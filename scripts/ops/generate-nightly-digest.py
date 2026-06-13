@@ -28,8 +28,10 @@ except ImportError:  # pragma: no cover - Python 3.9+ on supported machines.
 
 REPORT_STEM = "transcripted-nightly-digest"
 DEFAULT_AUTOMATIONS_DIR = Path.home() / ".codex" / "automations"
-DEFAULT_OUTPUT_DIR = Path("/Users/redbars/Delance")
-DEFAULT_REPO = Path("/Users/redbars/transcripted-latest")
+# Derive defaults from this script's location instead of hardcoding one
+# machine's personal paths; both stay overridable via --repo/--output-dir.
+DEFAULT_REPO = Path(__file__).resolve().parents[2]
+DEFAULT_OUTPUT_DIR = DEFAULT_REPO / "build" / "nightly-digest"
 LOCAL_TZ = ZoneInfo("America/Chicago") if ZoneInfo else timezone.utc
 FRESH_HOURS = 18
 DAU_GOAL = 1000
@@ -46,14 +48,37 @@ POSTHOG_ENV_KEYS = (
 )
 POSTHOG_ACTIVE_EVENTS = (
     "app_launched",
+    "app_unclean_shutdown_detected",
+    "app_session_stall_detected",
     "onboarding_completed",
     "dictation_started",
+    "dictation_start_failed",
     "dictation_completed",
     "dictation_cancelled",
+    "dictation_no_speech",
+    "dictation_audio_route_recovery_timeout",
     "meeting_recording_started",
+    "meeting_recording_start_failed",
     "meeting_recording_stopped",
+    "meeting_recording_cancelled",
+    "meeting_file_imported",
     "meeting_transcript_saved",
     "meeting_transcript_failed",
+    "meeting_transcript_skipped",
+    "activation_artifact_action_clicked",
+    "activation_agent_prompt_action_clicked",
+    "activation_agent_setup_cta_clicked",
+    "activation_return_proxy_observed",
+)
+POSTHOG_FIRST_VALUE_EVENTS = (
+    "dictation_completed",
+    "onboarding_first_dictation_saved",
+    "meeting_transcript_saved",
+    "onboarding_agent_cta_clicked",
+    "activation_artifact_action_clicked",
+    "activation_agent_prompt_action_clicked",
+    "activation_agent_setup_cta_clicked",
+    "activation_return_proxy_observed",
 )
 TRUSTED_POSTHOG_HOSTS = {
     "https://app.posthog.com",
@@ -564,6 +589,13 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
             status = "needs_review"
             signal = "Support found user-facing pain that needs a reply or investigation."
             action = "Review support draft"
+        elif contains_any(lower, ("no new external", "no new user", "no new public")) and contains_any(
+            lower,
+            ("no new pr recommended", "no new pr from", "no new pr was opened"),
+        ):
+            status = "watch"
+            signal = "Support found no new external support thread; existing audio and web-route risks stay on watch."
+            action = "Review support watch list"
         elif "support inbox: watch" in lower or "issue #500" in lower:
             status = "watch"
             signal = "Support watch is centered on issue #500 and meeting-audio confidence."
@@ -618,7 +650,13 @@ def classify_lane(automation: Automation, content: str, now: datetime, fresh_hou
     elif automation.id == "transcripted-nightly-reviewer":
         if contains_any(lower, ("needs changes", "blocker")) and "blockers: none" not in lower:
             status = "blocked"
-            if "issue #500" in lower or "#500" in lower:
+            if contains_any(lower, ("live sidecar preview", "live preview", "live sidecar files")) and contains_any(
+                lower,
+                ("no token", "access-control-allow-origin: *", "tokenized preview", "fixed `http://127.0.0.1:47834`"),
+            ):
+                signal = "Reviewer found a live sidecar preview privacy/docs blocker."
+                action = "Hold PR #924 until preview privacy and docs match"
+            elif "issue #500" in lower or "#500" in lower:
                 signal = "Reviewer kept issue #500 as the real user-trust blocker."
                 action = "Run the issue #500 audio matrix"
             else:
@@ -838,6 +876,8 @@ def human_next_steps(
         lane = blocked_lanes[0]
         if lane.human_action == "Run the issue #500 audio matrix":
             steps.append("Run the issue #500 audio matrix before broad meeting-audio or launch claims.")
+        elif lane.human_action.startswith("Hold PR #"):
+            steps.append(f"{lane.human_action}.")
         else:
             steps.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
 
@@ -1107,16 +1147,19 @@ def query_posthog_dau() -> dict[str, Any]:
     host_error = posthog_host_error(host)
     if host_error:
         return {"dau": None, "event_count": None, "error": host_error}
-    event_list = ", ".join(sql_quote(event) for event in POSTHOG_ACTIVE_EVENTS)
+    active_event_list = ", ".join(sql_quote(event) for event in POSTHOG_ACTIVE_EVENTS)
+    first_value_event_list = ", ".join(sql_quote(event) for event in POSTHOG_FIRST_VALUE_EVENTS)
+    query_event_list = ", ".join(sql_quote(event) for event in dict.fromkeys(POSTHOG_ACTIVE_EVENTS + POSTHOG_FIRST_VALUE_EVENTS))
 
     current_query = (
         "SELECT "
         "uniq(distinct_id) AS dau, "
         "countIf(event = 'app_launched') AS launches_24h, "
-        "count() AS workflow_events_24h "
+        f"countIf(event IN ({active_event_list})) AS workflow_events_24h, "
+        f"countIf(event IN ({first_value_event_list})) AS first_value_events_24h "
         "FROM events "
         "WHERE timestamp >= now() - INTERVAL 24 HOUR "
-        f"AND event IN ({event_list})"
+        f"AND event IN ({query_event_list})"
     )
     daily_query = (
         "SELECT "
@@ -1124,7 +1167,7 @@ def query_posthog_dau() -> dict[str, Any]:
         "uniq(distinct_id) AS active_devices "
         "FROM events "
         "WHERE timestamp >= now() - INTERVAL 30 DAY "
-        f"AND event IN ({event_list}) "
+        f"AND event IN ({query_event_list}) "
         "GROUP BY day "
         "ORDER BY day ASC"
     )
@@ -1141,11 +1184,20 @@ def query_posthog_dau() -> dict[str, Any]:
     try:
         row = (payload.get("results") or payload.get("data") or [])[0]
         dau = int(row[0])
+        launch_count = int(row[1]) if len(row) > 1 and row[1] is not None else None
         event_count = int(row[2]) if len(row) > 2 and row[2] is not None else None
+        first_value_event_count = int(row[3]) if len(row) > 3 and row[3] is not None else None
     except (IndexError, TypeError, ValueError):
         return {"dau": None, "event_count": None, "error": "PostHog response did not include DAU"}
     history = build_dau_history(daily_payload.get("results") or daily_payload.get("data") or [], datetime.now(timezone.utc).date())
-    return {"dau": dau, "event_count": event_count, "history": history, "error": None}
+    return {
+        "dau": dau,
+        "launch_count": launch_count,
+        "event_count": event_count,
+        "first_value_event_count": first_value_event_count,
+        "history": history,
+        "error": None,
+    }
 
 
 def build_dau_status(
@@ -1201,6 +1253,12 @@ def build_dau_status(
         confidence = "Low" if ops_tokens_incomplete else "Medium"
 
     proxy_parts: list[str] = []
+    first_value_event_count = posthog_dau.get("first_value_event_count") if posthog_dau else None
+    if isinstance(first_value_event_count, int):
+        proxy_parts.append(f"{first_value_event_count} first-value events in the last 24 hours")
+    launch_count = posthog_dau.get("launch_count") if posthog_dau else None
+    if isinstance(launch_count, int):
+        proxy_parts.append(f"{launch_count} app launches in the last 24 hours")
     event_count = posthog_dau.get("event_count") if posthog_dau else None
     if isinstance(event_count, int):
         proxy_parts.append(f"{event_count} PostHog events in the last 24 hours")
@@ -1213,7 +1271,7 @@ def build_dau_status(
     proxy = "; ".join(proxy_parts) if proxy_parts else "No reliable proxy found"
 
     if exact_source == "PostHog":
-        note = "Exact DAU came from PostHog active workflow events for the last 24 hours."
+        note = "Exact DAU came from PostHog active workflow and first-value events for the last 24 hours."
     elif exact_dau is not None:
         note = "Exact DAU came from a nightly automation memory entry."
     elif posthog_dau and posthog_dau.get("error"):
@@ -1227,6 +1285,14 @@ def build_dau_status(
         "goal": f"{DAU_GOAL:,} daily active users",
         "current": current,
         "gap": gap,
+        "first_value": f"{first_value_event_count} events" if isinstance(first_value_event_count, int) else "Unknown",
+        "first_value_note": "PostHog last 24 hours"
+        if isinstance(first_value_event_count, int)
+        else "No first-value count in this run",
+        "launches": f"{launch_count} launches" if isinstance(launch_count, int) else "Unknown",
+        "launch_note": "PostHog last 24 hours"
+        if isinstance(launch_count, int)
+        else "No launch count in this run",
         "proxy": proxy,
         "confidence": confidence,
         "note": note,
@@ -1273,6 +1339,8 @@ def build_recommendations(
         lane = blocked_lanes[0]
         if lane.human_action == "Run the issue #500 audio matrix":
             recommendations.append("Run the issue #500 audio matrix before broad meeting-audio or launch claims.")
+        elif lane.human_action.startswith("Hold PR #"):
+            recommendations.append(f"{lane.human_action}.")
         else:
             recommendations.append(f"Clear blocker: {lane.name} says {lane.human_action.lower()}.")
     if open_prs:
@@ -1764,6 +1832,15 @@ def render_html(payload: dict[str, Any]) -> str:
             f"<div class=\"role-chips\">{role_chips}</div>"
             "</div>"
         )
+    paused_role_names = [str(name) for name in payload.get("paused_lanes", [])]
+    if paused_role_names:
+        paused_chips = "".join(f"<span>{escape(name)}</span>" for name in paused_role_names)
+        role_sections.append(
+            "<div class=\"role-row\">"
+            "<h3>Paused</h3>"
+            f"<div class=\"role-chips\">{paused_chips}</div>"
+            "</div>"
+        )
     roles_included = "\n".join(role_sections)
 
     lane_sections: list[str] = []
@@ -2168,7 +2245,7 @@ a:hover {{ text-decoration: underline; }}
       <section class="detail-section">
         <header>
           <h2>Roles included</h2>
-          <p>The morning brief plus every active nightly role feeding it.</p>
+          <p>The morning brief plus every known nightly role feeding it.</p>
         </header>
         <div class="role-matrix">{roles_included}</div>
       </section>
@@ -2312,6 +2389,46 @@ def run_self_test() -> None:
         assert normalize_posthog_host("https://us.i.posthog.com") == "https://us.posthog.com"
         assert posthog_host_error("http://posthog.invalid") == "PostHog host must use HTTPS"
         assert posthog_host_error("https://example.invalid") is not None
+        dau_with_first_value = build_dau_status(
+            {},
+            False,
+            {"dau": 4, "launch_count": 9, "event_count": 12, "first_value_event_count": 7, "error": None},
+        )
+        assert dau_with_first_value["first_value"] == "7 events"
+        assert dau_with_first_value["launches"] == "9 launches"
+        assert "7 first-value events" in dau_with_first_value["proxy"]
+        assert "9 app launches" in dau_with_first_value["proxy"]
+        health_probe_workflow_events = {
+            "app_launched",
+            "app_unclean_shutdown_detected",
+            "app_session_stall_detected",
+            "onboarding_completed",
+            "dictation_started",
+            "dictation_start_failed",
+            "dictation_completed",
+            "dictation_cancelled",
+            "dictation_no_speech",
+            "dictation_audio_route_recovery_timeout",
+            "meeting_recording_started",
+            "meeting_recording_start_failed",
+            "meeting_recording_stopped",
+            "meeting_recording_cancelled",
+            "meeting_file_imported",
+            "meeting_transcript_saved",
+            "meeting_transcript_failed",
+            "meeting_transcript_skipped",
+            "activation_artifact_action_clicked",
+            "activation_agent_prompt_action_clicked",
+            "activation_agent_setup_cta_clicked",
+            "activation_return_proxy_observed",
+        }
+        assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
+        assert {
+            "activation_artifact_action_clicked",
+            "activation_agent_prompt_action_clicked",
+            "activation_agent_setup_cta_clicked",
+            "activation_return_proxy_observed",
+        }.issubset(set(POSTHOG_FIRST_VALUE_EVENTS))
         paths = write_reports(payload, output_dir)
         assert Path(paths["latest_html"]).exists()
         assert Path(paths["latest_json"]).exists()

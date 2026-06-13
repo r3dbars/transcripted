@@ -127,12 +127,12 @@ func testSentryEventPolicy() {
                 "forced_readiness_recoveries": "2",
                 "format_ready": "false",
                 "hfp_suspected": "false",
-                "input_device_class": "bluetooth",
+                "input_device_class": "built_in",
                 "output_device_class": "bluetooth",
                 "readiness_refreshes": "8",
                 "recovering": "false",
                 "recovery_start_attempts": "2",
-                "route_shape": "bluetooth_input_to_built_in_output",
+                "route_shape": "built_in_input_to_bluetooth_output",
                 "sample_flow_started": "false",
                 "selected_input_class": "built_in",
                 "selection_overrode_default": "true",
@@ -151,9 +151,9 @@ func testSentryEventPolicy() {
         assertEqual(tags["format_ready"], "false", "format readiness should be queryable")
         assertEqual(tags["hfp_suspected"], "false", "HFP suspicion should be queryable")
         assertEqual(tags["recovering"], "false", "recovery state should be queryable")
-        assertEqual(tags["input_device_class"], "bluetooth", "coarse device class should be queryable")
+        assertEqual(tags["input_device_class"], "built_in", "coarse device class should be queryable")
         assertEqual(tags["output_device_class"], "bluetooth", "coarse output class should be queryable")
-        assertEqual(tags["route_shape"], "bluetooth_input_to_built_in_output", "coarse route shape should be queryable")
+        assertEqual(tags["route_shape"], "built_in_input_to_bluetooth_output", "coarse route shape should be queryable")
         assertEqual(tags["sample_flow_started"], "false", "sample-flow state should be queryable")
         assertEqual(tags["selected_input_class"], "built_in", "selected input class should be queryable")
         assertEqual(tags["selection_overrode_default"], "true", "input override state should be queryable")
@@ -174,10 +174,19 @@ func testSentryEventPolicy() {
             forEngine: "meeting",
             event: "meeting_transcript_failed",
             context: [
+                "audio_device": "Jane's AirPods Pro",
+                "audio_path": "/Users/jane/Private/customer.wav",
+                "email": "person@example.com",
                 "failure_kind": "transcription_inference_failed",
+                "file_path": "/Users/jane/Private/customer.md",
                 "input_device_class": "usb",
+                "meeting_title": "Customer Roadmap",
                 "queue_depth_bucket": "zero",
+                "raw_url": "https://meet.example.com/private-room",
+                "speaker_name": "Alice Customer",
                 "system_status": "healthy",
+                "token": "sk-private",
+                "transcript_text": "private transcript words",
                 "trigger": "hotkey",
             ]
         )
@@ -187,6 +196,15 @@ func testSentryEventPolicy() {
         assertEqual(tags["queue_depth_bucket"], "zero", "queue depth should stay bucketed")
         assertEqual(tags["system_status"], "healthy", "system capture status should be queryable")
         assertEqual(tags["trigger"], "hotkey", "trigger should be queryable")
+        assertNil(tags["audio_device"], "raw device names should stay out of Sentry tags")
+        assertNil(tags["audio_path"], "audio paths should stay out of Sentry tags")
+        assertNil(tags["email"], "emails should stay out of Sentry tags")
+        assertNil(tags["file_path"], "file paths should stay out of Sentry tags")
+        assertNil(tags["meeting_title"], "meeting titles should stay out of Sentry tags")
+        assertNil(tags["raw_url"], "raw URLs should stay out of Sentry tags")
+        assertNil(tags["speaker_name"], "speaker names should stay out of Sentry tags")
+        assertNil(tags["token"], "tokens should stay out of Sentry tags")
+        assertNil(tags["transcript_text"], "transcript text should stay out of Sentry tags")
     }
 
     runSuite("SentryEventPolicy diagnosticTags ignores skipped meeting transcripts") {
@@ -233,6 +251,11 @@ func testSentryEventPolicy() {
                 "output_ducking_detected": "true",
                 "quiet_mic_recovered": "false",
                 "quiet_mic_unrecovered": "true",
+                "mic_boost_prompt": "declined",
+                "mic_file_available": "true",
+                "reason": "user_stop",
+                "stop_timed_out": "false",
+                "system_stream_present": "false",
                 "system_status": "failed",
             ]
         )
@@ -243,7 +266,32 @@ func testSentryEventPolicy() {
         assertEqual(tags["output_ducking_detected"], "true", "ducking classification should stay queryable")
         assertEqual(tags["quiet_mic_recovered"], "false", "quiet mic recovery state should stay queryable")
         assertEqual(tags["quiet_mic_unrecovered"], "true", "unrecovered quiet mic state should stay queryable")
+        assertEqual(tags["mic_boost_prompt"], "declined", "issue 500 mic-boost prompt outcome should ride degraded-capture events")
+        assertEqual(tags["mic_file_available"], "true", "mic file presence should stay queryable for degraded captures")
+        assertEqual(tags["reason"], "user_stop", "stop reason should stay queryable for degraded captures")
+        assertEqual(tags["stop_timed_out"], "false", "stop timeout state should stay queryable for degraded captures")
+        assertEqual(tags["system_stream_present"], "false", "system file presence should stay queryable for degraded captures")
         assertEqual(tags["system_status"], "failed", "existing meeting health tags should still survive")
+    }
+
+    runSuite("SentryEventPolicy diagnosticTags keeps stop-timeout file-presence flags searchable") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "recording_stop_timeout",
+            context: [
+                "audio_path": "/Users/redbars/Library/Application Support/Transcripted/captures/meetings/private.wav",
+                "mic_file_available": "true",
+                "stop_timeout_seconds": "45.0",
+                "system_file_available": "false",
+                "transcript_text": "private words",
+            ]
+        )
+
+        assertEqual(tags["mic_file_available"], "true", "mic file presence should stay queryable for stop timeouts")
+        assertEqual(tags["system_file_available"], "false", "system file presence should stay queryable for stop timeouts")
+        assertNil(tags["audio_path"], "raw audio paths should stay out of Sentry tags")
+        assertNil(tags["stop_timeout_seconds"], "raw timeout seconds should stay out of Sentry tags")
+        assertNil(tags["transcript_text"], "transcript text should stay out of Sentry tags")
     }
 
     runSuite("SentryEventPolicy diagnosticTags ignores non-allowlisted events") {

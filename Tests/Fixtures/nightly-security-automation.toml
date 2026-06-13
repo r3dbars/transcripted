@@ -1,0 +1,2 @@
+status = "ACTIVE"
+prompt = "Run nightly-security-check.py with build/nightly-security-report.json as the deterministic [nightly-security] guardrail."

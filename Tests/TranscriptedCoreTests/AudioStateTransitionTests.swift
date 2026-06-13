@@ -112,9 +112,9 @@ final class AudioStateTransitionTests: XCTestCase {
         let audio = makeAudio()
         audio.prepareForNewRecordingStart()
 
-        audio.recordMicSignalPeaks(raw: 0.10, processed: 0.40)
-        audio.recordMicSignalPeaks(raw: 0.05, processed: 0.55)
-        audio.recordMicSignalPeaks(raw: 0.22, processed: 0.30)
+        audio.recordMicSignalPeaks(raw: 0.10, processed: 0.40, appliedGain: nil, agcMaxGain: nil)
+        audio.recordMicSignalPeaks(raw: 0.05, processed: 0.55, appliedGain: nil, agcMaxGain: nil)
+        audio.recordMicSignalPeaks(raw: 0.22, processed: 0.30, appliedGain: nil, agcMaxGain: nil)
 
         let snapshot = audio.signalDiagnosticsSnapshot
         XCTAssertEqual(snapshot.micRawPeak, 0.22, accuracy: 1e-5)
@@ -139,7 +139,7 @@ final class AudioStateTransitionTests: XCTestCase {
         // Negative inputs can't push the recorded peak below 0 because the
         // accumulator starts at 0 and uses max(). The diagnostics string then
         // formats the floored value.
-        audio.recordMicSignalPeaks(raw: -0.5, processed: -0.25)
+        audio.recordMicSignalPeaks(raw: -0.5, processed: -0.25, appliedGain: nil, agcMaxGain: nil)
         audio.recordSystemSignalPeak(-0.1)
 
         let snapshot = audio.createPipelineDiagnosticsSnapshot()
@@ -152,7 +152,7 @@ final class AudioStateTransitionTests: XCTestCase {
         let audio = makeAudio()
         audio.prepareForNewRecordingStart()
 
-        audio.recordMicSignalPeaks(raw: .nan, processed: .infinity)
+        audio.recordMicSignalPeaks(raw: .nan, processed: .infinity, appliedGain: nil, agcMaxGain: nil)
         audio.recordSystemSignalPeak(.nan)
 
         let snapshot = audio.createPipelineDiagnosticsSnapshot()
@@ -165,7 +165,7 @@ final class AudioStateTransitionTests: XCTestCase {
         let audio = makeAudio()
         audio.prepareForNewRecordingStart()
 
-        audio.recordMicSignalPeaks(raw: 4.2, processed: 9.9)
+        audio.recordMicSignalPeaks(raw: 4.2, processed: 9.9, appliedGain: nil, agcMaxGain: nil)
         audio.recordSystemSignalPeak(3.0)
 
         let snapshot = audio.createPipelineDiagnosticsSnapshot()

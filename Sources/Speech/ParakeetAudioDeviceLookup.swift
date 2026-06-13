@@ -26,7 +26,9 @@ enum ParakeetAudioEngineWorkError: LocalizedError {
 }
 
 enum CoreAudioInputDeviceLookup {
-    static func preferredDictationInputSelection() throws -> DictationInputDeviceSelection {
+    static func preferredDictationInputSelection(
+        allowsBuiltInBluetoothFallback: Bool = true
+    ) throws -> DictationInputDeviceSelection {
         let defaultInputID = try defaultInputDeviceID()
         var availableInputs = try allInputDevices()
 
@@ -43,7 +45,8 @@ enum CoreAudioInputDeviceLookup {
         return DictationInputDeviceSelectionPolicy.selection(
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
-            availableInputs: availableInputs
+            availableInputs: availableInputs,
+            allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
         )
     }
 
@@ -227,7 +230,8 @@ enum CoreAudioInputDeviceLookup {
             throw InputDeviceLookupError.propertyReadFailed(status)
         }
 
-        return (value?.takeUnretainedValue() as String?) ?? ""
+        // CoreAudio's get-rule returns a +1 CFString; takeRetainedValue balances it.
+        return (value?.takeRetainedValue() as String?) ?? ""
     }
 
     private static func readUInt32Property(

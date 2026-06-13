@@ -1,0 +1,270 @@
+# Agent-first QA gates for Transcripted.
+#
+# This complements .agents/test-matrix.yml:
+# - test-matrix.yml maps changed paths to local verification commands.
+# - qa-gates.yml maps product risk and agent lanes to the gate that proves it.
+
+last_reviewed: 2026-06-08
+
+source_docs:
+  - AGENTS.md
+  - Tests/README.md
+  - docs/qa-test-bench.md
+  - docs/release-packaging.md
+  - docs/sparkle-updates.md
+  - docs/storage-paths.md
+
+test_layers:
+  fast_custom_runner:
+    command: "bash run-tests.sh"
+    proves:
+      - "manifest-registered app policy and persistence tests still pass"
+      - "privacy sanitizers, observability policy, speaker policy, storage helpers, and UI policy stay coherent"
+    agent_notes:
+      - "Root Tests/*Tests.swift files must be registered in Tests/FastTests.manifest."
+      - "Use bash run-tests.sh --coverage when the lane needs LLVM fast-test coverage output."
+
+  app_build:
+    command: "bash build.sh --no-open"
+    proves:
+      - "the menubar app target compiles through the authoritative raw-swiftc build"
+      - "the app-side source list and bundled helpers still link"
+
+  core_package:
+    command: "swift test"
+    proves:
+      - "TranscriptedCore package seams, storage, audio, speaker, and pipeline contracts still pass"
+    agent_notes:
+      - "This is separate from the app build. Run it for Package.swift, Sources/TranscriptedCore, or public core seam changes."
+
+  integration_smoke:
+    command: "bash run-integration-smoke.sh"
+    proves:
+      - "app/core linkage, wake recovery smoke, and selected core smoke tests still work together"
+
+  deterministic_e2e_smoke:
+    command: "bash run-e2e-smoke.sh"
+    proves:
+      - "release-critical dictation and meeting Markdown artifact contracts work without mic, TCC, or app UI"
+
+  qa_bench:
+    commands:
+      quick: "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
+      deep: "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
+      full: "bash scripts/ops/transcripted-qa-bench.sh --mode full"
+      ui: "bash scripts/ops/transcripted-qa-bench.sh --mode ui"
+      packaged: "bash scripts/ops/transcripted-qa-bench.sh --mode packaged"
+      artifact: "bash scripts/ops/transcripted-qa-bench.sh --mode artifact"
+      audio_synthetic: "bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic"
+      corpus: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
+      corpus_compare: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare"
+      live: "bash scripts/ops/transcripted-qa-bench.sh --mode live"
+    proves:
+      - "one local QA report can combine build, fast tests, E2E, integration, QA CLI, synthetic audio, release-health, packaged-app, optional Gemma planning, corpus, and live capture proof"
+    agent_notes:
+      - "Reports live under /tmp/transcripted-qa-bench/<run-id>/qa-report.md."
+      - "Corpus and live modes depend on private local data, permissions, and hardware. Permission blockers are INCOMPLETE, not green."
+      - "Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof. Real connected AirPods/Bluetooth hardware remains manual proof."
+
+  permission_state:
+    command: "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode computer-use"
+    proves:
+      - "Codex/computer-use host permissions are ready before screenshots, clicks, or Apple Events are counted"
+      - "Transcripted app bundle identity matches the expected TCC bundle id"
+      - "Duplicate or wrong running Transcripted app instances are caught before UI targeting is trusted"
+    agent_notes:
+      - "The command prints the expected manual grant state for computer-use and live-capture modes."
+      - "Permission blockers are INCOMPLETE, not green."
+      - "Use --mode live-capture before local mic/system-audio capture proof."
+
+  ui_automation_smoke:
+    command: "bash scripts/ops/transcripted-qa-bench.sh --mode ui"
+    proves:
+      - "the built app can be launched and observed through macOS Accessibility"
+      - "menu bar, Home, Settings, and General controls expose stable visible/clickable AX identifiers"
+      - "the runner reports Accessibility/TCC blockers as INCOMPLETE instead of green"
+    agent_notes:
+      - "Requires Accessibility permission for the terminal or Codex runner."
+      - "Does not prove microphone, system audio, Bluetooth, sleep/wake, or subjective UI feel."
+
+  live_capture_smoke:
+    command: "bash run-live-capture-smoke.sh"
+    proves:
+      - "real production mic and system-audio capture can start, stop, and write scratch WAVs on this Mac"
+    agent_notes:
+      - "Requires local microphone and System Audio Recording permissions."
+
+  corpus_validation:
+    commands:
+      validate: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
+      compare: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare"
+    proves:
+      - "private meeting corpus is readable and Transcripted Markdown can be scored against Zoom truth without printing private transcript text"
+
+  release_health:
+    commands:
+      release_gate_report: "python3 scripts/ops/release-gate-report.py"
+      release_candidate_report: "python3 scripts/ops/release-gate-report.py --release-candidate"
+      packaging_smoke: "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
+      packaged_app_smoke: "bash scripts/ops/transcripted-qa-bench.sh --mode packaged"
+      sparkle_verify: "bash scripts/release/verify-sparkle-release.sh <version>"
+      sentry_register: "SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>"
+      cask_update: "bash scripts/release/update-cask.sh <version>"
+    proves:
+      - "release artifact, Sparkle appcast, Homebrew cask, and Sentry release metadata can be checked before users depend on them"
+
+recommended_gates:
+  pre_merge:
+    default:
+      - "scripts/dev/agent-preflight.sh"
+      - "Run the union of checks from .agents/test-matrix.yml for the changed paths."
+    pr_levels:
+      docs_only_tiny:
+        required:
+          - "scripts/dev/agent-preflight.sh"
+          - "Run the mapped docs checks only."
+        excludes:
+          - "release notes"
+          - "appcast or update flow docs"
+          - "Homebrew cask docs"
+          - "QA gate docs"
+          - "public download or release-truth docs"
+      meaningful_code:
+        required:
+          - "codex-review against the real PR base"
+          - "Run the union of checks from .agents/test-matrix.yml for the changed paths."
+      release_impacting:
+        required:
+          - "codex-review against the real PR base"
+          - "Run the union of checks from .agents/test-matrix.yml for the changed paths."
+          - "bash scripts/ops/transcripted-qa-bench.sh --mode full"
+    add_when_broad_or_risky:
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode full"
+    cannot_be_green_if:
+      - "required path-mapped checks were skipped without a clear blocker"
+      - "new root fast tests are missing from Tests/FastTests.manifest"
+      - "manual-only proof is claimed as automated proof"
+
+  nightly:
+    default:
+      - "repo hygiene workflow or equivalent local syntax/preflight pass"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
+      - "python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json"
+    rotate_or_schedule:
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode corpus"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare"
+    cannot_be_green_if:
+      - "the latest report path is missing"
+      - "private corpus or live hardware blockers are hidden instead of reported"
+      - "nightly output does not name the first human action"
+
+  release_candidate:
+    required:
+      - "bash build-deps.sh --force"
+      - "python3 scripts/ops/release-gate-report.py --release-candidate"
+      - "bash build.sh --no-open"
+      - "bash run-tests.sh"
+      - "bash run-integration-smoke.sh"
+      - "bash run-e2e-smoke.sh"
+      - "swift test"
+      - "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode packaged"
+    add_when_shipping_to_users:
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts when fixture or private artifact roots are available"
+      - "full notarized build-beta.sh"
+      - "bash scripts/release/verify-sparkle-release.sh <version>"
+      - "bash scripts/release/update-cask.sh <version>"
+      - "live download/appcast/Homebrew/Sentry truth check"
+    cannot_be_green_if:
+      - "Sparkle metadata was expected but not updated"
+      - "Homebrew was expected but not updated"
+      - "live capture, route, or meeting-volume proof is missing for a release that claims audio reliability"
+
+  manual_proof:
+    required_for:
+      - "real meeting-app volume behavior"
+      - "mic and system-audio TCC behavior"
+      - "fresh TCC grant, deny, and revoke behavior"
+      - "Bluetooth or input-device switching"
+      - "sleep/wake during capture"
+      - "pasteback feel in real apps"
+      - "speaker review and manual rename feel"
+      - "update install behavior on existing installs"
+    output_contract:
+      - "name the exact scenario and date"
+      - "say PASS, FAIL, or INCOMPLETE"
+      - "include local evidence path when one exists"
+      - "never paste private transcript text, audio, meeting titles, speaker names, emails, tokens, absolute paths, private URLs, or raw device names"
+
+coverage_gaps:
+  ui:
+    current_coverage:
+      - "fast policy tests for settings/menu/home state"
+      - "build launch smoke with menu-bar JSON snapshot"
+      - "Accessibility-driven QA bench ui smoke for menu bar, Home, Settings, and General navigation"
+    missing_automation:
+      - "sanitized screenshot or accessibility-tree review for first-value, meeting, dictation, speaker review, and agent-connect flows"
+
+  audio:
+    current_coverage:
+      - "synthetic audio reliability matrix"
+      - "deterministic route fixtures for shared mic, missing system audio, quiet mic, output ducking, route churn, stop timeout, stop/restart after route switch, and stop/save artifact outcomes"
+      - "live capture smoke for mic and system audio"
+      - "fast/core tests for failure policy, recovery state, and archive handling"
+    missing_automation:
+      - "real-app route matrix for Chrome/Safari/Firefox Meet, Zoom, Bluetooth/AirPods, perceived volume, and saved-transcript proof"
+      - "trend report over local events for start latency, stop latency, recovery attempts, and route changes"
+
+  storage:
+    current_coverage:
+      - "fast/core storage path tests"
+      - "deterministic E2E artifact smoke"
+      - "TranscriptedQA artifact validation"
+    missing_automation:
+      - "relocated capture-library fixture"
+      - "retention/compression invariant checks for retained meeting audio"
+      - "migration/fallback checks across Transcripted, legacy Draft, and Documents fallback paths"
+
+  release:
+    current_coverage:
+      - "packaging docs and release scripts"
+      - "packaged-app smoke for app bundle, DMG, Sparkle config, dSYM, signing, launch/menu, and launch-log privacy"
+      - "nightly security/release drift checks"
+      - "single release-gate report that composes QA bench, Sentry/PostHog probes, release surfaces, and local log warnings"
+      - "repo hygiene syntax checks"
+    missing_automation:
+      - "mounted DMG copy/install proof for a real installed app"
+
+  privacy:
+    current_coverage:
+      - "Sentry and analytics allowlist tests"
+      - "payload sanitizer tests"
+      - "E2E support diagnostics redaction"
+      - "nightly security check"
+    missing_automation:
+      - "one private-data leakage sweep across QA bench reports, local logs, release notes, and generated PR bodies"
+
+  summaries:
+    current_coverage:
+      - "fast tests for local summary preferences and summarizer behavior"
+    missing_automation:
+      - "quality fixtures for user-initiated local summaries"
+      - "regression check that beta summaries stay opt-in until runtime and quality proof exists"
+
+  support_bugs:
+    current_coverage:
+      - "issue-specific manual docs for high-risk audio bugs"
+      - "fast tests for diagnostics and recovery policies"
+    missing_automation:
+      - "bug seed registry that maps support issue -> reproducer -> automated guard -> manual proof needed"
+
+agent_output_contract:
+  every_lane:
+    - "lead with GREEN, YELLOW, or RED"
+    - "name exact checks run and exact checks skipped"
+    - "name local report paths"
+    - "separate automated proof from manual proof"
+    - "state privacy boundary if logs, corpus, audio, or transcripts were involved"
+    - "end with the smallest next action"

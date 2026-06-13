@@ -1,0 +1,24 @@
+case=baseline_poll_200 since=2026-06-01T01:28:55Z
+launch_to_model_ms=5262
+launch_to_start_ms=5416
+model_to_start_ms=154
+fast_start_ms=150
+stop_to_paste_ms=87
+stop_to_done_ms=89
+decode_ms=76
+model_wait_ms=0
+words=12
+
+case=poll_100 since=2026-06-01T01:30:20Z
+launch_to_model_ms=11058
+launch_to_start_ms=11206
+model_to_start_ms=148
+fast_start_ms=145
+stop_to_paste_ms=n/a
+stop_to_done_ms=n/a
+decode_ms=n/a
+model_wait_ms=n/a
+words=n/a
+
+decision=rejected
+reason=100ms poll reduced model_to_start by 6ms and fast_start by 5ms, below the 10% meaningful-win rule; the 100ms run did not complete a stop sample cleanly, so the production constant was reverted.

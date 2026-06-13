@@ -3,10 +3,10 @@ import Foundation
 func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy docs list matches the source allowlist") {
         let documentedEvents = documentedAnalyticsEvents().sorted()
-        let policyEvents = sourceAnalyticsPolicyEvents().sorted()
+        let policyEvents = AnalyticsEventPolicy.allEventNames.sorted()
 
         assertFalse(documentedEvents.isEmpty, "privacy observability doc should list analytics events")
-        assertFalse(policyEvents.isEmpty, "analytics event policy source should expose parseable policy events")
+        assertFalse(policyEvents.isEmpty, "analytics event policy should expose its allowlisted event names")
         assertEqual(
             documentedEvents,
             policyEvents,
@@ -55,6 +55,107 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["permission_kind"], "system_recording", "permission kind should survive as a coarse enum")
         assertEqual(sanitized["flow_elapsed_bucket"], "30_119s", "coarse elapsed buckets should survive sanitization")
         assertEqual(sanitized["step_id"], "meeting_setup", "step id should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy pins active onboarding activation events") {
+        let expected: [(String, Set<String>)] = [
+            ("onboarding_model_state_changed", ["from_status", "step_id", "to_status"]),
+            ("onboarding_primary_cta_clicked", ["cta", "cta_type", "flow_elapsed_bucket", "model_state", "step_elapsed_bucket", "step_id"]),
+            ("onboarding_first_dictation_started", ["model_state", "step_id"]),
+            ("onboarding_first_dictation_saved", ["delivery", "step_id", "word_count_bucket"]),
+            ("onboarding_first_dictation_stop_clicked", ["step_id"]),
+            ("onboarding_first_dictation_empty", ["step_id"]),
+            ("onboarding_agent_cta_clicked", ["agent_cta", "step_id"]),
+            ("onboarding_reporting_toggle_changed", ["available", "enabled", "reporting_kind", "step_id"]),
+        ]
+
+        for (event, properties) in expected {
+            assertEqual(
+                AnalyticsEventPolicy.policy(forEvent: event)?.allowedProperties ?? Set<String>(),
+                properties,
+                "\(event) should keep a narrow activation payload"
+            )
+        }
+    }
+
+    runSuite("AnalyticsEventPolicy allows post-artifact activation events") {
+        let artifact = AnalyticsEventPolicy.policy(forEvent: "activation_artifact_action_clicked")
+        let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
+        let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
+        let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
+
+        assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
+        assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
+        assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
+        assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
+
+        let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
+            .union(artifact?.allowedProperties ?? Set<String>())
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "action_kind": "open_markdown",
+                "agent_target": "codex",
+                "artifact_age_bucket": "24_48h",
+                "artifact_kind": "meeting",
+                "prompt_kind": "meeting_bundle",
+                "result": "success",
+                "surface": "home_preview",
+                "transcript": "private words",
+                "meeting_title": "Customer call",
+                "speaker_name": "Alice",
+                "audio_path": "/Users/redbars/private.wav",
+                "file_path": "/Users/redbars/private.md",
+                "meeting_url": "https://example.com/private",
+                "prompt_text": "Read my transcript",
+                "word_count": "4217",
+            ],
+            allowedKeys: activationAllowedProperties
+        )
+
+        assertEqual(sanitized["action_kind"], "open_markdown", "action kind should survive")
+        assertEqual(sanitized["agent_target"], "codex", "agent target should survive")
+        assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
+        assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
+        assertEqual(sanitized["result"], "success", "coarse action result should survive")
+        assertEqual(sanitized["surface"], "home_preview", "surface should survive")
+        assertNil(sanitized["transcript"], "raw transcript text must not be sent")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["meeting_url"], "meeting URLs must not be sent")
+        assertNil(sanitized["prompt_text"], "raw prompt text must not be sent")
+        assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
+    }
+
+    runSuite("ActivationTelemetry buckets artifact age and next-day return proxy") {
+        let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
+
+        assertEqual(
+            ActivationTelemetry.artifactAgeBucket(since: now.addingTimeInterval(-3 * 3_600), now: now),
+            "lt_12h",
+            "same-session artifacts should stay in the shortest age bucket"
+        )
+        assertEqual(
+            ActivationTelemetry.artifactAgeBucket(since: now.addingTimeInterval(-30 * 3_600), now: now),
+            "24_48h",
+            "next-day artifacts should use a stable age bucket"
+        )
+        assertNil(
+            ActivationTelemetry.returnWindowBucket(since: now.addingTimeInterval(-2 * 3_600), now: now),
+            "return proxy should not fire for immediate same-session refreshes"
+        )
+        assertEqual(
+            ActivationTelemetry.returnWindowBucket(since: now.addingTimeInterval(-24 * 3_600), now: now),
+            "18_36h",
+            "next-day return proxy should capture the 18-36h window"
+        )
+        assertEqual(
+            ActivationTelemetry.returnWindowBucket(since: now.addingTimeInterval(-96 * 3_600), now: now),
+            "3_7d",
+            "late return proxy should stay bucketed"
+        )
     }
 
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
@@ -170,10 +271,13 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy keeps relaunch update telemetry narrow") {
         let relaunching = AnalyticsEventPolicy.policy(forEvent: "update_relaunching")
+        let installed = AnalyticsEventPolicy.policy(forEvent: "update_installed")
 
         assertEqual(relaunching?.allowedProperties.contains("version"), true, "relaunch telemetry should preserve the public app version")
         assertEqual(relaunching?.allowedProperties.contains("state"), false, "relaunch telemetry should not add redundant update state")
         assertEqual(relaunching?.allowedProperties.contains("automatic_downloads_enabled"), false, "relaunch telemetry should not add settings state")
+        assertEqual(installed?.allowedProperties.contains("version"), true, "installed update telemetry should preserve the public app version")
+        assertEqual(installed?.allowedProperties.contains("previous_version"), true, "installed update telemetry should preserve the previous public app version")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
@@ -191,6 +295,19 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["download_url"], "raw download locations should stay out of analytics")
         assertNil(sanitized["error_message"], "raw update errors should stay out of analytics")
         assertNil(sanitized["state"], "relaunch telemetry should not duplicate lifecycle state")
+
+        let installedSanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "previous_version": "1.2.2",
+                "state": "ready_to_install",
+                "version": "1.2.3",
+            ],
+            allowedKeys: installed?.allowedProperties ?? []
+        )
+
+        assertEqual(installedSanitized["version"], "1.2.3", "installed update telemetry should keep the target version")
+        assertEqual(installedSanitized["previous_version"], "1.2.2", "installed update telemetry should keep the public previous version")
+        assertNil(installedSanitized["state"], "installed update telemetry should stay lifecycle-specific")
     }
 
     runSuite("AnalyticsEventPolicy allows runtime diagnostic events") {
@@ -291,6 +408,57 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "menu", "non-hotkey triggers should remain attributable")
     }
 
+    runSuite("AnalyticsEventPolicy allows dictation stop latency only as coarse buckets") {
+        let stopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
+
+        assertEqual(stopLatency?.allowedProperties.contains("trigger"), true, "dictation stop latency should preserve stop trigger attribution")
+        assertEqual(stopLatency?.allowedProperties.contains("delivery"), true, "dictation stop latency should preserve delivery outcome")
+        assertEqual(stopLatency?.allowedProperties.contains("word_count_bucket"), true, "dictation stop latency should preserve coarse text size")
+        assertEqual(stopLatency?.allowedProperties.contains("stop_to_paste_bucket"), true, "dictation stop latency should bucket stop-to-paste time")
+        assertEqual(stopLatency?.allowedProperties.contains("stop_to_done_bucket"), true, "dictation stop latency should bucket total stop pipeline time")
+        assertEqual(stopLatency?.allowedProperties.contains("decode_bucket"), true, "dictation stop latency should bucket local model work without raw timings")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "auto_enter_bucket": "lt_100ms",
+                "auto_send": "disabled",
+                "chars": "512",
+                "cleanup_bucket": "lt_100ms",
+                "cleanup_changed": "true",
+                "cleanup_enabled": "true",
+                "copy_reason": "focus_changed",
+                "decode_bucket": "250_499ms",
+                "delivery": "pasted",
+                "mic_stop_bucket": "lt_100ms",
+                "model_wait_bucket": "lt_100ms",
+                "outcome": "completed",
+                "paste_bucket": "100_249ms",
+                "raw_text": "hello private words",
+                "save_bucket": "lt_100ms",
+                "save_outcome": "saved",
+                "source_app_bundle": "com.example.PrivateApp",
+                "stop_to_done_bucket": "500_999ms",
+                "stop_to_done_ms": "742",
+                "stop_to_paste_bucket": "500_999ms",
+                "stop_to_paste_ms": "621",
+                "trigger": "physical_key",
+                "word_count_bucket": "10_49",
+            ],
+            allowedKeys: stopLatency?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["stop_to_paste_bucket"], "500_999ms", "bucketed stop-to-paste timing should survive")
+        assertEqual(sanitized["stop_to_done_bucket"], "500_999ms", "bucketed total stop timing should survive")
+        assertEqual(sanitized["decode_bucket"], "250_499ms", "bucketed model work should survive")
+        assertEqual(sanitized["copy_reason"], "focus_changed", "normalized copy reason should survive")
+        assertEqual(sanitized["word_count_bucket"], "10_49", "coarse word count should survive")
+        assertNil(sanitized["stop_to_paste_ms"], "raw stop-to-paste milliseconds should stay local")
+        assertNil(sanitized["stop_to_done_ms"], "raw stop pipeline milliseconds should stay local")
+        assertNil(sanitized["chars"], "raw character counts should stay local")
+        assertNil(sanitized["raw_text"], "transcript text should stay out of analytics")
+        assertNil(sanitized["source_app_bundle"], "source app bundle IDs should stay out of analytics")
+    }
+
     runSuite("AnalyticsEventPolicy drops raw dictation timeout counters") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
 
@@ -369,6 +537,7 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
+        let dictationStopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
@@ -377,6 +546,7 @@ func testAnalyticsEventPolicy() {
 
         assertEqual(dictationStartFailed?.allowedProperties.contains("failure_kind"), true, "dictation start failures should allow normalized failure kinds")
         assertEqual(dictationCompleted?.allowedProperties.contains("word_count_bucket"), true, "dictation completion should allow bucketed word counts")
+        assertEqual(dictationStopLatency?.allowedProperties.contains("stop_to_paste_bucket"), true, "dictation stop latency should allow only bucketed stop-to-paste timing")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")
         assertEqual(meetingFailed?.allowedProperties.contains("failure_kind"), true, "meeting failures should allow normalized failure kinds")
@@ -415,6 +585,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(policy?.allowedProperties.contains("default_output_volume_after"), true, "meeting stop events should preserve output volume after recording")
         assertEqual(policy?.allowedProperties.contains("default_output_volume_dropped"), true, "meeting stop events should preserve issue 500 output-drop flags")
         assertEqual(healthPolicy?.allowedProperties.contains("default_system_output_volume_dropped"), true, "health snapshots should preserve system-output drop flags")
+        assertEqual(policy?.allowedProperties.contains("mic_boost_prompt"), true, "meeting stop events should preserve the issue 500 mic-boost prompt outcome")
+        assertEqual(healthPolicy?.allowedProperties.contains("mic_boost_prompt"), true, "health snapshots should preserve the issue 500 mic-boost prompt outcome")
 
         // Verify the key passes sanitization — it must not contain a sensitive fragment
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
@@ -535,6 +707,84 @@ func testAnalyticsEventPolicy() {
         assertEqual(skipped?.allowedProperties.contains("trigger"), true, "skipped meeting transcripts should preserve trigger attribution")
     }
 
+    runSuite("AnalyticsEventPolicy meeting outcomes drop adversarial private fields") {
+        let privateFields = [
+            "audio_device": "Jane's AirPods Pro",
+            "audio_path": "/Users/jane/Private/customer.wav",
+            "email": "person@example.com",
+            "file_path": "/Users/jane/Private/customer.md",
+            "meeting_title": "Customer Roadmap",
+            "raw_url": "https://meet.example.com/private-room",
+            "speaker_name": "Alice Customer",
+            "token": "sk-private",
+            "transcript_text": "private transcript words",
+        ]
+
+        let saved = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "duration_bucket": "10_29m",
+                    "participant_count_bucket": "2_3",
+                    "queue_depth_bucket": "1",
+                    "trigger": "hotkey",
+                    "word_count_bucket": "300_plus",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_saved")?.allowedProperties ?? []
+        )
+        assertEqual(saved["duration_bucket"], "10_29m", "saved meetings should keep duration bucket")
+        assertEqual(saved["participant_count_bucket"], "2_3", "saved meetings should keep participant bucket")
+        assertEqual(saved["trigger"], "hotkey", "saved meetings should keep trigger")
+        assertEqual(saved["word_count_bucket"], "300_plus", "saved meetings should keep word bucket")
+
+        let failed = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "failure_kind": "transcription_inference_failed",
+                    "queue_depth_bucket": "1",
+                    "trigger": "hotkey",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")?.allowedProperties ?? []
+        )
+        assertEqual(failed["failure_kind"], "transcription_inference_failed", "meeting failures should keep normalized failure kind")
+        assertEqual(failed["queue_depth_bucket"], "1", "meeting failures should keep queue bucket")
+
+        let skipped = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "failure_kind": "no_speech_detected",
+                    "queue_depth_bucket": "0",
+                    "trigger": "hotkey",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_skipped")?.allowedProperties ?? []
+        )
+        assertEqual(skipped["failure_kind"], "no_speech_detected", "skipped meetings should keep normalized reason")
+
+        let importFailed = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "failure_kind": "unsupported_format",
+                    "import_stage": "preparation",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_file_import_failed")?.allowedProperties ?? []
+        )
+        assertEqual(importFailed["failure_kind"], "unsupported_format", "import failures should keep normalized kind")
+        assertEqual(importFailed["import_stage"], "preparation", "import failures should keep coarse stage")
+
+        for sanitized in [saved, failed, skipped, importFailed] {
+            for key in privateFields.keys {
+                assertNil(sanitized[key], "\(key) should not be emitted for meeting outcome analytics")
+            }
+        }
+    }
+
     runSuite("AnalyticsEventPolicy allows saved-audio retranscription request attribution") {
         let requested = AnalyticsEventPolicy.policy(forEvent: "meeting_saved_audio_retranscription_requested")
 
@@ -588,6 +838,41 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["prompt_reason"], "calendar_plus_runtime_match", "prompt reason should survive sanitization")
         assertEqual(sanitized["backoff_kind"], "calendar_teams_extended", "dismiss backoff kind should survive sanitization")
     }
+
+    runSuite("AnalyticsEventPolicy keeps mic boost prompt events narrow") {
+        let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_mic_boost_prompt_shown")
+        let actioned = AnalyticsEventPolicy.policy(forEvent: "meeting_mic_boost_prompt_actioned")
+
+        assertEqual(
+            shown?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "trigger"],
+            "mic boost prompt shown should carry only coarse duration and trigger"
+        )
+        assertEqual(
+            actioned?.allowedProperties ?? Set<String>(),
+            ["action", "duration_bucket", "trigger"],
+            "mic boost prompt actioned should carry only the accept/decline enum plus coarse attribution"
+        )
+        assertEqual(
+            actioned?.allowedProperties.contains("app_name"),
+            false,
+            "the foreign app holding the mic must never be named in analytics"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "action": "accepted",
+                "duration_bucket": "10_29s",
+                "trigger": "hotkey",
+                "app_name": "Safari",
+            ],
+            allowedKeys: actioned?.allowedProperties ?? Set<String>()
+        )
+        assertEqual(sanitized["action"], "accepted", "accept/decline enum should survive sanitization")
+        assertEqual(sanitized["duration_bucket"], "10_29s", "coarse duration bucket should survive sanitization")
+        assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive sanitization")
+        assertNil(sanitized["app_name"], "unallowlisted properties must be dropped")
+    }
 }
 
 private func documentedAnalyticsEvents() -> [String] {
@@ -604,33 +889,6 @@ private func documentedAnalyticsEvents() -> [String] {
         }
 
         return String(trimmed.dropFirst(3).dropLast())
-    }
-}
-
-private func sourceAnalyticsPolicyEvents() -> [String] {
-    let text = loadRepoText("Sources/Observability/AnalyticsEventPolicy.swift")
-    guard let start = text.range(of: "private static let allowedPolicies: [String: AnalyticsEventPolicy] = [") else {
-        return []
-    }
-
-    let sourceAfterStart = String(text[start.upperBound...])
-    guard let end = sourceAfterStart.range(of: "\n    ]") else {
-        return []
-    }
-
-    let policyBody = String(sourceAfterStart[..<end.lowerBound])
-    return policyBody.split(separator: "\n").compactMap { line in
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("\""), trimmed.contains("\": .init(") else {
-            return nil
-        }
-
-        let withoutLeadingQuote = trimmed.dropFirst()
-        guard let closingQuote = withoutLeadingQuote.firstIndex(of: "\"") else {
-            return nil
-        }
-
-        return String(withoutLeadingQuote[..<closingQuote])
     }
 }
 

@@ -23,6 +23,7 @@ final class HomeViewModel: ObservableObject {
     private var refreshGeneration = 0
     private var dictationLimit = 10
     private var meetingLimit = 10
+    private var didTrackActivationReturnProxy = false
 
     // Settings Home must open instantly, even for users with thousands of dictations.
     // Keep the dashboard to a small recent slice and leave deep history to the dedicated pages/files.
@@ -41,6 +42,32 @@ final class HomeViewModel: ObservableObject {
         meetingLimit = initialMeetingLimit
         isLoading = true
         loadCurrentLimits(isInitialLoad: true)
+    }
+
+    func reloadVisibleContent() {
+        loadCurrentLimits(isInitialLoad: false)
+    }
+
+    func removeVisibleMeeting(id: String) {
+        var didRemove = false
+        meetingDaySections = meetingDaySections.compactMap { section in
+            let remainingItems = section.items.filter { item in
+                let shouldKeep = item.id != id
+                if !shouldKeep {
+                    didRemove = true
+                }
+                return shouldKeep
+            }
+            guard !remainingItems.isEmpty else { return nil }
+            return HomeDaySection(day: section.day, label: section.label, items: remainingItems)
+        }
+
+        guard didRemove else { return }
+        recentMeetingCount = max(0, recentMeetingCount - 1)
+        todayMeetingCount = meetingDaySections
+            .flatMap(\.items)
+            .filter { Calendar.current.isDateInToday($0.date) }
+            .count
     }
 
     func loadMoreDictations() {
@@ -85,6 +112,10 @@ final class HomeViewModel: ObservableObject {
             self.meetingDaySections = Self.groupByDay(visibleMeetings, dateForItem: \.date)
             self.canLoadMoreDictations = snapshot.dictations.count > requestedDictationLimit
             self.canLoadMoreMeetings = snapshot.meetings.count > requestedMeetingLimit
+            self.trackActivationReturnProxyIfNeeded(
+                dictations: visibleDictations,
+                meetings: visibleMeetings
+            )
             self.isLoading = false
             self.isLoadingMore = false
         }
@@ -124,19 +155,32 @@ final class HomeViewModel: ObservableObject {
     }
 
     private static func dayLabel(for day: Date) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
-        let formatter = Self.daySectionFormatter
-        return formatter.string(from: day)
+        HomeDaySectionLabel.label(for: day)
     }
 
-    private static let daySectionFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = .current
-        f.dateFormat = "EEEE, MMM d"
-        return f
-    }()
+    private func trackActivationReturnProxyIfNeeded(
+        dictations: [SavedDictationEntry],
+        meetings: [RecentMeetingItem]
+    ) {
+        guard !didTrackActivationReturnProxy else { return }
+
+        let dictationCandidates = dictations.map { entry in
+            (kind: ActivationTelemetry.ArtifactKind.dictation, date: entry.createdAt)
+        }
+        let meetingCandidates = meetings.map { item in
+            (kind: ActivationTelemetry.ArtifactKind.meeting, date: item.date)
+        }
+        guard let latest = (dictationCandidates + meetingCandidates).max(by: { $0.date < $1.date }) else {
+            return
+        }
+
+        didTrackActivationReturnProxy = ActivationTelemetry.trackReturnProxyIfEligible(
+            priorArtifactKind: latest.kind,
+            priorArtifactDate: latest.date,
+            surface: .home
+        )
+    }
+
 }
 
 struct HomeDaySection<Item>: Identifiable {
@@ -196,56 +240,6 @@ struct HomeDeleteFailure: Identifiable {
     let message: String
 }
 
-enum HomeActivityTab: String, CaseIterable, Identifiable {
-    case dictations
-    case meetings
-    case speakers
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .dictations: return "Dictations"
-        case .meetings: return "Meetings"
-        case .speakers: return "Speakers"
-        }
-    }
-}
-
-enum HomeHeroMode: String, CaseIterable, Identifiable {
-    case meeting
-    case dictation
-    case speakers
-
-    var id: String { rawValue }
-
-    static let tabOrder: [HomeHeroMode] = [.meeting, .dictation, .speakers]
-
-    var switchTitle: String {
-        switch self {
-        case .dictation: return "Dictation"
-        case .meeting: return "Meetings"
-        case .speakers: return "Speakers"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .dictation: return "mic.fill"
-        case .meeting: return "waveform"
-        case .speakers: return "person.2.fill"
-        }
-    }
-
-    var activityTab: HomeActivityTab {
-        switch self {
-        case .dictation: return .dictations
-        case .meeting: return .meetings
-        case .speakers: return .speakers
-        }
-    }
-}
-
 // MARK: - Stats summary
 
 struct HomeStatItem: Identifiable {
@@ -253,6 +247,15 @@ struct HomeStatItem: Identifiable {
     let symbolName: String
     let value: String
     let label: String
+    let detail: String?
+
+    init(id: String, symbolName: String, value: String, label: String, detail: String? = nil) {
+        self.id = id
+        self.symbolName = symbolName
+        self.value = value
+        self.label = label
+        self.detail = detail
+    }
 }
 
 enum HomeFeedbackIssueKind: String, CaseIterable, Identifiable {
@@ -308,12 +311,7 @@ struct HomeFeedbackTarget: Identifiable {
     }
 
     private static func stableReferenceID(for value: String) -> String {
-        var hash: UInt64 = 1_469_598_103_934_665_603
-        for byte in value.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return String(hash, radix: 16)
+        HomeStableReferenceID.id(for: value)
     }
 }
 
@@ -332,17 +330,66 @@ struct HomeMeetingPreview: Identifiable {
     let audio: MeetingAudioAttachment?
     let markdown: String
     let readError: String?
+    let summary: RecentMeetingSummaryPreview?
     let feedbackTarget: HomeFeedbackTarget
 
-    init(item: RecentMeetingItem, markdown: String, readError: String? = nil) {
+    init(
+        item: RecentMeetingItem,
+        markdown: String,
+        readError: String? = nil,
+        summary: RecentMeetingSummaryPreview? = nil
+    ) {
         id = item.id
-        title = item.title
+        title = item.displayTitle
         date = item.date
         transcriptURL = item.transcriptURL
         audio = item.audio
         self.markdown = markdown
         self.readError = readError
+        self.summary = summary
         feedbackTarget = HomeFeedbackTarget.meeting(item)
+    }
+
+    private init(
+        id: String,
+        title: String,
+        date: Date,
+        transcriptURL: URL,
+        audio: MeetingAudioAttachment?,
+        markdown: String,
+        readError: String?,
+        summary: RecentMeetingSummaryPreview?,
+        feedbackTarget: HomeFeedbackTarget
+    ) {
+        self.id = id
+        self.title = title
+        self.date = date
+        self.transcriptURL = transcriptURL
+        self.audio = audio
+        self.markdown = markdown
+        self.readError = readError
+        self.summary = summary
+        self.feedbackTarget = feedbackTarget
+    }
+
+    /// Returns a copy reflecting a renamed transcript while keeping the stable `id`
+    /// so the open preview sheet updates in place instead of dismissing and re-presenting.
+    func updatingAfterRename(
+        transcriptURL: URL,
+        title: String,
+        audio: MeetingAudioAttachment?
+    ) -> HomeMeetingPreview {
+        HomeMeetingPreview(
+            id: id,
+            title: title,
+            date: date,
+            transcriptURL: transcriptURL,
+            audio: audio,
+            markdown: markdown,
+            readError: readError,
+            summary: summary,
+            feedbackTarget: feedbackTarget
+        )
     }
 }
 
@@ -351,543 +398,160 @@ enum HomeMeetingMarkdownReadResult {
     case failure(String)
 }
 
-// MARK: - Welcome header
+// MARK: - Canvas header
 
-struct HomeWelcomeHeader: View {
-    let name: String
-    let summary: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Welcome back, \(name)")
-                .font(.system(size: 22, weight: .semibold))
-            Text(summary)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-// MARK: - Hero card
-
-private enum HomeHeroTabMetrics {
-    static let width: CGFloat = 172
-    static let height: CGFloat = 52
-    static let cornerRadius: CGFloat = 14
-    static let cardCornerRadius: CGFloat = 18
-    static let spacing: CGFloat = 4
-
-    static var surfaceFill: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(0.82)
-    }
-
-    static var inactiveFill: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(0.56)
-    }
-}
-
-struct HomeHeroCard<ActivityContent: View>: View {
-    @Binding var selectedMode: HomeHeroMode
-    private let activityContent: () -> ActivityContent
-
-    @Environment(\.displayScale) private var displayScale
-
-    init(
-        selectedMode: Binding<HomeHeroMode>,
-        @ViewBuilder activityContent: @escaping () -> ActivityContent
-    ) {
-        _selectedMode = selectedMode
-        self.activityContent = activityContent
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HomeHeroModeTabs(selectedMode: $selectedMode)
-                .padding(.bottom, -hairline)
-                .zIndex(1)
-
-            VStack(alignment: .leading, spacing: 18) {
-                activityContent()
-            }
-            .padding(.top, 20)
-            .padding(.horizontal, 28)
-            .padding(.bottom, 22)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                HomeHeroCardShape(
-                    cornerRadius: HomeHeroTabMetrics.cardCornerRadius,
-                    squareTopLeft: selectedMode == .meeting
-                )
-                    .fill(cardFill)
-            )
-            .overlay(
-                HomeHeroCardBorderShape(
-                    cornerRadius: HomeHeroTabMetrics.cardCornerRadius,
-                    selectedTabMinX: selectedTabLeadingOffset,
-                    selectedTabMaxX: selectedTabTrailingOffset,
-                    squareTopLeft: selectedMode == .meeting
-                )
-                    .stroke(Color.primary.opacity(0.08), lineWidth: hairline)
-            )
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var cardFill: Color {
-        HomeHeroTabMetrics.surfaceFill
-    }
-
-    private var hairline: CGFloat {
-        1 / max(displayScale, 1)
-    }
-
-    private var selectedTabLeadingOffset: CGFloat {
-        switch selectedMode {
-        case .meeting:
-            return 0
-        case .dictation:
-            return HomeHeroTabMetrics.width + HomeHeroTabMetrics.spacing
-        case .speakers:
-            return (HomeHeroTabMetrics.width * 2) + (HomeHeroTabMetrics.spacing * 2)
-        }
-    }
-
-    private var selectedTabTrailingOffset: CGFloat {
-        selectedTabLeadingOffset + HomeHeroTabMetrics.width
-    }
-}
-
-private struct HomeHeroModeTabs: View {
-    @Binding var selectedMode: HomeHeroMode
-
-    var body: some View {
-        HStack(alignment: .top, spacing: HomeHeroTabMetrics.spacing) {
-            ForEach(HomeHeroMode.tabOrder) { mode in
-                HomeHeroModeTab(
-                    mode: mode,
-                    isSelected: selectedMode == mode,
-                    action: {
-                        guard selectedMode != mode else { return }
-                        var transaction = Transaction()
-                        transaction.animation = nil
-                        withTransaction(transaction) {
-                            selectedMode = mode
-                        }
-                    }
-                )
-            }
-        }
-        .frame(height: HomeHeroTabMetrics.height, alignment: .topLeading)
-        .transaction { transaction in
-            transaction.animation = nil
-        }
-    }
-}
-
-private struct HomeHeroModeTab: View {
-    let mode: HomeHeroMode
-    let isSelected: Bool
-    let action: () -> Void
-
-    @Environment(\.displayScale) private var displayScale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: mode.symbolName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 18, height: 18)
-                Text(mode.switchTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-            .frame(width: HomeHeroTabMetrics.width, height: HomeHeroTabMetrics.height)
-            .background(
-                HomeHeroTabShape(cornerRadius: HomeHeroTabMetrics.cornerRadius)
-                    .fill(tabFill)
-                    .shadow(color: tabGlow, radius: tabGlowRadius, x: 0, y: 0)
-            )
-            .overlay(
-                HomeHeroTabBorderShape(cornerRadius: HomeHeroTabMetrics.cornerRadius)
-                    .stroke(tabStroke, lineWidth: hairline)
-            )
-            .contentShape(HomeHeroTabShape(cornerRadius: HomeHeroTabMetrics.cornerRadius))
-        }
-        .buttonStyle(.plain)
-        .help("Show \(mode.switchTitle.lowercased())")
-        .zIndex(isSelected ? 1 : 0)
-        .onHover { isHovering = $0 }
-        .animation(reduceMotion ? nil : SettingsInteractionPalette.animation, value: isHovering)
-        .accessibilityLabel(mode.switchTitle)
-        .accessibilityValue(isSelected ? "Selected" : "")
-    }
-
-    private var tabFill: Color {
-        if isSelected {
-            return surfaceFill
-        }
-        if isHovering {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.72)
-        }
-        return HomeHeroTabMetrics.inactiveFill
-    }
-
-    private var tabStroke: Color {
-        if isSelected {
-            return Color.primary.opacity(0.11)
-        }
-        return isHovering ? Color.accentColor.opacity(0.20) : Color.primary.opacity(0.06)
-    }
-
-    private var tabGlow: Color {
-        isHovering && !isSelected && !reduceMotion ? Color.accentColor.opacity(0.11) : Color.clear
-    }
-
-    private var tabGlowRadius: CGFloat {
-        isHovering && !isSelected && !reduceMotion ? 8 : 0
-    }
-
-    private var surfaceFill: Color {
-        HomeHeroTabMetrics.surfaceFill
-    }
-
-    private var hairline: CGFloat {
-        1 / max(displayScale, 1)
-    }
-}
-
-private struct HomeHeroTabShape: Shape {
-    let cornerRadius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let radius = min(cornerRadius, rect.width / 2, rect.height)
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + radius, y: rect.minY),
-            control: CGPoint(x: rect.minX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-            control: CGPoint(x: rect.maxX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.closeSubpath()
-        return path
-    }
-}
-
-private struct HomeHeroTabBorderShape: Shape {
-    let cornerRadius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let radius = min(cornerRadius, rect.width / 2, rect.height)
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + radius, y: rect.minY),
-            control: CGPoint(x: rect.minX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-            control: CGPoint(x: rect.maxX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        return path
-    }
-}
-
-private struct HomeHeroCardShape: Shape {
-    let cornerRadius: CGFloat
-    let squareTopLeft: Bool
-
-    func path(in rect: CGRect) -> Path {
-        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
-        let topLeftRadius = squareTopLeft ? 0 : radius
-        var path = Path()
-
-        path.move(to: CGPoint(x: rect.minX + topLeftRadius, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-            control: CGPoint(x: rect.maxX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
-            control: CGPoint(x: rect.maxX, y: rect.maxY)
-        )
-        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX, y: rect.maxY - radius),
-            control: CGPoint(x: rect.minX, y: rect.maxY)
-        )
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeftRadius))
-        if topLeftRadius > 0 {
-            path.addQuadCurve(
-                to: CGPoint(x: rect.minX + topLeftRadius, y: rect.minY),
-                control: CGPoint(x: rect.minX, y: rect.minY)
-            )
-        }
-        path.closeSubpath()
-        return path
-    }
-}
-
-private struct HomeHeroCardBorderShape: Shape {
-    let cornerRadius: CGFloat
-    let selectedTabMinX: CGFloat
-    let selectedTabMaxX: CGFloat
-    let squareTopLeft: Bool
-
-    func path(in rect: CGRect) -> Path {
-        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
-        let topLeftRadius = squareTopLeft ? 0 : radius
-        let topLineStart = rect.minX + topLeftRadius
-        let topLineEnd = rect.maxX - radius
-        let gapStart = max(rect.minX, min(rect.maxX, rect.minX + selectedTabMinX))
-        let gapEnd = max(rect.minX, min(rect.maxX, rect.minX + selectedTabMaxX))
-        var path = Path()
-
-        if topLeftRadius > 0 {
-            path.move(to: CGPoint(x: rect.minX, y: rect.minY + topLeftRadius))
-            path.addQuadCurve(
-                to: CGPoint(x: topLineStart, y: rect.minY),
-                control: CGPoint(x: rect.minX, y: rect.minY)
-            )
-        }
-
-        if gapStart > topLineStart {
-            path.move(to: CGPoint(x: topLineStart, y: rect.minY))
-            path.addLine(to: CGPoint(x: min(gapStart, topLineEnd), y: rect.minY))
-        }
-
-        if gapEnd < topLineEnd {
-            path.move(to: CGPoint(x: max(gapEnd, topLineStart), y: rect.minY))
-            path.addLine(to: CGPoint(x: topLineEnd, y: rect.minY))
-        }
-
-        path.move(to: CGPoint(x: topLineEnd, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-            control: CGPoint(x: rect.maxX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
-            control: CGPoint(x: rect.maxX, y: rect.maxY)
-        )
-        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX, y: rect.maxY - radius),
-            control: CGPoint(x: rect.minX, y: rect.maxY)
-        )
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeftRadius))
-
-        return path
-    }
-}
-
-// MARK: - Stats rail
-
-struct HomeStatsTopCard: View {
-    let stats: [HomeStatItem]
-    let streak: Int?
-
-    private let columns = [
-        GridItem(.flexible(minimum: 86), spacing: 12),
-        GridItem(.flexible(minimum: 86), spacing: 12)
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Text("Overall")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                    .tracking(0.6)
-
-                Spacer(minLength: 10)
-
-                if let streak, streak > 0 {
-                    HStack(spacing: 5) {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.orange)
-                        Text("\(streak)d")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(Color.primary)
-                }
-            }
-
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-                ForEach(stats) { stat in
-                    HStack(spacing: 8) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.primary.opacity(0.06))
-                            Image(systemName: stat.symbolName)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(width: 24, height: 24)
-
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(stat.value)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.primary)
-                                .lineLimit(1)
-                            Text(stat.label)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-            }
-        }
-        .padding(14)
-        .frame(width: 286, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.72))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-        )
-    }
-}
-
-struct HomeStatsBadge: View {
-    let stats: [HomeStatItem]
-    let streak: Int?
+struct HomeCanvasHeader: View {
+    let greeting: String
+    let streakText: String?
+    let hoursText: String
+    let wordsText: String
     let onViewStats: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
-        Button {
-            onViewStats()
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .center, spacing: 10) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chart.bar.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                        Text("Overall")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .textCase(.uppercase)
-                            .tracking(0.5)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(greeting)
+                .font(.system(size: 28, weight: .light))
+                .tracking(0.2)
+
+            Button(action: { onViewStats() }) {
+                HStack(spacing: 9) {
+                    if let streakText {
+                        stat(streakText, "streak")
+                        separatorDot
                     }
 
-                    Spacer(minLength: 10)
-
-                    Label("View stats", systemImage: "info.circle")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(Color.primary.opacity(0.055))
-                        )
+                    stat(hoursText, "recorded")
+                    separatorDot
+                    stat(wordsText, "words dictated")
                 }
-
-                LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 9) {
-                    ForEach(headlineStats.prefix(4)) { stat in
-                        HomeStatsStripMetric(stat: stat)
-                    }
-                }
+                .lineLimit(1)
+                .contentShape(Rectangle())
             }
-            .padding(14)
-            .frame(width: 348, alignment: .leading)
-            .frame(minHeight: 112)
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(isHovering ? 0.98 : 0.88))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.primary.opacity(isHovering ? 0.14 : 0.08), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(isHovering ? 0.18 : 0.10), radius: isHovering ? 16 : 10, x: 0, y: isHovering ? 8 : 5)
-            .scaleEffect(isHovering ? 1.006 : 1)
-            .animation(.easeOut(duration: 0.14), value: isHovering)
+            .buttonStyle(.plain)
+            .opacity(isHovering ? 1 : 0.9)
             .onHover { isHovering = $0 }
-        }
-        .buttonStyle(.plain)
-        .help("Show more stats")
-    }
-
-    private var metricColumns: [GridItem] {
-        [
-            GridItem(.flexible(minimum: 130), spacing: 12),
-            GridItem(.flexible(minimum: 130), spacing: 12),
-        ]
-    }
-
-    private var headlineStats: [HomeStatItem] {
-        let preferredIDs = ["typing-time-saved", "dictation-words", "meetings", "meeting-hours"]
-        let preferredStats = preferredIDs.compactMap { id in
-            stats.first(where: { $0.id == id })
-        }
-        return preferredStats.isEmpty ? Array(stats.prefix(4)) : preferredStats
-    }
-}
-
-private struct HomeStatsStripMetric: View {
-    let stat: HomeStatItem
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.primary.opacity(0.055))
-
-                Image(systemName: stat.symbolName)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(width: 24, height: 24)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(stat.value)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-
-                Text(compactLabel)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            .animation(.easeOut(duration: 0.12), value: isHovering)
+            .help("View all stats")
+            .accessibilityLabel("View all stats")
+            .accessibilityIdentifier("transcripted.home.stats.view")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var compactLabel: String {
-        stat.id == "dictation-words" ? "words" : stat.label
+    private func stat(_ value: String, _ label: String) -> some View {
+        HStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(Color.primary.opacity(0.9))
+            Text(label)
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+    }
+
+    private var separatorDot: some View {
+        Text("\u{00B7}")
+            .font(.system(size: 12.5, weight: .semibold))
+            .foregroundStyle(.tertiary)
     }
 }
+
+// MARK: - Needs-attention pills
+
+struct HomeAttentionIssue: Identifiable {
+    enum Destination {
+        case failedMeetings
+        case speakers
+        case summaries
+        case privacy
+        case models
+    }
+
+    enum Tone {
+        case warning
+        case failure
+        case progress
+
+        var color: Color {
+            switch self {
+            case .warning: return .orange
+            case .failure: return .red
+            case .progress: return .accentColor
+            }
+        }
+    }
+
+    let id: String
+    let title: String
+    let detail: String
+    let tone: Tone
+    let destination: Destination
+}
+
+struct HomeAttentionPillsRow: View {
+    let issues: [HomeAttentionIssue]
+    let onSelect: (HomeAttentionIssue) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(issues) { issue in
+                HomeAttentionPill(issue: issue) {
+                    onSelect(issue)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct HomeAttentionPill: View {
+    let issue: HomeAttentionIssue
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(issue.tone.color)
+                    .frame(width: 6, height: 6)
+                Text(issue.title)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.primary.opacity(0.85))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.primary.opacity(isHovering ? 0.055 : 0))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.primary.opacity(isHovering ? 0.16 : 0.09), lineWidth: 1)
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .help(issue.detail)
+        .accessibilityLabel(issue.title)
+        .accessibilityHint(issue.detail)
+        .accessibilityIdentifier("transcripted.home.needs-attention.review.\(issue.id)")
+    }
+}
+
+// MARK: - Stats detail
 
 struct HomeStatsDetailSheet: View {
     let stats: [HomeStatItem]
     let streak: Int?
+    let longestStreak: Int?
     let onDone: () -> Void
 
     private let columns = [
@@ -901,7 +565,7 @@ struct HomeStatsDetailSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Overall")
                         .font(.system(size: 22, weight: .semibold))
-                    Text("A quick read on saved work and time returned.")
+                    Text("Everything you've captured, and the time dictation gave back.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -910,6 +574,7 @@ struct HomeStatsDetailSheet: View {
 
                 Button("Done", action: onDone)
                     .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("transcripted.home.stats.done")
             }
 
             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
@@ -923,7 +588,20 @@ struct HomeStatsDetailSheet: View {
                             id: "streak",
                             symbolName: "flame.fill",
                             value: "\(streak)d",
-                            label: "streak"
+                            label: "current streak",
+                            detail: "Consecutive days with at least one capture"
+                        )
+                    )
+                }
+
+                if let longestStreak, longestStreak > 0, longestStreak != streak {
+                    HomeStatsDetailMetric(
+                        stat: HomeStatItem(
+                            id: "longest-streak",
+                            symbolName: "trophy.fill",
+                            value: "\(longestStreak)d",
+                            label: "longest streak",
+                            detail: "Your best run so far"
                         )
                     )
                 }
@@ -960,6 +638,13 @@ private struct HomeStatsDetailMetric: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                if let detail = stat.detail {
+                    Text(detail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .padding(12)
@@ -988,9 +673,9 @@ struct HomeArtifactStatus: Equatable {
     static func dictation(_ entry: SavedDictationEntry) -> HomeArtifactStatus? {
         switch entry.delivery {
         case .pasted, .copied:
-            return nil
+            return HomeArtifactStatus(text: "Saved to Markdown", tone: .ready)
         case .failed:
-            return HomeArtifactStatus(text: "Saved only", tone: .warning)
+            return HomeArtifactStatus(text: "Saved to Markdown only", tone: .warning)
         }
     }
 
@@ -1068,11 +753,13 @@ struct HomeRowActionButtons: View {
         }
         .buttonStyle(SettingsHoverButtonStyle(cornerRadius: 7))
         .help(help)
+        .accessibilityIdentifier("transcripted.home.row.copy")
     }
 }
 
 struct HomeRowMoreMenuButton: NSViewRepresentable {
     let items: [HomeRowMenuItem]
+    var automationIdentifier = "transcripted.home.row.more"
 
     func makeCoordinator() -> Coordinator {
         Coordinator(items: items)
@@ -1088,9 +775,12 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
         )
         button.contentTintColor = .secondaryLabelColor
         button.target = context.coordinator
+        button.retainedActionTarget = context.coordinator
         button.action = #selector(Coordinator.showMenu(_:))
         button.setButtonType(.momentaryChange)
         button.setAccessibilityLabel("More options")
+        button.identifier = NSUserInterfaceItemIdentifier(automationIdentifier)
+        button.setAccessibilityIdentifier(automationIdentifier)
         button.wantsLayer = true
         button.layer?.cornerRadius = 7
         return button
@@ -1098,11 +788,18 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.items = items
+        if let hoverButton = button as? HoverMenuButton {
+            hoverButton.retainedActionTarget = context.coordinator
+        }
+        button.target = context.coordinator
         button.isEnabled = !items.isEmpty
+        button.identifier = NSUserInterfaceItemIdentifier(automationIdentifier)
+        button.setAccessibilityIdentifier(automationIdentifier)
     }
 
     final class Coordinator: NSObject {
         var items: [HomeRowMenuItem]
+        private var menuActionTargets: [MenuActionTarget] = []
 
         init(items: [HomeRowMenuItem]) {
             self.items = items
@@ -1110,14 +807,19 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc func showMenu(_ sender: NSButton) {
             let menu = NSMenu()
+            menuActionTargets = []
+            // Without this, AppKit auto-enables every item whose target responds
+            // to the action, overriding the per-item isEnabled set below.
+            menu.autoenablesItems = false
             for item in items {
+                let target = MenuActionTarget(item: item)
+                menuActionTargets.append(target)
                 let menuItem = NSMenuItem(
                     title: item.title,
-                    action: #selector(performMenuItem(_:)),
+                    action: #selector(MenuActionTarget.perform(_:)),
                     keyEquivalent: ""
                 )
-                menuItem.target = self
-                menuItem.representedObject = item.id
+                menuItem.target = target
                 menuItem.isEnabled = item.isEnabled
                 if let image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: item.title) {
                     image.isTemplate = true
@@ -1140,18 +842,25 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                 in: sender
             )
         }
+    }
 
-        @objc private func performMenuItem(_ sender: NSMenuItem) {
-            guard let id = sender.representedObject as? UUID,
-                  let item = items.first(where: { $0.id == id }),
-                  item.isEnabled else {
-                return
+    final class MenuActionTarget: NSObject {
+        private let item: HomeRowMenuItem
+
+        init(item: HomeRowMenuItem) {
+            self.item = item
+        }
+
+        @objc func perform(_ sender: NSMenuItem) {
+            guard item.isEnabled else { return }
+            DispatchQueue.main.async {
+                self.item.action()
             }
-            item.action()
         }
     }
 
     final class HoverMenuButton: NSButton {
+        var retainedActionTarget: AnyObject?
         private var trackingAreaRef: NSTrackingArea?
         private var isHovering = false {
             didSet { updateAppearance() }
@@ -1223,6 +932,7 @@ private enum HomeActivityRowFormatting {
 
 private struct HomeActivityRowShell<Content: View>: View {
     let timeString: String
+    var secondaryTimeString: String? = nil
     let isCopied: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
@@ -1233,6 +943,7 @@ private struct HomeActivityRowShell<Content: View>: View {
     var trailingAccessory: AnyView? = nil
     var rowTone: HomeArtifactStatusTone? = nil
     var compact: Bool = false
+    var showsLeadingTimeColumn: Bool = true
     var opensOnRowClick: Bool = true
     @ViewBuilder let content: () -> Content
 
@@ -1251,7 +962,7 @@ private struct HomeActivityRowShell<Content: View>: View {
                 }
 
                 trailingActions
-                .opacity(isHovering ? 1 : 0.55)
+                .opacity(isHovering ? 1 : 0)
                 .animation(.easeOut(duration: 0.12), value: isHovering)
             }
 
@@ -1261,7 +972,7 @@ private struct HomeActivityRowShell<Content: View>: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, compact ? 5 : 9)
+        .padding(.vertical, compact ? 6 : 11)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(rowBackground)
@@ -1336,11 +1047,19 @@ private struct HomeActivityRowShell<Content: View>: View {
 
     private var mainContent: some View {
         HStack(alignment: .top, spacing: 14) {
-            Text(timeString)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
+            if showsLeadingTimeColumn {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(timeString)
+                        .foregroundStyle(.secondary)
+                    if let secondaryTimeString {
+                        Text(secondaryTimeString)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                 .frame(width: 64, alignment: .leading)
                 .padding(.top, 2)
+            }
 
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1381,10 +1100,15 @@ struct HomeDictationRow: View {
                     .multilineTextAlignment(.leading)
 
                 if let status {
-                    Text(status.text)
-                        .font(.caption2)
-                        .foregroundStyle(status.foregroundStyle)
-                        .lineLimit(1)
+                    Button(action: onOpen) {
+                        Label(status.text, systemImage: "doc.text")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(status.foregroundStyle)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open Markdown")
+                    .accessibilityIdentifier("transcripted.home.dictation.open-markdown")
                 }
 
                 if canExpand {
@@ -1403,6 +1127,7 @@ struct HomeDictationRow: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
                     .help(isExpanded ? "Collapse dictation" : "Expand dictation")
+                    .accessibilityIdentifier("transcripted.home.dictation.expand")
                 }
             }
         }
@@ -1437,66 +1162,161 @@ struct HomeDictationRow: View {
 struct HomeMeetingRow: View {
     let item: RecentMeetingItem
     let isCopied: Bool
+    let isSummarizingSummary: Bool
+    let localMeetingSummariesEnabled: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
     let onFlag: () -> Void
-    let hasSpeakerReviewWork: Bool
-    let canRetranscribe: Bool
-    let retranscriptionUnavailableReason: String?
-    let onReviewSpeakers: () -> Void
-    let onRetranscribe: () -> Void
     let menuItems: [HomeRowMenuItem]
+    var showsMicBoostHint: Bool = false
+
+    private let collapsedSummaryCharacterLimit = 260
 
     var body: some View {
         HomeActivityRowShell(
-            timeString: HomeActivityRowFormatting.timeFormatter.string(from: item.date),
+            timeString: startTimeString,
             isCopied: isCopied,
             onOpen: onOpen,
             onCopy: onCopy,
             onFlag: onFlag,
             menuItems: menuItems,
-            leadingAccessory: reviewSpeakersAccessory,
-            compact: true
+            leadingAccessory: leadingRowAccessory,
+            compact: visibleSummaryPreview == nil && !isSummarizingSummary,
+            showsLeadingTimeColumn: false
         ) {
-            Text(item.title)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: rowContentSpacing) {
+                Text(timeRangeString)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .padding(.bottom, 1)
+
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(displayedTitle)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+
+                    if visibleSummaryPreview != nil {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .help("Local summary")
+                    }
+                }
+
+                if isSummarizingSummary {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .frame(width: 12, height: 12)
+
+                        Text("Running local AI summary...")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                            .lineLimit(1)
+                    }
+                    .help("Transcripted is running the local Gemma summary for this meeting.")
+                    .accessibilityIdentifier("transcripted.home.meeting.summary-loading")
+                }
+
+                if let summaryPreview = visibleSummaryPreview {
+                    Text(summaryDisplayText(summaryPreview.summary))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .lineSpacing(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help("Preview meeting")
+            .accessibilityIdentifier("transcripted.home.meeting.preview")
         }
     }
 
-    private var reviewSpeakersAccessory: AnyView? {
-        if RecentMeetingSpeakerReviewActionPolicy.shouldShowReviewAction(
-            speakerStatus: item.speakerStatus,
-            hasSpeakerReviewWork: hasSpeakerReviewWork
-        ) {
+    private var rowContentSpacing: CGFloat {
+        if isSummarizingSummary { return 5 }
+        return visibleSummaryPreview == nil ? 2 : 4
+    }
+
+    private var timeRangeString: String {
+        guard let endTimeString else { return startTimeString }
+        return "\(startTimeString) - \(endTimeString)"
+    }
+
+    private var leadingRowAccessory: AnyView? {
+        // The shell supports one leading accessory; the summary dot keeps
+        // priority. The mic-boost action stays reachable via the row menu.
+        if let summary = aiSummaryAccessory { return summary }
+        guard showsMicBoostHint else { return nil }
+        return AnyView(
+            attentionDot(
+                color: .orange,
+                help: "Your mic was muffled by another call app"
+            )
+        )
+    }
+
+    private var aiSummaryAccessory: AnyView? {
+        guard HomeMeetingSummaryBetaPresentationPolicy.shouldShowAvailableSummaryDot(
+            for: item,
+            isEnabled: localMeetingSummariesEnabled
+        ) else { return nil }
+        if isSummarizingSummary {
             return AnyView(
-                HomeAttentionActionButton(
-                    title: "Review speakers",
-                    isDisabled: false,
-                    tint: .orange,
-                    action: onReviewSpeakers
-                )
-                    .help("Review speakers")
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 18, height: 26)
+                    .help("AI summary is running")
+                    .accessibilityIdentifier("transcripted.home.meeting.summary-loading-dot")
             )
         }
-
-        guard RecentMeetingRetranscriptionActionPolicy.shouldShowInlineAction(
-            speakerStatus: item.speakerStatus,
-            hasRetainedAudio: item.audio?.retranscriptionInput != nil,
-            hasSpeakerReviewWork: hasSpeakerReviewWork
-        ) else { return nil }
-
         return AnyView(
-            HomeAttentionActionButton(
-                title: "Identify speakers",
-                isDisabled: !canRetranscribe,
-                tint: .orange,
-                action: onRetranscribe
+            attentionDot(
+                color: .blue,
+                help: "AI summary available from More options"
             )
-                .help(retranscriptionUnavailableReason ?? "Re-transcribe this saved audio with speaker identification")
         )
+    }
+
+    private var startTimeString: String {
+        HomeActivityRowFormatting.timeFormatter.string(from: item.startDate ?? item.date)
+    }
+
+    private var endTimeString: String? {
+        guard let endDate = item.endDate else { return nil }
+        return HomeActivityRowFormatting.timeFormatter.string(from: endDate)
+    }
+
+    private var visibleSummaryPreview: RecentMeetingSummaryPreview? {
+        HomeMeetingSummaryBetaPresentationPolicy.visibleSummaryPreview(
+            for: item,
+            isEnabled: localMeetingSummariesEnabled
+        )
+    }
+
+    private var displayedTitle: String {
+        HomeMeetingSummaryBetaPresentationPolicy.displayTitle(
+            for: item,
+            isEnabled: localMeetingSummariesEnabled
+        )
+    }
+
+    private func summaryDisplayText(_ summary: String) -> String {
+        guard summary.count > collapsedSummaryCharacterLimit else { return summary }
+        return "\(summary.prefix(collapsedSummaryCharacterLimit).trimmingCharacters(in: .whitespacesAndNewlines))..."
+    }
+
+    private func attentionDot(color: Color, help: String, opacity: Double = 1) -> some View {
+        Circle()
+            .fill(color)
+            .frame(width: 7, height: 7)
+            .frame(width: 18, height: 26)
+            .opacity(opacity)
+            .help(help)
+            .accessibilityLabel(help)
     }
 }
 
@@ -1545,12 +1365,14 @@ struct HomeFailedMeetingInlineRow: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .help("Show saved audio in Finder")
+                .accessibilityIdentifier("transcripted.home.failed-meeting.show-audio")
             }
 
             if inlinePresentation.canShowRetryAction {
                 HomeAttentionActionButton(
                     title: item.isRetrying ? "Retrying" : "Try again",
                     isDisabled: retryDisabled,
+                    automationIdentifier: "transcripted.home.failed-meeting.retry",
                     action: onRetry
                 )
                 .help(retryHelp)
@@ -1563,7 +1385,7 @@ struct HomeFailedMeetingInlineRow: View {
                     isDestructive: hasRetainedAudioFiles,
                     action: onClear
                 )
-            ])
+            ], automationIdentifier: "transcripted.home.failed-meeting.more")
             .frame(width: 26, height: 26)
             .help("More options")
         }
@@ -1637,6 +1459,7 @@ private struct HomeAttentionActionButton: View {
     let title: String
     let isDisabled: Bool
     var tint: Color = .red
+    var automationIdentifier: String? = nil
     let action: () -> Void
 
     @State private var isHovering = false
@@ -1662,6 +1485,7 @@ private struct HomeAttentionActionButton: View {
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .onHover { isHovering = $0 }
+        .homeAutomationIdentifier(automationIdentifier)
     }
 
     private var foregroundColor: Color {
@@ -1709,6 +1533,18 @@ private struct HomeAudioIconButton: View {
             cornerRadius: 7
         ))
         .accessibilityLabel(title)
+        .accessibilityIdentifier("transcripted.home.audio.\(isPlaying ? "pause" : "play")")
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func homeAutomationIdentifier(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
+        }
     }
 }
 
@@ -1766,6 +1602,7 @@ private struct HomeMeetingAudioControl: View {
                 normalStroke: isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10)
             ))
             .accessibilityLabel(title)
+            .accessibilityIdentifier("transcripted.home.audio.inline-toggle")
 
             if let scrubber {
                 scrubber
@@ -1822,40 +1659,20 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     }
 }
 
-// MARK: - Activity tabs container
+// MARK: - Capture list
 
-struct HomeActivityTabsCard: View {
-    let selectedTab: HomeActivityTab
-    @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
-    let dictationSections: [HomeDaySection<SavedDictationEntry>]
-    let meetingSections: [HomeDaySection<HomeMeetingListItem>]
+struct HomeCaptureListSection<Item, Row: View>: View {
+    let sections: [HomeDaySection<Item>]
+    let emptyMessage: String
     let isLoading: Bool
     let isLoadingMore: Bool
-    let canLoadMoreDictations: Bool
-    let canLoadMoreMeetings: Bool
-    let copiedRowID: String?
-    let canRetryFailedMeetings: Bool
-    let failedMeetingRetryUnavailableReason: String?
-    let canRetranscribeSavedMeetings: Bool
-    let savedMeetingRetranscriptionUnavailableReason: String?
-    let onOpenDictation: (SavedDictationEntry) -> Void
-    let onCopyDictation: (SavedDictationEntry) -> Void
-    let onFlagDictation: (SavedDictationEntry) -> Void
-    let dictationMenuItems: (SavedDictationEntry) -> [HomeRowMenuItem]
-    let onOpenMeeting: (RecentMeetingItem) -> Void
-    let onCopyMeeting: (RecentMeetingItem) -> Void
-    let onFlagMeeting: (RecentMeetingItem) -> Void
-    let onReviewMeetingSpeakers: (RecentMeetingItem) -> Void
-    let onRetranscribeMeeting: (RecentMeetingItem) -> Void
-    let meetingMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
-    let onRetryFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
-    let onRevealFailedMeetingAudio: (MeetingSessionController.FailedMeetingItem) -> Void
-    let onClearFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
-    let onLoadMoreDictations: () -> Void
-    let onLoadMoreMeetings: () -> Void
+    let canLoadMore: Bool
+    let getID: (Item) -> AnyHashable
+    let onLoadMore: () -> Void
+    @ViewBuilder let row: (Item) -> Row
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if isLoading {
                 HStack {
                     ProgressView()
@@ -1867,120 +1684,23 @@ struct HomeActivityTabsCard: View {
                 }
                 .padding(.vertical, 28)
             } else {
-                switch selectedTab {
-                case .dictations:
-                    activitySection(
-                        sections: dictationSections,
-                        emptyMessage: "No recent dictations.",
-                        canLoadMore: canLoadMoreDictations,
-                        loadMoreTitle: "Load more",
-                        loadMoreAction: onLoadMoreDictations,
-                        getID: { AnyHashable($0.id) }
-                    ) { entry in
-                        HomeDictationRow(
-                            entry: entry,
-                            isCopied: copiedRowID == entry.id,
-                            onOpen: { onOpenDictation(entry) },
-                            onCopy: { onCopyDictation(entry) },
-                            onFlag: { onFlagDictation(entry) },
-                            menuItems: dictationMenuItems(entry)
-                        )
-                    }
-                case .meetings:
-                    activitySection(
-                        sections: meetingSections,
-                        emptyMessage: "No recent meetings. Record one or transcribe an audio file from General.",
-                        canLoadMore: canLoadMoreMeetings,
-                        loadMoreTitle: "Load more",
-                        loadMoreAction: onLoadMoreMeetings,
-                        getID: { AnyHashable($0.id) }
-                    ) { item in
-                        switch item {
-                        case .saved(let meeting):
-                            HomeMeetingRow(
-                                item: meeting,
-                                isCopied: copiedRowID == meeting.id,
-                                onOpen: { onOpenMeeting(meeting) },
-                                onCopy: { onCopyMeeting(meeting) },
-                                onFlag: { onFlagMeeting(meeting) },
-                                hasSpeakerReviewWork: hasSpeakerReviewWork,
-                                canRetranscribe: canRetranscribeSavedMeetings,
-                                retranscriptionUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
-                                onReviewSpeakers: { onReviewMeetingSpeakers(meeting) },
-                                onRetranscribe: { onRetranscribeMeeting(meeting) },
-                                menuItems: meetingMenuItems(meeting)
-                            )
-                        case .failed(let failedMeeting):
-                            HomeFailedMeetingInlineRow(
-                                item: failedMeeting,
-                                canRetry: canRetryFailedMeetings,
-                                retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                                onRetry: { onRetryFailedMeeting(failedMeeting) },
-                                onRevealAudio: { onRevealFailedMeetingAudio(failedMeeting) },
-                                onClear: { onClearFailedMeeting(failedMeeting) }
-                            )
-                        }
-                    }
-                case .speakers:
-                    HomeSpeakersTab(model: speakerPeopleModel)
+                HomeDayGroupedList(
+                    sections: sections,
+                    emptyMessage: emptyMessage,
+                    getID: getID,
+                    sectionSpacing: 14,
+                    headerSpacing: 2,
+                    row: row
+                )
+
+                if canLoadMore || isLoadingMore {
+                    HomeLoadMoreButton(
+                        title: "Load more",
+                        isLoading: isLoadingMore,
+                        action: onLoadMore
+                    )
                 }
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var hasSpeakerReviewWork: Bool {
-        !speakerPeopleModel.hasLoadedProfiles || speakerPeopleModel.needsReviewCount > 0
-    }
-
-    @ViewBuilder
-    private func activitySection<Item, Content: View>(
-        sections: [HomeDaySection<Item>],
-        emptyMessage: String,
-        canLoadMore: Bool,
-        loadMoreTitle: String,
-        loadMoreAction: @escaping () -> Void,
-        getID: @escaping (Item) -> AnyHashable,
-        @ViewBuilder row: @escaping (Item) -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HomeDayGroupedList(
-                sections: sections,
-                emptyMessage: emptyMessage,
-                getID: getID,
-                sectionSpacing: 10,
-                headerSpacing: 1,
-                row: row
-            )
-
-            if canLoadMore || isLoadingMore {
-                HomeLoadMoreButton(
-                    title: loadMoreTitle,
-                    isLoading: isLoadingMore,
-                    action: loadMoreAction
-                )
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct HomeSpeakersTab: View {
-    @ObservedObject var model: SpeakerPeopleSettingsViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Speakers")
-                    .font(.headline)
-
-                Text("Fix names that need attention, then browse everyone by meeting count.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            SpeakerPeopleSettingsSection(model: model)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -2137,20 +1857,27 @@ struct HomeMeetingPreviewSheet: View {
     let onOpenMarkdown: () -> Void
     let onCopyForAgent: () -> Void
     let onReportIssue: () -> Void
+    let onRenameTitle: (String) -> Void
     let onDone: () -> Void
     private let readableContent: HomeMeetingPreviewContent
+
+    @State private var isEditingTitle = false
+    @State private var draftTitle = ""
+    @FocusState private var isTitleFieldFocused: Bool
 
     init(
         preview: HomeMeetingPreview,
         onOpenMarkdown: @escaping () -> Void,
         onCopyForAgent: @escaping () -> Void,
         onReportIssue: @escaping () -> Void,
+        onRenameTitle: @escaping (String) -> Void,
         onDone: @escaping () -> Void
     ) {
         self.preview = preview
         self.onOpenMarkdown = onOpenMarkdown
         self.onCopyForAgent = onCopyForAgent
         self.onReportIssue = onReportIssue
+        self.onRenameTitle = onRenameTitle
         self.onDone = onDone
         self.readableContent = HomeMeetingPreviewContent.make(from: preview.markdown)
     }
@@ -2159,9 +1886,7 @@ struct HomeMeetingPreviewSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(preview.title)
-                        .font(.system(size: 22, weight: .semibold))
-                        .lineLimit(2)
+                    titleView
                     Text(HomeMeetingPreviewSheet.dateFormatter.string(from: preview.date))
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -2199,6 +1924,43 @@ struct HomeMeetingPreviewSheet: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
+                            if let summary = preview.summary {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Label("AI summary", systemImage: "sparkles")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.accentColor)
+                                        .textCase(.uppercase)
+                                        .tracking(0.6)
+
+                                    if summary.sections.isEmpty {
+                                        Text(summary.summary)
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(Color.primary)
+                                            .lineSpacing(2)
+                                            .textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    } else {
+                                        ForEach(Array(summary.sections.enumerated()), id: \.offset) { _, section in
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text(section.title)
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundStyle(.secondary)
+                                                Text(section.text)
+                                                    .font(.system(size: 13))
+                                                    .foregroundStyle(Color.primary)
+                                                    .lineSpacing(2)
+                                                    .textSelection(.enabled)
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                    }
+
+                                    Divider()
+                                        .padding(.top, 4)
+                                }
+                                .accessibilityIdentifier("transcripted.home.meeting-preview.summary")
+                            }
+
                             Text("Transcript")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.secondary)
@@ -2235,15 +1997,28 @@ struct HomeMeetingPreviewSheet: View {
             }
 
             HStack {
-                SettingsInlineActionButton(title: "Open Markdown", symbolName: "doc.text") {
+                SettingsInlineActionButton(
+                    title: "Open Markdown",
+                    symbolName: "doc.text",
+                    automationIdentifier: "transcripted.home.meeting-preview.open-markdown"
+                ) {
                     onOpenMarkdown()
                 }
 
-                SettingsInlineActionButton(title: "Copy for agent", symbolName: "square.on.square") {
+                SettingsInlineActionButton(
+                    title: "Copy for agent",
+                    symbolName: "square.on.square",
+                    automationIdentifier: "transcripted.home.meeting-preview.copy-for-agent"
+                ) {
                     onCopyForAgent()
                 }
 
-                SettingsInlineActionButton(title: "Report issue", symbolName: "flag", tone: .warning) {
+                SettingsInlineActionButton(
+                    title: "Report issue",
+                    symbolName: "flag",
+                    tone: .warning,
+                    automationIdentifier: "transcripted.home.meeting-preview.report-issue"
+                ) {
                     onReportIssue()
                 }
 
@@ -2252,6 +2027,46 @@ struct HomeMeetingPreviewSheet: View {
         }
         .padding(24)
         .frame(width: 680, height: 620)
+    }
+
+    @ViewBuilder
+    private var titleView: some View {
+        if isEditingTitle {
+            TextField("Meeting title", text: $draftTitle)
+                .textFieldStyle(.plain)
+                .font(.system(size: 22, weight: .semibold))
+                .focused($isTitleFieldFocused)
+                .onSubmit { commitTitleEdit() }
+                .onExitCommand { cancelTitleEdit() }
+                .accessibilityIdentifier("transcripted.home.meeting-preview.title-field")
+        } else {
+            Text(preview.title)
+                .font(.system(size: 22, weight: .semibold))
+                .lineLimit(2)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { beginTitleEdit() }
+                .help("Double-click to rename")
+                .accessibilityIdentifier("transcripted.home.meeting-preview.title")
+        }
+    }
+
+    private func beginTitleEdit() {
+        draftTitle = preview.title
+        isEditingTitle = true
+        isTitleFieldFocused = true
+    }
+
+    private func commitTitleEdit() {
+        isEditingTitle = false
+        isTitleFieldFocused = false
+        let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != preview.title else { return }
+        onRenameTitle(trimmed)
+    }
+
+    private func cancelTitleEdit() {
+        isEditingTitle = false
+        isTitleFieldFocused = false
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -2303,7 +2118,8 @@ private struct HomeMeetingPodcastPlayer: View {
                         size: 34,
                         isPrimary: false,
                         isDisabled: !canSeek,
-                        help: "Skip back 15 seconds"
+                        help: "Skip back 15 seconds",
+                        automationIdentifier: "transcripted.home.meeting-preview.audio.skip-back"
                     ) {
                         playback.skip(audio, by: -15)
                     }
@@ -2313,7 +2129,8 @@ private struct HomeMeetingPodcastPlayer: View {
                         size: 46,
                         isPrimary: playback.isActive(audio, choice: selectedPlaybackChoice),
                         isDisabled: false,
-                        help: "\(playback.buttonTitle(for: audio, choice: selectedPlaybackChoice)) meeting audio"
+                        help: "\(playback.buttonTitle(for: audio, choice: selectedPlaybackChoice)) meeting audio",
+                        automationIdentifier: "transcripted.home.meeting-preview.audio.toggle"
                     ) {
                         playback.toggle(audio, choice: selectedPlaybackChoice)
                     }
@@ -2323,7 +2140,8 @@ private struct HomeMeetingPodcastPlayer: View {
                         size: 34,
                         isPrimary: false,
                         isDisabled: !canSeek,
-                        help: "Skip forward 15 seconds"
+                        help: "Skip forward 15 seconds",
+                        automationIdentifier: "transcripted.home.meeting-preview.audio.skip-forward"
                     ) {
                         playback.skip(audio, by: 15)
                     }
@@ -2370,6 +2188,7 @@ private struct HomePodcastPlayerButton: View {
     let isPrimary: Bool
     let isDisabled: Bool
     let help: String
+    let automationIdentifier: String
     let action: () -> Void
 
     var body: some View {
@@ -2392,6 +2211,7 @@ private struct HomePodcastPlayerButton: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.42 : 1)
         .help(help)
+        .accessibilityIdentifier(automationIdentifier)
     }
 
     private var foreground: Color {
@@ -2475,11 +2295,7 @@ private enum HomeMeetingSpeakerColor {
             .systemIndigo,
         ]
 
-        let normalized = speaker.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = normalized.unicodeScalars.reduce(UInt32(0)) { partial, scalar in
-            partial &+ scalar.value
-        }
-        let index = Int(value % UInt32(palette.count))
+        let index = HomeMeetingSpeakerPalette.slotIndex(for: speaker, slotCount: palette.count)
         return Color(nsColor: palette[index])
     }
 }
@@ -2487,6 +2303,7 @@ private enum HomeMeetingSpeakerColor {
 struct HomeLoadMoreButton: View {
     let title: String
     let isLoading: Bool
+    var automationIdentifier = "transcripted.home.load-more"
     let action: () -> Void
 
     @State private var isHovering = false
@@ -2511,107 +2328,11 @@ struct HomeLoadMoreButton: View {
             .disabled(isLoading)
             .onHover { isHovering = $0 }
             .animation(.easeOut(duration: 0.14), value: isHovering)
+            .accessibilityIdentifier(automationIdentifier)
 
             Spacer(minLength: 0)
         }
         .padding(.top, 4)
-    }
-}
-
-// MARK: - Needs-attention card
-
-struct HomeNeedsAttentionCard: View {
-    enum Destination {
-        case failedMeetings
-        case speakers
-        case activity
-        case privacy
-        case models
-    }
-
-    struct Issue: Identifiable {
-        let id: String
-        let symbolName: String
-        let title: String
-        let detail: String
-        let destination: Destination
-        let actionTitle: String
-    }
-
-    let issues: [Issue]
-    let onReview: (Issue) -> Void
-
-    var body: some View {
-        if let first = issues.first {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: first.symbolName)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.orange)
-                    .frame(width: 18)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(first.title)
-                            .font(.subheadline.weight(.semibold))
-                        if issues.count > 1 {
-                            Text("+\(issues.count - 1)")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Text(first.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 12)
-
-                reviewControl(first: first)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.orange.opacity(0.07))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.orange.opacity(0.28), lineWidth: 1)
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func reviewControl(first: Issue) -> some View {
-        if issues.count <= 1 {
-            Button(first.actionTitle) {
-                onReview(first)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        } else {
-            Menu {
-                ForEach(issues) { issue in
-                    Button {
-                        onReview(issue)
-                    } label: {
-                        Label(issue.title, systemImage: issue.symbolName)
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text("Review")
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                }
-            }
-            .menuStyle(.borderlessButton)
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        }
     }
 }
 
@@ -2636,7 +2357,12 @@ struct HomeFailedMeetingsCard: View {
                     .font(.headline)
                 Spacer()
                 if hiddenCount > 0 {
-                    SettingsInlineActionButton(title: showAllTitle, tone: .warning, action: onShowAll)
+                    SettingsInlineActionButton(
+                        title: showAllTitle,
+                        tone: .warning,
+                        automationIdentifier: "transcripted.home.failed-meetings.show-all",
+                        action: onShowAll
+                    )
                 }
             }
 
@@ -2737,7 +2463,11 @@ private struct HomeFailedMeetingRow: View {
                             }
                         }
 
-                        SettingsInlineActionButton(title: "Show Audio", symbolName: "folder") {
+                        SettingsInlineActionButton(
+                            title: "Show Audio",
+                            symbolName: "folder",
+                            automationIdentifier: "transcripted.home.failed-meetings.show-audio"
+                        ) {
                             onRevealAudio()
                         }
                     } else {
@@ -2752,7 +2482,8 @@ private struct HomeFailedMeetingRow: View {
                         SettingsInlineActionButton(
                             title: item.isRetrying ? "Retrying..." : "Try Again",
                             symbolName: "arrow.clockwise",
-                            tone: .accent
+                            tone: .accent,
+                            automationIdentifier: "transcripted.home.failed-meetings.retry"
                         ) {
                             onRetry()
                         }
@@ -2763,10 +2494,14 @@ private struct HomeFailedMeetingRow: View {
                     SettingsInlineActionButton(
                         title: hasRetainedAudioFiles ? "Delete" : "Dismiss",
                         symbolName: hasRetainedAudioFiles ? "trash" : "xmark",
-                        tone: hasRetainedAudioFiles ? .destructive : .neutral
+                        tone: hasRetainedAudioFiles ? .destructive : .neutral,
+                        automationIdentifier: hasRetainedAudioFiles
+                            ? "transcripted.home.failed-meetings.delete"
+                            : "transcripted.home.failed-meetings.dismiss"
                     ) {
                         onClear()
                     }
+                    .frame(width: hasRetainedAudioFiles ? 78 : 82, height: 30)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

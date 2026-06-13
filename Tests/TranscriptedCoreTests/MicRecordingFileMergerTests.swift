@@ -36,16 +36,16 @@ final class MicRecordingFileMergerTests: XCTestCase {
             samples: Array(repeating: 0.2, count: 11_025)
         )
 
-        let mergedURL = try XCTUnwrap(
-            MicRecordingFileMerger.merge(
-                primaryURL: primaryURL,
-                segments: [
-                    MicRecordingSegment(url: primaryURL),
-                    MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.15)
-                ]
-            )
+        let outcome = try MicRecordingFileMerger.merge(
+            primaryURL: primaryURL,
+            segments: [
+                MicRecordingSegment(url: primaryURL),
+                MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.15)
+            ]
         )
+        let mergedURL = try XCTUnwrap(outcome.url)
 
+        XCTAssertTrue(outcome.isFullFidelity)
         XCTAssertTrue(FileManager.default.fileExists(atPath: mergedURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: primaryURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryURL.path))
@@ -72,7 +72,7 @@ final class MicRecordingFileMergerTests: XCTestCase {
             MicRecordingFileMerger.merge(
                 primaryURL: primaryURL,
                 segments: [MicRecordingSegment(url: primaryURL)]
-            )
+            ).url
         )
 
         XCTAssertEqual(resolvedURL, primaryURL)
@@ -101,7 +101,7 @@ final class MicRecordingFileMergerTests: XCTestCase {
                     MicRecordingSegment(url: primaryURL),
                     MicRecordingSegment(url: recoveryURL)
                 ]
-            )
+            ).url
         )
 
         let merged = try AudioResampler.loadWAV(url: mergedURL)
@@ -133,7 +133,7 @@ final class MicRecordingFileMergerTests: XCTestCase {
             MicRecordingFileMerger.merge(
                 primaryURL: urls[0],
                 segments: segments
-            )
+            ).url
         )
 
         let merged = try AudioResampler.loadWAV(url: mergedURL)
@@ -147,6 +147,97 @@ final class MicRecordingFileMergerTests: XCTestCase {
         for url in urls {
             XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
         }
+    }
+
+    func testMergeSalvagesAroundMissingMiddleSegment() throws {
+        let primaryURL = temporaryDirectory.appendingPathComponent("primary.wav")
+        let missingURL = temporaryDirectory.appendingPathComponent("vanished.wav")
+        let recoveryURL = temporaryDirectory.appendingPathComponent("recovery.wav")
+
+        try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
+        try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
+
+        let outcome = try MicRecordingFileMerger.merge(
+            primaryURL: primaryURL,
+            segments: [
+                MicRecordingSegment(url: primaryURL),
+                MicRecordingSegment(url: missingURL, gapBeforeDuration: 0.05),
+                MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.05)
+            ]
+        )
+
+        XCTAssertEqual(outcome.skippedSegments, 1)
+        XCTAssertEqual(outcome.appendedSegments, 2)
+        XCTAssertFalse(outcome.isFullFidelity)
+
+        // Degraded salvage keeps the source segments on disk for recovery.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: primaryURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recoveryURL.path))
+
+        // Both surviving segments' audio must be present in order:
+        // 1600 frames of 0.3, two 800-frame gaps, then 1600 frames of 0.6.
+        let merged = try AudioResampler.loadWAV(url: try XCTUnwrap(outcome.url))
+        XCTAssertEqual(merged.sampleRate, 16_000, accuracy: 0.5)
+        XCTAssertEqual(average(of: merged.samples, range: 200..<1_400), 0.3, accuracy: 0.02)
+        XCTAssertLessThan(averageAbsolute(of: merged.samples, range: 1_800..<3_000), 0.001)
+        XCTAssertEqual(average(of: merged.samples, range: 3_500..<4_500), 0.6, accuracy: 0.02)
+    }
+
+    func testMergeRepairsSegmentWithUnfinalizedHeader() throws {
+        let primaryURL = temporaryDirectory.appendingPathComponent("primary.wav")
+        let recoveryURL = temporaryDirectory.appendingPathComponent("recovery.wav")
+
+        try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
+        try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
+        try corruptHeaderSizes(at: recoveryURL)
+
+        // The corrupted segment must read as empty without repair — the exact
+        // state a crashed or leaked writer leaves behind.
+        XCTAssertEqual(try AVAudioFile(forReading: recoveryURL).length, 0)
+
+        let outcome = try MicRecordingFileMerger.merge(
+            primaryURL: primaryURL,
+            segments: [
+                MicRecordingSegment(url: primaryURL),
+                MicRecordingSegment(url: recoveryURL)
+            ]
+        )
+
+        XCTAssertEqual(outcome.repairedSegments, 1)
+        XCTAssertEqual(outcome.appendedSegments, 2)
+        XCTAssertEqual(outcome.skippedSegments, 0)
+        XCTAssertTrue(outcome.isFullFidelity)
+
+        let merged = try AudioResampler.loadWAV(url: try XCTUnwrap(outcome.url))
+        XCTAssertEqual(merged.samples.count, 3_200)
+        XCTAssertEqual(average(of: merged.samples, range: 200..<1_400), 0.3, accuracy: 0.02)
+        XCTAssertEqual(average(of: merged.samples, range: 1_800..<3_000), 0.6, accuracy: 0.02)
+    }
+
+    func testMergeThrowsWhenNoSegmentContributesAudio() throws {
+        let primaryURL = temporaryDirectory.appendingPathComponent("primary.wav")
+        let recoveryURL = temporaryDirectory.appendingPathComponent("recovery.wav")
+
+        XCTAssertThrowsError(
+            try MicRecordingFileMerger.merge(
+                primaryURL: primaryURL,
+                segments: [
+                    MicRecordingSegment(url: primaryURL),
+                    MicRecordingSegment(url: recoveryURL)
+                ]
+            )
+        )
+    }
+
+    private func corruptHeaderSizes(at url: URL) throws {
+        let info = try WAVHeaderRepair.probe(at: url)
+        let handle = try FileHandle(forUpdating: url)
+        defer { try? handle.close() }
+        let headerOnlyRIFFSize = UInt32(info.dataSizeFieldOffset - 4)
+        try handle.seek(toOffset: 4)
+        try handle.write(contentsOf: withUnsafeBytes(of: headerOnlyRIFFSize.littleEndian) { Data($0) })
+        try handle.seek(toOffset: UInt64(info.dataSizeFieldOffset))
+        try handle.write(contentsOf: Data([0, 0, 0, 0]))
     }
 
     private func writeMonoWAV(to url: URL, sampleRate: Double, samples: [Float]) throws {

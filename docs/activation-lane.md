@@ -1,0 +1,77 @@
+# Activation Lane
+
+Use this when work touches the user's first useful Transcripted loop:
+
+1. create or find a saved Markdown artifact
+2. hand that artifact to an agent
+3. get one useful answer
+4. come back later and reuse the saved context
+
+The product question is not just "did transcription run?" It is "did the user
+end up with local Markdown their agent can use?"
+
+## What Counts
+
+Good activation work should improve at least one of these moments:
+
+- first saved dictation or meeting Markdown is visible and easy to open
+- agent setup makes the saved folders or MCP tools usable
+- the user sees a concrete first question to ask an agent
+- recent saved artifacts are easy to return to from Home
+- failure states explain whether audio or Markdown was preserved
+- telemetry counts only coarse, privacy-safe activation events
+
+## Read First
+
+- `README.md` for the product promise
+- `docs/agent-connect.md` for the saved-folder and MCP handoff
+- `Sources/UI/CLAUDE.md` for Home, onboarding, settings, and agent-connect UI
+- `Sources/Support/CLAUDE.md` for Claude Desktop install, paths, paste, and preferences
+- `Sources/Dictation/CLAUDE.md` for dictation Markdown persistence
+- `Sources/Meeting/CLAUDE.md` for meeting save, retry, and retained-audio behavior
+- `Sources/Observability/CLAUDE.md` for activation telemetry guardrails
+
+## Route The Work
+
+| If the issue is about | Start here |
+| --- | --- |
+| first saved dictation or meeting is missing, hidden, or hard to open | `Sources/UI/Settings/HomeView.swift`, `Sources/UI/Shared/RecentCaptureScanners.swift`, `Sources/Dictation/`, `Sources/Meeting/` |
+| agent setup, first prompt, agent connect rows, or folder handoff | `Sources/UI/Shared/AgentConnectionGuide.swift`, `Sources/UI/Settings/AgentConnectionSettingsPage.swift`, `Sources/Support/ClaudeDesktopIntegrationInstaller.swift`, `Sources/Support/AgentMCPConnector.swift`, `docs/agent-connect.md` |
+| pasteback, copied text, Auto Enter, or clipboard restore | `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/UI/Overlay/DictationSessionController.swift`, `Sources/Accessibility/CLAUDE.md` |
+| Bluetooth or AirPods dictation reliability | `Sources/Speech/CLAUDE.md`, `docs/audio-reliability-daily-check.md` |
+| Zoom, Meet, Teams, or meeting prompt trust | `Sources/Meeting/CLAUDE.md`, `Sources/UI/Overlay/MeetingOverlayController.swift`, `docs/qa-issue-500-meeting-audio.md` |
+| activation analytics or health probes | `Sources/Observability/ActivationTelemetry.swift`, `Sources/Observability/AnalyticsEventPolicy.swift`, `docs/privacy-first-observability.md`, `docs/ops-credentials.md` |
+
+## Guardrails
+
+- Do not add transcript text, meeting titles, speaker names, file paths, source
+  app names, raw device names, emails, tokens, or raw URLs to off-device
+  analytics or crash payloads.
+- Do not claim activation is fixed from artifact volume alone. The stronger
+  proof is saved Markdown -> agent use -> return.
+- Do not start with a broad onboarding redesign when a smaller artifact, prompt,
+  Home, or retry-path fix would prove the loop.
+- Keep live release/download truth separate from source truth before making
+  launch or outreach claims.
+
+## Verification
+
+Always start with:
+
+```bash
+bash scripts/dev/agent-preflight.sh
+```
+
+Then follow `.agents/test-matrix.yml`.
+
+Common activation checks:
+
+- Swift/UI/support change: `bash build.sh --no-open` and `bash run-tests.sh`
+- Meeting/Core change: also `bash run-integration-smoke.sh`
+- Agent-connect helper change: include the relevant `Tools/TranscriptedMCP` or
+  Claude Desktop installer checks
+- UI change: add sanitized `.agent-review/visuals/` evidence for the PR
+- Telemetry change: update sanitizer/policy tests and keep payloads bucketed
+
+For GitHub issues, write acceptance criteria around the user-visible artifact
+or handoff proof, not just the internal function that changed.

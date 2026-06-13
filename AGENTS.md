@@ -56,6 +56,16 @@ Use `docs/repo-layout.md` as the canonical directory map and doc hierarchy.
 Use `.agents/test-matrix.yml` as the quick path-to-verification map, with this
 file taking precedence when there is any conflict.
 
+## Coordinator closeout
+
+When a worker lane reports back to the Transcripted coordinator, use this exact
+one-line shape and keep it short:
+
+`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action`
+
+Use `docs/agent-closeout.md` for the status meanings and GitHub cleanup
+boundaries.
+
 ## Build and test
 
 ```bash
@@ -66,12 +76,29 @@ bash run-integration-smoke.sh
 swift test
 ```
 
-Rules:
+Rules. Use `.agents/test-matrix.yml` for the full path-to-verification map;
+these are the common minimums:
 
 1. After changing Swift source, run `bash build.sh --no-open` and `bash run-tests.sh`.
-2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash run-integration-smoke.sh`.
-3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `swift test`.
+2. If you touch `Sources/Meeting/` or `Sources/TranscriptedCore/`, also run `bash build-deps.sh --force` and `bash run-integration-smoke.sh`.
+3. If you touch `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam, also run `bash build-deps.sh --force`, `bash run-integration-smoke.sh`, and `swift test`.
 4. `build.sh` must not compile `Sources/TranscriptedCore/` directly into the app target.
+
+PR QA levels:
+
+- Tiny docs-only: run `scripts/dev/agent-preflight.sh` and the mapped docs gate. Do not require full release QA for spelling, comments, or internal docs that do not change release truth.
+- Meaningful code: run `codex-review` against the real PR base, then run the union of `.agents/test-matrix.yml` checks for the changed paths.
+- Broad, risky, or release-impacting: run `codex-review`, the mapped checks, and `bash scripts/ops/transcripted-qa-bench.sh --mode full`.
+
+Treat release notes, appcast/update docs, Homebrew cask docs, QA-gate docs, and
+public download/release-truth docs as release-impacting even when the diff is
+Markdown-only.
+
+`codex-review` means: an independent model review of the full PR diff against
+the real base branch — e.g. `codex review` from the OpenAI Codex CLI, or an
+equivalent independent agent reviewer. Record the verdict (and any findings you
+rejected, with reasons) in the PR description. It is not defined as a repo
+script; any tool that reviews the true diff qualifies.
 
 ## Releases, Sparkle, and Homebrew
 
@@ -102,7 +129,7 @@ Rules:
    - `bash build-deps.sh --force` when dependency tooling changes
    - `bash build.sh --no-open`
    - `bash run-tests.sh`
-   - `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>` for packaging smoke, or the full notarized path when cutting a real release
+   - `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>` for packaging smoke, or the full notarized path when cutting a real release
 
 ## Observability, Sentry, and Analytics
 

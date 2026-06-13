@@ -139,7 +139,7 @@ final class OverlayRootView: NSView {
         headerView.update(
             state: state,
             dictationShortcutHint: dictationShortcutHint,
-            loadingTitle: state == .loading ? loadingPresentation.title : nil,
+            loadingTitle: state == .loading ? "Dictation" : nil,
             isError: showError,
             isMiniCursorMode: isMiniCursorMode,
             meterPresentation: DictationMeterPolicy.presentation(
@@ -225,9 +225,9 @@ final class OverlayLoadingView: NSView {
         let pad: CGFloat = 14
         let contentWidth = max(0, bounds.width - pad * 2)
 
-        titleLabel.frame = NSRect(x: pad, y: 12, width: contentWidth, height: 16)
-        detailLabel.frame = NSRect(x: pad, y: 32, width: contentWidth, height: 16)
-        progressBar.frame = NSRect(x: pad, y: 54, width: contentWidth, height: 6)
+        titleLabel.frame = NSRect(x: pad, y: 9, width: contentWidth, height: 16)
+        detailLabel.frame = NSRect(x: pad, y: 29, width: contentWidth, height: 28)
+        progressBar.frame = NSRect(x: pad, y: 59, width: contentWidth, height: 6)
     }
 
     func update(

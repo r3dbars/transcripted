@@ -108,7 +108,7 @@ enum TranscriptedConstants {
     static let dictationRecoveryBudget: TimeInterval = 6.0
 
     /// Poll interval while dictation waits on engine readiness (nanoseconds).
-    static let dictationReadinessPollInterval: UInt64 = 150_000_000  // 150ms
+    static let dictationReadinessPollInterval: UInt64 = 100_000_000  // 100ms
 
     /// Minimum interval between active readiness refreshes while dictation waits.
     /// This lets a failed recovery get unstuck without hammering CoreAudio.
@@ -120,7 +120,7 @@ enum TranscriptedConstants {
 
     /// Number of active readiness refreshes before a user-started dictation
     /// performs a hard idle audio graph rebuild.
-    static let dictationReadinessForcedRecoveryRefreshes: Int = 6
+    static let dictationReadinessForcedRecoveryRefreshes: Int = 5
 
     /// Max hard recovery attempts inside one user-started dictation wait.
     static let dictationReadinessForcedRecoveryAttempts: Int = 2
@@ -157,8 +157,14 @@ enum TranscriptedConstants {
 
     // MARK: - Clipboard
 
-    /// Delay after posting Cmd+V before restoring the user's clipboard.
+    /// Delay after the target app reads the borrowed dictation text before
+    /// restoring the user's clipboard.
     static let clipboardRestoreDelay: UInt64 = 120_000_000  // 120ms
+
+    /// Maximum time to keep borrowed dictation text available if the target app
+    /// has not requested it yet. This protects slower paste consumers without
+    /// leaving the user's clipboard borrowed indefinitely.
+    static let clipboardRestoreFallbackDelay: UInt64 = 2_500_000_000  // 2.5s
 
     /// Max time to wait for a just-activated target app before paste-back falls
     /// back to copying. This covers menu/settings flows where activation is async.
@@ -167,7 +173,7 @@ enum TranscriptedConstants {
     // MARK: - Dictation Auto Enter
 
     /// Small pause after paste-back before optionally pressing Enter.
-    static let dictationAutoEnterDelay: UInt64 = 200_000_000  // 200ms
+    static let dictationAutoEnterDelay: UInt64 = 150_000_000  // 150ms
 
     /// Ignore extremely short sessions so quick accidental taps do not submit.
     static let dictationAutoEnterMinimumDuration: TimeInterval = 0.3
@@ -183,11 +189,16 @@ enum TranscriptedConstants {
     /// Throttled logging minimum interval
     static let logThrottleInterval: TimeInterval = 0.25
 
+    /// Size cap for append-only JSONL observability logs (events.jsonl,
+    /// reliability.jsonl). On rotation the file is renamed to `<name>.1`,
+    /// bounding disk use at roughly twice this value per log.
+    static let jsonlLogRotationThreshold: UInt64 = 10_000_000  // 10 MB
+
     // MARK: - Error Display
 
     /// Duration to show error messages in overlay before auto-dismiss (nanoseconds)
     static let errorDismissDelay: UInt64 = 2_500_000_000  // 2.5 seconds
-    static let noSpeechDismissDelay: UInt64 = 1_400_000_000  // 1.4 seconds — enough time to read the empty-recording hint
+    static let noSpeechDismissDelay: UInt64 = 2_200_000_000  // 2.2 seconds — enough time to read the physical-key recovery hint
 
     // MARK: - Feedback Sounds
 

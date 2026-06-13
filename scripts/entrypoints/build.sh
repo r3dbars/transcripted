@@ -158,35 +158,70 @@ verify_signature() {
 }
 
 verify_launch_smoke() {
-    local smoke_log="$BUILD_DIR/launch-smoke.log"
-    local smoke_home="$BUILD_DIR/launch-smoke-home"
-    local ui_report="$BUILD_DIR/launch-ui-smoke.json"
+    local smoke_log="$REPO_ROOT/$BUILD_DIR/launch-smoke.log"
+    local smoke_home="$REPO_ROOT/$BUILD_DIR/launch-smoke-home"
+    local ui_report="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
+    local open_pid=""
+    local pre_launch_app_pids=""
     rm -f "$smoke_log"
     rm -rf "$smoke_home"
     rm -f "$ui_report"
     mkdir -p "$smoke_home"
 
-    CFFIXED_USER_HOME="$smoke_home" \
-    HOME="$smoke_home" \
-    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 \
-    TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1 \
-    TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1 \
-    TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT="$ui_report" \
-    "$APP_BINARY" >"$smoke_log" 2>&1 &
-    local app_pid=$!
+    snapshot_launch_smoke_app_pids() {
+        pgrep -f "$APP_BINARY" || true
+    }
+
+    is_pre_launch_app_pid() {
+        local candidate_pid="$1"
+        printf '%s\n' "$pre_launch_app_pids" | grep -qx "$candidate_pid"
+    }
+
+    terminate_launch_smoke_app() {
+        local app_pids
+        local pid
+        app_pids="$(snapshot_launch_smoke_app_pids)"
+        for pid in $app_pids; do
+            if ! is_pre_launch_app_pid "$pid"; then
+                kill -TERM "$pid" 2>/dev/null || true
+            fi
+        done
+        sleep 0.5
+        app_pids="$(snapshot_launch_smoke_app_pids)"
+        for pid in $app_pids; do
+            if ! is_pre_launch_app_pid "$pid"; then
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done
+    }
+
+    pre_launch_app_pids="$(snapshot_launch_smoke_app_pids)"
+
+    /usr/bin/open -n -g -F -W \
+        --stdout "$smoke_log" \
+        --stderr "$smoke_log" \
+        --env "CFFIXED_USER_HOME=$smoke_home" \
+        --env "HOME=$smoke_home" \
+        --env "TRANSCRIPTED_DISABLE_FILE_LOGGER=1" \
+        --env "TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1" \
+        --env "TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1" \
+        --env "TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT=$ui_report" \
+        --env "TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT=1" \
+        "$APP_BUNDLE" >>"$smoke_log" 2>&1 &
+    open_pid=$!
 
     for _ in $(seq 1 50); do
         if [ -s "$ui_report" ]; then
             break
         fi
-        if ! kill -0 "$app_pid" 2>/dev/null; then
+        if ! kill -0 "$open_pid" 2>/dev/null; then
             break
         fi
         sleep 0.1
     done
 
-    if ! kill -0 "$app_pid" 2>/dev/null; then
-        wait "$app_pid" || true
+    if ! kill -0 "$open_pid" 2>/dev/null && [ ! -s "$ui_report" ]; then
+        wait "$open_pid" || true
         echo "Transcripted exited during launch smoke."
         echo "Smoke log:"
         cat "$smoke_log"
@@ -197,8 +232,9 @@ verify_launch_smoke() {
         echo "Transcripted launch UI smoke report was not written."
         echo "Smoke log:"
         cat "$smoke_log"
-        kill "$app_pid" 2>/dev/null || true
-        wait "$app_pid" 2>/dev/null || true
+        terminate_launch_smoke_app
+        kill "$open_pid" 2>/dev/null || true
+        wait "$open_pid" 2>/dev/null || true
         exit 1
     fi
 
@@ -220,15 +256,44 @@ if not report.get("onboardingCompleted"):
     errors.append("onboarding was not completed for smoke")
 
 actions = report.get("content", {}).get("primaryActions", {})
-for key, expected_title in {
-    "startDictation": "Start Dictation",
-    "startMeeting": "Start Meeting",
+for key, expected in {
+    "home": ("Home", "transcripted.menubar.primary.home"),
+    "startDictation": ("Start Dictation", "transcripted.menubar.primary.start-dictation"),
+    "startMeeting": ("Start Meeting", "transcripted.menubar.primary.start-meeting"),
+    "pasteLastDictation": ("Paste Last Dictation", "transcripted.menubar.primary.paste-last-dictation"),
+    "recentMeetings": ("Recent Meetings", "transcripted.menubar.primary.recent-meetings"),
 }.items():
+    expected_title, expected_identifier = expected
     row = actions.get(key) or {}
     if row.get("title") != expected_title:
         errors.append(f"{key} title was {row.get('title')!r}")
+    if row.get("automationIdentifier") != expected_identifier:
+        errors.append(f"{key} automation identifier was {row.get('automationIdentifier')!r}")
     if not row.get("isVisible"):
         errors.append(f"{key} row was hidden")
+for key in ("home", "startDictation", "startMeeting"):
+    row = actions.get(key) or {}
+    if not row.get("isEnabled"):
+        errors.append(f"{key} row was disabled")
+
+utility_actions = report.get("content", {}).get("utilityActions", {})
+for key, expected in {
+    "connectAgent": ("Connect Agent", "transcripted.menubar.utility.connect-agent"),
+    "submitFeedback": ("Submit feedback", "transcripted.menubar.utility.submit-feedback"),
+    "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
+    "settings": ("Settings", "transcripted.menubar.utility.settings"),
+    "quit": ("Quit", "transcripted.menubar.utility.quit"),
+}.items():
+    expected_title, expected_identifier = expected
+    row = utility_actions.get(key) or {}
+    if row.get("title") != expected_title:
+        errors.append(f"{key} title was {row.get('title')!r}")
+    if row.get("automationIdentifier") != expected_identifier:
+        errors.append(f"{key} automation identifier was {row.get('automationIdentifier')!r}")
+    if not row.get("isVisible"):
+        errors.append(f"{key} row was hidden")
+for key in ("connectAgent", "submitFeedback", "settings", "quit"):
+    row = utility_actions.get(key) or {}
     if not row.get("isEnabled"):
         errors.append(f"{key} row was disabled")
 
@@ -243,24 +308,18 @@ if errors:
     sys.exit(1)
 PY
     then
-        kill "$app_pid" 2>/dev/null || true
-        wait "$app_pid" 2>/dev/null || true
+        terminate_launch_smoke_app
+        kill "$open_pid" 2>/dev/null || true
+        wait "$open_pid" 2>/dev/null || true
         exit 1
     fi
 
-    for _ in $(seq 1 50); do
-        if ! kill -0 "$app_pid" 2>/dev/null; then
-            wait "$app_pid" || true
-            echo "Transcripted exited during launch smoke."
-            echo "Smoke log:"
-            cat "$smoke_log"
-            exit 1
-        fi
-        sleep 0.1
-    done
-
-    kill "$app_pid" 2>/dev/null || true
-    wait "$app_pid" 2>/dev/null || true
+    if ! wait "$open_pid"; then
+        echo "Transcripted exited with an error during launch smoke."
+        echo "Smoke log:"
+        cat "$smoke_log"
+        exit 1
+    fi
 }
 
 sign_embedded_code() {
@@ -382,17 +441,10 @@ bundle_mcp_server
 # Unified dependencies (FluidAudio + mlx-swift-lm + WhisperKit)
 echo "Dependencies found"
 
-# Build the -I flags for all module directories
-DEPS_MODULE_FLAGS="-I$DEPS_MODULE_ROOT"
-for dir in "$DEPS_MODULE_ROOT"/*/; do
-    [ -d "$dir" ] || continue
-    case "$(basename "$dir")" in
-        *.swiftmodule) continue ;;
-    esac
-    DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
-done
-
-DEPS_FLAGS="$DEPS_MODULE_FLAGS -F$DEPS_FRAMEWORK_ROOT -Ldeps-libs -lDraftDeps -framework ESpeakNG -framework CoreML -framework CoreAudio"
+# Shared frameworks/linker/source arguments — single source of truth with
+# build-beta.sh so dev and shipped builds cannot diverge.
+source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
+build_app_swiftc_args
 
 # Bundle Metal libraries if present
 # MLX searches for mlx.metallib next to the binary first (Contents/MacOS/)
@@ -405,39 +457,22 @@ cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
+# Third-party license texts ship with the app: eSpeak NG is GPL-3.0 and the
+# rest (MIT/Apache) require notice preservation in distributed binaries.
+cp THIRD_PARTY_LICENSES.md "$APP_BUNDLE/Contents/Resources/"
+
 # Compile
 echo "Compiling..."
 echo "Swift compiler threads: $SWIFTC_NUM_THREADS"
-SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
 rm -f "$STAGED_APP_BINARY"
 swiftc \
     -O \
     -whole-module-optimization \
     -num-threads "$SWIFTC_NUM_THREADS" \
     -o "$STAGED_APP_BINARY" \
-    -framework AVFoundation \
-    -framework AppKit \
-    -framework SwiftUI \
-    -framework Combine \
-    -framework EventKit \
-    -framework Security \
-    -framework Carbon \
-    -framework Metal \
-    -framework MetalKit \
-    -framework Accelerate \
-    -framework Vision \
-    -framework MetalPerformanceShaders \
-    -framework MetalPerformanceShadersGraph \
-    -framework Network \
-    -framework ScreenCaptureKit \
-    -framework Sentry \
-    -framework Sparkle \
-    -lc++ \
-    $DEPS_FLAGS \
-    $SOURCE_FILES \
-    -parse-as-library \
-    -target arm64-apple-macos26.0 \
-    -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
+    "${APP_SWIFTC_LINK_ARGS[@]}" \
+    "${APP_SOURCE_FILES[@]}" \
+    "${APP_SWIFTC_TAIL_ARGS[@]}" \
     2>&1
 
 mv "$STAGED_APP_BINARY" "$APP_BINARY"
@@ -477,8 +512,12 @@ if [ -n "$SIGN_HASH" ] && codesign -dv "$APP_BUNDLE" 2>&1 | grep -q "Signature=a
     exit 1
 fi
 
-echo "Running launch smoke check..."
-verify_launch_smoke
+if [ "${TRANSCRIPTED_SKIP_LAUNCH_SMOKE:-0}" = "1" ]; then
+    echo "⚠️  Skipping launch smoke (TRANSCRIPTED_SKIP_LAUNCH_SMOKE=1) — app launch is UNVERIFIED in this build"
+else
+    echo "Running launch smoke check..."
+    verify_launch_smoke
+fi
 
 echo "Checking performance budget..."
 PERFORMANCE_BUDGET_ARGS=(--app "$APP_BUNDLE")

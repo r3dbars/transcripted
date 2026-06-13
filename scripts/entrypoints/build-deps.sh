@@ -6,16 +6,41 @@
 # Run once — artifacts go into deps-libs/ and deps-modules/
 # Pattern follows the cache-first build workflow: expensive build runs once, build.sh reuses cached artifacts
 
-set -e
+set -euo pipefail
 
 ENTRYPOINT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DRAFT_DIR="$(cd "$ENTRYPOINT_DIR/../.." && pwd)"
 cd "$DRAFT_DIR"
-TMP_ROOT="${TMPDIR%/}"
+TMP_ROOT="${TMPDIR:-}"
+TMP_ROOT="${TMP_ROOT%/}"
 if [ -z "$TMP_ROOT" ]; then
     TMP_ROOT="/tmp"
 fi
 DEPS_BUILD="$(mktemp -d "$TMP_ROOT/transcripted-deps-build.XXXXXX")"
+DEPS_STAGING=""
+
+# Always remove the multi-GB SwiftPM scratch tree, and any staging dirs that
+# never got swapped into place, no matter how the script exits.
+cleanup_scratch() {
+    rm -rf "$DEPS_BUILD"
+    if [ -n "$DEPS_STAGING" ]; then
+        rm -rf "$DEPS_STAGING"
+    fi
+}
+trap cleanup_scratch EXIT
+# Dual-archive naming contract (do NOT rename without updating every site):
+#   libDraftDeps.a    — APP-path archive (TranscriptedCore objects + external deps).
+#                       build.sh / build-beta.sh / run-integration-smoke.sh link it via
+#                       `-lDraftDeps`, and exclude Sources/TranscriptedCore from their own
+#                       swiftc compile so Core enters the app only through this archive.
+#   libExternalDeps.a — SPM-path archive (external deps only, TranscriptedCore EXCLUDED).
+#                       Package.swift links it for `swift test`, which compiles Core from
+#                       source; including Core here would cause duplicate-symbol errors.
+# The `libDraftDeps` filename and the `-lDraftDeps` linker flag are historical (Draft-era)
+# names kept intentionally for compatibility — they are load-bearing in linker flags across
+# build.sh, build-beta.sh, run-integration-smoke.sh, scripts/entrypoints/lib/swiftc-app-args.sh,
+# and the two SPM manifests (Package.swift, Tools/TranscriptedCLI/Package.swift). If you ever
+# rename them, grep -rn 'lDraftDeps' and grep -rn 'libDraftDeps' and update ALL sites.
 DEPS_LIBS="$DRAFT_DIR/deps-libs"
 DEPS_BUILD_STAMP="$DEPS_LIBS/.build-deps-stamp"
 DEPS_MODULES="$DRAFT_DIR/deps-modules"
@@ -272,8 +297,22 @@ fi
 
 echo "Building FluidAudio + mlx-swift-lm + WhisperKit (unified)..."
 
-# Clean previous build
-rm -rf "$DEPS_LIBS" "$DEPS_MODULES" "$DEPS_FRAMEWORKS" "$DEPS_TOOLS"
+# Build into staging directories and swap them into place only after the whole
+# build succeeds. A mid-build failure (network, checksum mismatch, compile
+# error) must leave the previous artifacts usable — deleting them up front
+# strands the checkout with no working build.sh/run-tests.sh until a full
+# successful rebuild.
+FINAL_DEPS_LIBS="$DEPS_LIBS"
+FINAL_DEPS_MODULES="$DEPS_MODULES"
+FINAL_DEPS_FRAMEWORKS="$DEPS_FRAMEWORKS"
+FINAL_DEPS_TOOLS="$DEPS_TOOLS"
+DEPS_STAGING="$DRAFT_DIR/.deps-staging"
+rm -rf "$DEPS_STAGING"
+DEPS_LIBS="$DEPS_STAGING/deps-libs"
+DEPS_BUILD_STAMP="$DEPS_LIBS/.build-deps-stamp"
+DEPS_MODULES="$DEPS_STAGING/deps-modules"
+DEPS_FRAMEWORKS="$DEPS_STAGING/deps-frameworks"
+DEPS_TOOLS="$DEPS_STAGING/deps-tools"
 mkdir -p "$DEPS_BUILD/Sources"
 
 # Copy TranscriptedCore's source tree into $DEPS_BUILD so SPM sees a stable,
@@ -401,6 +440,57 @@ EXTERNAL_DIRS=$(find . -maxdepth 1 -name "*.build" -type d | grep -v "Shim.build
 find $EXTERNAL_DIRS -name "*.o" -print0 | xargs -0 ar rcs "$DEPS_LIBS/libExternalDeps.a"
 EXT_COUNT=$(ar t "$DEPS_LIBS/libExternalDeps.a" | wc -l | tr -d ' ')
 echo "  $EXT_COUNT object files archived (external-only, no TranscriptedCore)"
+
+# --- Object-count assertions ---
+# The bare echoes above are not enough: an empty find/ar can produce a 0-object archive
+# that still "looks" built. Fail fast if either archive is empty, and require the external
+# archive to be strictly smaller than the app archive (it must lack TranscriptedCore's objects).
+if [ "$OBJ_COUNT" -le 0 ]; then
+    echo "[build-deps] ERROR: libDraftDeps.a contains $OBJ_COUNT object files — expected > 0."
+    echo "[build-deps]        The app-path archive is empty; the release build under $BUILD_RELEASE produced no .o files."
+    exit 1
+fi
+if [ "$EXT_COUNT" -le 0 ]; then
+    echo "[build-deps] ERROR: libExternalDeps.a contains $EXT_COUNT object files — expected > 0."
+    echo "[build-deps]        The SPM-path archive is empty; the EXTERNAL_DIRS find produced no .o files."
+    exit 1
+fi
+if [ "$EXT_COUNT" -ge "$OBJ_COUNT" ]; then
+    echo "[build-deps] ERROR: libExternalDeps.a ($EXT_COUNT objects) is not smaller than libDraftDeps.a ($OBJ_COUNT objects)."
+    echo "[build-deps]        The external archive must exclude TranscriptedCore's objects, so it must contain strictly fewer."
+    echo "[build-deps]        Check the EXTERNAL_DIRS 'grep -v TranscriptedCore.build' filter above."
+    exit 1
+fi
+
+# --- Symbol-level validation gate ---
+# Object counts only prove the archives are non-empty and differently sized. They do not prove
+# TranscriptedCore actually landed in the app archive (and only the app archive). Validate the
+# real symbol tables: libDraftDeps.a must define TranscriptedCore symbols, libExternalDeps.a
+# must define NONE. '16TranscriptedCore' is the Swift mangled-name token for the module
+# (16 = byte length of "TranscriptedCore"); if the Core module is ever renamed, update this
+# token to '<len><NewModuleName>'. Count with --defined-only so the external archive's
+# undefined references to Core (legitimate cross-archive links) are not miscounted as
+# contamination.
+NM_BIN="$(xcrun --find llvm-nm 2>/dev/null || command -v nm)"
+echo "Validating TranscriptedCore symbol placement (nm: $NM_BIN)..."
+# grep -c exits 1 on zero matches; under `set -euo pipefail` that would abort the
+# command substitution, so swallow grep's exit status while keeping its "0" count.
+APP_CORE_SYMBOLS=$({ "$NM_BIN" --defined-only "$DEPS_LIBS/libDraftDeps.a" 2>/dev/null | grep -c '16TranscriptedCore'; } || true)
+EXT_CORE_SYMBOLS=$({ "$NM_BIN" --defined-only "$DEPS_LIBS/libExternalDeps.a" 2>/dev/null | grep -c '16TranscriptedCore'; } || true)
+if [ "$APP_CORE_SYMBOLS" -le 0 ]; then
+    echo "[build-deps] ERROR: libDraftDeps.a defines $APP_CORE_SYMBOLS TranscriptedCore symbols — expected > 0."
+    echo "[build-deps]        The app-path archive is missing Core; build.sh excludes Sources/TranscriptedCore"
+    echo "[build-deps]        from its own swiftc compile, so the app would fail to link Core symbols."
+    exit 1
+fi
+if [ "$EXT_CORE_SYMBOLS" -gt 0 ]; then
+    echo "[build-deps] ERROR: libExternalDeps.a defines $EXT_CORE_SYMBOLS TranscriptedCore symbols — expected 0."
+    echo "[build-deps]        The SPM-path archive is contaminated with TranscriptedCore objects, which causes"
+    echo "[build-deps]        duplicate-symbol linker errors under 'swift test' (Core also compiles from source there)."
+    echo "[build-deps]        Check the EXTERNAL_DIRS 'grep -v TranscriptedCore.build' exclusion above."
+    exit 1
+fi
+echo "  libDraftDeps.a defines $APP_CORE_SYMBOLS TranscriptedCore symbols; libExternalDeps.a defines $EXT_CORE_SYMBOLS"
 
 # --- Swift modules ---
 echo "Copying Swift modules..."
@@ -541,6 +631,29 @@ else
 fi
 
 touch "$DEPS_BUILD_STAMP"
+
+# Everything succeeded — swap staged artifacts into their final locations.
+# The window where old artifacts are gone is now a few renames, not the
+# entire multi-minute build.
+swap_in_place() {
+    local staged="$1"
+    local final="$2"
+    rm -rf "${final}.old"
+    if [ -e "$final" ]; then
+        mv "$final" "${final}.old"
+    fi
+    mv "$staged" "$final"
+    rm -rf "${final}.old"
+}
+swap_in_place "$DEPS_LIBS" "$FINAL_DEPS_LIBS"
+swap_in_place "$DEPS_MODULES" "$FINAL_DEPS_MODULES"
+swap_in_place "$DEPS_FRAMEWORKS" "$FINAL_DEPS_FRAMEWORKS"
+swap_in_place "$DEPS_TOOLS" "$FINAL_DEPS_TOOLS"
+rmdir "$DEPS_STAGING" 2>/dev/null || true
+DEPS_LIBS="$FINAL_DEPS_LIBS"
+DEPS_MODULES="$FINAL_DEPS_MODULES"
+DEPS_FRAMEWORKS="$FINAL_DEPS_FRAMEWORKS"
+DEPS_TOOLS="$FINAL_DEPS_TOOLS"
 
 echo ""
 echo "=== Results ==="

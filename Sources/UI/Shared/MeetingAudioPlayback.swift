@@ -133,6 +133,13 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
         duration = 0
     }
 
+    func stopIfActive(attachmentIDs: Set<String>) {
+        guard let activeAttachmentID, attachmentIDs.contains(activeAttachmentID) else {
+            return
+        }
+        stop()
+    }
+
     func isActive(_ attachment: MeetingAudioAttachment) -> Bool {
         activeAttachmentID == attachment.id
     }

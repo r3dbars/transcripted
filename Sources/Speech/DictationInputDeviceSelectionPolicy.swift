@@ -23,6 +23,7 @@ struct DictationAudioDevice: Equatable {
 enum DictationInputDeviceSelectionReason: String {
     case defaultIsSafe
     case preferredBuiltInForBluetoothHeadset
+    case builtInFallbackSuppressedForRecoveryAttempt
     case noBuiltInFallbackAvailable
 }
 
@@ -41,7 +42,8 @@ enum DictationInputDeviceSelectionPolicy {
     static func selection(
         defaultInput: DictationAudioDevice,
         defaultOutput: DictationAudioDevice?,
-        availableInputs: [DictationAudioDevice]
+        availableInputs: [DictationAudioDevice],
+        allowsBuiltInBluetoothFallback: Bool = true
     ) -> DictationInputDeviceSelection {
         guard shouldAvoidBluetoothHeadsetInput(defaultInput, defaultOutput: defaultOutput) else {
             return DictationInputDeviceSelection(
@@ -49,6 +51,15 @@ enum DictationInputDeviceSelectionPolicy {
                 selectedInput: defaultInput,
                 defaultOutput: defaultOutput,
                 reason: .defaultIsSafe
+            )
+        }
+
+        guard allowsBuiltInBluetoothFallback else {
+            return DictationInputDeviceSelection(
+                defaultInput: defaultInput,
+                selectedInput: defaultInput,
+                defaultOutput: defaultOutput,
+                reason: .builtInFallbackSuppressedForRecoveryAttempt
             )
         }
 

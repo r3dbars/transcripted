@@ -90,6 +90,38 @@ func testMeetingCaptureVolumeDiagnostics() {
         assertEqual(context["output_ducking_detected"], "true", "during-recording output drops should still mark possible ducking")
     }
 
+    runSuite("MeetingCaptureVolumeDiagnostics keeps mic/output mismatch facts separate") {
+        let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "captured_input_volume_before": "0.650",
+                "captured_input_volume_during": "0.650",
+                "default_input_volume_before": "0.500",
+                "default_input_volume_during": "0.500",
+                "default_output_volume_before": "0.750",
+                "default_output_volume_during": "0.750",
+                "default_system_output_volume_before": "0.750",
+                "default_system_output_volume_during": "0.750",
+                "input_device_class": "built_in",
+                "mic_processed_peak": "0.30000",
+                "mic_raw_peak": "0.02000",
+                "output_device_class": "bluetooth",
+                "system_output_device_class": "bluetooth",
+            ],
+            afterStopContext: [
+                "default_input_volume_after": "0.500",
+                "default_output_volume_after": "0.750",
+                "default_system_output_volume_after": "0.400",
+            ]
+        )
+
+        assertEqual(context["captured_input_volume_dropped"], "false", "selected mic scalar should not inherit output-route drops")
+        assertEqual(context["default_input_volume_dropped"], "false", "default input scalar should stay separate from output volume")
+        assertEqual(context["default_output_volume_dropped"], "false", "normal output volume should not hide system-output ducking")
+        assertEqual(context["default_system_output_volume_dropped"], "true", "system output drop should stay queryable")
+        assertEqual(context["output_ducking_detected"], "true", "mismatched Bluetooth output ducking should be visible")
+        assertEqual(context["attenuation_kind"], "voice_processed", "quiet mic without an input scalar drop should stay classified as voice-processing attenuation")
+    }
+
     runSuite("MeetingCaptureVolumeDiagnostics classifies quiet mic recovery") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: [
@@ -258,6 +290,43 @@ func testMeetingCaptureVolumeDiagnostics() {
         assertEqual(context["attenuation_kind"], "none", "a normal-level mic should not be flagged as attenuated")
     }
 
+    runSuite("MeetingCaptureVolumeDiagnostics thresholds agree with the live QuietMicAttenuationDetector") {
+        // Cross-target agreement guard: TranscriptedCore's
+        // QuietMicAttenuationDetector duplicates the 0.05 raw / 0.12 processed
+        // literals (the fast-test runner cannot link Core), and its SPM tests
+        // pin the same values. These fixtures sit just inside each bar so a
+        // drifted threshold on either side fails one of the two suites.
+        let unrecovered = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "mic_raw_peak": "0.04000",
+                "mic_processed_peak": "0.11000",
+            ],
+            afterStopContext: [:]
+        )
+        assertEqual(unrecovered["quiet_mic_unrecovered"], "true", "raw 0.04 / processed 0.11 must sit inside both detection bars")
+        assertEqual(unrecovered["quiet_mic_recovered"], "false", "processed peak below 0.12 is not recovered")
+
+        let recovered = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "mic_raw_peak": "0.04000",
+                "mic_processed_peak": "0.12000",
+            ],
+            afterStopContext: [:]
+        )
+        assertEqual(recovered["quiet_mic_recovered"], "true", "processed peak at exactly 0.12 counts as usable")
+        assertEqual(recovered["quiet_mic_unrecovered"], "false", "a recovered quiet mic must not also look unrecovered")
+
+        let notQuiet = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+            baseContext: [
+                "mic_raw_peak": "0.05000",
+                "mic_processed_peak": "0.11000",
+            ],
+            afterStopContext: [:]
+        )
+        assertEqual(notQuiet["quiet_mic_recovered"], "false", "raw peak at exactly 0.05 is not quiet (strict <)")
+        assertEqual(notQuiet["quiet_mic_unrecovered"], "false", "raw peak at exactly 0.05 is not quiet (strict <)")
+    }
+
     runSuite("MeetingCaptureVolumeDiagnostics reports unavailable attenuation without mic peaks") {
         let context = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: [
@@ -268,5 +337,54 @@ func testMeetingCaptureVolumeDiagnostics() {
         )
 
         assertEqual(context["attenuation_kind"], "unavailable", "missing mic peaks should not become false attenuation confidence")
+    }
+
+    runSuite("MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered gates the issue 500 save-time hint") {
+        assertTrue(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(
+                in: ["attenuation_kind": "voice_processed", "quiet_mic_unrecovered": "true"]
+            ),
+            "voice-processed attenuation that gain could not recover is the still-open issue 500 case"
+        )
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(
+                in: ["attenuation_kind": "scalar_drop", "quiet_mic_unrecovered": "true"]
+            ),
+            "scalar drops are fully gain-recoverable and should not surface the hint"
+        )
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(
+                in: ["attenuation_kind": "voice_processed", "quiet_mic_unrecovered": "false"]
+            ),
+            "a recovered quiet mic should not surface the hint"
+        )
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(
+                in: ["attenuation_kind": "voice_processed", "quiet_mic_unrecovered": "unavailable"]
+            ),
+            "unavailable recovery state should not become false confidence"
+        )
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(
+                in: ["attenuation_kind": "voice_processed"]
+            ),
+            "a missing recovery state should not surface the hint"
+        )
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(
+                in: ["attenuation_kind": "none", "quiet_mic_unrecovered": "true"]
+            ),
+            "non-attenuated recordings should never surface the hint"
+        )
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(
+                in: ["attenuation_kind": "unavailable", "quiet_mic_unrecovered": "true"]
+            ),
+            "unclassifiable recordings should never surface the hint"
+        )
+        assertFalse(
+            MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: [:]),
+            "an empty context should never surface the hint"
+        )
     }
 }

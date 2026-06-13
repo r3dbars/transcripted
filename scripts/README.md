@@ -35,12 +35,13 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 ## Active helper scripts
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
+- `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
-- `scripts/release/register-sentry-release.sh` — create/finalize the matching Sentry release and upload release dSYMs after a GitHub release is published
+- `scripts/release/register-sentry-release.sh` — create/finalize the matching Sentry release, verify the release dSYM matches the app binary, and upload it after a GitHub release is published
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
 ## Operational health probes
@@ -48,18 +49,42 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/ops/health-probe.sh` — run health checks for observability lanes (Sentry, PostHog, GitHub, Cloudflare)
   - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>`
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
+- `scripts/ops/release-health-card.py` — print a compact release-health card for one app version by combining local release metadata, GitHub downloads, live public release surfaces, and PostHog update/workflow counts when credentials are present
+  - Usage: `python3 scripts/ops/release-health-card.py --version 1.1.47`
 - `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
   - Usage: `bash run-daily-audio-reliability.sh`
   - Synthetic-only usage: `bash run-daily-audio-reliability.sh --synthetic`
   - Writes local-only evidence under `/tmp/transcripted-repro-lab/<run-id>/`
-- `scripts/ops/nightly-security-check.py` — deterministic nightly security/privacy guardrail checker for repo drift, release/update drift, entitlements, shell hazards, recent-history secret leaks, and shared sanitizer coverage
+- `scripts/ops/nightly-security-check.py` — deterministic nightly security/privacy guardrail checker for repo drift, release/update drift, Homebrew cask/appcast parity, PostHog schema drift, raw observability payload keys, entitlements, shell hazards, recent-history secret leaks, and shared sanitizer coverage
   - Usage: `python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json`
+  - Strict gate: `python3 scripts/ops/nightly-security-check.py --strict --write-report build/nightly-security-report.json`
+  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.48.json --write-report build/nightly-security-report.json`
+  - Live release-surface gate: `python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces`
+  - Sentry release gate: `python3 scripts/ops/nightly-security-check.py --sentry-release-health`
+  - Required Sentry release gate: `python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health`
+  - Release dSYM gate after packaging: `python3 scripts/ops/nightly-security-check.py --require-release-debug-files`
   - Optional built-app verification: `python3 scripts/ops/nightly-security-check.py --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json`
+- `scripts/ops/release-gate-report.py` — single pre-merge/release gate report that runs the QA bench, Sentry/PostHog probes, appcast/download/release-health checks, and a local log sweep
+  - Usage: `python3 scripts/ops/release-gate-report.py`
+  - Deep RC usage: `python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts`
+  - Full one-command release gate: `python3 scripts/ops/release-gate-report.py --release-candidate`
+  - Writes local Markdown and JSON under `/tmp/transcripted-release-gate/<run-id>/`
+  - Exits `0` for GREEN, `3` for YELLOW/unknown, and `1` for RED
+  - Missing Sentry/PostHog credentials or manual proof are reported as yellow/unknown, not green
+- `scripts/ops/privacy-leak-sweep.py` — synthetic-only privacy sweep for logs/events/reliability JSONL, Sentry/PostHog payloads, QA/local reports, PR/release text, and scanner handoff summaries
+  - Usage: `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json`
 - `scripts/ops/performance-budget.rb` — fail a built app that exceeds bundle/resource budgets, ships the wrong Parakeet model set, includes old icon assets, or regresses optional runtime latency budgets
   - Usage: `scripts/ops/performance-budget.rb`
   - Thin-build usage: `scripts/ops/performance-budget.rb --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80`
   - Optional runtime log verification: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"`
+  - Optional strict dictation stop proof: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --require-dictation-stop-latency-samples 3`
+  - Fresh-window verification: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --events-since 2026-06-01T01:13:00Z --require-dictation-stop-latency-samples 3`
   - Optional meeting throughput verification: `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"` (defaults to recordings 30s or longer)
+- `scripts/ops/dictation-stop-autoeval.sh` — synthetic local-audio benchmark for dictation stop-to-text, stop-to-saved, and stop-to-delivery timing
+  - Usage: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant native`
+  - Writes ignored scratch output under `.autoeval/dictation-stop/`
+- `scripts/ops/dictation-recovery-autoeval.rb` — deterministic policy lab for dictation start-readiness, recovery timing, and Bluetooth-settle guardrails
+  - Usage: `ruby scripts/ops/dictation-recovery-autoeval.rb --details`
 - `scripts/ops/agent-todo-runner.rb` — local GitHub Issues queue runner for Codex agent tasks
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --labels-only`
   - Usage: `ruby scripts/ops/agent-todo-runner.rb --once`
@@ -69,15 +94,19 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh install`
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh status`
   - Usage: `bash scripts/ops/agent-todo-launchagent.sh logs`
-- `scripts/ops/qa-gate-check.sh` — one-shot check for the BET-88 QA gate comment on `#428` using the same strict owner + first-line PASS/FAIL rules as the label-gated auto-close workflow
+- `scripts/ops/qa-gate-check.sh` — historical one-shot check for the closed BET-88 QA gate `#428`, using the same strict owner + first-line PASS/FAIL rules as the label-gated auto-close workflow
   - Usage: `bash scripts/ops/qa-gate-check.sh [--json] [repo] [issue_number] [owner_login]`
   - Returns JSON and exits `0` for `pass`/`fail`, `3` for `PENDING`
 - `scripts/ops/qa-gate-closeout.sh` — closeout wrapper around `qa-gate-check.sh` that prints explicit unblock owner/action when status is still pending
   - Usage: `bash scripts/ops/qa-gate-closeout.sh [repo] [issue_number] [owner_login]`
   - Returns `0` for pass/fail closeout-ready, `3` when still blocked/pending
-- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, and optional live capture
+  - Keep these only while the closed BET-88 workflow remains useful as a repo
+    contract fixture; do not treat them as active queue automation.
+- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass for build, fast tests, deterministic E2E smoke, Core/package tests, TranscriptedQA, synthetic audio, release-health fixture checks, optional Gemma planning, and optional live capture
   - Quick usage: `bash scripts/ops/transcripted-qa-bench.sh --mode quick`
   - Deep usage: `bash scripts/ops/transcripted-qa-bench.sh --mode deep`
+  - Full usage: `bash scripts/ops/transcripted-qa-bench.sh --mode full`
+  - UI usage: `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
   - Corpus usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus`
   - Corpus compare usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare --corpus-ids meeting-0024,meeting-0025`
   - Live usage: `bash scripts/ops/transcripted-qa-bench.sh --mode live`

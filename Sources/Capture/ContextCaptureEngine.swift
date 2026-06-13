@@ -118,20 +118,13 @@ private func hotkeyHandler(
     return noErr
 }
 
-private enum PhysicalShortcutAction {
-    case dictationPushToTalk
-    case dictationHandsFree
-    case meeting
-}
+// PhysicalShortcutAction and PhysicalShortcutBinding live in
+// PhysicalShortcutMatcher.swift so the pure chord-resolution precedence can be
+// fast-tested independently of this Carbon/CGEventTap engine.
 
 private enum PhysicalShortcutPhase {
     case press
     case release
-}
-
-private struct PhysicalShortcutBinding {
-    let action: PhysicalShortcutAction
-    let binding: PhysicalDictationTriggerBinding
 }
 
 private final class PhysicalShortcutDetector {
@@ -259,6 +252,8 @@ private final class PhysicalShortcutDetector {
                 onShortcut?(.dictationHandsFree, .press)
             case .meeting:
                 onShortcut?(.meeting, .press)
+            case .pasteLastDictation:
+                onShortcut?(.pasteLastDictation, .press)
             }
             return nil
 
@@ -321,6 +316,13 @@ private final class PhysicalShortcutDetector {
                     cancelPendingModifierShortcut()
                     onShortcut?(.meeting, .press)
                 }
+            case .pasteLastDictation:
+                if hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action) {
+                    schedulePendingModifierShortcut(keyCode: keyCode, action: .pasteLastDictation)
+                } else {
+                    cancelPendingModifierShortcut()
+                    onShortcut?(.pasteLastDictation, .press)
+                }
             }
             return nil
 
@@ -329,14 +331,15 @@ private final class PhysicalShortcutDetector {
         }
     }
 
+    // Chord-resolution matchers live in PhysicalShortcutMatcher so their
+    // exact-then-fallback precedence stays Foundation-pure and fast-testable.
+    // These thin wrappers keep the detector's call sites unchanged.
     private func matchingKeyDownShortcut(
         _ shortcuts: [PhysicalShortcutBinding],
         keyCode: UInt32,
         modifiers: UInt32
     ) -> PhysicalShortcutBinding? {
-        shortcuts.first {
-            PhysicalDictationTriggerPreferences.matchesKeyDown($0.binding, keyCode: keyCode, modifiers: modifiers)
-        }
+        PhysicalShortcutMatcher.matchingKeyDownShortcut(shortcuts, keyCode: keyCode, modifiers: modifiers)
     }
 
     private func matchingFlagsChangedPressShortcut(
@@ -344,16 +347,7 @@ private final class PhysicalShortcutDetector {
         keyCode: UInt32,
         modifiers: UInt32
     ) -> PhysicalShortcutBinding? {
-        if let exact = shortcuts.first(where: {
-            $0.binding.keyCode == keyCode
-                && PhysicalDictationTriggerPreferences.matchesFlagsChangedPress($0.binding, keyCode: keyCode, modifiers: modifiers)
-        }) {
-            return exact
-        }
-
-        return shortcuts.first {
-            PhysicalDictationTriggerPreferences.matchesFlagsChangedPress($0.binding, keyCode: keyCode, modifiers: modifiers)
-        }
+        PhysicalShortcutMatcher.matchingFlagsChangedPressShortcut(shortcuts, keyCode: keyCode, modifiers: modifiers)
     }
 
     private func matchesRelease(
@@ -362,12 +356,7 @@ private final class PhysicalShortcutDetector {
         keyCode: UInt32,
         modifiers: UInt32
     ) -> Bool {
-        guard let shortcut = shortcuts.first(where: { $0.action == action }) else { return false }
-        return PhysicalDictationTriggerPreferences.matchesFlagsChangedRelease(
-            shortcut.binding,
-            keyCode: keyCode,
-            modifiers: modifiers
-        )
+        PhysicalShortcutMatcher.matchesRelease(for: action, in: shortcuts, keyCode: keyCode, modifiers: modifiers)
     }
 
     private func hasChordUsingModifier(
@@ -375,15 +364,7 @@ private final class PhysicalShortcutDetector {
         in shortcuts: [PhysicalShortcutBinding],
         excluding action: PhysicalShortcutAction
     ) -> Bool {
-        guard let modifier = PhysicalDictationTriggerPreferences.primaryModifierMask(for: keyCode) else {
-            return false
-        }
-
-        return shortcuts.contains {
-            $0.action != action
-                && !PhysicalDictationTriggerPreferences.isModifierKey($0.binding.keyCode)
-                && ($0.binding.modifiers & modifier) != 0
-        }
+        PhysicalShortcutMatcher.hasChordUsingModifier(keyCode, in: shortcuts, excluding: action)
     }
 
     private func schedulePendingModifierShortcut(keyCode: UInt32, action: PhysicalShortcutAction) {
@@ -456,6 +437,8 @@ class ContextCaptureEngine: ObservableObject {
             _sharedMeetingToggle = onMeetingToggle
         }
     }
+
+    var onPasteLastDictation: (() -> Void)?
 
     func registerHotkey() {
         guard hotkeyChangeObserver == nil else {
@@ -537,6 +520,10 @@ class ContextCaptureEngine: ObservableObject {
                 PhysicalShortcutBinding(
                     action: .meeting,
                     binding: PhysicalDictationTriggerPreferences.meetingBinding()
+                ),
+                PhysicalShortcutBinding(
+                    action: .pasteLastDictation,
+                    binding: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
                 )
             ]
 
@@ -608,7 +595,9 @@ class ContextCaptureEngine: ObservableObject {
             handlePhysicalDictationHandsFreePress()
         case (.meeting, .press):
             handlePhysicalMeetingPress()
-        case (.dictationHandsFree, .release), (.meeting, .release):
+        case (.pasteLastDictation, .press):
+            handlePhysicalPasteLastDictationPress()
+        case (.dictationHandsFree, .release), (.meeting, .release), (.pasteLastDictation, .release):
             break
         }
     }
@@ -703,6 +692,21 @@ class ContextCaptureEngine: ObservableObject {
         }
 
         onMeetingToggle?()
+    }
+
+    private func handlePhysicalPasteLastDictationPress() {
+        guard shouldAcceptHotkeyAction("paste_last_dictation_physical_trigger") else {
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "capture",
+                event: "hotkey_repeat_ignored",
+                message: "Ignored rapid repeat paste-last-dictation trigger",
+                context: ["hotkey_id": "paste_last_dictation_physical_trigger"]
+            )
+            return
+        }
+
+        onPasteLastDictation?()
     }
 
     deinit {

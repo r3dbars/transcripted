@@ -12,6 +12,70 @@ appcast for in-app Sparkle updates is at
 Entries marked **[CRITICAL]** are flagged as `sparkle:criticalUpdate` and are
 force-installed by Sparkle so existing users recover from a regression.
 
+## [1.1.47] - 2026-06-08
+
+### Added
+- Local Gemma meeting summary beta (opt-in), with clearer setup, download, and loading feedback.
+- Much stronger release QA stack: packaged-app smoke, release gate reports, slow-pasteback smoke, meeting route fixtures, Bluetooth route contracts, permission-state checks, UI automation hooks, privacy sweeps, and golden artifact fixtures.
+
+### Changed
+- Hardened meeting audio capture, Bluetooth/AirPods route settling, mic recovery, and Parakeet recovery.
+- Improved Sentry/PostHog release-health checks and observability privacy sanitizers.
+- Extended the detected-meeting prompt timeout; clarified the dictation model loading overlay and kept the no-speech recovery hint readable.
+
+### Fixed
+- Slow-target dictation pasteback and clipboard restore edge cases, including a pasteback observer restore race and an extended fallback window for slow consumers.
+- Duplicate meeting rows in speaker review and duplicate Home meeting deletions.
+- Meeting prompts for already-ended calendar events and Zoom app-only sessions.
+- Parakeet zombie recovery reset; finalized long meeting retry audio is now preserved.
+
+## [1.1.46] - 2026-06-02
+
+### Added
+- Activation telemetry events.
+
+### Changed
+- Dictation can now fall back to the built-in mic when a Bluetooth device is output-only.
+- Offline speaker post-processing now skips pairwise merges to guard against over-merging speakers.
+- Clarified agent first-answer prompts and first-artifact Markdown actions.
+- Hardened Sentry dSYM release registration.
+
+### Fixed
+- Failed meeting recovery actions.
+- Bluetooth mic start timeout.
+
+## [1.1.45] - 2026-06-01
+
+### Added
+- Live meeting sidecar support, with safer cancel and handoff behavior.
+- Dictation stop-latency metrics.
+
+### Changed
+- Dictation Markdown is now saved before Auto Enter runs.
+- Improved dictation start recovery, including stale readiness and timeout cases.
+- Strengthened speaker handling with a ghost-speaker merge floor.
+- Improved recent-capture loading and added Home/settings performance guards.
+- Cleaner Sparkle no-update, Sentry, PostHog, and analytics telemetry.
+- Updated Claude/agent setup copy and helper repair handling.
+
+### Fixed
+- Imported-audio source dates are preserved in generated notes.
+
+## [1.1.44] - 2026-05-27
+
+### Added
+- Compact cursor dictation overlay, with related settings cleanup.
+- Stronger Issue #500 QA evidence and release-surface checks, plus expanded regression coverage across meeting capture, dictation, observability, Sparkle, and Homebrew release metadata.
+
+### Changed
+- Bluetooth and microphone start-failure handling now explains what happened when a dictation start fails instead of feeling stuck.
+- Tightened privacy redaction for local paths and update-failure telemetry.
+- Improved nightly digest, agent helper, and operator troubleshooting workflows.
+
+### Fixed
+- Speaker-name review edge cases, including the 1.1.43 split-row regression and empty speaker-name saves.
+- Bluetooth dictation start timeout.
+
 ## [1.1.43] - 2026-05-22
 
 ### Added

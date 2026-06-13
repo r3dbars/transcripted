@@ -143,17 +143,14 @@ extension Transcription {
             AppLogger.transcription.info("Running offline diarization on system audio")
             let rawSegments = try await diarization.diarizeOffline(samples: systemSamples, sampleRate: 16000)
 
-            // Post-process diarization segments:
-            // PyAnnote's VBx does initial clustering but fragments dominant speakers
-            // on codec-compressed audio (e.g., one person split into 3 IDs during a
-            // long monologue). Pairwise merge at 0.78 catches same-person fragments
-            // (typically 0.75-0.85 similarity) without merging different speakers
-            // (typically 0.50-0.65 on Zoom audio).
+            // Post-process diarization segments, but skip the broad pairwise merge
+            // phase for PyAnnote/VBx output. Small-cluster absorption and DB-informed
+            // split still run for noise cleanup and known-speaker corrections.
             let existingProfiles = speakerDB.allSpeakers()
             let speakerSegments = EmbeddingClusterer.postProcess(
                 segments: rawSegments,
                 existingProfiles: existingProfiles,
-                pairwiseMergeThreshold: 0.78
+                pairwiseMergeThreshold: nil
             )
 
             let rawSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
@@ -266,29 +263,33 @@ extension Transcription {
                 // speaker is a ghost we still need a persistent UUID for later transcript
                 // metadata updates, so fall back to creating a best-effort profile.
                 if isGhost {
-                    var bestNonGhostId: Int?
-                    var bestSimilarity: Double = -1
-                    for (otherId, otherMean) in nonGhostMeans {
-                        let sim = Self.cosineSimilarityStatic(meanEmbedding, otherMean)
-                        if sim > bestSimilarity {
-                            bestSimilarity = sim
-                            bestNonGhostId = otherId
-                        }
-                    }
-                    if let targetId = bestNonGhostId {
-                        speakerIdRemap[speakerId] = targetId
+                    let mergeCandidate = Self.bestGhostSpeakerMergeCandidate(
+                        for: meanEmbedding,
+                        nonGhostMeans: nonGhostMeans
+                    )
+                    if let candidate = mergeCandidate, candidate.similarity >= Self.ghostSpeakerMergeSimilarityFloor {
+                        speakerIdRemap[speakerId] = candidate.speakerId
                         AppLogger.transcription.info("Ghost speaker force-merged", [
                             "ghostSpk": "\(speakerId)",
-                            "into": "\(targetId)",
-                            "similarity": String(format: "%.3f", bestSimilarity)
+                            "into": "\(candidate.speakerId)",
+                            "similarity": String(format: "%.3f", candidate.similarity),
+                            "threshold": String(format: "%.2f", Self.ghostSpeakerMergeSimilarityFloor)
                         ])
                     } else {
                         let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
                         speakerNewProfiles[speakerId] = newProfile.id
-                        AppLogger.transcription.warning("Ghost speaker kept as standalone best-effort profile", [
+                        var context = [
                             "speakerId": "\(speakerId)",
-                            "reason": "no-non-ghost-speaker-to-merge-into"
-                        ])
+                            "threshold": String(format: "%.2f", Self.ghostSpeakerMergeSimilarityFloor)
+                        ]
+                        if let candidate = mergeCandidate {
+                            context["bestNonGhostSpk"] = "\(candidate.speakerId)"
+                            context["similarity"] = String(format: "%.3f", candidate.similarity)
+                            context["reason"] = "below-minimum-similarity"
+                        } else {
+                            context["reason"] = "no-non-ghost-speaker-to-merge-into"
+                        }
+                        AppLogger.transcription.warning("Ghost speaker kept as standalone best-effort profile", context)
                     }
                     continue
                 }
@@ -596,6 +597,29 @@ extension Transcription {
         let newlyCreatedProfileIds: Set<UUID>
     }
 
+    struct GhostSpeakerMergeCandidate: Equatable {
+        let speakerId: Int
+        let similarity: Double
+    }
+
+    /// Ghost speakers only have a best-effort embedding from segments that were
+    /// too short, low-quality, or contaminated for normal profile matching. Keep
+    /// the auto-merge floor high enough that uncertain voices survive to review.
+    nonisolated static let ghostSpeakerMergeSimilarityFloor: Double = 0.72
+
+    nonisolated static func bestGhostSpeakerMergeCandidate(
+        for meanEmbedding: [Float],
+        nonGhostMeans: [Int: [Float]]
+    ) -> GhostSpeakerMergeCandidate? {
+        var bestCandidate: GhostSpeakerMergeCandidate?
+        for (otherId, otherMean) in nonGhostMeans {
+            let similarity = cosineSimilarityStatic(meanEmbedding, otherMean)
+            guard bestCandidate == nil || similarity > bestCandidate!.similarity else { continue }
+            bestCandidate = GhostSpeakerMergeCandidate(speakerId: otherId, similarity: similarity)
+        }
+        return bestCandidate
+    }
+
     /// Diarize + transcribe the mic channel when local-speaker split is on.
     /// Mirrors the system-audio classification path but skips the cross-channel
     /// contamination gate (there's nothing to gate against inside mic processing itself).
@@ -617,7 +641,7 @@ extension Transcription {
         let speakerSegments = EmbeddingClusterer.postProcess(
             segments: rawSegments,
             existingProfiles: existingProfiles,
-            pairwiseMergeThreshold: 0.78
+            pairwiseMergeThreshold: nil
         )
 
         let rawSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
@@ -680,14 +704,12 @@ extension Transcription {
             let isGhost = ghostSpeakerIdSet.contains(speakerId)
 
             if isGhost {
-                var bestNonGhostId: Int?
-                var bestSimilarity: Double = -1
-                for (otherId, otherMean) in nonGhostMeans {
-                    let sim = Self.cosineSimilarityStatic(meanEmbedding, otherMean)
-                    if sim > bestSimilarity { bestSimilarity = sim; bestNonGhostId = otherId }
-                }
-                if let targetId = bestNonGhostId {
-                    speakerIdRemap[speakerId] = targetId
+                let mergeCandidate = Self.bestGhostSpeakerMergeCandidate(
+                    for: meanEmbedding,
+                    nonGhostMeans: nonGhostMeans
+                )
+                if let candidate = mergeCandidate, candidate.similarity >= Self.ghostSpeakerMergeSimilarityFloor {
+                    speakerIdRemap[speakerId] = candidate.speakerId
                 } else {
                     let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
                     speakerNewProfiles[speakerId] = newProfile.id

@@ -178,9 +178,9 @@ final class ContextStoreTests: XCTestCase {
 
         XCTAssertEqual(items.count, 2)
 
-        let contextStoreSourceURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("Sources/TranscriptedCLI/ContextStore.swift")
-        let source = try String(contentsOf: contextStoreSourceURL, encoding: .utf8)
+        let parserSourceURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("../TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift")
+        let source = try String(contentsOf: parserSourceURL, encoding: .utf8)
         XCTAssertTrue(source.contains("split(separator: \":\", omittingEmptySubsequences: false)"))
         XCTAssertTrue(source.contains("components.count == rawComponents.count"))
         XCTAssertTrue(source.contains("!components.contains(where: { $0 < 0 })"))
@@ -293,8 +293,9 @@ final class ContextStoreTests: XCTestCase {
         duration: "0:18"
         speakers:
           - id: "0"
-            name: Linus
+            channel: system
             db_id: "80FB272B-6061-4FC4-8408-3F7A974C59DB"
+            name: Linus
         ---
 
         # Hardware chat
@@ -342,11 +343,13 @@ final class ContextStoreTests: XCTestCase {
         duration: "0:18"
         speakers:
           - id: "0"
-            name: Speaker 1
+            channel: system
             db_id: "system-1"
+            name: Speaker 1
           - id: "1"
-            name: Linus
+            channel: mic
             db_id: "linus-1"
+            name: Linus
         ---
 
         # Hardware chat
@@ -452,11 +455,13 @@ final class ContextStoreTests: XCTestCase {
         duration: "0:18"
         speakers:
           - id: "0"
-            name: Alex
+            channel: system
             db_id: "80FB272B-6061-4FC4-8408-3F7A974C59DB"
-          - id: "1"
             name: Alex
+          - id: "1"
+            channel: system
             db_id: "4F57C98D-B6B7-449F-95B9-3521FA99D7DA"
+            name: Alex
         ---
 
         # Duplicate names

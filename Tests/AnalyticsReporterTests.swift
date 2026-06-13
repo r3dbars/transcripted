@@ -304,4 +304,23 @@ func testAnalyticsReporter() {
             "invalid negative durations should fail closed to the shortest duration bucket"
         )
     }
+
+    runSuite("AnalyticsReporter latencyBucket keeps sub-second stop timings visible") {
+        assertEqual(AnalyticsReporter.latencyBucket(milliseconds: 0), "lt_100ms", "instant timings should stay in the first latency bucket")
+        assertEqual(AnalyticsReporter.latencyBucket(milliseconds: 99), "lt_100ms", "values below one hundred ms should stay in the first latency bucket")
+        assertEqual(AnalyticsReporter.latencyBucket(milliseconds: 100), "100_249ms", "one hundred ms should enter the next bucket")
+        assertEqual(AnalyticsReporter.latencyBucket(milliseconds: 250), "250_499ms", "two hundred fifty ms should enter the next bucket")
+        assertEqual(AnalyticsReporter.latencyBucket(milliseconds: 500), "500_999ms", "five hundred ms should enter the next bucket")
+        assertEqual(AnalyticsReporter.latencyBucket(milliseconds: 1_000), "1_2s", "one second should enter the short seconds bucket")
+        assertEqual(AnalyticsReporter.latencyBucket(milliseconds: 2_000), "2_5s", "two seconds should enter the slow stop bucket")
+        assertEqual(AnalyticsReporter.latencyBucket(milliseconds: 5_000), "5s_plus", "five seconds or more should stay capped")
+    }
+
+    runSuite("AnalyticsReporter latencyBucket treats invalid negative timings as fast") {
+        assertEqual(
+            AnalyticsReporter.latencyBucket(milliseconds: -1),
+            "lt_100ms",
+            "invalid negative timings should fail closed to the smallest latency bucket"
+        )
+    }
 }

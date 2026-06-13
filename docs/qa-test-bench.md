@@ -22,9 +22,46 @@ This runs:
 - `bash build.sh --no-open`
 - `bash run-tests.sh`
 - `bash run-e2e-smoke.sh`
+- `bash run-slow-pasteback-smoke.sh`
+- `bash scripts/ops/run-local-summary-fixture.sh`
 
 It proves the app builds, fast tests pass, and deterministic meeting/dictation
-artifact discovery still works without microphone or TCC prompts.
+artifact discovery plus fake slow-target pasteback still work without microphone
+or TCC prompts. The local summary fixture also proves the Gemma summary app path
+can start, finish, and rewrite a saved synthetic meeting into the expected
+Markdown shape without private meeting content or a model download.
+
+## Pasteback Synthetic Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
+```
+
+This runs only the fake slow Cmd+V target smoke. It writes a markdown subreport
+beside the QA report and JSON under `raw/`. It proves the target-buffer result
+for synthetic slow readers, retry pasteback, cancellation cleanup, and Auto
+Enter readiness without using real dictation audio or the real clipboard.
+
+## UI Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode ui
+```
+
+This builds the app, then runs:
+
+```bash
+swift run --package-path Tools/TranscriptedQA transcripted-qa ui-smoke --app build/Transcripted.app
+```
+
+The smoke launches the built app with an isolated home directory, opens the real
+menu bar popover through Accessibility, opens Home/Settings, navigates to
+General, and validates stable `transcripted.*` controls are visible and enabled.
+It writes local JSON evidence under the QA run's `raw/` folder.
+
+This requires Accessibility permission for the terminal or Codex runner. If
+macOS blocks AX observation/control, the result is `INCOMPLETE` with exit code
+`3`. Do not treat that as product proof.
 
 ## Deep Run
 
@@ -42,6 +79,20 @@ This adds:
 - `TranscriptedQA` health and live artifact validation
 - `bash run-daily-audio-reliability.sh --synthetic`
 
+The synthetic audio step also reports an audio route automation proxy matrix so
+the bench names what is automated for dictation, meeting mic/system audio,
+WebRTC/Zoom contention, Bluetooth/AirPods settling, and privacy/security. It
+also generates deterministic meeting-route fixtures for shared mic, missing
+system audio, quiet mic recovery/failure, output ducking, route churn, stop
+timeout, and stop/save artifact outcomes. This does not replace live or manual
+route proof.
+Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.
+Real connected AirPods/Bluetooth hardware remains manual proof.
+
+Deep inherits the deterministic local summary fixture from quick. That fixture
+is shape and hang-guard proof only; real Gemma summary quality still needs
+manual or corpus review.
+
 Live artifact validation is non-blocking by default because a development Mac
 may not have saved meetings yet. To make it strict:
 
@@ -49,21 +100,64 @@ may not have saved meetings yet. To make it strict:
 bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts
 ```
 
+## Full Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode full
+```
+
+Use this as the broad pre-merge gate for risky or release-impacting work. It
+runs `deep`, then adds:
+
+- deterministic release-health fixture checks
+- a local Gemma meeting-summary dry-run plan when eligible local transcripts are present
+
+The report includes a compact operator verdict:
+
+- Working
+- Regressed
+- Needs human
+- Release GO/HOLD
+
+`HOLD` is still expected when the automated full gate passes but manual proof is
+outstanding. Real meeting apps, TCC prompts, Bluetooth hardware, sleep/wake,
+local Gemma beta workflow, and pasteback feel still need the generated manual
+packet when those risks matter.
+
 ## Live Run
 
 ```bash
 bash scripts/ops/transcripted-qa-bench.sh --mode live
 ```
 
-This adds the real mic + system-audio capture smoke:
+This runs `full`, then adds the real mic + system-audio capture smoke:
 
 ```bash
 bash run-live-capture-smoke.sh --skip-build
 ```
 
-It requires local microphone permission and System Audio Recording permission.
-If macOS blocks it, report that as `INCOMPLETE` or `FAIL` with the permission
-reason. Do not treat a TCC blocker as product proof.
+Before that smoke, live mode runs:
+
+```bash
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode live-capture --format json
+```
+
+It requires local microphone permission, System Audio Recording proof, and the
+Codex/computer-use host permissions needed for screenshots and clicks. If macOS
+blocks the harness, report `INCOMPLETE: harness permission blocked` with the
+exact permission reason. Do not treat a TCC blocker as product proof.
+
+## Audio Synthetic Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic
+```
+
+This runs `bash run-daily-audio-reliability.sh --synthetic`. It can prove the
+deterministic route fixture matrix and the simulated artifact/failure contract.
+It cannot prove real Zoom, Meet, browser WebRTC, Bluetooth/AirPods, TCC, or
+user-perceived volume behavior. Issue #500 stays manual-required until the
+dated matrix in `docs/qa-issue-500-meeting-audio.md` is run.
 
 ## Corpus Run
 
@@ -97,6 +191,34 @@ Transcripted output against the corpus.
 
 The corpus is private local test data, so it stays out of the required agent
 test matrix. Use the corpus mode only on machines that have the corpus.
+
+## Release Gate Report
+
+Use this when you want one pre-merge or release-candidate report instead of
+separate build, telemetry, release-surface, and log checks:
+
+```bash
+python3 scripts/ops/release-gate-report.py
+```
+
+The default command runs the quick QA bench, Sentry and PostHog health probes,
+live appcast/download/release-health checks, and a local aggregate log sweep.
+It writes:
+
+```text
+/tmp/transcripted-release-gate/<run-id>/release-gate-report.md
+/tmp/transcripted-release-gate/<run-id>/release-gate-report.json
+```
+
+For a deeper release-candidate pass:
+
+```bash
+python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts
+```
+
+Missing Sentry or PostHog credentials are `YELLOW` / unknown. They are not
+treated as green proof. Actual release-surface drift or required release-health
+failures are `RED`.
 
 ## Short Output
 
@@ -186,6 +308,7 @@ Every run writes:
 
 Use it for the lanes that need a human:
 
+- Codex UI automation permission-state and state-change proof
 - actual meeting-app volume behavior
 - sleep/wake
 - Bluetooth and device switching
@@ -204,6 +327,24 @@ For the daily audio state-machine loop, use:
 ```text
 docs/audio-reliability-daily-check.md
 ```
+
+## Codex UI Automation Permissions
+
+Run this before any Codex computer-use, screenshot, or click-flow proof:
+
+```bash
+TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa permission-state --mode computer-use
+```
+
+Pass bar:
+
+- Accessibility, Event Posting, Input Monitoring, Screen Recording, and Automation are ready for the app that runs Codex or the terminal host
+- Transcripted app bundle identity matches the expected bundle id
+- every automated click proves a visible state change after the event
+
+If the command warns, stop the UI lane and report `INCOMPLETE: harness
+permission blocked`. Actual TCC grant, deny, revoke, fresh-user prompt behavior,
+real mic/system-audio capture, and "does this feel stuck?" judgment stay manual.
 
 ## Pass Bar
 

@@ -18,10 +18,13 @@ import Accelerate
 /// and slow release (raise gain gradually to avoid audible pumping during
 /// quiet stretches).
 ///
-/// The default tuning (`targetPeak = 0.45`, `maxGain = 12.0`,
-/// `minPeak = 0.0008`) mirrors `AudioSignalRecovery.normalizeForSpeech`
-/// so the saved WAV's loudness matches what the post-processing path would
-/// produce, and the in-memory STT copy stays consistent with the file.
+/// The default tuning (`targetPeak = 0.45`, `maxGain = 25.0`,
+/// `minPeak = 0.0008`, `noiseGatePeak = 0.002`) gives the live mic copy enough
+/// headroom for the more severe issue #500 voice-processing attenuation case
+/// while still refusing to turn USB-mic idle hiss into saved speech-looking
+/// audio. The post-processing path can normalize again before final
+/// transcription; this real-time pass protects the saved WAV, live preview,
+/// and diagnostics without touching system audio.
 ///
 /// Real-time safe: `process(buffer:)` performs zero allocations and no
 /// locking. Safe to invoke from an `AVAudioEngine` tap callback.
@@ -39,6 +42,12 @@ public final class RealtimeAGC {
     /// Below this peak the input is treated as silence; current gain holds
     /// rather than dropping back to 1.0. Prevents pumping during pauses.
     public let minPeak: Float
+
+    /// Below this raw peak, the buffer is treated as ambient idle noise and
+    /// muted before gain is applied. This stays below the quiet-speech band
+    /// used by issue #500 detection, but keeps held max gain from amplifying
+    /// Blue Yeti-style USB mic self-noise during pauses.
+    public let noiseGatePeak: Float
 
     /// Number of recent buffers used for the windowed peak. With ~85ms
     /// buffers (4096 frames at 48 kHz), 16 buffers ≈ 1.4 s of history —
@@ -61,10 +70,14 @@ public final class RealtimeAGC {
 
     /// - Parameters:
     ///   - targetPeak: Desired peak after gain. 0.45 leaves headroom under 1.0.
-    ///   - maxGain: Upper bound on applied gain. 12.0 matches the
-    ///     post-processing recovery cap.
+    ///   - maxGain: Upper bound on applied gain. 25.0 lets a very quiet
+    ///     but real shared-device mic stream reach the usable diagnostic bar
+    ///     without opting into Apple's system-wide voice-processing ducking.
     ///   - minPeak: Silence threshold for hold behavior. 0.0008 matches
     ///     AudioSignalRecovery's lower bound for WebRTC-attenuated input.
+    ///   - noiseGatePeak: Raw idle-noise threshold. 0.002 matches the
+    ///     activity floor used by `QuietMicAttenuationDetector`; values below
+    ///     this are not treated as voice-like input.
     ///   - windowSize: Buffers of peak history.
     ///   - attackTimeMs: Time constant for *reducing* gain when input
     ///     suddenly grows. Fast attack avoids clipping. 20ms.
@@ -75,8 +88,9 @@ public final class RealtimeAGC {
     ///     coefficients. 4096 frames at 48 kHz ≈ 85ms.
     public init(
         targetPeak: Float = 0.45,
-        maxGain: Float = 12.0,
+        maxGain: Float = 25.0,
         minPeak: Float = 0.0008,
+        noiseGatePeak: Float = 0.002,
         windowSize: Int = 16,
         attackTimeMs: Float = 20,
         releaseTimeMs: Float = 300,
@@ -85,6 +99,7 @@ public final class RealtimeAGC {
         self.targetPeak = max(0.0001, min(1.0, targetPeak))
         self.maxGain = max(1.0, maxGain)
         self.minPeak = max(0.000001, minPeak)
+        self.noiseGatePeak = max(self.minPeak, noiseGatePeak)
         self.windowSize = max(1, windowSize)
         self.recentPeaks = [Float](repeating: 0, count: max(1, windowSize))
         // α = 1 − exp(−Δt / τ). When Δt ≥ τ we approach 1.0 (snap to target);
@@ -138,7 +153,17 @@ public final class RealtimeAGC {
             }
         }
 
-        // 2. Slot into rolling peak window and pick window peak.
+        // 2. Gate sub-activity ambient noise before it can be amplified.
+        // Keep the gain state steady so the next real utterance still starts
+        // from the current recovery level instead of pumping up from unity.
+        if bufferPeak > 0, bufferPeak < noiseGatePeak {
+            clear(buffer: buffer, frameCount: frameCount, channelCount: channelCount)
+            recentPeaks[nextPeakIndex] = 0
+            nextPeakIndex = (nextPeakIndex + 1) % recentPeaks.count
+            return
+        }
+
+        // 3. Slot into rolling peak window and pick window peak.
         recentPeaks[nextPeakIndex] = bufferPeak
         nextPeakIndex = (nextPeakIndex + 1) % recentPeaks.count
         var windowPeak: Float = 0
@@ -146,7 +171,7 @@ public final class RealtimeAGC {
             if value > windowPeak { windowPeak = value }
         }
 
-        // 3. Target gain. Hold during silence so a long pause doesn't make
+        // 4. Target gain. Hold during silence so a long pause doesn't make
         // gain race back to 1.0 and then jump up again on the next word.
         let targetGain: Float
         if windowPeak < minPeak {
@@ -155,12 +180,12 @@ public final class RealtimeAGC {
             targetGain = max(1.0, min(maxGain, targetPeak / windowPeak))
         }
 
-        // 4. Smooth gain via one-pole IIR. Fast when reducing (attack),
+        // 5. Smooth gain via one-pole IIR. Fast when reducing (attack),
         // slow when raising (release).
         let coef = (targetGain < currentGain) ? attackCoef : releaseCoef
         currentGain = currentGain + coef * (targetGain - currentGain)
 
-        // 5. Apply gain in place. vDSP_vsmul works for both interleaved
+        // 6. Apply gain in place. vDSP_vsmul works for both interleaved
         // (treat as a single contiguous block) and non-interleaved (per
         // channel pointer).
         var gain = currentGain
@@ -173,8 +198,8 @@ public final class RealtimeAGC {
             }
         }
 
-        // 6. Hard-clip to [-1, 1]. With targetPeak = 0.45 and a maxGain of
-        // 12.0 we shouldn't exceed unity often; this is a safety net for
+        // 7. Hard-clip to [-1, 1]. With targetPeak = 0.45 and a maxGain of
+        // 25.0 we shouldn't exceed unity often; this is a safety net for
         // transients above the windowed peak.
         var lo: Float = -1.0
         var hi: Float = 1.0
@@ -184,6 +209,18 @@ public final class RealtimeAGC {
         } else {
             for ch in 0..<channelCount {
                 vDSP_vclip(channelData[ch], 1, &lo, &hi, channelData[ch], 1, frameCount)
+            }
+        }
+    }
+
+    private func clear(buffer: AVAudioPCMBuffer, frameCount: vDSP_Length, channelCount: Int) {
+        guard let channelData = buffer.floatChannelData else { return }
+        if buffer.format.isInterleaved {
+            let totalLength = frameCount * vDSP_Length(channelCount)
+            vDSP_vclr(channelData[0], 1, totalLength)
+        } else {
+            for ch in 0..<channelCount {
+                vDSP_vclr(channelData[ch], 1, frameCount)
             }
         }
     }

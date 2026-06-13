@@ -15,6 +15,7 @@ final class LiveMeetingTranscriber {
     func start(
         capture: MeetingCaptureBridge,
         codexSession: LiveMeetingCodexSession,
+        feed: LiveMeetingTranscriptFeed? = nil,
         startedAt: Date = Date()
     ) {
         stop(capture: capture)
@@ -27,6 +28,7 @@ final class LiveMeetingTranscriber {
             audioSource: .microphone,
             streamingSession: session,
             codexSession: codexSession,
+            feed: feed,
             startedAt: startedAt
         )
         let systemChannel = LiveMeetingTranscriberChannel(
@@ -34,6 +36,7 @@ final class LiveMeetingTranscriber {
             audioSource: .system,
             streamingSession: session,
             codexSession: codexSession,
+            feed: feed,
             startedAt: startedAt
         )
 
@@ -81,6 +84,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private let audioSource: AudioSource
     private let streamingSession: StreamingAsrSession
     private let codexSession: LiveMeetingCodexSession
+    private let feed: LiveMeetingTranscriptFeed?
     private let startedAt: Date
     private let inputQueue: DispatchQueue
     private let lock = NSLock()
@@ -88,18 +92,22 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private var continuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
     private var inputTask: Task<Void, Never>?
     private var updateState = LiveMeetingStreamingUpdateState()
+    private var lastFeedText = ""
+    private var lastFeedWasFinal = false
 
     init(
         source: LiveMeetingCodexSource,
         audioSource: AudioSource,
         streamingSession: StreamingAsrSession,
         codexSession: LiveMeetingCodexSession,
+        feed: LiveMeetingTranscriptFeed?,
         startedAt: Date
     ) {
         self.source = source
         self.audioSource = audioSource
         self.streamingSession = streamingSession
         self.codexSession = codexSession
+        self.feed = feed
         self.startedAt = startedAt
         self.inputQueue = DispatchQueue(
             label: "com.transcripted.live-meeting-transcriber.\(source.rawValue)",
@@ -150,6 +158,9 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
             )
             try Task.checkCancellation()
             try codexSession.updateStreamingBackendStatus("local_streaming_asr_running")
+            if let feed {
+                await MainActor.run { feed.markLive() }
+            }
 
             let updates = await manager.transcriptionUpdates
             let updateTask = Task.detached(priority: .utility) { [weak self] in
@@ -171,6 +182,10 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
                 "local_streaming_asr_failed",
                 note: "\(source.displayName) live streaming stopped: \(error.localizedDescription)"
             )
+            if let feed {
+                let note = "\(source.displayName) live transcription stopped. The final transcript still saves normally."
+                await MainActor.run { feed.markFailed(note: note) }
+            }
         }
     }
 
@@ -183,6 +198,35 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private func append(update: StreamingTranscriptionUpdate) {
         let now = Date()
         let normalized = LiveMeetingStreamingUpdatePolicy.normalizedText(update.text)
+        guard !normalized.isEmpty else { return }
+        let elapsed = now.timeIntervalSince(startedAt)
+        let entry = LiveMeetingCodexTranscriptEntry(
+            source: source,
+            text: normalized,
+            timestampSeconds: elapsed,
+            createdAt: now,
+            isFinal: update.isConfirmed
+        )
+
+        // In-app drawer lane: unthrottled. Partials replace themselves in
+        // memory, so every distinct hypothesis can flow word-by-word; only
+        // exact repeats are dropped.
+        if let feed {
+            let isDistinct = lock.withLock {
+                guard normalized != lastFeedText || update.isConfirmed != lastFeedWasFinal else {
+                    return false
+                }
+                lastFeedText = normalized
+                lastFeedWasFinal = update.isConfirmed
+                return true
+            }
+            if isDistinct {
+                Task { @MainActor in feed.ingest(entry) }
+            }
+        }
+
+        // Sidecar file lane: keep the append throttle so provisional updates
+        // do not hammer live_transcript.md on disk.
         let shouldAppend = lock.withLock {
             LiveMeetingStreamingUpdatePolicy.shouldAppend(
                 text: normalized,
@@ -199,16 +243,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
             updateState.lastAppendedWasFinal = update.isConfirmed
         }
 
-        let elapsed = now.timeIntervalSince(startedAt)
-        try? codexSession.append(
-            LiveMeetingCodexTranscriptEntry(
-                source: source,
-                text: normalized,
-                timestampSeconds: elapsed,
-                createdAt: now,
-                isFinal: update.isConfirmed
-            )
-        )
+        try? codexSession.append(entry)
     }
 
     private static func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {

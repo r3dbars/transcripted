@@ -5,6 +5,12 @@ latest shipped tag.
 
 Keep it short. Focus on what a user would notice or care about.
 
+**Lead with one human sentence.** The first line of the published release note
+should be something a non-technical user would care about, in plain words —
+"Dictation now pastes reliably into slow apps like Zoom chat" — not "Hardens
+pasteback retry path." The engineering changelog comes after. Releases are a
+marketing surface: people land on them from the appcast, Homebrew, and search.
+
 ## Candidate summary
 
 - One sentence on what this candidate is trying to improve.

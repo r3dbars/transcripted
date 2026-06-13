@@ -10,20 +10,30 @@ settings-side agent connection flow.
 
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
   page routing, and page-level actions.
-- `TranscriptedSettingsSidebar.swift` - sidebar sections and rows.
+- `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
+  content section (Home/Dictations/Speakers/Agent); the settings pages are
+  reached via the sidebar gear and an in-content tab strip.
 - `TranscriptedSettingsGeneralControls.swift` - compact General-page rows,
   disclosure rows, headings, and info popovers.
 - `TranscriptedSettingsRows.swift` - small reusable rows used by Settings:
   model choices, custom corrections, Auto Enter apps, failed meetings, and
   recent-meeting audio controls.
-- `AgentConnectionSettingsPage.swift` - Settings' agent page, including Claude
-  Desktop install/copy/reveal flows.
-- `HomeView.swift` - Home dashboard, recent capture lists, stats, preview,
-  feedback, failed meeting, and speaker review entry points.
+- `AgentConnectionSettingsPage.swift` - Settings' agent page: one connect row
+  per detected agent (via `AgentMCPConnector`), the universal copy-prompt row,
+  the live-meetings toggle, and the Advanced disclosure.
+- `HomeMeetingSummaryBetaPresentationPolicy.swift` - Home dashboard gates for
+  showing opt-in local AI meeting-summary titles, previews, badges, and menu
+  actions.
+- `HomeView.swift` - Home canvas components (greeting header with stats line,
+  attention pills, capture list sections), recent capture rows, preview,
+  feedback, and failed meeting entry points.
+- `HomeCanvasGreeting.swift` - time-of-day greeting helper for the Home
+  canvas header.
 - `PermissionsOnboardingView.swift` - first-run permissions and agent setup
   walkthrough.
-- `SpeakerPeopleSettingsSection.swift` - people/speaker profile list, naming,
-  merging, review filters, and local-speaker split preference UI.
+- `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
+  queue (one row per distinct voice), compact duplicate-merge suggestions, and
+  the searchable all-speakers list with per-row play/rename/merge/delete.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
 
 ## Guardrails
@@ -39,6 +49,11 @@ settings-side agent connection flow.
 - Do not put meeting transcript parsing, speaker database work, or retained
   audio cleanup here. Use `Sources/Meeting/`, `Sources/TranscriptedCore/`, or
   `Sources/UI/Shared/` for those ownership seams.
+- Local AI meeting summary actions must stay blocked during active dictation,
+  active meeting recording, model prep, background meeting work, and speaker
+  review. The Beta page owns provider selection between Gemma MLX and Apple
+  on-device summaries. Keep those gates in shared policy instead of duplicating
+  state checks across row actions.
 
 ## Verification
 
@@ -54,4 +69,5 @@ Manual checks:
 - failed meeting retry, reveal, delete/dismiss, and retained-audio playback work
 - custom dictionary edits persist and preview correctly
 - Auto Enter app allow/remove controls work
-- Agent page can copy prompts, reveal config, and install/repair Claude Desktop
+- Agent page can connect detected agents, copy the universal prompt, reveal
+  config and folders, and set up the Codex inbox from Advanced

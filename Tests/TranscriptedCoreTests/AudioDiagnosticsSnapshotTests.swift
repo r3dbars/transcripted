@@ -25,7 +25,7 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         let audio = makeAudio()
         audio.prepareForNewRecordingStart()
 
-        audio.recordMicSignalPeaks(raw: 0.03, processed: 0.36)
+        audio.recordMicSignalPeaks(raw: 0.03, processed: 0.36, appliedGain: nil, agcMaxGain: nil)
         audio.recordSystemSignalPeak(0.25)
 
         let snapshot = audio.createPipelineDiagnosticsSnapshot()
@@ -44,9 +44,51 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         XCTAssertNotNil(snapshot.privacySafeContext["captured_input_volume_during"])
     }
 
+    func testHandleMicBufferAppliesAGCBeforeMicCallbackAndDiagnostics() throws {
+        let audio = makeAudio()
+        audio.prepareForNewRecordingStart()
+        audio.realtimeAGC = RealtimeAGC()
+        defer {
+            audio.onMicPCMBuffer = nil
+            audio.realtimeAGC = nil
+        }
+
+        var callbackPeaks: [Float] = []
+        audio.onMicPCMBuffer = { buffer in
+            callbackPeaks.append(audio.linearPeak(buffer: buffer))
+        }
+
+        let rawPeak: Float = 0.04
+        for _ in 0..<40 {
+            let buffer = try makeMonoSineBuffer(peak: rawPeak)
+            let originalPeak = audio.linearPeak(buffer: buffer)
+            audio.handleMicBuffer(buffer)
+
+            XCTAssertEqual(
+                audio.linearPeak(buffer: buffer),
+                originalPeak,
+                accuracy: 0.0001,
+                "handleMicBuffer must leave the CoreAudio-owned input buffer untouched"
+            )
+        }
+
+        let processedPeak = try XCTUnwrap(callbackPeaks.last)
+        XCTAssertGreaterThan(processedPeak, 0.40, "mic callback should receive the AGC-processed copy")
+        XCTAssertLessThan(processedPeak, 0.55, "mic callback should stay near the AGC target and avoid clipping")
+
+        let snapshot = audio.createPipelineDiagnosticsSnapshot()
+        XCTAssertEqual(snapshot.micRawPeak, "0.04000")
+        XCTAssertGreaterThan(
+            Double(snapshot.micProcessedPeak) ?? 0,
+            Double(snapshot.micRawPeak) ?? 1,
+            "diagnostics should prove the processed meeting mic path is louder than the raw input"
+        )
+        XCTAssertEqual(snapshot.privacySafeContext["realtime_agc"], "true")
+    }
+
     func testSnapshotResetsSignalDiagnosticsForNewRecording() {
         let audio = makeAudio()
-        audio.recordMicSignalPeaks(raw: 0.03, processed: 0.36)
+        audio.recordMicSignalPeaks(raw: 0.03, processed: 0.36, appliedGain: nil, agcMaxGain: nil)
         audio.recordSystemSignalPeak(0.25)
 
         audio.prepareForNewRecordingStart()
@@ -95,6 +137,32 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         let level = audio.normalizedRMSLevel(buffer: buffer)
 
         XCTAssertGreaterThan(level, 0.8)
+    }
+
+    private func makeMonoSineBuffer(peak: Float, frames: Int = 4096) throws -> AVAudioPCMBuffer {
+        let format = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(frames)
+        ))
+        buffer.frameLength = AVAudioFrameCount(frames)
+
+        guard let channelData = buffer.floatChannelData?[0] else {
+            XCTFail("Missing channel data")
+            return buffer
+        }
+
+        let twoPiF = 2.0 * Double.pi * 1_000.0
+        for index in 0..<frames {
+            let t = Double(index) / 48_000.0
+            channelData[index] = peak * Float(sin(twoPiF * t))
+        }
+        return buffer
     }
 
     private func makeStereoBuffer(left: Float, right: Float) throws -> AVAudioPCMBuffer {

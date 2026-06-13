@@ -53,6 +53,7 @@ public class DiarizationService: ObservableObject {
     private var offlineDiarizerManager: OfflineDiarizerManager?
     private var offlineModelState: DiarizationModelState = .notLoaded
     private var optionalStreamingWarmupTask: Task<Void, Never>?
+    private var offlineInitializationTask: Task<Void, Never>?
 
     /// Provider that resolves bundled model directories. Embedders can swap this to
     /// redirect lookups (e.g. a shared cache in Application Support). Returning `nil`
@@ -77,6 +78,26 @@ public class DiarizationService: ObservableObject {
             return
         }
 
+        // Deduplicate concurrent loads. Warmup and queued-job recovery can
+        // both call initialize(); without dedup they interleave at the await,
+        // double-load the models, and a losing duplicate that throws would
+        // overwrite modelState to .failed even though the first load
+        // succeeded.
+        if let inFlight = offlineInitializationTask {
+            AppLogger.transcription.debug("Awaiting in-flight offline diarization initialization")
+            await inFlight.value
+            return
+        }
+
+        let task = Task {
+            await self.performOfflineInitialization()
+            self.offlineInitializationTask = nil
+        }
+        offlineInitializationTask = task
+        await task.value
+    }
+
+    private func performOfflineInitialization() async {
         modelState = .loading
         AppLogger.transcription.info("Diarization initializing offline models")
 
@@ -278,7 +299,7 @@ public class DiarizationService: ObservableObject {
     }
 
     /// Convert FluidAudio's string speaker ID (e.g., "speaker_0") to integer
-    private nonisolated func speakerIdFromString(_ id: String) -> Int {
+    nonisolated func speakerIdFromString(_ id: String) -> Int {
         // Sortformer uses "speaker_0", "speaker_1", etc.
         if let separator = id.lastIndex(of: "_"),
            let intId = Int(id[id.index(after: separator)...]) {

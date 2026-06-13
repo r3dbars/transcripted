@@ -8,6 +8,12 @@ struct AnalyticsEventPolicy: Equatable {
         allowedPolicies[event]
     }
 
+    /// All allowlisted analytics event names, sorted. Exposed so tests can assert
+    /// source-vs-docs parity against the compiled policy table instead of parsing this file's text.
+    static var allEventNames: [String] {
+        allowedPolicies.keys.sorted()
+    }
+
     private static let meetingCaptureDiagnosticProperties: Set<String> = [
         "attenuation_kind",
         "buffer_success_bucket",
@@ -35,6 +41,7 @@ struct AnalyticsEventPolicy: Equatable {
         "input_device_class",
         "input_rate_hz",
         "input_volume_scalar_available",
+        "mic_boost_prompt",
         "mic_processing",
         "mic_processed_peak",
         "mic_raw_peak",
@@ -98,6 +105,37 @@ struct AnalyticsEventPolicy: Equatable {
         "stall_kind",
         "stall_stage",
         "trigger",
+    ]
+
+    private static let activationArtifactActionProperties: Set<String> = [
+        "action_kind",
+        "artifact_age_bucket",
+        "artifact_kind",
+        "surface",
+    ]
+
+    private static let activationAgentPromptActionProperties: Set<String> = [
+        "action_kind",
+        "agent_target",
+        "artifact_kind",
+        "prompt_kind",
+        "result",
+        "surface",
+    ]
+
+    private static let activationAgentSetupProperties: Set<String> = [
+        "agent_target",
+        "prior_status",
+        "result",
+        "setup_kind",
+        "surface",
+    ]
+
+    private static let activationReturnProxyProperties: Set<String> = [
+        "prior_artifact_kind",
+        "proxy_kind",
+        "return_window_bucket",
+        "surface",
     ]
 
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
@@ -256,6 +294,22 @@ struct AnalyticsEventPolicy: Equatable {
                 "step_index",
             ]
         ),
+        "activation_artifact_action_clicked": .init(
+            name: "activation_artifact_action_clicked",
+            allowedProperties: activationArtifactActionProperties
+        ),
+        "activation_agent_prompt_action_clicked": .init(
+            name: "activation_agent_prompt_action_clicked",
+            allowedProperties: activationAgentPromptActionProperties
+        ),
+        "activation_agent_setup_cta_clicked": .init(
+            name: "activation_agent_setup_cta_clicked",
+            allowedProperties: activationAgentSetupProperties
+        ),
+        "activation_return_proxy_observed": .init(
+            name: "activation_return_proxy_observed",
+            allowedProperties: activationReturnProxyProperties
+        ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",
             allowedProperties: [
@@ -336,6 +390,13 @@ struct AnalyticsEventPolicy: Equatable {
                 "version",
             ]
         ),
+        "update_installed": .init(
+            name: "update_installed",
+            allowedProperties: [
+                "previous_version",
+                "version",
+            ]
+        ),
         "settings_opened": .init(
             name: "settings_opened",
             allowedProperties: [
@@ -404,6 +465,29 @@ struct AnalyticsEventPolicy: Equatable {
                 "word_count_bucket",
             ]))
         ),
+        "dictation_stop_latency_measured": .init(
+            name: "dictation_stop_latency_measured",
+            allowedProperties: dictationRouteDiagnosticProperties.union(Set([
+                "auto_enter_bucket",
+                "auto_send",
+                "cleanup_bucket",
+                "cleanup_changed",
+                "cleanup_enabled",
+                "copy_reason",
+                "decode_bucket",
+                "delivery",
+                "mic_stop_bucket",
+                "model_wait_bucket",
+                "outcome",
+                "paste_bucket",
+                "save_bucket",
+                "save_outcome",
+                "stop_to_done_bucket",
+                "stop_to_paste_bucket",
+                "trigger",
+                "word_count_bucket",
+            ]))
+        ),
         "dictation_cancelled": .init(
             name: "dictation_cancelled",
             allowedProperties: dictationRouteDiagnosticProperties.union(Set([
@@ -468,6 +552,21 @@ struct AnalyticsEventPolicy: Equatable {
                 "prompt_reason",
                 "provider",
                 "source",
+            ]
+        ),
+        "meeting_mic_boost_prompt_shown": .init(
+            name: "meeting_mic_boost_prompt_shown",
+            allowedProperties: [
+                "duration_bucket",
+                "trigger",
+            ]
+        ),
+        "meeting_mic_boost_prompt_actioned": .init(
+            name: "meeting_mic_boost_prompt_actioned",
+            allowedProperties: [
+                "action",
+                "duration_bucket",
+                "trigger",
             ]
         ),
         "meeting_recording_stopped": .init(

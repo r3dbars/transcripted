@@ -80,7 +80,8 @@ final class MeetingSessionController: ObservableObject {
                 micURL: URL,
                 systemURL: URL?,
                 healthInfo: RecordingHealthInfo,
-                meetingTitle: String?
+                meetingTitle: String?,
+                recordingDate: Date
             )
             case imported(
                 audioURL: URL,
@@ -108,6 +109,7 @@ final class MeetingSessionController: ObservableObject {
         let healthInfo: RecordingHealthInfo
         let pipelineSnapshot: AudioPipelineDiagnosticsSnapshot
         let suggestedTitle: String?
+        let recordingStartedAt: Date?
     }
 
     private struct BackgroundTranscriptionWorkSnapshot {
@@ -152,7 +154,9 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var displayStatus: DisplayStatus = .idle
     @Published private(set) var lastSavedTranscriptURL: URL? = nil
     @Published private(set) var lastSavedTitle: String? = nil
+    @Published private(set) var savedMeetingReplacementCommitCount: Int = 0
     @Published private(set) var audioInactivityWarning: MeetingAudioInactivityWarning?
+    @Published private(set) var isMicBoostPromptVisible = false
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
     @Published private(set) var warmupStatus: ModelWarmupStatus = .ready {
@@ -169,6 +173,9 @@ final class MeetingSessionController: ObservableObject {
     let capture: MeetingCaptureBridge
     private let liveCodexSession = LiveMeetingCodexSession()
     private let liveMeetingTranscriber = LiveMeetingTranscriber()
+    /// In-memory live transcript behind the meeting overlay's embedded
+    /// drawer. Fed by `liveMeetingTranscriber` alongside the sidecar files.
+    let liveTranscriptFeed = LiveMeetingTranscriptFeed()
     let services: AppServices
     let taskManager: TranscriptionTaskManager
     private let failedManager: FailedTranscriptionManager
@@ -181,6 +188,7 @@ final class MeetingSessionController: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
     private var modelPreparationTask: Task<Result<Void, Error>, Never>?
+    private var savedTranscriptRestyleTask: Task<StyledMeetingTranscript, Never>?
     private var retryingFailedMeetingIDs: Set<UUID> = []
     private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
     private var preparingQueuedTranscriptionJob: QueuedTranscriptionJob?
@@ -188,7 +196,11 @@ final class MeetingSessionController: ObservableObject {
     private var queuedRuntimeDiagnosticsJobIDs: Set<UUID> = []
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeRecordingTrigger: StartTrigger = .unknown
+    private var activeRecordingIdentity: UUID?
+    private var micBoostPromptRecordingIdentity: UUID?
+    private var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
     private var activeRecordingSuggestedTitle: String?
+    private var activeRecordingStartedAt: Date?
     private var activeTranscriptionTrigger: StartTrigger = .unknown
     private var isFinishingRecording = false
     private var shouldSurfaceMeetingWarmupFailure = false
@@ -203,6 +215,8 @@ final class MeetingSessionController: ObservableObject {
     private var liveCodexFinalTranscriptNeedsQueuedJobID = false
     private var liveCodexAwaitedTranscriptionJobID: UUID?
     private var activeQueuedTranscriptionJobID: UUID?
+    private var failedAudioCompressionTask: Task<Void, Never>?
+    private var failedAudioCompressionNeedsReschedule = false
 
     var shouldConfirmQuitForActiveCapture: Bool {
         isCaptureSessionActive || isFinishingRecording
@@ -289,6 +303,13 @@ final class MeetingSessionController: ObservableObject {
         self.downloader = MeetingModelDownloader(stt: sttAdapter, diarization: diarization)
 
         wireSubscriptions()
+
+        // Recover recordings orphaned by a crash before any failed-queue entry
+        // existed — they become visible, retryable items on Home.
+        let scratchDirectory = storagePaths.audioCaptures
+        Task { [taskManager] in
+            await taskManager.recoverOrphanedRecordings(in: scratchDirectory)
+        }
     }
 
     // MARK: - Public API
@@ -395,6 +416,10 @@ final class MeetingSessionController: ObservableObject {
             calendarTitle: calendarSuggestedTitleProvider?()
         )
         activeRecordingTrigger = trigger
+        activeRecordingIdentity = UUID()
+        micBoostPromptRecordingIdentity = nil
+        micBoostPromptOutcome = .notShown
+        isMicBoostPromptVisible = false
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         startLiveCodexSessionIfNeeded(title: resolvedMeetingTitle)
 
@@ -402,7 +427,9 @@ final class MeetingSessionController: ObservableObject {
         guard started else {
             finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
             activeRecordingTrigger = .unknown
+            clearActiveRecordingIdentity()
             activeRecordingSuggestedTitle = nil
+            activeRecordingStartedAt = nil
             let failureMessage = capture.errorMessage ?? "Meeting recording couldn't start. Check Transcripted's permissions and audio setup, then try again."
             let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
             let failureProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
@@ -428,6 +455,7 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
+        activeRecordingStartedAt = Date()
         state = .recording
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
@@ -564,6 +592,8 @@ final class MeetingSessionController: ObservableObject {
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "stop_requested")
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
+        isMicBoostPromptVisible = false
+        clearActiveRecordingIdentity()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
 
@@ -594,12 +624,17 @@ final class MeetingSessionController: ObservableObject {
             shouldAwaitFinalTranscript: shouldAwaitFinalLiveCodexTranscript
         )
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
-        let stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+        var stopCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
             afterStopContext: afterStopVolumeContext
         )
+        // Read the prompt outcome before any state mutations below; it is only
+        // reset at the NEXT recording start, so the value is stable through stop.
+        let micAttenuatedByCallApp = MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: stopCaptureDiagnostics)
+        stopCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
+        activeRecordingStartedAt = nil
         state = .transcribing
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
         let stopDiagnosticsContext = stopCaptureDiagnostics.merging(
@@ -668,7 +703,8 @@ final class MeetingSessionController: ObservableObject {
                 micAudioURL: nil,
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stopped without microphone audio.",
-                meetingTitle: recordingSnapshot.suggestedTitle
+                meetingTitle: recordingSnapshot.suggestedTitle,
+                recordingDate: recordingSnapshot.recordingStartedAt
             )
             DiagnosticsTrail.record(
                 level: .error,
@@ -714,6 +750,7 @@ final class MeetingSessionController: ObservableObject {
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stop timed out before audio files were finalized.",
                 meetingTitle: recordingSnapshot.suggestedTitle,
+                recordingDate: recordingSnapshot.recordingStartedAt,
                 archiveAudio: false
             )
             DiagnosticsTrail.record(
@@ -733,11 +770,30 @@ final class MeetingSessionController: ObservableObject {
             return
         }
 
+        // Issue #500: when stop diagnostics classified an unrecovered
+        // voice-processed quiet mic, ride the facts into the saved transcript
+        // frontmatter so Home can surface the enable-for-next-time hint.
+        let healthInfoForSave: RecordingHealthInfo
+        if micAttenuatedByCallApp {
+            let base = recordingSnapshot.healthInfo
+            healthInfoForSave = RecordingHealthInfo(
+                captureQuality: base.captureQuality,
+                audioGaps: base.audioGaps,
+                deviceSwitches: base.deviceSwitches,
+                gapDescriptions: base.gapDescriptions,
+                micAttenuatedByCallApp: true,
+                micBoostPrompt: micBoostPromptOutcome.rawValue
+            )
+        } else {
+            healthInfoForSave = recordingSnapshot.healthInfo
+        }
+
         let outcome = enqueueTranscriptionJob(
             micURL: micURL,
             systemURL: files.systemURL,
-            healthInfo: recordingSnapshot.healthInfo,
+            healthInfo: healthInfoForSave,
             meetingTitle: recordingSnapshot.suggestedTitle,
+            recordingDate: recordingSnapshot.recordingStartedAt ?? Date(),
             startTrigger: recordingSnapshot.trigger
         )
 
@@ -772,6 +828,123 @@ final class MeetingSessionController: ObservableObject {
                 ]
             )
         )
+    }
+
+    private func handleMicAttenuationCue() {
+        guard case .recording = state,
+              let activeRecordingIdentity else { return }
+        guard MeetingMicBoostPromptPolicy.shouldPresent(
+            isRecording: isRecording,
+            isFinishingRecording: isFinishingRecording,
+            sessionStateIsRecording: state == .recording,
+            voiceProcessingPreferenceEnabled: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
+            currentOutcome: micBoostPromptOutcome
+        ) else { return }
+        micBoostPromptOutcome = .shown
+        micBoostPromptRecordingIdentity = activeRecordingIdentity
+        isMicBoostPromptVisible = true
+        DiagnosticsTrail.record(
+            level: .warning,
+            engine: "meeting",
+            event: "meeting_mic_boost_prompt_shown",
+            message: "Mic attenuated by another app's voice processing; offering boost",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_mic_boost_prompt_shown",
+            properties: [
+                "trigger": activeRecordingTrigger.rawValue,
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+            ]
+        )
+    }
+
+    func acceptMicBoostPrompt() {
+        guard shouldApplyMicBoostPromptAction() else {
+            clearStaleMicBoostPrompt()
+            return
+        }
+        micBoostPromptOutcome = .accepted
+        isMicBoostPromptVisible = false
+        micBoostPromptRecordingIdentity = nil
+        capture.armVoiceProcessingForActiveRecording()
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_mic_boost_prompt_actioned",
+            message: "Mic boost prompt accepted; arming VPIO mid-recording",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "action": "accepted",
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_mic_boost_prompt_actioned",
+            properties: [
+                "action": "accepted",
+                "trigger": activeRecordingTrigger.rawValue,
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+            ]
+        )
+    }
+
+    func declineMicBoostPrompt() {
+        guard shouldApplyMicBoostPromptAction() else {
+            clearStaleMicBoostPrompt()
+            return
+        }
+        micBoostPromptOutcome = .declined
+        isMicBoostPromptVisible = false
+        micBoostPromptRecordingIdentity = nil
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_mic_boost_prompt_actioned",
+            message: "Mic boost prompt declined",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "action": "declined",
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "meeting_mic_boost_prompt_actioned",
+            properties: [
+                "action": "declined",
+                "trigger": activeRecordingTrigger.rawValue,
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+            ]
+        )
+    }
+
+    private func shouldApplyMicBoostPromptAction() -> Bool {
+        guard case .recording = state,
+              let activeRecordingIdentity,
+              let micBoostPromptRecordingIdentity,
+              micBoostPromptRecordingIdentity == activeRecordingIdentity else {
+            return false
+        }
+        return MeetingMicBoostPromptPolicy.shouldApplyPromptAction(
+            isPromptVisible: isMicBoostPromptVisible,
+            isRecording: isRecording,
+            isFinishingRecording: isFinishingRecording,
+            sessionStateIsRecording: state == .recording
+        )
+    }
+
+    private func clearStaleMicBoostPrompt() {
+        isMicBoostPromptVisible = false
+        micBoostPromptRecordingIdentity = nil
+    }
+
+    private func clearActiveRecordingIdentity() {
+        activeRecordingIdentity = nil
+        micBoostPromptRecordingIdentity = nil
     }
 
     func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
@@ -825,6 +998,8 @@ final class MeetingSessionController: ObservableObject {
         defer { isFinishingRecording = false }
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
+        isMicBoostPromptVisible = false
+        clearActiveRecordingIdentity()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
 
@@ -845,12 +1020,16 @@ final class MeetingSessionController: ObservableObject {
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         finishLiveCodexSessionForActiveRecording(status: .cancelled, shouldAwaitFinalTranscript: false)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
-        let cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
+        var cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
             baseContext: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
             afterStopContext: afterStopVolumeContext
         )
+        // Mirror stopRecording(): cancelled meetings carry the prompt outcome
+        // too, so diagnostics can correlate cancellations with the prompt.
+        cancelCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
+        activeRecordingStartedAt = nil
         restoreStateAfterRecordingEndedWithoutNewWork()
         AppSoundPlayer.shared.play(.dictationCancelled)
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "cancelled")
@@ -1029,12 +1208,13 @@ final class MeetingSessionController: ObservableObject {
 
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, let meetingTitle):
+            case .recorded(let micURL, let systemURL, _, let meetingTitle, let recordingDate):
                 preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: "Transcription cancelled",
-                    meetingTitle: meetingTitle
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate
                 )
             case .imported(let audioURL, _, _):
                 try? FileManager.default.removeItem(at: audioURL)
@@ -1042,6 +1222,10 @@ final class MeetingSessionController: ObservableObject {
         }
 
         taskManager.cancelAll()
+        if liveCodexSessionAwaitingFinalTranscript {
+            finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
+            activeQueuedTranscriptionJobID = nil
+        }
         state = .ready
         DiagnosticsTrail.record(
             level: .warning,
@@ -1057,6 +1241,7 @@ final class MeetingSessionController: ObservableObject {
         var didPreserveRecording = false
         var recordingTrigger = activeRecordingTrigger
         var stoppedFiles: (micURL: URL?, systemURL: URL?) = (nil, nil)
+        var stopTimedOut = false
 
         if isFinishingRecording {
             await waitForRecordingFinishBeforeTermination()
@@ -1068,20 +1253,34 @@ final class MeetingSessionController: ObservableObject {
 
             _ = audioInactivityDetector.stopRecording()
             audioInactivityWarning = nil
+            isMicBoostPromptVisible = false
+            clearActiveRecordingIdentity()
 
-            let files = await capture.stopAndAwaitFiles()
+            let shutdownFailedTaskId = UUID()
+            let files = await capture.stopAndAwaitFiles { [weak self] lateResult in
+                self?.refreshTimedOutFailedMeetingAudio(
+                    id: shutdownFailedTaskId,
+                    result: lateResult
+                )
+            }
             stoppedFiles = (micURL: files.micURL, systemURL: files.systemURL)
+            stopTimedOut = files.didTimeOut
             finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
             let meetingTitle = activeRecordingSuggestedTitle
+            let recordingDate = activeRecordingStartedAt
             activeRecordingTrigger = .unknown
             activeRecordingSuggestedTitle = nil
+            activeRecordingStartedAt = nil
 
             if files.micURL != nil || files.systemURL != nil {
                 didPreserveRecording = preserveFailedMeetingForRetry(
+                    taskId: shutdownFailedTaskId,
                     micAudioURL: files.micURL,
                     systemAudioURL: files.systemURL,
                     errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
-                    meetingTitle: meetingTitle
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate,
+                    archiveAudio: !files.didTimeOut
                 )
             }
         } else {
@@ -1116,6 +1315,7 @@ final class MeetingSessionController: ObservableObject {
                     "trigger": recordingTrigger.rawValue,
                     "mic_file_present": boolString(stoppedFiles.micURL != nil),
                     "system_file_present": boolString(stoppedFiles.systemURL != nil),
+                    "stop_timed_out": boolString(stopTimedOut),
                     "active_preserved": "\(activePreserved)",
                     "queued_preserved": "\(queuedPreserved)"
                 ]
@@ -1143,12 +1343,13 @@ final class MeetingSessionController: ObservableObject {
         var preservedCount = 0
         for job in jobs {
             switch job.kind {
-            case .recorded(let micURL, let systemURL, _, let meetingTitle):
+            case .recorded(let micURL, let systemURL, _, let meetingTitle, let recordingDate):
                 if preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: errorMessage,
-                    meetingTitle: meetingTitle
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate
                 ) {
                     preservedCount += 1
                 }
@@ -1159,10 +1360,16 @@ final class MeetingSessionController: ObservableObject {
         return preservedCount
     }
 
-    func retryFailedMeeting(id: UUID) {
-        guard !isRecording, !hasBackgroundTranscriptionWork, !isSpeakerReviewPending else { return }
-        guard !retryingFailedMeetingIDs.contains(id) else { return }
+    @discardableResult
+    func retryFailedMeeting(id: UUID) -> Bool {
+        guard !isRecording, !hasBackgroundTranscriptionWork, !isSpeakerReviewPending else { return false }
+        guard !retryingFailedMeetingIDs.contains(id) else { return false }
+        guard failedManager.failedTranscriptions.contains(where: { $0.id == id }) else {
+            refreshFailedMeetings()
+            return false
+        }
 
+        failedAudioCompressionTask?.cancel()
         retryingFailedMeetingIDs.insert(id)
         activeTranscriptionTrigger = .unknown
         refreshFailedMeetings()
@@ -1190,13 +1397,16 @@ final class MeetingSessionController: ObservableObject {
             self.retryingFailedMeetingIDs.remove(id)
             self.refreshFailedMeetings()
         }
+        return true
     }
 
     @discardableResult
     func retranscribeSavedMeeting(
         micAudioURL: URL?,
         systemAudioURL: URL,
-        title: String?
+        title: String?,
+        transcriptURL: URL? = nil,
+        recordingDate: Date? = nil
     ) async -> Bool {
         guard !(sttRouter.isRecording || sttRouter.isTranscribing) else {
             state = .error("Wait for the current dictation to finish before re-transcribing saved audio.")
@@ -1257,21 +1467,59 @@ final class MeetingSessionController: ObservableObject {
             systemURL: systemAudioURL,
             outputFolder: MeetingStoragePaths.transcriptsFolder,
             meetingTitle: title,
-            splitLocalSpeakers: true
+            splitLocalSpeakers: true,
+            replacementTranscriptURL: transcriptURL,
+            recordingDate: recordingDate,
+            onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
+                self?.handleReplacementTranscriptCommitted(for: committedTranscriptURL)
+            }
         )
         return true
     }
 
-    func dismissFailedMeeting(id: UUID) {
-        retryingFailedMeetingIDs.remove(id)
-        failedManager.removeFailedTranscription(id: id)
-        refreshFailedMeetings()
+    private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {
+        clearGeneratedSummaryAfterReplacementRetranscription(for: transcriptURL)
+        savedMeetingReplacementCommitCount &+= 1
     }
 
-    func deleteFailedMeeting(id: UUID) {
+    private func clearGeneratedSummaryAfterReplacementRetranscription(for transcriptURL: URL) {
+        do {
+            guard try LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL) else {
+                return
+            }
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_retranscription_summary_invalidated",
+                message: "Removed stale local summary after saved meeting retranscription",
+                context: baseDiagnosticsContext()
+            )
+        } catch {
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_retranscription_summary_invalidation_failed",
+                message: "Failed to remove stale local summary after saved meeting retranscription",
+                context: baseDiagnosticsContext(extra: [
+                    "error_type": "\(type(of: error))"
+                ])
+            )
+        }
+    }
+
+    @discardableResult
+    func dismissFailedMeeting(id: UUID) -> Bool {
         retryingFailedMeetingIDs.remove(id)
-        failedManager.deleteFailedTranscription(id: id)
+        let didDismiss = failedManager.removeFailedTranscription(id: id)
         refreshFailedMeetings()
+        return didDismiss || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
+    }
+
+    @discardableResult
+    func deleteFailedMeeting(id: UUID) -> Bool {
+        retryingFailedMeetingIDs.remove(id)
+        let didDelete = failedManager.deleteFailedTranscription(id: id)
+        refreshFailedMeetings()
+        return didDelete || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
     }
 
     // MARK: - Subscriptions
@@ -1286,6 +1534,11 @@ final class MeetingSessionController: ObservableObject {
                     event = self.audioInactivityDetector.startRecording(at: self.recordingDuration)
                 } else {
                     event = self.audioInactivityDetector.stopRecording()
+                    // Capture can stop underneath the controller (device
+                    // watchdog give-up, disk-full guard) without any app-side
+                    // stop path running. The boost prompt must never outlive
+                    // the recording it offered to fix.
+                    self.isMicBoostPromptVisible = false
                 }
                 self.applyAudioInactivityEvent(event)
             }
@@ -1317,6 +1570,14 @@ final class MeetingSessionController: ObservableObject {
                 self.applyAudioInactivityEvent(
                     self.audioInactivityDetector.tick(at: duration)
                 )
+            }
+            .store(in: &cancellables)
+
+        capture.$micAttenuationCueObserved
+            .removeDuplicates()
+            .filter { $0 }
+            .sink { [weak self] _ in
+                self?.handleMicAttenuationCue()
             }
             .store(in: &cancellables)
 
@@ -1368,25 +1629,13 @@ final class MeetingSessionController: ObservableObject {
             .sink { [weak self] url in
                 guard let self else { return }
                 guard let url else {
+                    self.savedTranscriptRestyleTask = nil
                     self.lastSavedTranscriptURL = nil
                     self.lastSavedTitle = nil
                     return
                 }
 
-                let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
-                self.lastSavedTranscriptURL = styled.url
-                self.lastSavedTitle = styled.title
-                self.attachLiveCodexFinalTranscriptIfReady(url: styled.url, title: styled.title)
-                let transcriptURL = styled.url
-                Task.detached(priority: .utility) {
-                    await MeetingAudioStorageManager.processSavedTranscript(at: transcriptURL)
-                }
-                DiagnosticsTrail.record(
-                    engine: "meeting",
-                    event: "meeting_transcript_artifact_ready",
-                    message: "Meeting transcript artifact is ready",
-                    context: self.baseDiagnosticsContext()
-                )
+                self.restyleSavedTranscriptInBackground(at: url)
             }
             .store(in: &cancellables)
 
@@ -1410,6 +1659,37 @@ final class MeetingSessionController: ObservableObject {
 
         refreshFailedMeetings()
         refreshWarmupStatus()
+    }
+
+    /// Restyling reads and rewrites the whole saved transcript and can rename
+    /// the markdown + retained-audio artifacts, so it must stay off the main
+    /// actor; multi-hour meetings produce multi-MB files. Restyles are chained
+    /// so two passes never touch the same artifacts concurrently.
+    private func restyleSavedTranscriptInBackground(at url: URL) {
+        let previousRestyle = savedTranscriptRestyleTask
+        let restyle = Task.detached(priority: .userInitiated) { () -> StyledMeetingTranscript in
+            _ = await previousRestyle?.value
+            return MeetingTranscriptStyler.restyleTranscript(at: url)
+        }
+        savedTranscriptRestyleTask = restyle
+
+        Task { @MainActor [weak self] in
+            let styled = await restyle.value
+            let transcriptURL = styled.url
+            Task.detached(priority: .utility) {
+                await MeetingAudioStorageManager.processSavedTranscript(at: transcriptURL)
+            }
+            guard let self, self.savedTranscriptRestyleTask == restyle else { return }
+            self.lastSavedTranscriptURL = styled.url
+            self.lastSavedTitle = styled.title
+            self.attachLiveCodexFinalTranscriptIfReady(url: styled.url, title: styled.title)
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_transcript_artifact_ready",
+                message: "Meeting transcript artifact is ready",
+                context: self.baseDiagnosticsContext()
+            )
+        }
     }
 
     private func observeAudioActivity() {
@@ -1485,12 +1765,16 @@ final class MeetingSessionController: ObservableObject {
             liveCodexSessionAwaitingFinalTranscript = false
             liveCodexSessionCanAttachFinalTranscript = false
             liveCodexAwaitedTranscriptionJobID = nil
+            liveTranscriptFeed.reset()
             return
         }
 
         guard !liveCodexSessionAwaitingFinalTranscript else {
             liveCodexSessionOwnedByActiveRecording = false
             liveCodexFinalTranscriptNeedsQueuedJobID = false
+            liveTranscriptFeed.beginDeferred(
+                note: "Live transcript is paused while the previous meeting finishes its handoff. This meeting still saves normally."
+            )
             DiagnosticsTrail.record(
                 level: .info,
                 engine: "meeting",
@@ -1519,11 +1803,16 @@ final class MeetingSessionController: ObservableObject {
             liveCodexFinalTranscriptNeedsQueuedJobID = false
             liveCodexAwaitedTranscriptionJobID = nil
             if canStartLiveBackend {
+                liveTranscriptFeed.beginStarting()
                 liveMeetingTranscriber.start(
                     capture: capture,
-                    codexSession: liveCodexSession
+                    codexSession: liveCodexSession,
+                    feed: liveTranscriptFeed
                 )
             } else {
+                liveTranscriptFeed.beginDeferred(
+                    note: "Live transcript is paused while another meeting finishes processing. This meeting still saves normally."
+                )
                 try? liveCodexSession.updateStreamingBackendStatus(
                     backendStatus,
                     note: "Live ASR was deferred because another meeting transcript was already processing. The normal final transcript will still save through Transcripted."
@@ -1548,11 +1837,79 @@ final class MeetingSessionController: ObservableObject {
             liveCodexSessionOwnedByActiveRecording = false
             liveCodexFinalTranscriptNeedsQueuedJobID = false
             liveCodexAwaitedTranscriptionJobID = nil
+            liveTranscriptFeed.markFailed(
+                note: "Live transcript couldn't start for this meeting. The final transcript still saves normally."
+            )
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
                 event: "live_codex_session_start_failed",
                 message: "Live meeting sidecar could not start",
+                context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
+            )
+        }
+    }
+
+    /// Late-join entry point for the meeting overlay's Live View affordance:
+    /// the user enabled live meetings while this recording was already in
+    /// flight. Live streaming ASR cannot attach mid-recording — the bridge's
+    /// live PCM preview handlers must be installed before capture starts and
+    /// never reassigned mid-session — so this starts the sidecar session
+    /// without provisional live text. The final transcript still attaches
+    /// automatically after the recording is saved, and the next recording
+    /// gets the full live pipeline from `startLiveCodexSessionIfNeeded`.
+    func connectLiveSidecarToActiveRecording() {
+        guard LiveMeetingCodexPreferences.isEnabled() else { return }
+        guard state == .recording else { return }
+        guard !liveCodexSessionIsActive, !liveCodexSessionAwaitingFinalTranscript else { return }
+
+        let backendStatus = "deferred_live_view_joined_mid_recording"
+        do {
+            try liveCodexSession.start(
+                title: activeRecordingSuggestedTitle,
+                startedAt: activeRecordingStartedAt ?? Date(),
+                streamingBackendStatus: backendStatus
+            )
+            liveCodexSessionIsActive = true
+            liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = true
+            liveCodexSessionOwnedByActiveRecording = true
+            liveCodexFinalTranscriptNeedsQueuedJobID = false
+            liveCodexAwaitedTranscriptionJobID = nil
+            // Leave liveCodexPreviewHandlersNeedClearingAfterActiveRecording
+            // untouched: a disable-then-re-enable during the same recording
+            // still owes a post-recording handler clear, and clearing the
+            // flag here would leak the installed handlers.
+            liveTranscriptFeed.beginDeferred(
+                note: "Live transcript is on now and begins with your next meeting. This meeting's transcript still saves normally when you stop."
+            )
+            try? liveCodexSession.updateStreamingBackendStatus(
+                backendStatus,
+                note: "Live View joined after this recording started, so live transcript lines begin with your next meeting. The final transcript will still attach here when this recording is saved."
+            )
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "live_codex_session_joined_mid_recording",
+                message: "Live meeting sidecar joined an active recording without live ASR",
+                context: baseDiagnosticsContext(
+                    extra: ["live_backend_status": backendStatus]
+                )
+            )
+        } catch {
+            liveCodexSessionIsActive = false
+            liveCodexSessionAwaitingFinalTranscript = false
+            liveCodexSessionCanAttachFinalTranscript = false
+            liveCodexSessionOwnedByActiveRecording = false
+            liveCodexFinalTranscriptNeedsQueuedJobID = false
+            liveCodexAwaitedTranscriptionJobID = nil
+            liveTranscriptFeed.markFailed(
+                note: "Live transcript couldn't start. This meeting's transcript still saves normally."
+            )
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_codex_session_join_failed",
+                message: "Live meeting sidecar could not join the active recording",
                 context: baseDiagnosticsContext(extra: ["error": error.localizedDescription])
             )
         }
@@ -1602,6 +1959,7 @@ final class MeetingSessionController: ObservableObject {
         guard liveCodexSessionIsActive || liveCodexSessionAwaitingFinalTranscript else { return }
 
         liveMeetingTranscriber.stop(capture: capture, clearPreviewHandlers: clearPreviewHandlers)
+        liveTranscriptFeed.finish()
         if clearPreviewHandlers {
             liveCodexPreviewHandlersNeedClearingAfterActiveRecording = false
         }
@@ -1805,6 +2163,7 @@ final class MeetingSessionController: ObservableObject {
         systemURL: URL?,
         healthInfo: RecordingHealthInfo,
         meetingTitle: String?,
+        recordingDate: Date,
         startTrigger: StartTrigger
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
@@ -1812,7 +2171,8 @@ final class MeetingSessionController: ObservableObject {
                 micURL: micURL,
                 systemURL: systemURL,
                 healthInfo: healthInfo,
-                meetingTitle: meetingTitle
+                meetingTitle: meetingTitle,
+                recordingDate: recordingDate
             ),
             startTrigger: startTrigger,
             sttModel: sttRouter.selectedModel
@@ -1958,7 +2318,7 @@ final class MeetingSessionController: ObservableObject {
         activeQueuedTranscriptionJobID = job.id
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, let healthInfo, let meetingTitle):
+        case .recorded(let micURL, let systemURL, let healthInfo, let meetingTitle, let recordingDate):
             taskManager.startTranscription(
                 taskId: job.id,
                 micURL: micURL,
@@ -1966,7 +2326,8 @@ final class MeetingSessionController: ObservableObject {
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 healthInfo: healthInfo,
                 meetingTitle: meetingTitle,
-                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled()
+                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
+                recordingDate: recordingDate
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             taskManager.startImportedTranscription(
@@ -1991,12 +2352,13 @@ final class MeetingSessionController: ObservableObject {
         }
 
         switch job.kind {
-        case .recorded(let micURL, let systemURL, _, let meetingTitle):
+        case .recorded(let micURL, let systemURL, _, let meetingTitle, let recordingDate):
             preserveFailedMeetingForRetry(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
                 errorMessage: message,
-                meetingTitle: meetingTitle
+                meetingTitle: meetingTitle,
+                recordingDate: recordingDate
             )
         case .imported(let audioURL, _, _):
             try? FileManager.default.removeItem(at: audioURL)
@@ -2143,15 +2505,11 @@ final class MeetingSessionController: ObservableObject {
                     ]
                 )
             )
-            AnalyticsReporter.track(
-                "meeting_transcript_saved",
-                properties: savedTranscriptAnalyticsProperties().merging(
-                    [
+            trackSavedTranscriptAnalyticsInBackground(
+                baseProperties: [
                     "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
                     "trigger": transcriptionTrigger.rawValue,
-                    ],
-                    uniquingKeysWith: { _, new in new }
-                )
+                ]
             )
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_saved")
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
@@ -2330,12 +2688,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func meetingStartFailureKind(from message: String) -> String {
-        let normalized = message.lowercased()
-        if normalized.contains("permission") { return "permission_missing" }
-        if normalized.contains("timeout") || normalized.contains("timed out") { return "start_timeout" }
-        if normalized.contains("system audio") { return "system_stream_unavailable" }
-        if normalized.contains("microphone") || normalized.contains("mic") { return "mic_unavailable" }
-        return "unexpected"
+        MeetingStartFailureClassifier.kind(from: message)
     }
 
     private func meetingCaptureAnalyticsProperties(snapshot: AudioPipelineDiagnosticsSnapshot) -> [String: String] {
@@ -2389,12 +2742,14 @@ final class MeetingSessionController: ObservableObject {
         guard shouldReport else { return }
 
         var context = captureDiagnostics
+        context.removeValue(forKey: "gap_count")
+        context.removeValue(forKey: "route_change_count")
         context["capture_quality"] = healthInfo.captureQuality.rawValue
         context["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: durationSeconds)
-        context["gap_count"] = "\(healthInfo.audioGaps)"
+        context["gap_count_bucket"] = AnalyticsReporter.countBucket(healthInfo.audioGaps)
         context["mic_file_available"] = boolString(files.micURL != nil)
         context["reason"] = reason.rawValue
-        context["route_change_count"] = "\(healthInfo.deviceSwitches)"
+        context["route_change_count_bucket"] = AnalyticsReporter.countBucket(healthInfo.deviceSwitches)
         context["stop_timed_out"] = boolString(stopTimedOut)
         context["system_stream_present"] = boolString(files.systemURL != nil)
         context["trigger"] = trigger.rawValue
@@ -2408,10 +2763,35 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
-    private func savedTranscriptAnalyticsProperties() -> [String: String] {
-        guard let url = taskManager.lastSavedTranscriptURL ?? lastSavedTranscriptURL,
-              let raw = try? String(contentsOf: url, encoding: .utf8),
-              let values = TranscriptFrontmatter.values(in: raw) else {
+    /// The bucketed properties come from transcript frontmatter on disk, so the
+    /// read happens off the main actor and waits for any in-flight restyle to
+    /// finish renaming the saved artifact before reading it.
+    private func trackSavedTranscriptAnalyticsInBackground(baseProperties: [String: String]) {
+        let restyle = savedTranscriptRestyleTask
+        let fallbackTranscriptURL = taskManager.lastSavedTranscriptURL ?? lastSavedTranscriptURL
+        Task.detached(priority: .utility) {
+            let transcriptURL: URL?
+            if let restyle {
+                transcriptURL = await restyle.value.url
+            } else {
+                transcriptURL = fallbackTranscriptURL
+            }
+            let transcriptProperties = Self.savedTranscriptAnalyticsProperties(transcriptURL: transcriptURL)
+            await MainActor.run {
+                AnalyticsReporter.track(
+                    "meeting_transcript_saved",
+                    properties: transcriptProperties.merging(
+                        baseProperties,
+                        uniquingKeysWith: { _, new in new }
+                    )
+                )
+            }
+        }
+    }
+
+    nonisolated private static func savedTranscriptAnalyticsProperties(transcriptURL: URL?) -> [String: String] {
+        guard let transcriptURL,
+              let values = try? TranscriptFrontmatter.readValues(from: transcriptURL) else {
             return [:]
         }
 
@@ -2448,7 +2828,8 @@ final class MeetingSessionController: ObservableObject {
             pipelineSnapshot: capture.pipelineDiagnosticsSnapshot(
                 overrideSystemAudioStatus: systemAudioStatus
             ),
-            suggestedTitle: activeRecordingSuggestedTitle
+            suggestedTitle: activeRecordingSuggestedTitle,
+            recordingStartedAt: activeRecordingStartedAt
         )
     }
 
@@ -2471,18 +2852,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func systemAudioStatusMessage(for status: SystemAudioStatus) -> String {
-        switch status {
-        case .unknown:
-            return "System audio status reset"
-        case .healthy:
-            return "System audio capture is healthy"
-        case .reconnecting:
-            return "System audio capture is reconnecting"
-        case .silent:
-            return "System audio capture is silent"
-        case .failed:
-            return "System audio capture failed"
-        }
+        MeetingSystemAudioStatusCopy.message(for: status)
     }
 
     private func boolString(_ value: Bool) -> String {
@@ -2496,6 +2866,7 @@ final class MeetingSessionController: ObservableObject {
         systemAudioURL: URL?,
         errorMessage: String,
         meetingTitle: String?,
+        recordingDate: Date? = nil,
         archiveAudio: Bool = true
     ) -> Bool {
         let preserved = taskManager.addFailedTranscriptionRetainingAvailableAudio(
@@ -2504,6 +2875,7 @@ final class MeetingSessionController: ObservableObject {
             errorMessage: errorMessage,
             taskId: taskId,
             meetingTitle: meetingTitle,
+            recordingDate: recordingDate,
             archiveAudio: archiveAudio
         )
         if preserved {
@@ -2513,13 +2885,14 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func refreshTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
-        guard let micURL = result.micURL else { return }
-        let existingSystemURL = failedManager.failedTranscriptions
-            .first(where: { $0.id == id })?
-            .systemAudioURL
+        let existingFailure = failedManager.failedTranscriptions
+            .first(where: { $0.id == id })
+        let existingMicURL = existingFailure?.micAudioURL
+        let existingSystemURL = existingFailure?.systemAudioURL
+        guard let micURL = result.micURL ?? existingMicURL else { return }
         let systemURL = result.systemURL ?? existingSystemURL
 
-        let updated = failedManager.updateFailedTranscriptionAudio(
+        let updated = taskManager.promoteFinalizedFailedTranscriptionAudio(
             id: id,
             micAudioURL: micURL,
             systemAudioURL: systemURL
@@ -2556,6 +2929,61 @@ final class MeetingSessionController: ObservableObject {
                     isRetrying: retryingFailedMeetingIDs.contains(failed.id)
                 )
             }
+        scheduleFailedAudioCompression(for: failedTranscriptions)
+    }
+
+    private func scheduleFailedAudioCompression(for failedTranscriptions: [FailedTranscription]) {
+        guard failedAudioCompressionTask == nil else {
+            failedAudioCompressionNeedsReschedule = true
+            return
+        }
+
+        let candidates = failedTranscriptions.compactMap { failed -> FailedMeetingAudioCompressionCandidate? in
+            guard !retryingFailedMeetingIDs.contains(failed.id) else { return nil }
+            var urls = [failed.micAudioURL]
+            if let systemAudioURL = failed.systemAudioURL {
+                urls.append(systemAudioURL)
+            }
+            guard urls.contains(where: { $0.pathExtension.localizedCaseInsensitiveCompare("wav") == .orderedSame }) else {
+                return nil
+            }
+            return FailedMeetingAudioCompressionCandidate(
+                id: failed.id,
+                micAudioURL: failed.micAudioURL,
+                systemAudioURL: failed.systemAudioURL
+            )
+        }
+        guard !candidates.isEmpty else { return }
+
+        failedAudioCompressionNeedsReschedule = false
+        let audioArchiveRoot = MeetingStoragePaths.audioArchiveFolder
+        failedAudioCompressionTask = Task { [weak self] in
+            _ = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
+                candidates: candidates,
+                audioArchiveRoot: audioArchiveRoot,
+                persistUpdate: { [weak self] update in
+                    await MainActor.run {
+                        guard let self,
+                              !self.retryingFailedMeetingIDs.contains(update.id) else {
+                            return false
+                        }
+                        return self.failedManager.updateFailedTranscriptionAudio(
+                            id: update.id,
+                            micAudioURL: update.micAudioURL,
+                            systemAudioURL: update.systemAudioURL
+                        )
+                    }
+                }
+            )
+            await MainActor.run { [weak self] in
+                let shouldReschedule = self?.failedAudioCompressionNeedsReschedule == true
+                self?.failedAudioCompressionTask = nil
+                self?.failedAudioCompressionNeedsReschedule = false
+                if shouldReschedule, let self {
+                    self.scheduleFailedAudioCompression(for: self.failedManager.failedTranscriptions)
+                }
+            }
+        }
     }
 }
 

@@ -1,5 +1,10 @@
 import Foundation
 
+// This is a repo-structure contract, not behavioral coverage. The suites here assert that
+// build/test scripts, docs, and release metadata keep agreed-on shapes and strings — they do
+// not exercise app runtime behavior. When one fails, fix the script/doc it names rather than
+// reaching for the app code.
+
 func testRepoCommandContract() {
     runSuite("Repo command contract - root build and test wrappers stay script-based") {
         let wrappers = [
@@ -8,6 +13,7 @@ func testRepoCommandContract() {
             "build.sh": "scripts/entrypoints/build.sh",
             "run-e2e-smoke.sh": "scripts/entrypoints/run-e2e-smoke.sh",
             "run-live-capture-smoke.sh": "scripts/entrypoints/run-live-capture-smoke.sh",
+            "run-slow-pasteback-smoke.sh": "scripts/entrypoints/run-slow-pasteback-smoke.sh",
             "run-tests.sh": "scripts/entrypoints/run-tests.sh",
             "run-integration-smoke.sh": "scripts/entrypoints/run-integration-smoke.sh"
         ]
@@ -47,6 +53,30 @@ func testRepoCommandContract() {
         assertFalse(contents.contains("\"r3d-bar\""), "Cloudflare probe should not check the old redbars Pages project name")
     }
 
+    runSuite("Repo command contract - Sentry health probe prints aggregate issue rollup") {
+        let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+
+        assertTrue(
+            contents.contains("Sentry unresolved issue rollup (top 5):")
+                && contents.contains(".shortId")
+                && contents.contains("count=\\(.count")
+                && contents.contains("users=\\(.userCount")
+                && contents.contains("lastSeen=\\(.lastSeen"),
+            "Sentry probe should show aggregate issue counts and freshness for operator triage"
+        )
+        assertTrue(
+            contents.contains("sentry_test_event")
+                && contents.contains("support_diagnostic_event")
+                && contents.contains("contains(\"sentry_test_event\")")
+                && contents.contains("contains(\"support_diagnostic_event\")"),
+            "Sentry probe should filter manual verification and support diagnostic events out of health rollups"
+        )
+        assertFalse(
+            contents.contains("/events/"),
+            "Sentry health probe should not fetch raw event payloads for the nightly rollup"
+        )
+    }
+
     runSuite("Repo command contract - PostHog health probe uses the query API") {
         let contents = readRepoTextFile("scripts/ops/health-probe.sh")
 
@@ -78,6 +108,12 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - PostHog health probe keeps aggregate daily active-device trend") {
         let contents = readRepoTextFile("scripts/ops/health-probe.sh")
+        let digest = readRepoTextFile("scripts/ops/generate-nightly-digest.py")
+        let workflowEvents = sourceSlice(
+            contents,
+            from: "workflow_events=",
+            to: "  onboarding_events="
+        )
 
         assertTrue(
             contents.contains("daily_query=")
@@ -97,11 +133,16 @@ func testRepoCommandContract() {
             contents.contains("PostHog daily active device ids"),
             "PostHog probe should not print user or device identifiers"
         )
+        assertTrue(
+            workflowEvents.contains("meeting_file_imported") && digest.contains("\"meeting_file_imported\""),
+            "aggregate active-device workflow sets should count imported audio activity"
+        )
     }
 
     runSuite("Repo command contract - PostHog health probe counts emitted first-value events") {
         let probe = readRepoTextFile("scripts/ops/health-probe.sh")
         let docs = readRepoTextFile("docs/ops-credentials.md")
+        let digest = readRepoTextFile("scripts/ops/generate-nightly-digest.py")
         let firstValueEvents = sourceSlice(
             probe,
             from: "first_value_events=",
@@ -112,16 +153,35 @@ func testRepoCommandContract() {
             "dictation_completed",
             "onboarding_first_dictation_saved",
             "meeting_transcript_saved",
-            "onboarding_agent_cta_clicked"
+            "onboarding_agent_cta_clicked",
+            "activation_artifact_action_clicked",
+            "activation_agent_prompt_action_clicked",
+            "activation_agent_setup_cta_clicked",
+            "activation_return_proxy_observed"
         ] {
             assertTrue(
                 firstValueEvents.contains(event) && docs.contains(event),
                 "PostHog first-value probe and docs should include \(event)"
             )
         }
+        for event in [
+            "activation_artifact_action_clicked",
+            "activation_agent_prompt_action_clicked",
+            "activation_agent_setup_cta_clicked",
+            "activation_return_proxy_observed"
+        ] {
+            assertTrue(
+                digest.contains(event),
+                "nightly digest DAU event set should include \(event)"
+            )
+        }
         assertTrue(
             probe.contains("first_value_events=") && probe.contains("first_value_events_7d"),
             "PostHog probe should keep the aggregate first-value event count"
+        )
+        assertFalse(
+            firstValueEvents.contains("meeting_file_imported"),
+            "imported audio should count as activity but not as first value"
         )
     }
 
@@ -137,6 +197,37 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dev and beta builds share one swiftc argument source") {
+        let buildScript = readRepoTextFile("scripts/entrypoints/build.sh")
+        let betaScript = readRepoTextFile("scripts/entrypoints/build-beta.sh")
+        let sharedArgs = readRepoTextFile("scripts/entrypoints/lib/swiftc-app-args.sh")
+
+        for (name, contents) in [("build.sh", buildScript), ("build-beta.sh", betaScript)] {
+            assertTrue(
+                contents.contains("lib/swiftc-app-args.sh") && contents.contains("build_app_swiftc_args"),
+                "\(name) must source the shared swiftc argument library instead of hand-maintaining its own flag list"
+            )
+            assertTrue(
+                contents.contains("\"${APP_SWIFTC_LINK_ARGS[@]}\"")
+                    && contents.contains("\"${APP_SOURCE_FILES[@]}\"")
+                    && contents.contains("\"${APP_SWIFTC_TAIL_ARGS[@]}\""),
+                "\(name) must expand the shared swiftc argument arrays (quoted) in its compile invocation"
+            )
+            assertFalse(
+                contents.contains("-framework ScreenCaptureKit") || contents.contains("-lsqlite3"),
+                "\(name) must not regrow an inline framework/library list next to the shared one — that is how the builds diverged before"
+            )
+        }
+        assertTrue(
+            sharedArgs.contains("-framework ScreenCaptureKit") && sharedArgs.contains("-lsqlite3"),
+            "the shared swiftc args must link ScreenCaptureKit and sqlite3 explicitly rather than relying on autolink"
+        )
+        assertTrue(
+            sharedArgs.contains("-not -path 'Sources/TranscriptedCore/*'"),
+            "the shared source list must keep TranscriptedCore out of the app compile; Core links in via libDraftDeps.a"
+        )
+    }
+
     runSuite("Repo command contract - build-deps readiness matches the app build") {
         let buildDepsScript = readRepoTextFile("scripts/entrypoints/build-deps.sh")
         assertTrue(
@@ -146,6 +237,23 @@ func testRepoCommandContract() {
         assertTrue(
             buildDepsScript.contains("newest_dependency_input") && buildDepsScript.contains("deps_are_ready"),
             "build-deps.sh should rebuild stale TranscriptedCore artifacts instead of printing a false ready message"
+        )
+        // The dual-archive invariant — Core lives in libDraftDeps.a (app path) and is absent
+        // from libExternalDeps.a (SPM path) — must stay verified at build time, not just trusted.
+        // A raw `ar t | wc -l` object count cannot catch Core leaking into (or vanishing from) an
+        // archive, so the build must keep an nm symbol-level gate.
+        assertTrue(
+            buildDepsScript.contains("16TranscriptedCore"),
+            "build-deps.sh should validate TranscriptedCore symbol placement via the Swift mangled module token"
+        )
+        assertTrue(
+            buildDepsScript.contains("xcrun --find llvm-nm")
+                && buildDepsScript.contains("--defined-only"),
+            "build-deps.sh should use nm with --defined-only so undefined Core references are not miscounted"
+        )
+        assertTrue(
+            buildDepsScript.contains("The SPM-path archive is contaminated with TranscriptedCore objects"),
+            "build-deps.sh should fail with an actionable message when libExternalDeps.a contains Core symbols"
         )
     }
 
@@ -190,6 +298,64 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - QA bench full gate stays wired for review habit") {
+        let qaBench = readRepoTextFile("scripts/ops/transcripted-qa-bench.sh")
+        let qaGates = readRepoTextFile(".agents/qa-gates.yml")
+        let agents = readRepoTextFile("AGENTS.md")
+        let agentStart = readRepoTextFile("AGENT_START.md")
+        let onboarding = readRepoTextFile("docs/agent-onboarding.md")
+        let testsReadme = readRepoTextFile("Tests/README.md")
+        let qaBenchDoc = readRepoTextFile("docs/qa-test-bench.md")
+        let scriptsReadme = readRepoTextFile("scripts/README.md")
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+
+        assertTrue(
+            qaBench.contains("quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live")
+                && qaBench.contains("run_full_tail")
+                && qaBench.contains("60-release-health")
+                && qaBench.contains("61-gemma-summary-plan")
+                && qaBench.contains("Local Gemma summary dry-run plan not applicable (no eligible local transcripts)")
+                && qaBench.contains("Operator Verdict")
+                && qaBench.contains("Release:")
+                && qaBench.contains("HOLD - automated full gate is green, but manual proof is still required"),
+            "QA bench should expose a full gate with release-health, optional Gemma planning, and non-false-green operator verdict rows"
+        )
+        assertTrue(
+            qaGates.contains("full: \"bash scripts/ops/transcripted-qa-bench.sh --mode full\"")
+                && qaGates.contains("docs_only_tiny:")
+                && qaGates.contains("meaningful_code:")
+                && qaGates.contains("release_impacting:")
+                && qaGates.contains("codex-review against the real PR base"),
+            "qa-gates should define full QA plus PR review levels"
+        )
+        assertTrue(
+            agents.contains("PR QA levels:")
+                && agents.contains("Tiny docs-only")
+                && agents.contains("Meaningful code")
+                && agents.contains("release-impacting")
+                && agentStart.contains("Before merging, classify the PR level")
+                && onboarding.contains("before merging a meaningful code PR, run `codex-review`")
+                && matrix.contains("PR-level overlays still apply"),
+            "agent docs should make codex-review and full QA a PR-level overlay instead of a blanket every-PR gate"
+        )
+        assertTrue(
+            qaBenchDoc.contains("## Full Run")
+                && qaBenchDoc.contains("Working")
+                && qaBenchDoc.contains("Regressed")
+                && qaBenchDoc.contains("Needs human")
+                && qaBenchDoc.contains("Release GO/HOLD")
+                && testsReadme.contains("--mode full")
+                && testsReadme.contains("--mode ui")
+                && testsReadme.contains("not every-PR requirements"),
+            "QA bench docs should explain full mode and keep tiny PRs out of mandatory release QA"
+        )
+        assertTrue(
+            scriptsReadme.contains("Full usage: `bash scripts/ops/transcripted-qa-bench.sh --mode full`")
+                && scriptsReadme.contains("release-health fixture checks"),
+            "scripts README should list the full QA bench mode"
+        )
+    }
+
     runSuite("Repo command contract - script edits map to syntax and owned checks") {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
         let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
@@ -200,14 +366,109 @@ func testRepoCommandContract() {
             "bash -n scripts/entrypoints/run-tests.sh",
             "bash -n scripts/entrypoints/run-integration-smoke.sh",
             "bash -n scripts/ops/daily-audio-reliability-check.sh",
+            "bash -n scripts/ops/health-probe.sh",
+            "bash -n scripts/dev/onboarding.sh",
+            "bash -n scripts/dev/benchmark-home-recent-captures.sh",
             "python3 -m py_compile scripts/ops/generate-nightly-digest.py",
-            "python3 scripts/ops/generate-nightly-digest.py --self-test"
+            "python3 scripts/ops/generate-nightly-digest.py --self-test",
+            "python3 -m py_compile scripts/ops/nightly-security-check.py",
+            "python3 -m py_compile scripts/ops/release-gate-report.py",
+            "python3 scripts/ops/release-gate-report.py --self-test",
+            "python3 -m py_compile scripts/ops/build-codex-memory-index.py",
+            "bash -n scripts/ops/nightly-transcripted-archive-miner.sh",
+            "ruby -c scripts/ops/performance-budget.rb",
+            "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
         ]
 
         for check in expectedChecks {
             assertTrue(matrix.contains(check), "test matrix should include \(check)")
             assertTrue(preflight.contains(check), "agent preflight should include \(check)")
         }
+    }
+
+    runSuite("Repo command contract - agent preflight covers every matrix check") {
+        // The matrix is canonical; preflight mirrors it. This parses every
+        // check string out of the matrix so a rule added there without a
+        // matching preflight rule fails fast instead of silently drifting
+        // (which happened with the slow-pasteback, packaged-app-smoke,
+        // privacy-leak-sweep, and local-summary-fixture rules).
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+
+        var inChecks = false
+        var matrixChecks: [String] = []
+        for rawLine in matrix.components(separatedBy: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            if line == "checks:" { inChecks = true; continue }
+            // Any other key (paths:, notes:, rules:) ends the checks list.
+            if line.hasSuffix(":") || line.hasPrefix("- paths:") { inChecks = false; continue }
+            guard inChecks, line.hasPrefix("- \""), line.hasSuffix("\"") else { continue }
+            let check = String(line.dropFirst(3).dropLast(1))
+            if !matrixChecks.contains(check) { matrixChecks.append(check) }
+        }
+
+        assertTrue(
+            matrixChecks.count >= 30,
+            "matrix check extraction should see the full rule set, got \(matrixChecks.count) — did the matrix format change?"
+        )
+        for check in matrixChecks {
+            assertTrue(
+                preflight.contains(check),
+                "agent preflight has drifted from .agents/test-matrix.yml: missing \(check)"
+            )
+        }
+    }
+
+    runSuite("Repo command contract - release gate report composes QA, telemetry, release, and logs") {
+        let report = readRepoTextFile("scripts/ops/release-gate-report.py")
+        let docs = readRepoTextFile("docs/qa-test-bench.md")
+        let scriptsReadme = readRepoTextFile("scripts/README.md")
+        let qaGates = readRepoTextFile(".agents/qa-gates.yml")
+
+        assertTrue(
+            report.contains("scripts/ops/transcripted-qa-bench.sh")
+                && report.contains("scripts/ops/health-probe.sh")
+                && report.contains("scripts/ops/nightly-security-check.py")
+                && report.contains("sweep_local_logs"),
+            "release gate report should compose QA bench, telemetry probes, release surfaces, and local log sweep"
+        )
+        assertTrue(
+            report.contains("SKIP sentry: missing SENTRY_AUTH_TOKEN")
+                && report.contains("Sentry credentials missing")
+                && report.contains("missing Sentry/PostHog credentials"),
+            "release gate report should keep missing telemetry tokens yellow/unknown rather than green"
+        )
+        assertTrue(
+            report.contains("BLOCKING_RELEASE_WATCH_IDS")
+                && report.contains("appcast-release-candidate")
+                && report.contains("release_watch_status")
+                && report.contains("sync_command_record_status")
+                && report.contains("Live release surfaces skipped"),
+            "release gate report should keep blocking release watch items red, skipped live checks yellow, and command rows aligned with parsed release proof"
+        )
+        assertTrue(
+            report.contains("Automated Proof")
+                && report.contains("Regressions")
+                && report.contains("Telemetry")
+                && report.contains("Release Surfaces")
+                && report.contains("Local Log Warnings")
+                && report.contains("Manual QA Checklist"),
+            "release gate report should render the expected owner-facing sections"
+        )
+        assertTrue(
+            report.contains(#"--release-candidate"#)
+                && report.contains(#"choices=["quick", "deep", "full", "live"]"#)
+                && report.contains(#"EXIT_CODES[payload["status"]]"#)
+                && report.contains("Exit code follows the overall report status"),
+            "release gate report should support the full one-command QA mode and exit from the overall green/yellow/red verdict"
+        )
+        assertTrue(
+            docs.contains("python3 scripts/ops/release-gate-report.py")
+                && scriptsReadme.contains("release-gate-report.py")
+                && qaGates.contains("release_gate_report"),
+            "release gate report should be discoverable in QA docs, scripts README, and QA gates"
+        )
     }
 
     runSuite("Repo command contract - integration smoke rejects stale Core deps") {
@@ -464,6 +725,47 @@ func testRepoCommandContract() {
         assertTrue(cask.contains("depends_on macos: \">= :tahoe\""), "Homebrew cask should stay aligned with the macOS 26+ release floor")
     }
 
+    runSuite("Repo command contract - Sentry release registration requires matching dSYM") {
+        let buildBeta = readRepoTextFile("scripts/entrypoints/build-beta.sh")
+        let registerSentry = readRepoTextFile("scripts/release/register-sentry-release.sh")
+        let releaseDocs = readRepoTextFile("docs/release-packaging.md")
+
+        assertTrue(
+            buildBeta.contains("GENERATE_DSYM=\"${GENERATE_DSYM:-1}\"")
+                && buildBeta.contains("dsymutil \"$APP_BINARY\" -o \"$APP_DSYM\""),
+            "release builds should generate the app dSYM by default"
+        )
+        assertTrue(
+            buildBeta.contains("SENTRY_REQUIRE_DEBUG_FILES=\"${SENTRY_REQUIRE_DEBUG_FILES:-1}\"")
+                && buildBeta.contains("SENTRY_APP_BINARY_PATH=\"${SENTRY_APP_BINARY_PATH:-$APP_BINARY}\"")
+                && buildBeta.contains("SENTRY_DEBUG_FILES_PATH=\"${SENTRY_DEBUG_FILES_PATH:-$APP_DSYM}\""),
+            "build-beta.sh should register Sentry with the exact app/dSYM pair from the release build"
+        )
+        assertTrue(
+            registerSentry.contains("SENTRY_REQUIRE_DEBUG_FILES=\"${SENTRY_REQUIRE_DEBUG_FILES:-1}\"")
+                && registerSentry.contains("SENTRY_DEBUG_FILES_PATH=\"${SENTRY_DEBUG_FILES_PATH:-build/Transcripted.app.dSYM}\"")
+                && registerSentry.contains("SENTRY_APP_BINARY_PATH=\"${SENTRY_APP_BINARY_PATH:-build/Transcripted.app/Contents/MacOS/Transcripted}\""),
+            "standalone Sentry registration should require the release dSYM and know the matching app binary path by default"
+        )
+        assertTrue(
+            registerSentry.contains("dwarfdump --uuid \"$path\"")
+                && registerSentry.contains("verify_debug_file_match \"$SENTRY_APP_BINARY_PATH\" \"$SENTRY_DEBUG_FILES_PATH\"")
+                && registerSentry.contains("Sentry debug files do not match the app binary."),
+            "Sentry registration should fail before upload when the dSYM UUID does not match the app binary"
+        )
+        assertTrue(
+            registerSentry.contains("Release is yellow unless matching dSYM was uploaded separately"),
+            "explicit debug-file skips should call the release yellow"
+        )
+        assertTrue(
+            releaseDocs.contains("verifies the dSYM UUID matches the built app binary")
+                && releaseDocs.contains("SENTRY_DEBUG_FILES_PATH=/path/to/Transcripted.app.dSYM")
+                && releaseDocs.contains("SENTRY_APP_BINARY_PATH=/path/to/Transcripted.app/Contents/MacOS/Transcripted")
+                && releaseDocs.contains("call the release yellow"),
+            "release docs should tell future workers how to register a reused artifact without stale symbols"
+        )
+    }
+
     runSuite("Repo command contract - Sparkle app settings point at the committed appcast") {
         let infoPlist = readRepoTextFile("Info.plist")
         let appcast = readRepoTextFile("docs/appcast.xml")
@@ -612,6 +914,33 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Sparkle relaunch records installed-update confirmation") {
+        let controller = readRepoTextFile("Sources/Observability/SparkleUpdaterController.swift")
+        let relaunchBlock = sourceSlice(
+            controller,
+            from: "func updaterWillRelaunchApplication",
+            to: "extension SparkleUpdaterController: SPUStandardUserDriverDelegate"
+        )
+        let confirmationBlock = sourceSlice(
+            controller,
+            from: "private func trackInstalledUpdateIfNeeded()",
+            to: "private func markUpdateReadyToInstall("
+        )
+
+        assertTrue(
+            relaunchBlock.contains("rememberPendingInstalledUpdate"),
+            "Sparkle relaunch should persist the expected installed version before quitting"
+        )
+        assertTrue(
+            confirmationBlock.contains("update_installed"),
+            "next launch should emit a narrow installed-update confirmation event"
+        )
+        assertTrue(
+            confirmationBlock.contains("removeObject(forKey: Self.pendingInstalledUpdateVersionKey)"),
+            "installed-update confirmation should clear the one-shot marker"
+        )
+    }
+
     runSuite("Repo command contract - release docs keep Sparkle and Homebrew gates explicit") {
         let releaseDocs = readRepoTextFile("docs/release-packaging.md")
         let sparkleDocs = readRepoTextFile("docs/sparkle-updates.md")
@@ -634,8 +963,20 @@ func testRepoCommandContract() {
             "release packaging docs should include the Sentry release registration command"
         )
         assertTrue(
+            releaseDocs.contains("Prefer this post-publish registration path")
+                && releaseDocs.contains("REGISTER_SENTRY_RELEASE=1"),
+            "release packaging docs should explain when build-time Sentry registration is safe"
+        )
+        assertTrue(
             releaseDocs.contains("Homebrew users will still") && releaseDocs.contains("install or upgrade to the older version"),
             "release packaging docs should warn when the cask is stale"
+        )
+        assertTrue(
+            releaseDocs.contains("live `/appcast.xml`")
+                && releaseDocs.contains("live `/download`")
+                && releaseDocs.contains("live `/download/latest.dmg`")
+                && releaseDocs.contains("Cloudflare Pages deployment status"),
+            "release packaging docs should keep live web release truth separate from source truth"
         )
         assertTrue(
             releaseDocs.contains("SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"),
@@ -661,8 +1002,57 @@ func testRepoCommandContract() {
             scriptsReadme.contains("scripts/release/generate-sparkle-appcast.sh")
                 && scriptsReadme.contains("scripts/release/verify-sparkle-release.sh")
                 && scriptsReadme.contains("scripts/release/update-cask.sh")
-                && scriptsReadme.contains("scripts/release/register-sentry-release.sh"),
-            "scripts README should list the active release helper scripts"
+                && scriptsReadme.contains("scripts/release/register-sentry-release.sh")
+                && scriptsReadme.contains("scripts/dev/benchmark-home-recent-captures.sh")
+                && scriptsReadme.contains("scripts/ops/dictation-recovery-autoeval.rb"),
+            "scripts README should list the active release, benchmark, and autoeval helper scripts"
+        )
+    }
+
+    runSuite("Repo command contract - release path preflight rebuilds deps") {
+        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+        let releaseMatrixBlock = sourceSlice(
+            matrix,
+            from: "- \"build-beta.sh\"",
+            to: "- \"Tools/TranscriptedCLI/**\""
+        )
+        let releasePreflightBlock = sourceSlice(
+            preflight,
+            from: "if matches_any \"$path\" \"build-beta.sh\"",
+            to: "if matches_any \"$path\" \"README.md\""
+        )
+
+        assertTrue(
+            releaseMatrixBlock.contains("bash build-deps.sh --force")
+                && releaseMatrixBlock.contains("bash build.sh --no-open")
+                && releaseMatrixBlock.contains("SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"),
+            "release-path matrix checks should rebuild deps before app and packaging smoke"
+        )
+        assertTrue(
+            releasePreflightBlock.contains("add_command \"bash build-deps.sh --force\"")
+                && releasePreflightBlock.contains("add_command \"bash build.sh --no-open\"")
+                && releasePreflightBlock.contains("add_command \"SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>\""),
+            "agent preflight should suggest dependency rebuilds for release-path edits"
+        )
+    }
+
+    runSuite("Repo command contract - Cloudflare ops docs split read from deploy") {
+        let docs = readRepoTextFile("docs/ops-credentials.md")
+
+        assertTrue(
+            docs.contains("Cloudflare Pages Read")
+                && docs.contains("Pages project, deployment, zone, and analytics status")
+                && docs.contains("Pages Read")
+                && docs.contains("Zone Read")
+                && docs.contains("Cloudflare Pages Deploy")
+                && docs.contains("Pages Write"),
+            "Cloudflare ops docs should distinguish health-check read scopes from deploy-capable credentials"
+        )
+        assertTrue(
+            docs.contains("health probe reads Pages project/deployment status and zone analytics")
+                && docs.contains("Manual deploys need `Pages Write`"),
+            "Cloudflare docs should warn that health-probe auth is not deploy proof"
         )
     }
 
@@ -830,6 +1220,22 @@ func testRepoCommandContract() {
             "performance budget should cap ready-engine dictation start latency when samples are required"
         )
         assertTrue(
+            contents.contains("MAX_DICTATION_REQUEST_TO_RECORDING_P95_MS = 250.0"),
+            "performance budget should cap request-to-recording latency when strict start samples are required"
+        )
+        assertTrue(
+            contents.contains("MAX_DICTATION_START_TO_FIRST_SAMPLE_P95_MS = 350.0"),
+            "performance budget should cap start-to-first-sample latency when strict start samples are required"
+        )
+        assertTrue(
+            contents.contains("MAX_DICTATION_STOP_TO_PASTE_P95_MS = 750.0"),
+            "performance budget should cap stop-to-paste latency when samples are required"
+        )
+        assertTrue(
+            contents.contains("MAX_DICTATION_STOP_TO_DONE_P95_MS = 1_000.0"),
+            "performance budget should cap the full stop pipeline when samples are required"
+        )
+        assertTrue(
             contents.contains("MAX_MEETING_P95_RTF = 0.05"),
             "performance budget should cap meeting processing real-time factor when stats are provided"
         )
@@ -840,6 +1246,58 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("--require-dictation-fast-start-samples"),
             "performance budget should support strict fresh dictation start proof"
+        )
+        assertTrue(
+            contents.contains("--max-dictation-request-to-recording-p95-ms")
+                && contents.contains("--max-dictation-start-to-first-sample-p95-ms"),
+            "strict dictation start proof should expose budgets for the user-visible start and audio-flow metrics"
+        )
+        assertTrue(
+            contents.contains("--require-dictation-stop-latency-samples"),
+            "performance budget should support strict fresh dictation stop proof"
+        )
+        assertTrue(
+            contents.contains("--events-since ISO8601")
+                && contents.contains("event[\"_time\"] >= options[:events_since]"),
+            "performance budget should support fresh-window runtime event scoring"
+        )
+        assertTrue(
+            contents.contains("--stats-since ISO8601")
+                && contents.contains("created_at >= '#{since_time.utc.iso8601}'"),
+            "performance budget should support fresh-window meeting throughput scoring"
+        )
+        assertTrue(
+            contents.contains("--min-transcription-samples")
+                && contents.contains("--min-meeting-samples"),
+            "performance budget should let focused experiments set explicit sample requirements"
+        )
+        assertTrue(
+            contents.contains("dictation_stop_latency_measured")
+                && contents.contains("stop_to_paste_ms")
+                && contents.contains("stop_to_done_ms"),
+            "performance budget should parse measured dictation stop latency samples"
+        )
+        assertTrue(
+            contents.contains("STOP_LATENCY_STAGE_KEYS")
+                && contents.contains("Dictation stop stage p95s:")
+                && contents.contains("Dictation stop slowest stage:"),
+            "performance budget should report per-stage stop latency and identify the slowest stop segment"
+        )
+        assertTrue(
+            contents.contains("dictation_request_to_recording_ms"),
+            "performance budget should surface true request-to-recording timing when logs include it"
+        )
+        assertTrue(
+            contents.contains("start_to_first_sample_ms"),
+            "performance budget should surface audio-flow timing when logs include it"
+        )
+        assertTrue(
+            contents.contains("dictation_start_proof_events")
+                && contents.contains("dictation request-to-recording samples")
+                && contents.contains("Dictation request-to-recording p95 is")
+                && contents.contains("dictation start-to-first-sample samples")
+                && contents.contains("Dictation start-to-first-sample p95 is"),
+            "strict dictation start proof should enforce the collected request-to-recording and audio-flow samples"
         )
         assertTrue(
             contents.contains("--stats PATH"),
@@ -885,6 +1343,33 @@ func testRepoCommandContract() {
         assertTrue(
             localBuildScript.contains("TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1"),
             "local launch smoke should not create dirty-shutdown diagnostics markers"
+        )
+        assertTrue(
+            localBuildScript.contains("/usr/bin/open -n -g -F -W")
+                && localBuildScript.contains("--env \"TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT=$ui_report\"")
+                && localBuildScript.contains("--env \"TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT=1\"")
+                && localBuildScript.contains("\"$APP_BUNDLE\""),
+            "local launch smoke should launch the app bundle through LaunchServices"
+        )
+        assertFalse(
+            localBuildScript.contains("\"$APP_BINARY\" >\"$smoke_log\""),
+            "local launch smoke should not run the app executable directly from sandboxed agent contexts"
+        )
+        assertTrue(
+            localBuildScript.contains("pre_launch_app_pids=\"$(snapshot_launch_smoke_app_pids)\"")
+                && localBuildScript.contains("terminate_launch_smoke_app()")
+                && localBuildScript.contains("pgrep -f \"$APP_BINARY\"")
+                && localBuildScript.contains("is_pre_launch_app_pid")
+                && localBuildScript.contains("kill -TERM \"$pid\"")
+                && localBuildScript.contains("kill -KILL \"$pid\""),
+            "local launch smoke timeout cleanup should terminate only app processes created by this smoke run"
+        )
+        let appSource = readRepoTextFile("Sources/TranscriptedApp.swift")
+        assertTrue(
+            appSource.contains("TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT")
+                && appSource.contains("scheduleLaunchUISmokeTerminationIfRequested")
+                && appSource.contains("Darwin.exit(0)"),
+            "launch smoke should let the app terminate itself instead of depending on process-listing in sandboxed agents"
         )
 
         let runtimeDiagnostics = readRepoTextFile("Sources/Observability/RuntimeDiagnostics.swift")
@@ -933,6 +1418,33 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - dictation recovery autoeval separates baseline from kept policy") {
+        let contents = readRepoTextFile("scripts/ops/dictation-recovery-autoeval.rb")
+        let baselineBlock = sourceSlice(contents, from: "BASELINE = Config.new(", to: ")\n\nKEPT_POLICY = Config.new(")
+        let keptBlock = sourceSlice(contents, from: "KEPT_POLICY = Config.new(", to: ")\n\nSCENARIOS = [")
+
+        assertTrue(
+            baselineBlock.contains("name: \"baseline\"")
+                && baselineBlock.contains("poll_ms: 150")
+                && baselineBlock.contains("forced_recovery_refreshes: 6")
+                && baselineBlock.contains("max_recording_start_attempts: 3"),
+            "recovery autoeval baseline should stay the pre-keeper policy, not the kept winner"
+        )
+        assertTrue(
+            keptBlock.contains("name: \"kept_current_policy\"")
+                && keptBlock.contains("poll_ms: 100")
+                && keptBlock.contains("forced_recovery_refreshes: 5")
+                && keptBlock.contains("max_recording_start_attempts: 2"),
+            "recovery autoeval should name the current kept policy separately from the baseline"
+        )
+        assertTrue(
+            contents.contains("all_results.fetch(BASELINE.name)")
+                && contents.contains("Baseline: pre-keeper policy")
+                && contents.contains("Kept current policy:"),
+            "recovery autoeval deltas and raw rows should be anchored to the real baseline"
+        )
+    }
+
     runSuite("Repo command contract - dictation fast start does not fall through into recovery wait") {
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         guard
@@ -956,8 +1468,146 @@ func testRepoCommandContract() {
             "fast dictation start should emit a measurable local proof event"
         )
         assertTrue(
+            fastPathBlock.contains("request_to_recording_ms"),
+            "fast dictation start should measure request-to-recording latency, not only CoreAudio start time"
+        )
+        assertTrue(
+            fastPathBlock.contains("pre_recording_overhead_ms"),
+            "fast dictation start should expose non-CoreAudio overhead for future autoeval runs"
+        )
+        assertTrue(
             fastPathBlock.contains("dictation_fast_start_fell_back_to_wait"),
             "fast dictation start fallback should emit a local proof event"
+        )
+    }
+
+    runSuite("Repo command contract - forced dictation recovery preempts refresh churn") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let forcedRecoveryBlock = sourceSlice(
+            contents,
+            from: "func startForcedRecovery(appState: TranscriptedAppState, reason: String) -> Bool",
+            to: "func cancelIfTimedOut(now: TimeInterval) -> DictationReadinessRefreshTimeout?"
+        )
+
+        assertTrue(
+            forcedRecoveryBlock.contains("operation != \"force_input_recovery\""),
+            "hard dictation input recovery should leave an existing hard recovery alone"
+        )
+        assertTrue(
+            forcedRecoveryBlock.contains("cancel()"),
+            "hard dictation input recovery should preempt lower-priority readiness refresh churn"
+        )
+    }
+
+    runSuite("Repo command contract - dictation stop path emits paste latency proof") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        assertTrue(
+            contents.contains("DictationStopTiming(requestedAt: stopRequestedAt)")
+                && contents.contains("stopTiming.micStoppedAt")
+                && contents.contains("stopTiming.transcriptionStartedAt")
+                && contents.contains("stopTiming.pastedAt")
+                && contents.contains("stopTiming.savedAt"),
+            "dictation stop path should mark the critical stages from stop through paste and save"
+        )
+        assertTrue(
+            contents.contains("dictation_stop_latency_measured")
+                && contents.contains("stop_to_paste_ms")
+                && contents.contains("stop_to_done_ms"),
+            "dictation stop path should emit local raw stop latency measurements"
+        )
+        assertTrue(
+            contents.contains("AnalyticsReporter.latencyBucket(milliseconds:")
+                && contents.contains("\"stop_to_paste_bucket\"")
+                && contents.contains("\"stop_to_done_bucket\""),
+            "dictation stop analytics should send coarse latency buckets instead of raw milliseconds"
+        )
+    }
+
+    runSuite("Repo command contract - dictation Auto Enter stays after paste readiness") {
+        let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let saveBeforeAutoEnterBlock = sourceSlice(
+            contents,
+            from: "case .saveBeforeAutoEnter:",
+            to: "let wordCount = text.split"
+        )
+        let saveTaskRange = saveBeforeAutoEnterBlock.range(of: "let saveTask = self.startPersistingDictationTranscript")
+        let autoEnterRange = saveBeforeAutoEnterBlock.range(of: "autoSendOutcome = await self.performAutoEnterIfNeeded")
+        let finishSaveRange = saveBeforeAutoEnterBlock.range(of: "saveFailureMessage = await self.finishPersistingDictationTranscript")
+
+        assertTrue(
+            saveTaskRange != nil
+                && autoEnterRange != nil
+                && finishSaveRange != nil
+                && saveTaskRange!.lowerBound < autoEnterRange!.lowerBound
+                && autoEnterRange!.lowerBound < finishSaveRange!.lowerBound,
+            "default stop finalization should start saving, wait/send Auto Enter, then await the save result"
+        )
+
+        let autoEnterBlock = sourceSlice(
+            contents,
+            from: "private func performAutoEnterIfNeeded(",
+            to: "@discardableResult"
+        )
+        let delayRange = autoEnterBlock.range(of: "Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)")
+        let readinessRange = autoEnterBlock.range(of: "await textPaster.waitForClipboardReadyForAutoEnter()")
+        let sendRange = autoEnterBlock.range(of: "return autoSender.send(DictationAutoSendPreferences.sendKey())")
+
+        assertTrue(
+            delayRange != nil
+                && readinessRange != nil
+                && sendRange != nil
+                && delayRange!.lowerBound < readinessRange!.lowerBound
+                && readinessRange!.lowerBound < sendRange!.lowerBound,
+            "Auto Enter should sleep briefly, wait for clipboard read/readiness, then send the follow-up key"
+        )
+    }
+
+    runSuite("Repo command contract - audio sample flow start stays measurable") {
+        let contents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        assertTrue(
+            contents.contains("start_to_first_sample_ms"),
+            "audio_samples_detected should include start-to-first-buffer latency for dictation start autoevals"
+        )
+    }
+
+    runSuite("Repo command contract - dictation audio start exposes stage timings") {
+        let contents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        assertTrue(
+            contents.contains("dictation_audio_start_timing"),
+            "dictation start autoevals need a local stage-timing event"
+        )
+        assertTrue(
+            contents.contains("audio_input_snapshot_read_ms")
+                && contents.contains("audio_tap_install_ms")
+                && contents.contains("audio_engine_start_ms"),
+            "stage timing should cover audio snapshot read, tap install, and engine start"
+        )
+    }
+
+    runSuite("Repo command contract - dictation honors the shared mic boost preference") {
+        let contents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        let startBlock = sourceSlice(
+            contents,
+            from: "private func installTapAndStartEngine",
+            to: "private func removeRecordingTap"
+        )
+
+        guard
+            let preferenceRead = startBlock.range(of: "MicrophoneProcessingPreferences.isVoiceProcessingEnabled()"),
+            let applyCall = startBlock.range(of: "Self.applyDictationVoiceProcessingPreference"),
+            let tapInstall = startBlock.range(of: "inputNode.installTap(onBus: 0")
+        else {
+            assertionFailure("Dictation start should read the shared mic-processing preference before installing the tap")
+            return
+        }
+
+        assertTrue(
+            preferenceRead.lowerBound < applyCall.lowerBound && applyCall.lowerBound < tapInstall.lowerBound,
+            "dictation should apply the accepted meeting mic boost before recording audio"
+        )
+        assertTrue(
+            contents.contains("dictation_voice_processing_unavailable"),
+            "dictation should report VPIO setup failures without blocking recording"
         )
     }
 
@@ -1233,6 +1883,40 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - degraded meeting Sentry context stays bucketed") {
+        let contents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let reportBlock = sourceSlice(
+            contents,
+            from: "private func reportCaptureHealthIfNeeded(",
+            to: "private func trackSavedTranscriptAnalyticsInBackground("
+        )
+
+        assertTrue(
+            reportBlock.contains("context[\"gap_count_bucket\"] = AnalyticsReporter.countBucket(healthInfo.audioGaps)"),
+            "degraded meeting Sentry events should preserve coarse gap counts"
+        )
+        assertTrue(
+            reportBlock.contains("context[\"route_change_count_bucket\"] = AnalyticsReporter.countBucket(healthInfo.deviceSwitches)"),
+            "degraded meeting Sentry events should preserve coarse route-change counts"
+        )
+        assertTrue(
+            reportBlock.contains("context.removeValue(forKey: \"gap_count\")"),
+            "raw gap counts inherited from capture diagnostics should be stripped before Sentry context"
+        )
+        assertTrue(
+            reportBlock.contains("context.removeValue(forKey: \"route_change_count\")"),
+            "raw route-change counts inherited from capture diagnostics should be stripped before Sentry context"
+        )
+        assertFalse(
+            reportBlock.contains("context[\"gap_count\"] ="),
+            "raw gap counts should stay out of degraded meeting Sentry context"
+        )
+        assertFalse(
+            reportBlock.contains("context[\"route_change_count\"] ="),
+            "raw route-change counts should stay out of degraded meeting Sentry context"
+        )
+    }
+
     runSuite("Repo command contract - queued meetings recover unloaded models before transcription") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let downloaderContents = readRepoTextFile("Sources/Meeting/MeetingModelDownloader.swift")
@@ -1354,6 +2038,38 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - failed audio compression reschedules queue changes") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let schedulerBlock = sourceSlice(
+            controllerContents,
+            from: "private func scheduleFailedAudioCompression(",
+            to: "private extension MeetingSessionController.State"
+        )
+        let retryBlock = sourceSlice(
+            controllerContents,
+            from: "func retryFailedMeeting(id: UUID) -> Bool",
+            to: "Task { [weak self] in"
+        )
+
+        assertTrue(
+            controllerContents.contains("failedAudioCompressionNeedsReschedule"),
+            "failed audio compression should track queue changes that arrive during an active pass"
+        )
+        assertTrue(
+            schedulerBlock.contains("failedAudioCompressionNeedsReschedule = true"),
+            "an active compression pass should mark that the failed queue needs another scan"
+        )
+        assertTrue(
+            schedulerBlock.contains("self.scheduleFailedAudioCompression(for: self.failedManager.failedTranscriptions)"),
+            "compression completion should re-check the latest failed queue before going idle"
+        )
+        assertTrue(
+            retryBlock.contains("failedAudioCompressionTask?.cancel()")
+                && !retryBlock.contains("failedAudioCompressionTask = nil"),
+            "retry should cancel active failed-audio compression without allowing a concurrent rescan before cleanup finishes"
+        )
+    }
+
     runSuite("Repo command contract - stop-timeout failed meetings refresh Home immediately") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let timeoutBlock = sourceSlice(
@@ -1377,8 +2093,19 @@ func testRepoCommandContract() {
         )
         assertTrue(
             controllerContents.contains("refreshTimedOutFailedMeetingAudio(")
-                && controllerContents.contains("updateFailedTranscriptionAudio("),
-            "late WAV finalization should refresh the failed queue so retries do not point at deleted mic recovery segments"
+                && controllerContents.contains("promoteFinalizedFailedTranscriptionAudio("),
+            "late WAV finalization should promote finalized failed audio before refreshing the failed queue"
+        )
+        let refreshTimedOutAudioBlock = sourceSlice(
+            controllerContents,
+            from: "private func refreshTimedOutFailedMeetingAudio(",
+            to: "private func refreshFailedMeetings("
+        )
+        assertTrue(
+            refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
+                && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
+                && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL"),
+            "late finalization should still promote system-only failed audio by reusing the failed queue mic placeholder"
         )
         assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),
@@ -1482,6 +2209,36 @@ func testRepoCommandContract() {
         assertTrue(
             terminationBlock.contains("activeQueuedTranscriptionJobID = nil"),
             "shutdown preservation should clear the active queued job owner used for live sidecar final attachment"
+        )
+        assertTrue(
+            terminationBlock.contains("let shutdownFailedTaskId = UUID()")
+                && terminationBlock.contains("capture.stopAndAwaitFiles {")
+                && terminationBlock.contains("refreshTimedOutFailedMeetingAudio("),
+            "shutdown stop timeouts should keep the same late-finalization repair path as normal meeting stops"
+        )
+        assertTrue(
+            terminationBlock.contains("taskId: shutdownFailedTaskId")
+                && terminationBlock.contains("archiveAudio: !files.didTimeOut"),
+            "shutdown stop timeouts should keep unfinished scratch audio in place until late finalization can promote it"
+        )
+    }
+
+    runSuite("Repo command contract - transcription cancellation clears live sidecar waits") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let cancelBlock = sourceSlice(
+            controllerContents,
+            from: "func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {",
+            to: "func prepareForTermination() async {"
+        )
+
+        assertTrue(
+            cancelBlock.contains("if liveCodexSessionAwaitingFinalTranscript")
+                && cancelBlock.contains("finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)"),
+            "cancelling the owning transcription should fail the pending live sidecar handoff instead of leaving agents waiting forever"
+        )
+        assertTrue(
+            cancelBlock.contains("activeQueuedTranscriptionJobID = nil"),
+            "transcription cancellation should clear the queued job owner used for live sidecar final attachment"
         )
     }
 
@@ -1593,7 +2350,7 @@ func testRepoCommandContract() {
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let needsAttentionBlock = sourceSlice(
             settingsContents,
-            from: "private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {",
+            from: "private var homeAttentionIssues: [HomeAttentionIssue] {",
             to: "private var homeMeetingDaySections:"
         )
 
@@ -1699,8 +2456,123 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - replacement retranscription cancellation keeps original transcript") {
+        let runnerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner.swift")
+        let managerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+
+        assertTrue(
+            managerContents.contains("targetTranscriptURL: replacementTranscriptURL")
+                && managerContents.contains("archiveRecordingAudio: replacementTranscriptURL == nil"),
+            "saved-audio replacement should overwrite the selected transcript without archiving duplicate retained audio"
+        )
+        assertTrue(
+            runnerContents.contains("let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: targetTranscriptURL)")
+                && runnerContents.contains("let transcriptId = replacementTranscriptRollback?.transcriptId ?? UUID()"),
+            "replacement retranscription should snapshot the selected transcript and reuse its existing ID"
+        )
+        assertTrue(
+            runnerContents.contains("replacementTranscriptRollback: replacementTranscriptRollback")
+                && runnerContents.contains("replacementTranscriptRollback.restore()"),
+            "replacement retranscription cancellation should restore the selected original transcript"
+        )
+        assertTrue(
+            runnerContents.contains("let originalFileDates = OriginalFileDates.capture(for: targetURL)")
+                && runnerContents.contains("originalFileDates?.restore(to: url)"),
+            "replacement retranscription rollback should preserve the selected transcript's file dates for Home ordering"
+        )
+        assertTrue(
+            runnerContents.contains("speakerClipURLs: namingEntries.map(\\.clipURL),\n                deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,\n                replacementTranscriptRollback: replacementTranscriptRollback"),
+            "replacement retranscription cancellation during speaker clip extraction should restore the selected original transcript"
+        )
+        assertTrue(
+            runnerContents.contains("if deleteSavedTranscript {")
+                && runnerContents.contains("try? FileManager.default.removeItem(at: savedURL)"),
+            "new cancelled transcripts should still be removed when they are not replacing an existing file"
+        )
+    }
+
+    runSuite("Repo command contract - replacement stats do not double-count existing recordings") {
+        let statsContents = readRepoTextFile("Sources/TranscriptedCore/Stats/StatsDatabase.swift")
+
+        assertTrue(
+            statsContents.contains("let existing = recordingMetadataImpl(id: metadata.id)\n                ?? recordingMetadataImpl(transcriptPath: metadata.transcriptPath)")
+                && statsContents.contains("updateDailyActivityForSessionChange(from: existing, to: storedMetadata)"),
+            "stats recording should detect same-ID and same-path replacements before updating daily totals"
+        )
+        assertTrue(
+            statsContents.contains("recordingCountDelta: 0")
+                && statsContents.contains("durationDelta: metadata.durationSeconds - existing.durationSeconds"),
+            "same-day replacement stats should adjust duration without incrementing recording count"
+        )
+    }
+
+    runSuite("Repo command contract - replacement retranscription clears stale local summaries") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let managerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let summaryContents = readRepoTextFile("Sources/Meeting/LocalMeetingSummarizer.swift")
+
+        assertTrue(
+            managerContents.contains("onReplacementTranscriptCommitted")
+                && managerContents.contains("if replacementTranscriptURL != nil {\n                        onReplacementTranscriptCommitted?(transcriptURL)"),
+            "Core should notify the app after a replacement transcript commits"
+        )
+        assertTrue(
+            controllerContents.contains("onReplacementTranscriptCommitted:")
+                && controllerContents.contains("handleReplacementTranscriptCommitted")
+                && controllerContents.contains("savedMeetingReplacementCommitCount &+= 1"),
+            "saved-meeting replacement should clear stale local summary sidecars and emit a same-URL refresh signal after commit"
+        )
+        assertTrue(
+            settingsContents.contains(".onChange(of: meetingSession.savedMeetingReplacementCommitCount)")
+                && settingsContents.contains("speakerPeopleModel.refresh()"),
+            "Settings Home should refresh meeting rows and speaker review state after same-URL replacement retranscription"
+        )
+        assertTrue(
+            summaryContents.contains("static func removeGeneratedSummary")
+                && summaryContents.contains("values[\"capture_type\"] == \"meeting_summary\"")
+                && summaryContents.contains("values[\"source_transcript\"] == transcriptURL.lastPathComponent"),
+            "local summary cleanup should only remove generated summaries for the matching transcript"
+        )
+    }
+
+    runSuite("Repo command contract - Home failed meeting actions surface failures") {
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let managerContents = readRepoTextFile("Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift")
+
+        assertTrue(
+            controllerContents.contains("func retryFailedMeeting(id: UUID) -> Bool"),
+            "failed-meeting retry should report whether the retry started"
+        )
+        assertTrue(
+            controllerContents.contains("func dismissFailedMeeting(id: UUID) -> Bool")
+                && controllerContents.contains("func deleteFailedMeeting(id: UUID) -> Bool"),
+            "failed-meeting clear actions should report whether the queue changed"
+        )
+        assertTrue(
+            managerContents.contains("public func removeFailedTranscription(id: UUID) -> Bool")
+                && managerContents.contains("public func deleteFailedTranscription(id: UUID) -> Bool"),
+            "failed-queue manager deletes should return persistence results instead of fire-and-forget"
+        )
+        assertTrue(
+            settingsContents.contains("retryFailedMeeting(item)")
+                && settingsContents.contains("let didStart = meetingSession.retryFailedMeeting(id: item.id)")
+                && settingsContents.contains("title: \"Could not retry meeting\""),
+            "Home retry clicks should surface immediate retry blockers"
+        )
+        assertTrue(
+            settingsContents.contains("let didClear: Bool")
+                && settingsContents.contains("didClear = meetingSession.deleteFailedMeeting(id: item.id)")
+                && settingsContents.contains("didClear = meetingSession.dismissFailedMeeting(id: item.id)")
+                && settingsContents.contains("if !didClear"),
+            "Home delete/dismiss clicks should surface failed queue updates"
+        )
+    }
+
     runSuite("Repo command contract - Paste Last Dictation uses the paste target guard") {
         let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
+        let shortcutContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarShortcutsView.swift")
         let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
 
         assertTrue(
@@ -1712,6 +2584,12 @@ func testRepoCommandContract() {
             appContents.contains("let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)")
                 && appContents.contains("settingsTextPaster.paste(latestText, target: pasteTarget)"),
             "settings Paste Last Dictation should use the same focus guard as normal dictation paste"
+        )
+        assertTrue(
+            shortcutContents.contains("var onPasteLastDictation: (() -> Void)?")
+                && shortcutContents.contains("self.onPasteLastDictation?()")
+                && !shortcutContents.contains("pasteLastDictationRow.onPrimaryAction = {}"),
+            "shortcut-panel Paste Last Dictation should invoke the paste action instead of an empty primary action"
         )
     }
 
@@ -1782,11 +2660,13 @@ func testRepoCommandContract() {
         let featureTemplate = readRepoTextFile(".github/ISSUE_TEMPLATE/feature_request.md")
         let prTemplate = readRepoTextFile(".github/PULL_REQUEST_TEMPLATE.md")
         let repoHygieneWorkflow = readRepoTextFile(".github/workflows/repo-hygiene.yml")
-        let qaGateAutoClose = readRepoTextFile(".github/workflows/qa-gate-auto-close-bet88.yml")
+        let workflow = readRepoTextFile("WORKFLOW.md")
+        let orchestration = readRepoTextFile("docs/agent-issue-orchestration.md")
 
         assertTrue(
             matrix.contains("\".github/**\"")
                 && matrix.contains("\"WORKFLOW.md\"")
+                && matrix.contains("\"Tools/README.md\"")
                 && matrix.contains("\"scripts/dev/agent-preflight.sh\"")
                 && matrix.contains("ruby -c scripts/ops/agent-todo-runner.rb")
                 && matrix.contains("bash -n scripts/ops/qa-gate-check.sh"),
@@ -1795,6 +2675,7 @@ func testRepoCommandContract() {
         assertTrue(
             preflight.contains("\".github/*\"")
                 && preflight.contains("\"WORKFLOW.md\"")
+                && preflight.contains("\"Tools/README.md\"")
                 && preflight.contains("\"scripts/dev/agent-preflight.sh\"")
                 && preflight.contains("ruby -c scripts/ops/agent-todo-runner.rb")
                 && preflight.contains("bash -n scripts/ops/qa-gate-check.sh"),
@@ -1806,13 +2687,22 @@ func testRepoCommandContract() {
             "agent issue template should make the manual queue label explicit"
         )
         assertTrue(
+            agentTemplate.contains("Activation / saved artifacts / agent payoff")
+                && agentTemplate.contains("docs/activation-lane.md")
+                && agentTemplate.contains("COORD_DONE: GREEN/BRIEF/RED"),
+            "agent issue template should make lane selection and coordinator closeout explicit"
+        )
+        assertTrue(
             bugTemplate.contains("Please redact transcripts, audio, meeting titles, speaker names, emails, tokens")
                 && featureTemplate.contains("Please do not include private transcripts, audio, meeting titles, speaker names"),
             "public issue templates should put privacy redaction guidance where users attach diagnostics"
         )
         assertTrue(
             prTemplate.contains("`scripts/dev/agent-preflight.sh`")
+                && prTemplate.contains("Selected checks from `.agents/test-matrix.yml`")
                 && prTemplate.contains("`swift test` if I touched `Package.swift`, `Sources/TranscriptedCore/`, or the public core seam")
+                && prTemplate.contains("Lane: `activation` / `dictation reliability` / `meeting reliability` / `release ops` / `agent workflow`")
+                && prTemplate.contains("COORD_DONE: GREEN/BRIEF/RED")
                 && prTemplate.contains("Agent PRs link the issue/workpad")
                 && prTemplate.contains("No private transcripts, audio, tokens, personal paths, or customer data"),
             "PR template should point reviewers at preflight, core package checks, agent review evidence, and privacy review"
@@ -1820,14 +2710,66 @@ func testRepoCommandContract() {
         assertTrue(
             repoHygieneWorkflow.contains("on:\n  pull_request:")
                 && repoHygieneWorkflow.contains("bash scripts/dev/agent-preflight.sh origin/main")
-                && repoHygieneWorkflow.contains("ruby -c scripts/ops/agent-todo-runner.rb")
-                && repoHygieneWorkflow.contains("python3 -m py_compile scripts/ops/nightly-security-check.py"),
-            "repo should have a lightweight pull_request hygiene workflow for repo plumbing"
+                && repoHygieneWorkflow.contains("find scripts -name '*.rb' -print0 | xargs -0 -n1 ruby -c")
+                && repoHygieneWorkflow.contains("find scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile"),
+            "repo should have a lightweight pull_request hygiene workflow that syntax-checks every script via globs, not a hand-maintained list"
         )
         assertTrue(
-            qaGateAutoClose.contains("contains(github.event.issue.labels.*.name, 'qa-gate-auto-close')")
-                && !qaGateAutoClose.contains("child_issue_number"),
-            "old BET-88 auto-close workflow should be label-gated and should not mutate a hard-coded child issue"
+            workflow.contains("symphony-workspaces` folder name is historical")
+                && orchestration.contains("symphony-workspaces` name is historical"),
+            "agent issue workflow docs should explain the historical local workspace folder name"
+        )
+    }
+
+    runSuite("Repo command contract - activation lane and closeout docs stay linked") {
+        let agentStart = readRepoTextFile("AGENT_START.md")
+        let onboarding = readRepoTextFile("docs/agent-onboarding.md")
+        let repoLayout = readRepoTextFile("docs/repo-layout.md")
+        let activation = readRepoTextFile("docs/activation-lane.md")
+        let closeout = readRepoTextFile("docs/agent-closeout.md")
+        let workflow = readRepoTextFile("WORKFLOW.md")
+        let agents = readRepoTextFile("AGENTS.md")
+        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
+
+        assertTrue(
+            agentStart.contains("Activation/artifacts/agent payoff - `docs/activation-lane.md`")
+                && agentStart.contains("Bluetooth/AirPods dictation")
+                && agentStart.contains("Zoom/Meet prompts")
+                && agentStart.contains("Pasteback/clipboard/Auto Enter"),
+            "agent start should route common current product lanes to the right docs"
+        )
+        assertTrue(
+            onboarding.contains("## Choose The Lane")
+                && onboarding.contains("docs/activation-lane.md")
+                && onboarding.contains("docs/agent-closeout.md"),
+            "agent onboarding should tell workers how to classify vague work before editing"
+        )
+        assertTrue(
+            repoLayout.contains("docs/activation-lane.md")
+                && repoLayout.contains("docs/agent-closeout.md")
+                && repoLayout.contains("docs/agent-connect.md")
+                && repoLayout.contains("Casks/")
+                && repoLayout.contains("Dated audit and autoeval docs in `docs/` are point-in-time evidence"),
+            "repo layout should list activation, handoff, agent-connect, Homebrew, and point-in-time audit surfaces"
+        )
+        assertTrue(
+            onboarding.contains("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
+                && onboarding.contains("Sources/TranscriptedCore/Audio/Audio.swift"),
+            "agent onboarding should flag the large Core coordination files alongside the app mega-files"
+        )
+        assertTrue(
+            activation.contains("saved Markdown -> agent use -> return")
+                && activation.contains("Sources/Observability/ActivationTelemetry.swift")
+                && activation.contains("Do not claim activation is fixed from artifact volume alone"),
+            "activation lane doc should keep product payoff and privacy-safe measurement explicit"
+        )
+        assertTrue(
+            closeout.contains("COORD_DONE: GREEN/BRIEF/RED")
+                && agents.contains("COORD_DONE: GREEN/BRIEF/RED")
+                && preflight.contains("COORD_DONE: GREEN/BRIEF/RED")
+                && closeout.contains("delete branches, close issues")
+                && workflow.contains("docs/agent-closeout.md"),
+            "closeout docs and workflow should keep delegated handoff and GitHub mutation boundaries explicit"
         )
     }
 
@@ -1918,8 +2860,9 @@ func testRepoCommandContract() {
         let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         assertTrue(
-            homeContents.contains("Label(\"View stats\", systemImage: \"info.circle\")"),
-            "home stats should keep a visible View stats action"
+            homeContents.contains("transcripted.home.stats.view")
+                && homeContents.contains(".help(\"View all stats\")"),
+            "the home stats line should stay a labeled, scriptable stats affordance"
         )
         assertTrue(
             homeContents.contains("let onViewStats: () -> Void")
@@ -1934,6 +2877,63 @@ func testRepoCommandContract() {
                 || homeContents.contains(".sheet(isPresented: $isShowingDetails")
                 || homeContents.contains(".popover(isPresented: $isShowingDetails"),
             "home stats badge should not own its own details presentation state"
+        )
+    }
+
+    runSuite("Repo command contract - Home meeting deletion hashes audio only after metadata candidates") {
+        let deletionContents = readRepoTextFile("Sources/UI/Shared/HomeMeetingDeletion.swift")
+        let duplicateBlock = sourceSlice(
+            deletionContents,
+            from: "private static func duplicateRetainedAudioMeetings",
+            to: "private static func isAppOwnedMeetingTranscript"
+        )
+        let preScanBlock = sourceSlice(
+            deletionContents,
+            from: "private static func duplicateRetainedAudioMeetings",
+            to: "let meetingsDirectory"
+        )
+
+        assertFalse(
+            preScanBlock.contains("audioSignature(for: selectedAudio)"),
+            "Home delete should not hash selected retained audio before checking app-owned same-title candidates"
+        )
+        assertTrue(
+            duplicateBlock.contains("var candidates: [(URL, MeetingAudioAttachment)]")
+                && duplicateBlock.contains("guard !candidates.isEmpty,\n              let selectedSignature = audioSignature(for: selectedAudio)"),
+            "Home delete should collect cheap metadata candidates before hashing retained audio"
+        )
+    }
+
+    runSuite("Repo command contract - Home meeting deletion runs off the Settings UI path") {
+        let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let deleteBlock = sourceSlice(
+            settingsContents,
+            from: "private func deleteMeeting(_ item: RecentMeetingItem)",
+            to: "private func failedMeetingAudioAttachment"
+        )
+
+        assertTrue(
+            deleteBlock.contains("HomeMeetingDeletion.plan(for: item)")
+                && deleteBlock.contains("MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))"),
+            "Home delete should stop retained-audio playback only when the active attachment is part of the planned deletion"
+        )
+        assertTrue(
+            deleteBlock.contains("Task.detached(priority: .userInitiated)") &&
+                deleteBlock.contains("try HomeMeetingDeletion.delete(plan)") &&
+                deleteBlock.contains("_ = try await deletionTask.value"),
+            "Home delete should run filesystem cleanup away from the main Settings UI path"
+        )
+        assertTrue(
+            homeContents.contains("func removeVisibleMeeting(id: String)")
+                && deleteBlock.contains("homeViewModel.removeVisibleMeeting(id: item.id)")
+                && deleteBlock.contains("if homeMeetingPreview?.transcriptURL == item.transcriptURL"),
+            "confirmed Home delete should immediately close stale preview state and remove the visible meeting row before the filesystem refresh"
+        )
+        assertTrue(
+            deleteBlock.contains("} catch {\n                refreshRecentCaptures(force: true)")
+                && deleteBlock.contains("presentHomeDeleteFailure("),
+            "failed Home delete should force a reload so an optimistically hidden row is restored with a visible error"
         )
     }
 

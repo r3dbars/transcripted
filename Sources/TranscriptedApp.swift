@@ -6,6 +6,7 @@ import AppKit
 import AVFoundation
 import Carbon
 import Combine
+import Darwin
 import TranscriptedCore
 import UniformTypeIdentifiers
 
@@ -185,6 +186,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.start()
             appState.contextCapture.onMeetingToggle = { [weak self] in
                 self?.meetingOverlayController.toggleFromHotkey()
+            }
+            appState.contextCapture.onPasteLastDictation = { [weak self] in
+                self?.pasteLastDictationFromSettings()
             }
             SpeakerNamingSheet.shared.observe(taskManager: meetingSession.taskManager)
         }
@@ -424,6 +428,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         button.image = image
         button.imagePosition = .imageOnly
         button.toolTip = "Transcripted"
+        button.identifier = NSUserInterfaceItemIdentifier("transcripted.status-item.button")
+        button.setAccessibilityIdentifier("transcripted.status-item.button")
+        button.setAccessibilityLabel("Transcripted")
         button.action = #selector(togglePopover)
         button.target = self
 
@@ -457,6 +464,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
               !reportPath.isEmpty else {
             return
         }
+        defer {
+            scheduleLaunchUISmokeTerminationIfRequested(environment: environment)
+        }
 
         let smokeMenuVisibility = Dictionary(uniqueKeysWithValues: MenuBarOptionalItem.allCases.map { ($0, true) })
         let report = menuPanelController.launchUISmokeReport(
@@ -477,6 +487,18 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             try encoder.encode(report).write(to: reportURL, options: .atomic)
         } catch {
             NSLog("Failed to write launch UI smoke report: \(error.localizedDescription)")
+        }
+    }
+
+    private func scheduleLaunchUISmokeTerminationIfRequested(environment: [String: String]) {
+        guard environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT"] == "1" else { return }
+
+        let delay = environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_DELAY_SECONDS"]
+            .flatMap(Double.init)
+            .map { max(0, $0) } ?? 5
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            Darwin.exit(0)
         }
     }
 

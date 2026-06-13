@@ -127,6 +127,48 @@ final class ValidatorTests: XCTestCase {
         })
     }
 
+    func testTranscriptValidatorIgnoresLocalSummarySidecars() throws {
+        try """
+        ---
+        capture_type: meeting_summary
+        source_transcript: "Call_2026-04-18_14-43-40.md"
+        summary_model: mlx-community/gemma-4-12B-it-4bit
+        ---
+        ## Summary
+        Local summary text.
+        """.write(
+            to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.summary.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        ---
+        title: "Call"
+        date: "2026-04-18"
+        time: "14:43:40"
+        duration: "600"
+        transcription_engine: "parakeet_local"
+        diarization_engine: "pyannote_offline"
+        sources: [mic, system_audio]
+        capture_quality: "excellent"
+        mic_utterances: "1"
+        system_utterances: "1"
+        total_word_count: "12"
+        ---
+        ## Transcript
+        Speaker 1: Hello.
+        """.write(
+            to: tempRoot.appendingPathComponent("Call_2026-04-18_14-43-40.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let results = TranscriptValidator(directory: tempRoot).validate()
+
+        XCTAssertFalse(results.contains { $0.target == "Call_2026-04-18_14-43-40.summary.md" })
+        XCTAssertFalse(results.contains { $0.status == .fail })
+    }
+
     func testLogValidatorAcceptsStableJSONLFields() throws {
         let logURL = tempRoot.appendingPathComponent("app.jsonl")
         try """
@@ -166,6 +208,42 @@ final class ValidatorTests: XCTestCase {
             ValidationReport(results: [.fail("bad", target: "fixture", detail: "broken")]).exitCode,
             1
         )
+    }
+
+    func testUIAutomationSmokeReportExitCodesSeparateIncompleteFromFailure() {
+        var incompleteBuilder = UIAutomationSmokeReportBuilder(
+            runID: "fixture",
+            appBundlePath: "build/Transcripted.app",
+            reportPath: nil
+        )
+        incompleteBuilder.add(.pass("app-bundle", "Built app bundle exists", target: "build/Transcripted.app"))
+        incompleteBuilder.add(.incomplete(
+            "accessibility-permission",
+            "Automation runner has Accessibility access",
+            target: "macOS Accessibility",
+            detail: "blocked"
+        ))
+
+        let incompleteReport = incompleteBuilder.build(generatedAt: Date(timeIntervalSince1970: 1_777_777_777))
+        XCTAssertEqual(incompleteReport.status, .incomplete)
+        XCTAssertEqual(incompleteReport.exitCode, 3)
+
+        var failedBuilder = UIAutomationSmokeReportBuilder(
+            runID: "fixture",
+            appBundlePath: "build/Transcripted.app",
+            reportPath: nil
+        )
+        failedBuilder.add(.pass("app-bundle", "Built app bundle exists", target: "build/Transcripted.app"))
+        failedBuilder.add(.fail(
+            "menu-identifiers",
+            "Menu bar popover exposes core controls",
+            target: "menubar",
+            detail: "missing controls"
+        ))
+
+        let failedReport = failedBuilder.build(generatedAt: Date(timeIntervalSince1970: 1_777_777_777))
+        XCTAssertEqual(failedReport.status, .fail)
+        XCTAssertEqual(failedReport.exitCode, 1)
     }
 
     func testValidationReportJSONIncludesAutomationSummaryAndFingerprints() throws {

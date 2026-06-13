@@ -36,7 +36,12 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
     }
 
     var supportsRuntimeOnlyPrompt: Bool {
-        supportsNativeRuntimePrompt && self != .teams
+        switch self {
+        case .zoom, .teams, .googleMeet:
+            return false
+        case .webex, .facetime:
+            return supportsNativeRuntimePrompt
+        }
     }
 
     var displayName: String {
@@ -110,8 +115,9 @@ struct MeetingPromptBackoffDecision: Equatable {
 }
 
 enum MeetingPromptWindowPolicy {
-    static func shouldOfferCalendarPrompt(startsIn: TimeInterval) -> Bool {
-        (-MeetingPromptHeuristics.calendarReminderPostStartGrace ... MeetingPromptHeuristics.calendarReminderLeadTime)
+    static func shouldOfferCalendarPrompt(startsIn: TimeInterval, endsIn: TimeInterval) -> Bool {
+        guard endsIn > 0 else { return false }
+        return (-MeetingPromptHeuristics.calendarReminderPostStartGrace ... MeetingPromptHeuristics.calendarReminderLeadTime)
             .contains(startsIn)
     }
 }
@@ -429,7 +435,8 @@ enum MeetingPromptSyntheticEvaluator {
               let provider = provider(for: meetingURL) else { return nil }
 
         let startsIn = event.startDate.timeIntervalSince(now)
-        guard MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(startsIn: startsIn) else { return nil }
+        let endsIn = event.endDate.timeIntervalSince(now)
+        guard MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(startsIn: startsIn, endsIn: endsIn) else { return nil }
 
         let eventTitle = suggestedTranscriptTitle(from: event) ?? "Upcoming meeting"
         let transcriptTitle = suggestedTranscriptTitle(from: event)

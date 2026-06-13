@@ -148,32 +148,41 @@ final class MeetingOverlayRootView: NSView {
     private let audioWaveform = DualWaveformHostView(frame: .zero)
     private let recordButton = NSButton()
     private let remindButton = NSButton()
-    private let cancelButton = NSButton()
     private let closeButton = NSButton()
-    private let chevronButton = NSButton()
+    private let pillBodyView = MeetingPillBodyView(frame: .zero)
+    private let transcriptDrawer = MeetingLiveTranscriptDrawerView(frame: .zero)
     private let warmupTitleLabel = NSTextField(labelWithString: "Getting Transcripted ready")
     private let warmupSubtitleLabel = NSTextField(labelWithString: "Loading dictation and meeting models")
     private let warmupProgress = NSProgressIndicator()
     private var currentState: MeetingOverlayController.OverlayState = .idle
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
-    private let cancelTooltip = "Cancel meeting recording"
     private let finishTooltip = "Finish and transcribe"
     private let dismissPromptTooltip = "Dismiss meeting prompt"
     private let remindPromptTooltip = "Remind me soon"
     private let startTooltip = "Start meeting recording"
-    private let minimizeTooltip = "Minimize meeting widget"
-    private let expandTooltip = "Expand meeting widget"
     private var tooltipPanel: MeetingOverlayTooltipPanel?
     private var tooltipTask: Task<Void, Never>?
     private var tooltipTrackingAreas: [NSTrackingArea] = []
-    private var isRecordingMinimized = false
+    private var lastTooltipAreaSignature: String?
+    private var panelHoverTrackingArea: NSTrackingArea?
+    private var isCondensed = false
+    private var lastStripFadeAt = Date.distantPast
+    private var currentLiveViewAffordance: MeetingLiveViewAffordancePolicy.Affordance?
+    private var isTranscriptExpanded = false
+    private var isDrawerVisible = false
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
     var onRemindAction: (() -> Void)?
-    var onCancelAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
-    var onToggleMinimized: (() -> Void)?
+    var onLiveViewAction: (() -> Void)?
+    var onLiveViewBrowserAction: (() -> Void)?
+    var onCopyTranscriptAction: (() -> Void)?
+    var onDrawerResizeBegan: (() -> Void)?
+    var onDrawerResizeChanged: ((CGFloat) -> Void)?
+    var onDrawerResizeEnded: (() -> Void)?
+    var onPanelHoverChanged: ((Bool) -> Void)?
+    var onStripMenuRequested: (() -> NSMenu?)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -279,23 +288,15 @@ final class MeetingOverlayRootView: NSView {
         remindButton.isHidden = true
         addSubview(remindButton)
 
-        cancelButton.isBordered = false
-        cancelButton.wantsLayer = true
-        cancelButton.layer?.cornerRadius = MeetingOverlayTokens.cancelHeight / 2
-        cancelButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
-        cancelButton.layer?.borderWidth = 0.5
-        cancelButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
-        cancelButton.imageScaling = .scaleProportionallyDown
-        cancelButton.image = cancelButtonImage()
-        cancelButton.imagePosition = .imageOnly
-        cancelButton.contentTintColor = MeetingOverlayTokens.quietActionTint
-        cancelButton.toolTip = nil
-        cancelButton.setAccessibilityLabel(cancelTooltip)
-        cancelButton.setAccessibilityHelp("Shows a confirmation before discarding this meeting recording.")
-        cancelButton.target = self
-        cancelButton.action = #selector(handleCancelAction)
-        cancelButton.isHidden = true
-        addSubview(cancelButton)
+        // The pill body sits above the passive strip content (dot, timer,
+        // waveform) and below the real buttons, so clicking anywhere on the
+        // strip toggles the transcript while small drags still move the
+        // panel and the buttons stay clickable.
+        pillBodyView.onClick = { [weak self] in self?.onLiveViewAction?() }
+        pillBodyView.menuProvider = { [weak self] in self?.onStripMenuRequested?() }
+        pillBodyView.setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)
+        pillBodyView.isHidden = true
+        addSubview(pillBodyView)
 
         closeButton.attributedTitle = NSAttributedString(
             string: "Stop",
@@ -317,18 +318,30 @@ final class MeetingOverlayRootView: NSView {
         closeButton.isHidden = true
         addSubview(closeButton)
 
-        chevronButton.imageScaling = .scaleProportionallyDown
-        chevronButton.contentTintColor = MeetingOverlayTokens.chevronActionTint
-        chevronButton.isBordered = false
-        chevronButton.wantsLayer = true
-        chevronButton.layer?.cornerRadius = 0
-        chevronButton.layer?.backgroundColor = NSColor.clear.cgColor
-        chevronButton.layer?.borderWidth = 0
-        chevronButton.layer?.borderColor = nil
-        chevronButton.target = self
-        chevronButton.action = #selector(handleToggleMinimized)
-        chevronButton.isHidden = true
-        addSubview(chevronButton)
+        transcriptDrawer.isHidden = true
+        transcriptDrawer.alphaValue = 0
+        transcriptDrawer.onOpenInBrowser = { [weak self] in self?.onLiveViewBrowserAction?() }
+        transcriptDrawer.onCopyTranscript = { [weak self] in self?.onCopyTranscriptAction?() }
+        transcriptDrawer.onResizeDragBegan = { [weak self] in self?.onDrawerResizeBegan?() }
+        transcriptDrawer.onResizeDragChanged = { [weak self] delta in self?.onDrawerResizeChanged?(delta) }
+        transcriptDrawer.onResizeDragEnded = { [weak self] in self?.onDrawerResizeEnded?() }
+        addSubview(transcriptDrawer)
+
+        // Persistent whole-panel hover tracking drives the rest/bloom
+        // behavior; .inVisibleRect keeps it sized automatically across
+        // every panel resize so it never needs rebuilding.
+        let hoverArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(hoverArea)
+        panelHoverTrackingArea = hoverArea
+    }
+
+    func flashTranscriptCopyFeedback() {
+        transcriptDrawer.flashCopyFeedback()
     }
 
     override func layout() {
@@ -401,15 +414,6 @@ final class MeetingOverlayRootView: NSView {
             height: closeHeight
         )
 
-        // Chevron button remains hidden, but keep a frame for layout stability.
-        let chevronSize: CGFloat = 16
-        chevronButton.frame = NSRect(
-            x: closeButton.frame.minX - chevronSize - 6,
-            y: headerMidY - chevronSize / 2,
-            width: chevronSize,
-            height: chevronSize
-        )
-
         // Two waveform strips (mic top, system bottom) mirror the dictation
         // visualizer language, with small source labels for clarity.
         let labelX = timerLabel.frame.maxX + 12
@@ -447,22 +451,24 @@ final class MeetingOverlayRootView: NSView {
 
     private func layoutRecording() {
         let tokens = MeetingOverlayTokens.self
-        let midY = bounds.height / 2
 
-        if isRecordingMinimized {
-            layoutMinimizedRecording(midY: midY)
+        if isCondensed {
+            // Top-anchored like the full strip, so resting while the panel
+            // is still tall mid-animation stays continuous.
+            layoutCondensedRecording(
+                midY: bounds.height - tokens.condensedPillHeight / 2
+            )
             return
         }
 
-        cancelButton.frame = NSRect(
-            x: tokens.padLeft,
-            y: midY - tokens.cancelHeight / 2,
-            width: tokens.cancelHeight,
-            height: tokens.cancelHeight
-        )
+        // The recording strip always anchors to the top of the panel. When
+        // collapsed the panel *is* the strip, so the anchors coincide — and
+        // never branching on the drawer flag means the strip can't jump when
+        // the flag flips while the panel is still tall mid-animation.
+        let midY = bounds.height - tokens.panelHeight / 2
 
         statusDot.frame = NSRect(
-            x: cancelButton.frame.maxX + tokens.headerGap,
+            x: tokens.padLeft + 2,
             y: midY - tokens.dotSize / 2,
             width: tokens.dotSize,
             height: tokens.dotSize
@@ -483,79 +489,91 @@ final class MeetingOverlayRootView: NSView {
             height: tokens.stopHeight
         )
 
-        chevronButton.frame = NSRect(
-            x: closeButton.frame.minX - tokens.headerGap - tokens.toggleHeight,
-            y: midY - tokens.toggleHeight / 2,
-            width: tokens.toggleHeight,
-            height: tokens.toggleHeight
-        )
-
         let barsLeft = timerLabel.frame.maxX + tokens.headerGap
-        let barsRight = chevronButton.frame.minX - tokens.headerGap
+        let barsRight = closeButton.frame.minX - tokens.headerGap
         let availableBarsWidth = max(0, barsRight - barsLeft)
         let barsWidth = min(tokens.recordingWaveformWidth, availableBarsWidth)
         let barsHeight: CGFloat = 22
         let barsY = midY - barsHeight / 2
         audioWaveform.frame = NSRect(
-            x: barsLeft,
+            x: barsLeft + (availableBarsWidth - barsWidth) / 2,
             y: barsY,
             width: barsWidth,
             height: barsHeight
+        )
+
+        // The body covers the strip below the stop button so any click on
+        // the pill itself toggles the transcript.
+        pillBodyView.frame = NSRect(
+            x: 0,
+            y: bounds.height - tokens.panelHeight,
+            width: bounds.width,
+            height: tokens.panelHeight
         )
 
         titleLabel.frame = .zero
         detailLabel.frame = .zero
         micLabel.frame = .zero
         systemLabel.frame = .zero
+
+        // The drawer fills everything below the recording strip; it stays in
+        // the tree during the height animation so it can fade and clip while
+        // the panel grows or shrinks. Its width is pinned to the expanded
+        // panel width so transcript text never re-wraps mid-animation — the
+        // panel's corner mask clips the overhang while narrower.
+        transcriptDrawer.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: tokens.expandedRecordingPanelWidth,
+            height: max(0, bounds.height - tokens.panelHeight)
+        )
         refreshTooltipTrackingAreas()
     }
 
-    private func layoutMinimizedRecording(midY: CGFloat) {
+    private func layoutCondensedRecording(midY: CGFloat) {
         let tokens = MeetingOverlayTokens.self
 
-        cancelButton.frame = NSRect(
-            x: tokens.minimizedPadLeft,
-            y: midY - tokens.cancelHeight / 2,
-            width: tokens.cancelHeight,
-            height: tokens.cancelHeight
-        )
+        // Centered capsule content: just the dot and the timer.
+        let timerSize = timerLabel.fittingSize
+        let contentWidth = tokens.dotSize + tokens.condensedGap + timerSize.width
+        let startX = max(tokens.condensedPadLeft, (bounds.width - contentWidth) / 2)
 
         statusDot.frame = NSRect(
-            x: cancelButton.frame.maxX + tokens.minimizedGap,
+            x: startX,
             y: midY - tokens.dotSize / 2,
             width: tokens.dotSize,
             height: tokens.dotSize
         )
+        timerLabel.frame = NSRect(
+            x: statusDot.frame.maxX + tokens.condensedGap,
+            y: midY - timerSize.height / 2,
+            width: timerSize.width,
+            height: timerSize.height
+        )
 
+        pillBodyView.frame = bounds
+
+        // Keep real frames for the stop button and waveform: while the
+        // condense/wake animation runs they cross-fade and ride the moving
+        // edges instead of vanishing on the first layout tick. At capsule
+        // width the waveform's available span collapses to zero naturally,
+        // and both views end the transition hidden.
         closeButton.frame = NSRect(
             x: bounds.width - tokens.padRight - tokens.stopHeight,
             y: midY - tokens.stopHeight / 2,
             width: tokens.stopHeight,
             height: tokens.stopHeight
         )
-
-        chevronButton.frame = NSRect(
-            x: closeButton.frame.minX - tokens.minimizedGap - tokens.toggleHeight,
-            y: midY - tokens.toggleHeight / 2,
-            width: tokens.toggleHeight,
-            height: tokens.toggleHeight
-        )
-
-        let timerX = statusDot.frame.maxX + tokens.minimizedGap
-        let timerWidth = max(0, chevronButton.frame.minX - timerX - tokens.minimizedGap)
-        let timerSize = timerLabel.fittingSize
-        timerLabel.frame = NSRect(
-            x: timerX,
-            y: midY - timerSize.height / 2,
-            width: min(timerWidth, timerSize.width),
-            height: timerSize.height
-        )
+        let barsLeft = timerLabel.frame.maxX + tokens.headerGap
+        let barsRight = closeButton.frame.minX - tokens.headerGap
+        let barsWidth = max(0, min(tokens.recordingWaveformWidth, barsRight - barsLeft))
+        audioWaveform.frame = NSRect(x: barsLeft, y: midY - 11, width: barsWidth, height: 22)
 
         titleLabel.frame = .zero
         detailLabel.frame = .zero
         micLabel.frame = .zero
         systemLabel.frame = .zero
-        audioWaveform.frame = .zero
+        transcriptDrawer.frame = .zero
         refreshTooltipTrackingAreas()
     }
 
@@ -675,12 +693,20 @@ final class MeetingOverlayRootView: NSView {
         participants: [String],
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
-        isRecordingMinimized: Bool
+        isCondensed: Bool,
+        liveView: MeetingLiveViewAffordancePolicy.Affordance?,
+        isTranscriptExpanded: Bool
     ) {
         currentState = state
-        self.isRecordingMinimized = state == .recording && isRecordingMinimized
-        layer?.cornerRadius = self.isRecordingMinimized
-            ? MeetingOverlayTokens.minimizedCornerRadius
+        currentLiveViewAffordance = liveView
+        self.isTranscriptExpanded = state == .recording && !isCondensed && isTranscriptExpanded
+        let wasCondensed = self.isCondensed
+        self.isCondensed = state == .recording && isCondensed
+        if wasCondensed != self.isCondensed {
+            hideTooltip()
+        }
+        layer?.cornerRadius = self.isCondensed
+            ? MeetingOverlayTokens.condensedCornerRadius
             : MeetingOverlayTokens.cornerRadius
         if let warmupStatus {
             currentWarmupStatus = warmupStatus
@@ -700,13 +726,22 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
         systemLabel.isHidden = true
-        let showLevels = state == .recording && !self.isRecordingMinimized
-        audioWaveform.isHidden = !showLevels
         recordButton.isHidden = !isPrompting
         remindButton.isHidden = !isPrompting || prompt?.remindTitle == nil
-        cancelButton.isHidden = state != .recording
-        closeButton.isHidden = isPreparing || (state != .recording && !isPrompting)
-        chevronButton.isHidden = state != .recording
+        if state == .recording {
+            applyStripContentFade(wasCondensed: wasCondensed)
+        } else {
+            audioWaveform.isHidden = true
+            audioWaveform.alphaValue = 1
+            closeButton.isHidden = isPreparing || !isPrompting
+            closeButton.alphaValue = 1
+        }
+        pillBodyView.isHidden = state != .recording || liveView == nil
+        if let liveView {
+            pillBodyView.setAccessibilityLabel(liveView.accessibilityLabel)
+            pillBodyView.setAccessibilityHelp(liveView.accessibilityHelp)
+        }
+        refreshTranscriptDrawerVisibility()
         warmupTitleLabel.isHidden = !isPreparing
         warmupSubtitleLabel.isHidden = !isPreparing
         warmupProgress.isHidden = !isPreparing
@@ -763,17 +798,16 @@ final class MeetingOverlayRootView: NSView {
             closeButton.toolTip = nil
             closeButton.setAccessibilityLabel(finishTooltip)
             closeButton.setAccessibilityHelp("Stops recording, saves the audio, and starts transcription.")
-            closeButton.layer?.backgroundColor = MeetingOverlayTokens.finishActionColor.cgColor
+            closeButton.layer?.backgroundColor = MeetingOverlayTokens.stopActionColor.cgColor
             closeButton.layer?.cornerRadius = MeetingOverlayTokens.stopHeight / 2
-            closeButton.layer?.borderWidth = 0.5
-            closeButton.layer?.borderColor = MeetingOverlayTokens.finishActionBorder.cgColor
-            updateChevronButtonAppearance()
+            closeButton.layer?.borderWidth = 0
+            closeButton.layer?.borderColor = nil
         case .transcribing:
             titleLabel.stringValue = "Saving transcript"
             updateStatusDot(color: MeetingOverlayTokens.dotPrep)
             detailLabel.stringValue = ""
         case .saved:
-            titleLabel.stringValue = "Saved transcript"
+            titleLabel.stringValue = "Saved to Markdown"
             updateStatusDot(color: MeetingOverlayTokens.dotSaved)
             detailLabel.stringValue = ""
         case .error(let message):
@@ -799,10 +833,52 @@ final class MeetingOverlayRootView: NSView {
         currentSystemLevel = max(0, min(1, systemLevel))
         audioWaveform.primaryLevel = currentMicLevel
         audioWaveform.secondaryLevel = currentSystemLevel
-        let shouldAnimate = state == .recording && !self.isRecordingMinimized
+        let shouldAnimate = state == .recording && !self.isCondensed
         audioWaveform.isActive = shouldAnimate
 
         needsLayout = true
+    }
+
+    /// Cross-fades the waveform and stop button through rest/wake
+    /// transitions so the capsule morph reads as one motion instead of
+    /// content popping out on the first frame.
+    private func applyStripContentFade(wasCondensed: Bool) {
+        let fadeViews: [NSView] = [audioWaveform, closeButton]
+
+        guard wasCondensed != isCondensed else {
+            // Steady state: pin final values without animating — but give an
+            // in-flight fade time to finish, or the per-second duration tick
+            // clips it partway through.
+            guard Date().timeIntervalSince(lastStripFadeAt) > 0.3 else { return }
+            for view in fadeViews {
+                view.isHidden = isCondensed
+                view.alphaValue = isCondensed ? 0 : 1
+            }
+            return
+        }
+
+        lastStripFadeAt = Date()
+        let fadeOut = isCondensed
+        if !fadeOut {
+            for view in fadeViews {
+                view.isHidden = false
+            }
+        }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = fadeOut ? 0.12 : 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: fadeOut ? .easeIn : .easeOut)
+            for view in fadeViews {
+                view.animator().alphaValue = fadeOut ? 0 : 1
+            }
+        }, completionHandler: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.isCondensed == fadeOut else { return }
+                if fadeOut {
+                    self.audioWaveform.isHidden = true
+                    self.closeButton.isHidden = true
+                }
+            }
+        })
     }
 
     func updateAudioLevels(micLevel: Float, systemLevel: Float) {
@@ -810,6 +886,50 @@ final class MeetingOverlayRootView: NSView {
         currentSystemLevel = max(0, min(1, systemLevel))
         audioWaveform.primaryLevel = currentMicLevel
         audioWaveform.secondaryLevel = currentSystemLevel
+    }
+
+    /// Separate push channel for live transcript content so per-entry updates
+    /// do not re-run the full state update path.
+    func updateLiveTranscript(
+        _ attributed: NSAttributedString,
+        statusText: String?,
+        hasEntries: Bool
+    ) {
+        transcriptDrawer.update(
+            transcript: attributed,
+            statusText: statusText,
+            hasEntries: hasEntries
+        )
+    }
+
+    /// Fades the drawer in or out as one unit. The panel height animates in
+    /// the same breath (driven by the controller's resize), so the drawer is
+    /// clipped to the space below the recording strip while it appears.
+    private func refreshTranscriptDrawerVisibility() {
+        let drawerVisible = currentState == .recording && !isCondensed && isTranscriptExpanded
+        guard drawerVisible != isDrawerVisible else { return }
+        isDrawerVisible = drawerVisible
+
+        if drawerVisible {
+            transcriptDrawer.isHidden = false
+            transcriptDrawer.prepareForReveal()
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.18
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                transcriptDrawer.animator().alphaValue = 1
+            }
+        } else {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.12
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                transcriptDrawer.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self, !self.isDrawerVisible else { return }
+                    self.transcriptDrawer.isHidden = true
+                }
+            })
+        }
     }
 
     private func applyBaseVisualStyle() {
@@ -837,23 +957,6 @@ final class MeetingOverlayRootView: NSView {
         remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
         remindButton.layer?.borderWidth = 0.5
         remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
-        cancelButton.image = cancelButtonImage()
-        cancelButton.imagePosition = .imageOnly
-        cancelButton.contentTintColor = MeetingOverlayTokens.quietActionTint
-        cancelButton.toolTip = nil
-        cancelButton.setAccessibilityLabel(cancelTooltip)
-        cancelButton.setAccessibilityHelp("Shows a confirmation before discarding this meeting recording.")
-        cancelButton.layer?.cornerRadius = MeetingOverlayTokens.cancelHeight / 2
-        cancelButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
-        cancelButton.layer?.borderWidth = 0.5
-        cancelButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
-        chevronButton.imagePosition = .imageOnly
-        chevronButton.contentTintColor = MeetingOverlayTokens.chevronActionTint
-        chevronButton.toolTip = nil
-        chevronButton.layer?.cornerRadius = 0
-        chevronButton.layer?.backgroundColor = NSColor.clear.cgColor
-        chevronButton.layer?.borderWidth = 0
-        chevronButton.layer?.borderColor = nil
     }
 
     private func buttonTitle(_ title: String, size: CGFloat, weight: NSFont.Weight) -> NSAttributedString {
@@ -889,59 +992,102 @@ final class MeetingOverlayRootView: NSView {
             .withSymbolConfiguration(config)
     }
 
-    private func cancelButtonImage() -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
-        return NSImage(systemSymbolName: "xmark", accessibilityDescription: cancelTooltip)?
-            .withSymbolConfiguration(config)
-    }
-
-    private func updateChevronButtonAppearance() {
-        let tooltip = isRecordingMinimized ? expandTooltip : minimizeTooltip
-        chevronButton.image = chevronButtonImage()
-        chevronButton.setAccessibilityLabel(tooltip)
-        chevronButton.setAccessibilityHelp(tooltip)
-    }
-
-    private func chevronButtonImage() -> NSImage? {
-        let symbolName = isRecordingMinimized ? "chevron.right" : "chevron.left"
-        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
-        return NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
-    }
-
     private func refreshTooltipTrackingAreas() {
+        // Layout runs every duration tick and every animation frame;
+        // removing and re-adding tracking areas while the cursor sits inside
+        // one re-fires synthetic enter events and churns tooltips. Only
+        // rebuild when a tracked rect or text actually changed.
+        let signature = tooltipAreaSignature()
+        if signature == lastTooltipAreaSignature { return }
+        lastTooltipAreaSignature = signature
+
         for area in tooltipTrackingAreas {
             removeTrackingArea(area)
         }
         tooltipTrackingAreas.removeAll()
 
-        addTooltipTrackingArea(for: cancelButton, text: cancelTooltip)
         addTooltipTrackingArea(for: closeButton, text: currentState == .recording ? finishTooltip : dismissPromptTooltip)
         addTooltipTrackingArea(for: remindButton, text: remindPromptTooltip)
         addTooltipTrackingArea(for: recordButton, text: startTooltip)
-        addTooltipTrackingArea(
-            for: chevronButton,
-            text: isRecordingMinimized ? expandTooltip : minimizeTooltip
-        )
+        if let stripTooltip = currentLiveViewAffordance?.tooltip, !pillBodyView.isHidden {
+            // The body sits underneath the stop button; trim its tooltip
+            // rect so hovering stop never shows the transcript tooltip.
+            var rect = convert(pillBodyView.bounds, from: pillBodyView)
+            if !closeButton.isHidden {
+                let stopRect = convert(closeButton.bounds, from: closeButton)
+                rect.size.width = max(0, stopRect.minX - rect.minX - 4)
+            }
+            addTooltipTrackingArea(rect: rect, anchorView: pillBodyView, text: stripTooltip)
+        }
+        if isDrawerVisible {
+            addTooltipTrackingArea(
+                for: transcriptDrawer.copyActionView,
+                text: MeetingLiveViewAffordancePolicy.copyTooltip
+            )
+            addTooltipTrackingArea(
+                for: transcriptDrawer.moreActionView,
+                text: MeetingLiveViewAffordancePolicy.moreTooltip
+            )
+        }
 
         if tooltipTrackingAreas.isEmpty {
             hideTooltip()
         }
     }
 
+    /// Mirrors exactly the rect/text pairs `refreshTooltipTrackingAreas`
+    /// would install, so steady-state layout passes can skip the rebuild.
+    private func tooltipAreaSignature() -> String {
+        var parts: [String] = []
+        func sig(_ view: NSView, _ text: String) {
+            guard !view.isHidden, view.frame.width > 0, view.frame.height > 0 else { return }
+            let rect = convert(view.bounds, from: view)
+            parts.append("\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))|\(text)")
+        }
+        sig(closeButton, currentState == .recording ? finishTooltip : dismissPromptTooltip)
+        sig(remindButton, remindPromptTooltip)
+        sig(recordButton, startTooltip)
+        if let stripTooltip = currentLiveViewAffordance?.tooltip, !pillBodyView.isHidden {
+            var rect = convert(pillBodyView.bounds, from: pillBodyView)
+            if !closeButton.isHidden {
+                let stopRect = convert(closeButton.bounds, from: closeButton)
+                rect.size.width = max(0, stopRect.minX - rect.minX - 4)
+            }
+            if rect.width > 0, rect.height > 0 {
+                parts.append("\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))|\(stripTooltip)")
+            }
+        }
+        if isDrawerVisible {
+            sig(transcriptDrawer.copyActionView, MeetingLiveViewAffordancePolicy.copyTooltip)
+            sig(transcriptDrawer.moreActionView, MeetingLiveViewAffordancePolicy.moreTooltip)
+        }
+        return parts.joined(separator: ";")
+    }
+
     private func addTooltipTrackingArea(for view: NSView, text: String) {
         guard !view.isHidden, view.frame.width > 0, view.frame.height > 0 else { return }
+        // Convert from the anchor's superview so nested views (drawer
+        // children) track correctly, not just direct siblings.
+        addTooltipTrackingArea(rect: convert(view.bounds, from: view), anchorView: view, text: text)
+    }
+
+    private func addTooltipTrackingArea(rect: NSRect, anchorView: NSView, text: String) {
+        guard rect.width > 0, rect.height > 0 else { return }
         let area = NSTrackingArea(
-            rect: view.frame,
+            rect: rect,
             options: [.mouseEnteredAndExited, .activeAlways],
             owner: self,
-            userInfo: ["tooltipText": text, "anchorView": view]
+            userInfo: ["tooltipText": text, "anchorView": anchorView]
         )
         tooltipTrackingAreas.append(area)
         addTrackingArea(area)
     }
 
     override func mouseEntered(with event: NSEvent) {
+        if event.trackingArea === panelHoverTrackingArea {
+            onPanelHoverChanged?(true)
+            return
+        }
         guard
             let text = event.trackingArea?.userInfo?["tooltipText"] as? String,
             let anchorView = event.trackingArea?.userInfo?["anchorView"] as? NSView
@@ -950,6 +1096,9 @@ final class MeetingOverlayRootView: NSView {
     }
 
     override func mouseExited(with event: NSEvent) {
+        if event.trackingArea === panelHoverTrackingArea {
+            onPanelHoverChanged?(false)
+        }
         hideTooltip()
     }
 
@@ -1001,30 +1150,80 @@ final class MeetingOverlayRootView: NSView {
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds))
-        let m = total / 60
-        let s = total % 60
-        return String(format: "%02d:%02d", m, s)
+        MeetingDurationFormatter.formatDuration(seconds)
     }
 
+    // Clicking a tracked button while its tooltip is up would otherwise
+    // leave the old tooltip text floating over the new state.
     @objc private func handleSecondaryAction() {
+        hideTooltip()
         onSecondaryAction?()
     }
 
     @objc private func handleRemindAction() {
+        hideTooltip()
         onRemindAction?()
     }
 
-    @objc private func handleCancelAction() {
-        onCancelAction?()
-    }
-
     @objc private func handlePrimaryAction() {
+        hideTooltip()
         onPrimaryAction?()
     }
+}
 
-    @objc private func handleToggleMinimized() {
-        onToggleMinimized?()
+// MARK: - Pill body
+
+/// Transparent click surface covering the recording strip. Clicking toggles
+/// the transcript drawer; a small drag still moves the panel (re-handed to
+/// the window once movement exceeds a threshold); right-click shows the
+/// pill's context menu.
+@available(macOS 14.0, *)
+@MainActor
+final class MeetingPillBodyView: NSView {
+    var onClick: (() -> Void)?
+    var menuProvider: (() -> NSMenu?)?
+
+    private var pendingDownEvent: NSEvent?
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseDown(with event: NSEvent) {
+        pendingDownEvent = event
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let downEvent = pendingDownEvent else { return }
+        let dx = abs(event.locationInWindow.x - downEvent.locationInWindow.x)
+        let dy = abs(event.locationInWindow.y - downEvent.locationInWindow.y)
+        guard dx > 4 || dy > 4 else { return }
+        // Past the click threshold: this is a move, hand the gesture to the
+        // window so the panel drags exactly like its other background areas.
+        pendingDownEvent = nil
+        window?.performDrag(with: downEvent)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard pendingDownEvent != nil else { return }
+        pendingDownEvent = nil
+        onClick?()
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        menuProvider?() ?? super.menu(for: event)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onClick?()
+        return true
     }
 }
 
@@ -1048,35 +1247,40 @@ enum MeetingOverlayTokens {
     static let quietActionBg = NSColor.white.withAlphaComponent(0.08)
     static let quietActionBorder = NSColor.white.withAlphaComponent(0.14)
     static let quietActionTint = NSColor.white.withAlphaComponent(0.70)
-    static let chevronActionTint = NSColor.white.withAlphaComponent(0.58)
-    static let finishActionColor = NSColor.white.withAlphaComponent(0.16)
-    static let finishActionBorder = NSColor.white.withAlphaComponent(0.24)
-    static let finishActionForeground = NSColor.white.withAlphaComponent(0.92)
+    // Stop is the one strong-colored control on the pill: the action every
+    // meeting ends with should never need a second look.
+    static let stopActionColor = NSColor(calibratedRed: 0.79, green: 0.24, blue: 0.26, alpha: 1.0)
+    static let finishActionForeground = NSColor.white.withAlphaComponent(0.96)
 
     static let panelWidth: CGFloat  = 360
-    static let recordingPanelWidth: CGFloat = 292
-    static let minimizedRecordingPanelWidth: CGFloat = 184
+    // Tight fit for dot + timer + waveform + stop; the wide layout only
+    // returns while the transcript drawer is open.
+    static let recordingPanelWidth: CGFloat = 256
+    static let expandedRecordingPanelWidth: CGFloat = 324
+    static let condensedPillWidth: CGFloat = 120
     static let panelHeight: CGFloat = 44
-    static let minimizedRecordingPanelHeight: CGFloat = 36
+    static let condensedPillHeight: CGFloat = 32
     static let promptHeight: CGFloat = 88
     static let warmupHeight: CGFloat = 96
     static let errorHeight: CGFloat = 72
     static let cornerRadius: CGFloat = 22
-    static let minimizedCornerRadius: CGFloat = 18
+    static let condensedCornerRadius: CGFloat = 16
     static let dotSize: CGFloat     = 8
     static let padLeft: CGFloat     = 12
     static let padRight: CGFloat    = 8
     static let headerGap: CGFloat   = 8
-    static let minimizedPadLeft: CGFloat = 10
-    static let minimizedGap: CGFloat = 7
+    static let condensedPadLeft: CGFloat = 12
+    static let condensedGap: CGFloat = 7
     static let timerFontSize: CGFloat = 13
-    static let cancelHeight: CGFloat = 24
-    static let toggleHeight: CGFloat = 22
+    static let drawerPad: CGFloat = 12
+    static let drawerBrowserButtonSize: CGFloat = 20
+    static let drawerResizeHandleHeight: CGFloat = 12
     static let stopHeight: CGFloat  = 28
     static let recordingWaveformWidth: CGFloat = 124
     static let tooltipOffset: CGFloat = 8
     static let tooltipScreenInset: CGFloat = 6
     static let tooltipDelayNanoseconds: UInt64 = 80_000_000
+    static let defaultDetectedMeetingPromptTimeoutSeconds = 30
 }
 
 // MARK: - Controller
@@ -1089,7 +1293,7 @@ enum MeetingOverlayTokens {
 /// `ContextCaptureEngine.onMeetingToggle`.
 @available(macOS 14.0, *)
 @MainActor
-final class MeetingOverlayController {
+final class MeetingOverlayController: NSObject {
 
     enum OverlayState: Equatable {
         case idle
@@ -1134,16 +1338,28 @@ final class MeetingOverlayController {
     private var subscriptions: Set<AnyCancellable> = []
     private var autoHideTask: Task<Void, Never>?
     private var isShowingCancelConfirmation = false
-    private var isRecordingMinimized = false
+    private var isRestingCondensed = false
+    private var isPanelHovered = false
+    private var restTask: Task<Void, Never>?
+    private var isTranscriptExpanded = false
+    private var lastRequestedPanelSize: NSSize?
+    private var drawerResizeBaseHeight: CGFloat?
+    private var activeDrawerHeightOverride: CGFloat?
+    private var latestTranscriptFinals: [LiveMeetingCodexTranscriptEntry] = []
+    private var latestTranscriptPartials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry] = [:]
+    private var latestTranscriptPhase: LiveMeetingTranscriptFeedPhase = .idle
+    private var transcriptPushPending = false
 
     private enum PromptKind {
         case detectedMeeting
         case audioInactivity
+        case micBoost
     }
 
     deinit {
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
+        restTask?.cancel()
     }
 
     // MARK: - Dependencies
@@ -1180,9 +1396,15 @@ final class MeetingOverlayController {
         rootView.autoresizingMask = [.width, .height]
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
         rootView.onRemindAction = { [weak self] in self?.handleRemindActionTapped() }
-        rootView.onCancelAction = { [weak self] in self?.handleCancelTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
-        rootView.onToggleMinimized = { [weak self] in self?.toggleRecordingMinimized() }
+        rootView.onLiveViewAction = { [weak self] in self?.handleLiveViewTapped() }
+        rootView.onLiveViewBrowserAction = { [weak self] in self?.handleLiveViewBrowserTapped() }
+        rootView.onPanelHoverChanged = { [weak self] hovered in self?.handlePanelHoverChanged(hovered) }
+        rootView.onStripMenuRequested = { [weak self] in self?.makeStripMenu() }
+        rootView.onCopyTranscriptAction = { [weak self] in self?.handleCopyTranscriptTapped() }
+        rootView.onDrawerResizeBegan = { [weak self] in self?.handleDrawerResizeBegan() }
+        rootView.onDrawerResizeChanged = { [weak self] delta in self?.handleDrawerResizeChanged(delta) }
+        rootView.onDrawerResizeEnded = { [weak self] in self?.handleDrawerResizeEnded() }
         panel.contentView?.addSubview(rootView)
 
         self.panel = panel
@@ -1212,7 +1434,10 @@ final class MeetingOverlayController {
     }
 
     @discardableResult
-    func presentDetectedMeetingPrompt(_ candidate: MeetingPromptDetector.Candidate, timeout seconds: Int = 10) -> Bool {
+    func presentDetectedMeetingPrompt(
+        _ candidate: MeetingPromptDetector.Candidate,
+        timeout seconds: Int = MeetingOverlayTokens.defaultDetectedMeetingPromptTimeoutSeconds
+    ) -> Bool {
         guard let session = meetingSession else { return false }
 
         let presentationSnapshot = MeetingPromptPresentationSnapshot(
@@ -1285,6 +1510,104 @@ final class MeetingOverlayController {
                 self?.applyAudioInactivityWarning(warning)
             }
             .store(in: &subscriptions)
+
+        session.$isMicBoostPromptVisible
+            .receive(on: RunLoop.main)
+            .sink { [weak self] visible in
+                self?.applyMicBoostPrompt(visible)
+            }
+            .store(in: &subscriptions)
+
+        let feed = session.liveTranscriptFeed
+        feed.$finalEntries
+            .combineLatest(feed.$partialEntries, feed.$phase)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] finals, partials, phase in
+                self?.latestTranscriptFinals = finals
+                self?.latestTranscriptPartials = partials
+                self?.latestTranscriptPhase = phase
+                self?.pushTranscriptToView()
+            }
+            .store(in: &subscriptions)
+    }
+
+    private func pushTranscriptToView() {
+        // Word-rate updates arrive for the whole meeting; building the
+        // attributed string and re-laying-out the text view is only worth
+        // doing while the drawer can actually be seen. Hidden updates mark
+        // the view dirty and get flushed once on reveal.
+        guard isTranscriptExpanded, state == .recording else {
+            transcriptPushPending = true
+            return
+        }
+        transcriptPushPending = false
+
+        let hasEntries = !latestTranscriptFinals.isEmpty || !latestTranscriptPartials.isEmpty
+        rootView?.updateLiveTranscript(
+            makeTranscriptAttributedText(
+                finals: latestTranscriptFinals,
+                partials: latestTranscriptPartials
+            ),
+            statusText: MeetingLiveViewAffordancePolicy.drawerStatus(
+                phase: latestTranscriptPhase,
+                hasEntries: hasEntries
+            ),
+            hasEntries: hasEntries
+        )
+    }
+
+    private func flushPendingTranscriptIfNeeded() {
+        guard transcriptPushPending else { return }
+        pushTranscriptToView()
+    }
+
+    private func makeTranscriptAttributedText(
+        finals: [LiveMeetingCodexTranscriptEntry],
+        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry]
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 2
+        paragraph.paragraphSpacing = 7
+
+        func append(_ entry: LiveMeetingCodexTranscriptEntry, isPartial: Bool) {
+            if result.length > 0 {
+                result.append(NSAttributedString(string: "\n"))
+            }
+            let isMic = entry.source == .microphone
+            let tag = isMic ? "You" : "Them"
+            let tagColor = isMic
+                ? MeetingOverlayTokens.waveformMicTint
+                : MeetingOverlayTokens.waveformSystemTint
+            result.append(NSAttributedString(
+                string: "\(tag)  ",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: isPartial ? tagColor.withAlphaComponent(0.55) : tagColor,
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+            result.append(NSAttributedString(
+                string: entry.text,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+                    .foregroundColor: isPartial
+                        ? MeetingOverlayTokens.textSecondary
+                        : MeetingOverlayTokens.textPrimary,
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+        }
+
+        for entry in finals {
+            append(entry, isPartial: false)
+        }
+        for source in [LiveMeetingCodexSource.microphone, .system] {
+            if let partial = partials[source] {
+                append(partial, isPartial: true)
+            }
+        }
+        return result
     }
 
     private func applyAudioInactivityWarning(_ warning: MeetingAudioInactivityWarning?) {
@@ -1305,7 +1628,7 @@ final class MeetingOverlayController {
             warning: warning,
             countdownSeconds: promptSecondsRemaining
         )
-        isRecordingMinimized = false
+        bloomFromRest()
         state = .prompt
         showPanel()
         pushToView()
@@ -1314,10 +1637,57 @@ final class MeetingOverlayController {
         }
     }
 
+    private func applyMicBoostPrompt(_ visible: Bool) {
+        guard visible else {
+            clearMicBoostPrompt()
+            return
+        }
+        guard meetingSession?.state == .recording else { return }
+        // Precedence: never replace an active audio-inactivity prompt (it can
+        // auto-stop the recording). The post-meeting Home hint is the backstop.
+        if state == .prompt, promptKind == .audioInactivity { return }
+
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+
+        promptCandidate = nil
+        promptKind = .micBoost
+        promptSecondsRemaining = 0
+        currentPrompt = micBoostPromptDisplay()
+        bloomFromRest()
+        state = .prompt
+        showPanel()
+        pushToView()
+        // No schedulePromptCountdown(): expiry must never auto-enable VPIO.
+    }
+
+    private func clearMicBoostPrompt() {
+        guard promptKind == .micBoost else { return }
+
+        promptCountdownTask?.cancel()
+        promptKind = nil
+        currentPrompt = nil
+
+        if meetingSession?.state == .recording {
+            state = .recording
+            showPanel()
+            pushToView()
+            // Transcript updates that arrived while the prompt was up were
+            // deferred (the drawer only renders in .recording); flush them
+            // now instead of waiting for the next ASR update.
+            flushPendingTranscriptIfNeeded()
+            scheduleRestIfNeeded()
+        } else {
+            state = .idle
+            hidePanel()
+        }
+    }
+
     private func applySessionState(_ sessionState: MeetingSessionController.State) {
         switch sessionState {
         case .idle:
-            isRecordingMinimized = false
+            cancelRest()
+            isTranscriptExpanded = false
             if state == .prompt {
                 pushToView()
                 break
@@ -1326,7 +1696,8 @@ final class MeetingOverlayController {
             state = .idle
             hidePanel()
         case .loadingModels:
-            isRecordingMinimized = false
+            cancelRest()
+            isTranscriptExpanded = false
             state = .preparing
             currentPrompt = nil
             promptCandidate = nil
@@ -1334,7 +1705,8 @@ final class MeetingOverlayController {
             promptCountdownTask?.cancel()
             showPanel()
         case .ready:
-            isRecordingMinimized = false
+            cancelRest()
+            isTranscriptExpanded = false
             if state == .prompt {
                 pushToView()
                 break
@@ -1352,6 +1724,15 @@ final class MeetingOverlayController {
             state = .idle
             hidePanel()
         case .recording:
+            if state != .recording {
+                // New recording: restore the user's last drawer choice so a
+                // transcript they kept open last meeting opens itself, and
+                // start from a clean hover state — enter events re-arm it.
+                isTranscriptExpanded = LiveMeetingCodexPreferences.isEnabled()
+                    && LiveMeetingCodexPreferences.isDrawerOpenPreferred()
+                isPanelHovered = false
+            }
+            isRestingCondensed = false
             state = .recording
             currentPrompt = nil
             promptCandidate = nil
@@ -1359,8 +1740,11 @@ final class MeetingOverlayController {
             promptCountdownTask?.cancel()
             autoHideTask?.cancel()
             showPanel()
+            flushPendingTranscriptIfNeeded()
+            scheduleRestIfNeeded()
         case .transcribing:
-            isRecordingMinimized = false
+            cancelRest()
+            isTranscriptExpanded = false
             state = .transcribing
             currentPrompt = nil
             promptCandidate = nil
@@ -1368,7 +1752,8 @@ final class MeetingOverlayController {
             promptCountdownTask?.cancel()
             showPanel()
         case .error(let message):
-            isRecordingMinimized = false
+            cancelRest()
+            isTranscriptExpanded = false
             state = .error(message)
             currentPrompt = nil
             promptCandidate = nil
@@ -1404,6 +1789,7 @@ final class MeetingOverlayController {
             width: desiredWidth,
             height: desiredHeight
         ))
+        lastRequestedPanelSize = NSSize(width: desiredWidth, height: desiredHeight)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { ctx in
@@ -1421,8 +1807,10 @@ final class MeetingOverlayController {
             return MeetingOverlayTokens.warmupHeight
         case .prompt:
             return MeetingOverlayTokens.promptHeight
-        case .recording where isRecordingMinimized:
-            return MeetingOverlayTokens.minimizedRecordingPanelHeight
+        case .recording where isVisuallyCondensed:
+            return MeetingOverlayTokens.condensedPillHeight
+        case .recording where isTranscriptExpanded:
+            return MeetingOverlayTokens.panelHeight + currentDrawerHeight()
         case .error:
             return MeetingOverlayTokens.errorHeight
         default:
@@ -1430,10 +1818,15 @@ final class MeetingOverlayController {
         }
     }
 
+    // The transcript drawer reuses the recording pill's width on purpose:
+    // expansion is a pure downward slide, so the header strip never moves
+    // and text never re-wraps mid-animation.
     private func currentPanelWidth() -> CGFloat {
         switch state {
-        case .recording where isRecordingMinimized:
-            return MeetingOverlayTokens.minimizedRecordingPanelWidth
+        case .recording where isVisuallyCondensed:
+            return MeetingOverlayTokens.condensedPillWidth
+        case .recording where isTranscriptExpanded:
+            return MeetingOverlayTokens.expandedRecordingPanelWidth
         case .recording:
             return MeetingOverlayTokens.recordingPanelWidth
         default:
@@ -1443,6 +1836,10 @@ final class MeetingOverlayController {
 
     private func hidePanel() {
         guard let panel = panel, panel.isVisible else { return }
+        lastRequestedPanelSize = nil
+        // A panel hidden under the cursor never delivers mouseExited; a
+        // stale hover flag would silently block resting next recording.
+        isPanelHovered = false
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.14
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -1452,7 +1849,10 @@ final class MeetingOverlayController {
         })
     }
 
-    private func handleCancelTapped() {
+    /// Discard lives behind the pill's context menu (with this confirmation)
+    /// rather than as a permanent button: deleting a recording is a rare,
+    /// deliberate act and must never sit one mis-click from Stop.
+    private func handleDiscardRequested() {
         guard !isShowingCancelConfirmation else { return }
         guard let session = meetingSession else { return }
         guard case .recording = session.state else { return }
@@ -1505,6 +1905,8 @@ final class MeetingOverlayController {
             switch promptKind {
             case .audioInactivity:
                 meetingSession?.dismissAudioInactivityWarning()
+            case .micBoost:
+                meetingSession?.declineMicBoostPrompt()
             case .detectedMeeting, .none:
                 dismissPrompt(notifyDetector: true)
             }
@@ -1525,6 +1927,10 @@ final class MeetingOverlayController {
                 guard let session = self?.meetingSession else { return }
                 await session.endRecordingFromAudioInactivityPrompt(automatic: false)
             }
+        case .micBoost:
+            // Session clears the published flag, which routes back through
+            // applyMicBoostPrompt(false) -> clearMicBoostPrompt -> .recording.
+            meetingSession?.acceptMicBoostPrompt()
         case .detectedMeeting, .none:
             guard let candidate = promptCandidate else { return }
             onPromptRecord?(candidate)
@@ -1541,10 +1947,316 @@ final class MeetingOverlayController {
         hidePanel()
     }
 
-    private func toggleRecordingMinimized() {
+    /// Point-of-use live transcript action. With the preference already on
+    /// this toggles the embedded transcript drawer; with it off this is the
+    /// one-click enable: persist the preference, prepare the workspace and
+    /// preview server (so the browser/agent views work too), late-join the
+    /// sidecar to the in-flight recording, and open the drawer. None of
+    /// these steps can raise a TCC prompt. Failure rolls the enable back,
+    /// mirroring Settings' disable-after-failure behavior.
+    private func handleLiveViewTapped() {
         guard state == .recording else { return }
-        isRecordingMinimized.toggle()
+
+        if LiveMeetingCodexPreferences.isEnabled() {
+            isTranscriptExpanded.toggle()
+            LiveMeetingCodexPreferences.setDrawerOpenPreferred(isTranscriptExpanded)
+            if isTranscriptExpanded {
+                bloomFromRest()
+                flushPendingTranscriptIfNeeded()
+            } else {
+                scheduleRestIfNeeded()
+            }
+            pushToView()
+            return
+        }
+
+        LiveMeetingCodexPreferences.setEnabled(true)
+        do {
+            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            meetingSession?.connectLiveSidecarToActiveRecording()
+            _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+            isTranscriptExpanded = true
+            LiveMeetingCodexPreferences.setDrawerOpenPreferred(true)
+            bloomFromRest()
+            flushPendingTranscriptIfNeeded()
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .liveSidecar,
+                agentTarget: .localAgent,
+                surface: .meetingOverlay
+            )
+        } catch {
+            LiveMeetingCodexPreferences.setEnabled(false)
+            meetingSession?.stopLiveCodexSessionFromSettings()
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .liveSidecar,
+                agentTarget: .localAgent,
+                surface: .meetingOverlay,
+                result: .failed
+            )
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_view_enable_from_overlay_failed",
+                message: "Live transcript could not be enabled from the meeting overlay",
+                context: ["error": error.localizedDescription]
+            )
+        }
+
         pushToView()
+    }
+
+    // MARK: - Rest / wake
+
+    /// True when the pill should currently render as the compact capsule.
+    /// Hovering wakes the pill (clears the resting state) rather than
+    /// temporarily overriding rendering, so hover-out never resizes anything
+    /// directly — only the countdown does. That asymmetry is what makes the
+    /// interaction immune to spurious enter/exit events during animations.
+    private var isVisuallyCondensed: Bool {
+        MeetingPillRestPolicy.isCondensedRendered(
+            isResting: isRestingCondensed,
+            isRecording: state == .recording,
+            isTranscriptVisible: isTranscriptExpanded
+        )
+    }
+
+    private func scheduleRestIfNeeded() {
+        restTask?.cancel()
+        guard !isRestingCondensed,
+              MeetingPillRestPolicy.canRest(
+                isRecording: state == .recording,
+                isTranscriptVisible: isTranscriptExpanded,
+                keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
+                isHovered: isPanelHovered
+              ) else { return }
+
+        restTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(
+                nanoseconds: UInt64(MeetingPillRestPolicy.restDelaySeconds * 1_000_000_000)
+            )
+            guard !Task.isCancelled, let self else { return }
+            guard MeetingPillRestPolicy.canRest(
+                isRecording: self.state == .recording,
+                isTranscriptVisible: self.isTranscriptExpanded,
+                keepControlsVisible: MeetingOverlayPillPreferences.keepControlsVisible(),
+                isHovered: self.isPanelHovered
+            ) else { return }
+            // Belt and braces against a lost exit/enter pair: never rest
+            // while the pointer is physically over the panel, even if the
+            // hover flag went stale.
+            guard !self.pointerIsOverPanel() else {
+                self.scheduleRestIfNeeded()
+                return
+            }
+            self.isRestingCondensed = true
+            self.pushToView()
+        }
+    }
+
+    private func pointerIsOverPanel() -> Bool {
+        guard let panel, panel.isVisible else { return false }
+        return panel.frame.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
+    }
+
+    /// Leaving the recording flow entirely: stop the countdown and forget
+    /// the resting state.
+    private func cancelRest() {
+        restTask?.cancel()
+        restTask = nil
+        isRestingCondensed = false
+    }
+
+    /// Wake the pill back to its full strip (prompts, drawer opens, pin).
+    private func bloomFromRest() {
+        restTask?.cancel()
+        restTask = nil
+        isRestingCondensed = false
+    }
+
+    private func handlePanelHoverChanged(_ hovered: Bool) {
+        guard hovered != isPanelHovered else { return }
+        isPanelHovered = hovered
+        if hovered {
+            restTask?.cancel()
+            if isRestingCondensed {
+                // Wake: hovering restores the full pill, which then stays
+                // until the next quiet stretch passes — no peek-and-snap.
+                isRestingCondensed = false
+                pushToView()
+            }
+        } else {
+            scheduleRestIfNeeded()
+        }
+    }
+
+    // MARK: - Pill context menu
+
+    private func makeStripMenu() -> NSMenu? {
+        guard state == .recording else { return nil }
+
+        // An open menu is attention: pause the rest countdown so the pill
+        // cannot shrink underneath it. The next hover-out reschedules.
+        restTask?.cancel()
+
+        let menu = NSMenu()
+
+        let toggleItem = NSMenuItem(
+            title: MeetingLiveViewAffordancePolicy.transcriptToggleMenuTitle(
+                isLiveMeetingSidecarEnabled: LiveMeetingCodexPreferences.isEnabled(),
+                isTranscriptVisible: isTranscriptExpanded
+            ),
+            action: #selector(handleMenuToggleTranscript),
+            keyEquivalent: ""
+        )
+        toggleItem.target = self
+        menu.addItem(toggleItem)
+
+        let pinItem = NSMenuItem(
+            title: MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle,
+            action: #selector(handleMenuTogglePin),
+            keyEquivalent: ""
+        )
+        pinItem.target = self
+        pinItem.state = MeetingOverlayPillPreferences.keepControlsVisible() ? .on : .off
+        menu.addItem(pinItem)
+
+        if LiveMeetingCodexPreferences.isEnabled() {
+            let browserItem = NSMenuItem(
+                title: MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle,
+                action: #selector(handleMenuOpenInBrowser),
+                keyEquivalent: ""
+            )
+            browserItem.target = self
+            menu.addItem(browserItem)
+        }
+
+        menu.addItem(.separator())
+
+        let discardItem = NSMenuItem(
+            title: MeetingLiveViewAffordancePolicy.discardRecordingMenuTitle,
+            action: #selector(handleMenuDiscard),
+            keyEquivalent: ""
+        )
+        discardItem.target = self
+        menu.addItem(discardItem)
+
+        return menu
+    }
+
+    @objc private func handleMenuToggleTranscript() {
+        handleLiveViewTapped()
+    }
+
+    @objc private func handleMenuTogglePin() {
+        let pinned = !MeetingOverlayPillPreferences.keepControlsVisible()
+        MeetingOverlayPillPreferences.setKeepControlsVisible(pinned)
+        if pinned {
+            bloomFromRest()
+        } else {
+            scheduleRestIfNeeded()
+        }
+        pushToView()
+    }
+
+    @objc private func handleMenuOpenInBrowser() {
+        handleLiveViewBrowserTapped()
+    }
+
+    @objc private func handleMenuDiscard() {
+        handleDiscardRequested()
+    }
+
+    private func currentDrawerHeight() -> CGFloat {
+        activeDrawerHeightOverride ?? CGFloat(LiveMeetingCodexPreferences.preferredDrawerHeight())
+    }
+
+    private func handleDrawerResizeBegan() {
+        guard state == .recording, isTranscriptExpanded else { return }
+        let height = currentDrawerHeight()
+        drawerResizeBaseHeight = height
+        activeDrawerHeightOverride = height
+    }
+
+    private func handleDrawerResizeChanged(_ delta: CGFloat) {
+        guard let base = drawerResizeBaseHeight, let panel, panel.isVisible else { return }
+        var height = CGFloat(LiveMeetingCodexPreferences.clampedDrawerHeight(Double(base + delta)))
+
+        var frame = panel.frame
+        let top = frame.origin.y + frame.height
+        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            height = min(height, top - visible.minY - 8 - MeetingOverlayTokens.panelHeight)
+        }
+
+        activeDrawerHeightOverride = height
+        let total = MeetingOverlayTokens.panelHeight + height
+        frame.origin.y = top - total
+        frame.size.height = total
+        // Direct, unanimated frame tracking while the user drags; the size
+        // memo keeps duration ticks from animating back mid-drag.
+        panel.setFrame(frame, display: true)
+        lastRequestedPanelSize = frame.size
+    }
+
+    private func handleDrawerResizeEnded() {
+        if let height = activeDrawerHeightOverride {
+            LiveMeetingCodexPreferences.setPreferredDrawerHeight(Double(height))
+        }
+        drawerResizeBaseHeight = nil
+        activeDrawerHeightOverride = nil
+    }
+
+    private func handleCopyTranscriptTapped() {
+        let text = makeTranscriptPlainText()
+        guard !text.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        rootView?.flashTranscriptCopyFeedback()
+    }
+
+    private func makeTranscriptPlainText() -> String {
+        LiveTranscriptPlainTextRenderer.makeTranscriptPlainText(
+            finals: latestTranscriptFinals,
+            partials: latestTranscriptPartials
+        )
+    }
+
+    /// Drawer-header action: opens the tokenized browser preview, the same
+    /// page Settings' "Open Live View" uses and the one agents watch.
+    private func handleLiveViewBrowserTapped() {
+        do {
+            let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+            let previewURL = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+            let opened = NSWorkspace.shared.open(previewURL)
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .livePreview,
+                agentTarget: .localAgent,
+                surface: .meetingOverlay,
+                result: opened ? .success : .failed
+            )
+            if opened {
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .liveMeetingPreview,
+                    actionKind: .opened,
+                    agentTarget: .localAgent,
+                    surface: .meetingOverlay
+                )
+            }
+        } catch {
+            ActivationTelemetry.trackAgentSetupCTA(
+                setupKind: .livePreview,
+                agentTarget: .localAgent,
+                surface: .meetingOverlay,
+                result: .failed
+            )
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "live_view_open_from_overlay_failed",
+                message: "Live View could not open from the meeting overlay",
+                context: ["error": error.localizedDescription]
+            )
+        }
     }
 
     private func dismissPrompt(notifyDetector: Bool) {
@@ -1572,6 +2284,19 @@ final class MeetingOverlayController {
             state = .recording
             showPanel()
             pushToView()
+            // The silence that raised this prompt can hold it up for minutes;
+            // flush transcript updates deferred behind it instead of waiting
+            // for the next ASR update.
+            flushPendingTranscriptIfNeeded()
+            scheduleRestIfNeeded()
+            // A mic-boost prompt may have fired while the inactivity prompt
+            // was up (suppressed by precedence) or been replaced by it. The
+            // session still latches it visible — and already recorded its
+            // outcome as "shown" — so re-present instead of silently losing
+            // the one-shot in-meeting offer.
+            if meetingSession?.isMicBoostPromptVisible == true {
+                applyMicBoostPrompt(true)
+            }
         } else {
             state = .idle
             hidePanel()
@@ -1608,6 +2333,8 @@ final class MeetingOverlayController {
                 warning: warning,
                 countdownSeconds: promptSecondsRemaining
             )
+        case .micBoost:
+            currentPrompt = micBoostPromptDisplay()
         case .detectedMeeting, .none:
             currentPrompt = detectedMeetingPromptDisplay(countdownSeconds: promptSecondsRemaining)
         }
@@ -1615,6 +2342,10 @@ final class MeetingOverlayController {
 
     private func handlePromptCountdownExpired() {
         switch promptKind {
+        case .micBoost:
+            // Defensive no-op: a countdown is never scheduled for this kind,
+            // and expiry must never auto-enable VPIO.
+            return
         case .audioInactivity:
             guard meetingSession?.audioInactivityWarning?.automaticStopAllowed != false else {
                 return
@@ -1673,9 +2404,27 @@ final class MeetingOverlayController {
         )
     }
 
+    // The prompt panel renders `detail` as a single truncating line (~336pt
+    // at 11pt medium; fixed MeetingOverlayTokens.promptHeight). The ducking
+    // trade-off disclosure must be the detail on its own and fit untruncated
+    // — the user has to see the cost before consenting to VPIO — so the
+    // cause lives in the title instead.
+    private func micBoostPromptDisplay() -> PromptDisplay {
+        PromptDisplay(
+            title: "Mic is very quiet — another app's call",
+            detail: "Boosting may make other apps' audio slightly quieter.",
+            countdownText: "",
+            secondaryTitle: "Not now",
+            secondaryAccessibilityLabel: "Keep software mic boost",
+            remindTitle: nil,
+            remindAccessibilityLabel: nil,
+            primaryTitle: "Boost Mic",
+            primaryAccessibilityLabel: "Boost microphone with Apple voice processing"
+        )
+    }
+
     private func formatInactiveDuration(_ duration: TimeInterval) -> String {
-        let minutes = max(1, Int(round(duration / 60)))
-        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+        MeetingDurationFormatter.formatInactiveDuration(duration)
     }
 
     // MARK: - View push
@@ -1690,7 +2439,13 @@ final class MeetingOverlayController {
             participants: currentParticipants,
             warmupStatus: currentWarmupStatus,
             prompt: currentPrompt,
-            isRecordingMinimized: isRecordingMinimized
+            isCondensed: isVisuallyCondensed,
+            liveView: MeetingLiveViewAffordancePolicy.affordance(
+                isRecording: state == .recording,
+                isLiveMeetingSidecarEnabled: LiveMeetingCodexPreferences.isEnabled(),
+                isTranscriptVisible: isTranscriptExpanded
+            ),
+            isTranscriptExpanded: isTranscriptExpanded
         )
     }
 
@@ -1702,19 +2457,48 @@ final class MeetingOverlayController {
     }
 
     private func resizePanelIfNeeded() {
-        guard let panel, panel.isVisible else { return }
-        let desiredHeight = currentPanelHeight()
-        let desiredWidth = currentPanelWidth()
-        let heightChanged = abs(panel.frame.height - desiredHeight) > 0.5
-        let widthChanged = abs(panel.frame.width - desiredWidth) > 0.5
-        guard heightChanged || widthChanged else { return }
+        guard let panel, panel.isVisible else {
+            lastRequestedPanelSize = nil
+            return
+        }
+        let desired = NSSize(width: currentPanelWidth(), height: currentPanelHeight())
 
-        var frame = panel.frame
-        frame.origin.y += frame.height - desiredHeight
-        frame.origin.x += (frame.width - desiredWidth) / 2
-        frame.size.height = desiredHeight
-        frame.size.width = desiredWidth
-        panel.setFrame(frame, display: true, animate: true)
+        // Compare against the last *requested* size, not the live frame: the
+        // per-second duration tick lands mid-animation, and re-targeting the
+        // same size against an intermediate frame restarts the animation and
+        // makes the resize stutter.
+        if let last = lastRequestedPanelSize,
+           abs(last.width - desired.width) < 0.5,
+           abs(last.height - desired.height) < 0.5 {
+            return
+        }
+        lastRequestedPanelSize = desired
+
+        // Keep the top edge and horizontal center fixed; both are invariant
+        // across our resizes, so reading them mid-animation is safe.
+        let frame = panel.frame
+        let top = frame.origin.y + frame.height
+        var target = NSRect(
+            x: frame.midX - desired.width / 2,
+            y: top - desired.height,
+            width: desired.width,
+            height: desired.height
+        )
+
+        // Never grow past the bottom or sides of the screen the panel is on.
+        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            target.origin.y = max(target.origin.y, visible.minY + 8)
+            target.origin.x = min(
+                max(target.origin.x, visible.minX + 8),
+                visible.maxX - target.width - 8
+            )
+        }
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.20
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(target, display: true)
+        }
     }
 }
 

@@ -56,10 +56,40 @@ func runSmoke() async -> Int32 {
 
     print("[smoke] SpeakerDatabase(path:)…")
     let speakerDB = SpeakerDatabase(path: paths.speakerDB.path)
-    _ = speakerDB
+
+    // Behavioral round-trip: inserting an embedding (pure SQLite, no CoreML or audio
+    // device) should mint a profile that getSpeaker(id:) can read back, and it should
+    // show up in the all-speakers listing.
+    let insertedSpeaker = speakerDB.addOrUpdateSpeaker(embedding: Array(repeating: 0.1, count: 256))
+    guard let fetchedSpeaker = speakerDB.getSpeaker(id: insertedSpeaker.id),
+          fetchedSpeaker.id == insertedSpeaker.id else {
+        print("[smoke] FAIL: SpeakerDatabase did not read back the inserted speaker")
+        return 1
+    }
+    guard speakerDB.allSpeakers().contains(where: { $0.id == insertedSpeaker.id }) else {
+        print("[smoke] FAIL: SpeakerDatabase all-speakers listing dropped the inserted speaker")
+        return 1
+    }
 
     print("[smoke] FailedTranscriptionManager(paths:)…")
     let failed = FailedTranscriptionManager(paths: paths)
+
+    // Behavioral round-trip: enqueue a failed transcription whose audio path lives under
+    // the sandboxed captures root, then confirm the in-memory queue count reflects the add.
+    // Needs no CoreML or audio device — the manager only validates path containment and
+    // persists JSON. The add-then-read-count API shape mirrors TranscriptedE2ESmoke.swift.
+    try? FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+    let smokeMicURL = paths.audioCaptures.appendingPathComponent("smoke-mic.wav")
+    let didEnqueueFailed = failed.addFailedTranscription(
+        micAudioURL: smokeMicURL,
+        systemAudioURL: nil,
+        errorMessage: "Smoke fixture failure",
+        meetingTitle: "Smoke Meeting"
+    )
+    guard didEnqueueFailed, failed.count == 1 else {
+        print("[smoke] FAIL: FailedTranscriptionManager did not enqueue the failed transcription (persisted=\(didEnqueueFailed) count=\(failed.count))")
+        return 1
+    }
 
     print("[smoke] AppServices(...) DI container…")
     // NOTE: AppServices wants a concrete SpeechToTextEngine. The smoke binary

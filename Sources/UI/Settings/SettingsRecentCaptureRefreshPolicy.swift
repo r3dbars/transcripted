@@ -8,11 +8,32 @@ enum SettingsRecentCaptureRefreshMode {
 enum SettingsRecentCaptureRefreshPolicy {
     static func mode(for page: TranscriptedSettingsPage) -> SettingsRecentCaptureRefreshMode {
         switch page {
-        case .home:
+        case .home, .dictations:
             return .homeDashboard
-        case .general, .models, .shortcuts, .people, .storage, .connectAgent, .privacy, .support, .about:
+        case .general, .models, .shortcuts, .people, .storage, .connectAgent, .beta, .privacy, .support, .about:
             return .none
         }
+    }
+
+    static func shouldStartDashboardRefresh(
+        for page: TranscriptedSettingsPage,
+        force: Bool,
+        isInFlight: Bool,
+        lastStartedAt: Date?,
+        now: Date,
+        minimumInterval: TimeInterval = SettingsDashboardRefreshPolicy.passiveRefreshMinimumInterval
+    ) -> Bool {
+        guard mode(for: page) == .homeDashboard else {
+            return false
+        }
+
+        return SettingsDashboardRefreshPolicy.shouldStartRefresh(
+            force: force,
+            isInFlight: isInFlight,
+            lastStartedAt: lastStartedAt,
+            now: now,
+            minimumInterval: minimumInterval
+        )
     }
 }
 

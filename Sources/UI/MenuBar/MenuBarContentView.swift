@@ -6,6 +6,7 @@ import AppKit
 struct MenuBarContentSmokeSnapshot: Codable, Equatable {
     let header: MenuBarHeaderSmokeSnapshot
     let primaryActions: [String: MenuBarActionRowSmokeSnapshot]
+    let utilityActions: [String: MenuBarActionRowSmokeSnapshot]
 }
 
 @MainActor
@@ -152,7 +153,8 @@ final class MenuBarContentView: NSView {
     var smokeSnapshot: MenuBarContentSmokeSnapshot {
         MenuBarContentSmokeSnapshot(
             header: headerView.smokeSnapshot,
-            primaryActions: primaryActionsView.smokeSnapshot
+            primaryActions: primaryActionsView.smokeSnapshot,
+            utilityActions: utilityActionsView.smokeSnapshot
         )
     }
 }

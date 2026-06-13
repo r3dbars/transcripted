@@ -31,6 +31,15 @@ rules:
       - "bash run-e2e-smoke.sh"
 
   - paths:
+      - "Tests/E2E/SlowPastebackSmoke.swift"
+      - "Sources/Support/ClipboardRestoringTextPaster.swift"
+      - "Sources/Support/TranscriptedConstants.swift"
+      - "run-slow-pasteback-smoke.sh"
+      - "scripts/entrypoints/run-slow-pasteback-smoke.sh"
+    checks:
+      - "bash run-slow-pasteback-smoke.sh"
+
+  - paths:
       - "build-deps.sh"
       - "scripts/entrypoints/build-deps.sh"
     checks:
@@ -78,22 +87,111 @@ rules:
       - "bash -n scripts/ops/daily-audio-reliability-check.sh"
 
   - paths:
+      - "scripts/ops/health-probe.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/ops/health-probe.sh"
+
+  - paths:
+      - "scripts/dev/onboarding.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/dev/onboarding.sh"
+
+  - paths:
+      - "scripts/dev/benchmark-home-recent-captures.sh"
+      - "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/dev/benchmark-home-recent-captures.sh"
+      - "scripts/dev/benchmark-home-recent-captures.sh"
+
+  - paths:
       - "scripts/ops/generate-nightly-digest.py"
-      - "scripts/README.md"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/generate-nightly-digest.py"
       - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
+      - "scripts/ops/nightly-security-check.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/nightly-security-check.py"
+      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.48.json --write-report build/nightly-security-report.json"
+
+  - paths:
+      - "scripts/ops/release-gate-report.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/release-gate-report.py"
+      - "python3 scripts/ops/release-gate-report.py --self-test"
+
+  - paths:
+      - "scripts/ops/packaged-app-smoke.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/packaged-app-smoke.py"
+      - "python3 scripts/ops/packaged-app-smoke.py --self-test"
+
+  - paths:
+      - "scripts/ops/privacy-leak-sweep.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/privacy-leak-sweep.py"
+      - "python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json"
+
+  - paths:
+      - "scripts/ops/build-codex-memory-index.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/build-codex-memory-index.py"
+
+  - paths:
+      - "scripts/ops/nightly-transcripted-archive-miner.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/ops/nightly-transcripted-archive-miner.sh"
+
+  - paths:
+      - "scripts/ops/performance-budget.rb"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "ruby -c scripts/ops/performance-budget.rb"
+
+  - paths:
       - "scripts/ops/transcripted-qa-bench.sh"
+      - "scripts/ops/run-local-summary-fixture.sh"
       - "scripts/ops/validate-meeting-corpus.py"
       - "scripts/ops/compare-meeting-corpus.py"
       - "docs/qa-test-bench.md"
     checks:
+      - "bash -n scripts/ops/transcripted-qa-bench.sh"
+      - "bash -n scripts/ops/run-local-summary-fixture.sh"
+      - "bash scripts/ops/run-local-summary-fixture.sh"
       - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
+      - "swift test --package-path Tools/TranscriptedQA"
       - "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
       - "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
+
+  - paths:
+      - "scripts/ops/dictation-stop-autoeval.sh"
+      - "scripts/ops/dictation-recovery-autoeval.rb"
+      - "docs/autoeval-dictation-stop-speed-*.md"
+      - "docs/autoeval-dictation-recovery-time-*.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/ops/dictation-stop-autoeval.sh"
+      - "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
+
+  - paths:
+      - "scripts/ops/dictation-recovery-autoeval.rb"
+      - "docs/autoeval-dictation-recovery-time-*.md"
+      - "docs/autoeval-dictation-start-time-*.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
+      - "ruby scripts/ops/dictation-recovery-autoeval.rb --details"
 
   - paths:
       - "scripts/ops/agent-todo-runner.rb"
@@ -143,9 +241,18 @@ rules:
       - "Casks/**"
       - "docs/appcast.xml"
     checks:
+      - "bash build-deps.sh --force"
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
-      - "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
+      - "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
+
+  - paths:
+      - "Tools/TranscriptedCaptureKit/**"
+    checks:
+      - "swift test --package-path Tools/TranscriptedCaptureKit"
+      - "swift test --package-path Tools/TranscriptedCLI"
+      - "swift test --package-path Tools/TranscriptedMCP"
+      - "bash run-e2e-smoke.sh"
 
   - paths:
       - "Tools/TranscriptedCLI/**"
@@ -156,6 +263,7 @@ rules:
       - "Tools/TranscriptedMCP/**"
     checks:
       - "swift test --package-path Tools/TranscriptedMCP"
+      - "bash run-e2e-smoke.sh"
 
   - paths:
       - "Tools/TranscriptedQA/**"
@@ -170,6 +278,12 @@ rules:
       - "CONTRIBUTING.md"
       - "WORKFLOW.md"
       - "docs/**"
+      - "Tests/README.md"
+      - "scripts/README.md"
+      - "Sources/CLAUDE.md"
+      - "Sources/**/CLAUDE.md"
+      - "Tools/README.md"
+      - "Tools/**/CLAUDE.md"
       - ".agents/**"
       - ".github/**"
       - "scripts/dev/agent-preflight.sh"
@@ -179,5 +293,7 @@ rules:
 notes:
   - "If a change matches multiple rules, run the union of checks."
   - "When in doubt, prefer the stricter AGENTS.md rule."
+  - "PR-level overlays still apply: meaningful code needs codex-review against the real PR base; broad or release-impacting work needs bash scripts/ops/transcripted-qa-bench.sh --mode full."
+  - "Tiny docs-only PRs intentionally stay on preflight/mapped docs checks unless they change release truth, QA gates, appcast/update flow, Homebrew, or public download truth."
   - "Live capture smoke requires local microphone and System Audio Recording permissions; document permission blockers explicitly."
   - "UI changes should include sanitized review visuals under .agent-review/visuals/."

@@ -14,7 +14,6 @@ struct TranscriptedSettingsView: View {
 
     private let actions: TranscriptedSettingsActions
     private let appLogger: AppLogger
-    private let sidebarSections = SettingsSidebarSection.defaultSections
 
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
@@ -65,8 +64,6 @@ struct TranscriptedSettingsView: View {
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
-    @State private var homeActivityTab: HomeActivityTab = .meetings
-    @State private var homeHeroMode: HomeHeroMode = .meeting
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State private var homeDeleteFailure: HomeDeleteFailure?
@@ -75,7 +72,25 @@ struct TranscriptedSettingsView: View {
     @State private var homeShowsStatsDetails = false
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
+    @State private var homeLocalSummaryJobIDs: Set<String> = []
+    @State private var homeLocalSummaryTasks: [String: Task<LocalMeetingSummaryResult, Error>] = [:]
+    @State private var homeLocalSummaryTaskTokens: [String: UUID] = [:]
+    @State private var homeLocalSummaryNotice: HomeLocalSummaryNotice?
+    @State private var homeLocalSummaryNoticeDismissTask: Task<Void, Never>?
+    @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
+    @AppStorage(LocalMeetingSummaryPreferences.providerKey) private var localMeetingSummaryProviderRawValue = LocalMeetingSummaryProvider.defaultProvider.rawValue
+    @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
+    @State private var betaFeatureStatus: String?
+    @State private var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
+    @State private var appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
+    @State private var showLocalSummarySetupDetails = false
+    @State private var localSummaryModelPreparationStatus: String?
+    @State private var localSummaryModelPreparationTask: Task<String, Error>?
+    @State private var localSummaryModelPreparationToken: UUID?
+    @State private var isLocalSummaryModelPreparing = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
+    @State private var speakerInboxScrollRequest = 0
+    @State private var speakerInboxScrollAwaitingQueue = false
 
     init(
         appState: TranscriptedAppState,
@@ -95,26 +110,17 @@ struct TranscriptedSettingsView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $settingsColumnVisibility) {
             List(selection: $navigation.selectedPage) {
-                ForEach(sidebarSections) { section in
-                    if let title = section.title {
-                        Section {
-                            sidebarRows(for: section.pages)
-                        } header: {
-                            Text(title)
-                        }
-                    } else {
-                        sidebarRows(for: section.pages)
-                    }
-                }
+                sidebarRows(for: SettingsSidebarSection.primarySection.pages)
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
             .listStyle(.sidebar)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
                     Divider()
+                    settingsPagesToggle
                     settingsSidebarFooter
-                        .background(.thinMaterial)
                 }
+                .background(.thinMaterial)
             }
         } detail: {
             ZStack {
@@ -128,17 +134,31 @@ struct TranscriptedSettingsView: View {
                 )
                 .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 28) {
-                        pageBody
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 24) {
+                            if SettingsSidebarSection.isSettingsPage(navigation.selectedPage) {
+                                settingsTabStrip
+                            }
+                            pageBody
+                        }
+                        .padding(.horizontal, 28)
+                        .padding(.top, settingsContentTopPadding)
+                        .padding(.bottom, 28)
+                        .frame(maxWidth: 860, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.horizontal, 28)
-                    .padding(.top, settingsContentTopPadding)
-                    .padding(.bottom, 28)
-                    .frame(maxWidth: 860, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .onChange(of: speakerInboxScrollRequest) { _, _ in
+                        speakerInboxScrollAwaitingQueue = speakerPeopleModel.reviewQueueItems.isEmpty
+                        scrollToSpeakerInbox(using: proxy)
+                    }
+                    .onChange(of: speakerPeopleModel.reviewQueueItems.count) { oldCount, newCount in
+                        guard speakerInboxScrollAwaitingQueue, oldCount == 0, newCount > 0 else { return }
+                        speakerInboxScrollAwaitingQueue = false
+                        scrollToSpeakerInbox(using: proxy)
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .frame(minWidth: 880, minHeight: 640)
@@ -147,9 +167,79 @@ struct TranscriptedSettingsView: View {
             HomeStatsDetailSheet(
                 stats: homeStatItems,
                 streak: homeStreak,
+                longestStreak: statsService.longestStreak > 0 ? statsService.longestStreak : nil,
                 onDone: {
                     homeShowsStatsDetails = false
                 }
+            )
+        }
+        .sheet(item: $homeFeedbackTarget) { target in
+            HomeFeedbackSheet(
+                target: target,
+                onCancel: {
+                    homeFeedbackTarget = nil
+                },
+                onSubmit: { submission in
+                    submitHomeFeedback(submission)
+                }
+            )
+        }
+        .sheet(item: $homeMeetingPreview) { preview in
+            HomeMeetingPreviewSheet(
+                preview: preview,
+                onOpenMarkdown: {
+                    trackSettingsAction("open_recent_meeting_markdown", page: .home)
+                    ActivationTelemetry.trackArtifactAction(
+                        artifactKind: .meeting,
+                        actionKind: .openMarkdown,
+                        surface: .homePreview,
+                        artifactDate: preview.date
+                    )
+                    NSWorkspace.shared.open(preview.transcriptURL)
+                },
+                onCopyForAgent: {
+                    handleCopyMeetingPreview(preview)
+                },
+                onReportIssue: {
+                    homeMeetingPreview = nil
+                    Task { @MainActor in
+                        await Task.yield()
+                        homeFeedbackTarget = preview.feedbackTarget
+                    }
+                },
+                onRenameTitle: { newTitle in
+                    renameMeetingPreview(preview, to: newTitle)
+                },
+                onDone: {
+                    homeMeetingPreview = nil
+                }
+            )
+        }
+        .alert(item: $homeDeleteConfirmation) { confirmation in
+            Alert(
+                title: Text(confirmation.title),
+                message: Text(confirmation.message),
+                primaryButton: .destructive(Text(confirmation.confirmTitle)) {
+                    confirmation.perform()
+                },
+                secondaryButton: .cancel()
+            )
+        }
+        .alert(item: $homeDeleteFailure) { failure in
+            Alert(
+                title: Text(failure.title),
+                message: Text(failure.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+        .alert(item: $pendingAudioRetentionWindow) { window in
+            Alert(
+                title: Text("Delete old replay audio?"),
+                message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
+                primaryButton: .destructive(Text("Delete Old Audio")) {
+                    applyAudioRetentionWindow(window)
+                },
+                secondaryButton: .cancel()
             )
         }
         .task(id: navigation.presentationID) {
@@ -157,8 +247,14 @@ struct TranscriptedSettingsView: View {
             expandGeneralDisclosureForPresentedPage()
             trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
         }
-        .onChange(of: navigation.selectedPage) { _, page in
+        .onChange(of: navigation.selectedPage) { oldPage, page in
+            if oldPage == .people && page != .people {
+                SpeakerClipPlayback.stop()
+            }
             refreshRecentCaptures()
+            if page == .people {
+                speakerPeopleModel.refresh()
+            }
             if pageShowsAutoEnterSettings(page) {
                 refreshAutoEnterPreferences(includeCandidates: true)
             }
@@ -169,6 +265,10 @@ struct TranscriptedSettingsView: View {
             if SettingsSpeakerQueueRefreshPolicy.shouldRefreshAfterMeetingTranscriptSave(newURL) {
                 speakerPeopleModel.refresh()
             }
+        }
+        .onChange(of: meetingSession.savedMeetingReplacementCommitCount) { _, _ in
+            refreshRecentCaptures(force: true)
+            speakerPeopleModel.refresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
             refreshRecentCaptures(force: true)
@@ -185,6 +285,11 @@ struct TranscriptedSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .localSpeakerPrefsDidChange)) { _ in
             splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .microphoneProcessingPrefsDidChange)) { _ in
+            // Accepting the mid-meeting mic-boost prompt flips this preference
+            // outside Settings; keep an open window's toggle in sync.
+            meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptedPermissionsDidChange)) { _ in
             refreshPermissions()
         }
@@ -199,6 +304,8 @@ struct TranscriptedSettingsView: View {
             homeDashboardRefreshInFlight = false
             homeMeetingPreviewLoadTask?.cancel()
             homeMeetingPreviewLoadTask = nil
+            localSummaryModelPreparationTask?.cancel()
+            localSummaryModelPreparationTask = nil
             homeViewModel.cancel()
         }
     }
@@ -212,6 +319,59 @@ struct TranscriptedSettingsView: View {
             )
                 .tag(page)
         }
+    }
+
+    private var settingsPagesToggle: some View {
+        let isInSettings = SettingsSidebarSection.isSettingsPage(navigation.selectedPage)
+        return Button {
+            trackSettingsAction("open_settings_area", page: navigation.selectedPage)
+            navigation.selectedPage = .general
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isInSettings ? Color.accentColor : Color.secondary)
+                Text("Settings")
+                    .font(.caption.weight(isInSettings ? .semibold : .regular))
+                    .foregroundStyle(isInSettings ? Color.primary : Color.secondary)
+
+                Spacer(minLength: 6)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsHoverButtonStyle(tone: isInSettings ? .accent : .neutral, cornerRadius: 10))
+        .help("Open settings")
+        .accessibilityIdentifier("transcripted.settings.sidebar.settings-toggle")
+    }
+
+    private var settingsTabStrip: some View {
+        HStack(spacing: 6) {
+            ForEach(SettingsSidebarSection.settingsSections.flatMap(\.pages)) { page in
+                let isSelected = navigation.selectedPage == page
+                Button {
+                    navigation.selectedPage = page
+                } label: {
+                    Text(page.title)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.75))
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.055))
+                        )
+                        .contentShape(Capsule(style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("transcripted.settings.tab.\(page.rawValue)")
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
     }
 
     private var settingsSidebarFooter: some View {
@@ -258,6 +418,7 @@ struct TranscriptedSettingsView: View {
         ))
         .disabled(!settingsFooterActionEnabled)
         .help(settingsFooterHelp)
+        .accessibilityIdentifier("transcripted.settings.footer.check-updates")
     }
 
     @ViewBuilder
@@ -265,6 +426,8 @@ struct TranscriptedSettingsView: View {
         switch navigation.selectedPage {
         case .home:
             homePage
+        case .dictations:
+            dictationsPage
         case .general:
             generalPage
         case .models:
@@ -277,6 +440,8 @@ struct TranscriptedSettingsView: View {
             storagePage
         case .connectAgent:
             connectAgentPage
+        case .beta:
+            betaPage
         case .privacy:
             privacyPage
         case .support:
@@ -287,67 +452,26 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homePage: some View {
-        let stats = homeStatItems
-        let needsAttention = homeNeedsAttentionIssues
-        let allFailedMeetings = meetingSession.failedMeetings
-        let failedMeetings = homeShowsAllFailedMeetings
-            ? allFailedMeetings
-            : Array(allFailedMeetings.prefix(3))
-        let hiddenFailedMeetingCount = max(0, allFailedMeetings.count - failedMeetings.count)
-        let meetingSections = homeMeetingDaySections
+        VStack(alignment: .leading, spacing: 20) {
+            HomeCanvasHeader(
+                greeting: homeGreeting,
+                streakText: homeStreak.map { "\($0)d" },
+                hoursText: statsService.formattedTotalHours,
+                wordsText: formattedInteger(homeViewModel.totalDictationWordCount),
+                onViewStats: {
+                    trackSettingsAction("open_home_stats", page: .home)
+                    homeShowsStatsDetails = true
+                }
+            )
+            .padding(.top, 8)
 
-        return VStack(alignment: .leading, spacing: 14) {
-            if !failedMeetings.isEmpty {
-                HomeFailedMeetingsCard(
-                    items: failedMeetings,
-                    hiddenCount: hiddenFailedMeetingCount,
-                    canRetry: canRetryFailedMeetings,
-                    retryUnavailableReason: failedMeetingRetryUnavailableReason,
-                    audioAttachment: { failedMeetingAudioAttachment(for: $0) },
-                    onRetry: { item in
-                        trackSettingsAction("home_retry_failed_meeting", page: .home)
-                        meetingSession.retryFailedMeeting(id: item.id)
-                    },
-                    onRevealAudio: { item in
-                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
-                        revealFailedMeetingAudio(item)
-                    },
-                    onClear: { item in
-                        requestClearFailedMeeting(item)
-                    },
-                    onShowAll: {
-                        trackSettingsAction("home_show_all_failed_meetings", page: .home)
-                        homeShowsAllFailedMeetings = true
-                    }
-                )
+            if !homeAttentionIssues.isEmpty {
+                HomeAttentionPillsRow(issues: homeAttentionIssues) { issue in
+                    reviewHomeAttentionIssue(issue)
+                }
             }
 
-            HStack(alignment: .top, spacing: 20) {
-                HomeWelcomeHeader(
-                    name: homeViewModel.welcomeName,
-                    summary: homeWelcomeSummary
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
-
-                HomeStatsBadge(
-                    stats: stats,
-                    streak: homeStreak,
-                    onViewStats: {
-                        homeShowsStatsDetails = true
-                    }
-                )
-                    .layoutPriority(0)
-            }
-
-            if !needsAttention.isEmpty {
-                HomeNeedsAttentionCard(
-                    issues: needsAttention,
-                    onReview: { issue in
-                        reviewHomeNeedsAttention(issue)
-                    }
-                )
-            }
+            homeFailedMeetingsCard
 
             if let activity = homeTranscriptionActivity {
                 SettingsActivityCard(
@@ -357,10 +481,15 @@ struct TranscriptedSettingsView: View {
                     detail: activity.detail,
                     tone: activity.tone,
                     progress: activity.progress,
-                    actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript",
+                    actionTitle: activity.transcriptURL == nil ? nil : "Open Markdown",
                     action: activity.transcriptURL.map { transcriptURL in
                         {
                             trackSettingsAction("open_current_activity", page: .home)
+                            ActivationTelemetry.trackArtifactAction(
+                                artifactKind: .meeting,
+                                actionKind: .openMarkdown,
+                                surface: .homeCurrentActivity
+                            )
                             NSWorkspace.shared.open(transcriptURL)
                         }
                     }
@@ -368,148 +497,170 @@ struct TranscriptedSettingsView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            HomeHeroCard(
-                selectedMode: homeHeroModeSelection
-            ) {
-                HomeActivityTabsCard(
-                    selectedTab: homeActivityTab,
-                    speakerPeopleModel: speakerPeopleModel,
-                    dictationSections: homeViewModel.dictationDaySections,
-                    meetingSections: meetingSections,
-                    isLoading: homeViewModel.isLoading,
-                    isLoadingMore: homeViewModel.isLoadingMore,
-                    canLoadMoreDictations: homeViewModel.canLoadMoreDictations,
-                    canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings,
-                    copiedRowID: homeCopiedRowID,
-                    canRetryFailedMeetings: canRetryFailedMeetings,
-                    failedMeetingRetryUnavailableReason: failedMeetingRetryUnavailableReason,
-                    canRetranscribeSavedMeetings: canRetranscribeSavedMeetings,
-                    savedMeetingRetranscriptionUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
-                    onOpenDictation: { entry in
-                        trackSettingsAction("open_recent_dictation", page: .home)
-                        NSWorkspace.shared.open(entry.url)
-                    },
-                    onCopyDictation: { entry in
-                        handleCopyDictation(entry)
-                    },
-                    onFlagDictation: { entry in
-                        trackSettingsAction("flag_dictation", page: .home)
-                        homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
-                    },
-                    dictationMenuItems: { entry in
-                        dictationRowMenuItems(for: entry)
-                    },
-                    onOpenMeeting: { item in
-                        presentHomeMeetingPreview(item)
-                    },
-                    onCopyMeeting: { item in
-                        handleCopyMeeting(item)
-                    },
-                    onFlagMeeting: { item in
-                        trackSettingsAction("flag_meeting", page: .home)
-                        homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
-                    },
-                    onReviewMeetingSpeakers: { _ in
-                        openHomeSpeakerReview(actionName: "review_meeting_speakers_row")
-                    },
-                    onRetranscribeMeeting: { item in
-                        handleRetranscribeMeeting(item)
-                    },
-                    meetingMenuItems: { item in
-                        meetingRowMenuItems(for: item)
-                    },
-                    onRetryFailedMeeting: { item in
-                        trackSettingsAction("home_retry_failed_meeting", page: .home)
-                        meetingSession.retryFailedMeeting(id: item.id)
-                    },
-                    onRevealFailedMeetingAudio: { item in
-                        trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
-                        revealFailedMeetingAudio(item)
-                    },
-                    onClearFailedMeeting: { item in
-                        requestClearFailedMeeting(item)
-                    },
-                    onLoadMoreDictations: {
-                        trackSettingsAction("load_more_dictations", page: .home)
-                        homeViewModel.loadMoreDictations()
-                    },
-                    onLoadMoreMeetings: {
-                        trackSettingsAction("load_more_meetings", page: .home)
-                        homeViewModel.loadMoreMeetings()
+            if let notice = homeLocalSummaryNotice {
+                SettingsActivityCard(
+                    symbolName: "sparkles",
+                    title: notice.title,
+                    status: notice.status,
+                    detail: notice.detail,
+                    tone: .success,
+                    progress: nil,
+                    actionTitle: "Open enhanced transcript",
+                    action: {
+                        trackSettingsAction("open_local_meeting_summary_notice", page: .home)
+                        clearHomeLocalSummaryNotice(id: notice.id)
+                        NSWorkspace.shared.open(notice.transcriptURL)
                     }
                 )
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
-            .padding(.top, 14)
+
+            homeMeetingsListSection
+                .padding(.top, 6)
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
-        .sheet(item: $homeFeedbackTarget) { target in
-            HomeFeedbackSheet(
-                target: target,
-                onCancel: {
-                    homeFeedbackTarget = nil
+    }
+
+    @ViewBuilder
+    private var homeFailedMeetingsCard: some View {
+        let allFailedMeetings = meetingSession.failedMeetings
+        if !allFailedMeetings.isEmpty {
+            let failedMeetings = homeShowsAllFailedMeetings
+                ? allFailedMeetings
+                : Array(allFailedMeetings.prefix(3))
+            HomeFailedMeetingsCard(
+                items: failedMeetings,
+                hiddenCount: max(0, allFailedMeetings.count - failedMeetings.count),
+                canRetry: canRetryFailedMeetings,
+                retryUnavailableReason: failedMeetingRetryUnavailableReason,
+                audioAttachment: { failedMeetingAudioAttachment(for: $0) },
+                onRetry: { item in
+                    trackSettingsAction("home_retry_failed_meeting", page: .home)
+                    retryFailedMeeting(item)
                 },
-                onSubmit: { submission in
-                    submitHomeFeedback(submission)
+                onRevealAudio: { item in
+                    trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
+                    revealFailedMeetingAudio(item)
+                },
+                onClear: { item in
+                    requestClearFailedMeeting(item)
+                },
+                onShowAll: {
+                    trackSettingsAction("home_show_all_failed_meetings", page: .home)
+                    homeShowsAllFailedMeetings = true
                 }
             )
         }
-        .sheet(item: $homeMeetingPreview) { preview in
-            HomeMeetingPreviewSheet(
-                preview: preview,
-                onOpenMarkdown: {
-                    trackSettingsAction("open_recent_meeting_markdown", page: .home)
-                    NSWorkspace.shared.open(preview.transcriptURL)
-                },
-                onCopyForAgent: {
-                    handleCopyMeetingPreview(preview)
-                },
-                onReportIssue: {
-                    homeMeetingPreview = nil
-                    Task { @MainActor in
-                        await Task.yield()
-                        homeFeedbackTarget = preview.feedbackTarget
-                    }
-                },
-                onDone: {
-                    homeMeetingPreview = nil
-                }
+    }
+
+    private var dictationsPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Dictations",
+                summary: "Recent dictations saved to daily Markdown files."
             )
+
+            homeDictationsListSection
         }
-        .onChange(of: homeActivityTab) { _, newValue in
-            trackSettingsAction("home_tab_\(newValue.rawValue)", page: .home)
-            if newValue == .meetings {
-                refreshRecentCaptures(force: true)
-            } else if newValue == .speakers {
-                speakerPeopleModel.refresh()
+    }
+
+    private var homeMeetingsListSection: some View {
+        HomeCaptureListSection(
+            sections: homeMeetingDaySections,
+            emptyMessage: HomeCaptureListCopy.emptyMeetings,
+            isLoading: homeViewModel.isLoading,
+            isLoadingMore: homeViewModel.isLoadingMore,
+            canLoadMore: homeViewModel.canLoadMoreMeetings,
+            getID: { AnyHashable($0.id) },
+            onLoadMore: {
+                trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
+                homeViewModel.loadMoreMeetings()
             }
+        ) { item in
+            homeMeetingListRow(item)
         }
-        .alert(item: $homeDeleteConfirmation) { confirmation in
-            Alert(
-                title: Text(confirmation.title),
-                message: Text(confirmation.message),
-                primaryButton: .destructive(Text(confirmation.confirmTitle)) {
-                    confirmation.perform()
+    }
+
+    @ViewBuilder
+    private func homeMeetingListRow(_ item: HomeMeetingListItem) -> some View {
+        switch item {
+        case .saved(let meeting):
+            HomeMeetingRow(
+                item: meeting,
+                isCopied: homeCopiedRowID == meeting.id,
+                isSummarizingSummary: homeLocalSummaryJobIDs.contains(meeting.id),
+                localMeetingSummariesEnabled: localMeetingSummariesEnabled,
+                onOpen: { presentHomeMeetingPreview(meeting) },
+                onCopy: { handleCopyMeeting(meeting) },
+                onFlag: {
+                    trackSettingsAction("flag_meeting", page: navigation.selectedPage)
+                    homeFeedbackTarget = HomeFeedbackTarget.meeting(meeting)
                 },
-                secondaryButton: .cancel()
+                menuItems: meetingRowMenuItems(for: meeting),
+                showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                    audioHealth: meeting.audioHealth,
+                    voiceProcessingPreferenceEnabled: meetingVoiceProcessingEnabled
+                )
             )
-        }
-        .alert(item: $homeDeleteFailure) { failure in
-            Alert(
-                title: Text(failure.title),
-                message: Text(failure.message),
-                dismissButton: .default(Text("OK"))
-            )
-        }
-        .alert(item: $pendingAudioRetentionWindow) { window in
-            Alert(
-                title: Text("Delete old replay audio?"),
-                message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
-                primaryButton: .destructive(Text("Delete Old Audio")) {
-                    applyAudioRetentionWindow(window)
+        case .failed(let failedMeeting):
+            HomeFailedMeetingInlineRow(
+                item: failedMeeting,
+                canRetry: canRetryFailedMeetings,
+                retryUnavailableReason: failedMeetingRetryUnavailableReason,
+                onRetry: {
+                    trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
+                    retryFailedMeeting(failedMeeting)
                 },
-                secondaryButton: .cancel()
+                onRevealAudio: {
+                    trackSettingsAction("home_reveal_failed_meeting_audio", page: navigation.selectedPage)
+                    revealFailedMeetingAudio(failedMeeting)
+                },
+                onClear: { requestClearFailedMeeting(failedMeeting) }
             )
         }
+    }
+
+    private var homeDictationsListSection: some View {
+        HomeCaptureListSection(
+            sections: homeViewModel.dictationDaySections,
+            emptyMessage: HomeCaptureListCopy.emptyDictations,
+            isLoading: homeViewModel.isLoading,
+            isLoadingMore: homeViewModel.isLoadingMore,
+            canLoadMore: homeViewModel.canLoadMoreDictations,
+            getID: { AnyHashable($0.id) },
+            onLoadMore: {
+                trackSettingsAction("load_more_dictations", page: navigation.selectedPage)
+                homeViewModel.loadMoreDictations()
+            }
+        ) { entry in
+            HomeDictationRow(
+                entry: entry,
+                isCopied: homeCopiedRowID == entry.id,
+                onOpen: {
+                    trackSettingsAction("open_recent_dictation", page: navigation.selectedPage)
+                    ActivationTelemetry.trackArtifactAction(
+                        artifactKind: .dictation,
+                        actionKind: .openMarkdown,
+                        surface: .homeRow,
+                        artifactDate: entry.createdAt
+                    )
+                    NSWorkspace.shared.open(entry.url)
+                },
+                onCopy: { handleCopyDictation(entry) },
+                onFlag: {
+                    trackSettingsAction("flag_dictation", page: navigation.selectedPage)
+                    homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
+                },
+                menuItems: dictationRowMenuItems(for: entry)
+            )
+        }
+    }
+
+    private var homeGreeting: String {
+        HomeCanvasGreeting.text(
+            hour: Calendar.current.component(.hour, from: Date()),
+            firstName: homeViewModel.welcomeName
+        )
     }
 
     private var settingsContentTopPadding: CGFloat {
@@ -523,28 +674,17 @@ struct TranscriptedSettingsView: View {
         settingsColumnVisibility == .detailOnly ? .hidden : .visible
     }
 
-    private var homeHeroModeSelection: Binding<HomeHeroMode> {
-        Binding(
-            get: { homeHeroMode },
-            set: { newMode in
-                homeHeroMode = newMode
-                homeActivityTab = newMode.activityTab
-            }
-        )
-    }
-
-    private func reviewHomeNeedsAttention(_ issue: HomeNeedsAttentionCard.Issue) {
+    private func reviewHomeAttentionIssue(_ issue: HomeAttentionIssue) {
         switch issue.destination {
         case .failedMeetings:
             trackSettingsAction("open_needs_attention_failed_meetings", page: .home)
-            homeActivityTab = .meetings
-            homeHeroMode = .meeting
+            navigation.selectedPage = .home
+            homeShowsAllFailedMeetings = true
         case .speakers:
             openHomeSpeakerReview(actionName: "open_needs_attention_speakers")
-        case .activity:
-            trackSettingsAction("open_needs_attention_activity", page: .home)
-            homeActivityTab = .meetings
-            homeHeroMode = .meeting
+        case .summaries:
+            trackSettingsAction("open_needs_attention_summaries", page: .home)
+            navigation.selectedPage = .home
         case .privacy:
             trackSettingsAction("open_needs_attention_privacy", page: .home)
             showGeneralPrivacySettings = true
@@ -557,13 +697,24 @@ struct TranscriptedSettingsView: View {
     }
 
     private func openHomeSpeakerReview(actionName: String) {
-        trackSettingsAction(actionName, page: .home)
+        trackSettingsAction(actionName, page: navigation.selectedPage)
         speakerPeopleModel.refresh()
         speakerPeopleModel.searchText = ""
-        speakerPeopleModel.profileFilter = .needsReview
-        navigation.selectedPage = .home
-        homeActivityTab = .speakers
-        homeHeroMode = .speakers
+        navigation.selectedPage = .people
+        requestSpeakerInboxFocus()
+    }
+
+    private func requestSpeakerInboxFocus() {
+        speakerInboxScrollRequest += 1
+    }
+
+    private func scrollToSpeakerInbox(using proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(.snappy(duration: 0.22)) {
+                proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue, anchor: .top)
+            }
+        }
     }
 
     private func handleCopyDictation(_ entry: SavedDictationEntry) {
@@ -576,6 +727,13 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeeting(_ item: RecentMeetingItem) {
         trackSettingsAction("copy_meeting", page: .home)
+        ActivationTelemetry.trackAgentPromptAction(
+            promptKind: .meetingBundle,
+            actionKind: .copied,
+            agentTarget: .localAgent,
+            surface: .homeRow,
+            artifactKind: .meeting
+        )
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         if let bundle = AgentConnectionGuide.portableMeetingBundle(
@@ -595,12 +753,44 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
         trackSettingsAction("copy_meeting_preview", page: .home)
+        let bundle = AgentConnectionGuide.portableMeetingBundle(
+            title: preview.title,
+            date: preview.date,
+            transcriptURL: preview.transcriptURL
+        )
+        let fallbackMarkdown = preview.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let text = bundle ?? (fallbackMarkdown.isEmpty ? nil : preview.markdown) else {
+            ActivationTelemetry.trackAgentPromptAction(
+                promptKind: .meetingBundle,
+                actionKind: .copied,
+                agentTarget: .localAgent,
+                surface: .homePreview,
+                result: .failed,
+                artifactKind: .meeting
+            )
+            NSSound.beep()
+            return
+        }
+
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(preview.markdown, forType: .string)
+        pasteboard.setString(text, forType: .string)
+        ActivationTelemetry.trackAgentPromptAction(
+            promptKind: bundle == nil ? .meetingMarkdown : .meetingBundle,
+            actionKind: .copied,
+            agentTarget: .localAgent,
+            surface: .homePreview,
+            result: bundle == nil ? .fallbackCopied : .success,
+            artifactKind: .meeting
+        )
     }
 
     private func handleRetranscribeMeeting(_ item: RecentMeetingItem) {
+        guard !hasSpeakerReviewWork(for: item) else {
+            openHomeSpeakerReview(actionName: "open_speaker_review_before_retranscribe")
+            return
+        }
+
         guard let input = item.audio?.retranscriptionInput else {
             NSSound.beep()
             return
@@ -611,7 +801,9 @@ struct TranscriptedSettingsView: View {
             let didStart = await meetingSession.retranscribeSavedMeeting(
                 micAudioURL: input.micURL,
                 systemAudioURL: input.systemURL,
-                title: item.title
+                title: item.title,
+                transcriptURL: item.transcriptURL,
+                recordingDate: item.startDate ?? item.date
             )
             if !didStart {
                 NSSound.beep()
@@ -619,8 +811,123 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private func handleOpenOrGenerateLocalSummary(_ item: RecentMeetingItem) {
+        guard localMeetingSummariesEnabled else { return }
+
+        if item.summaryPreview != nil {
+            trackSettingsAction("open_local_meeting_summary", page: .home)
+            NSWorkspace.shared.open(item.transcriptURL)
+            return
+        }
+
+        generateLocalSummary(for: item)
+    }
+
+    private func generateLocalSummary(for item: RecentMeetingItem) {
+        guard localMeetingSummariesEnabled else { return }
+        guard homeLocalSummaryTasks[item.id] == nil else { return }
+        if let unavailableReason = localMeetingSummaryUnavailableReason {
+            homeDeleteFailure = HomeDeleteFailure(
+                title: "Could not summarize meeting",
+                message: unavailableReason
+            )
+            return
+        }
+        trackSettingsAction("generate_local_meeting_summary", page: .home)
+        let provider = localMeetingSummaryProvider
+        recordLocalSummaryEvent(
+            event: "local_meeting_summary_started",
+            message: "\(provider.title) meeting summary started",
+            context: [
+                "provider": provider.rawValue,
+                "has_existing_summary": item.summaryPreview == nil ? "false" : "true",
+                "setup_ready": selectedLocalSummaryProviderIsReady ? "true" : "false",
+                "setup_profile": selectedLocalSummaryProviderProfileName,
+            ]
+        )
+        clearHomeLocalSummaryNotice()
+        homeLocalSummaryJobIDs.insert(item.id)
+
+        let task = Task.detached(priority: .utility) {
+            switch provider {
+            case .gemmaMLX:
+                return try await LocalMeetingSummarizer().summarize(
+                    transcriptURL: item.transcriptURL,
+                    title: item.title
+                )
+            case .appleFoundation:
+                return try await AppleFoundationMeetingSummarizer().summarize(
+                    transcriptURL: item.transcriptURL,
+                    title: item.title
+                )
+            }
+        }
+        let taskToken = UUID()
+        homeLocalSummaryTasks[item.id] = task
+        homeLocalSummaryTaskTokens[item.id] = taskToken
+
+        Task { @MainActor in
+            defer {
+                if homeLocalSummaryTaskTokens[item.id] == taskToken {
+                    homeLocalSummaryJobIDs.remove(item.id)
+                    homeLocalSummaryTasks[item.id] = nil
+                    homeLocalSummaryTaskTokens[item.id] = nil
+                }
+            }
+
+            do {
+                let result = try await task.value
+                guard localMeetingSummariesEnabled else { return }
+                presentHomeLocalSummaryNotice(HomeLocalSummaryNotice(
+                    transcriptURL: result.transcriptURL,
+                    chunkCount: result.chunkCount
+                ))
+                recordLocalSummaryEvent(
+                    event: "local_meeting_summary_completed",
+                    message: "\(result.provider.title) meeting summary saved",
+                    context: [
+                        "provider": result.provider.rawValue,
+                        "chunk_count": "\(result.chunkCount)",
+                        "profile": result.profileName,
+                    ]
+                )
+                refreshRecentCapturesAfterLocalSummary()
+            } catch is CancellationError {
+                recordLocalSummaryEvent(
+                    event: "local_meeting_summary_cancelled",
+                    message: "\(provider.title) meeting summary cancelled",
+                    context: [
+                        "provider": provider.rawValue,
+                    ]
+                )
+                return
+            } catch {
+                guard localMeetingSummariesEnabled else { return }
+                recordLocalSummaryEvent(
+                    level: .error,
+                    event: "local_meeting_summary_failed",
+                    message: "\(provider.title) meeting summary failed",
+                    context: [
+                        "provider": provider.rawValue,
+                        "error": error.localizedDescription,
+                    ]
+                )
+                homeDeleteFailure = HomeDeleteFailure(
+                    title: "Could not summarize meeting",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
     private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
         trackSettingsAction("preview_recent_meeting", page: .home)
+        ActivationTelemetry.trackArtifactAction(
+            artifactKind: .meeting,
+            actionKind: .preview,
+            surface: .homeRow,
+            artifactDate: item.date
+        )
         homeMeetingPreviewLoadTask?.cancel()
         homeMeetingPreviewLoadTask = Task { @MainActor in
             let readResult = await Self.readMeetingMarkdown(at: item.transcriptURL)
@@ -628,7 +935,14 @@ struct TranscriptedSettingsView: View {
 
             switch readResult {
             case .success(let markdown):
-                homeMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown)
+                homeMeetingPreview = HomeMeetingPreview(
+                    item: item,
+                    markdown: markdown,
+                    summary: HomeMeetingSummaryBetaPresentationPolicy.visibleSummaryPreview(
+                        for: item,
+                        isEnabled: localMeetingSummariesEnabled
+                    )
+                )
             case .failure(let message):
                 homeMeetingPreview = HomeMeetingPreview(
                     item: item,
@@ -698,8 +1012,14 @@ struct TranscriptedSettingsView: View {
 
     private func dictationRowMenuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
         [
-            HomeRowMenuItem(title: "Open saved file", symbolName: "doc.text") {
+            HomeRowMenuItem(title: "Open Markdown", symbolName: "doc.text") {
                 trackSettingsAction("open_recent_dictation_file", page: .home)
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .dictation,
+                    actionKind: .openMarkdown,
+                    surface: .homeMenu,
+                    artifactDate: entry.createdAt
+                )
                 NSWorkspace.shared.open(entry.url)
             },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
@@ -708,6 +1028,12 @@ struct TranscriptedSettingsView: View {
             },
             HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
                 trackSettingsAction("reveal_dictation_in_finder", page: .home)
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .dictation,
+                    actionKind: .revealFolder,
+                    surface: .homeMenu,
+                    artifactDate: entry.createdAt
+                )
                 NSWorkspace.shared.activateFileViewerSelecting([entry.url])
             },
             HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
@@ -733,6 +1059,33 @@ struct TranscriptedSettingsView: View {
 
     private func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
         var items: [HomeRowMenuItem] = []
+        let hasSummary = item.summaryPreview != nil
+        let isSummarizing = homeLocalSummaryJobIDs.contains(item.id)
+        let isPreparingLocalSummaryModel = isLocalSummaryModelPreparing
+        let canGenerateSummary = localMeetingSummaryUnavailableReason == nil
+        let hasPendingSpeakerReview = hasSpeakerReviewWork(for: item)
+        let summaryActionTitle: String
+        if isSummarizing {
+            summaryActionTitle = "Running AI summary..."
+        } else if hasSummary {
+            summaryActionTitle = "Open enhanced transcript"
+        } else if isPreparingLocalSummaryModel {
+            summaryActionTitle = "Preparing \(localMeetingSummaryProvider.title)..."
+        } else {
+            summaryActionTitle = "Run AI summary"
+        }
+
+        if HomeMeetingSummaryBetaPresentationPolicy.shouldShowSummaryMenuActions(isEnabled: localMeetingSummariesEnabled) {
+            items.append(
+                HomeRowMenuItem(
+                    title: summaryActionTitle,
+                    symbolName: hasSummary ? "doc.text" : "sparkles",
+                    isEnabled: !isSummarizing && (hasSummary || canGenerateSummary)
+                ) {
+                    handleOpenOrGenerateLocalSummary(item)
+                }
+            )
+        }
 
         items.append(contentsOf: [
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
@@ -741,9 +1094,51 @@ struct TranscriptedSettingsView: View {
             },
             HomeRowMenuItem(title: "Show transcript in Finder", symbolName: "doc.text") {
                 trackSettingsAction("reveal_meeting_in_finder", page: .home)
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .meeting,
+                    actionKind: .revealFolder,
+                    surface: .homeMenu,
+                    artifactDate: item.date
+                )
                 NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
             }
         ])
+
+        if HomeMeetingSummaryBetaPresentationPolicy.shouldShowSummaryMenuActions(isEnabled: localMeetingSummariesEnabled),
+           hasSummary {
+            items.append(
+                HomeRowMenuItem(
+                    title: isSummarizing
+                        ? "Regenerating AI summary..."
+                        : (isPreparingLocalSummaryModel ? "Preparing \(localMeetingSummaryProvider.title)..." : "Regenerate AI summary"),
+                    symbolName: "arrow.clockwise",
+                    isEnabled: !isSummarizing && canGenerateSummary
+                ) {
+                    generateLocalSummary(for: item)
+                }
+            )
+        }
+
+        if hasPendingSpeakerReview {
+            items.append(
+                HomeRowMenuItem(title: "Review speakers", symbolName: "person.crop.circle.badge.questionmark") {
+                    openHomeSpeakerReview(actionName: "review_meeting_speakers_row")
+                }
+            )
+        }
+
+        if RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+            audioHealth: item.audioHealth,
+            voiceProcessingPreferenceEnabled: meetingVoiceProcessingEnabled
+        ) {
+            items.append(
+                HomeRowMenuItem(title: "Use enhanced mic pickup next time", symbolName: "mic.badge.plus") {
+                    trackSettingsToggle("meeting_voice_processing", enabled: true, page: .home)
+                    MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
+                    meetingVoiceProcessingEnabled = true
+                }
+            )
+        }
 
         if let audio = item.audio, let firstAudio = audio.urls.first {
             if audio.retranscriptionInput != nil {
@@ -751,7 +1146,10 @@ struct TranscriptedSettingsView: View {
                     HomeRowMenuItem(
                         title: "Re-transcribe with speaker ID",
                         symbolName: "person.2.fill",
-                        isEnabled: canRetranscribeSavedMeetings
+                        isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                            globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
+                            hasSpeakerReviewWork: hasPendingSpeakerReview
+                        )
                     ) {
                         handleRetranscribeMeeting(item)
                     }
@@ -785,20 +1183,69 @@ struct TranscriptedSettingsView: View {
     }
 
     private func deleteMeeting(_ item: RecentMeetingItem) {
-        do {
-            if let audio = item.audio, MeetingAudioPlayback.shared.isActive(audio) {
-                MeetingAudioPlayback.shared.stop()
+        if homeMeetingPreview?.transcriptURL == item.transcriptURL {
+            homeMeetingPreview = nil
+        }
+        homeViewModel.removeVisibleMeeting(id: item.id)
+
+        let deletionTask = Task.detached(priority: .userInitiated) {
+            let plan = HomeMeetingDeletion.plan(for: item)
+            await MainActor.run {
+                MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(plan.audioAttachmentIDs))
             }
-            try removeItemIfPresent(at: item.transcriptURL)
-            if let audio = item.audio {
-                try removeItemIfPresent(at: audio.directoryURL)
+            return try HomeMeetingDeletion.delete(plan)
+        }
+
+        Task { @MainActor in
+            do {
+                _ = try await deletionTask.value
+                refreshRecentCaptures(force: true)
+            } catch {
+                refreshRecentCaptures(force: true)
+                presentHomeDeleteFailure(
+                    title: "Could not delete meeting",
+                    error: error
+                )
             }
-            refreshRecentCaptures(force: true)
-        } catch {
-            presentHomeDeleteFailure(
-                title: "Could not delete meeting",
-                error: error
-            )
+        }
+    }
+
+    private func renameMeetingPreview(_ preview: HomeMeetingPreview, to rawTitle: String) {
+        trackSettingsAction("rename_recent_meeting", page: .home)
+
+        let sourceURL = preview.transcriptURL
+        let attachmentID = preview.audio?.id
+
+        let renameTask = Task.detached(priority: .userInitiated) { () throws -> HomeMeetingRenameResult in
+            if let attachmentID {
+                await MainActor.run {
+                    MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: [attachmentID])
+                }
+            }
+            return try HomeMeetingRename.rename(transcriptAt: sourceURL, to: rawTitle)
+        }
+
+        Task { @MainActor in
+            do {
+                let result = try await renameTask.value
+                let audio = MeetingAudioArchiveResolver.attachment(forTranscript: result.transcriptURL)
+                if homeMeetingPreview?.id == preview.id {
+                    homeMeetingPreview = preview.updatingAfterRename(
+                        transcriptURL: result.transcriptURL,
+                        title: result.title,
+                        audio: audio
+                    )
+                }
+                refreshRecentCaptures(force: true)
+            } catch HomeMeetingRenameError.emptyTitle {
+                // Empty title is treated as a cancelled edit — leave everything untouched.
+            } catch {
+                refreshRecentCaptures(force: true)
+                presentHomeDeleteFailure(
+                    title: "Could not rename meeting",
+                    error: error
+                )
+            }
         }
     }
 
@@ -841,32 +1288,45 @@ struct TranscriptedSettingsView: View {
             MeetingAudioPlayback.shared.stop()
         }
 
+        let didClear: Bool
+        let failureTitle: String
         if !item.audioURLs.isEmpty {
-            meetingSession.deleteFailedMeeting(id: item.id)
+            didClear = meetingSession.deleteFailedMeeting(id: item.id)
+            failureTitle = "Could not delete failed meeting"
         } else {
-            meetingSession.dismissFailedMeeting(id: item.id)
+            didClear = meetingSession.dismissFailedMeeting(id: item.id)
+            failureTitle = "Could not dismiss failed meeting"
+        }
+
+        if !didClear {
+            presentHomeActionFailure(
+                title: failureTitle,
+                message: "Transcripted could not update the failed-meeting queue. Check the capture folder, then try again."
+            )
         }
     }
 
-    private func removeItemIfPresent(at url: URL) throws {
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        try FileManager.default.removeItem(at: url)
+    private func presentHomeDeleteFailure(title: String, error: Error) {
+        presentHomeActionFailure(title: title, message: error.localizedDescription)
     }
 
-    private func presentHomeDeleteFailure(title: String, error: Error) {
+    private func presentHomeActionFailure(title: String, message: String) {
         NSSound.beep()
         homeDeleteFailure = HomeDeleteFailure(
             title: title,
-            message: error.localizedDescription
+            message: message
         )
     }
 
-    private var homeWelcomeSummary: String {
-        let dictations = homeViewModel.todayDictationCount
-        let meetings = statsService.todayRecordings
-        let dictationLabel = dictations == 1 ? "dictation" : "dictations"
-        let meetingLabel = meetings == 1 ? "meeting" : "meetings"
-        return "\(formattedInteger(dictations)) \(dictationLabel) · \(formattedInteger(meetings)) \(meetingLabel) today"
+    private func retryFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
+        let didStart = meetingSession.retryFailedMeeting(id: item.id)
+        if !didStart {
+            presentHomeActionFailure(
+                title: "Could not retry meeting",
+                message: failedMeetingRetryUnavailableReason
+                    ?? "Transcripted could not start that retry. The saved audio may already be cleared."
+            )
+        }
     }
 
     private var homeStatItems: [HomeStatItem] {
@@ -875,31 +1335,43 @@ struct TranscriptedSettingsView: View {
                 id: "dictations",
                 symbolName: "text.bubble.fill",
                 value: formattedInteger(homeViewModel.totalDictationCount),
-                label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations"
+                label: homeViewModel.totalDictationCount == 1 ? "dictation" : "dictations",
+                detail: "Spoken notes saved to your daily Markdown files"
             ),
             HomeStatItem(
                 id: "dictation-words",
                 symbolName: "text.alignleft",
                 value: formattedInteger(homeViewModel.totalDictationWordCount),
-                label: "dictated words"
+                label: "words dictated",
+                detail: "Words you spoke instead of typed"
             ),
             HomeStatItem(
                 id: "typing-time-saved",
                 symbolName: "keyboard",
                 value: formattedTypingTimeSaved(forDictatedWords: homeViewModel.totalDictationWordCount),
-                label: "saved"
+                label: "typing time saved",
+                detail: "Estimated from your dictated words at a 40 words-per-minute typing pace"
             ),
             HomeStatItem(
                 id: "meetings",
                 symbolName: "person.2.wave.2.fill",
                 value: formattedInteger(statsService.totalRecordings),
-                label: statsService.totalRecordings == 1 ? "meeting" : "meetings"
+                label: statsService.totalRecordings == 1 ? "meeting" : "meetings",
+                detail: "Transcribed and saved on this Mac"
             ),
             HomeStatItem(
                 id: "meeting-hours",
                 symbolName: "clock.fill",
                 value: statsService.formattedTotalHours,
-                label: "hours"
+                label: "meeting hours recorded",
+                detail: "Total length of everything you've captured"
+            ),
+            HomeStatItem(
+                id: "meetings-30d",
+                symbolName: "calendar",
+                value: formattedInteger(statsService.last30DaysRecordings),
+                label: "meetings, last 30 days",
+                detail: "Your recent capture momentum"
             )
         ]
     }
@@ -909,20 +1381,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private func formattedTypingTimeSaved(forDictatedWords wordCount: Int) -> String {
-        guard wordCount > 0 else { return "0h" }
-
-        let hours = Double(wordCount) / 40.0 / 60.0
-        guard hours >= 1 else { return "<1h" }
-
-        if hours < 10 {
-            let roundedTenths = (hours * 10).rounded() / 10
-            if roundedTenths >= 10 {
-                return "\(Int(roundedTenths.rounded()))h"
-            }
-            return String(format: "%.1fh", roundedTenths)
-        }
-
-        return "\(Int(hours.rounded()))h"
+        TypingTimeSavedFormatter.format(dictatedWords: wordCount)
     }
 
     private static let homeIntegerFormatter: NumberFormatter = {
@@ -936,18 +1395,17 @@ struct TranscriptedSettingsView: View {
         return streak > 0 ? streak : nil
     }
 
-    private var homeNeedsAttentionIssues: [HomeNeedsAttentionCard.Issue] {
-        var issues: [HomeNeedsAttentionCard.Issue] = []
+    private var homeAttentionIssues: [HomeAttentionIssue] {
+        var issues: [HomeAttentionIssue] = []
 
         if !missingRequiredPermissions.isEmpty {
             issues.append(
-                HomeNeedsAttentionCard.Issue(
+                HomeAttentionIssue(
                     id: "permissions",
-                    symbolName: "lock.trianglebadge.exclamationmark",
-                    title: "Permissions",
+                    title: "Permissions need attention",
                     detail: permissionsDetailLine,
-                    destination: .privacy,
-                    actionTitle: "Fix"
+                    tone: .warning,
+                    destination: .privacy
                 )
             )
         }
@@ -955,15 +1413,40 @@ struct TranscriptedSettingsView: View {
         if !meetingSession.failedMeetings.isEmpty {
             let count = meetingSession.failedMeetings.count
             issues.append(
-                HomeNeedsAttentionCard.Issue(
+                HomeAttentionIssue(
                     id: "failed-meetings",
-                    symbolName: "waveform.badge.exclamationmark",
-                    title: count == 1 ? "Meeting needs attention" : "Meetings need attention",
+                    title: count == 1 ? "1 meeting failed" : "\(count) meetings failed",
                     detail: count == 1
                         ? "Saved audio is waiting for review or retry."
                         : "\(count) saved recordings are waiting for review or retry.",
-                    destination: .failedMeetings,
-                    actionTitle: "Review"
+                    tone: .failure,
+                    destination: .failedMeetings
+                )
+            )
+        }
+
+        let reviewCount = speakerPeopleModel.pendingVoiceGroups.count
+        if reviewCount > 0 {
+            issues.append(
+                HomeAttentionIssue(
+                    id: "speakers",
+                    title: reviewCount == 1 ? "1 speaker needs a name" : "\(reviewCount) speakers need names",
+                    detail: "Name saved speaker labels so transcripts read like a conversation.",
+                    tone: .warning,
+                    destination: .speakers
+                )
+            )
+        }
+
+        if !homeLocalSummaryJobIDs.isEmpty {
+            let count = homeLocalSummaryJobIDs.count
+            issues.append(
+                HomeAttentionIssue(
+                    id: "summaries",
+                    title: count == 1 ? "1 summary running" : "\(count) summaries running",
+                    detail: "Local AI summaries are still being written.",
+                    tone: .progress,
+                    destination: .summaries
                 )
             )
         }
@@ -974,24 +1457,22 @@ struct TranscriptedSettingsView: View {
         )
         if modelCard.tone == .failed {
             issues.append(
-                HomeNeedsAttentionCard.Issue(
+                HomeAttentionIssue(
                     id: "voice-model-failed",
-                    symbolName: "tray.and.arrow.down.fill",
-                    title: "Voice model",
+                    title: "Voice model needs attention",
                     detail: modelCard.detail,
-                    destination: .models,
-                    actionTitle: "Fix"
+                    tone: .warning,
+                    destination: .models
                 )
             )
         } else if preferredTranscriptionModel != effectiveTranscriptionModel {
             issues.append(
-                HomeNeedsAttentionCard.Issue(
+                HomeAttentionIssue(
                     id: "voice-model-mismatch",
-                    symbolName: "tray.and.arrow.down.fill",
-                    title: "Voice model",
+                    title: "Voice model mismatch",
                     detail: "\(preferredTranscriptionModel.title) is selected but \(effectiveTranscriptionModel.title) is being used.",
-                    destination: .models,
-                    actionTitle: "Review"
+                    tone: .warning,
+                    destination: .models
                 )
             )
         }
@@ -1012,6 +1493,13 @@ struct TranscriptedSettingsView: View {
 
     private var canRetryFailedMeetings: Bool {
         failedMeetingRetryUnavailableReason == nil
+    }
+
+    private func hasSpeakerReviewWork(for meeting: RecentMeetingItem) -> Bool {
+        guard speakerPeopleModel.hasLoadedProfiles else {
+            return meeting.speakerStatus.needsReview
+        }
+        return speakerPeopleModel.hasPendingReview(forTranscript: meeting.transcriptURL)
     }
 
     private var canRetranscribeSavedMeetings: Bool {
@@ -1044,6 +1532,36 @@ struct TranscriptedSettingsView: View {
         )
     }
 
+    private var localMeetingSummaryUnavailableReason: String? {
+        if let busyReason = LocalMeetingSummaryAvailabilityPolicy.unavailableReason(
+            isDictationActive: sttRouter.isRecording || sttRouter.isTranscribing,
+            isMeetingRecording: meetingSession.isRecording,
+            isPreparingModels: meetingSession.state == .loadingModels,
+            isPreparingLocalSummaryModel: isLocalSummaryModelPreparing,
+            hasMeetingWork: meetingSession.hasRuntimeDiagnosticsWork,
+            isSpeakerReviewPending: meetingSession.isSpeakerReviewPending
+        ) {
+            return busyReason
+        }
+
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            if !localSummarySetupStatus.hasEnoughMemory {
+                return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB."
+            }
+            if !localSummarySetupStatus.hasRuntime {
+                return "Install uv from Beta settings before running Gemma summaries."
+            }
+        case .appleFoundation:
+            if !appleSummarySetupStatus.isReady {
+                return appleSummarySetupStatus.unavailableReason
+                    ?? "Apple on-device summaries are unavailable on this Mac right now."
+            }
+        }
+
+        return nil
+    }
+
     private var shortcutsPage: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
@@ -1053,7 +1571,7 @@ struct TranscriptedSettingsView: View {
 
             SettingsSection(
                 title: "Keys",
-                detail: "Set push-to-talk, hands-free, and meeting shortcuts."
+                detail: "Set push-to-talk, hands-free, paste-last-dictation, and meeting shortcuts."
             ) {
                 SettingsToggleRow(
                     title: "Enable dictation shortcuts",
@@ -1071,7 +1589,7 @@ struct TranscriptedSettingsView: View {
                 )
 
                 HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                    .frame(height: 108)
+                    .frame(height: HotkeyRecorderContainer.preferredHeight)
 
                 if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
                     HStack(alignment: .top, spacing: 8) {
@@ -1197,7 +1715,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Launch at login",
                         message: "When this is on, macOS opens Transcripted after you sign in, so the menu bar app and shortcuts are ready without opening it yourself."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.launch-at-login"
                 )
 
                 GeneralToggleRow(
@@ -1216,7 +1735,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Show in Dock",
                         message: "Turn this off if you want Transcripted to stay out of the Dock while idle. Settings and active recordings can still bring the app forward when needed."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.show-in-dock"
                 )
 
                 GeneralToggleRow(
@@ -1235,7 +1755,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Dictation sounds",
                         message: "These short sounds tell you when dictation starts, finishes, or hears no speech. Turn them off if you want Transcripted to stay quiet."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.dictation-sounds"
                 )
 
                 GeneralToggleRow(
@@ -1254,7 +1775,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Clean up pasted text",
                         message: "Transcripted lightly fixes filler words, repeated words, and spacing before it pastes your dictation. Turn this off when you want the raw transcript."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.cleanup-pasted-text"
                 )
 
                 DictationOverlayModeRow(
@@ -1284,7 +1806,8 @@ struct TranscriptedSettingsView: View {
                     info: GeneralInfo(
                         title: "Confirm meeting quits",
                         message: "When this is on, Transcripted asks before quitting during a live meeting so you do not stop a recording by accident."
-                    )
+                    ),
+                    automationIdentifier: "transcripted.settings.general.confirm-meeting-quits"
                 )
             }
 
@@ -1302,7 +1825,8 @@ struct TranscriptedSettingsView: View {
                         title: "Transcription model",
                         value: effectiveTranscriptionModel.title,
                         isExpanded: $showGeneralModelSettings,
-                        help: showGeneralModelSettings ? "Hide transcription model settings." : "Show transcription model settings."
+                        help: showGeneralModelSettings ? "Hide transcription model settings." : "Show transcription model settings.",
+                        automationIdentifier: "transcripted.settings.general.disclosure.transcription-model"
                     ) {
                         trackSettingsAction("toggle_model_settings", page: .general)
                     }
@@ -1317,7 +1841,8 @@ struct TranscriptedSettingsView: View {
                         title: "Keyboard shortcuts",
                         value: dictationShortcutsEnabled ? "On" : "Off",
                         isExpanded: $showGeneralShortcutSettings,
-                        help: showGeneralShortcutSettings ? "Hide keyboard shortcut settings." : "Show keyboard shortcut settings."
+                        help: showGeneralShortcutSettings ? "Hide keyboard shortcut settings." : "Show keyboard shortcut settings.",
+                        automationIdentifier: "transcripted.settings.general.disclosure.keyboard-shortcuts"
                     ) {
                         trackSettingsAction("toggle_shortcut_settings", page: .general)
                     }
@@ -1332,7 +1857,8 @@ struct TranscriptedSettingsView: View {
                         title: "Privacy",
                         value: generalPrivacyStatusLine,
                         isExpanded: $showGeneralPrivacySettings,
-                        help: showGeneralPrivacySettings ? "Hide privacy settings." : "Show privacy settings."
+                        help: showGeneralPrivacySettings ? "Hide privacy settings." : "Show privacy settings.",
+                        automationIdentifier: "transcripted.settings.general.disclosure.privacy"
                     ) {
                         trackSettingsAction("toggle_privacy_settings", page: .general)
                     }
@@ -1359,7 +1885,8 @@ struct TranscriptedSettingsView: View {
                         title: "Transcribe audio file",
                         value: "Choose",
                         systemImage: "waveform",
-                        help: "Choose an audio file to transcribe."
+                        help: "Choose an audio file to transcribe.",
+                        automationIdentifier: "transcripted.settings.general.transcribe-audio-file"
                     ) {
                         trackSettingsAction("import_recording", page: .general)
                         actions.importAudioFile()
@@ -1369,7 +1896,8 @@ struct TranscriptedSettingsView: View {
                         title: "Corrections",
                         value: customDictionaryStatusLine,
                         isExpanded: $showGeneralCorrections,
-                        help: showGeneralCorrections ? "Hide correction settings." : "Show correction settings."
+                        help: showGeneralCorrections ? "Hide correction settings." : "Show correction settings.",
+                        automationIdentifier: "transcripted.settings.general.disclosure.corrections"
                     ) {
                         trackSettingsAction("toggle_corrections", page: .general)
                     }
@@ -1474,7 +2002,7 @@ struct TranscriptedSettingsView: View {
             )
 
             HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                .frame(height: 108)
+                .frame(height: HotkeyRecorderContainer.preferredHeight)
 
             if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
                 HStack(alignment: .top, spacing: 8) {
@@ -1603,10 +2131,10 @@ struct TranscriptedSettingsView: View {
                     .font(.subheadline.weight(.semibold))
 
                 SettingsToggleRow(
-                    title: "Use Apple voice processing",
+                    title: "Enhanced mic pickup during calls (Apple voice processing)",
                     detail: meetingVoiceProcessingEnabled
-                        ? "May lower other app audio in Zoom/Meet."
-                        : "Off. Transcripted boosts the saved mic and live transcript without changing system audio.",
+                        ? "On. Fixes the quiet mic when another call app holds it in voice mode. Other apps' audio may get slightly quieter while recording."
+                        : "Off. Transcripted boosts the saved mic in software without touching other apps' audio. Turn on if your side of calls records very quiet.",
                     isOn: Binding(
                         get: { meetingVoiceProcessingEnabled },
                         set: { newValue in
@@ -1632,7 +2160,7 @@ struct TranscriptedSettingsView: View {
                     )
                 )
 
-                Text("Meeting audio changes apply to the next recording.")
+                Text("Changes here apply from the next recording.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -1680,10 +2208,14 @@ struct TranscriptedSettingsView: View {
                 .disabled(!AnalyticsReporter.isAvailable)
 
                 HStack {
-                    SettingsInlineActionButton(title: "Send Test Sentry Event", tone: .warning) {
-                        trackSettingsAction("send_test_sentry_event", page: .general)
-                        sendTestSentryEvent()
-                    }
+                SettingsInlineActionButton(
+                    title: "Send Test Sentry Event",
+                    tone: .warning,
+                    automationIdentifier: "transcripted.settings.general.send-test-sentry-event"
+                ) {
+                    trackSettingsAction("send_test_sentry_event", page: .general)
+                    sendTestSentryEvent()
+                }
                     .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
 
                     if let sentryTestStatus {
@@ -1759,7 +2291,11 @@ struct TranscriptedSettingsView: View {
 
                 Spacer()
 
-                SettingsInlineActionButton(title: "Clear all", tone: .destructive) {
+                SettingsInlineActionButton(
+                    title: "Clear all",
+                    tone: .destructive,
+                    automationIdentifier: "transcripted.settings.general.corrections.clear-all"
+                ) {
                     trackSettingsAction("clear_corrections", page: .general)
                     clearCorrectionRows()
                 }
@@ -1899,7 +2435,7 @@ struct TranscriptedSettingsView: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Speakers",
-                summary: "Name deferred speaker reviews, play samples, and clean up duplicates."
+                summary: "Name new voices and manage the people in your meetings."
             )
 
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)
@@ -2137,6 +2673,595 @@ struct TranscriptedSettingsView: View {
         AgentConnectionSettingsPage(meetingSession: meetingSession)
     }
 
+    private var betaPage: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsPageIntro(
+                title: "Beta",
+                summary: "Turn on experimental local features when you want to test them."
+            )
+
+            SettingsSection(
+                title: "Experimental Features",
+                detail: "These are off by default. Nothing runs automatically unless you turn it on here."
+            ) {
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsToggleRow(
+                        title: "AI meeting summaries",
+                        detail: localMeetingSummariesEnabled
+                            ? "On. Transcripted may prepare Gemma now; meeting summaries still run only when you choose Run AI summary."
+                            : "Create private meeting summaries on this Mac. Turning this on may download or warm Gemma before your first summary.",
+                        isOn: Binding(
+                            get: { localMeetingSummariesEnabled },
+                            set: { enabled in
+                                localMeetingSummariesEnabled = enabled
+                                LocalMeetingSummaryPreferences.setEnabled(enabled)
+                                trackSettingsToggle("local_ai_meeting_summaries", enabled: enabled, page: .beta)
+                                handleLocalMeetingSummaryToggle(enabled)
+                            }
+                        ),
+                        help: "Opt in to local meeting summaries on Home.",
+                        automationIdentifier: "transcripted.settings.beta.ai-meeting-summaries"
+                    )
+
+                    Picker("Summary provider", selection: Binding(
+                        get: { localMeetingSummaryProvider },
+                        set: { provider in
+                            localMeetingSummaryProviderRawValue = provider.rawValue
+                            LocalMeetingSummaryPreferences.setProvider(provider)
+                            trackSettingsToggle("local_ai_meeting_summary_provider_\(provider.rawValue)", enabled: true, page: .beta)
+                            refreshLocalSummarySetupStatus()
+                            if localMeetingSummariesEnabled {
+                                cancelLocalSummaryJobs()
+                                clearHomeLocalSummaryNotice()
+                                cancelLocalSummaryModelPreparation()
+                                localSummaryModelPreparationStatus = nil
+                                prepareLocalSummaryModelFromBeta()
+                            }
+                        }
+                    )) {
+                        ForEach(LocalMeetingSummaryProvider.allCases, id: \.self) { provider in
+                            Text(provider.title).tag(provider)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(isLocalSummaryModelPreparing)
+
+                    Text(localMeetingSummaryProvider.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    betaLocalSummarySetupStatus
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsToggleRow(
+                        title: "Live meeting sidecar",
+                        detail: betaLiveMeetingCodexEnabled
+                            ? "On. Transcripted prepares a local folder that Codex or Claude Cowork can watch during active meetings."
+                            : "Let Codex or Claude Cowork follow an active meeting through a local sidecar folder.",
+                        isOn: Binding(
+                            get: { betaLiveMeetingCodexEnabled },
+                            set: { enabled in
+                                betaLiveMeetingCodexEnabled = enabled
+                                LiveMeetingCodexPreferences.setEnabled(enabled)
+                                trackSettingsToggle("live_meeting_sidecar", enabled: enabled, page: .beta)
+                                handleBetaLiveMeetingSidecarToggle(enabled)
+                            }
+                        ),
+                        help: "Opt in to the live meeting sidecar workspace.",
+                        automationIdentifier: "transcripted.settings.beta.live-meeting-sidecar"
+                    )
+
+                    betaLiveSidecarSetupStatus
+                }
+            }
+        }
+    }
+
+    private var betaLocalSummarySetupStatus: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: localSummarySetupStatusSymbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(localSummarySetupStatusColor)
+                    .frame(width: 22)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(localSummarySetupStatusTitle)
+                        .font(.subheadline.weight(.semibold))
+                    Text(localSummarySetupStatusDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                SettingsInlineActionButton(
+                    title: "Check setup",
+                    symbolName: "arrow.clockwise",
+                    automationIdentifier: "transcripted.settings.beta.local-summary.check-setup"
+                ) {
+                    trackSettingsAction("check_local_summary_setup", page: .beta)
+                    refreshLocalSummarySetupStatus()
+                }
+
+                if localMeetingSummariesEnabled, selectedLocalSummaryProviderIsReady {
+                    SettingsInlineActionButton(
+                        title: isLocalSummaryModelPreparing ? "Cancel setup" : localSummaryPrepareButtonTitle,
+                        symbolName: isLocalSummaryModelPreparing ? "xmark.circle" : "tray.and.arrow.down",
+                        tone: isLocalSummaryModelPreparing ? .warning : .neutral,
+                        automationIdentifier: "transcripted.settings.beta.local-summary.prepare-model"
+                    ) {
+                        if isLocalSummaryModelPreparing {
+                            trackSettingsAction("cancel_local_summary_model_prepare", page: .beta)
+                            cancelLocalSummaryModelPreparation()
+                            localSummaryModelPreparationStatus = "\(localMeetingSummaryProvider.title) setup cancelled. You can try again when this Mac is idle."
+                        } else {
+                            trackSettingsAction("prepare_local_summary_model", page: .beta)
+                            prepareLocalSummaryModelFromBeta()
+                        }
+                    }
+                }
+            }
+
+            if localMeetingSummaryProvider == .gemmaMLX, !localSummarySetupStatus.hasRuntime {
+                SettingsInlineActionButton(
+                    title: "Install uv",
+                    symbolName: "arrow.down.circle",
+                    tone: .warning,
+                    automationIdentifier: "transcripted.settings.beta.local-summary.install-uv"
+                ) {
+                    trackSettingsAction("open_uv_install_guide", page: .beta)
+                    openUVInstallGuide()
+                }
+            }
+
+            if let localSummaryModelPreparationStatus {
+                Text(localSummaryModelPreparationStatus)
+                    .font(.caption)
+                    .foregroundStyle(isLocalSummaryModelPreparing ? Color.accentColor : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            DisclosureGroup("Setup details", isExpanded: $showLocalSummarySetupDetails) {
+                VStack(alignment: .leading, spacing: 8) {
+                    betaSetupDetailLine(
+                        title: "Provider",
+                        value: localMeetingSummaryProvider.title
+                    )
+                    ForEach(localSummarySetupDetails, id: \.title) { detail in
+                        betaSetupDetailLine(title: detail.title, value: detail.value)
+                    }
+                }
+                .padding(.top, 6)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.top, 2)
+    }
+
+    private var betaLiveSidecarSetupStatus: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: betaLiveMeetingCodexEnabled ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(betaLiveMeetingCodexEnabled ? Color.green : Color.secondary)
+                    .frame(width: 22)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(betaLiveMeetingCodexEnabled ? "Sidecar workspace is on" : "Sidecar workspace is off")
+                        .font(.subheadline.weight(.semibold))
+                    Text(betaLiveSidecarDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(spacing: 10) {
+                SettingsInlineActionButton(
+                    title: "Open Agent setup",
+                    symbolName: "sparkles",
+                    tone: .accent,
+                    automationIdentifier: "transcripted.settings.beta.open-agent-setup"
+                ) {
+                    trackSettingsAction("open_agent_setup_from_beta", page: .beta)
+                    navigation.selectedPage = .connectAgent
+                }
+
+                if let betaFeatureStatus {
+                    Label(
+                        betaFeatureStatus,
+                        systemImage: betaFeatureStatus.hasPrefix("Could not") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(betaFeatureStatus.hasPrefix("Could not") ? Color.orange : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func betaSetupDetailLine(title: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .leading)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func handleBetaLiveMeetingSidecarToggle(_ enabled: Bool) {
+        betaFeatureStatus = nil
+
+        if enabled {
+            do {
+                _ = try prepareBetaLiveMeetingSidecarWorkspaceForUse()
+                betaFeatureStatus = "Live meeting sidecar is ready."
+            } catch {
+                betaLiveMeetingCodexEnabled = false
+                LiveMeetingCodexPreferences.setEnabled(false)
+                meetingSession.stopLiveCodexSessionFromSettings()
+                stopBetaLiveMeetingSidecarPreview()
+                betaFeatureStatus = "Could not prepare live meeting sidecar: \(error.localizedDescription)"
+            }
+        } else {
+            meetingSession.stopLiveCodexSessionFromSettings()
+            stopBetaLiveMeetingSidecarPreview()
+        }
+    }
+
+    private func handleLocalMeetingSummaryToggle(_ enabled: Bool) {
+        refreshLocalSummarySetupStatus()
+        if enabled {
+            prepareLocalSummaryModelFromBeta()
+        } else {
+            cancelLocalSummaryJobs()
+            clearHomeLocalSummaryNotice()
+            cancelLocalSummaryModelPreparation()
+            localSummaryModelPreparationStatus = nil
+        }
+    }
+
+    private func prepareLocalSummaryModelFromBeta() {
+        refreshLocalSummarySetupStatus()
+        localSummaryModelPreparationTask?.cancel()
+
+        let provider = localMeetingSummaryProvider
+        switch provider {
+        case .gemmaMLX:
+            guard localSummarySetupStatus.hasEnoughMemory else {
+                localSummaryModelPreparationStatus = "Gemma needs more memory than this Mac reports."
+                return
+            }
+
+            guard localSummarySetupStatus.hasRuntime else {
+                localSummaryModelPreparationStatus = "Install uv first, then Transcripted can download Gemma here."
+                return
+            }
+        case .appleFoundation:
+            guard appleSummarySetupStatus.isReady else {
+                localSummaryModelPreparationStatus = appleSummarySetupStatus.unavailableReason
+                    ?? "Apple on-device summaries are unavailable on this Mac right now."
+                return
+            }
+        }
+
+        isLocalSummaryModelPreparing = true
+        localSummaryModelPreparationStatus = localSummaryPreparationStartedStatus
+        recordLocalSummaryEvent(
+            event: "local_meeting_summary_model_prepare_started",
+            message: "\(provider.title) summary model preparation started",
+            context: [
+                "provider": provider.rawValue,
+                "setup_profile": selectedLocalSummaryProviderProfileName,
+            ]
+        )
+
+        let taskToken = UUID()
+        let task = Task.detached(priority: .utility) {
+            switch provider {
+            case .gemmaMLX:
+                return try await LocalMeetingSummarizer().prepareModelForFirstSummary()
+            case .appleFoundation:
+                return try await AppleFoundationMeetingSummarizer().prepareModelForFirstSummary()
+            }
+        }
+        localSummaryModelPreparationTask = task
+        localSummaryModelPreparationToken = taskToken
+
+        Task { @MainActor in
+            do {
+                let profile = try await task.value
+                guard !Task.isCancelled, localSummaryModelPreparationToken == taskToken else { return }
+                isLocalSummaryModelPreparing = false
+                localSummaryModelPreparationTask = nil
+                localSummaryModelPreparationToken = nil
+                refreshLocalSummarySetupStatus()
+                localSummaryModelPreparationStatus = "\(provider.title) is ready. The first real summary should start without a surprise setup step."
+                recordLocalSummaryEvent(
+                    event: "local_meeting_summary_model_prepare_completed",
+                    message: "\(provider.title) summary model preparation completed",
+                    context: [
+                        "provider": provider.rawValue,
+                        "profile": profile,
+                    ]
+                )
+            } catch is CancellationError {
+                guard localSummaryModelPreparationToken == taskToken else { return }
+                isLocalSummaryModelPreparing = false
+                localSummaryModelPreparationTask = nil
+                localSummaryModelPreparationToken = nil
+                localSummaryModelPreparationStatus = nil
+                recordLocalSummaryEvent(
+                    event: "local_meeting_summary_model_prepare_cancelled",
+                    message: "\(provider.title) summary model preparation cancelled",
+                    context: [
+                        "provider": provider.rawValue,
+                    ]
+                )
+            } catch {
+                guard localSummaryModelPreparationToken == taskToken else { return }
+                isLocalSummaryModelPreparing = false
+                localSummaryModelPreparationTask = nil
+                localSummaryModelPreparationToken = nil
+                refreshLocalSummarySetupStatus()
+                localSummaryModelPreparationStatus = "\(provider.title) setup failed: \(error.localizedDescription)"
+                recordLocalSummaryEvent(
+                    level: .error,
+                    event: "local_meeting_summary_model_prepare_failed",
+                    message: "\(provider.title) summary model preparation failed",
+                    context: [
+                        "provider": provider.rawValue,
+                        "error": error.localizedDescription,
+                    ]
+                )
+            }
+        }
+    }
+
+    private func cancelLocalSummaryModelPreparation() {
+        localSummaryModelPreparationTask?.cancel()
+        localSummaryModelPreparationTask = nil
+        localSummaryModelPreparationToken = nil
+        isLocalSummaryModelPreparing = false
+    }
+
+    private func prepareBetaLiveMeetingSidecarWorkspaceForUse() throws -> URL {
+        let workspaceURL = try AgentConnectionGuide.ensureLiveMeetingCodexWorkspace()
+        if #available(macOS 14.0, *) {
+            _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
+        }
+        return workspaceURL
+    }
+
+    private func stopBetaLiveMeetingSidecarPreview() {
+        if #available(macOS 14.0, *) {
+            LiveMeetingPreviewServer.shared.stop()
+        }
+    }
+
+    private func refreshLocalSummarySetupStatus() {
+        localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
+        appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
+    }
+
+    private func cancelLocalSummaryJobs() {
+        for task in homeLocalSummaryTasks.values {
+            task.cancel()
+        }
+        homeLocalSummaryTasks.removeAll()
+        homeLocalSummaryTaskTokens.removeAll()
+        homeLocalSummaryJobIDs.removeAll()
+    }
+
+    private func presentHomeLocalSummaryNotice(_ notice: HomeLocalSummaryNotice) {
+        homeLocalSummaryNotice = notice
+        homeLocalSummaryNoticeDismissTask?.cancel()
+        homeLocalSummaryNoticeDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: HomeLocalSummaryNoticeDismissalPolicy.autoDismissDelayNanoseconds)
+            guard !Task.isCancelled,
+                  HomeLocalSummaryNoticeDismissalPolicy.shouldDismiss(
+                    current: homeLocalSummaryNotice,
+                    scheduledNoticeID: notice.id
+                  ) else { return }
+            homeLocalSummaryNotice = nil
+            homeLocalSummaryNoticeDismissTask = nil
+        }
+    }
+
+    private func clearHomeLocalSummaryNotice(id: UUID? = nil) {
+        if let id, homeLocalSummaryNotice?.id != id { return }
+        homeLocalSummaryNoticeDismissTask?.cancel()
+        homeLocalSummaryNoticeDismissTask = nil
+        homeLocalSummaryNotice = nil
+    }
+
+    private func refreshRecentCapturesAfterLocalSummary() {
+        guard navigation.selectedPage == .home else {
+            refreshRecentCaptures(force: true)
+            return
+        }
+        homeViewModel.reloadVisibleContent()
+        Task { @MainActor in
+            await statsService.refreshStats()
+        }
+    }
+
+    private func recordLocalSummaryEvent(
+        level: EventLevel = .info,
+        event: String,
+        message: String,
+        context: [String: String] = [:]
+    ) {
+        DiagnosticsTrail.record(
+            logger: appLogger,
+            level: level,
+            engine: "meeting",
+            event: event,
+            message: message,
+            context: context
+        )
+    }
+
+    private func openUVInstallGuide() {
+        guard let url = URL(string: "https://docs.astral.sh/uv/getting-started/installation/") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private var localMeetingSummaryProvider: LocalMeetingSummaryProvider {
+        LocalMeetingSummaryProvider(rawValue: localMeetingSummaryProviderRawValue)
+            ?? LocalMeetingSummaryProvider.defaultProvider
+    }
+
+    private var selectedLocalSummaryProviderIsReady: Bool {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return localSummarySetupStatus.isReady
+        case .appleFoundation:
+            return appleSummarySetupStatus.isReady
+        }
+    }
+
+    private var selectedLocalSummaryProviderProfileName: String {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return localSummarySetupStatus.profileName
+        case .appleFoundation:
+            return appleSummarySetupStatus.profileName
+        }
+    }
+
+    private var localSummaryPrepareButtonTitle: String {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return "Prepare Gemma"
+        case .appleFoundation:
+            return "Check Apple model"
+        }
+    }
+
+    private var localSummaryPreparationStartedStatus: String {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return "Preparing Gemma 4 12B locally. Transcripted is warming the local runner and may download several GB from Hugging Face; detailed download progress is not available yet."
+        case .appleFoundation:
+            return "Checking Apple's on-device Foundation Model locally. Transcripted will use the best Apple model this Mac exposes, including Core Advanced when available."
+        }
+    }
+
+    private var localSummarySetupDetails: [(title: String, value: String)] {
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            return [
+                ("Model", "Gemma 4 12B 4-bit MLX"),
+                ("Download", "First summary may download several GB into your local Hugging Face cache."),
+                ("Runtime", localSummarySetupStatus.hasRuntime
+                    ? "uv found at \(localSummarySetupStatus.uvPath ?? "")"
+                    : "Install uv so Transcripted can run the local MLX package."),
+                ("Hardware", "Recommended: Apple Silicon with 16 GB memory. 8 GB Macs are not supported yet."),
+                ("Privacy", "Transcript text stays on this Mac. The model download comes from Hugging Face if it is not cached.")
+            ]
+        case .appleFoundation:
+            return [
+                ("Model", "Apple Foundation Models system model"),
+                ("Context", appleSummarySetupStatus.contextSize > 0
+                    ? "\(appleSummarySetupStatus.contextSize) tokens reported by this Mac."
+                    : "Context size unavailable."),
+                ("Runtime", appleSummarySetupStatus.isReady
+                    ? "Apple Intelligence model is available."
+                    : (appleSummarySetupStatus.unavailableReason ?? "Apple model unavailable.")),
+                ("Hardware", "Uses the best Apple on-device model this Mac exposes. Core Advanced is used only when the system provides it."),
+                ("Privacy", "Transcript text stays on this Mac and uses Apple's local model path.")
+            ]
+        }
+    }
+
+    private var localSummarySetupStatusTitle: String {
+        if isLocalSummaryModelPreparing {
+            return "Preparing \(localMeetingSummaryProvider.title)"
+        }
+
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            if !localSummarySetupStatus.hasEnoughMemory {
+                return "Not supported on this Mac"
+            }
+            if !localSummarySetupStatus.hasRuntime {
+                return "Setup needed"
+            }
+        case .appleFoundation:
+            if !appleSummarySetupStatus.isFrameworkAvailable {
+                return "Framework unavailable"
+            }
+            if !appleSummarySetupStatus.isModelAvailable {
+                return "Apple model unavailable"
+            }
+        }
+        return "Runtime ready"
+    }
+
+    private var localSummarySetupStatusDetail: String {
+        if isLocalSummaryModelPreparing {
+            return "Transcripted is preparing \(localMeetingSummaryProvider.title). Home summaries stay paused so this Mac only runs one local summary job at a time."
+        }
+
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            if !localSummarySetupStatus.hasEnoughMemory {
+                return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Local Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB to avoid heavy swapping."
+            }
+            if !localSummarySetupStatus.hasRuntime {
+                return "Install uv first. The first summary may download a large local Gemma model, then future summaries reuse the local cache."
+            }
+            return "uv is installed. Use Prepare Gemma to download or warm the local model before running a meeting summary."
+        case .appleFoundation:
+            if !appleSummarySetupStatus.isReady {
+                return appleSummarySetupStatus.unavailableReason ?? "Apple on-device summaries are unavailable on this Mac right now."
+            }
+            return "Apple's on-device model is available with a \(appleSummarySetupStatus.contextSize)-token context. Transcripted will chunk long meetings before merging."
+        }
+    }
+
+    private var localSummarySetupStatusSymbol: String {
+        if isLocalSummaryModelPreparing {
+            return "arrow.triangle.2.circlepath"
+        }
+        if selectedLocalSummaryProviderIsReady {
+            return "checkmark.circle.fill"
+        }
+        return "exclamationmark.circle.fill"
+    }
+
+    private var localSummarySetupStatusColor: Color {
+        if isLocalSummaryModelPreparing {
+            return Color.accentColor
+        }
+        if selectedLocalSummaryProviderIsReady {
+            return .green
+        }
+        return .orange
+    }
+
+    private var betaLiveSidecarDetail: String {
+        if betaLiveMeetingCodexEnabled {
+            return "Transcripted prepares the local workspace. Use Agent setup to open Codex, copy Cowork setup, or open the live preview."
+        }
+        return "Normal meeting transcripts still save as usual. Turn this on only when you want a local agent to watch active meetings."
+    }
+
     private var privacyPage: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
@@ -2164,10 +3289,10 @@ struct TranscriptedSettingsView: View {
                 detail: "How Transcripted handles your microphone during meetings."
             ) {
                 SettingsToggleRow(
-                    title: "Use Apple voice processing for Safari/Firefox mic attenuation",
+                    title: "Enhanced mic pickup during calls (Apple voice processing)",
                     detail: meetingVoiceProcessingEnabled
-                        ? "May lower other app audio in Zoom/Meet."
-                        : "Off. Transcripted boosts the saved mic and live transcript in software without changing system audio.",
+                        ? "On. Fixes the quiet mic when another call app holds it in voice mode. Other apps' audio may get slightly quieter while recording."
+                        : "Off. Transcripted boosts the saved mic in software without touching other apps' audio. Turn on if your side of calls records very quiet.",
                     isOn: Binding(
                         get: { meetingVoiceProcessingEnabled },
                         set: { newValue in
@@ -2193,7 +3318,7 @@ struct TranscriptedSettingsView: View {
                     )
                 )
 
-                Text("Meeting audio changes apply to the next recording.")
+                Text("Changes here apply from the next recording.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -2759,6 +3884,12 @@ struct TranscriptedSettingsView: View {
         refreshShortcutState()
         refreshDockVisibility()
         refreshLaunchAtLoginState()
+        Task { @MainActor in
+            await statsService.refreshStats()
+        }
+        if !speakerPeopleModel.hasLoadedProfiles {
+            speakerPeopleModel.refresh()
+        }
         customDictionaryText = CustomDictionaryPreferences.rawText()
         customDictionaryRows = CorrectionDraftRow.rows(from: customDictionaryText)
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
@@ -2766,6 +3897,7 @@ struct TranscriptedSettingsView: View {
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+        refreshLocalSummarySetupStatus()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
         crashReportingEnabled = CrashReportingPreferences.isEnabled()
@@ -2969,7 +4101,8 @@ struct TranscriptedSettingsView: View {
 
     private func refreshHomeDashboard(force: Bool) {
         let now = Date()
-        guard SettingsDashboardRefreshPolicy.shouldStartRefresh(
+        guard SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
+            for: navigation.selectedPage,
             force: force,
             isInFlight: homeDashboardRefreshInFlight,
             lastStartedAt: lastHomeDashboardRefreshStartedAt,
@@ -3235,15 +4368,16 @@ struct TranscriptedSettingsView: View {
     }
 
     private func autoEnterDisplayName(for bundleID: String) -> String {
-        if let candidate = autoEnterAppCandidates.first(where: { $0.bundleID == bundleID }) {
-            return candidate.name
-        }
-
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            return url.deletingPathExtension().lastPathComponent
-        }
-
-        return bundleID
+        AutoEnterDisplayNameResolver.resolve(
+            bundleID: bundleID,
+            candidateNames: autoEnterAppCandidates.map { ($0.bundleID, $0.name) },
+            workspaceLookup: { id in
+                guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else {
+                    return nil
+                }
+                return url.deletingPathExtension().lastPathComponent
+            }
+        )
     }
 
     private var aboutUpdateStatusTitle: String {

@@ -23,6 +23,27 @@ final class RealtimeAGCTests: XCTestCase {
         return buffer
     }
 
+    /// Build a non-interleaved stereo Float32 buffer with different channel peaks.
+    private func makeStereoBuffer(leftPeak: Float, rightPeak: Float, frames: Int = 4096, sampleRate: Double = 48_000) -> AVAudioPCMBuffer {
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 2,
+            interleaved: false
+        )!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
+        buffer.frameLength = AVAudioFrameCount(frames)
+        let left = buffer.floatChannelData![0]
+        let right = buffer.floatChannelData![1]
+        let twoPiF = 2.0 * Double.pi * 1_000.0
+        for i in 0..<frames {
+            let t = Double(i) / sampleRate
+            left[i] = leftPeak * Float(sin(twoPiF * t))
+            right[i] = rightPeak * Float(sin(twoPiF * t))
+        }
+        return buffer
+    }
+
     /// Read samples back out of a mono buffer.
     private func samples(from buffer: AVAudioPCMBuffer) -> [Float] {
         let count = Int(buffer.frameLength)
@@ -33,6 +54,16 @@ final class RealtimeAGCTests: XCTestCase {
     /// Buffer peak (max |x|).
     private func peak(of samples: [Float]) -> Float {
         samples.reduce(0) { max($0, abs($1)) }
+    }
+
+    private func peak(of buffer: AVAudioPCMBuffer, channel: Int) -> Float {
+        let count = Int(buffer.frameLength)
+        guard let channelData = buffer.floatChannelData?[channel] else { return 0 }
+        var result: Float = 0
+        for index in 0..<count {
+            result = max(result, abs(channelData[index]))
+        }
+        return result
     }
 
     /// Generate a 1 kHz sine at the given peak amplitude. Defaults match
@@ -79,6 +110,25 @@ final class RealtimeAGCTests: XCTestCase {
         XCTAssertLessThanOrEqual(lastPeak, 0.13, "AGC should respect maxGain cap")
         XCTAssertGreaterThan(lastPeak, 0.05, "AGC should still apply some boost at the cap")
         XCTAssertLessThanOrEqual(agc.appliedGain, 12.0 + 0.001, "appliedGain should not exceed maxGain")
+    }
+
+    func testIssue500VeryQuietMicReachesUsableProcessedPeak() {
+        // Issue #500 voice-processing attenuation can be quieter than the
+        // original scalar-drop case. At the old 12x default cap, a 0.005 peak
+        // stayed below the 0.12 processed-peak diagnostics bar and still looked
+        // unrecovered. The default realtime path should now cross that bar
+        // without opting into Apple VPIO.
+        let agc = RealtimeAGC()
+        var lastPeak: Float = 0
+        for _ in 0..<32 {
+            let buffer = makeMonoBuffer(samples: sineSamples(peak: 0.005))
+            agc.process(buffer: buffer)
+            lastPeak = peak(of: samples(from: buffer))
+        }
+
+        XCTAssertGreaterThanOrEqual(lastPeak, 0.12, "Severely attenuated issue #500 mic input should become diagnostically usable")
+        XCTAssertLessThanOrEqual(lastPeak, 0.14, "Default cap should avoid a large overshoot for very quiet input")
+        XCTAssertLessThanOrEqual(agc.appliedGain, 25.0 + 0.001, "default appliedGain should respect the raised cap")
     }
 
     func testNormalLevelInputPassesThrough() {
@@ -134,6 +184,45 @@ final class RealtimeAGCTests: XCTestCase {
         }
         XCTAssertEqual(agc.appliedGain, heldGain, accuracy: 0.0001,
                        "Once silence-hold engages, gain must be exactly steady to avoid pumping the next utterance")
+    }
+
+    func testSubActivityNoiseIsMutedInsteadOfBoostedDuringPauses() {
+        // A real USB mic feedback report described hiss/squeal getting much
+        // worse in silence. After the AGC has built up gain for quiet speech,
+        // sub-activity idle noise must not be multiplied into the retained
+        // mic file.
+        let agc = RealtimeAGC()
+        for _ in 0..<32 {
+            let buffer = makeMonoBuffer(samples: sineSamples(peak: 0.005))
+            agc.process(buffer: buffer)
+        }
+        let heldGain = agc.appliedGain
+        XCTAssertGreaterThan(heldGain, 5.0, "Should have built up significant gain on attenuated input")
+
+        let idleNoise = makeMonoBuffer(samples: sineSamples(peak: 0.001))
+        agc.process(buffer: idleNoise)
+
+        XCTAssertEqual(peak(of: samples(from: idleNoise)), 0, accuracy: 0.000001,
+                       "Sub-activity idle noise should be muted instead of boosted into audible hiss")
+        XCTAssertEqual(agc.appliedGain, heldGain, accuracy: 0.0001,
+                       "Noise gating should not pump or reset the current recovery gain")
+    }
+
+    func testIssue500QuietSpeechBandStillPassesThroughNoiseGate() {
+        // The noise gate must stay below the issue #500 quiet-speech band:
+        // voice-like raw peaks around 0.003 should still be recoverable and
+        // visible to the live attenuation detector.
+        let agc = RealtimeAGC()
+        var lastPeak: Float = 0
+        for _ in 0..<32 {
+            let buffer = makeMonoBuffer(samples: sineSamples(peak: 0.003))
+            agc.process(buffer: buffer)
+            lastPeak = peak(of: samples(from: buffer))
+        }
+
+        XCTAssertGreaterThan(lastPeak, 0.05, "Quiet voice-like input should still pass through and receive gain")
+        XCTAssertLessThanOrEqual(agc.noiseGatePeak, 0.002 + 0.0001,
+                                 "The default gate should stay below the quiet-speech detector's activity floor")
     }
 
     func testResetReturnsGainToUnity() {
@@ -223,5 +312,28 @@ final class RealtimeAGCTests: XCTestCase {
         }
         XCTAssertEqual(maxLeft, maxRight, accuracy: 0.001, "Interleaved channels should receive identical gain")
         XCTAssertGreaterThan(maxLeft, 0.04, "Interleaved stereo should also be boosted")
+    }
+
+    func testNonInterleavedStereoUsesLoudestChannelForSharedGain() {
+        // Meeting mic buffers are commonly non-interleaved. A channel scan
+        // regression here can make one quiet channel drive huge gain and clip
+        // the louder channel, which looks like a channel/gain issue #500.
+        let agc = RealtimeAGC()
+        var finalBuffer: AVAudioPCMBuffer?
+        for _ in 0..<40 {
+            let buffer = makeStereoBuffer(leftPeak: 0.03, rightPeak: 0.30)
+            agc.process(buffer: buffer)
+            finalBuffer = buffer
+        }
+
+        let buffer = finalBuffer!
+        let leftPeak = peak(of: buffer, channel: 0)
+        let rightPeak = peak(of: buffer, channel: 1)
+
+        XCTAssertGreaterThan(rightPeak, 0.40, "Louder channel should land near the AGC target peak")
+        XCTAssertLessThan(rightPeak, 0.55, "Louder channel should not clip because a quieter sibling channel drove gain")
+        XCTAssertGreaterThan(leftPeak, 0.035, "Quiet sibling channel should receive the same shared gain")
+        XCTAssertLessThan(leftPeak, 0.07, "Quiet sibling channel should not get independent over-boost")
+        XCTAssertEqual(leftPeak / rightPeak, 0.10, accuracy: 0.02, "Shared gain should preserve the stereo channel ratio")
     }
 }

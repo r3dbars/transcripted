@@ -26,7 +26,7 @@ enum SentryRuntimeConfiguration {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         infoDictionary: [String: Any]? = Bundle.main.infoDictionary
     ) -> String {
-        firstNonEmpty(
+        firstSafeMetadataValue(
             environment[environmentEnvironmentKey],
             infoDictionary?[environmentInfoKey] as? String
         ) ?? "production"
@@ -36,16 +36,16 @@ enum SentryRuntimeConfiguration {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         infoDictionary: [String: Any]? = Bundle.main.infoDictionary
     ) -> String {
-        if let releaseOverride = firstNonEmpty(environment[releaseEnvironmentKey]),
+        if let releaseOverride = firstSafeMetadataValue(environment[releaseEnvironmentKey]),
            isValidReleaseName(releaseOverride) {
             return releaseOverride
         }
 
-        let prefix = firstNonEmpty(
+        let prefix = firstSafeMetadataValue(
             infoDictionary?[releasePrefixInfoKey] as? String,
             defaultReleasePrefix
         ) ?? defaultReleasePrefix
-        let version = firstNonEmpty(infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
+        let version = firstSafeMetadataValue(infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
         let releaseName = "\(prefix)@\(version)"
         return isValidReleaseName(releaseName) ? releaseName : "\(defaultReleasePrefix)@unknown"
     }
@@ -54,7 +54,7 @@ enum SentryRuntimeConfiguration {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         infoDictionary: [String: Any]? = Bundle.main.infoDictionary
     ) -> String? {
-        firstNonEmpty(
+        firstSafeMetadataValue(
             environment[distEnvironmentKey],
             infoDictionary?["CFBundleVersion"] as? String
         )
@@ -86,6 +86,23 @@ enum SentryRuntimeConfiguration {
             .first(where: { !$0.isEmpty })
     }
 
+    private static func firstSafeMetadataValue(_ candidates: String?...) -> String? {
+        candidates
+            .compactMap(safeMetadataValue)
+            .first
+    }
+
+    private static func safeMetadataValue(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty,
+              isValidMetadataValue(trimmed),
+              SentryPayloadSanitizer.sanitizeText(trimmed) == trimmed else {
+            return nil
+        }
+
+        return trimmed
+    }
+
     private static func firstValidHTTPSValue(_ candidates: String?...) -> String? {
         candidates
             .compactMap { normalizedHTTPSValue($0) }
@@ -113,6 +130,17 @@ enum SentryRuntimeConfiguration {
         }
 
         return !["\n", "\t", "/", "\\"].contains { value.contains($0) }
+    }
+
+    private static func isValidMetadataValue(_ value: String) -> Bool {
+        guard value.count <= 200 else { return false }
+        return !value.contains { character in
+            character == "\n"
+                || character == "\r"
+                || character == "\t"
+                || character == "/"
+                || character == "\\"
+        }
     }
 
     private static func parseBoolean(_ value: String) -> Bool? {

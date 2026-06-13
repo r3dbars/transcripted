@@ -687,6 +687,94 @@ func testClaudeDesktopIntegrationInstaller() {
         )
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — replaces a stale installed helper") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperRefreshTests-\(UUID().uuidString)", isDirectory: true)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
+            bundledBinaryURL: bundledBinaryURL,
+            installedBinaryURL: installedBinaryURL
+        )
+
+        assertEqual(refreshed, true, "stale installed helper should be refreshed at launch")
+        assertEqual(
+            (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? "",
+            "#!/bin/sh\necho current\n",
+            "refresh should copy the bundled helper bytes over the stale install"
+        )
+        assertTrue(
+            FileManager.default.isExecutableFile(atPath: installedBinaryURL.path),
+            "refreshed helper should stay executable"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — leaves a current helper untouched") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperFreshTests-\(UUID().uuidString)", isDirectory: true)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\necho current\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
+            bundledBinaryURL: bundledBinaryURL,
+            installedBinaryURL: installedBinaryURL
+        )
+
+        assertEqual(refreshed, false, "matching helper should not be rewritten on every launch")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — never installs fresh") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperNoInstallTests-\(UUID().uuidString)", isDirectory: true)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+
+        let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
+            bundledBinaryURL: bundledBinaryURL,
+            installedBinaryURL: installedBinaryURL
+        )
+
+        assertEqual(refreshed, false, "refresh should not install a helper the user never set up")
+        assertFalse(
+            FileManager.default.fileExists(atPath: installedBinaryURL.path),
+            "refresh must not create a new install without user consent"
+        )
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.currentStatus — warns when bundled helper is missing") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeMissingBundleTests-\(UUID().uuidString)", isDirectory: true)
@@ -1532,6 +1620,110 @@ func testClaudeDesktopIntegrationInstaller() {
             fileManager: .default
         )
         assertEqual(helpersResult?.path, helperURL.path, "Helpers location should be accepted")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — times out a hung helper instead of waiting forever") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestHangTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: helperURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\nsleep 30\n".write(to: helperURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: helperURL.path)
+
+        let started = Date()
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL, timeout: 0.4)
+            assertTrue(false, "hung helper should throw a timeout error")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(error, .selfTestTimedOut, "hung helper should raise selfTestTimedOut")
+        } catch {
+            assertTrue(false, "unexpected error type: \(error)")
+        }
+        assertTrue(
+            Date().timeIntervalSince(started) < 10,
+            "timeout should fire promptly instead of waiting out the helper"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — survives a grandchild holding the output pipes") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestGrandchildTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        // The backgrounded sleep inherits the helper's stdout/stderr pipe
+        // write ends, so EOF does not arrive until long after the helper
+        // itself exits — exactly the shape that pinned rows at "Connecting…".
+        let script = """
+        #!/bin/sh
+        cat <<'JSON'
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":8,"dictation_file_count":9}
+        JSON
+        sleep 30 &
+        exit 0
+        """
+        try? FileManager.default.createDirectory(at: helperURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? script.write(to: helperURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: helperURL.path)
+
+        let started = Date()
+        do {
+            let result = try ClaudeDesktopIntegrationInstaller.runSelfTest(
+                binaryURL: helperURL,
+                timeout: 5,
+                pipeDrainTimeout: 1
+            )
+            assertEqual(result.ok, true, "output written before exit should still decode")
+            assertEqual(result.meetingFileCount, 8, "drained output should be complete despite the held pipe")
+        } catch {
+            assertTrue(false, "a grandchild holding the pipes should not fail the self-test: \(error)")
+        }
+        assertTrue(
+            Date().timeIntervalSince(started) < 10,
+            "a grandchild holding the pipes must not block the self-test"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.runSelfTest — drains helpers that write more than a pipe buffer") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeSelfTestBigOutputTests-\(UUID().uuidString)", isDirectory: true)
+        let helperURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        // ~400KB of stderr diagnostics — far past the 64KB pipe buffer that
+        // used to deadlock waitUntilExit-before-read.
+        let script = """
+        #!/bin/sh
+        awk 'BEGIN { for (i = 0; i < 8000; i++) printf "stderr-noise-%d-........................................\\n", i }' >&2
+        cat <<'JSON'
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":3,"dictation_file_count":4}
+        JSON
+        exit 0
+        """
+        try? FileManager.default.createDirectory(at: helperURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? script.write(to: helperURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: helperURL.path)
+
+        let started = Date()
+        do {
+            let result = try ClaudeDesktopIntegrationInstaller.runSelfTest(binaryURL: helperURL, timeout: 10)
+            assertEqual(result.ok, true, "oversized stderr output should not poison stdout decoding")
+            assertEqual(result.meetingFileCount, 3, "self-test JSON should decode despite oversized stderr")
+        } catch {
+            assertTrue(false, "oversized helper output should drain instead of deadlocking: \(error)")
+        }
+        assertTrue(
+            Date().timeIntervalSince(started) < 10,
+            "oversized helper output should drain promptly"
+        )
     }
 }
 

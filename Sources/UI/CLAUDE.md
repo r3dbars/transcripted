@@ -8,12 +8,11 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 - `Overlay/`
 - `MenuBar/`
 - `Settings/`
-- `AgentConnect/`
 - `Shared/`
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (64 Swift files)
+## Files (67 Swift files)
 
 ### Overlay/
 
@@ -31,7 +30,10 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/OverlayTokens.swift` — design tokens (colors, spacing, sizing) for overlay views
 - `Overlay/PanelDragView.swift` — drag handle for repositioning the overlay panel
 - `Overlay/WaveformLayer.swift` — Core Animation layer drawing the audio waveform
-- `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status
+- `Overlay/MeetingLiveTranscriptDrawerView.swift` — self-contained drawer container (hover-revealed copy + overflow menu, status line, scrolling transcript, drag-to-resize grip) shown below the recording strip, clipped and faded as one unit while the panel resizes
+- `Overlay/MeetingLiveViewAffordancePolicy.swift` — presentation policy for the pill-body transcript toggle, context/overflow menu titles, and drawer status copy, including the one-click enable copy when live meetings is off
+- `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
+- `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status; the recording pill is click-to-toggle for the embedded live transcript drawer (fed by `MeetingSessionController.liveTranscriptFeed`), rests to a compact capsule when unattended, and carries a context menu (transcript toggle, pin, browser view, discard)
 
 The overlay area holds both live transient recording surfaces: the compact
 dictation overlay and the meeting prompt / recording overlay.
@@ -46,7 +48,6 @@ into a taller loading or error state.
 
 ### MenuBar/
 
-- `MenuBar/MenuAgentConnectPageView.swift` — agent connection page in the menubar popover
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
@@ -61,48 +62,49 @@ into a taller loading or error state.
 - `MenuBar/MenuOutlineButton.swift` — outlined button style for menubar actions
 - `MenuBar/MenuTokens.swift` — design tokens for menubar views
 
-### AgentConnect/
+The agent-connect surface is the Settings window's Agent page plus the
+onboarding connect stage. Both keep one mental model:
 
-- `AgentConnect/AgentConnectionWindowController.swift` — `AgentConnectionWindowCoordinator` and `NSWindowController` for the standalone agent-connect window
-- `AgentConnect/AgentConnectionWindowView.swift` — SwiftUI content for the standalone agent-connect window
-
-The current agent-connect surfaces should keep one simple mental model:
-
-- lead with one smart copy-paste prompt
-- let that prompt prefer MCP when available and fall back to folders when not
-- keep manual folder paths and MCP setup secondary, not primary
+- one row per agent found on the Mac, one Connect button each
+- every row points the agent's own MCP config at the same installed helper
+- the universal copy-prompt row covers agents we cannot configure directly
+- folders, the Codex inbox automation, and config details stay behind Advanced
 
 ### Settings/
 
-- `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page, including Claude Desktop install/repair, copy prompts, folder paths, and config reveal actions
+- `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page: detected-agent connect rows (Claude Desktop, Claude Code, Codex, Cursor), the universal copy-prompt row, the live-meetings toggle, and the Advanced disclosure (folders, Codex inbox, config details)
+- `Settings/HomeCanvasGreeting.swift` — time-of-day greeting helper for the Home canvas header
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
+- `Settings/HomeMeetingSummaryBetaPresentationPolicy.swift` — presentation gates for the opt-in local AI meeting-summary beta on the Home dashboard
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
-- `Settings/HomeView.swift` — redesigned Settings home dashboard with fast recent activity loading, grouped recent dictations/meetings, meeting-audio playback, failed-meeting recovery, summary stats, and lightweight copy/feedback/delete affordances
+- `Settings/HomeView.swift` — Home canvas (greeting header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets with AI-summary lead, and the stats detail sheet
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/SettingsContentLayoutPolicy.swift` — layout policy for compact settings content spacing and scroll behavior
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
-- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for browsing, naming, merging, previewing, and deleting saved speaker profiles, plus the toggle for identifying multiple local speakers on the mic track
+- `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for the speakers surface: a voice-to-name queue grouped to one row per distinct voice, compact duplicate-merge suggestions, and a searchable all-speakers list with per-row play, rename, merge, and delete
 - `Settings/TranscriptedSettingsGeneralControls.swift` — shared General-page headings, grouped rows, disclosure rows, and info popovers
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
 - `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback, copy/send diagnostics) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
-- `Settings/TranscriptedSettingsPage.swift` — enum of settings pages (home, general, models, shortcuts, people, storage, connectAgent, privacy, support, about) with titles, summaries, and SF Symbol names
+- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, Auto Enter apps, retained-audio playback, and failed meetings
-- `Settings/TranscriptedSettingsSidebar.swift` — Settings sidebar section model and sidebar row
+- `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 
 ### Shared/
 
-- `Shared/AgentConnectionGuide.swift` — shared smart-prompt, MCP setup, and folder fallback copy for the agent-connect flow
+- `Shared/AgentConnectionGuide.swift` — shared starter prompt, folder paths, Codex inbox, live-sidecar, and portable meeting bundle copy for the agent-connect flow
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
+- `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows, including transcript, summary, and retained-audio cleanup
+- `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Home preview's editable title: rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page
@@ -116,13 +118,16 @@ so the meeting prompt detector and the settings/onboarding flows share the same
 app-level permission logic outside the UI tree.
 
 Cross-cutting local-speaker behavior is split between settings and review UI:
-`SpeakerPeopleSettingsSection` owns the persisted toggle for local mic diarization,
+`TranscriptedSettingsView` owns the persisted toggle for local mic diarization,
 while `SpeakerNamingSheet` is where users confirm local-vs-remote speakers or
 collapse the local side back into a single "You" track.
 
-The redesigned Settings home surface is intentionally a fast dashboard rather
-than a full archive browser. `HomeView` keeps recent dictations and meetings to
-small paged slices so the settings window still opens quickly for users with
+The main window is content-first: the sidebar leads with Home, Dictations,
+Speakers, and Agent; the sidebar gear opens a settings area in the content
+pane with a capsule tab strip (General/Storage/Beta/Support/About). Home is the meetings surface — an editorial canvas (time-of-day
+greeting, stats line, needs-attention pills, failed-meeting recovery, the
+day-grouped meetings list); Dictations is the separate dictation history. `HomeView` keeps recent
+captures to small paged slices so the window still opens quickly for users with
 large capture libraries, and `SettingsRecentCaptureRefreshPolicy` keeps those
 refreshes scoped to the pages that actually need them.
 
@@ -147,6 +152,13 @@ After changing UI code:
 ```bash
 bash build.sh --no-open
 bash run-tests.sh
+```
+
+For menu bar, Home, Settings, or navigation automation changes, also run when
+local Accessibility permission is available:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode ui
 ```
 
 Manual checks:
@@ -174,8 +186,18 @@ Relevant direct coverage:
 - `Tests/DictationRecordingStartOverlayPolicyTests.swift`
 - `Tests/DictationSoundsTests.swift`
 - `Tests/FeedbackIssueBuilderTests.swift`
+- `Tests/HomeCanvasGreetingTests.swift`
+- `Tests/HomeMeetingDeletionTests.swift`
+- `Tests/HomeMeetingSummaryBetaPresentationPolicyTests.swift`
 - `Tests/FirstRunExperienceTests.swift`
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
+- `Tests/MeetingLiveViewAffordancePolicyTests.swift`
+- `Tests/MeetingPillRestPolicyTests.swift`
+- `Tests/RecentCaptureScannersTests.swift`
+- `Tests/SettingsContentLayoutPolicyTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
+- `Tests/SpeakerReviewQueueScannerTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`
+- `Tests/UIAutomationSurfaceContractTests.swift`
+- `bash scripts/ops/transcripted-qa-bench.sh --mode ui` for live AX smoke of first-run onboarding, menu bar, Home, Settings, and navigation

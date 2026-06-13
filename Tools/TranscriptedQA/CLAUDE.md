@@ -1,6 +1,6 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 24 Swift files total: `Package.swift`, 22 files under `Sources/TranscriptedQA/`, and 1 test file under `Tests/TranscriptedQATests/`.
+QA testing suite for Transcripted. 30 Swift files total: `Package.swift`, 25 files under `Sources/TranscriptedQA/`, and 4 test files under `Tests/TranscriptedQATests/`.
 
 The current package is intentionally small:
 
@@ -16,14 +16,17 @@ The current package is intentionally small:
 |------|---------|
 | `TranscriptedQA.swift` | CLI entry point (`@main`), shared path helpers, and subcommand registration |
 
-### Commands/ (10 files)
+### Commands/ (12 files)
 
 | File | Purpose |
 |------|---------|
 | `CheckHealth.swift` | Quick health check: DB integrity, model presence, disk space |
 | `GenerateFixtures.swift` | Generate valid test data (transcripts, legacy JSON artifacts, DB records) for CI or manual verification |
+| `PermissionState.swift` | No-prompt macOS permission-state probe for Codex computer-use and live QA blockers |
+| `PackagedAppSmoke.swift` | Pre-publish packaged app smoke for app bundle metadata, Sparkle config, signing, dSYM, DMG, optional UI, and privacy-safe local logs |
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
+| `UISmoke.swift` | Launch a built app and validate onboarding, menu bar, Home, Settings, and General navigation through macOS Accessibility |
 | `ValidateAll.swift` | Run all validators: transcripts, DB, index, logs, artifacts |
 | `ValidateArtifacts.swift` | Check optional legacy JSON artifacts, YAML frontmatter, speaker clips |
 | `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
@@ -62,10 +65,13 @@ The current package is intentionally small:
 |------|---------|
 | `ValidationResult.swift` | shared `ValidationResult`, `ValidationReport`, and PASS/WARN/FAIL status types used for structured text or JSON validator output |
 
-### Tests/ (1 file)
+### Tests/ (4 files)
 
 | File | Purpose |
 |------|---------|
+| `PackagedAppSmokeTests.swift` | package-level coverage for packaged app metadata, Sparkle config, dSYM UUIDs, DMG, and log privacy checks |
+| `PermissionStateProbeTests.swift` | package-level coverage for permission-state probe modes and blocker classification |
+| `PermissionStateRuntimeGateTests.swift` | package-level coverage for duplicate/wrong-running-app runtime gate warnings |
 | `ValidatorTests.swift` | package-level coverage for YAML parsing, legacy index validation, JSON sidecar validation, and `ValidationReport` exit-code behavior |
 
 ## Usage
@@ -84,6 +90,11 @@ swift run transcripted-qa validate-transcripts
 swift run transcripted-qa validate-index
 swift run transcripted-qa validate-logs
 swift run transcripted-qa check-health
+swift run transcripted-qa permission-state --mode computer-use
+swift run transcripted-qa packaged-app-smoke --app ../../build/Transcripted.app --dsym ../../build/Transcripted.app.dSYM --run-ui-smoke
+
+# UI automation smoke, local Accessibility permission required
+swift run transcripted-qa ui-smoke --app ../../build/Transcripted.app
 
 # Override nonstandard locations when captures are relocated
 swift run transcripted-qa validate-all --path /path/to/meetings --state-dir /path/to/state --log-path /path/to/app.jsonl
@@ -119,12 +130,15 @@ For agent and automation use, the JSON form also includes:
 - **Fixture generation**: `generate-fixtures` creates valid test data for use in CI or manual testing
 - **Round-trip testing**: `round-trip` validates that validators correctly catch injected corruption
 - **Stress testing**: `stress-test` generates large datasets to surface performance and correctness issues
+- **UI smoke**: `ui-smoke` checks stable AX identifiers across first-run onboarding, menu bar, Home, and Settings, and exits `3` for Accessibility/TCC blockers
+- **Packaged app smoke**: `packaged-app-smoke` validates a no-publish `build-beta.sh` artifact, including version/config parity, Sparkle keys, signing, dSYM UUIDs, DMG readability, optional menu bar UI, and local log privacy
+- **Permission state**: `permission-state` prints the expected manual grant state, checks Codex host Accessibility/Event Posting/Input Monitoring/Screen Recording/Automation, verifies the Transcripted app bundle id, and warns on duplicate or wrong running Transcripted app instances
 
 ## Gotchas
 
 - The package is now split across `Commands/`, `Validators/`, `Utilities/`, `Generators/`, and `Models/`, so keep `TranscriptedQA.configuration` in sync when adding or removing subcommands.
-- All validators run synchronously on background threads
-- SQLite readers use dedicated utility queues for thread safety
+- Validators run synchronously on the calling thread; there is no internal dispatching
+- SQLite readers open read-only connections with no internal queueing — callers own thread safety
 - Validation results are structured for programmatic consumption and can be emitted as aligned text or pretty JSON via `ValidationReport`
 - Error messages are human-readable for CLI output
 - Defaults now prefer `~/Library/Application Support/Transcripted/captures/meetings`, `~/Library/Application Support/Transcripted/state/`, and `~/Library/Application Support/Transcripted/logs/app.jsonl`

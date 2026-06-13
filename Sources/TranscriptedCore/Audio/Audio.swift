@@ -5,11 +5,19 @@ import AppKit
 import CoreAudio
 import Combine
 
-/// Cosmetic lifecycle cues emitted by `Audio` so embedders can play start /
-/// stop UI feedback without `Audio` itself depending on AppKit / NSSound.
+/// Lifecycle cues emitted by `Audio` so embedders can react without `Audio`
+/// itself depending on AppKit / NSSound.
+///
+/// `recordingStarted` / `recordingStopped` are cosmetic (UI sounds).
+/// `micAttenuatedByForeignVoiceProcessing` is an actionable one-shot signal:
+/// the mic stayed attenuated for ~30s despite the software AGC pinned at max
+/// gain (issue #500 — a foreign app holds the shared input device in macOS
+/// voice/communication mode). Hosts may route it to a consent prompt that
+/// offers Apple voice processing for the active recording.
 public enum CaptureLifecycleCue: Sendable {
     case recordingStarted
     case recordingStopped
+    case micAttenuatedByForeignVoiceProcessing
 }
 
 /// Status of system audio capture for UI feedback
@@ -156,8 +164,28 @@ public class Audio: ObservableObject, @unchecked Sendable {
     }
     func appendMicSegment(_ segment: MicRecordingSegment) {
         micSegmentsLock.lock()
-        defer { micSegmentsLock.unlock() }
         _micSegments.append(segment)
+        let segments = _micSegments
+        micSegmentsLock.unlock()
+        recordingJournal.recordSegments(segments, session: journalSession)
+    }
+
+    // Journal ownership for the in-flight recording session. Issued by the
+    // store when the start path calls `begin()`; consumed (read-and-cleared)
+    // by `stop()` so only the stop that ends an active session can write the
+    // stopping/finalized journal states.
+    private var _journalSession: MeetingRecordingJournalSession?
+    private let journalSessionLock = NSLock()
+    var journalSession: MeetingRecordingJournalSession? {
+        get { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; return _journalSession }
+        set { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; _journalSession = newValue }
+    }
+    func takeJournalSession() -> MeetingRecordingJournalSession? {
+        journalSessionLock.lock()
+        defer { journalSessionLock.unlock() }
+        let session = _journalSession
+        _journalSession = nil
+        return session
     }
 
     // MARK: - Recording Health Tracking (Phase 1: Sleep/Wake + Gap Logging)
@@ -256,6 +284,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// system-wide voice-comms ducking. Lazily created at start, reset on
     /// device recovery, deinit'd at stop.
     var realtimeAGC: RealtimeAGC?
+
+    /// Live issue #500 attenuation detector. Main-thread-only: replaced on
+    /// the start path in `prepareForNewRecordingStart`, consumed only by the
+    /// 0.2s recording timer (both effectively main); no lock.
+    var quietMicAttenuationDetector = QuietMicAttenuationDetector()
 
     // Device change watchdog - thread-safe access via lock
     // Uses CACurrentMediaTime() (monotonic clock) to avoid false triggers after sleep/wake.
@@ -421,7 +454,26 @@ public class Audio: ObservableObject, @unchecked Sendable {
     private var _micRawPeak: Float = 0
     private var _micProcessedPeak: Float = 0
     private var _systemAudioPeak: Float = 0
+    // Interval-scoped mic facts consumed by the 0.2s recording timer for the
+    // live issue #500 attenuation detector. Zeroed every drain so one loud
+    // cough cannot mask later attenuation the way the lifetime maxima do.
+    // `_intervalMinAppliedGain` is nil when no AGC-processed buffer arrived
+    // this interval; updated via min so one unpinned buffer disqualifies
+    // the tick.
+    private var _intervalMicRawPeak: Float = 0
+    private var _intervalMicProcessedPeak: Float = 0
+    private var _intervalMinAppliedGain: Float?
+    private var _intervalAGCMaxGain: Float?
+    private var _intervalSawMicBuffer: Bool = false
     private let signalDiagnosticsLock = NSLock()
+
+    struct MicSignalIntervalDiagnostics {
+        let rawPeak: Float
+        let processedPeak: Float
+        let minAppliedGain: Float?
+        let agcMaxGain: Float?
+        let sawBuffer: Bool
+    }
 
     var signalDiagnosticsSnapshot: AudioSignalDiagnosticsSnapshot {
         signalDiagnosticsLock.lock()
@@ -439,13 +491,45 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _micRawPeak = 0
         _micProcessedPeak = 0
         _systemAudioPeak = 0
+        _intervalMicRawPeak = 0
+        _intervalMicProcessedPeak = 0
+        _intervalMinAppliedGain = nil
+        _intervalAGCMaxGain = nil
+        _intervalSawMicBuffer = false
     }
 
-    func recordMicSignalPeaks(raw: Float, processed: Float) {
+    func recordMicSignalPeaks(raw: Float, processed: Float, appliedGain: Float?, agcMaxGain: Float?) {
         signalDiagnosticsLock.lock()
         defer { signalDiagnosticsLock.unlock() }
         _micRawPeak = max(_micRawPeak, raw)
         _micProcessedPeak = max(_micProcessedPeak, processed)
+        _intervalMicRawPeak = max(_intervalMicRawPeak, raw)
+        _intervalMicProcessedPeak = max(_intervalMicProcessedPeak, processed)
+        if let appliedGain {
+            _intervalMinAppliedGain = min(_intervalMinAppliedGain ?? .infinity, appliedGain)
+            _intervalAGCMaxGain = agcMaxGain
+        }
+        _intervalSawMicBuffer = true
+    }
+
+    /// Read-and-zero the interval-scoped mic facts. Called only from the
+    /// 0.2s recording timer so each tick sees exactly one interval.
+    func drainMicSignalIntervalDiagnostics() -> MicSignalIntervalDiagnostics {
+        signalDiagnosticsLock.lock()
+        defer { signalDiagnosticsLock.unlock() }
+        let interval = MicSignalIntervalDiagnostics(
+            rawPeak: _intervalMicRawPeak,
+            processedPeak: _intervalMicProcessedPeak,
+            minAppliedGain: _intervalMinAppliedGain,
+            agcMaxGain: _intervalAGCMaxGain,
+            sawBuffer: _intervalSawMicBuffer
+        )
+        _intervalMicRawPeak = 0
+        _intervalMicProcessedPeak = 0
+        _intervalMinAppliedGain = nil
+        _intervalAGCMaxGain = nil
+        _intervalSawMicBuffer = false
+        return interval
     }
 
     func recordSystemSignalPeak(_ peak: Float) {
@@ -578,8 +662,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Embedders can redirect captures by passing a custom `CoreStoragePaths` at init.
     let paths: CoreStoragePaths
 
+    /// Durable record of the in-flight recording for crash recovery. Lives
+    /// next to the scratch audio; cleared once the meeting reaches a durable
+    /// state (transcript saved or failed-queue entry persisted).
+    let recordingJournal: MeetingRecordingJournalStore
+
     public init(paths: CoreStoragePaths = .default) {
         self.paths = paths
+        self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
     }
 
     func ensureCaptureInfrastructureConfigured() {
@@ -772,6 +862,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
         resetSignalDiagnostics()
+        // Fresh instance = clean one-shot latch per recording.
+        quietMicAttenuationDetector = QuietMicAttenuationDetector()
         recordingStartRouteVolumeSnapshot = AudioRouteVolumeSnapshot.captureDefaultRoute()
         resetRecordingStartCapturedInput()
         resetSilenceTracking()  // Start fresh silence tracking
@@ -795,6 +887,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         consecutiveSystemWriteErrors = 0
         systemAudioFailed = false
         micSegments = []
+        // Any leftover journal ownership belongs to a session that never
+        // stopped cleanly; the new session gets a fresh token at begin().
+        journalSession = nil
     }
 
     private func beginStartIntent() -> UUID {
@@ -950,6 +1045,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         guard recordingSessionGeneration == sessionGeneration else { return }
 
         systemAudioFileURL = fileURL
+        recordingJournal.recordSystemAudio(fileURL, session: journalSession)
         restoreSystemAudioHealthyStatusAfterSuccessfulStart()
     }
 
@@ -978,6 +1074,15 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let micSegmentsSnapshot = self.micSegments
         let finalSystemURL = systemAudioFileURL
         let cueHandler = self.onCaptureLifecycleCue
+
+        // Take (read-and-clear) journal ownership: only the stop that ends an
+        // active session may write the stopping/finalized states. With no
+        // active session — a double stop, or cleanup after a start that failed
+        // before the journal began — the token is nil and the journal store
+        // drops both writes, so a previous meeting's already-handed-off
+        // journal cannot be resurrected into the next launch's recovery scan.
+        let journalSession = takeJournalSession()
+        recordingJournal.markStopping(session: journalSession)
 
         // Update UI state immediately so the meeting widget unfreezes
         // before any of the slow CoreAudio teardown begins. Without this
@@ -1057,6 +1162,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     if let currentMicFile = self.micAudioFile, currentMicFile === micAudioFileRef {
                         self.micAudioFile = nil
                     }
+                    // Close explicitly so the WAV header is finalized here on
+                    // the serial queue before cleanupGroup.notify hands the
+                    // file to the merger. Waiting for deinit is racy: other
+                    // closure captures can keep the writer alive past notify,
+                    // and an unpatched header reads back as a zero-length file.
+                    micAudioFileRef.close()
                     AppLogger.audioMic.info("Audio file closed", ["file": primaryMicURL?.lastPathComponent ?? self.micAudioFileURL?.lastPathComponent ?? "unknown"])
                 }
                 cleanupGroup.leave()
@@ -1068,6 +1179,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     if let currentSystemFile = self.systemAudioFile, currentSystemFile === systemAudioFileRef {
                         self.systemAudioFile = nil
                     }
+                    systemAudioFileRef.close()
                     AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
                 }
                 cleanupGroup.leave()
@@ -1076,6 +1188,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
                 guard let self else { return }
                 let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegmentsSnapshot)
+                self.recordingJournal.markFinalized(finalMicURL: finalMicURL, session: journalSession)
                 DispatchQueue.main.async {
                     if self.recordingSessionGeneration == stopGeneration {
                         self.originalMicAudioFileURL = nil
@@ -1090,6 +1203,22 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     self.onRecordingComplete?(finalMicURL, finalSystemURL)
                 }
             }
+        }
+    }
+
+    /// Deliberate mid-recording engine restart so a processing-mode change
+    /// (arming VPIO for the issue #500 mic boost) takes effect immediately.
+    /// Reuses the device-recovery machinery; never runs recovery on the
+    /// calling thread (recovery uses Thread.sleep for HAL settle).
+    public func restartCaptureForProcessingChange() {
+        guard isRecording, !isMicRecovering else { return }
+        enableVoiceProcessing = true
+        // Snapshot the generation BEFORE dispatch: stop() bumps it
+        // synchronously, so a stop racing the boost aborts cleanly at
+        // recovery's existing generation checks.
+        let sessionGeneration = recordingSessionGeneration
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.recoverFromDeviceChange(sessionGeneration: sessionGeneration, reason: .processingChange)
         }
     }
 

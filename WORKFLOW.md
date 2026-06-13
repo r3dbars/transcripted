@@ -38,6 +38,9 @@ Workspace:
 
 {{ workspace.path }}
 
+The `symphony-workspaces` folder name is historical. Treat it as the current
+local runner workspace root unless the frontmatter above changes.
+
 ## Job
 
 Take this GitHub issue from `agent todo` or `agent in progress` to a reviewable pull request.
@@ -61,7 +64,8 @@ Use the issue as the source of truth. If the issue is too vague to implement saf
 13. Open a draft PR against `main` with `gh pr create --draft`, unless you are updating an existing PR.
 14. Link the PR in the issue workpad and add a short verification summary.
 15. Remove `agent in progress` and add `human review` when the PR is ready for Justin to review.
-16. After you finish, the runner will add an Agent Review Packet to the PR and a Human Review Ready hub comment to the issue with change classification, visual evidence when present, Transcripted QA, and an automated PR review.
+16. After you finish, end your final message with the compact closeout shape in `docs/agent-closeout.md`.
+17. After you finish, the runner will add an Agent Review Packet to the PR and a Human Review Ready hub comment to the issue with change classification, visual evidence when present, Transcripted QA, and an automated PR review.
 
 ## Guardrails
 
@@ -102,4 +106,5 @@ PR: ...
 - None
 ```
 
-Final message must report completed actions and blockers only.
+Final message must report completed actions and blockers only, using the
+`COORD_DONE` format from `docs/agent-closeout.md` when the run is delegated.

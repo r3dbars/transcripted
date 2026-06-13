@@ -96,6 +96,7 @@ probe_sentry() {
   response=$(curl -s -f -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" \
     "https://sentry.io/api/0/projects/r3dbars/apple-macos/issues/?query=is:unresolved&limit=10" \
     --header "Content-Type: application/json")
+  response=$(echo "$response" | jq '[.[] | select((((.title // "") | contains("sentry_test_event")) or ((.title // "") | contains("support_diagnostic_event"))) | not)]')
 
   if [[ -z "$response" ]]; then
     echo "Sentry: no unresolved issues"
@@ -107,9 +108,8 @@ probe_sentry() {
   echo "Sentry unresolved issues: $count"
 
   if [[ "$count" -gt 0 ]]; then
-    local top_issue
-    top_issue=$(echo "$response" | jq -r '.[0] | "[\(.id)] \(.title)"')
-    echo "Top issue: $top_issue"
+    echo "Sentry unresolved issue rollup (top 5):"
+    echo "$response" | jq -r '.[0:5][] | " - [\(.shortId // .id)] count=\(.count // 0) users=\(.userCount // 0) lastSeen=\(.lastSeen // "unknown") \(.title)"'
   fi
 }
 
@@ -125,9 +125,9 @@ probe_posthog() {
 
   echo "PostHog health check..."
   local workflow_events onboarding_events first_value_events query daily_query payload daily_payload
-  workflow_events="'app_launched','app_unclean_shutdown_detected','app_session_stall_detected','onboarding_completed','dictation_started','dictation_start_failed','dictation_completed','dictation_cancelled','dictation_no_speech','dictation_audio_route_recovery_timeout','meeting_recording_started','meeting_recording_start_failed','meeting_recording_stopped','meeting_recording_cancelled','meeting_transcript_saved','meeting_transcript_failed','meeting_transcript_skipped'"
+  workflow_events="'app_launched','app_unclean_shutdown_detected','app_session_stall_detected','onboarding_completed','dictation_started','dictation_start_failed','dictation_completed','dictation_cancelled','dictation_no_speech','dictation_audio_route_recovery_timeout','meeting_recording_started','meeting_recording_start_failed','meeting_recording_stopped','meeting_recording_cancelled','meeting_file_imported','meeting_transcript_saved','meeting_transcript_failed','meeting_transcript_skipped','activation_artifact_action_clicked','activation_agent_prompt_action_clicked','activation_agent_setup_cta_clicked','activation_return_proxy_observed'"
   onboarding_events="'onboarding_shown','onboarding_step_viewed','onboarding_permission_cta_clicked','onboarding_permission_status_changed','onboarding_model_state_changed','onboarding_primary_cta_clicked','onboarding_first_dictation_started','onboarding_first_dictation_saved','onboarding_first_dictation_stop_clicked','onboarding_first_dictation_empty','onboarding_meeting_dry_run_clicked','onboarding_agent_cta_clicked','onboarding_reporting_toggle_changed','onboarding_completed','onboarding_dismissed'"
-  first_value_events="'dictation_completed','onboarding_first_dictation_saved','meeting_transcript_saved','onboarding_agent_cta_clicked'"
+  first_value_events="'dictation_completed','onboarding_first_dictation_saved','meeting_transcript_saved','onboarding_agent_cta_clicked','activation_artifact_action_clicked','activation_agent_prompt_action_clicked','activation_agent_setup_cta_clicked','activation_return_proxy_observed'"
   query="select uniq(distinct_id) as devices_7d, sum(case when event in ($workflow_events) then 1 else 0 end) as workflow_events_7d, sum(case when event in ($onboarding_events) then 1 else 0 end) as onboarding_events_7d, sum(case when event in ($first_value_events) then 1 else 0 end) as first_value_events_7d from events where timestamp >= now() - interval 7 day"
   daily_query="select toDate(timestamp) as day, uniq(distinct_id) as active_devices from events where timestamp >= now() - interval 7 day and event in ($workflow_events) group by day order by day asc"
   payload=$(jq -cn --arg query "$query" '{query: {kind: "HogQLQuery", query: $query}, refresh: "blocking"}')

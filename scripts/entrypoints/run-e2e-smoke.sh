@@ -33,10 +33,13 @@ mkdir -p "$FAKE_HOME" "$WORK_ROOT"
 SWIFT_SOURCES=(
     "Tests/E2E/TranscriptedE2ESmoke.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
+    "Sources/Support/LocalMeetingSummaryPreferences.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/Dictation/DictationTranscriptStore.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
+    "Sources/Meeting/LocalMeetingSummarizer.swift"
+    "Sources/Meeting/MeetingArtifactRenamer.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
@@ -44,10 +47,13 @@ SWIFT_SOURCES=(
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
     "Sources/TranscriptedCore/Services/CoreStoragePaths.swift"
     "Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift"
+    "Sources/TranscriptedCore/Audio/WAVHeaderRepair.swift"
     "Sources/TranscriptedCore/Logging/AppLogger.swift"
     "Sources/TranscriptedCore/Logging/FileLogger.swift"
+    "Sources/TranscriptedCore/Logging/LogPrivacySanitizer.swift"
     "Sources/TranscriptedCore/Utilities/FilePermissions.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
+    "Sources/UI/Shared/HomeMeetingDeletion.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
@@ -62,13 +68,51 @@ SWIFT_SOURCES=(
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift"
 )
 
-echo "Compiling deterministic E2E smoke..."
+for source in "${SWIFT_SOURCES[@]}"; do
+    if [ ! -f "$source" ]; then
+        echo "E2E smoke source missing: $source" >&2
+        exit 1
+    fi
+done
+
+CAPTURE_KIT_BUILD_DIR="$BUILD_DIR/capture-kit"
+mkdir -p "$CAPTURE_KIT_BUILD_DIR"
+
+echo "Compiling TranscriptedCaptureKit module..."
 swiftc \
+    Tools/TranscriptedCaptureKit/Sources/TranscriptedCaptureKit/*.swift \
+    -module-name TranscriptedCaptureKit \
+    -emit-module -emit-module-path "$CAPTURE_KIT_BUILD_DIR/TranscriptedCaptureKit.swiftmodule" \
+    -emit-library -static -o "$CAPTURE_KIT_BUILD_DIR/libTranscriptedCaptureKit.a" \
+    -parse-as-library
+
+echo "Compiling deterministic E2E smoke..."
+COMPILE_STDERR="$BUILD_DIR/compile-stderr.log"
+if ! swiftc \
     "${SWIFT_SOURCES[@]}" \
+    -I "$CAPTURE_KIT_BUILD_DIR" \
+    -L "$CAPTURE_KIT_BUILD_DIR" \
+    -lTranscriptedCaptureKit \
     -framework AppKit \
     -lsqlite3 \
     -parse-as-library \
-    -o "$SMOKE_BIN"
+    -o "$SMOKE_BIN" 2> >(tee "$COMPILE_STDERR" >&2); then
+    missing_symbols="$(
+        grep -oE "cannot find (type )?'[^']+' in scope" "$COMPILE_STDERR" 2>/dev/null \
+            | grep -oE "'[^']+'" | tr -d "'" | sort -u || true
+    )"
+    if [ -n "$missing_symbols" ]; then
+        echo "" >&2
+        echo "E2E smoke compile failed with unresolved symbols. It likely needs a new source file added to SWIFT_SOURCES." >&2
+        while IFS= read -r symbol; do
+            [ -z "$symbol" ] && continue
+            echo "  - missing symbol: $symbol" >&2
+            echo "    locate it with: grep -rln \"struct/enum/class/func $symbol\" Sources Tools" >&2
+        done <<< "$missing_symbols"
+        echo "  Add the file that defines the symbol to the SWIFT_SOURCES array in $0." >&2
+    fi
+    exit 1
+fi
 
 echo "Running deterministic E2E smoke..."
 CFFIXED_USER_HOME="$FAKE_HOME" \

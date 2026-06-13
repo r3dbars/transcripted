@@ -147,17 +147,22 @@ enum ParakeetAudioFormatReadinessPolicy {
         inputChannelCount: UInt32,
         selectedInputClass: String,
         outputDeviceClass: String,
-        selectionOverrodeDefault: Bool
+        selectionOverrodeDefault: Bool,
+        selectionReason _: DictationInputDeviceSelectionReason? = nil
     ) -> ParakeetAudioFormatReadiness {
         guard isUsableCaptureSampleRate(outputSampleRate), outputChannelCount > 0,
               isUsableCaptureSampleRate(inputSampleRate), inputChannelCount > 0 else {
             return .invalid
         }
 
+        let lowRateOutputBus = likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded()))
+        let overriddenBluetoothOutputRoute = selectionOverrodeDefault
+            && outputDeviceClass == "bluetooth"
+
         if selectedInputClass != "bluetooth",
-           outputDeviceClass != "bluetooth",
            inputSampleRate >= 44_100,
-           likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded())) {
+           lowRateOutputBus,
+           (outputDeviceClass != "bluetooth" || overriddenBluetoothOutputRoute) {
             return .routeNotSettled
         }
 
@@ -188,6 +193,49 @@ enum ParakeetAudioFormatReadinessPolicy {
             return Int(fallbackCaptureSampleRate) * max(seconds, 1)
         }
         return min(Int(sampleCount), Int(maximumBufferCapacitySampleRate) * max(seconds, 1))
+    }
+}
+
+enum ParakeetInputOverrideSettlePolicy {
+    static func delayNanoseconds(afterImmediateReadiness readiness: ParakeetAudioFormatReadiness) -> UInt64 {
+        switch readiness {
+        case .ready, .invalid, .routeNotSettled:
+            return TranscriptedConstants.audioRecoveryDelay
+        }
+    }
+}
+
+enum ParakeetTapSampleRatePolicy {
+    static func effectiveSampleRate(
+        bufferSampleRate: Double,
+        hardwareSampleRate _: Double? = nil
+    ) -> Double {
+        ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(bufferSampleRate)
+    }
+}
+
+enum ParakeetRouteDiagnosticsPolicy {
+    static func routeShape(
+        selectedInputClass: String,
+        outputDeviceClass: String
+    ) -> String {
+        "\(selectedInputClass)_input_to_\(outputDeviceClass)_output"
+    }
+
+    static func isLikelyBluetoothHandsFreeProfile(
+        inputClass: String,
+        outputDeviceClass: String,
+        inputRate: Double?,
+        outputRate: Double?
+    ) -> Bool {
+        guard let inputRate, let outputRate else { return false }
+        if inputClass == "bluetooth" {
+            return inputRate <= 24_000 && outputRate >= 44_100
+        }
+        if outputDeviceClass == "bluetooth" {
+            return outputRate <= 24_000 && inputRate >= 44_100
+        }
+        return false
     }
 }
 

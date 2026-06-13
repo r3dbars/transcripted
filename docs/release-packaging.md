@@ -107,6 +107,29 @@ For a thin packaging smoke that also skips notarization, keep every opt-out visi
 SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
+After `build-beta.sh` succeeds, run the packaged-app smoke before publishing
+anything:
+
+```bash
+python3 scripts/ops/packaged-app-smoke.py
+```
+
+That smoke checks the packaged `build/Transcripted.app`, the versioned DMG,
+Sparkle feed URL and public key, appcast coherence, signing and entitlements,
+dSYM UUID evidence, an isolated launch/menu report, and generated launch-log
+privacy. For a stricter release-candidate report after packaging, compose it
+with:
+
+```bash
+python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts --include-packaged-app-smoke --require-release-debug-files
+```
+
+Yellow is expected when notarization is intentionally skipped or the appcast has
+not yet been updated for a new version. Red means the package itself is broken.
+When an agent runs this inside Codex's filesystem sandbox, `codesign`,
+`hdiutil`, and packaged-app launch checks may need an approved unsandboxed rerun
+before calling a package red.
+
 ## Release Flow
 
 ```bash
@@ -120,7 +143,29 @@ Before you publish a user-facing release note, sanity-check the release state:
 - confirm the build output prints the expected Sentry release and dist
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
 - if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
+- verify live release truth separately from source truth: live `/appcast.xml`, live `/download`, live `/download/latest.dmg`, crawler-facing release text, and Cloudflare Pages deployment status should all match the intended release before launch or outreach claims
+- run `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json` before publishing release notes or PR text that summarize QA, support, or observability work
 - if you want a clean starting point, use `docs/release-notes-template.md`
+
+Use the strict release-health gate when validating release surfaces:
+
+```bash
+python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
+python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health
+```
+
+The live surface gate compares the committed appcast against the live appcast,
+download routes, GitHub release asset size/digest, and Homebrew cask checksum.
+
+After a packaging build, add local dSYM verification:
+
+```bash
+python3 scripts/ops/nightly-security-check.py --strict --require-release-debug-files
+```
+
+The packaged-app smoke above also checks the same local app/dSYM UUID pair when
+`build/Transcripted.app.dSYM` is present. Use `--require-dsym` when missing
+symbols should fail the package smoke instead of marking the release yellow.
 
 If you expect existing installs of Transcripted to discover the new version
 inside the app, do not stop after the DMG is built. You must also complete the
@@ -128,19 +173,35 @@ Sparkle steps in `docs/sparkle-updates.md`.
 
 After the release is published on GitHub, register the matching Sentry release
 so Sentry sees a real finalized release before production events arrive. This
-also uploads `build/Transcripted.app.dSYM` when it is present:
+also requires and uploads `build/Transcripted.app.dSYM` by default:
 
 ```bash
-bash scripts/release/register-sentry-release.sh <version>
+SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>
 ```
+
+Prefer this post-publish registration path. `build-beta.sh` also supports
+`REGISTER_SENTRY_RELEASE=1`, but use that only when the tag, app binary, dSYM,
+and release artifact are already final and match the GitHub release you intend
+to ship.
 
 The script creates/finalizes `transcripted@<version>` for the `r3dbars/apple-macos`
 Sentry project, associates commits when Sentry can resolve the repo, and uploads
-debug symbol files through `sentry-cli debug-files upload --no-sources`. If the
-dSYM was moved, set `SENTRY_DEBUG_FILES_PATH=/path/to/Transcripted.app.dSYM`. If
-symbols are intentionally unavailable for a one-off local registration, set
-`SENTRY_UPLOAD_DEBUG_FILES=0`; shipped releases should not skip this because
-crash reports may lose app frames.
+debug symbol files through `sentry-cli debug-files upload --no-sources`. Before
+upload, it verifies the dSYM UUID matches the built app binary at
+`build/Transcripted.app/Contents/MacOS/Transcripted`.
+
+If you are registering a reused artifact, set both paths so they point at the
+matching pair from that exact release build:
+
+```bash
+SENTRY_DEBUG_FILES_PATH=/path/to/Transcripted.app.dSYM \
+SENTRY_APP_BINARY_PATH=/path/to/Transcripted.app/Contents/MacOS/Transcripted \
+bash scripts/release/register-sentry-release.sh <version>
+```
+
+If symbols are intentionally unavailable for a one-off local registration, set
+`SENTRY_UPLOAD_DEBUG_FILES=0` and call the release yellow; shipped releases
+should not skip this because crash reports may lose app frames.
 
 If you expect `brew install` or `brew upgrade` to pick up the new version, do
 not stop after the GitHub release is published. You must also refresh and push
@@ -170,6 +231,27 @@ For a dry run that still validates the signed app and DMG assembly:
 ```bash
 SKIP_NOTARIZATION=1 bash build-beta.sh <beta-token> <user-name>
 ```
+
+After the dry-run package exists, run the packaged app smoke before any upload,
+appcast, cask, or Sentry release work:
+
+```bash
+swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke
+```
+
+Or use the QA bench wrapper:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode packaged
+```
+
+That smoke checks local app/package evidence only: app version/config parity,
+Sparkle feed URL/public key/update flags, signing, bundled helper/framework
+presence, dSYM UUID match, versioned DMG readability, optional menu bar UI, and
+local log privacy patterns. It does not notarize, publish, register Sentry
+releases, update `docs/appcast.xml`, or update the Homebrew cask. If the UI
+portion is blocked by Accessibility/TCC, the result is incomplete/yellow rather
+than green.
 
 ## Expected Validation
 

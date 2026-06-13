@@ -165,6 +165,48 @@ func testObservabilityTextRedactor() {
         assertTrue(redacted.contains("trigger=hotkey"), "non-sensitive trigger should remain")
     }
 
+    runSuite("ObservabilityTextRedactor scrubs inline source_app_bundle assignments") {
+        let input = "ctx source_app_bundle=com.example.privateapp result=ok"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("com.example.privateapp"), "inline source_app_bundle value must not survive")
+        assertEqual(redacted,
+                    "ctx source_app_bundle=[redacted-sensitive-value] result=ok",
+                    "inline source_app_bundle should redact only the sensitive assignment")
+    }
+
+    runSuite("ObservabilityTextRedactor scrubs case-insensitive inline source_app_bundle assignments") {
+        let input = "ctx SOURCE_APP_BUNDLE=com.example.PrivateApp stage=ready"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("com.example.PrivateApp"), "case-varied source_app_bundle value must not survive")
+        assertEqual(redacted,
+                    "ctx SOURCE_APP_BUNDLE=[redacted-sensitive-value] stage=ready",
+                    "case-insensitive inline keys should preserve safe metadata after redaction")
+    }
+
+    runSuite("ObservabilityTextRedactor scrubs trailing inline source_app_bundle assignments") {
+        let input = "ctx source_app_bundle=com.example.privateapp"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertFalse(redacted.contains("com.example.privateapp"), "trailing source_app_bundle value must not survive")
+        assertEqual(redacted,
+                    "ctx source_app_bundle=[redacted-sensitive-value]",
+                    "source_app_bundle at end of line should still collapse to the redaction marker")
+    }
+
+    runSuite("ObservabilityTextRedactor leaves source_app_bundle lookalike keys alone") {
+        let input = "ctx safe_source_app_bundle=com.example.coarse source_app_bundle=com.example.privateapp result=ok"
+        let redacted = ObservabilityTextRedactor.redact(input)
+
+        assertTrue(redacted.contains("safe_source_app_bundle=com.example.coarse"),
+                   "non-sensitive lookalike key should remain")
+        assertFalse(redacted.contains("com.example.privateapp"), "real source_app_bundle value must not survive")
+        assertTrue(redacted.contains("source_app_bundle=[redacted-sensitive-value]"),
+                   "real source_app_bundle key should still redact")
+        assertTrue(redacted.contains("result=ok"), "safe metadata should remain")
+    }
+
     runSuite("ObservabilityTextRedactor scrubs (parakeet, device) and (whisper, device) tuples") {
         // The engineDeviceLogRegex protects logs like `STT route changed (parakeet, Jane's Mic)`
         // where the engine name is fine but the device name leaks.
@@ -188,15 +230,18 @@ func testObservabilityTextRedactor() {
     }
 
     runSuite("ObservabilityTextRedactor scrubs JSON source_app and bundle_id assignments") {
-        let input = #"{"source_app":"com.slack.Slack","source_app_name":"Slack","bundle_id":"com.private.app"}"#
+        let input = #"{"source_app":"com.slack.Slack","source_app_bundle":"com.private.short","source_app_name":"Slack","bundle_id":"com.private.app"}"#
         let redacted = ObservabilityTextRedactor.redact(input)
 
         assertFalse(redacted.contains("com.slack.Slack"), "source_app bundle id must not survive")
+        assertFalse(redacted.contains("com.private.short"), "short source_app_bundle value must not survive")
         assertFalse(redacted.contains("\"Slack\""), "source_app_name must not survive")
         assertFalse(redacted.contains("com.private.app"), "bundle_id must not survive")
         // All three should collapse to the sensitive marker form.
         assertTrue(redacted.contains("\"source_app\":\"[redacted-sensitive-value]\""),
                    "source_app should collapse to marker")
+        assertTrue(redacted.contains("\"source_app_bundle\":\"[redacted-sensitive-value]\""),
+                   "source_app_bundle should collapse to marker")
         assertTrue(redacted.contains("\"source_app_name\":\"[redacted-sensitive-value]\""),
                    "source_app_name should collapse to marker")
         assertTrue(redacted.contains("\"bundle_id\":\"[redacted-sensitive-value]\""),

@@ -31,6 +31,9 @@ final class MeetingCaptureBridge: ObservableObject {
     @Published private(set) var recordingDuration: TimeInterval = 0
     @Published private(set) var systemAudioStatus: SystemAudioStatus = .unknown
     @Published private(set) var errorMessage: String?
+    /// One-shot per recording: true once Core fired the issue #500
+    /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
+    @Published private(set) var micAttenuationCueObserved: Bool = false
 
     // MARK: - Underlying capture
 
@@ -68,6 +71,7 @@ final class MeetingCaptureBridge: ObservableObject {
         if audio.isRecording { return true }
 
         errorMessage = nil
+        micAttenuationCueObserved = false
 
         // Apply the user's microphone-processing choice before each
         // recording. VPIO defaults off (no Zoom ducking); enable only when
@@ -150,6 +154,14 @@ final class MeetingCaptureBridge: ObservableObject {
         return result
     }
 
+    /// User consented to the mid-meeting mic boost. Persists the preference so
+    /// future meetings start with VPIO armed, then restarts the live engine so
+    /// THIS meeting picks it up (~1-2s gap, recorded as a mic segment gap).
+    func armVoiceProcessingForActiveRecording() {
+        MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
+        audio.restartCaptureForProcessingChange()
+    }
+
     func pipelineDiagnosticsSnapshot(
         overrideSystemAudioStatus: SystemAudioStatus? = nil
     ) -> AudioPipelineDiagnosticsSnapshot {
@@ -211,13 +223,15 @@ final class MeetingCaptureBridge: ObservableObject {
         // the main queue (via DispatchQueue.main.async / MainActor.run inside
         // the lifecycle helpers), but we still bounce through Task @MainActor
         // to match the rest of the bridge's threading discipline.
-        audio.onCaptureLifecycleCue = { cue in
-            Task { @MainActor in
+        audio.onCaptureLifecycleCue = { [weak self] cue in
+            Task { @MainActor [weak self] in
                 switch cue {
                 case .recordingStarted:
                     NSSound(named: "Tink")?.play()
                 case .recordingStopped:
                     NSSound(named: "Pop")?.play()
+                case .micAttenuatedByForeignVoiceProcessing:
+                    self?.micAttenuationCueObserved = true
                 }
             }
         }

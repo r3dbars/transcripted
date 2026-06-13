@@ -4,17 +4,17 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (65 Swift files)
+## Subsystems (67 Swift files)
 
 - `Audio/` (18 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
-- `Logging/` (2 files) — shared app logger and JSONL file logger
+- `Logging/` (3 files) — shared app logger, JSONL file logger, and log privacy sanitizer
 - `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
 - `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
 - `Speaker/` (11 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, people-review policy, profile merging, retroactive transcript updates
 - `Stats/` (4 files) — recording stats database, models, queries, and service
-- `Storage/` (5 files) — transcript save, scanner, formatter, shared frontmatter parsing, and retained-recording audio archiving
+- `Storage/` (6 files) — transcript save, scanner, formatter, format options, shared frontmatter parsing, and retained-recording audio archiving
 - `Utilities/` (2 files) — date formatting and file permission helpers
 
 ## The seams embedders should know
@@ -33,7 +33,8 @@ These seams exist specifically so the app can embed the library without adopting
 - `AudioCaptureStartState` is the canonical readiness policy for live meeting capture. Meeting capture should not report success until mic recording is running and the system-audio file exists.
 - `MeetingInputDeviceSelectionPolicy` avoids using Bluetooth headset input for meeting capture when a built-in mic fallback is available, so WebRTC-style playback downgrades do not get worse.
 - `AudioSignalRecovery` is the shared low-level signal-analysis helper used when recorded audio needs peak / RMS / active-ratio checks or gain-normalized recovery clips before later transcription work.
-- `RealtimeAGC` is the default meeting-mic cleanup path for attenuated shared-device input. It avoids the playback-ducking side effects of Apple voice processing while still boosting quiet WebRTC-contended captures.
+- `RealtimeAGC` is the default meeting-mic cleanup path for attenuated shared-device input. It avoids the playback-ducking side effects of Apple voice processing while still boosting quiet WebRTC-contended captures and gating idle USB-mic noise.
+- `MeetingRecordingJournalStore` persists in-progress recording journals for launch recovery. Journal mutations are scoped to the session token returned by `begin(...)` so late stop-path writes cannot corrupt a newer recording's journal.
 - `SCKAudioCapture` is the macOS 26+ backend for audio-only ScreenCaptureKit capture, which keeps system-audio recording on the lighter permission tier and avoids full screen-pixel capture.
 - `AudioPipelineDiagnosticsSnapshot` is the privacy-safe route and buffer-health summary used for analytics and Sentry context. Keep it limited to bucketed device classes, rates, channel counts, and recovery state, never raw device names, transcript text, titles, file paths, or audio.
 - Hosts embedding `TranscriptedCore` should keep app-specific permission UX outside this directory, but they should understand that system-audio capture backend behavior now depends on OS availability.
@@ -61,6 +62,8 @@ default path.
 
 `TranscriptSaver.saveTranscript(...)` writes a markdown transcript, including YAML speaker metadata and recording-health fields like `capture_quality`, `audio_gaps`, and `device_switches` when the host provides them.
 
+The standalone CLI/MCP tools parse this same Markdown format through a dependency-free mirror in `Tools/TranscriptedCaptureKit` (it intentionally does not link Core). If `TranscriptFormatter` or `TranscriptFrontmatter` changes the written format, update the kit's parsers and tests in the same change.
+
 ## Editing rules
 
 - Keep app-shell UI types out of this directory.
@@ -72,7 +75,8 @@ default path.
 
 Always run:
 
-- `bash build.sh`
+- `bash build-deps.sh --force`
+- `bash build.sh --no-open`
 - `bash run-tests.sh`
 - `bash run-integration-smoke.sh`
 
@@ -84,14 +88,18 @@ Current direct core coverage includes:
 
 - `Tests/TranscriptedCoreTests/AudioInitializationTests.swift`
 - `Tests/TranscriptedCoreTests/AudioDiagnosticsSnapshotTests.swift`
+- `Tests/TranscriptedCoreTests/BluetoothMeetingRouteContractTests.swift`
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
 - `Tests/TranscriptedCoreTests/DatabaseFilePermissionsTests.swift`
 - `Tests/TranscriptedCoreTests/EmbeddingClustererTests.swift`
 - `Tests/TranscriptedCoreTests/FailedTranscriptionManagerTests.swift`
 - `Tests/TranscriptedCoreTests/FileLoggerTests.swift`
 - `Tests/TranscriptedCoreTests/MeetingInputDeviceSelectionPolicyTests.swift`
+- `Tests/TranscriptedCoreTests/MeetingRecordingJournalTests.swift`
+- `Tests/TranscriptedCoreTests/MeetingRouteArtifactFixtureTests.swift`
 - `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
 - `Tests/MicRecordingMergePlanTests.swift`
+- `Tests/TranscriptedCoreTests/QuietMicAttenuationDetectorTests.swift`
 - `Tests/TranscriptedCoreTests/RealtimeAGCTests.swift`
 - `Tests/TranscriptedCoreTests/RecordingAudioArchiverTests.swift`
 - `Tests/TranscriptedCoreTests/RecordingHealthInfoOverrideTests.swift`

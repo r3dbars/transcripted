@@ -4,6 +4,7 @@
 
 ## Packages
 
+- `TranscriptedCaptureKit/` — shared library for capture-library resolution and capture-Markdown parsing, used by the CLI and MCP packages
 - `TranscriptedCLI/` — local context and offline diarization CLI
 - `TranscriptedMCP/` — read-only MCP server for saved meetings and dictations
 - `TranscriptedQA/` — artifact validation and QA CLI
@@ -12,6 +13,7 @@
 
 Each package has its own local `CLAUDE.md` and `Package.swift`.
 
+- `Tools/TranscriptedCaptureKit/CLAUDE.md`
 - `Tools/TranscriptedCLI/CLAUDE.md`
 - `Tools/TranscriptedMCP/CLAUDE.md`
 - `Tools/TranscriptedQA/CLAUDE.md`

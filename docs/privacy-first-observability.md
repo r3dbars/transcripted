@@ -97,6 +97,10 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `onboarding_reporting_toggle_changed`
 - `onboarding_completed`
 - `onboarding_dismissed`
+- `activation_artifact_action_clicked`
+- `activation_agent_prompt_action_clicked`
+- `activation_agent_setup_cta_clicked`
+- `activation_return_proxy_observed`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
@@ -106,6 +110,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `update_download_finished`
 - `update_ready_to_install`
 - `update_relaunching`
+- `update_installed`
 - `settings_opened`
 - `settings_page_viewed`
 - `settings_action_clicked`
@@ -115,6 +120,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `dictation_started`
 - `dictation_start_failed`
 - `dictation_completed`
+- `dictation_stop_latency_measured`
 - `dictation_cancelled`
 - `dictation_no_speech`
 - `dictation_audio_route_changed`
@@ -125,6 +131,8 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_prompt_shown`
 - `meeting_prompt_dismissed`
 - `meeting_prompt_record_selected`
+- `meeting_mic_boost_prompt_shown`
+- `meeting_mic_boost_prompt_actioned`
 - `meeting_recording_stopped`
 - `meeting_capture_health_snapshot`
 - `meeting_recording_cancelled`
@@ -174,6 +182,16 @@ If the run built a fresh app or needs build-output verification, rerun it with:
 ```bash
 python3 scripts/ops/nightly-security-check.py --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json
 ```
+
+For a focused local privacy sweep, run:
+
+```bash
+python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json
+```
+
+That command uses synthetic values only. It covers logs/events/reliability
+JSONL, Sentry/PostHog payloads, QA and local report text, PR/release text, and
+the scanner handoff summary shape.
 
 The shared regression corpus for off-device scrubbers lives at
 `Tests/Fixtures/ObservabilitySanitizerCorpus.json`. Both the Sentry and

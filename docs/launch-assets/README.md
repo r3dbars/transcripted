@@ -16,15 +16,23 @@ Static screenshots:
 
 Motion assets:
 
-- `docs/assets/launch/transcripted-demo.mov` - fast Home -> Meetings -> Dictation -> Home tour
-- `docs/assets/launch/transcripted-demo.mp4` - lightweight social/video upload of the fast tour
-- `docs/assets/launch/transcripted-demo.gif` - GitHub README and quick previews
+- `docs/assets/launch/transcripted-hero.gif` - 18s composed README hero
+  (pain hook -> transcript -> Claude Q&A -> dictation -> end card); replace
+  with a real recording using `docs/marketing/hero-video-storyboard.md`
 - `docs/assets/launch/transcripted-dictation-recording.mov` - dictation recording control
 - `docs/assets/launch/transcripted-dictation-recording.mp4` - lightweight social/video upload
-- `docs/assets/launch/transcripted-dictation-recording.gif` - GitHub README and quick previews
-- `docs/assets/launch/transcripted-meeting-recording.mov` - meeting recording start flow
-- `docs/assets/launch/transcripted-meeting-recording.mp4` - lightweight social/video upload
-- `docs/assets/launch/transcripted-meeting-recording.gif` - GitHub README and quick previews
+- `docs/assets/launch/transcripted-dictation-recording.gif` - in the README dictation section
+- `docs/assets/launch/transcripted-demo.mov` / `.mp4` / `.gif` - 4-frame fast
+  tour; too fast for the README (superseded by the hero GIF), still usable as
+  raw material
+- `docs/assets/launch/transcripted-meeting-recording.mov` / `.mp4` / `.gif` -
+  **do not publish**: the app window is clipped on the right edge in the
+  source recording; re-record per the storyboard before using anywhere
+
+Social preview:
+
+- `docs/assets/social-preview.png` - 1280x640 for the GitHub repo Settings ->
+  Social preview slot (upload is a manual one-time step)
 
 Sample output:
 

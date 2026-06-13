@@ -14,7 +14,7 @@ For day-to-day agent work, start with `AGENT_START.md` and treat `AGENTS.md` as 
 - optional local-speaker review for people sharing the room mic
 - agent-readable Markdown output saved to disk
 
-The old standalone Transcripted app is preserved on branch `legacy/transcripted-standalone` and tag `pre-draft-takeover-2026-04-06`. The older drafting/ghostwriting flow is not active on `main`; `DictationSessionController.cancelSession()` is the only remaining compatibility hook from that removed routing.
+The old standalone Transcripted app is preserved on branch `legacy/transcripted-standalone` and tag `pre-draft-takeover-2026-04-06`. The older drafting/ghostwriting flow is not active on `main` and no compatibility hooks from that routing remain in the source tree.
 
 ## First reads
 
@@ -42,7 +42,7 @@ bash run-integration-smoke.sh      # app/core linkage + wake recovery + MicRecor
 bash run-e2e-smoke.sh              # deterministic release-critical artifact smoke (no mic/TCC)
 bash run-live-capture-smoke.sh     # local hardware/TCC smoke (needs mic + System Audio Recording perms)
 swift test                         # Swift Package tests for TranscriptedCore seam only
-bash build-beta.sh <token> <user>  # signed beta/distribution build; SKIP_NOTARIZATION=1 for packaging smoke
+bash build-beta.sh '' <user>       # signed beta/distribution build; first arg is compatibility-only
 bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the current branch diff
 ```
 
@@ -55,7 +55,8 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 - Touched live-capture smoke paths (`Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift`, `run-live-capture-smoke.sh`, `scripts/entrypoints/run-live-capture-smoke.sh`) → `bash run-live-capture-smoke.sh --skip-build`
 - Touched `Package.swift`, `Sources/TranscriptedCore/**`, or `Tests/TranscriptedCoreTests/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh` + `swift test`
 - Touched `Sources/Observability/**`, `Info.plist`, `docs/sparkle-updates.md`, or `docs/appcast.xml` → `bash build.sh --no-open` + `bash run-tests.sh`
-- Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh --no-open` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>`
+- Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh --no-open` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>`
+- Touched `Tools/TranscriptedCaptureKit/**` → `swift test --package-path Tools/TranscriptedCaptureKit` + `swift test --package-path Tools/TranscriptedCLI` + `swift test --package-path Tools/TranscriptedMCP` + `bash run-e2e-smoke.sh`
 - Touched `Tools/TranscriptedCLI/**` → `swift test --package-path Tools/TranscriptedCLI`
 - Touched `Tools/TranscriptedMCP/**` → `swift test --package-path Tools/TranscriptedMCP`
 - Touched `Tools/TranscriptedQA/**` → `swift test --package-path Tools/TranscriptedQA`
@@ -73,7 +74,7 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 
 ### Running a single test
 
-Fast tests are top-level functions, not XCTest cases. To run one in isolation, temporarily reduce the manifest to that one entry and run `bash run-tests.sh`, or invoke the compiled runner under `build/tests/` directly. For the SPM target use `swift test --filter <TestName>` (e.g. `swift test --filter MicRecordingFileMergerTests`).
+Fast tests are top-level functions, not XCTest cases. To run one in isolation, use `bash run-tests.sh --filter <entryFn|File>` (e.g. `bash run-tests.sh --filter testJSONLWriter`); the selector matches an entry function, a file name, or a case-insensitive substring of either, and `bash run-tests.sh --list` prints the known entry functions. For the SPM target use `swift test --filter <TestName>` (e.g. `swift test --filter MicRecordingFileMergerTests`).
 
 ## Build-system shape
 
@@ -102,7 +103,8 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | `Sources/Speech/` | local STT engines (`ParakeetEngine`), `STTRouter`, recorded-audio buffering, dictation audio recovery |
 | `Sources/Support/` | app paths, permissions metadata, hotkey/trigger preferences, paste, dictionary, launch-at-login |
 | `Sources/TranscriptedCore/` | reusable meeting transcription library — strict library boundary, consumed only through `Sources/Meeting/` |
-| `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `AgentConnect/`, `Shared/` |
+| `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
+| `Tools/TranscriptedCaptureKit` | shared capture-library resolution + capture-Markdown parsing library for the CLI and MCP tools |
 | `Tools/TranscriptedCLI` | standalone local-context and offline diarization CLI |
 | `Tools/TranscriptedMCP` | read-only MCP server for saved meetings/dictations |
 | `Tools/TranscriptedQA` | standalone artifact validation and QA CLI |

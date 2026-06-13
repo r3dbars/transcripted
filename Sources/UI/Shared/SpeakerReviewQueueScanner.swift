@@ -26,15 +26,6 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
         ].joined(separator: "|")
     }
 
-    var channelTitle: String {
-        switch channel {
-        case .mic:
-            return "Person in the room"
-        case .system:
-            return "Remote participant"
-        }
-    }
-
     var speakerLabel: String {
         "\(channelPrefix)/\(sourceName)"
     }
@@ -47,6 +38,14 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
             return "System"
         }
     }
+}
+
+struct SpeakerPendingVoiceGroup: Identifiable, Sendable {
+    let representative: SpeakerPendingReviewItem
+    let meetingCount: Int
+    let sampleText: String?
+
+    var id: UUID { representative.speakerId }
 }
 
 enum SpeakerReviewQueueScanner {
@@ -113,7 +112,7 @@ enum SpeakerReviewQueueScanner {
         )
         let recordedAt = TranscriptFrontmatter.recordedAt(values: document.values)
 
-        return frontmatterSpeakers(from: document.lines).compactMap { speaker in
+        let items: [SpeakerPendingReviewItem] = frontmatterSpeakers(from: document.lines).compactMap { speaker in
             guard speaker.source == "db_pending",
                   let dbId = speaker.dbId,
                   let profile = profilesById[dbId],
@@ -140,6 +139,45 @@ enum SpeakerReviewQueueScanner {
                 sourceName: speaker.name
             )
         }
+
+        return deduplicatedPendingItems(items)
+    }
+
+    /// Collapses the per-meeting review queue into one entry per distinct voice.
+    /// Items are expected newest-first (the order `loadPendingItems` returns), so
+    /// each group's representative is that voice's most recent appearance.
+    static func groupedByVoice(_ items: [SpeakerPendingReviewItem]) -> [SpeakerPendingVoiceGroup] {
+        var order: [UUID] = []
+        var itemsBySpeakerID: [UUID: [SpeakerPendingReviewItem]] = [:]
+
+        for item in items {
+            if itemsBySpeakerID[item.speakerId] == nil {
+                order.append(item.speakerId)
+            }
+            itemsBySpeakerID[item.speakerId, default: []].append(item)
+        }
+
+        return order.compactMap { speakerId in
+            guard let groupItems = itemsBySpeakerID[speakerId],
+                  let representative = groupItems.first else {
+                return nil
+            }
+
+            let transcriptPaths = Set(groupItems.map { $0.transcriptURL.standardizedFileURL.path })
+            let sampleText = groupItems
+                .first { $0.sampleText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }?
+                .sampleText
+            return SpeakerPendingVoiceGroup(
+                representative: representative,
+                meetingCount: transcriptPaths.count,
+                sampleText: sampleText
+            )
+        }
+    }
+
+    private static func deduplicatedPendingItems(_ items: [SpeakerPendingReviewItem]) -> [SpeakerPendingReviewItem] {
+        var seen = Set<String>()
+        return items.filter { seen.insert($0.id).inserted }
     }
 
     private struct FrontmatterSpeaker {

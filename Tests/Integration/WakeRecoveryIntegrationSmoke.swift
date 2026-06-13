@@ -111,20 +111,26 @@ struct Main {
         let firstResult = await first.value
         let secondResult = await second.value
         let registerCalls = await MainActor.run { hotkeys.registerCalls }
+        let unregisterCalls = await MainActor.run { hotkeys.unregisterCalls }
         let readinessCount = await MainActor.run { readinessCalls.count }
         let sleepCount = await MainActor.run { sleepCalls.count }
 
+        // The first wake retries once (busy → nil), so it unregisters before each of its two
+        // register attempts. The coalesced second wake joins the in-flight task and must add no
+        // further register/unregister work, so the unregister count should match registerCalls at 2
+        // and not double up.
         guard firstResult.hotkeysRecovered,
               firstResult.performedRecovery,
               secondResult.hotkeysRecovered,
               !secondResult.performedRecovery,
               registerCalls == 2,
+              unregisterCalls == 2,
               readinessCount == 1,
               sleepCount == 1 else {
             print("[wake-smoke] FAIL")
             print("[wake-smoke]   firstResult: recovered=\(firstResult.hotkeysRecovered) performed=\(firstResult.performedRecovery)")
             print("[wake-smoke]   secondResult: recovered=\(secondResult.hotkeysRecovered) performed=\(secondResult.performedRecovery)")
-            print("[wake-smoke]   registerCalls=\(registerCalls) readinessCount=\(readinessCount) sleepCount=\(sleepCount)")
+            print("[wake-smoke]   registerCalls=\(registerCalls) unregisterCalls=\(unregisterCalls) readinessCount=\(readinessCount) sleepCount=\(sleepCount)")
             return 1
         }
 

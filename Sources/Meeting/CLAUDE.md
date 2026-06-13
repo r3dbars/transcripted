@@ -7,7 +7,7 @@
 ## Files
 
 - `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles, retained-audio URLs, and retry metadata
-- `MeetingAudioStorageManager.swift` — compresses retained meeting WAVs to M4A, applies audio-retention cleanup, and backfills existing retained audio after launch or Settings changes
+- `MeetingAudioStorageManager.swift` — compresses retained meeting WAVs to M4A, compresses queue-tracked failed-meeting WAVs without deleting untracked orphans, applies audio-retention cleanup, and backfills existing retained audio after launch or Settings changes
 - `MeetingAudioInactivityDetector.swift` — detects prolonged audio silence during meetings and emits warning/cleared events so the UI can prompt the user to confirm the recording is still needed
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio` that converts start/stop into async flows, waits for both live capture and system-audio-file readiness, and mirrors live levels for the UI
 - `MeetingCaptureBridge+LivePreview.swift` — bridge extension for recording health snapshots plus mic/system live-preview buffer forwarding
@@ -17,8 +17,12 @@
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths, derives titles, and prepares single-file meeting transcription jobs
 - `LiveMeetingCodexSession.swift` — app-owned sidecar writer for the opt-in live-meeting workspace used by Codex and Claude Cowork; it must not replace or mutate the normal saved meeting transcript pipeline
+- `LiveMeetingPreviewServer.swift` — loopback HTTP server that serves the live sidecar preview on a tokenized URL so the page updates in place without full-page refreshes while Transcripted is running
 - `LiveMeetingStreamingUpdatePolicy.swift` — tiny throttling/deduplication policy for provisional live ASR updates before they are appended to the sidecar
-- `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text
+- `LiveMeetingTranscriber.swift` — opt-in streaming ASR bridge that feeds mic/system live PCM copies into FluidAudio's local streaming Parakeet manager and appends provisional sidecar text, mirroring accepted updates into `LiveMeetingTranscriptFeed`
+- `LiveMeetingTranscriptFeed.swift` — main-actor in-memory live transcript store behind the meeting overlay's embedded drawer; finals capped, newest partial per source replaces itself
+- `LocalMeetingSummarizer.swift` — opt-in local meeting-summary runners (Gemma MLX and Apple Foundation Models), transcript chunking, provider metadata, runtime env sanitizing, and stale-transcript write protection; blocking model runs execute on a dedicated queue so they never occupy Swift-concurrency cooperative threads
+- `MeetingMicBoostPromptPolicy.swift` — dependency-free gate for the in-meeting Boost Mic consent prompt and stale prompt actions
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
 - `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
 - `MeetingPromptHeuristics.swift` — shared scoring, prompt reasons, and provider-aware remind/dismiss backoff rules for calendar- and runtime-based prompt candidates
@@ -29,6 +33,7 @@
 - `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting overlay in its transcribing/saving state
 - `MeetingStoragePaths.swift` — current split meeting storage layout across the capture library, app state, logs, and temp folders
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
+- `MeetingArtifactRenamer.swift` — shared rename mechanics for a saved meeting's Markdown, retained `audio/<stem>_audio/` directory, and `<stem>.summary.md` sidecar; builds the canonical `YYYY-MM-dd <title>` stem. Used by both the post-save restyle and the Home title-edit flow so naming and sidecar bookkeeping cannot drift
 - `MeetingWarmupStatusPolicy.swift` — centralizes the user-facing warmup progress, copy, visibility, and ready/failure state for dictation + meeting model startup across overlay, menubar, and settings surfaces
 
 ## End-to-end flow
@@ -44,8 +49,8 @@
 9. `MeetingSessionController.cancelRecording(...)` is only for explicit confirmed discard flows; it stops capture, removes scratch audio, and does not enqueue transcription.
 10. `MeetingSessionController.importAudioFile(...)` routes standalone recordings through `MeetingImportedAudioPreparer` and into the same save / naming / restyling pipeline used by live captures.
 11. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time. When `LocalSpeakerPreferences` is enabled, queued meeting work also asks the core pipeline to diarize the local mic channel instead of treating it as a single "You" speaker.
-12. A subscription on `taskManager.$lastSavedTranscriptURL` calls `MeetingTranscriptStyler.restyleTranscript(...)` and updates the recent-meetings UI state.
-13. After a transcript is saved, `MeetingAudioStorageManager` compresses retained WAV audio to M4A and applies the user's retention setting. Launch and Settings changes also run a backfill pass over existing Transcripted meeting transcripts.
+12. A subscription on `taskManager.$lastSavedTranscriptURL` runs `MeetingTranscriptStyler.restyleTranscript(...)` on a serialized background task (the restyle reads/rewrites the whole transcript and can rename artifacts, so it must stay off the main actor) and hops back to the main actor to update the recent-meetings UI state. The restyle fails closed when a transcript body has text the entry parser cannot understand instead of replacing it with the empty placeholder.
+13. After a transcript is saved, `MeetingAudioStorageManager` compresses retained WAV audio to M4A and applies the user's retention setting. Launch and Settings changes also run a backfill pass over existing Transcripted meeting transcripts, and queue-tracked failed-meeting audio can be compressed only after the failed queue is updated to point at the converted files.
 14. If the speaker review sheet shows multiple local speakers, the user can either name them individually or collapse them back to a single "You" track via the UI's "Keep as You" path.
 15. Failed meetings can be played, revealed, retried, deleted, or dismissed from Home, with `MeetingFailureKind` providing stable failure categories, `MeetingFailureExplanation` preserving retry/artifact state, and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
 
@@ -57,17 +62,20 @@
 - Imported meeting audio should be copied into app-controlled scratch space before transcription so later cleanup and metadata writes stay consistent with live captures.
 - Retained-audio maintenance must only manage Transcripted meeting transcripts and app-owned retained audio filenames. A transcript is only storage-owned when its frontmatter has `capture_type: meeting` and a valid `capture_id` or `transcript_id`. Be very conservative with deletion: Markdown transcripts stay, unrelated files in capture folders stay, symlinked audio folders are ignored, and converted or pre-existing M4A files should be owner-only.
 - Meeting recording cancellation must be explicit, visible, and confirmed because discard deletes the captured audio. Do not wire Escape to meeting cancellation.
-- `MeetingPromptDetector` can prompt from either upcoming calendar events or recently active supported meeting apps (Zoom, Teams, Webex, FaceTime, plus browser-hosted providers like Google Meet).
+- `MeetingPromptDetector` can prompt from upcoming calendar events or from recently active supported runtime apps. Zoom and Teams should rely on stronger calendar evidence because app-open/frontmost state is not enough to prove a call is active.
 - Prompt dismissals are provider- and source-aware: runtime-only prompts can remind sooner, calendar-linked prompts can stay suppressed until the next relevant window, and Teams gets a longer minimum dismiss interval.
-- Local mic diarization is opt-in and controlled by `Support/LocalSpeakerPreferences.swift`, so default meeting behavior still keeps the mic side as a single "You" speaker unless the user enables review for people in the room.
+- Local mic diarization is opt-in and controlled by `Sources/Support/LocalSpeakerPreferences.swift`, so default meeting behavior still keeps the mic side as a single "You" speaker unless the user enables review for people in the room.
 - Live meeting sidecar mode is opt-in and sidecar-only. It can write provisional live files under app support during recording, but the durable meeting Markdown still comes from the existing `TranscriptionTaskManager` save pipeline. Keep live ASR isolated from final transcription work; if another transcript is already processing, prefer deferring live ASR over contending with the final pipeline.
+- Live streaming ASR can only start with a recording: `MeetingCaptureBridge` live PCM preview handlers must be installed before capture starts and never reassigned mid-session. `connectLiveSidecarToActiveRecording()` is the only mid-recording entry point (used by the meeting overlay's Live View button) and deliberately starts the sidecar session without live ASR; the final transcript still attaches normally.
 - `MeetingRecordingStartGate` is the canonical place for meeting-recording permission policy and reason strings. Keep duplicate permission branching out of overlay code.
+- `MeetingMicBoostPromptPolicy` is the canonical place for the in-meeting Boost Mic consent prompt. It must not present or apply actions after recording stop/cancel/termination teardown begins.
 - `MeetingFailureExplanation` owns the answer to "what happened, what was retained, and can the user retry?" Keep support summaries and telemetry aligned through its report fields instead of duplicating outcome logic.
 - `MeetingFailureKind` is the canonical place for stable failed-meeting categories used by presentation and metadata. Keep new classification rules centralized there.
 - `MeetingFailureCopy` is the canonical place for human-facing failed-meeting titles and details. Keep retry messaging centralized there.
 - `MeetingSessionUIPolicy` is the canonical place for deciding whether background meeting work should still surface as an active transcribing/saving state. Speaker review alone should not keep that state visible.
 - `TranscriptionTaskManager` stays single-flight. App-level queueing belongs in `MeetingSessionController`, not in ad hoc background tasks.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
+- Local meeting summaries rewrite the saved transcript after a slow local model run. Always re-read the transcript before writing and fail closed if transcript text changed while generation was in flight. Keep provider-specific setup and metadata explicit so Gemma MLX and Apple Foundation Models summaries remain distinguishable.
 
 ## Storage
 
@@ -76,7 +84,7 @@ Meeting capture artifacts live under `<capture-library>/meetings/`:
 - `*.md`
 - `audio/*_audio/` retained mic/system audio copied from successful meeting captures
 - retained audio is compressed from WAV to M4A after transcript save; retention cleanup uses Transcripted transcript frontmatter date, not Markdown edit time
-- retained-audio backfill skips orphaned, failed, non-Transcripted, and symlinked audio folders instead of guessing ownership
+- retained-audio backfill skips orphaned, non-Transcripted, and symlinked audio folders instead of guessing ownership; failed audio is only compressed when it is still referenced by the failed-meeting retry queue
 
 App-owned meeting state lives under `~/Library/Application Support/Transcripted/state/`:
 
@@ -102,7 +110,8 @@ See `docs/storage-paths.md` for the full map.
 
 ## Test and verification
 
-- `bash build.sh`
+- `bash build-deps.sh --force`
+- `bash build.sh --no-open`
 - `bash run-tests.sh`
 - `bash run-integration-smoke.sh`
 
@@ -113,6 +122,7 @@ Relevant direct coverage:
 - `Tests/MeetingFailureKindTests.swift`
 - `Tests/MeetingPromptHeuristicsTests.swift`
 - `Tests/MeetingRecordingStartGateTests.swift`
+- `Tests/MeetingMicBoostPromptPolicyTests.swift`
 - `Tests/MeetingRecordingCleanupTests.swift`
 - `Tests/MeetingWarmupStatusPolicyTests.swift`
 - `Tests/MeetingAudioInactivityDetectorTests.swift`
@@ -120,6 +130,12 @@ Relevant direct coverage:
 - `Tests/MeetingSessionUIPolicyTests.swift`
 - `Tests/MeetingAudioStorageManagerTests.swift`
 - `Tests/MeetingTranscriptStylerTests.swift`
+- `Tests/MeetingRouteFixtureTests.swift`
+- `Tests/LiveMeetingCodexSessionTests.swift`
+- `Tests/LiveMeetingPreviewServerTests.swift`
+- `Tests/LiveMeetingStreamingUpdatePolicyTests.swift`
+- `Tests/LiveMeetingTranscriptFeedTests.swift`
+- `Tests/LocalMeetingSummarizerTests.swift`
 - `Tests/SpeakerNamingPolicyTests.swift`
 - `Tests/Integration/AppCoreIntegrationSmoke.swift`
 

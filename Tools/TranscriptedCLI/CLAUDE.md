@@ -44,10 +44,10 @@ They also honor:
 
 | File | Purpose |
 |------|---------|
-| `Package.swift` | Swift package manifest; links against repo dependency artifacts |
+| `Package.swift` | Swift package manifest; depends on `../TranscriptedCaptureKit` and links against repo dependency artifacts |
 | `TranscriptedCLI.swift` | `@main` command root and subcommand registration |
 | `ContextCommands.swift` | CLI entry points for recent/search/read context commands |
-| `ContextStore.swift` | Shared file-loading and filtering logic for local context |
+| `ContextStore.swift` | File-loading and filtering logic for local context; directory resolution and markdown parsing delegate to `TranscriptedCaptureKit` |
 | `ContextModels.swift` | Codable models used by the context commands |
 | `DiarizeCommand.swift` | Single-file diarization command |
 | `BatchCommand.swift` | Directory diarization command |
@@ -121,3 +121,4 @@ with `TRANSCRIPTEDCLI_ENABLE_DIARIZATION=1` when diarization is needed.
 - when the user moved the capture library in Transcripted Settings, the CLI should follow that app-selected path before defaulting back to `~/Library/Application Support/Transcripted/captures`
 - `context-recent` is intentionally a mixed feed; if the user asks for the latest meeting specifically, add `--kind meeting`
 - changes here should be verified independently from the app build
+- directory resolution and capture-Markdown parsing live in `Tools/TranscriptedCaptureKit` and are shared with `Tools/TranscriptedMCP`; change them there, not by re-inlining logic into `ContextStore.swift`

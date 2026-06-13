@@ -6,11 +6,12 @@
 //
 // NOTE: ContextCaptureEngine itself is @MainActor and wired to AppKit, Carbon,
 // NSWorkspace, DictationSessionController, FloatingOverlayController,
-// EventReporter, and DiagnosticsTrail. Its internal seams
-// (shouldAcceptHotkeyAction, routeDictationToggle, PhysicalShortcutDetector,
-// PhysicalShortcutBinding, PhysicalShortcutAction) are file-private. These
-// tests cover the shared constants and preference seams the engine consumes,
-// not the engine class itself.
+// EventReporter, and DiagnosticsTrail. Its remaining internal seams
+// (shouldAcceptHotkeyAction, routeDictationToggle, PhysicalShortcutDetector)
+// are file-private. These tests cover the shared constants and preference seams
+// the engine consumes, plus the pure chord-resolution precedence the engine now
+// delegates to PhysicalShortcutMatcher (PhysicalShortcutAction /
+// PhysicalShortcutBinding live alongside it), not the engine class itself.
 
 import AppKit
 import Carbon
@@ -67,6 +68,23 @@ func testContextCaptureEnginePolicy() {
             source.contains("shouldAcceptHotkeyAction(\"meeting_physical_trigger\")"),
             "meeting physical trigger should have its own debounce key"
         )
+        assertTrue(
+            source.contains("shouldAcceptHotkeyAction(\"paste_last_dictation_physical_trigger\")"),
+            "paste-last-dictation trigger should have its own debounce key"
+        )
+    }
+
+    runSuite("ContextCaptureEngine hotkey unregister — preserves paste callback owner") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("var onPasteLastDictation: (() -> Void)?"),
+            "paste-last-dictation callback should stay on the engine like the meeting toggle callback"
+        )
+        assertFalse(
+            source.contains("onPasteLastDictation = nil"),
+            "hotkey unregister/re-register recovery should not clear the app-owned paste callback"
+        )
     }
 
     // MARK: - Notification.Name.hotkeysDidChange
@@ -85,15 +103,16 @@ func testContextCaptureEnginePolicy() {
     // MARK: - Binding provider default set
     // The engine's bindingProvider always emits the meeting binding and,
     // when dictation shortcuts are enabled, prepends push-to-talk and
-    // hands-free. Pin the three defaults a fresh install hands the provider.
+    // hands-free. Pin the defaults a fresh install hands the provider.
 
-    runSuite("PhysicalDictationTriggerPreferences fresh install — engine bindingProvider sees Fn / Right Option / Option-M") {
+    runSuite("PhysicalDictationTriggerPreferences fresh install — engine bindingProvider sees Fn / Right Option / Option-M / Option-Shift-V") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let pushToTalk = PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults)
         let handsFree = PhysicalDictationTriggerPreferences.handsFreeBinding(userDefaults: defaults)
         let meeting = PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults)
+        let pasteLastDictation = PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults)
 
         assertEqual(pushToTalk.keyCode, UInt32(kVK_Function), "push-to-talk default keyCode should be Fn")
         assertEqual(pushToTalk.modifiers, 0, "push-to-talk default should have no modifiers")
@@ -101,12 +120,19 @@ func testContextCaptureEnginePolicy() {
         assertEqual(handsFree.modifiers, 0, "hands-free default should have no modifiers")
         assertEqual(meeting.keyCode, UInt32(kVK_ANSI_M), "meeting default keyCode should be M")
         assertEqual(meeting.modifiers, PhysicalDictationTriggerModifiers.option, "meeting default modifier should be Option")
+        assertEqual(pasteLastDictation.keyCode, UInt32(kVK_ANSI_V), "paste-last-dictation default keyCode should be V")
+        assertEqual(
+            pasteLastDictation.modifiers,
+            PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.shift,
+            "paste-last-dictation default modifiers should be Option Shift"
+        )
     }
 
-    runSuite("PhysicalDictationTriggerPreferences fresh install — meeting binding is independent of dictation shortcuts toggle") {
-        // The engine's bindingProvider always includes the meeting binding,
+    runSuite("PhysicalDictationTriggerPreferences fresh install — meeting and paste bindings are independent of dictation shortcuts toggle") {
+        // The engine's bindingProvider always includes the meeting and paste bindings,
         // even when dictation shortcuts are off. The meeting default must
-        // therefore survive in the absence of any saved dictation preference.
+        // therefore survive in the absence of any saved dictation preference,
+        // and paste-last-dictation stays available as a recovery action.
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -122,6 +148,11 @@ func testContextCaptureEnginePolicy() {
             meeting,
             PhysicalDictationTriggerPreferences.defaultMeetingBinding,
             "meeting binding should stay available even when dictation shortcuts are disabled"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pasteLastDictationBinding(userDefaults: defaults),
+            PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding,
+            "paste-last-dictation binding should stay available even when dictation shortcuts are disabled"
         )
     }
 
@@ -238,6 +269,14 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
+    runSuite("PhysicalDictationTriggerPreferences.displayString — paste-last-dictation default formats as Option-Shift-V chord") {
+        assertEqual(
+            PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding),
+            "⌥⇧V",
+            "paste-last-dictation default should render as ⌥⇧V in shortcut editors"
+        )
+    }
+
     runSuite("PhysicalDictationTriggerPreferences.displayString — dictation defaults render as Fn and Right Option") {
         assertEqual(
             PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.defaultPushToTalkBinding),
@@ -267,6 +306,28 @@ func testContextCaptureEnginePolicy() {
                 modifiers: PhysicalDictationTriggerModifiers.option
             ),
             "engine's keyDown matcher should accept the configured meeting chord"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences.matchesKeyDown — paste-last-dictation Option-Shift-V binding accepts ⌥⇧V keyDown") {
+        let pasteLastDictation = PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding
+
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(
+                pasteLastDictation,
+                keyCode: UInt32(kVK_ANSI_V),
+                modifiers: PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.shift
+            ),
+            "engine's keyDown matcher should accept the configured paste-last-dictation chord"
+        )
+    }
+
+    runSuite("PhysicalDictationTriggerPreferences.matchesKeyDown — paste-last-dictation binding rejects bare V") {
+        let pasteLastDictation = PhysicalDictationTriggerPreferences.defaultPasteLastDictationBinding
+
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(pasteLastDictation, keyCode: UInt32(kVK_ANSI_V), modifiers: 0),
+            "bare V should not fire paste-last-dictation while a user is typing"
         )
     }
 
@@ -354,6 +415,242 @@ func testContextCaptureEnginePolicy() {
         assertNil(
             PhysicalDictationTriggerPreferences.primaryModifierMask(for: UInt32(kVK_ANSI_M)),
             "typing keys have no primary modifier mask"
+        )
+    }
+
+    // MARK: - PhysicalShortcutMatcher chord-resolution precedence
+    // The detector resolves which configured binding a key event belongs to via
+    // PhysicalShortcutMatcher. These exercise the real extracted matcher so its
+    // exact-then-fallback precedence, per-action release scoping, and
+    // shared-modifier chord detection stay faithful to the engine's behavior.
+
+    runSuite("PhysicalShortcutMatcher.matchingFlagsChangedPressShortcut — exact keyCode binding wins over fallback") {
+        // Two modifier-only bindings that both accept an Option flagsChanged
+        // event: hands-free is on Left Option, push-to-talk on Right Option.
+        // When the Right Option key fires, the exact-keyCode match must win even
+        // though the Left Option binding would also satisfy the press matcher.
+        let bindings = [
+            PhysicalShortcutBinding(
+                action: .dictationHandsFree,
+                binding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Option))
+            ),
+            PhysicalShortcutBinding(
+                action: .dictationPushToTalk,
+                binding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+            )
+        ]
+
+        let match = PhysicalShortcutMatcher.matchingFlagsChangedPressShortcut(
+            bindings,
+            keyCode: UInt32(kVK_RightOption),
+            modifiers: PhysicalDictationTriggerModifiers.option
+        )
+
+        assertEqual(
+            match?.action,
+            .dictationPushToTalk,
+            "exact-keyCode flagsChanged binding must win over an equally-eligible fallback binding"
+        )
+    }
+
+    runSuite("PhysicalShortcutMatcher.matchingFlagsChangedPressShortcut — falls back to a chord binding when the event uses a generic modifier keyCode") {
+        // A Right Command + Shift chord. A generic Shift keyCode event with both
+        // modifiers held belongs to the chord, but its keyCode (kVK_Shift) does
+        // not equal the binding keyCode (kVK_RightCommand), so the exact pass
+        // misses and the fallback pass must resolve it.
+        let bindings = [
+            PhysicalShortcutBinding(
+                action: .dictationHandsFree,
+                binding: PhysicalDictationTriggerBinding(
+                    keyCode: UInt32(kVK_RightCommand),
+                    modifiers: PhysicalDictationTriggerModifiers.shift
+                )
+            )
+        ]
+
+        let match = PhysicalShortcutMatcher.matchingFlagsChangedPressShortcut(
+            bindings,
+            keyCode: UInt32(kVK_Shift),
+            modifiers: PhysicalDictationTriggerModifiers.command | PhysicalDictationTriggerModifiers.shift
+        )
+
+        assertEqual(
+            match?.action,
+            .dictationHandsFree,
+            "a generic-modifier event that belongs to a chord should resolve via the fallback pass"
+        )
+    }
+
+    runSuite("PhysicalShortcutMatcher.matchesRelease — only the binding for the requested action is consulted") {
+        let bindings = [
+            PhysicalShortcutBinding(
+                action: .dictationHandsFree,
+                binding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+            ),
+            PhysicalShortcutBinding(
+                action: .dictationPushToTalk,
+                binding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
+            )
+        ]
+
+        // Right Option releasing (Option flag cleared) is a release for the
+        // hands-free binding...
+        assertTrue(
+            PhysicalShortcutMatcher.matchesRelease(
+                for: .dictationHandsFree,
+                in: bindings,
+                keyCode: UInt32(kVK_RightOption),
+                modifiers: 0
+            ),
+            "release should match the hands-free binding when its Right Option flag clears"
+        )
+
+        // ...but the same key event must not count as a release for push-to-talk,
+        // whose binding is the Fn key.
+        assertFalse(
+            PhysicalShortcutMatcher.matchesRelease(
+                for: .dictationPushToTalk,
+                in: bindings,
+                keyCode: UInt32(kVK_RightOption),
+                modifiers: 0
+            ),
+            "a Right Option release must not be treated as a release for the Fn-bound push-to-talk action"
+        )
+    }
+
+    runSuite("PhysicalShortcutMatcher.matchesRelease — missing action binding never releases") {
+        let bindings = [
+            PhysicalShortcutBinding(
+                action: .dictationHandsFree,
+                binding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+            )
+        ]
+
+        assertFalse(
+            PhysicalShortcutMatcher.matchesRelease(
+                for: .meeting,
+                in: bindings,
+                keyCode: UInt32(kVK_RightOption),
+                modifiers: 0
+            ),
+            "no configured binding for the action means there is nothing to release"
+        )
+    }
+
+    runSuite("PhysicalShortcutMatcher.hasChordUsingModifier — detects a modifier shared by another action's chord") {
+        // Hands-free is bare Right Option (Option flag). Meeting is an Option-M
+        // chord, a keyed binding whose modifiers include Option. Pressing Right
+        // Option therefore collides with the meeting chord and must be flagged
+        // so the detector defers the bare-modifier shortcut.
+        let bindings = [
+            PhysicalShortcutBinding(
+                action: .dictationHandsFree,
+                binding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+            ),
+            PhysicalShortcutBinding(
+                action: .meeting,
+                binding: PhysicalDictationTriggerBinding(
+                    keyCode: UInt32(kVK_ANSI_M),
+                    modifiers: PhysicalDictationTriggerModifiers.option
+                )
+            )
+        ]
+
+        assertTrue(
+            PhysicalShortcutMatcher.hasChordUsingModifier(
+                UInt32(kVK_RightOption),
+                in: bindings,
+                excluding: .dictationHandsFree
+            ),
+            "Right Option must be detected as feeding the meeting Option-M chord so the modifier press is deferred"
+        )
+    }
+
+    runSuite("PhysicalShortcutMatcher.hasChordUsingModifier — ignores the excluded action and other modifier-only bindings") {
+        // Excluding meeting removes the only chord that uses Option; the
+        // remaining hands-free binding is itself a modifier-only key, which the
+        // matcher must skip, so no shared chord is reported.
+        let bindings = [
+            PhysicalShortcutBinding(
+                action: .dictationHandsFree,
+                binding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+            ),
+            PhysicalShortcutBinding(
+                action: .meeting,
+                binding: PhysicalDictationTriggerBinding(
+                    keyCode: UInt32(kVK_ANSI_M),
+                    modifiers: PhysicalDictationTriggerModifiers.option
+                )
+            )
+        ]
+
+        assertFalse(
+            PhysicalShortcutMatcher.hasChordUsingModifier(
+                UInt32(kVK_RightOption),
+                in: bindings,
+                excluding: .meeting
+            ),
+            "excluding the only Option chord leaves only a modifier-only binding, which is not a chord conflict"
+        )
+    }
+
+    runSuite("PhysicalShortcutMatcher.hasChordUsingModifier — non-modifier keyCode has no primary mask") {
+        let bindings = [
+            PhysicalShortcutBinding(
+                action: .meeting,
+                binding: PhysicalDictationTriggerBinding(
+                    keyCode: UInt32(kVK_ANSI_M),
+                    modifiers: PhysicalDictationTriggerModifiers.option
+                )
+            )
+        ]
+
+        assertFalse(
+            PhysicalShortcutMatcher.hasChordUsingModifier(
+                UInt32(kVK_ANSI_M),
+                in: bindings,
+                excluding: .dictationHandsFree
+            ),
+            "a typing keyCode has no primary modifier mask, so it can't share a modifier with another chord"
+        )
+    }
+
+    runSuite("PhysicalShortcutMatcher.matchingKeyDownShortcut — picks the binding whose chord the keyDown satisfies") {
+        let bindings = [
+            PhysicalShortcutBinding(
+                action: .meeting,
+                binding: PhysicalDictationTriggerBinding(
+                    keyCode: UInt32(kVK_ANSI_M),
+                    modifiers: PhysicalDictationTriggerModifiers.option
+                )
+            ),
+            PhysicalShortcutBinding(
+                action: .pasteLastDictation,
+                binding: PhysicalDictationTriggerBinding(
+                    keyCode: UInt32(kVK_ANSI_V),
+                    modifiers: PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.shift
+                )
+            )
+        ]
+
+        let match = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            bindings,
+            keyCode: UInt32(kVK_ANSI_V),
+            modifiers: PhysicalDictationTriggerModifiers.option | PhysicalDictationTriggerModifiers.shift
+        )
+
+        assertEqual(
+            match?.action,
+            .pasteLastDictation,
+            "keyDown matcher should resolve the Option-Shift-V chord to paste-last-dictation"
+        )
+        assertNil(
+            PhysicalShortcutMatcher.matchingKeyDownShortcut(
+                bindings,
+                keyCode: UInt32(kVK_ANSI_V),
+                modifiers: 0
+            ),
+            "bare V with no modifiers should match no keyDown binding"
         )
     }
 }

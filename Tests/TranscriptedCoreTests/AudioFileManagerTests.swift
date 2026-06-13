@@ -107,12 +107,14 @@ final class AudioFileManagerTests: XCTestCase {
 
     // MARK: - manualDownmix (AudioFileManager.swift:465)
 
-    func testManualDownmixAveragesNonInterleavedStereoChannels() throws {
+    func testManualDownmixUsesDominantNonInterleavedChannelWithoutPhaseCancellation() throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let audio = makeAudio(root: root)
 
-        // Left = 1.0, Right = -1.0 -> mono average = 0.0 across every frame.
+        // Left = 1.0, Right = -1.0 used to average to silence. For mic capture,
+        // choose the dominant channel instead so opposite-polarity inputs do not
+        // erase local speech.
         let stereo = try makeNonInterleavedBuffer(
             channels: 2,
             sampleRate: 48_000,
@@ -131,18 +133,18 @@ final class AudioFileManagerTests: XCTestCase {
         XCTAssertEqual(mono.format.channelCount, 1)
         let monoData = try XCTUnwrap(mono.floatChannelData?[0])
         for frame in 0..<256 {
-            XCTAssertEqual(monoData[frame], 0.0, accuracy: 1e-6)
+            XCTAssertEqual(monoData[frame], 1.0, accuracy: 1e-6)
         }
     }
 
-    func testManualDownmixAveragesInterleavedStereoChannels() throws {
+    func testManualDownmixUsesDominantInterleavedStereoChannel() throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let audio = makeAudio(root: root)
 
         // Interleaved branch in manualDownmix (AudioFileManager.swift:479) reads
-        // [L0,R0,L1,R1,...] and must produce the same per-frame average as the
-        // non-interleaved path.
+        // [L0,R0,L1,R1,...] and must preserve the dominant channel just like
+        // the non-interleaved path.
         let stereo = try makeInterleavedBuffer(
             channels: 2,
             sampleRate: 44_100,
@@ -160,7 +162,34 @@ final class AudioFileManagerTests: XCTestCase {
         XCTAssertEqual(mono.frameLength, 128)
         let monoData = try XCTUnwrap(mono.floatChannelData?[0])
         for frame in 0..<128 {
-            XCTAssertEqual(monoData[frame], 0.6, accuracy: 1e-6)
+            XCTAssertEqual(monoData[frame], 0.8, accuracy: 1e-6)
+        }
+    }
+
+    func testManualDownmixDoesNotHalveSpeechWhenSecondChannelIsSilent() throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = makeAudio(root: root)
+
+        let stereo = try makeNonInterleavedBuffer(
+            channels: 2,
+            sampleRate: 48_000,
+            frameCount: 128
+        ) { ch, frame in
+            ch == 0 ? Float(frame) / 128.0 : 0.0
+        }
+
+        let monoFormat = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ))
+
+        let mono = try XCTUnwrap(audio.manualDownmix(buffer: stereo, to: monoFormat))
+        let monoData = try XCTUnwrap(mono.floatChannelData?[0])
+        for frame in 0..<128 {
+            XCTAssertEqual(monoData[frame], Float(frame) / 128.0, accuracy: 1e-6)
         }
     }
 
@@ -452,7 +481,7 @@ final class AudioFileManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: recovery.path))
     }
 
-    func testFinalizeMicRecordingFallsBackToPrimaryWhenMergeFails() throws {
+    func testFinalizeMicRecordingSalvagesAroundMissingSegment() throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -462,8 +491,31 @@ final class AudioFileManagerTests: XCTestCase {
         let missing = root.appendingPathComponent("does-not-exist.wav")
         try writeMonoWAV(to: primary, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
 
-        // The merger throws when a segment file is missing; finalizeMicRecording
-        // (AudioFileManager.swift:415) swallows the error and returns the primary.
+        // The merger skips the missing segment instead of aborting, so the
+        // primary's audio still lands in a merged file. Degraded salvage keeps
+        // the source segment on disk for recovery.
+        let result = try XCTUnwrap(audio.finalizeMicRecording(
+            primaryURL: primary,
+            segments: [
+                MicRecordingSegment(url: primary),
+                MicRecordingSegment(url: missing)
+            ]
+        ))
+        XCTAssertEqual(result.lastPathComponent, "primary_merged.wav")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: primary.path))
+    }
+
+    func testFinalizeMicRecordingFallsBackToPrimaryWhenNothingIsMergeable() throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let audio = makeAudio(root: root)
+
+        // Neither segment exists, so the merger throws and finalizeMicRecording
+        // swallows the error and returns the primary URL unchanged.
+        let primary = root.appendingPathComponent("primary.wav")
+        let missing = root.appendingPathComponent("does-not-exist.wav")
         let result = audio.finalizeMicRecording(
             primaryURL: primary,
             segments: [

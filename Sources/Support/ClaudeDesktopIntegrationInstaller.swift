@@ -79,6 +79,7 @@ enum ClaudeDesktopIntegrationError: LocalizedError, Equatable {
     case selfTestFailed(status: Int32, output: String)
     case selfTestReportedUnhealthy(output: String)
     case selfTestOutputUnreadable(String)
+    case selfTestTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -98,6 +99,8 @@ enum ClaudeDesktopIntegrationError: LocalizedError, Equatable {
             return "Transcripted direct tools did not pass the local check."
         case .selfTestOutputUnreadable:
             return "Transcripted direct tools ran, but the health check output could not be read."
+        case .selfTestTimedOut:
+            return "Transcripted direct tools did not respond to the local check. Try connecting again."
         }
     }
 }
@@ -213,6 +216,33 @@ enum ClaudeDesktopIntegrationInstaller {
         )
     }
 
+    /// Silently re-copies the bundled helper over a previously installed one
+    /// when their contents differ, e.g. after an app update. Configs are left
+    /// untouched — they already point at the stable installed path. Never
+    /// installs fresh: a missing installed helper means the user has not
+    /// opted into agent setup yet.
+    @discardableResult
+    static func refreshInstalledHelperIfNeeded(
+        bundledBinaryURL: URL? = bundledMCPBinaryURL(),
+        installedBinaryURL: URL = installedMCPBinaryURL,
+        fileManager: FileManager = .default
+    ) throws -> Bool {
+        guard let bundledBinaryURL,
+              fileManager.isExecutableFile(atPath: bundledBinaryURL.path),
+              fileManager.fileExists(atPath: installedBinaryURL.path),
+              bundledBinaryURL.standardizedFileURL.path != installedBinaryURL.standardizedFileURL.path,
+              !fileManager.contentsEqual(atPath: installedBinaryURL.path, andPath: bundledBinaryURL.path) else {
+            return false
+        }
+
+        try installBundledBinary(
+            from: bundledBinaryURL,
+            to: installedBinaryURL,
+            fileManager: fileManager
+        )
+        return true
+    }
+
     static func configSnippet(commandPath: String = installedMCPBinaryURL.path) -> String {
         let root: [String: Any] = [
             "mcpServers": [
@@ -258,6 +288,22 @@ enum ClaudeDesktopIntegrationInstaller {
         configURL: URL,
         fileManager: FileManager = .default
     ) throws -> URL? {
+        try writeMCPServersConfig(
+            commandPath: commandPath,
+            configURL: configURL,
+            fileManager: fileManager
+        )
+    }
+
+    /// Merges the Transcripted server entry into any `mcpServers`-style JSON
+    /// config (Claude Desktop, Cursor). Preserves other servers and top-level
+    /// keys; backs up unreadable configs instead of overwriting them blindly.
+    @discardableResult
+    static func writeMCPServersConfig(
+        commandPath: String,
+        configURL: URL,
+        fileManager: FileManager = .default
+    ) throws -> URL? {
         try fileManager.createDirectory(
             at: configURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -282,39 +328,41 @@ enum ClaudeDesktopIntegrationInstaller {
         return backupURL
     }
 
+    static let selfTestTimeout: TimeInterval = 30
+
     static func runSelfTest(
         binaryURL: URL,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        timeout: TimeInterval = selfTestTimeout,
+        pipeDrainTimeout: TimeInterval = BoundedProcessRunner.defaultPipeDrainTimeout
     ) throws -> TranscriptedMCPSelfTest {
         guard fileManager.isExecutableFile(atPath: binaryURL.path) else {
             throw ClaudeDesktopIntegrationError.installedBinaryNotExecutable(binaryURL)
         }
 
-        let process = Process()
-        process.executableURL = binaryURL
-        process.arguments = ["--self-test"]
+        let result: BoundedProcessRunner.Output
+        do {
+            result = try BoundedProcessRunner.run(
+                executable: binaryURL,
+                arguments: ["--self-test"],
+                timeout: timeout,
+                pipeDrainTimeout: pipeDrainTimeout
+            )
+        } catch is BoundedProcessRunner.RunError {
+            throw ClaudeDesktopIntegrationError.selfTestTimedOut
+        }
 
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
+        let output = String(decoding: result.stdoutData + result.stderrData, as: UTF8.self)
 
-        try process.run()
-        process.waitUntilExit()
-
-        let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
-        let output = String(decoding: stdoutData + stderrData, as: UTF8.self)
-
-        guard process.terminationStatus == 0 else {
+        guard result.status == 0 else {
             throw ClaudeDesktopIntegrationError.selfTestFailed(
-                status: process.terminationStatus,
+                status: result.status,
                 output: output
             )
         }
 
         do {
-            let selfTest = try JSONDecoder().decode(TranscriptedMCPSelfTest.self, from: stdoutData)
+            let selfTest = try JSONDecoder().decode(TranscriptedMCPSelfTest.self, from: result.stdoutData)
             guard selfTest.ok else {
                 throw ClaudeDesktopIntegrationError.selfTestReportedUnhealthy(output: output)
             }
@@ -384,7 +432,10 @@ enum ClaudeDesktopIntegrationInstaller {
         return fileManager.contentsEqual(atPath: installedBinaryURL.path, andPath: bundledBinaryURL.path)
     }
 
-    private static func backupConfig(at configURL: URL, fileManager: FileManager) throws -> URL? {
+    /// Timestamped sibling copy of a config file. Shared with the Codex TOML
+    /// path in `AgentMCPConnector`, so every agent-config rewrite leaves the
+    /// original recoverable.
+    static func backupConfig(at configURL: URL, fileManager: FileManager) throws -> URL? {
         guard fileManager.fileExists(atPath: configURL.path) else { return nil }
 
         let timestamp = ISO8601DateFormatter().string(from: Date())
@@ -392,6 +443,97 @@ enum ClaudeDesktopIntegrationInstaller {
         let backupURL = configURL.deletingLastPathComponent()
             .appendingPathComponent("\(configURL.lastPathComponent).backup-\(timestamp)", isDirectory: false)
         try fileManager.copyItem(at: configURL, to: backupURL)
+        fileManager.restrictFileToOwnerOnly(at: backupURL)
         return backupURL
+    }
+}
+
+/// Runs a short-lived helper or CLI process with every wait bounded: the exit
+/// wait is capped by `timeout`, both pipes are drained off-thread into
+/// lock-protected buffers so a chatty child cannot stall against a full pipe
+/// buffer, and the post-exit drain is capped by `pipeDrainTimeout` so a
+/// grandchild that inherited the pipe write ends cannot block the caller
+/// after the child itself has exited.
+enum BoundedProcessRunner {
+    struct Output {
+        let status: Int32
+        let stdoutData: Data
+        let stderrData: Data
+    }
+
+    enum RunError: Error, Equatable {
+        case timedOut
+    }
+
+    static let defaultPipeDrainTimeout: TimeInterval = 5
+
+    private final class LockedDataBuffer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var buffer = Data()
+
+        func append(_ chunk: Data) {
+            lock.lock()
+            buffer.append(chunk)
+            lock.unlock()
+        }
+
+        func snapshot() -> Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return buffer
+        }
+    }
+
+    static func run(
+        executable: URL,
+        arguments: [String],
+        timeout: TimeInterval,
+        pipeDrainTimeout: TimeInterval = defaultPipeDrainTimeout
+    ) throws -> Output {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+
+        try process.run()
+
+        let stdoutBuffer = LockedDataBuffer()
+        let stderrBuffer = LockedDataBuffer()
+        let drained = DispatchGroup()
+        for (pipe, buffer) in [(stdout, stdoutBuffer), (stderr, stderrBuffer)] {
+            drained.enter()
+            DispatchQueue.global(qos: .utility).async {
+                let handle = pipe.fileHandleForReading
+                while true {
+                    let chunk = handle.availableData
+                    if chunk.isEmpty { break }
+                    buffer.append(chunk)
+                }
+                drained.leave()
+            }
+        }
+
+        if finished.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            _ = finished.wait(timeout: .now() + 2)
+            throw RunError.timedOut
+        }
+
+        // EOF only arrives once every inherited write end closes, and a
+        // leaked grandchild can hold them open long after the child exited.
+        // Take whatever has been drained so far instead of waiting forever.
+        _ = drained.wait(timeout: .now() + pipeDrainTimeout)
+        return Output(
+            status: process.terminationStatus,
+            stdoutData: stdoutBuffer.snapshot(),
+            stderrData: stderrBuffer.snapshot()
+        )
     }
 }

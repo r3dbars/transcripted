@@ -286,7 +286,7 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = "Pasted"
             modeLabel.textColor = OverlayTokens.textPrimary
         case .loading:
-            modeLabel.stringValue = loadingTitle ?? "Loading dictation"
+            modeLabel.stringValue = loadingTitle ?? "Dictation"
             modeLabel.textColor = OverlayTokens.textSecondary
         case .idle:
             modeLabel.stringValue = "Dictation"

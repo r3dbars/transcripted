@@ -100,6 +100,10 @@ if [ -n "$changed_paths" ]; then
             add_command "bash run-e2e-smoke.sh"
         fi
 
+        if matches_any "$path" "Tests/E2E/SlowPastebackSmoke.swift" "Sources/Support/ClipboardRestoringTextPaster.swift" "Sources/Support/TranscriptedConstants.swift" "run-slow-pasteback-smoke.sh" "scripts/entrypoints/run-slow-pasteback-smoke.sh"; then
+            add_command "bash run-slow-pasteback-smoke.sh"
+        fi
+
         if matches_any "$path" "build-deps.sh" "scripts/entrypoints/build-deps.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n build-deps.sh"
@@ -135,16 +139,87 @@ if [ -n "$changed_paths" ]; then
             add_command "bash -n scripts/ops/daily-audio-reliability-check.sh"
         fi
 
-        if matches_any "$path" "scripts/ops/generate-nightly-digest.py" "scripts/README.md"; then
+        if matches_any "$path" "scripts/ops/health-probe.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/ops/health-probe.sh"
+        fi
+
+        if matches_any "$path" "scripts/dev/onboarding.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/dev/onboarding.sh"
+        fi
+
+        if matches_any "$path" "scripts/dev/benchmark-home-recent-captures.sh" "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/dev/benchmark-home-recent-captures.sh"
+            add_command "scripts/dev/benchmark-home-recent-captures.sh"
+        fi
+
+        if matches_any "$path" "scripts/ops/generate-nightly-digest.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/generate-nightly-digest.py"
             add_command "python3 scripts/ops/generate-nightly-digest.py --self-test"
         fi
 
-        if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
+        if matches_any "$path" "scripts/ops/nightly-security-check.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/nightly-security-check.py"
+            add_command "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.48.json --write-report build/nightly-security-report.json"
+        fi
+
+        if matches_any "$path" "scripts/ops/release-gate-report.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/release-gate-report.py"
+            add_command "python3 scripts/ops/release-gate-report.py --self-test"
+        fi
+
+        if matches_any "$path" "scripts/ops/packaged-app-smoke.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/packaged-app-smoke.py"
+            add_command "python3 scripts/ops/packaged-app-smoke.py --self-test"
+        fi
+
+        if matches_any "$path" "scripts/ops/privacy-leak-sweep.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/privacy-leak-sweep.py"
+            add_command "python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json"
+        fi
+
+        if matches_any "$path" "scripts/ops/build-codex-memory-index.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/build-codex-memory-index.py"
+        fi
+
+        if matches_any "$path" "scripts/ops/nightly-transcripted-archive-miner.sh"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/ops/nightly-transcripted-archive-miner.sh"
+        fi
+
+        if matches_any "$path" "scripts/ops/performance-budget.rb"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "ruby -c scripts/ops/performance-budget.rb"
+        fi
+
+        if matches_any "$path" "scripts/ops/transcripted-qa-bench.sh" "scripts/ops/run-local-summary-fixture.sh" "scripts/ops/validate-meeting-corpus.py" "scripts/ops/compare-meeting-corpus.py" "docs/qa-test-bench.md"; then
+            add_command "bash -n scripts/ops/transcripted-qa-bench.sh"
+            add_command "bash -n scripts/ops/run-local-summary-fixture.sh"
+            add_command "bash scripts/ops/run-local-summary-fixture.sh"
             add_command "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
+            add_command "swift test --package-path Tools/TranscriptedQA"
             add_command "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
             add_command "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
+        fi
+
+        if matches_any "$path" "scripts/ops/dictation-stop-autoeval.sh" "scripts/ops/dictation-recovery-autoeval.rb" "docs/autoeval-dictation-stop-speed-*.md" "docs/autoeval-dictation-recovery-time-*.md"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/ops/dictation-stop-autoeval.sh"
+            add_command "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
+        fi
+
+        if matches_any "$path" "scripts/ops/dictation-recovery-autoeval.rb" "docs/autoeval-dictation-recovery-time-*.md" "docs/autoeval-dictation-start-time-*.md"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "ruby -c scripts/ops/dictation-recovery-autoeval.rb"
+            add_command "ruby scripts/ops/dictation-recovery-autoeval.rb --details"
         fi
 
         if matches_any "$path" "scripts/ops/agent-todo-runner.rb" "scripts/ops/agent-todo-launchagent.sh" "scripts/ops/qa-gate-check.sh" "scripts/ops/qa-gate-closeout.sh"; then
@@ -167,12 +242,20 @@ if [ -n "$changed_paths" ]; then
             add_command "swift test"
         fi
 
+        if matches_any "$path" "Tools/TranscriptedCaptureKit/*"; then
+            add_command "swift test --package-path Tools/TranscriptedCaptureKit"
+            add_command "swift test --package-path Tools/TranscriptedCLI"
+            add_command "swift test --package-path Tools/TranscriptedMCP"
+            add_command "bash run-e2e-smoke.sh"
+        fi
+
         if matches_any "$path" "Tools/TranscriptedCLI/*"; then
             add_command "swift test --package-path Tools/TranscriptedCLI"
         fi
 
         if matches_any "$path" "Tools/TranscriptedMCP/*"; then
             add_command "swift test --package-path Tools/TranscriptedMCP"
+            add_command "bash run-e2e-smoke.sh"
         fi
 
         if matches_any "$path" "Tools/TranscriptedQA/*"; then
@@ -180,12 +263,13 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "build-beta.sh" "scripts/entrypoints/build-beta.sh" "scripts/release/*" "docs/release-packaging.md" "docs/sparkle-updates.md" "Casks/*" "docs/appcast.xml"; then
+            add_command "bash build-deps.sh --force"
             add_command "bash build.sh --no-open"
             add_command "bash run-tests.sh"
-            add_command "SKIP_NOTARIZATION=1 bash build-beta.sh <token> <user-name>"
+            add_command "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
         fi
 
-        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
+        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" "Tests/README.md" "scripts/README.md" "Sources/CLAUDE.md" "Sources/*/CLAUDE.md" "Sources/*/*/CLAUDE.md" "Tools/README.md" "Tools/*/CLAUDE.md" "Tools/*/*/CLAUDE.md" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
         fi
     done <<< "$changed_paths"
@@ -210,3 +294,8 @@ echo "- nearest live CLAUDE.md for touched code"
 echo ""
 
 echo "Matrix: .agents/test-matrix.yml"
+echo ""
+
+echo "Coordinator closeout:"
+echo "COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action"
+echo "See docs/agent-closeout.md for status meanings and cleanup boundaries."

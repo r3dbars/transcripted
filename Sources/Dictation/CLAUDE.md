@@ -8,15 +8,18 @@
 
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
 - `DictationStoragePaths.swift` — capture-library-backed storage root for dictation artifacts
-- `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day
+- `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day; serializes day-file writes through `DictationTranscriptMutationLock`
 - `DictationTranscriptStore.swift` — shared seam for saving dictation markdown and reading the newest saved dictation back out
+- `DictationStopFinalizationPolicy.swift` — chooses whether the Markdown save runs before or after the optional Auto Enter keystroke; the default is `saveBeforeAutoEnter`
+- `DictationStopBenchmarkRunner.swift` — env-gated in-app benchmark for stop-to-text, stop-to-saved, and stop-to-delivery timing on synthetic audio fixtures; it does not touch the real clipboard or focused app
 
 ## Flow
 
 1. `Sources/UI/Overlay/DictationSessionController.swift` transcribes audio with `STTRouter`.
 2. The session tries to paste the text back into the target app.
 3. The session records whether delivery was `pasted`, `copied`, or `failed`.
-4. `DictationTranscriptStore.save(...)` appends a new section to that day's markdown file.
+4. `DictationStopFinalizationPolicy.order` decides whether the session saves before or after the optional Auto Enter keystroke. The current default starts the save before Auto Enter, then awaits the save result.
+5. `DictationTranscriptStore.save(...)` appends a new section to that day's markdown file, with mutations serialized through `DictationTranscriptMutationLock`.
 
 ## Storage
 
@@ -49,6 +52,6 @@ bash run-tests.sh
 
 ## Agent notes
 
-- If you change the markdown layout, update the tests.
+- If you change the markdown layout, update the tests. The `Dictations_YYYY-MM-DD.md` day-file format is also parsed by the standalone tools through `Tools/TranscriptedCaptureKit` — update its parser and tests in the same change.
 - Dictation artifacts are append-only by day; do not assume one file per session.
 - This directory owns dictation persistence plus the newest-saved-dictation lookup seam. Recording lifecycle changes still belong in `Sources/UI/Overlay/DictationSessionController.swift` and `Sources/Speech/`.

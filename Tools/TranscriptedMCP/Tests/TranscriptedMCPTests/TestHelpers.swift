@@ -2,6 +2,7 @@ import Foundation
 @testable import transcripted_mcp
 
 func makeFixtureJSON(
+    title: String? = nil,
     date: String = "2026-03-29T10:00:00-0500",
     durationSeconds: Int = 1800,
     speakers: [(id: String, name: String, persistentId: String?)] = [
@@ -22,12 +23,14 @@ func makeFixtureJSON(
     let micSpeakerCount = Set(micUtterances.map(\.speakerId)).count
     let systemSpeakerCount = Set(systemUtterances.map(\.speakerId)).count
 
+    // Entry shape and key order mirror TranscriptFormatter.formatTranscriptMarkdown.
     let speakerLines = speakers
         .filter { $0.id.hasPrefix("system_") }
         .map { speaker -> String in
             let rawId = speaker.id.replacingOccurrences(of: "system_", with: "")
             var lines = [
-                "  - id: \"\(rawId)\""
+                "  - id: \"\(rawId)\"",
+                "    channel: system"
             ]
             if let persistentId = speaker.persistentId {
                 lines.append("    db_id: \"\(persistentId)\"")
@@ -59,9 +62,11 @@ func makeFixtureJSON(
         return "- **\(name):** \(grouped.count) utterances, ~\(wordCount) words, \(formatDuration(seconds: Int(speakingSeconds.rounded())))"
     }.joined(separator: "\n")
 
+    let titleLine = title.map { "title: \"\($0)\"\n" } ?? ""
+
     return """
     ---
-    transcript_id: "\(UUID().uuidString)"
+    \(titleLine)transcript_id: "\(UUID().uuidString)"
     date: \(dateComponents.date)
     time: \(dateComponents.time)
     duration: "\(formatDuration(seconds: durationSeconds))"
@@ -74,8 +79,22 @@ func makeFixtureJSON(
     mic_speakers: \(micSpeakerCount)
     system_speakers: \(systemSpeakerCount)
     total_word_count: \(totalWordCount)
+    capture_quality: degraded
+    audio_gaps: 1
+    device_switches: 0
+    gap_events:
+      - "Audio gap at 00:42 (1.5s)"
+    audio_health: mic_attenuated_by_call_app
+    mic_boost_prompt: "Mic level was boosted after a call app attenuated it."
     speakers:
     \(speakerLines)
+    tags:
+      - transcripted
+      - meeting
+    aliases:
+      - "Meeting \(dateComponents.date) \(dateComponents.time)"
+    cssclasses:
+      - transcripted
     ---
 
     # Meeting Fixture

@@ -4,6 +4,7 @@ struct MenuBarActionRowSmokeSnapshot: Codable, Equatable {
     let title: String
     let detail: String
     let trailingText: String
+    let automationIdentifier: String
     let isVisible: Bool
     let isEnabled: Bool
 }
@@ -38,6 +39,7 @@ final class MenuBarActionRowView: NSControl {
 
     override var isEnabled: Bool {
         didSet {
+            setAccessibilityEnabled(isEnabled)
             updateAppearance()
             window?.invalidateCursorRects(for: self)
         }
@@ -69,6 +71,8 @@ final class MenuBarActionRowView: NSControl {
         rowTone = tone
         rowSize = size
         self.isEnabled = isEnabled
+        setAccessibilityLabel(title)
+        setAccessibilityHelp(detail.isEmpty ? nil : detail)
 
         titleLabel.stringValue = title
         detailLabel.stringValue = detail
@@ -88,7 +92,16 @@ final class MenuBarActionRowView: NSControl {
         updateAppearance()
     }
 
+    func setAutomationIdentifier(_ rawValue: String) {
+        identifier = NSUserInterfaceItemIdentifier(rawValue)
+        setAccessibilityIdentifier(rawValue)
+    }
+
     private func setupViews() {
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityEnabled(isEnabled)
+
         wantsLayer = true
         layer?.cornerRadius = MenuTokens.cardCornerRadius
 
@@ -271,11 +284,18 @@ final class MenuBarActionRowView: NSControl {
         onPress?()
     }
 
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        onPress?()
+        return true
+    }
+
     var smokeSnapshot: MenuBarActionRowSmokeSnapshot {
         MenuBarActionRowSmokeSnapshot(
             title: titleLabel.stringValue,
             detail: detailLabel.stringValue,
             trailingText: trailingLabel.stringValue,
+            automationIdentifier: accessibilityIdentifier(),
             isVisible: !isHidden,
             isEnabled: isEnabled
         )

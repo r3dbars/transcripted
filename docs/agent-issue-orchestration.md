@@ -80,6 +80,8 @@ bash scripts/ops/agent-todo-launchagent.sh restart
 - Reads `WORKFLOW.md`.
 - Finds open issues labeled `agent todo` or `agent in progress`.
 - Creates or reuses `/Users/redbars/code/symphony-workspaces/GH-<issue-number>`.
+  The `symphony-workspaces` name is historical; it is still the current local
+  runner workspace root until `WORKFLOW.md` changes.
 - Creates a single `## Codex Workpad` issue comment if one does not exist.
 - Moves new work from `agent todo` to `agent in progress`.
 - Launches Codex in that issue workspace.

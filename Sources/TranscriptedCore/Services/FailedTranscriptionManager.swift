@@ -66,12 +66,37 @@ public class FailedTranscriptionManager: ObservableObject {
                 return micSafe && systemSafe
             }
 
-            // Filter out entries where audio files no longer exist
-            failedTranscriptions = sandboxedEntries.filter { $0.audioFilesExist() }
+            // Heal stale audio references before the existence filter. A crash
+            // between the merger's segment cleanup and the queue repoint leaves
+            // an entry pointing at a deleted pre-merge WAV while
+            // `<stem>_merged.wav` sits on disk — dropping that entry here would
+            // make the meeting disappear permanently.
+            var healedCount = 0
+            let healedEntries = sandboxedEntries.map { entry in
+                let healed = healAudioReferences(of: entry)
+                if healed != nil { healedCount += 1 }
+                return healed ?? entry
+            }
 
-            // Save back if we filtered any out
-            if failedTranscriptions.count != loaded.count {
-                AppLogger.pipeline.info("Removed entries with missing audio files or unsafe paths", ["count": "\(loaded.count - failedTranscriptions.count)"])
+            // Filter out entries where audio files no longer exist
+            failedTranscriptions = healedEntries.filter { entry in
+                guard entry.audioFilesExist() else {
+                    AppLogger.pipeline.error("Dropping failed transcription entry with missing audio", [
+                        "id": entry.id.uuidString,
+                        "micFile": entry.micAudioURL.lastPathComponent,
+                        "systemFile": entry.systemAudioURL?.lastPathComponent ?? "none"
+                    ])
+                    return false
+                }
+                return true
+            }
+
+            // Save back if we filtered or healed any
+            if failedTranscriptions.count != loaded.count || healedCount > 0 {
+                AppLogger.pipeline.info("Reconciled failed transcription entries on load", [
+                    "removed": "\(loaded.count - failedTranscriptions.count)",
+                    "healed": "\(healedCount)"
+                ])
                 saveFailedTranscriptions()
             }
 
@@ -89,6 +114,83 @@ public class FailedTranscriptionManager: ObservableObject {
                 ])
             }
             AppLogger.pipeline.error("Corrupt failed transcriptions file, backed up", ["error": "\(error)"])
+        }
+    }
+
+    /// Repairs an entry whose audio references no longer match the disk state.
+    /// Returns the healed entry, or nil when nothing needed healing.
+    private func healAudioReferences(of entry: FailedTranscription) -> FailedTranscription? {
+        let fileManager = FileManager.default
+        var micURL = entry.micAudioURL
+        var systemURL = entry.systemAudioURL
+        var didHeal = false
+
+        // A merge that completed after the entry was written deletes the
+        // pre-merge segments and leaves `<stem>_merged.wav` in their place.
+        if !fileManager.fileExists(atPath: micURL.path) {
+            let mergedCandidate = micURL.deletingLastPathComponent()
+                .appendingPathComponent(micURL.deletingPathExtension().lastPathComponent + "_merged.wav")
+            if fileManager.fileExists(atPath: mergedCandidate.path), isSafeAudioURL(mergedCandidate) {
+                micURL = mergedCandidate
+                didHeal = true
+                AppLogger.pipeline.info("Healed failed transcription mic audio to merged file", [
+                    "id": entry.id.uuidString,
+                    "file": mergedCandidate.lastPathComponent
+                ])
+            }
+        }
+
+        // Keep the meeting retryable with mic audio only rather than dropping
+        // it because the system-audio file went missing.
+        if let existingSystemURL = systemURL,
+           !fileManager.fileExists(atPath: existingSystemURL.path),
+           fileManager.fileExists(atPath: micURL.path) {
+            systemURL = nil
+            didHeal = true
+            AppLogger.pipeline.warning("Dropped missing system audio reference from failed transcription", [
+                "id": entry.id.uuidString,
+                "file": existingSystemURL.lastPathComponent
+            ])
+        }
+
+        // Audio preserved during a quit that interrupted finalization can have
+        // an unpatched WAV header, which reads back as zero-length and makes
+        // every retry fail. Nothing else re-runs finalization after relaunch.
+        repairWAVHeaderIfNeeded(at: micURL, entryId: entry.id)
+        if let systemURL {
+            repairWAVHeaderIfNeeded(at: systemURL, entryId: entry.id)
+        }
+
+        guard didHeal else { return nil }
+        return FailedTranscription(
+            id: entry.id,
+            timestamp: entry.timestamp,
+            recordingDate: entry.recordingDate,
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: entry.errorMessage,
+            meetingTitle: entry.meetingTitle,
+            retryCount: entry.retryCount,
+            lastRetryDate: entry.lastRetryDate
+        )
+    }
+
+    private func repairWAVHeaderIfNeeded(at url: URL, entryId: UUID) {
+        guard url.pathExtension.lowercased() == "wav",
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            if try WAVHeaderRepair.repairIfNeeded(at: url) {
+                AppLogger.pipeline.info("Repaired unfinalized WAV header for failed transcription audio", [
+                    "id": entryId.uuidString,
+                    "file": url.lastPathComponent
+                ])
+            }
+        } catch {
+            AppLogger.pipeline.warning("Could not inspect failed transcription WAV header", [
+                "id": entryId.uuidString,
+                "file": url.lastPathComponent,
+                "error": error.localizedDescription
+            ])
         }
     }
 
@@ -114,7 +216,8 @@ public class FailedTranscriptionManager: ObservableObject {
         micAudioURL: URL,
         systemAudioURL: URL?,
         errorMessage: String,
-        meetingTitle: String? = nil
+        meetingTitle: String? = nil,
+        recordingDate: Date? = nil
     ) -> Bool {
         // Security: validate incoming audio URLs before they ever reach the queue.
         // The on-disk load path already re-checks sandboxing, but without this guard an
@@ -130,6 +233,7 @@ public class FailedTranscriptionManager: ObservableObject {
 
         let failed = FailedTranscription(
             id: id,
+            recordingDate: recordingDate,
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
@@ -171,6 +275,7 @@ public class FailedTranscriptionManager: ObservableObject {
         failedTranscriptions[index] = FailedTranscription(
             id: existing.id,
             timestamp: existing.timestamp,
+            recordingDate: existing.recordingDate,
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: existing.errorMessage,
@@ -180,6 +285,9 @@ public class FailedTranscriptionManager: ObservableObject {
         )
 
         let didPersist = saveFailedTranscriptions()
+        if !didPersist {
+            failedTranscriptions[index] = existing
+        }
         AppLogger.pipeline.info("Updated failed transcription audio", [
             "id": "\(id)",
             "persisted": "\(didPersist)"
@@ -187,16 +295,24 @@ public class FailedTranscriptionManager: ObservableObject {
         return didPersist
     }
 
-    /// Removes a failed transcription from the queue
-    public func removeFailedTranscription(id: UUID) {
+    /// Removes a failed transcription from the queue.
+    @discardableResult
+    public func removeFailedTranscription(id: UUID) -> Bool {
         guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
-            return
+            return false
         }
 
-        failedTranscriptions.remove(at: index)
-        saveFailedTranscriptions()
+        let removed = failedTranscriptions.remove(at: index)
+        let didPersist = saveFailedTranscriptions()
+        if !didPersist {
+            failedTranscriptions.insert(removed, at: index)
+        }
 
-        AppLogger.pipeline.info("Removed failed transcription", ["id": "\(id)"])
+        AppLogger.pipeline.info("Removed failed transcription", [
+            "id": "\(id)",
+            "persisted": "\(didPersist)"
+        ])
+        return didPersist
     }
 
     @discardableResult
@@ -209,6 +325,7 @@ public class FailedTranscriptionManager: ObservableObject {
         failedTranscriptions[index] = FailedTranscription(
             id: existing.id,
             timestamp: existing.timestamp,
+            recordingDate: existing.recordingDate,
             micAudioURL: existing.micAudioURL,
             systemAudioURL: existing.systemAudioURL,
             errorMessage: errorMessage,
@@ -225,10 +342,15 @@ public class FailedTranscriptionManager: ObservableObject {
         return didPersist
     }
 
-    /// Removes a failed transcription and deletes its audio files
-    public func deleteFailedTranscription(id: UUID) {
+    /// Removes a failed transcription and deletes its audio files.
+    @discardableResult
+    public func deleteFailedTranscription(id: UUID) -> Bool {
         guard let failed = failedTranscriptions.first(where: { $0.id == id }) else {
-            return
+            return false
+        }
+
+        guard removeFailedTranscription(id: id) else {
+            return false
         }
 
         // Delete audio files independently so one failure does not hide the other.
@@ -242,8 +364,7 @@ public class FailedTranscriptionManager: ObservableObject {
             removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
         }
 
-        // Remove from queue
-        removeFailedTranscription(id: id)
+        return true
     }
 
     /// Increments retry count for a failed transcription
@@ -275,6 +396,21 @@ public class FailedTranscriptionManager: ObservableObject {
             return
         }
 
+        // Persist the entry removal before touching audio files. Deleting
+        // audio first means a crash in between leaves entries pointing at
+        // missing files, which the load filter then drops silently.
+        let removedIds = Set(oldFailures.map { $0.id })
+        let previousEntries = failedTranscriptions
+        failedTranscriptions.removeAll { removedIds.contains($0.id) }
+        guard saveFailedTranscriptions() else {
+            failedTranscriptions = previousEntries
+            AppLogger.pipeline.error("Skipped old failed transcription cleanup because removal did not persist", [
+                "count": "\(oldFailures.count)",
+                "olderThanDays": "\(days)"
+            ])
+            return
+        }
+
         for failure in oldFailures {
             removeAudioFile(failure.micAudioURL, label: "old failure mic audio")
             if let systemURL = failure.systemAudioURL {
@@ -285,10 +421,6 @@ public class FailedTranscriptionManager: ObservableObject {
                 removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
             }
         }
-
-        let removedIds = Set(oldFailures.map { $0.id })
-        failedTranscriptions.removeAll { removedIds.contains($0.id) }
-        saveFailedTranscriptions()
 
         AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "\(oldFailures.count)", "olderThanDays": "\(days)"])
     }

@@ -26,12 +26,14 @@ let package = Package(
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        .package(path: "../TranscriptedCaptureKit"),
     ],
     targets: [
         .executableTarget(
             name: "transcripted-cli",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "TranscriptedCaptureKit", package: "TranscriptedCaptureKit"),
             ],
             path: "Sources/TranscriptedCLI",
             swiftSettings: hasDiarizationDeps ? [
@@ -66,7 +68,17 @@ let package = Package(
         .testTarget(
             name: "TranscriptedCLITests",
             dependencies: ["transcripted-cli"],
-            path: "Tests/TranscriptedCLITests"
+            path: "Tests/TranscriptedCLITests",
+            swiftSettings: hasDiarizationDeps ? [
+                .define("TRANSCRIPTEDCLI_WITH_DIARIZATION"),
+                .unsafeFlags([
+                    "-F", depsFrameworksRoot,
+                    "-I", depsModulesRoot,
+                    "-I", "\(depsModulesRoot)/FastClusterWrapper",
+                    "-I", "\(depsModulesRoot)/MachTaskSelfWrapper",
+                    "-I", "\(depsModulesRoot)/yyjson",
+                ]),
+            ] : []
         ),
     ]
 )

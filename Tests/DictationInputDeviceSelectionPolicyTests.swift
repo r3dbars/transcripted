@@ -32,6 +32,88 @@ func testDictationInputDeviceSelectionPolicy() {
         assertEqual(selection.selectedInput, macBookMic, "MacBook mic should be the first built-in fallback")
     }
 
+    runSuite("DictationInputDeviceSelectionPolicy can suppress built-in fallback for recovery starts") {
+        let airPodsInput = device(1, "Justin's AirPods Pro", .bluetooth)
+        let airPodsOutput = device(2, "Justin's AirPods Pro", .bluetooth, inputChannels: 0)
+        let macBookMic = device(3, "MacBook Pro Microphone", .builtIn)
+
+        let selection = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: airPodsInput,
+            defaultOutput: airPodsOutput,
+            availableInputs: [airPodsInput, macBookMic],
+            allowsBuiltInBluetoothFallback: false
+        )
+
+        assertEqual(selection.selectedInput, airPodsInput, "recovery starts should get one chance to use the matched Bluetooth route")
+        assertFalse(selection.didOverrideDefault, "suppressed fallback should not force the hybrid built-in/Bluetooth route")
+        assertEqual(selection.reason, .builtInFallbackSuppressedForRecoveryAttempt, "selection reason should make the recovery fallback queryable")
+    }
+
+    runSuite("DictationInputDeviceSelectionPolicy suppresses fallback before ranking built-in candidates") {
+        let headsetInput = device(1, "Bluetooth Headset", .bluetooth)
+        let headsetOutput = device(2, "Bluetooth Output", .bluetooth, inputChannels: 0)
+        let displayMic = device(3, "External Built-In Microphone", .builtIn)
+        let builtInMic = device(4, "Built-In Microphone", .builtIn)
+
+        let selection = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: headsetInput,
+            defaultOutput: headsetOutput,
+            availableInputs: [headsetInput, displayMic, builtInMic],
+            allowsBuiltInBluetoothFallback: false
+        )
+
+        assertEqual(selection.selectedInput, headsetInput, "suppressed fallback should keep the matched Bluetooth input even when better built-in mics are visible")
+        assertFalse(selection.didOverrideDefault, "suppressed fallback should not rank or select built-in candidates")
+        assertEqual(selection.reason, .builtInFallbackSuppressedForRecoveryAttempt, "suppressed fallback should keep its explicit recovery reason")
+    }
+
+    runSuite("DictationInputDeviceSelectionPolicy suppresses fallback when Bluetooth output is unknown") {
+        let headsetInput = device(1, "Bluetooth Hands-Free", .bluetooth)
+        let builtInMic = device(2, "Built-In Microphone", .builtIn)
+
+        let selection = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: headsetInput,
+            defaultOutput: nil,
+            availableInputs: [headsetInput, builtInMic],
+            allowsBuiltInBluetoothFallback: false
+        )
+
+        assertEqual(selection.selectedInput, headsetInput, "recovery starts should not force a built-in override when output lookup fails")
+        assertEqual(selection.reason, .builtInFallbackSuppressedForRecoveryAttempt, "missing output plus suppressed fallback should still be queryable")
+    }
+
+    runSuite("DictationInputDeviceSelectionPolicy suppression flag does not affect safe USB inputs") {
+        let usbMic = device(1, "USB Microphone", .usb)
+        let headsetOutput = device(2, "Bluetooth Output", .bluetooth, inputChannels: 0)
+        let builtInMic = device(3, "Built-In Microphone", .builtIn)
+
+        let selection = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: usbMic,
+            defaultOutput: headsetOutput,
+            availableInputs: [usbMic, builtInMic],
+            allowsBuiltInBluetoothFallback: false
+        )
+
+        assertEqual(selection.selectedInput, usbMic, "non-Bluetooth mics should stay selected regardless of the recovery fallback flag")
+        assertEqual(selection.reason, .defaultIsSafe, "safe defaults should not be labeled as suppressed Bluetooth recovery")
+    }
+
+    runSuite("DictationInputDeviceSelectionPolicy suppression flag does not affect safe Bluetooth playback") {
+        let headsetInput = device(1, "Bluetooth Headset", .bluetooth)
+        let speakers = device(2, "Built-In Speakers", .builtIn, inputChannels: 0)
+        let builtInMic = device(3, "Built-In Microphone", .builtIn)
+
+        let selection = DictationInputDeviceSelectionPolicy.selection(
+            defaultInput: headsetInput,
+            defaultOutput: speakers,
+            availableInputs: [headsetInput, builtInMic],
+            allowsBuiltInBluetoothFallback: false
+        )
+
+        assertEqual(selection.selectedInput, headsetInput, "Bluetooth input is already safe when playback is not on Bluetooth")
+        assertEqual(selection.reason, .defaultIsSafe, "safe Bluetooth routes should not be reported as suppressed recovery attempts")
+    }
+
     runSuite("DictationInputDeviceSelectionPolicy keeps Bluetooth input when output is not Bluetooth") {
         let airPodsInput = device(1, "Justin's AirPods Pro", .bluetooth)
         let speakers = device(2, "MacBook Pro Speakers", .builtIn, inputChannels: 0)

@@ -4,14 +4,89 @@
   "paths": {
     "info_plist": "Info.plist",
     "appcast": "docs/appcast.xml",
+    "homebrew_cask": "Casks/transcripted.rb",
     "local_entitlements": "config/entitlements/local.plist",
     "beta_entitlements": "config/entitlements/beta.plist",
     "build_script": "scripts/entrypoints/build.sh",
     "build_beta_script": "scripts/entrypoints/build-beta.sh",
+    "privacy_leak_sweep": "scripts/ops/privacy-leak-sweep.py",
     "sanitizer_corpus": "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
     "sentry_sanitizer_tests": "Tests/SentryPayloadSanitizerTests.swift",
-    "analytics_sanitizer_tests": "Tests/AnalyticsPayloadSanitizerTests.swift"
+    "analytics_sanitizer_tests": "Tests/AnalyticsPayloadSanitizerTests.swift",
+    "analytics_event_policy": "Sources/Observability/AnalyticsEventPolicy.swift",
+    "observability_policy_sources": [
+      "Sources/Observability/AnalyticsEventPolicy.swift",
+      "Sources/Observability/SentryEventPolicy.swift"
+    ],
+    "health_probe": "scripts/ops/health-probe.sh",
+    "nightly_digest": "scripts/ops/generate-nightly-digest.py",
+    "release_app_binary": "build/Transcripted.app/Contents/MacOS/Transcripted",
+    "release_debug_files": "build/Transcripted.app.dSYM"
   },
+  "sentry": {
+    "org": "r3dbars",
+    "project": "apple-macos"
+  },
+  "live_release_surfaces": {
+    "appcast": "https://transcripted.app/appcast.xml",
+    "download_page": "https://transcripted.app/download",
+    "crawler_text": "https://transcripted.app/llms-full.txt",
+    "direct_download_routes": [
+      "https://transcripted.app/download/latest.dmg",
+      "https://transcripted.app/download/latest.dmg/",
+      "https://transcripted.app/download/latest/"
+    ]
+  },
+  "posthog_health_probe_event_variables": [
+    "workflow_events",
+    "onboarding_events",
+    "first_value_events"
+  ],
+  "required_posthog_first_value_events": [
+    "dictation_completed",
+    "onboarding_first_dictation_saved",
+    "meeting_transcript_saved",
+    "onboarding_agent_cta_clicked",
+    "activation_artifact_action_clicked",
+    "activation_agent_prompt_action_clicked",
+    "activation_agent_setup_cta_clicked",
+    "activation_return_proxy_observed"
+  ],
+  "disallowed_observability_payload_keys": [
+    "app_identifier",
+    "app_name",
+    "audio_device",
+    "audio_path",
+    "authorization",
+    "bearer",
+    "client_secret",
+    "context",
+    "credential",
+    "device_name",
+    "dsn",
+    "email",
+    "error",
+    "file_path",
+    "meeting_name",
+    "meeting_title",
+    "meeting_url",
+    "name",
+    "password",
+    "path",
+    "prompt_text",
+    "raw_url",
+    "source_app",
+    "source_app_bundle_id",
+    "source_app_name",
+    "speaker_name",
+    "title",
+    "token",
+    "transcript",
+    "transcript_path",
+    "transcript_text",
+    "transcript_url",
+    "url"
+  ],
   "expected_info_plist": {
     "LSMinimumSystemVersion": "26.0",
     "SUFeedURL": "https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml",

@@ -274,6 +274,7 @@ struct SettingsInlineActionButton: View {
     let title: String
     var symbolName: String? = nil
     var tone: SettingsInteractionTone = .neutral
+    var automationIdentifier: String? = nil
     let action: () -> Void
 
     var body: some View {
@@ -299,6 +300,7 @@ struct SettingsInlineActionButton: View {
             normalFill: normalFill,
             normalStroke: normalStroke
         ))
+        .settingsAutomationIdentifier(automationIdentifier)
     }
 
     private var normalFill: Color {
@@ -324,6 +326,17 @@ struct SettingsInlineActionButton: View {
             return Color.orange.opacity(0.16)
         case .destructive:
             return Color.red.opacity(0.14)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func settingsAutomationIdentifier(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
         }
     }
 }
@@ -737,6 +750,7 @@ struct SettingsToggleRow: View {
     let detail: String
     @Binding var isOn: Bool
     var help: String? = nil
+    var automationIdentifier: String? = nil
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -762,6 +776,7 @@ struct SettingsToggleRow: View {
                 .accessibilityLabel(Text(title))
                 .accessibilityValue(Text(isOn ? "On" : "Off"))
                 .accessibilityHint(Text(detail))
+                .settingsAutomationIdentifier(automationIdentifier)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -818,6 +833,7 @@ struct PermissionStatusRow: View {
                 normalFill: Color.primary.opacity(0.025),
                 normalStroke: Color.primary.opacity(0.06)
             ))
+            .accessibilityIdentifier("transcripted.settings.permissions.\(kind.rawValue).action")
         }
     }
 }
@@ -890,6 +906,7 @@ struct ModelCacheMetricRow: View {
 
 struct HotkeyRecorderContainer: NSViewRepresentable {
     var dictationShortcutsEnabled = true
+    static let preferredHeight: CGFloat = 140
 
     func makeNSView(context: Context) -> HotkeyRecorderAppKitView {
         let view = HotkeyRecorderAppKitView(frame: .zero)

@@ -452,16 +452,10 @@ bundle_mcp_server
 # Unified dependencies (FluidAudio + mlx-swift-lm + WhisperKit)
 echo "Dependencies found"
 
-DEPS_MODULE_FLAGS="-Ideps-modules"
-for dir in deps-modules/*/; do
-    [ -d "$dir" ] || continue
-    case "$(basename "$dir")" in
-        *.swiftmodule) continue ;;
-    esac
-    DEPS_MODULE_FLAGS="$DEPS_MODULE_FLAGS -I$dir"
-done
-
-DEPS_FLAGS="$DEPS_MODULE_FLAGS -F$DEPS_FRAMEWORK_ROOT -Ldeps-libs -lDraftDeps -framework ESpeakNG -framework CoreML -framework CoreAudio"
+# Shared frameworks/linker/source arguments — single source of truth with
+# build.sh so dev and shipped builds cannot diverge.
+source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
+build_app_swiftc_args
 
 # Bundle Metal libraries if present
 for metallib in deps-libs/*.metallib; do
@@ -472,10 +466,13 @@ cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
+# Third-party license texts ship with the app: eSpeak NG is GPL-3.0 and the
+# rest (MIT/Apache) require notice preservation in distributed binaries.
+cp THIRD_PARTY_LICENSES.md "$APP_BUNDLE/Contents/Resources/"
+
 # Compile with BETA_BUILD flag
 echo "Compiling (beta build)..."
 echo "Swift compiler threads: $SWIFTC_NUM_THREADS"
-SOURCE_FILES=$(find Sources -name '*.swift' -not -path 'Sources/TranscriptedCore/*')
 mkdir -p "$SWIFTC_TEMP_DIR"
 rm -f "$STAGED_APP_BINARY"
 TMPDIR="$REPO_ROOT/$SWIFTC_TEMP_DIR/" swiftc \
@@ -488,29 +485,9 @@ TMPDIR="$REPO_ROOT/$SWIFTC_TEMP_DIR/" swiftc \
     -num-threads "$SWIFTC_NUM_THREADS" \
     -D BETA_BUILD \
     -o "$STAGED_APP_BINARY" \
-    -framework AVFoundation \
-    -framework AppKit \
-    -framework SwiftUI \
-    -framework Combine \
-    -framework EventKit \
-    -framework Security \
-    -framework Carbon \
-    -framework Metal \
-    -framework MetalKit \
-    -framework Accelerate \
-    -framework Vision \
-    -framework MetalPerformanceShaders \
-    -framework MetalPerformanceShadersGraph \
-    -framework Network \
-    -framework Sentry \
-    -framework Sparkle \
-    -lsqlite3 \
-    -lc++ \
-    $DEPS_FLAGS \
-    $SOURCE_FILES \
-    -parse-as-library \
-    -target arm64-apple-macos26.0 \
-    -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
+    "${APP_SWIFTC_LINK_ARGS[@]}" \
+    "${APP_SOURCE_FILES[@]}" \
+    "${APP_SWIFTC_TAIL_ARGS[@]}" \
     2>&1
 
 mv "$STAGED_APP_BINARY" "$APP_BINARY"
@@ -641,6 +618,7 @@ fi
 if [ "$REGISTER_SENTRY_RELEASE" = "1" ]; then
     echo "Registering Sentry release..."
     SENTRY_REQUIRE_DEBUG_FILES="${SENTRY_REQUIRE_DEBUG_FILES:-1}" \
+        SENTRY_APP_BINARY_PATH="${SENTRY_APP_BINARY_PATH:-$APP_BINARY}" \
         SENTRY_DEBUG_FILES_PATH="${SENTRY_DEBUG_FILES_PATH:-$APP_DSYM}" \
         bash scripts/release/register-sentry-release.sh "$APP_VERSION"
 fi

@@ -7,6 +7,7 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -71,6 +72,19 @@ SHELL_GUARD_PATTERNS = [
 ]
 
 SEVERITY_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
+REQUIRED_SENTRY_RELEASE_CHECK_IDS = {
+    "sentry-cli-missing",
+    "sentry-release-missing",
+}
+REQUIRED_RELEASE_DEBUG_CHECK_IDS = {
+    "release-binary-missing",
+    "release-dsym-missing",
+    "dwarfdump-missing",
+    "release-dsym-uuid-mismatch",
+}
+RELEASE_HEALTH_BLOCKING_WATCH_IDS = {
+    "appcast-release-candidate",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -89,6 +103,35 @@ def parse_args() -> argparse.Namespace:
         help="Optional built app bundle path to validate, e.g. build/Transcripted.app.",
     )
     parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero when deterministic findings are present.",
+    )
+    parser.add_argument(
+        "--live-release-surfaces",
+        action="store_true",
+        help="Check transcripted.app live appcast and download routes against the committed appcast.",
+    )
+    parser.add_argument(
+        "--github-release-json",
+        help="Optional gh release JSON fixture for deterministic GitHub asset metadata checks.",
+    )
+    parser.add_argument(
+        "--sentry-release-health",
+        action="store_true",
+        help="Use configured Sentry auth to verify the release matching Info.plist exists.",
+    )
+    parser.add_argument(
+        "--require-sentry-release-health",
+        action="store_true",
+        help="Fail if Sentry auth, sentry-cli, or the release matching Info.plist is missing.",
+    )
+    parser.add_argument(
+        "--require-release-debug-files",
+        action="store_true",
+        help="Fail unless the configured release app binary and dSYM exist and have matching UUIDs.",
+    )
+    parser.add_argument(
         "--automation-toml",
         help="Optional explicit automation.toml path. Defaults to the local Codex automation file when present.",
     )
@@ -105,6 +148,10 @@ def read_text(path: Path) -> str:
 
 def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=False)
+
+
+def command_exists(name: str) -> bool:
+    return shutil.which(name) is not None
 
 
 def normalize_path(path: str | Path) -> str:
@@ -479,6 +526,749 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
     return findings, watch_items
 
 
+def appcast_item_metadata(item: ET.Element | None) -> dict[str, str] | None:
+    namespaces = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+    if item is None:
+        return None
+
+    enclosure = item.find("enclosure")
+    return {
+        "version": (
+            item.findtext("sparkle:shortVersionString", namespaces=namespaces)
+            or item.findtext("sparkle:version", namespaces=namespaces)
+            or ""
+        ).strip(),
+        "build": (item.findtext("sparkle:version", namespaces=namespaces) or "").strip(),
+        "minimum_system_version": (
+            item.findtext("sparkle:minimumSystemVersion", namespaces=namespaces) or ""
+        ).strip(),
+        "hardware_requirements": (
+            item.findtext("sparkle:hardwareRequirements", namespaces=namespaces) or ""
+        ).strip(),
+        "url": enclosure.attrib.get("url", "") if enclosure is not None else "",
+        "length": enclosure.attrib.get("length", "") if enclosure is not None else "",
+        "signature": (
+            enclosure.attrib.get("{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature", "")
+            if enclosure is not None
+            else ""
+        ),
+    }
+
+
+def latest_appcast_metadata(root: Path, manifest: dict) -> dict[str, str] | None:
+    appcast_path = root / manifest["paths"]["appcast"]
+    latest = ET.parse(appcast_path).getroot().find("./channel/item")
+    return appcast_item_metadata(latest)
+
+
+def check_cask(root: Path, manifest: dict) -> list[dict]:
+    cask_path = root / manifest["paths"]["homebrew_cask"]
+    text = read_text(cask_path)
+    latest = latest_appcast_metadata(root, manifest)
+    cask = cask_metadata(root, manifest)
+    findings: list[dict] = []
+
+    if not cask["version"]:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "cask-version-missing",
+                "Homebrew cask is missing a version line.",
+                "Casks/transcripted.rb should pin the published Transcripted version.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+    elif latest and cask["version"] != latest["version"]:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "cask-version-mismatch",
+                "Homebrew cask version drifted from the latest appcast release.",
+                f"Cask has {cask['version']!r}, appcast has {latest['version']!r}.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    if not cask["sha256"]:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "cask-sha256-invalid",
+                "Homebrew cask sha256 is missing or invalid.",
+                "Casks/transcripted.rb should carry the 64-character sha256 of the published DMG.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    expected_template = (
+        f'https://github.com/{manifest["repo_slug"]}/releases/download/'
+        'v#{version}/Transcripted-#{version}.dmg'
+    )
+    if expected_template not in text:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "cask-url-template",
+                "Homebrew cask URL drifted from the GitHub release asset template.",
+                f"Expected template {expected_template!r}.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    if "strategy :github_latest" not in text:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "cask-livecheck",
+                "Homebrew cask livecheck should track the latest GitHub release.",
+                "Expected livecheck strategy :github_latest.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    return findings
+
+
+def cask_metadata(root: Path, manifest: dict) -> dict[str, str]:
+    text = read_text(root / manifest["paths"]["homebrew_cask"])
+    version_match = re.search(r'(?m)^\s*version\s+"([^"]+)"', text)
+    sha_match = re.search(r'(?m)^\s*sha256\s+"([0-9A-Fa-f]{64})"', text)
+    return {
+        "version": version_match.group(1) if version_match else "",
+        "sha256": sha_match.group(1).lower() if sha_match else "",
+    }
+
+
+def normalized_sha256_digest(value: object) -> str:
+    digest = str(value or "").strip().lower()
+    if digest.startswith("sha256:"):
+        digest = digest[len("sha256:") :]
+    if re.fullmatch(r"[0-9a-f]{64}", digest):
+        return digest
+    return ""
+
+
+def load_github_release_json(root: Path, release_json_path: str) -> tuple[dict | None, str]:
+    path = Path(release_json_path)
+    if not path.is_absolute():
+        path = root / path
+    try:
+        return json.loads(path.read_text(encoding="utf-8")), normalize_path(path)
+    except Exception as exc:
+        return None, f"{normalize_path(path)}: {exc}"
+
+
+def fetch_github_release_json(root: Path, manifest: dict, version: str) -> tuple[dict | None, str]:
+    if not command_exists("gh"):
+        return None, "gh CLI is missing."
+    result = run(
+        [
+            "gh",
+            "release",
+            "view",
+            f"v{version}",
+            "--repo",
+            manifest["repo_slug"],
+            "--json",
+            "tagName,isDraft,isPrerelease,url,assets",
+        ],
+        cwd=root,
+    )
+    if result.returncode != 0:
+        return None, result.stderr.strip() or result.stdout.strip() or "gh release view failed."
+    try:
+        return json.loads(result.stdout), "gh release view"
+    except json.JSONDecodeError as exc:
+        return None, f"gh release view returned invalid JSON: {exc}"
+
+
+def check_github_release_metadata(
+    root: Path,
+    manifest: dict,
+    enabled: bool,
+    release_json_path: str | None,
+) -> list[dict]:
+    if not enabled and not release_json_path:
+        return []
+
+    latest = latest_appcast_metadata(root, manifest)
+    if not latest:
+        return [
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-no-local-appcast",
+                "Cannot check GitHub release metadata without a parseable local appcast.",
+                "docs/appcast.xml needs a latest item first.",
+                manifest["paths"]["appcast"],
+            )
+        ]
+
+    if release_json_path:
+        release, source = load_github_release_json(root, release_json_path)
+    else:
+        release, source = fetch_github_release_json(root, manifest, latest["version"])
+
+    if release is None:
+        return [
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-metadata-unavailable",
+                "GitHub release metadata could not be loaded.",
+                source,
+            )
+        ]
+
+    findings: list[dict] = []
+    version = latest["version"]
+    expected_tag = f"v{version}"
+    expected_asset_name = f"Transcripted-{version}.dmg"
+    if release.get("tagName") != expected_tag:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-tag",
+                "GitHub release tag drifted from the committed appcast.",
+                f"{source}: expected {expected_tag!r}, got {release.get('tagName')!r}.",
+            )
+        )
+
+    if release.get("isDraft") is True:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-draft",
+                "GitHub release is still a draft.",
+                f"{source}: {expected_tag} must be published before release readiness is green.",
+            )
+        )
+
+    if release.get("isPrerelease") is True:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "github-release-prerelease",
+                "GitHub release is marked prerelease.",
+                f"{source}: {expected_tag} should be a normal release for public readiness.",
+            )
+        )
+
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        assets = []
+    asset = next(
+        (item for item in assets if isinstance(item, dict) and item.get("name") == expected_asset_name),
+        None,
+    )
+    if asset is None:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-missing",
+                "GitHub release is missing the expected Transcripted DMG asset.",
+                f"{source}: expected asset {expected_asset_name!r}.",
+            )
+        )
+        return findings
+
+    asset_url = str(asset.get("url", "")).strip()
+    if asset_url != latest["url"]:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-url",
+                "GitHub release asset URL drifted from the committed appcast.",
+                f"{source}: expected {latest['url']!r}, got {asset_url!r}.",
+            )
+        )
+
+    try:
+        asset_size = int(asset.get("size"))
+    except (TypeError, ValueError):
+        asset_size = -1
+    expected_size = int(latest["length"]) if latest["length"].isdigit() else -1
+    if asset_size != expected_size:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-size",
+                "GitHub release asset size drifted from the committed appcast.",
+                f"{source}: expected {expected_size}, got {asset_size}.",
+            )
+        )
+
+    asset_digest = normalized_sha256_digest(asset.get("digest"))
+    cask_sha = cask_metadata(root, manifest)["sha256"]
+    if not asset_digest:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-digest-missing",
+                "GitHub release asset is missing a sha256 digest.",
+                f"{source}: cask checksum cannot be checked against the current DMG asset.",
+            )
+        )
+    elif cask_sha and asset_digest != cask_sha:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-digest",
+                "Homebrew cask checksum drifted from the GitHub release asset digest.",
+                f"{source}: cask sha256={cask_sha!r}, asset digest={asset_digest!r}.",
+                manifest["paths"]["homebrew_cask"],
+            )
+        )
+
+    state = str(asset.get("state", "")).strip()
+    if state and state != "uploaded":
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "github-release-asset-state",
+                "GitHub release asset is not uploaded.",
+                f"{source}: asset state is {state!r}.",
+            )
+        )
+
+    return findings
+
+
+def quoted_strings(text: str) -> set[str]:
+    return set(re.findall(r'"([A-Za-z0-9_]+)"', text))
+
+
+def check_observability_payload_keys(root: Path, manifest: dict) -> list[dict]:
+    findings: list[dict] = []
+    disallowed = set(manifest["disallowed_observability_payload_keys"])
+    for relative_path in manifest["paths"]["observability_policy_sources"]:
+        text = read_text(root / relative_path)
+        bad_keys = sorted(quoted_strings(text).intersection(disallowed))
+        if bad_keys:
+            findings.append(
+                make_finding(
+                    "observability_privacy",
+                    "high",
+                    "raw-observability-payload-key",
+                    "Observability policy allowlists include raw/private payload keys.",
+                    f"Disallowed key(s): {', '.join(bad_keys)}.",
+                    relative_path,
+                )
+            )
+    return findings
+
+
+def source_analytics_policy_events(root: Path, manifest: dict) -> set[str]:
+    text = read_text(root / manifest["paths"]["analytics_event_policy"])
+    return set(re.findall(r'(?m)^\s*"([a-z0-9_]+)":\s*\.init\(', text))
+
+
+def shell_event_variable(text: str, variable_name: str) -> set[str]:
+    match = re.search(rf'{re.escape(variable_name)}="([^"]+)"', text)
+    if not match:
+        return set()
+    return set(re.findall(r"'([^']+)'", match.group(1)))
+
+
+def python_tuple_events(text: str, variable_name: str) -> set[str]:
+    match = re.search(rf'{re.escape(variable_name)}\s*=\s*\((.*?)\)', text, re.DOTALL)
+    if not match:
+        return set()
+    return set(re.findall(r'"([^"]+)"', match.group(1)))
+
+
+def check_posthog_health_schema(root: Path, manifest: dict) -> list[dict]:
+    findings: list[dict] = []
+    policy_events = source_analytics_policy_events(root, manifest)
+    health_text = read_text(root / manifest["paths"]["health_probe"])
+    digest_text = read_text(root / manifest["paths"]["nightly_digest"])
+
+    health_events: set[str] = set()
+    for variable_name in manifest["posthog_health_probe_event_variables"]:
+        parsed = shell_event_variable(health_text, variable_name)
+        if not parsed:
+            findings.append(
+                make_finding(
+                    "automation_guardrails",
+                    "medium",
+                    f"posthog-health-schema-{variable_name}",
+                    "PostHog health probe event schema could not be parsed.",
+                    f"Expected shell variable {variable_name}.",
+                    manifest["paths"]["health_probe"],
+                )
+            )
+        health_events.update(parsed)
+
+    digest_events = python_tuple_events(digest_text, "POSTHOG_ACTIVE_EVENTS").union(
+        python_tuple_events(digest_text, "POSTHOG_FIRST_VALUE_EVENTS")
+    )
+    unknown = sorted((health_events | digest_events) - policy_events)
+    if unknown:
+        findings.append(
+            make_finding(
+                "observability_privacy",
+                "medium",
+                "posthog-schema-unknown-events",
+                "Operational PostHog probes reference events outside AnalyticsEventPolicy.",
+                f"Unknown event(s): {', '.join(unknown)}.",
+                manifest["paths"]["health_probe"],
+            )
+        )
+
+    first_value_sources = {
+        "health-probe": (
+            shell_event_variable(health_text, "first_value_events"),
+            manifest["paths"]["health_probe"],
+        ),
+        "nightly-digest": (
+            python_tuple_events(digest_text, "POSTHOG_FIRST_VALUE_EVENTS"),
+            manifest["paths"]["nightly_digest"],
+        ),
+    }
+    required_first_value = set(manifest["required_posthog_first_value_events"])
+    for source_label, (events, path) in first_value_sources.items():
+        missing_first_value = sorted(required_first_value - events)
+        if missing_first_value:
+            findings.append(
+                make_finding(
+                    "observability_privacy",
+                    "medium",
+                    f"posthog-first-value-schema-{source_label}",
+                    "PostHog release-health probe is missing first-value activation events.",
+                    f"{source_label} missing event(s): {', '.join(missing_first_value)}.",
+                    path,
+                )
+            )
+
+    return findings
+
+
+def curl_stdout(root: Path, command: list[str]) -> subprocess.CompletedProcess[str]:
+    return run(["curl", "--max-time", "15", "--retry", "2", *command], cwd=root)
+
+
+def first_header_value(headers: str, name: str) -> str:
+    pattern = re.compile(rf"^{re.escape(name)}:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+    match = pattern.search(headers)
+    return match.group(1).strip() if match else ""
+
+
+def live_appcast_urls(manifest: dict) -> list[str]:
+    urls: list[str] = []
+    for candidate in (
+        manifest["expected_info_plist"].get("SUFeedURL", ""),
+        manifest["live_release_surfaces"].get("appcast", ""),
+    ):
+        if candidate and candidate not in urls:
+            urls.append(candidate)
+    return urls
+
+
+def check_live_release_surfaces(root: Path, manifest: dict, enabled: bool) -> list[dict]:
+    if not enabled:
+        return []
+
+    latest = latest_appcast_metadata(root, manifest)
+    if not latest:
+        return [
+            make_finding(
+                "release_integrity",
+                "high",
+                "live-release-no-local-appcast",
+                "Cannot check live release surfaces without a parseable local appcast.",
+                "docs/appcast.xml needs a latest item first.",
+                manifest["paths"]["appcast"],
+            )
+        ]
+
+    findings: list[dict] = []
+    for live_appcast_url in live_appcast_urls(manifest):
+        result = curl_stdout(root, ["-fsSL", live_appcast_url])
+        if result.returncode != 0:
+            findings.append(
+                make_finding(
+                    "release_integrity",
+                    "medium",
+                    "live-appcast-unreachable",
+                    "Live appcast could not be fetched.",
+                    f"curl failed for {live_appcast_url}.",
+                )
+            )
+        else:
+            try:
+                live_latest = appcast_item_metadata(ET.fromstring(result.stdout).find("./channel/item"))
+                if live_latest is None:
+                    findings.append(
+                        make_finding(
+                            "release_integrity",
+                            "high",
+                            "live-appcast-missing-item",
+                            "Live appcast is missing its latest release item.",
+                            f"Expected a channel/item entry matching the committed appcast at {live_appcast_url}.",
+                        )
+                    )
+                else:
+                    drift = {
+                        key: (live_latest.get(key, ""), latest.get(key, ""))
+                        for key in (
+                            "version",
+                            "build",
+                            "minimum_system_version",
+                            "hardware_requirements",
+                            "url",
+                            "length",
+                            "signature",
+                        )
+                        if live_latest.get(key, "") != latest.get(key, "")
+                    }
+                    if drift:
+                        detail = "; ".join(
+                            f"{key}: live={live!r}, local={local!r}"
+                            for key, (live, local) in drift.items()
+                        )
+                        findings.append(
+                            make_finding(
+                                "release_integrity",
+                                "high",
+                                "live-appcast-drift",
+                                "Live appcast drifted from the committed latest appcast item.",
+                                f"{live_appcast_url}: {detail}",
+                            )
+                        )
+            except ET.ParseError as exc:
+                findings.append(
+                    make_finding(
+                        "release_integrity",
+                        "high",
+                        "live-appcast-invalid",
+                        "Live appcast is not parseable XML.",
+                        f"{live_appcast_url}: {exc}",
+                    )
+                )
+
+    for route in manifest["live_release_surfaces"]["direct_download_routes"]:
+        result = curl_stdout(root, ["-sSI", route])
+        location = first_header_value(result.stdout, "location")
+        if result.returncode != 0 or location != latest["url"]:
+            findings.append(
+                make_finding(
+                    "release_integrity",
+                    "high",
+                    "live-download-route-drift",
+                    "Live direct-download route does not redirect to the committed latest DMG.",
+                    f"{route} location={location!r}; expected {latest['url']!r}.",
+                )
+            )
+
+    page_result = curl_stdout(root, ["-fsSL", manifest["live_release_surfaces"]["download_page"]])
+    page_text = page_result.stdout if page_result.returncode == 0 else ""
+    download_markers = [
+        latest["url"],
+        "download/latest.dmg",
+        "/download/latest.dmg",
+        "/download/latest/",
+    ]
+    if (
+        page_result.returncode != 0
+        or latest["version"] not in page_text
+        or not any(marker in page_text for marker in download_markers)
+    ):
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "live-download-page-drift",
+                "Live /download page drifted from the committed latest release.",
+                (
+                    f"Expected version {latest['version']!r} and a current download marker "
+                    f"on {manifest['live_release_surfaces']['download_page']}."
+                ),
+            )
+        )
+
+    crawler_result = curl_stdout(root, ["-fsSL", manifest["live_release_surfaces"]["crawler_text"]])
+    if crawler_result.returncode != 0 or latest["version"] not in crawler_result.stdout:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "live-crawler-release-drift",
+                "Crawler-facing release text does not mention the committed latest version.",
+                f"Expected to find {latest['version']!r} in {manifest['live_release_surfaces']['crawler_text']}.",
+            )
+        )
+
+    return findings
+
+
+def sentry_release_name(root: Path, manifest: dict) -> str:
+    with (root / manifest["paths"]["info_plist"]).open("rb") as handle:
+        plist = plistlib.load(handle)
+    prefix = str(plist.get("TranscriptedSentryReleasePrefix", "transcripted")).strip()
+    version = str(plist.get("CFBundleShortVersionString", "")).strip()
+    return f"{prefix}@{version}"
+
+
+def check_sentry_release_health(
+    root: Path,
+    manifest: dict,
+    enabled: bool,
+    required: bool,
+) -> tuple[list[dict], list[dict]]:
+    if not enabled and not required:
+        return [], []
+
+    release = sentry_release_name(root, manifest)
+    watch_items: list[dict] = []
+    findings: list[dict] = []
+    if not command_exists("sentry-cli"):
+        if required:
+            findings.append(
+                make_finding(
+                    "release_integrity",
+                    "medium",
+                    "sentry-cli-missing",
+                    "Cannot verify Sentry release existence because sentry-cli is missing.",
+                    "Install sentry-cli on the release-health runner.",
+                )
+            )
+            return findings, watch_items
+        watch_items.append(
+            make_watch_item(
+                "sentry-cli-missing",
+                "Sentry release health was requested but sentry-cli is missing.",
+                "Install sentry-cli on the release-health runner.",
+            )
+        )
+        return findings, watch_items
+
+    sentry = manifest["sentry"]
+    result = run(
+        [
+            "sentry-cli",
+            "releases",
+            "info",
+            "--org",
+            sentry["org"],
+            "--project",
+            sentry["project"],
+            release,
+        ],
+        cwd=root,
+    )
+    if result.returncode != 0:
+        detail = f"sentry-cli releases info failed for {release!r} in {sentry['org']}/{sentry['project']}."
+        if not required:
+            watch_items.append(
+                make_watch_item(
+                    "sentry-release-health-failed",
+                    "Sentry release health was requested but sentry-cli could not verify it.",
+                    detail,
+                )
+            )
+            return findings, watch_items
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "sentry-release-missing",
+                "Sentry release matching Info.plist could not be verified.",
+                detail,
+            )
+        )
+
+    return findings, watch_items
+
+
+def uuid_set_for_path(root: Path, path: Path) -> tuple[set[str], str]:
+    result = run(["dwarfdump", "--uuid", str(path)], cwd=root)
+    if result.returncode != 0:
+        return set(), result.stderr.strip() or result.stdout.strip()
+    uuids = {
+        match.group(1)
+        for match in re.finditer(r"^UUID:\s+([A-Fa-f0-9-]+)\s", result.stdout, re.MULTILINE)
+    }
+    return uuids, ""
+
+
+def check_release_debug_files(root: Path, manifest: dict, required: bool) -> list[dict]:
+    if not required:
+        return []
+
+    findings: list[dict] = []
+    binary_path = root / manifest["paths"]["release_app_binary"]
+    debug_path = root / manifest["paths"]["release_debug_files"]
+    if not binary_path.exists():
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "release-binary-missing",
+                "Release app binary is missing for dSYM verification.",
+                f"Expected {manifest['paths']['release_app_binary']}.",
+                manifest["paths"]["release_app_binary"],
+            )
+        )
+    if not debug_path.exists():
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "release-dsym-missing",
+                "Release dSYM is missing.",
+                f"Expected {manifest['paths']['release_debug_files']}.",
+                manifest["paths"]["release_debug_files"],
+            )
+        )
+    if findings:
+        return findings
+
+    if not command_exists("dwarfdump"):
+        return [
+            make_finding(
+                "release_integrity",
+                "medium",
+                "dwarfdump-missing",
+                "Cannot verify release dSYM UUIDs because dwarfdump is missing.",
+                "Install Xcode command line tools on the release-health runner.",
+            )
+        ]
+
+    binary_uuids, binary_error = uuid_set_for_path(root, binary_path)
+    debug_uuids, debug_error = uuid_set_for_path(root, debug_path)
+    if not binary_uuids or not debug_uuids or binary_uuids != debug_uuids:
+        detail = (
+            f"binary UUIDs={sorted(binary_uuids)!r}; dSYM UUIDs={sorted(debug_uuids)!r}; "
+            f"errors={binary_error or debug_error or 'none'}"
+        )
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "release-dsym-uuid-mismatch",
+                "Release dSYM UUIDs do not match the app binary.",
+                detail,
+                manifest["paths"]["release_debug_files"],
+            )
+        )
+
+    return findings
+
+
 def load_plist(path: Path) -> dict:
     with path.open("rb") as handle:
         return plistlib.load(handle)
@@ -779,6 +1569,97 @@ def check_sanitizer_corpus(root: Path, manifest: dict) -> list[dict]:
     return findings
 
 
+def check_privacy_leak_sweep(root: Path, manifest: dict) -> list[dict]:
+    relative_path = manifest["paths"].get("privacy_leak_sweep")
+    if not relative_path:
+        return [
+            make_finding(
+                "observability_privacy",
+                "medium",
+                "privacy-leak-sweep-missing-manifest-path",
+                "Nightly manifest should point at the synthetic privacy leak sweep.",
+                "Missing paths.privacy_leak_sweep.",
+            )
+        ]
+
+    script_path = root / relative_path
+    if not script_path.is_file():
+        return [
+            make_finding(
+                "observability_privacy",
+                "high",
+                "privacy-leak-sweep-missing",
+                "Synthetic privacy leak sweep script is missing.",
+                f"Expected {relative_path}.",
+                relative_path,
+            )
+        ]
+
+    report_path = "build/privacy-leak-sweep-nightly.json"
+    result = run(["python3", relative_path, "--write-report", report_path], cwd=root)
+    if result.returncode != 0:
+        detail = "\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[:8])
+        return [
+            make_finding(
+                "observability_privacy",
+                "high",
+                "privacy-leak-sweep-failed",
+                "Synthetic privacy leak sweep found a report or handoff surface leak.",
+                detail or "privacy-leak-sweep.py exited non-zero.",
+                relative_path,
+            )
+        ]
+
+    try:
+        report = json.loads((root / report_path).read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [
+            make_finding(
+                "observability_privacy",
+                "medium",
+                "privacy-leak-sweep-report-invalid",
+                "Synthetic privacy leak sweep did not write a parseable report.",
+                str(exc),
+                report_path,
+            )
+        ]
+
+    if report.get("status") != "pass" or report.get("finding_count", 0) != 0:
+        return [
+            make_finding(
+                "observability_privacy",
+                "high",
+                "privacy-leak-sweep-report-attention",
+                "Synthetic privacy leak sweep report is not clean.",
+                f"Status {report.get('status')!r}; findings {report.get('finding_count')!r}.",
+                report_path,
+            )
+        ]
+
+    expected_lanes = {
+        "logs-events-reliability",
+        "sentry-posthog-payloads",
+        "qa-report-artifacts",
+        "pr-release-docs",
+        "automated-scanner-test-pr",
+    }
+    actual_lanes = {str(item.get("id")) for item in report.get("lanes", [])}
+    missing_lanes = sorted(expected_lanes - actual_lanes)
+    if missing_lanes:
+        return [
+            make_finding(
+                "observability_privacy",
+                "medium",
+                "privacy-leak-sweep-lane-drift",
+                "Synthetic privacy leak sweep no longer covers every expected lane.",
+                f"Missing lanes: {', '.join(missing_lanes)}.",
+                relative_path,
+            )
+        ]
+
+    return []
+
+
 def score_report(findings: list[dict], manifest: dict) -> tuple[int, dict]:
     weights = manifest["scoring"]["weights"]
     multipliers = manifest["scoring"]["severity_multipliers"]
@@ -858,6 +1739,38 @@ def print_report(report: dict) -> None:
             print(f"  {item['detail']}")
 
 
+def has_required_release_health_failure(args: argparse.Namespace, findings: list[dict]) -> bool:
+    required_check_ids: set[str] = set()
+    if args.require_sentry_release_health:
+        required_check_ids.update(REQUIRED_SENTRY_RELEASE_CHECK_IDS)
+    if args.require_release_debug_files:
+        required_check_ids.update(REQUIRED_RELEASE_DEBUG_CHECK_IDS)
+
+    return any(finding.get("check_id") in required_check_ids for finding in findings)
+
+
+def has_blocking_release_health_watch_item(args: argparse.Namespace, watch_items: list[dict]) -> bool:
+    if not release_health_mode(args):
+        return False
+    return any(item.get("check_id") in RELEASE_HEALTH_BLOCKING_WATCH_IDS for item in watch_items)
+
+
+def release_health_mode(args: argparse.Namespace) -> bool:
+    return any(
+        [
+            args.live_release_surfaces,
+            bool(args.github_release_json),
+            args.sentry_release_health,
+            args.require_sentry_release_health,
+            args.require_release_debug_files,
+        ]
+    )
+
+
+def should_check_automation_prompt(args: argparse.Namespace) -> bool:
+    return bool(args.automation_toml) or not release_health_mode(args)
+
+
 def main() -> int:
     args = parse_args()
     root = repo_root()
@@ -871,11 +1784,29 @@ def main() -> int:
     findings.extend(check_info_plist(root, manifest))
     appcast_findings, watch_items = check_appcast(root, manifest)
     findings.extend(appcast_findings)
+    findings.extend(check_cask(root, manifest))
+    findings.extend(check_observability_payload_keys(root, manifest))
+    findings.extend(check_posthog_health_schema(root, manifest))
+    findings.extend(check_live_release_surfaces(root, manifest, args.live_release_surfaces))
+    findings.extend(
+        check_github_release_metadata(root, manifest, args.live_release_surfaces, args.github_release_json)
+    )
+    sentry_findings, sentry_watch_items = check_sentry_release_health(
+        root,
+        manifest,
+        args.sentry_release_health,
+        args.require_sentry_release_health,
+    )
+    findings.extend(sentry_findings)
+    watch_items.extend(sentry_watch_items)
+    findings.extend(check_release_debug_files(root, manifest, args.require_release_debug_files))
     findings.extend(check_entitlements(root, manifest))
     findings.extend(check_build_script_contract(root, manifest))
     findings.extend(check_built_app(root, manifest, args.app_bundle))
-    findings.extend(check_automation_prompt(manifest, automation_path))
+    if should_check_automation_prompt(args):
+        findings.extend(check_automation_prompt(manifest, automation_path))
     findings.extend(check_sanitizer_corpus(root, manifest))
+    findings.extend(check_privacy_leak_sweep(root, manifest))
 
     report = build_report(root, manifest, findings, watch_items, args.app_bundle, automation_path)
     print_report(report)
@@ -887,6 +1818,12 @@ def main() -> int:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
+    if (
+        (args.strict and findings)
+        or has_required_release_health_failure(args, findings)
+        or has_blocking_release_health_watch_item(args, watch_items)
+    ):
+        return 1
     return 0
 
 

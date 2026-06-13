@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import transcripted_mcp
 
@@ -397,6 +398,79 @@ final class TranscriptIndexTests: XCTestCase {
 
         XCTAssertEqual(result.items.count, 1)
         XCTAssertEqual(result.items.first?.preview, "No transcript captured.")
+    }
+
+    // MARK: - Write-transaction failure behavior
+
+    /// Runs raw SQL against the index database through a second connection,
+    /// letting tests sabotage the schema underneath a live TranscriptIndex.
+    private func execRawSQL(_ sql: String) throws {
+        var db: OpaquePointer?
+        let path = tempDir.appendingPathComponent("mcp_index.sqlite").path
+        guard sqlite3_open(path, &db) == SQLITE_OK else {
+            defer { sqlite3_close(db) }
+            throw MCPIndexError.databaseOpenFailed("test connection failed for \(path)")
+        }
+        defer { sqlite3_close(db) }
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw MCPIndexError.queryFailed(String(cString: sqlite3_errmsg(db)))
+        }
+    }
+
+    func testFailedUtteranceInsertRollsBackMeetingAndAllowsRetry() throws {
+        try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+
+        // Sabotage the write path: drop the utterances table so the per-utterance
+        // insert fails after the meetings row was already written in-transaction.
+        try execRawSQL("DROP TABLE utterances")
+
+        XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir))
+
+        // The transaction must roll back: no half-indexed meeting marked indexed.
+        XCTAssertTrue(try index.listRecentMeetings(count: 10).isEmpty)
+
+        // A fresh index (createTables restores the dropped table and triggers)
+        // retries the meeting because json_modified_at was never committed.
+        index = try TranscriptIndex(indexDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        let results = try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(results.results.count, 1)
+    }
+
+    func testFailedDictationEntryInsertRollsBackDayAndAllowsRetry() throws {
+        try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
+
+        try execRawSQL("DROP TABLE dictation_entries")
+
+        XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir))
+
+        // The dictation_days row written before the failing entry insert must roll back.
+        XCTAssertTrue(try index.listDictationDays(count: 10).isEmpty)
+
+        index = try TranscriptIndex(indexDir: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let days = try index.listDictationDays(count: 10)
+        XCTAssertEqual(days.count, 1)
+        XCTAssertEqual(days[0].entryCount, 2)
+    }
+
+    func testFailedRemovalRollsBackAndKeepsMeetingSearchable() throws {
+        try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+
+        // Sabotage removal mid-transaction: the utterances delete succeeds, then
+        // the meeting_speakers delete fails. The whole removal must roll back.
+        try execRawSQL("DROP TABLE meeting_speakers")
+        try FileManager.default.removeItem(at: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.md"))
+
+        XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir))
+
+        let results = try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(results.results.count, 1)
     }
 
     func testContextSearchResultEncodesStableAgentKeys() throws {

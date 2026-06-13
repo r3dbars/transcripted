@@ -1,5 +1,6 @@
 import Foundation
 import MCP
+import TranscriptedCaptureKit
 
 // MARK: - Helpers
 
@@ -247,7 +248,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             case "read_dictation":
                 return try handleReadDictation(params: params, dictationDirs: directories.dictationDirs)
             case "search":
-                return try handleSearch(params: params, index: index)
+                return try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "search_context":
                 return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "recent_context":
@@ -313,19 +314,7 @@ private func handleListDictations(params: CallTool.Parameters, index: Transcript
 
 /// Extract title from markdown YAML frontmatter
 private func extractTitle(from content: String) -> String? {
-    // Minimum valid frontmatter is "---\n...\n---\n" (8+ chars)
-    guard content.count >= 8, content.hasPrefix("---"),
-          let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else { return nil }
-    let yaml = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
-    for line in yaml.components(separatedBy: "\n") {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed == "---" { break }
-        if trimmed.hasPrefix("title:") {
-            let title = String(trimmed.dropFirst(6)).trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
-            return title.isEmpty ? nil : title
-        }
-    }
-    return nil
+    CaptureMarkdown.extractTitle(from: content)
 }
 
 /// Returns non-empty transcript dialogue lines from the `## Full Transcript` section, filtering boilerplate.
@@ -434,7 +423,7 @@ private func handleReadDictation(params: CallTool.Parameters, dictationDirs: [UR
 
 // MARK: - search
 
-private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
+private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
         return textResult("Missing required parameter: query", isError: true)
     }
@@ -443,7 +432,8 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex) t
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
 
-    let results = try index.searchUtterances(query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo)
+    var results = try index.searchUtterances(query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo)
+    hydrateMeetingSearchTitles(in: &results, meetingDirs: meetingDirs)
 
     if results.results.isEmpty {
         var msg = "No results found for \"\(query)\""
@@ -620,16 +610,33 @@ private func parseContextKind(_ raw: String?) -> ContextKind {
     return kind
 }
 
-private func meetingTitle(for filename: String, meetingDirs: [URL]) -> String {
+/// Frontmatter title for a meeting markdown file, or nil when the file is
+/// unreadable or its frontmatter has no title.
+private func frontmatterMeetingTitle(for filename: String, meetingDirs: [URL]) -> String? {
     guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
         named: filename,
         appendingExtension: "md",
         in: meetingDirs
     ),
     let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
-        return filename
+        return nil
     }
-    return extractTitle(from: content) ?? filename
+    return extractTitle(from: content)
+}
+
+private func meetingTitle(for filename: String, meetingDirs: [URL]) -> String {
+    frontmatterMeetingTitle(for: filename, meetingDirs: meetingDirs) ?? filename
+}
+
+/// Replace the index's filename-derived meeting titles with real frontmatter
+/// titles. Groups whose markdown has no frontmatter title keep the
+/// filename-derived title they already carry.
+func hydrateMeetingSearchTitles(in results: inout GroupedSearchResult, meetingDirs: [URL]) {
+    for index in results.results.indices {
+        if let title = frontmatterMeetingTitle(for: results.results[index].filename, meetingDirs: meetingDirs) {
+            results.results[index].meetingTitle = title
+        }
+    }
 }
 
 private func hydrateMeetingTitles<T>(

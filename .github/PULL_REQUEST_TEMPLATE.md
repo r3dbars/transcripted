@@ -5,6 +5,7 @@
 ## Product Impact
 
 - Affects: `dictation` / `meetings` / `agent artifacts` / `docs only`
+- Lane: `activation` / `dictation reliability` / `meeting reliability` / `release ops` / `agent workflow`
 - Why this matters:
 
 ## What changed
@@ -14,6 +15,7 @@
 ## How I checked it
 
 - [ ] `scripts/dev/agent-preflight.sh`
+- [ ] Selected checks from `.agents/test-matrix.yml` for the files changed
 - [ ] `bash build.sh --no-open`
 - [ ] `bash run-tests.sh`
 - [ ] Performance budget passed (`bash build.sh --no-open` runs the bundle gate; run `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl"` for runtime-sensitive changes)
@@ -34,3 +36,9 @@
 ## Notes
 
 <!-- Related issues, follow-ups, screenshots, or legacy-branch impact -->
+
+## Agent handoff
+
+<!-- For delegated work, paste the one-line closeout from docs/agent-closeout.md. -->
+
+`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action`

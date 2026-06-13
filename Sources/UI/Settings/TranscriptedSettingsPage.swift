@@ -2,17 +2,28 @@ import Foundation
 
 enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case home
+    case dictations
     case general
     case models
     case shortcuts
     case people
     case storage
     case connectAgent
+    case beta
     case privacy
     case support
     case about
 
     var id: String { rawValue }
+
+    var automationIdentifier: String {
+        switch self {
+        case .connectAgent:
+            return "transcripted.settings.sidebar.connect-agent"
+        default:
+            return "transcripted.settings.sidebar.\(rawValue)"
+        }
+    }
 
     var analyticsValue: String {
         switch self {
@@ -35,12 +46,14 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .home: return "Home"
+        case .dictations: return "Dictations"
         case .general: return "General"
         case .models: return "Models"
         case .shortcuts: return "Shortcuts"
         case .people: return "Speakers"
         case .storage: return "Storage"
         case .connectAgent: return "Agent"
+        case .beta: return "Beta"
         case .privacy: return "Privacy"
         case .support: return "Support"
         case .about: return "About"
@@ -51,6 +64,8 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .home:
             return "Start capture and check setup."
+        case .dictations:
+            return "Recent dictation history."
         case .general:
             return "Basic app behavior."
         case .models:
@@ -62,7 +77,9 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .storage:
             return "Where your files live."
         case .connectAgent:
-            return "One prompt, plus direct paths."
+            return "Connect your AI tools."
+        case .beta:
+            return "Experimental local features."
         case .privacy:
             return "Permissions and optional reporting."
         case .support:
@@ -75,12 +92,14 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .home: return "house.fill"
+        case .dictations: return "mic.fill"
         case .general: return "gearshape.fill"
         case .models: return "cpu.fill"
         case .shortcuts: return "keyboard"
         case .people: return "person.2.fill"
         case .storage: return "externaldrive.fill"
         case .connectAgent: return "sparkles"
+        case .beta: return "wand.and.stars"
         case .privacy: return "lock.shield.fill"
         case .support: return "questionmark.bubble.fill"
         case .about: return "info.circle.fill"

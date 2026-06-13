@@ -17,6 +17,65 @@ final class EmbeddingClustererTests: XCTestCase {
         XCTAssertEqual(Set(merged.map(\.speakerId)), [1])
     }
 
+    func testOfflinePostProcessSkipsTransitivePairwiseCollapse() {
+        let segments = [
+            segment(speakerId: 1, startTime: 0, endTime: 3, embedding: unitVector(degrees: 0)),
+            segment(speakerId: 2, startTime: 3, endTime: 6, embedding: unitVector(degrees: 30)),
+            segment(speakerId: 3, startTime: 6, endTime: 9, embedding: unitVector(degrees: 60)),
+            segment(speakerId: 4, startTime: 9, endTime: 12, embedding: unitVector(degrees: 90)),
+            segment(speakerId: 5, startTime: 12, endTime: 15, embedding: unitVector(degrees: 120)),
+            segment(speakerId: 6, startTime: 15, endTime: 18, embedding: unitVector(degrees: 150)),
+        ]
+
+        XCTAssertEqual(
+            Set(EmbeddingClusterer.pairwiseMerge(segments: segments, threshold: 0.78).map(\.speakerId)).count,
+            1,
+            "Transitive pairwise merge reproduces the reported multi-speaker collapse risk"
+        )
+
+        let withoutPairwise = EmbeddingClusterer.postProcess(
+            segments: segments,
+            existingProfiles: [],
+            pairwiseMergeThreshold: nil
+        )
+
+        XCTAssertEqual(Set(withoutPairwise.map(\.speakerId)).count, 6)
+    }
+
+    func testPostProcessStillAbsorbsSmallClustersWhenPairwiseMergeIsSkipped() {
+        let processed = EmbeddingClusterer.postProcess(
+            segments: [
+                segment(speakerId: 1, startTime: 0, endTime: 40, embedding: [1.0, 0.0]),
+                segment(speakerId: 2, startTime: 40, endTime: 44, embedding: unitVector(cosineToXAxis: 0.95)),
+                segment(speakerId: 3, startTime: 44, endTime: 84, embedding: [0.0, 1.0]),
+            ],
+            existingProfiles: [],
+            pairwiseMergeThreshold: nil
+        )
+
+        XCTAssertEqual(Set(processed.map(\.speakerId)), [1, 3])
+    }
+
+    func testPostProcessStillRunsDbInformedSplitWhenPairwiseMergeIsSkipped() {
+        let profileA = speakerProfile(id: UUID(), embedding: [1.0, 0.0], name: "Alex")
+        let profileB = speakerProfile(id: UUID(), embedding: [0.0, 1.0], name: "Blair")
+        var segments: [SpeakerSegment] = []
+        for index in 0..<8 {
+            segments.append(segment(speakerId: 1, startTime: Double(index), endTime: Double(index + 1), embedding: [1.0, 0.0]))
+        }
+        for index in 8..<16 {
+            segments.append(segment(speakerId: 1, startTime: Double(index), endTime: Double(index + 1), embedding: [0.0, 1.0]))
+        }
+
+        let processed = EmbeddingClusterer.postProcess(
+            segments: segments,
+            existingProfiles: [profileA, profileB],
+            pairwiseMergeThreshold: nil
+        )
+
+        XCTAssertEqual(Set(processed.map { $0.speakerId }).count, 2)
+    }
+
     func testAbsorbSmallClustersPreservesAtLeastTwoSpeakers() {
         let protected = EmbeddingClusterer.absorbSmallClusters(
             segments: [
@@ -87,5 +146,10 @@ final class EmbeddingClustererTests: XCTestCase {
     private func unitVector(cosineToXAxis: Float) -> [Float] {
         let y = sqrt(max(0, 1 - (cosineToXAxis * cosineToXAxis)))
         return [cosineToXAxis, y]
+    }
+
+    private func unitVector(degrees: Float) -> [Float] {
+        let radians = degrees * .pi / 180
+        return [cos(radians), sin(radians)]
     }
 }
