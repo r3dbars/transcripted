@@ -297,4 +297,82 @@ func testMeetingPromptHeuristics() {
             "in-progress calendar-backed meetings should still be eligible during the post-start grace period"
         )
     }
+
+    runSuite("MeetingPromptProvider.isBrowserBundleID — matches browser families by prefix, including helpers") {
+        assertTrue(
+            MeetingPromptProvider.isBrowserBundleID("com.google.Chrome"),
+            "the main Chrome bundle should be recognized"
+        )
+        assertTrue(
+            MeetingPromptProvider.isBrowserBundleID("com.google.Chrome.helper"),
+            "Chrome's helper process (the one that actually holds the mic in a call) must be recognized"
+        )
+        assertTrue(
+            MeetingPromptProvider.isBrowserBundleID("com.apple.WebKit.GPU"),
+            "Safari/WKWebView audio runs in a WebKit service process and must be recognized"
+        )
+        assertTrue(
+            MeetingPromptProvider.isBrowserBundleID("com.apple.Safari"),
+            "the main Safari bundle should be recognized"
+        )
+        assertFalse(
+            MeetingPromptProvider.isBrowserBundleID("com.apple.QuickTimePlayerX"),
+            "non-browser apps should not be treated as a browser call"
+        )
+        assertFalse(
+            MeetingPromptProvider.isBrowserBundleID("com.google.ChromeEvil"),
+            "a bundle id that only shares a prefix segment should not match the family"
+        )
+    }
+
+    runSuite("MeetingPromptProvider.micInputProvider — attributes mic-holding processes to a provider") {
+        assertEqual(
+            MeetingPromptProvider.micInputProvider(forBundleID: "us.zoom.xos"),
+            .zoom,
+            "the native Zoom bundle holding the mic should attribute to Zoom"
+        )
+        assertEqual(
+            MeetingPromptProvider.micInputProvider(forBundleID: "us.zoom.xos.helper"),
+            .zoom,
+            "a native conferencing helper process should still attribute to its parent app"
+        )
+        assertEqual(
+            MeetingPromptProvider.micInputProvider(forBundleID: "com.microsoft.teams2"),
+            .teams,
+            "the native Teams bundle holding the mic should attribute to Teams"
+        )
+        assertEqual(
+            MeetingPromptProvider.micInputProvider(forBundleID: "com.google.Chrome.helper"),
+            .googleMeet,
+            "a browser holding the mic maps to the representative browser-call provider — this closes the Meet gap"
+        )
+        assertEqual(
+            MeetingPromptProvider.micInputProvider(forBundleID: "com.apple.WebKit.GPU"),
+            .googleMeet,
+            "a Safari/WebKit service holding the mic maps to the browser-call provider"
+        )
+        assertNil(
+            MeetingPromptProvider.micInputProvider(forBundleID: "com.apple.QuickTimePlayerX"),
+            "an unrecognized mic user (QuickTime, Voice Memos, …) should produce no provider and no prompt"
+        )
+        assertNil(
+            MeetingPromptProvider.micInputProvider(forBundleID: "com.justinbetker.draft"),
+            "our own bundle is not a conferencing app or browser, so attribution alone yields nil"
+        )
+    }
+
+    runSuite("MeetingPromptHeuristics.micInputPresentation — mic-in-use outranks a frontmost browser") {
+        let presentation = MeetingPromptHeuristics.micInputPresentation(title: "Zoom call detected")
+        assertEqual(presentation.title, "Zoom call detected", "mic-input title should pass through unchanged")
+        assertEqual(presentation.score, 5, "mic-in-use should score above the frontmost-browser runtime score of 4")
+        assertTrue(
+            presentation.score > MeetingPromptHeuristics.runtimePresentation(
+                providerName: "Zoom",
+                isFrontmost: true,
+                lastActiveAt: nil,
+                now: Date(timeIntervalSince1970: 1_000)
+            )!.score,
+            "a mic-in-use candidate should outrank a frontmost-app candidate"
+        )
+    }
 }
