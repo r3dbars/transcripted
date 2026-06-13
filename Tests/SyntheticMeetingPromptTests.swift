@@ -162,6 +162,14 @@ func testSyntheticMeetingPrompts() {
     }
 
     runSuite("SyntheticMeetingPrompts — native runtime prompts are provider-limited") {
+        let webex = evaluateSyntheticPrompt(
+            calendarAccessGranted: false,
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                runningBundleIDs: ["com.cisco.webexmeetingsapp"],
+                frontmostBundleID: "com.cisco.webexmeetingsapp"
+            )
+        )
         let zoom = evaluateSyntheticPrompt(
             calendarAccessGranted: false,
             calendarEvents: [],
@@ -179,8 +187,9 @@ func testSyntheticMeetingPrompts() {
             )
         )
 
-        assertEqual(zoom.candidate?.id, "runtime:zoom", "Zoom can prompt from runtime evidence")
-        assertEqual(zoom.candidate?.title, "Zoom is active", "frontmost native runtime prompt should use active copy")
+        assertEqual(webex.candidate?.id, "runtime:webex", "Webex can prompt from runtime evidence")
+        assertEqual(webex.candidate?.title, "Webex is active", "frontmost native runtime prompt should use active copy")
+        assertEqual(zoom.suppressionReason, .noCandidate, "Zoom app-open evidence alone should stay quiet without calendar context")
         assertEqual(teams.suppressionReason, .noCandidate, "Teams should not prompt only because the app is open")
     }
 
@@ -189,24 +198,24 @@ func testSyntheticMeetingPrompts() {
             calendarAccessGranted: false,
             calendarEvents: [],
             runtimeSnapshot: syntheticRuntimeSnapshot(
-                runningBundleIDs: ["us.zoom.xos"],
-                recentNativeActivity: [.zoom: syntheticPromptNow.addingTimeInterval(-30)]
+                runningBundleIDs: ["com.cisco.webexmeetingsapp"],
+                recentNativeActivity: [.webex: syntheticPromptNow.addingTimeInterval(-30)]
             )
         )
         let stale = evaluateSyntheticPrompt(
             calendarAccessGranted: false,
             calendarEvents: [],
             runtimeSnapshot: syntheticRuntimeSnapshot(
-                runningBundleIDs: ["us.zoom.xos"],
+                runningBundleIDs: ["com.cisco.webexmeetingsapp"],
                 recentNativeActivity: [
-                    .zoom: syntheticPromptNow.addingTimeInterval(
+                    .webex: syntheticPromptNow.addingTimeInterval(
                         -(MeetingPromptHeuristics.runtimeActivityFreshness + 1)
                     )
                 ]
             )
         )
 
-        assertEqual(recent.candidate?.title, "Zoom just opened", "recent native launches should get a softer prompt")
+        assertEqual(recent.candidate?.title, "Webex just opened", "recent native launches should get a softer prompt")
         assertEqual(stale.suppressionReason, .noCandidate, "stale native activity should expire")
     }
 
@@ -230,9 +239,9 @@ func testSyntheticMeetingPrompts() {
             calendarAccessGranted: false,
             calendarEvents: [],
             runtimeSnapshot: syntheticRuntimeSnapshot(
-                runningBundleIDs: ["us.zoom.xos"],
-                frontmostBundleID: "us.zoom.xos",
-                runtimeSuppressedUntil: [.zoom: syntheticPromptNow.addingTimeInterval(60)]
+                runningBundleIDs: ["com.cisco.webexmeetingsapp"],
+                frontmostBundleID: "com.cisco.webexmeetingsapp",
+                runtimeSuppressedUntil: [.webex: syntheticPromptNow.addingTimeInterval(60)]
             )
         )
 

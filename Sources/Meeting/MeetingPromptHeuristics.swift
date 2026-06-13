@@ -229,6 +229,45 @@ struct MeetingPromptCalendarEventSnapshot: Equatable {
     let url: URL?
     let location: String?
     let notes: String?
+
+    var meetingURL: URL? {
+        if let url, Self.provider(for: url) != nil {
+            return url
+        }
+
+        for source in [location, notes] {
+            guard let source else { continue }
+            guard let url = Self.extractFirstMeetingURL(in: source) else { continue }
+            return url
+        }
+
+        return nil
+    }
+
+    var provider: MeetingPromptProvider? {
+        guard let meetingURL else { return nil }
+        return Self.provider(for: meetingURL)
+    }
+
+    private static let meetingURLDetector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+    )
+
+    private static func extractFirstMeetingURL(in text: String) -> URL? {
+        guard let detector = meetingURLDetector else { return nil }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        let matches = detector.matches(in: text, options: [], range: range)
+        for match in matches {
+            guard let url = match.url, provider(for: url) != nil else { continue }
+            return url
+        }
+        return nil
+    }
+
+    private static func provider(for url: URL) -> MeetingPromptProvider? {
+        guard let host = url.host else { return nil }
+        return MeetingPromptProvider.provider(forMeetingHost: host)
+    }
 }
 
 @available(macOS 14.0, *)
@@ -431,8 +470,8 @@ enum MeetingPromptSyntheticEvaluator {
         runtimeSnapshot: MeetingPromptRuntimeSnapshot
     ) -> MeetingPromptScoredCandidate? {
         guard !event.isAllDay else { return nil }
-        guard let meetingURL = extractMeetingURL(from: event),
-              let provider = provider(for: meetingURL) else { return nil }
+        guard let meetingURL = event.meetingURL,
+              let provider = event.provider else { return nil }
 
         let startsIn = event.startDate.timeIntervalSince(now)
         let endsIn = event.endDate.timeIntervalSince(now)
