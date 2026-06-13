@@ -24,6 +24,7 @@ final class MeetingPromptDetector {
     }
 
     var onPromptRequest: ((Candidate) -> Bool)?
+    var shouldSkipPromptEvaluation: (() -> Bool)?
 
     private let eventStore = EKEventStore()
     private var pollingTask: Task<Void, Never>?
@@ -40,16 +41,6 @@ final class MeetingPromptDetector {
     private static let meetingURLDetector = try? NSDataDetector(
         types: NSTextCheckingResult.CheckingType.link.rawValue
     )
-
-    private static let browserBundleIdentifiers: Set<String> = [
-        "com.apple.Safari",
-        "com.google.Chrome",
-        "com.google.Chrome.canary",
-        "com.microsoft.edgemac",
-        "com.brave.Browser",
-        "company.thebrowser.Browser",
-        "org.mozilla.firefox"
-    ]
 
     func start() {
         guard pollingTask == nil else { return }
@@ -190,6 +181,8 @@ final class MeetingPromptDetector {
         pruneExpiredEntries(now: now)
         seedNativeActivityIfNeeded(frontmostBundleID: frontmostBundleID, now: now)
 
+        guard shouldSkipPromptEvaluation?() != true else { return }
+
         var candidates: [ScoredCandidate] = []
         if TranscriptedPermissionAccess.calendarAccessGranted() {
             candidates.append(contentsOf: upcomingCalendarCandidates(
@@ -270,7 +263,7 @@ final class MeetingPromptDetector {
 
             let isFrontmost = frontmostBundleID.map(provider.activeBundleIdentifiers.contains) ?? false
             guard let presentation = MeetingPromptHeuristics.runtimePresentation(
-                providerName: displayName(for: provider),
+                providerName: provider.displayName,
                 isFrontmost: isFrontmost,
                 lastActiveAt: recentNativeActivity[provider],
                 now: now
@@ -310,134 +303,32 @@ final class MeetingPromptDetector {
         let searchEnd = now.addingTimeInterval(15 * 60)
         let predicate = eventStore.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: nil)
 
-        return eventStore.events(matching: predicate)
-            .compactMap { event in
-                scoredCandidate(
-                    from: event,
-                    now: now,
-                    runningBundleIDs: runningBundleIDs,
-                    frontmostBundleID: frontmostBundleID
+        let runtimeSnapshot = MeetingPromptRuntimeSnapshot(
+            runningBundleIDs: runningBundleIDs,
+            frontmostBundleID: frontmostBundleID,
+            recentNativeActivity: recentNativeActivity,
+            runtimeSuppressedUntil: runtimeSuppressedUntil
+        )
+        let eventSnapshots = eventStore.events(matching: predicate)
+            .map { event in
+                MeetingPromptCalendarEventSnapshot(
+                    id: event.calendarItemIdentifier,
+                    title: event.title,
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                    isAllDay: event.isAllDay,
+                    url: event.url,
+                    location: event.location,
+                    notes: event.notes
                 )
             }
-    }
 
-    private func scoredCandidate(
-        from event: EKEvent,
-        now: Date,
-        runningBundleIDs: Set<String>,
-        frontmostBundleID: String?
-    ) -> ScoredCandidate? {
-        guard !event.isAllDay else { return nil }
-        guard let meetingURL = extractMeetingURL(from: event), let provider = provider(for: meetingURL) else { return nil }
-
-        let startsIn = event.startDate.timeIntervalSince(now)
-        let genericWindow = MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(startsIn: startsIn)
-        let runtimeReason = activeRuntimeReason(
-            for: provider,
-            runningBundleIDs: runningBundleIDs,
-            frontmostBundleID: frontmostBundleID
+        return MeetingPromptSyntheticEvaluator.calendarCandidates(
+            from: eventSnapshots,
+            now: now,
+            runtimeSnapshot: runtimeSnapshot
         )
-        guard genericWindow else { return nil }
-
-        let eventTitle = displayTitle(from: event)
-        let transcriptTitle = suggestedTranscriptTitle(from: event)
-        let detail = buildDetail(eventTitle: eventTitle, startsIn: startsIn, runtimeReason: runtimeReason)
-        let score = scoreForCandidate(startsIn: startsIn, runtimeReason: runtimeReason)
-
-        return ScoredCandidate(
-            candidate: Candidate(
-                id: "calendar:\(event.calendarItemIdentifier)",
-                title: "Meeting detected",
-                detail: detail,
-                provider: provider,
-                reason: MeetingPromptHeuristics.reason(
-                    for: .calendarEvent,
-                    hasRuntimeContext: runtimeReason != nil
-                ),
-                source: .calendarEvent,
-                startDate: event.startDate,
-                endDate: event.endDate,
-                meetingURL: meetingURL,
-                suggestedTranscriptTitle: transcriptTitle
-            ),
-            score: score
-        )
-    }
-
-    private func displayTitle(from event: EKEvent) -> String {
-        suggestedTranscriptTitle(from: event) ?? "Upcoming meeting"
-    }
-
-    private func suggestedTranscriptTitle(from event: EKEvent) -> String? {
-        let trimmed = (event.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func buildDetail(eventTitle: String, startsIn: TimeInterval, runtimeReason: String?) -> String {
-        if let runtimeReason {
-            return "\(eventTitle) - \(runtimeReason)"
-        }
-
-        if startsIn > 90 {
-            let minutes = Int(ceil(startsIn / 60))
-            return "\(eventTitle) - starts in \(minutes) min"
-        }
-
-        if startsIn > 15 {
-            return "\(eventTitle) - starts soon"
-        }
-
-        if startsIn >= -120 {
-            return "\(eventTitle) - starting now"
-        }
-
-        return "\(eventTitle) - already in progress"
-    }
-
-    private func scoreForCandidate(startsIn: TimeInterval, runtimeReason: String?) -> Int {
-        var score = runtimeReason == nil ? 1 : 3
-
-        if (-60 ... 120).contains(startsIn) {
-            score += 2
-        } else if (-5 * 60 ... 5 * 60).contains(startsIn) {
-            score += 1
-        }
-
-        return score
-    }
-
-    private func activeRuntimeReason(
-        for provider: MeetingPromptProvider,
-        runningBundleIDs: Set<String>,
-        frontmostBundleID: String?
-    ) -> String? {
-        if !provider.activeBundleIdentifiers.isEmpty,
-           provider.activeBundleIdentifiers.contains(where: runningBundleIDs.contains) {
-            return "\(displayName(for: provider)) is open"
-        }
-
-        if provider.browserHosted,
-           let frontmostBundleID,
-           Self.browserBundleIdentifiers.contains(frontmostBundleID) {
-            return "meeting tab is active"
-        }
-
-        return nil
-    }
-
-    private func displayName(for provider: MeetingPromptProvider) -> String {
-        switch provider {
-        case .zoom:
-            return "Zoom"
-        case .googleMeet:
-            return "Google Meet"
-        case .teams:
-            return "Teams"
-        case .webex:
-            return "Webex"
-        case .facetime:
-            return "FaceTime"
-        }
+        .map { ScoredCandidate(candidate: $0.candidate, score: $0.score) }
     }
 
     private func extractMeetingURL(from event: EKEvent) -> URL? {

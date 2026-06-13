@@ -1215,14 +1215,13 @@ final class MeetingOverlayController {
     func presentDetectedMeetingPrompt(_ candidate: MeetingPromptDetector.Candidate, timeout seconds: Int = 10) -> Bool {
         guard let session = meetingSession else { return false }
 
-        switch session.state {
-        case .recording, .transcribing, .loadingModels:
+        let presentationSnapshot = MeetingPromptPresentationSnapshot(
+            sessionState: MeetingPromptSessionPromptState(session.state),
+            overlayState: MeetingPromptOverlayPromptState(state)
+        )
+        guard MeetingPromptPresentationGate.allowsDetectedMeetingPrompt(presentationSnapshot) else {
             return false
-        case .idle, .ready, .error:
-            break
         }
-
-        guard state == .idle || state == .saved else { return false }
 
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
@@ -1716,5 +1715,27 @@ final class MeetingOverlayController {
         frame.size.height = desiredHeight
         frame.size.width = desiredWidth
         panel.setFrame(frame, display: true, animate: true)
+    }
+}
+
+@available(macOS 14.0, *)
+private extension MeetingPromptOverlayPromptState {
+    init(_ state: MeetingOverlayController.OverlayState) {
+        switch state {
+        case .idle:
+            self = .idle
+        case .prompt:
+            self = .prompt
+        case .preparing:
+            self = .preparing
+        case .recording:
+            self = .recording
+        case .transcribing:
+            self = .transcribing
+        case .saved:
+            self = .saved
+        case .error:
+            self = .error
+        }
     }
 }
