@@ -3,9 +3,9 @@
 // A self-contained container so the overlay can fade and clip the whole
 // drawer as one unit while the panel animates its height.
 //
-// The header is hover-revealed: copy and an overflow menu float over the
-// transcript's top-right corner only while the pointer is inside the drawer,
-// keeping the resting surface chrome-free.
+// The transcript actions are hover-revealed: copy and an overflow menu float
+// over the transcript's bottom-right corner only while the pointer is inside
+// the drawer, keeping the resting surface chrome-free.
 //
 // Pure AppKit renderer per the overlay observation pattern: the controller
 // pushes content through `update(...)`; callbacks cover copy, the
@@ -110,8 +110,8 @@ final class MeetingLiveTranscriptDrawerView: NSView {
             accessibilityLabel: MeetingLiveViewAffordancePolicy.moreTooltip
         )
 
-        // Hover-revealed header: floats above the transcript's top-right
-        // corner and only appears while the pointer is inside the drawer.
+        // Hover-revealed actions: float above the transcript's bottom-right
+        // corner and only appear while the pointer is inside the drawer.
         hoverBar.alphaValue = 0
         hoverBar.addSubview(copyButton)
         hoverBar.addSubview(moreButton)
@@ -236,7 +236,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         let barWidth = buttonSize * 2 + 6
         hoverBar.frame = NSRect(
             x: bounds.width - pad - barWidth,
-            y: top - 8 - buttonSize,
+            y: MeetingOverlayTokens.drawerResizeHandleHeight + 8,
             width: barWidth,
             height: buttonSize
         )
