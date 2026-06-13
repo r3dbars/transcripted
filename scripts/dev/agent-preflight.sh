@@ -164,7 +164,7 @@ if [ -n "$changed_paths" ]; then
         if matches_any "$path" "scripts/ops/nightly-security-check.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/nightly-security-check.py"
-            add_command "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.47.json --write-report build/nightly-security-report.json"
+            add_command "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.48.json --write-report build/nightly-security-report.json"
         fi
 
         if matches_any "$path" "scripts/ops/release-gate-report.py"; then

@@ -58,7 +58,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/ops/nightly-security-check.py` — deterministic nightly security/privacy guardrail checker for repo drift, release/update drift, Homebrew cask/appcast parity, PostHog schema drift, raw observability payload keys, entitlements, shell hazards, recent-history secret leaks, and shared sanitizer coverage
   - Usage: `python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json`
   - Strict gate: `python3 scripts/ops/nightly-security-check.py --strict --write-report build/nightly-security-report.json`
-  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.47.json --write-report build/nightly-security-report.json`
+  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.48.json --write-report build/nightly-security-report.json`
   - Live release-surface gate: `python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces`
   - Sentry release gate: `python3 scripts/ops/nightly-security-check.py --sentry-release-health`
   - Required Sentry release gate: `python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health`
