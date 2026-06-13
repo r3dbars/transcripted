@@ -871,6 +871,150 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
     }
 }
 
+struct HomeFailedMeetingClearButton: NSViewRepresentable {
+    let title: String
+    let symbolName: String
+    let tone: SettingsInteractionTone
+    let automationIdentifier: String
+    let action: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = HoverActionButton()
+        button.isBordered = false
+        button.imagePosition = .imageLeading
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.perform(_:))
+        button.setButtonType(.momentaryChange)
+        button.bezelStyle = .rounded
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 8
+        button.layer?.masksToBounds = true
+        configure(button, context: context)
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        configure(button, context: context)
+    }
+
+    private func configure(_ button: NSButton, context: Context) {
+        button.title = title
+        button.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        button.contentTintColor = tintColor
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+        button.identifier = NSUserInterfaceItemIdentifier(automationIdentifier)
+        button.setAccessibilityIdentifier(automationIdentifier)
+        button.setAccessibilityLabel(title)
+        button.setAccessibilityRole(.button)
+        if let hoverButton = button as? HoverActionButton {
+            hoverButton.tone = tone
+        }
+    }
+
+    private var tintColor: NSColor {
+        switch tone {
+        case .destructive:
+            return .systemRed
+        case .warning:
+            return .systemOrange
+        case .accent:
+            return .controlAccentColor
+        case .neutral:
+            return .secondaryLabelColor
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+        }
+
+        @objc func perform(_ sender: NSButton) {
+            DispatchQueue.main.async {
+                self.action()
+            }
+        }
+    }
+
+    final class HoverActionButton: NSButton {
+        var tone: SettingsInteractionTone = .neutral {
+            didSet { updateAppearance() }
+        }
+
+        private var trackingAreaRef: NSTrackingArea?
+        private var isHovering = false {
+            didSet { updateAppearance() }
+        }
+
+        override var isHighlighted: Bool {
+            didSet { updateAppearance() }
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let trackingAreaRef {
+                removeTrackingArea(trackingAreaRef)
+            }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(area)
+            trackingAreaRef = area
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            isHovering = true
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            isHovering = false
+        }
+
+        override func accessibilityPerformPress() -> Bool {
+            performClick(nil)
+            return true
+        }
+
+        private func updateAppearance() {
+            let alpha: CGFloat
+            if isHighlighted {
+                alpha = 0.15
+            } else if isHovering {
+                alpha = 0.10
+            } else {
+                alpha = 0.06
+            }
+            layer?.backgroundColor = baseColor.withAlphaComponent(alpha).cgColor
+            layer?.borderColor = baseColor.withAlphaComponent(isHovering || isHighlighted ? 0.24 : 0.14).cgColor
+            layer?.borderWidth = 1
+        }
+
+        private var baseColor: NSColor {
+            switch tone {
+            case .destructive:
+                return .systemRed
+            case .warning:
+                return .systemOrange
+            case .accent:
+                return .controlAccentColor
+            case .neutral:
+                return .labelColor
+            }
+        }
+    }
+}
+
 // MARK: - Activity rows
 
 private enum HomeActivityRowFormatting {
@@ -2398,7 +2542,7 @@ private struct HomeFailedMeetingRow: View {
                         .help(retryHelp)
                     }
 
-                    SettingsInlineActionButton(
+                    HomeFailedMeetingClearButton(
                         title: hasRetainedAudioFiles ? "Delete" : "Dismiss",
                         symbolName: hasRetainedAudioFiles ? "trash" : "xmark",
                         tone: hasRetainedAudioFiles ? .destructive : .neutral,
@@ -2408,6 +2552,7 @@ private struct HomeFailedMeetingRow: View {
                     ) {
                         onClear()
                     }
+                    .frame(minWidth: hasRetainedAudioFiles ? 78 : 82, minHeight: 30)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

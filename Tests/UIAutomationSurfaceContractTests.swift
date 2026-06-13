@@ -115,6 +115,8 @@ func testUIAutomationSurfaceContract() {
 
         for requiredHomeRendererHook in [
             "title: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
+            "HomeFailedMeetingClearButton(",
+            "override func accessibilityPerformPress() -> Bool",
             "HomeRowMoreMenuButton(items:",
             "MenuActionTarget(item: item)",
             "DispatchQueue.main.async {\n                self.item.action()",
