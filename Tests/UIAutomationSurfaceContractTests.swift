@@ -111,6 +111,7 @@ func testUIAutomationSurfaceContract() {
         for requiredHomeRendererHook in [
             "title: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
             "HomeRowMoreMenuButton(items:",
+            "DispatchQueue.main.async {\n                item.action()",
             "title: \"Copy for agent\"",
         ] {
             assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
