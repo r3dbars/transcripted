@@ -111,11 +111,16 @@ func testUIAutomationSurfaceContract() {
         for requiredHomeRendererHook in [
             "title: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
             "HomeRowMoreMenuButton(items:",
-            "DispatchQueue.main.async {\n                item.action()",
+            "MenuActionTarget(item: item)",
+            "DispatchQueue.main.async {\n                self.item.action()",
             "title: \"Copy for agent\"",
         ] {
             assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
+        assertFalse(
+            homeSource.contains("representedObject = item.id"),
+            "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
+        )
 
         for requiredOnboardingHook in [
             "Enable system audio",
