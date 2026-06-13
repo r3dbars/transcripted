@@ -57,6 +57,25 @@ final class SpeakerProfileMergerTests: XCTestCase {
         XCTAssertNotNil(database.getSpeaker(id: second.id))
     }
 
+    func testMergeDuplicatesPreservesProtectedPendingProfiles() {
+        let first = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        let second = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+
+        database.mergeDuplicates(threshold: 0.6, protecting: [first.id])
+
+        XCTAssertNotNil(
+            database.getSpeaker(id: first.id),
+            "Profiles referenced by pending speaker review rows must not be absorbed before review completes."
+        )
+        XCTAssertNotNil(database.getSpeaker(id: second.id))
+    }
+
     func testPruneWeakProfilesKeepsDeferredProfilesWithReviewSamples() throws {
         let profileId = UUID()
         _ = database.addOrUpdateSpeaker(

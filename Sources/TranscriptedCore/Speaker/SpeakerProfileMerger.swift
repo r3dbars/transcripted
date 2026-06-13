@@ -247,8 +247,12 @@ extension SpeakerDatabase {
     /// Keeps the profile with more calls (better embedding). Transfers display name if the
     /// weaker profile has one and the stronger doesn't. Call after each recording.
     public func mergeDuplicates(threshold: Double = 0.6) {
+        mergeDuplicates(threshold: threshold, protecting: [])
+    }
+
+    public func mergeDuplicates(threshold: Double = 0.6, protecting protectedIds: Set<UUID>) {
         queue.sync {
-            mergeDuplicatesImpl(threshold: threshold)
+            mergeDuplicatesImpl(threshold: threshold, protectedIds: protectedIds)
         }
     }
 
@@ -259,7 +263,11 @@ extension SpeakerDatabase {
         mergeDuplicates(threshold: 0.6)
     }
 
-    private func mergeDuplicatesImpl(threshold: Double) {
+    public func mergeDuplicates(protecting protectedIds: Set<UUID>) {
+        mergeDuplicates(threshold: 0.6, protecting: protectedIds)
+    }
+
+    private func mergeDuplicatesImpl(threshold: Double, protectedIds: Set<UUID>) {
         let speakers = allSpeakersImpl()
         guard speakers.count > 1 else { return }
 
@@ -270,9 +278,11 @@ extension SpeakerDatabase {
         // No outer transaction — SQLite doesn't support nested BEGIN EXCLUSIVE.
         for i in 0..<speakers.count {
             guard !mergedIds.contains(speakers[i].id) else { continue }
+            guard !protectedIds.contains(speakers[i].id) else { continue }
 
             for j in (i + 1)..<speakers.count {
                 guard !mergedIds.contains(speakers[j].id) else { continue }
+                guard !protectedIds.contains(speakers[j].id) else { continue }
                 guard !shouldSkipDuplicateMerge(speakers[i], speakers[j]) else { continue }
 
                 let similarity = cosineSimilarity(speakers[i].embedding, speakers[j].embedding)

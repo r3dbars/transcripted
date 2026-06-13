@@ -34,6 +34,9 @@ public protocol SpeakerStore: Sendable {
     /// Merge obviously duplicate profiles (high cosine similarity)
     func mergeDuplicates()
 
+    /// Merge obvious duplicates while preserving profiles that are still tied to pending review rows
+    func mergeDuplicates(protecting protectedIds: Set<UUID>)
+
     /// Remove weak/unnamed profiles with low confidence
     func pruneWeakProfiles()
 
@@ -45,4 +48,10 @@ public protocol SpeakerStore: Sendable {
 
     /// Find profiles matching a name (fuzzy, with name variants)
     func findProfilesByName(_ name: String) -> [SpeakerProfile]
+}
+
+public extension SpeakerStore {
+    func mergeDuplicates(protecting protectedIds: Set<UUID>) {
+        mergeDuplicates()
+    }
 }
