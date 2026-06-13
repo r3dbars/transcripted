@@ -304,6 +304,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingFailureKind.swift"
     "Sources/Meeting/MeetingPromptDetector.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
+    "Sources/Meeting/MicActivityMonitor.swift"
     "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingAudioStorageManager.swift"
     "Sources/Meeting/MeetingRecordingCleanup.swift"
