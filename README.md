@@ -3,7 +3,7 @@
 # Transcripted
 
 [![Latest release](https://img.shields.io/github/v/release/r3dbars/transcripted?label=release&color=ee7b35)](https://github.com/r3dbars/transcripted/releases/latest)
-[![Downloads](https://img.shields.io/badge/downloads-releases-ee7b35)](https://github.com/r3dbars/transcripted/releases)
+[![Downloads](https://img.shields.io/github/downloads/r3dbars/transcripted/total?label=downloads&color=ee7b35)](https://github.com/r3dbars/transcripted/releases)
 [![macOS 26+ on Apple Silicon](https://img.shields.io/badge/macOS_26%2B-Apple_Silicon-1d1d1f?logo=apple&logoColor=white)](#install)
 [![MIT license](https://img.shields.io/badge/license-MIT-3da639)](LICENSE)
 [![100% local transcription](https://img.shields.io/badge/transcription-100%25_local-3da639)](#privacy)
