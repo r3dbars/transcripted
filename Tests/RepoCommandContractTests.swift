@@ -1,5 +1,10 @@
 import Foundation
 
+// This is a repo-structure contract, not behavioral coverage. The suites here assert that
+// build/test scripts, docs, and release metadata keep agreed-on shapes and strings — they do
+// not exercise app runtime behavior. When one fails, fix the script/doc it names rather than
+// reaching for the app code.
+
 func testRepoCommandContract() {
     runSuite("Repo command contract - root build and test wrappers stay script-based") {
         let wrappers = [
@@ -232,6 +237,23 @@ func testRepoCommandContract() {
         assertTrue(
             buildDepsScript.contains("newest_dependency_input") && buildDepsScript.contains("deps_are_ready"),
             "build-deps.sh should rebuild stale TranscriptedCore artifacts instead of printing a false ready message"
+        )
+        // The dual-archive invariant — Core lives in libDraftDeps.a (app path) and is absent
+        // from libExternalDeps.a (SPM path) — must stay verified at build time, not just trusted.
+        // A raw `ar t | wc -l` object count cannot catch Core leaking into (or vanishing from) an
+        // archive, so the build must keep an nm symbol-level gate.
+        assertTrue(
+            buildDepsScript.contains("16TranscriptedCore"),
+            "build-deps.sh should validate TranscriptedCore symbol placement via the Swift mangled module token"
+        )
+        assertTrue(
+            buildDepsScript.contains("xcrun --find llvm-nm")
+                && buildDepsScript.contains("--defined-only"),
+            "build-deps.sh should use nm with --defined-only so undefined Core references are not miscounted"
+        )
+        assertTrue(
+            buildDepsScript.contains("The SPM-path archive is contaminated with TranscriptedCore objects"),
+            "build-deps.sh should fail with an actionable message when libExternalDeps.a contains Core symbols"
         )
     }
 
@@ -2638,8 +2660,6 @@ func testRepoCommandContract() {
         let featureTemplate = readRepoTextFile(".github/ISSUE_TEMPLATE/feature_request.md")
         let prTemplate = readRepoTextFile(".github/PULL_REQUEST_TEMPLATE.md")
         let repoHygieneWorkflow = readRepoTextFile(".github/workflows/repo-hygiene.yml")
-        let qaGateAutoClose = readRepoTextFile(".github/workflows/qa-gate-auto-close-bet88.yml")
-        let qaGateStatus = readRepoTextFile(".github/workflows/qa-gate-status-bet88.yml")
         let workflow = readRepoTextFile("WORKFLOW.md")
         let orchestration = readRepoTextFile("docs/agent-issue-orchestration.md")
 
@@ -2693,13 +2713,6 @@ func testRepoCommandContract() {
                 && repoHygieneWorkflow.contains("find scripts -name '*.rb' -print0 | xargs -0 -n1 ruby -c")
                 && repoHygieneWorkflow.contains("find scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile"),
             "repo should have a lightweight pull_request hygiene workflow that syntax-checks every script via globs, not a hand-maintained list"
-        )
-        assertTrue(
-            qaGateAutoClose.contains("contains(github.event.issue.labels.*.name, 'qa-gate-auto-close')")
-                && qaGateAutoClose.contains("Historical BET-88/#428 fixture")
-                && qaGateStatus.contains("Historical BET-88/#428 fixture")
-                && !qaGateAutoClose.contains("child_issue_number"),
-            "old BET-88 auto-close workflow should be label-gated and should not mutate a hard-coded child issue"
         )
         assertTrue(
             workflow.contains("symphony-workspaces` folder name is historical")

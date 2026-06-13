@@ -155,11 +155,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     private static func dayLabel(for day: Date) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
-        let formatter = Self.daySectionFormatter
-        return formatter.string(from: day)
+        HomeDaySectionLabel.label(for: day)
     }
 
     private func trackActivationReturnProxyIfNeeded(
@@ -185,12 +181,6 @@ final class HomeViewModel: ObservableObject {
         )
     }
 
-    private static let daySectionFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = .current
-        f.dateFormat = "EEEE, MMM d"
-        return f
-    }()
 }
 
 struct HomeDaySection<Item>: Identifiable {
@@ -321,12 +311,7 @@ struct HomeFeedbackTarget: Identifiable {
     }
 
     private static func stableReferenceID(for value: String) -> String {
-        var hash: UInt64 = 1_469_598_103_934_665_603
-        for byte in value.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return String(hash, radix: 16)
+        HomeStableReferenceID.id(for: value)
     }
 }
 
@@ -1628,11 +1613,6 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 
 // MARK: - Capture list
 
-enum HomeCaptureListCopy {
-    static let emptyMeetings = "No recent meetings. Record one or transcribe an audio file from General."
-    static let emptyDictations = "No recent dictations."
-}
-
 struct HomeCaptureListSection<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
@@ -2222,11 +2202,7 @@ private enum HomeMeetingSpeakerColor {
             .systemIndigo,
         ]
 
-        let normalized = speaker.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = normalized.unicodeScalars.reduce(UInt32(0)) { partial, scalar in
-            partial &+ scalar.value
-        }
-        let index = Int(value % UInt32(palette.count))
+        let index = HomeMeetingSpeakerPalette.slotIndex(for: speaker, slotCount: palette.count)
         return Color(nsColor: palette[index])
     }
 }

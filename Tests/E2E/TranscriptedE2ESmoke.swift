@@ -556,6 +556,28 @@ private final class TranscriptedE2ESmokeHarness {
             try expect(!diagnostics.contains(forbidden), "Support diagnostics should not contain sensitive value: \(forbidden)")
         }
 
+        // Absence of forbidden values alone also passes if a whole section was silently dropped or
+        // the body came back empty. Assert the redacted structure actually survived: known-safe
+        // fields must still be present, and the explicit redaction markers must appear, proving the
+        // sensitive sections were emitted and redacted rather than omitted.
+        for expected in [
+            "Version: 9.9.9",
+            "input_device_class: built_in",
+            "session_stage: recording",
+        ] {
+            try expect(diagnostics.contains(expected), "Support diagnostics should keep known-safe field: \(expected)")
+        }
+        // Note: the injected sk- token only appears inside `token=...` assignments, so the
+        // apiKeyRegex's "sk-****" is superseded by a later secret-assignment pass; the raw token's
+        // absence is already asserted above. These markers prove sections were emitted and redacted.
+        for marker in [
+            "[redacted-path]",
+            "[redacted-email]",
+            "[redacted-sensitive-value]",
+        ] {
+            try expect(diagnostics.contains(marker), "Support diagnostics should surface redaction marker: \(marker)")
+        }
+
         let eventLog = try String(contentsOf: fixtures.eventLogURL, encoding: .utf8)
         try expect(!eventLog.contains(fixtures.meetingURL.path), "Sanitized observability event should not contain file paths")
         try expect(!eventLog.contains(secretToken), "Sanitized observability event should not contain tokens")

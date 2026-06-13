@@ -2688,12 +2688,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func meetingStartFailureKind(from message: String) -> String {
-        let normalized = message.lowercased()
-        if normalized.contains("permission") { return "permission_missing" }
-        if normalized.contains("timeout") || normalized.contains("timed out") { return "start_timeout" }
-        if normalized.contains("system audio") { return "system_stream_unavailable" }
-        if normalized.contains("microphone") || normalized.contains("mic") { return "mic_unavailable" }
-        return "unexpected"
+        MeetingStartFailureClassifier.kind(from: message)
     }
 
     private func meetingCaptureAnalyticsProperties(snapshot: AudioPipelineDiagnosticsSnapshot) -> [String: String] {
@@ -2857,18 +2852,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func systemAudioStatusMessage(for status: SystemAudioStatus) -> String {
-        switch status {
-        case .unknown:
-            return "System audio status reset"
-        case .healthy:
-            return "System audio capture is healthy"
-        case .reconnecting:
-            return "System audio capture is reconnecting"
-        case .silent:
-            return "System audio capture is silent"
-        case .failed:
-            return "System audio capture failed"
-        }
+        MeetingSystemAudioStatusCopy.message(for: status)
     }
 
     private func boolString(_ value: Bool) -> String {

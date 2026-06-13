@@ -3,10 +3,10 @@ import Foundation
 func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy docs list matches the source allowlist") {
         let documentedEvents = documentedAnalyticsEvents().sorted()
-        let policyEvents = sourceAnalyticsPolicyEvents().sorted()
+        let policyEvents = AnalyticsEventPolicy.allEventNames.sorted()
 
         assertFalse(documentedEvents.isEmpty, "privacy observability doc should list analytics events")
-        assertFalse(policyEvents.isEmpty, "analytics event policy source should expose parseable policy events")
+        assertFalse(policyEvents.isEmpty, "analytics event policy should expose its allowlisted event names")
         assertEqual(
             documentedEvents,
             policyEvents,
@@ -889,33 +889,6 @@ private func documentedAnalyticsEvents() -> [String] {
         }
 
         return String(trimmed.dropFirst(3).dropLast())
-    }
-}
-
-private func sourceAnalyticsPolicyEvents() -> [String] {
-    let text = loadRepoText("Sources/Observability/AnalyticsEventPolicy.swift")
-    guard let start = text.range(of: "private static let allowedPolicies: [String: AnalyticsEventPolicy] = [") else {
-        return []
-    }
-
-    let sourceAfterStart = String(text[start.upperBound...])
-    guard let end = sourceAfterStart.range(of: "\n    ]") else {
-        return []
-    }
-
-    let policyBody = String(sourceAfterStart[..<end.lowerBound])
-    return policyBody.split(separator: "\n").compactMap { line in
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("\""), trimmed.contains("\": .init(") else {
-            return nil
-        }
-
-        let withoutLeadingQuote = trimmed.dropFirst()
-        guard let closingQuote = withoutLeadingQuote.firstIndex(of: "\"") else {
-            return nil
-        }
-
-        return String(withoutLeadingQuote[..<closingQuote])
     }
 }
 

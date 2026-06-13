@@ -25,24 +25,54 @@ case "$coverage_env" in
         ;;
 esac
 
+USAGE="Usage: bash run-tests.sh [--coverage] [--filter <entryFn|File>] [--list]"
+
+filter_selector=""
+list_only=false
+expect_filter_value=false
+
 for arg in "$@"; do
+    # Two-token form: the previous iteration set this sentinel so the value is
+    # consumed here instead of falling through to the unknown-option arm.
+    if [ "$expect_filter_value" = true ]; then
+        filter_selector="$arg"
+        expect_filter_value=false
+        continue
+    fi
     case "$arg" in
         --coverage)
             coverage_requested=true
             ;;
+        --filter|--only)
+            expect_filter_value=true
+            ;;
+        --filter=*|--only=*)
+            filter_selector="${arg#*=}"
+            ;;
+        --list)
+            list_only=true
+            ;;
         -h|--help)
-            echo "Usage: bash run-tests.sh [--coverage]"
+            echo "$USAGE"
             echo ""
             echo "Set FAST_TEST_COVERAGE=1 or pass --coverage to write LLVM coverage artifacts to $COVERAGE_DIR."
+            echo "Pass --filter <selector> (or --only <selector>) to run a single suite by entry function or file name."
+            echo "Pass --list to print the known fast-test entry functions and exit."
             exit 0
             ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: bash run-tests.sh [--coverage]"
+            echo "$USAGE"
             exit 2
             ;;
     esac
 done
+
+if [ "$expect_filter_value" = true ]; then
+    echo "Missing value for --filter"
+    echo "$USAGE"
+    exit 2
+fi
 
 cleanup_generated_runner() {
     rm -f "$GENERATED_RUNNER"
@@ -102,6 +132,57 @@ if [ -n "$stray_root_swift" ]; then
     exit 1
 fi
 
+# Known entry-function names, derived after the integrity guards above so --list
+# and --filter only ever surface a manifest that already passed sync checks.
+known_entry_functions=$(
+    printf '%s\n' "$manifest_entries" | \
+    cut -d: -f2 | \
+    sort
+)
+
+if [ "$list_only" = true ]; then
+    printf '%s\n' "$known_entry_functions"
+    exit 0
+fi
+
+if [ -n "$filter_selector" ]; then
+    selector_lower=$(printf '%s' "$filter_selector" | tr '[:upper:]' '[:lower:]')
+    filtered_entries=$(
+        printf '%s\n' "$manifest_entries" | \
+        while IFS=':' read -r test_file entry_function; do
+            [ -z "$test_file" ] && continue
+            file_no_ext="${test_file%.swift}"
+            file_lower=$(printf '%s' "$test_file" | tr '[:upper:]' '[:lower:]')
+            func_lower=$(printf '%s' "$entry_function" | tr '[:upper:]' '[:lower:]')
+            match=false
+            if [ "$filter_selector" = "$entry_function" ] || \
+               [ "$filter_selector" = "$test_file" ] || \
+               [ "$filter_selector" = "$file_no_ext" ]; then
+                match=true
+            fi
+            # Substring match (case-insensitive) without a case/esac block, which
+            # confuses the bash 3.2 parser inside this $() substitution.
+            if [ "${file_lower#*"$selector_lower"}" != "$file_lower" ] || \
+               [ "${func_lower#*"$selector_lower"}" != "$func_lower" ]; then
+                match=true
+            fi
+            if [ "$match" = true ]; then
+                printf '%s:%s\n' "$test_file" "$entry_function"
+            fi
+        done
+    )
+
+    if [ -z "$filtered_entries" ]; then
+        echo "No fast test matches: $filter_selector"
+        echo ""
+        echo "Known entry functions:"
+        printf '%s\n' "$known_entry_functions"
+        exit 2
+    fi
+
+    manifest_entries="$filtered_entries"
+fi
+
 mkdir -p "$BUILD_DIR"
 
 cat > "$GENERATED_RUNNER" <<'EOF'
@@ -123,6 +204,13 @@ while IFS=':' read -r test_file entry_function; do
 
     if [ ! -f "Tests/$test_file" ]; then
         echo "Manifest references missing fast test file: Tests/$test_file"
+        exit 1
+    fi
+
+    # Catch manifest typos here so they fail with a precise message instead of a
+    # cryptic swiftc 'cannot find <entry> in scope' from the generated runner.
+    if ! grep -q "func $entry_function(" "Tests/$test_file"; then
+        echo "Manifest entry function not found: $entry_function (declared in Tests/$test_file?)"
         exit 1
     fi
 
@@ -286,7 +374,30 @@ APP_SOURCES=(
     "Sources/UI/Shared/MeetingAudioPlayback.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift"
+    "Sources/UI/Settings/TypingTimeSavedFormatter.swift"
+    "Sources/UI/Settings/AutoEnterDisplayNameResolver.swift"
+    "Sources/UI/Overlay/MeetingDurationFormatter.swift"
+    "Sources/UI/Overlay/LiveTranscriptPlainTextRenderer.swift"
+    "Sources/Meeting/MeetingStartFailureClassifier.swift"
+    "Sources/Meeting/MeetingSystemAudioStatusCopy.swift"
+    "Sources/UI/Settings/HomePresentation.swift"
+    "Sources/Capture/PhysicalShortcutMatcher.swift"
 )
+
+# Fail early on a stale APP_SOURCES entry (renamed or deleted source) so the
+# error names the missing path instead of a raw swiftc 'no such file' dump.
+missing_app_sources=()
+for app_source in "${APP_SOURCES[@]}"; do
+    if [ ! -f "$app_source" ]; then
+        missing_app_sources+=("$app_source")
+    fi
+done
+if [ "${#missing_app_sources[@]}" -gt 0 ]; then
+    echo "APP_SOURCES lists files that no longer exist on disk:"
+    printf '  - %s\n' "${missing_app_sources[@]}"
+    echo "Update the APP_SOURCES list in $0 to match the current tree."
+    exit 1
+fi
 
 TEST_BINARY="$BUILD_DIR/tests"
 
@@ -324,13 +435,35 @@ SWIFTC_ARGS+=(
     -o "$TEST_BINARY"
 )
 
-"${SWIFTC_ARGS[@]}" 2>&1
+compile_status=0
+"${SWIFTC_ARGS[@]}" 2>&1 || compile_status=$?
+if [ "$compile_status" -ne 0 ]; then
+    echo ""
+    echo "+------------------------------------------------------------------+"
+    echo "| Fast-test compile failed.                                        |"
+    echo "| A 'cannot find ... in scope' usually means a manifest entry or   |"
+    echo "| APP_SOURCES file is missing or out of date.                      |"
+    echo "| Check Tests/FastTests.manifest and the APP_SOURCES list in this  |"
+    echo "| runner before chasing the swiftc output above.                   |"
+    echo "+------------------------------------------------------------------+"
+    exit "$compile_status"
+fi
 
 echo "Running tests..."
 echo ""
 
+print_failure_rerun_hint() {
+    echo ""
+    echo "Re-run one suite with: bash run-tests.sh --filter <entryFn>"
+}
+
 if [ "$coverage_requested" = true ]; then
-    LLVM_PROFILE_FILE="$COVERAGE_DIR/default-%p.profraw" TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY"
+    run_status=0
+    LLVM_PROFILE_FILE="$COVERAGE_DIR/default-%p.profraw" TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY" || run_status=$?
+    if [ "$run_status" -ne 0 ]; then
+        print_failure_rerun_hint
+        exit "$run_status"
+    fi
 
     profraw_files=("$COVERAGE_DIR"/*.profraw)
     if [ ! -e "${profraw_files[0]}" ]; then
@@ -364,5 +497,10 @@ if [ "$coverage_requested" = true ]; then
     echo "Coverage summary: $COVERAGE_SUMMARY"
     echo "Coverage LCOV: $COVERAGE_LCOV"
 else
-    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY"
+    run_status=0
+    TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$TEST_BINARY" || run_status=$?
+    if [ "$run_status" -ne 0 ]; then
+        print_failure_rerun_hint
+        exit "$run_status"
+    fi
 fi

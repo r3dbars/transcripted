@@ -8,6 +8,12 @@ struct AnalyticsEventPolicy: Equatable {
         allowedPolicies[event]
     }
 
+    /// All allowlisted analytics event names, sorted. Exposed so tests can assert
+    /// source-vs-docs parity against the compiled policy table instead of parsing this file's text.
+    static var allEventNames: [String] {
+        allowedPolicies.keys.sorted()
+    }
+
     private static let meetingCaptureDiagnosticProperties: Set<String> = [
         "attenuation_kind",
         "buffer_success_bucket",

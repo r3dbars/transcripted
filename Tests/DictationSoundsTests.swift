@@ -1,3 +1,29 @@
+// DictationSoundsTests.swift
+//
+// Three kinds of coverage live in this file; they are NOT the same strength of proof:
+//
+// REAL BEHAVIORAL COVERAGE (compiled): the UISoundPreferences suites and the
+// "AppSoundPlayer uses expected bundled files only" / "playback entrypoints are best
+// effort" suites exercise Foundation-pure logic compiled into the fast-test runner —
+// the default-on preference, explicit get/set, and the per-cue bundled-file-name and
+// volume-multiplier mapping. These run the real logic and assert real outputs.
+//
+// REAL STRUCTURAL RESOURCE CONTRACT (NOT compiled, but a real on-disk fact): the
+// "Bundled sound files are exactly the active cue set" suite lists Resources/Sounds on
+// disk and asserts the exact file set. Resources/Sounds is copied wholesale into the app
+// bundle, so this is a genuine resource invariant (no unused/surprise cues ship) — it
+// checks the real filesystem, not source text.
+//
+// IMPLEMENTATION-PINNING PRESENCE PINS (NOT compiled): the "Feedback submit paths stay
+// silent" suite reads Sources/UI/Shared/TranscriptedSupportActions.swift and
+// Sources/UI/Settings/TranscriptedSettingsView.swift as TEXT and asserts ABSENCE of
+// `AppSoundPlayer.shared.play(.feedbackSubmitted` and `NSSound.beep()` on the feedback
+// paths. These SwiftUI/AppKit sources are NOT compiled into this Foundation-only runner,
+// so these greps pin source structure, not runtime behavior: they guard the product rule
+// that submitting feedback opens email silently (no app cue, no system beep). If you
+// rename those functions or change how feedback playback is wired, update both the source
+// and these presence pins together.
+
 import Foundation
 
 func testDictationSounds() {

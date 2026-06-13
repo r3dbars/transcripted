@@ -34,7 +34,7 @@ func testHomeImportAudioAction() {
             "meetings tab should not carry the imported-audio action"
         )
         assertTrue(
-            homeSource.contains("transcribe an audio file from General"),
+            HomeCaptureListCopy.emptyMeetings.contains("transcribe an audio file from General"),
             "home meeting empty state should point users back to the import location"
         )
     }

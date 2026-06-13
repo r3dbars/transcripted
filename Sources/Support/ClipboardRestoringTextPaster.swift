@@ -86,6 +86,15 @@ private func postClipboardPasteShortcut() -> Bool {
     return true
 }
 
+enum ClipboardTargetActivationPolicy {
+    /// Pure wait decision used by `waitForTargetActivation`: keep waiting only while the
+    /// target is not yet frontmost AND the elapsed time has not reached the timeout.
+    static func shouldWait(targetIsFrontmost: Bool, elapsed: TimeInterval, timeout: TimeInterval) -> Bool {
+        guard !targetIsFrontmost else { return false }
+        return elapsed < timeout
+    }
+}
+
 struct DictationPasteTarget: Equatable {
     let processIdentifier: pid_t?
     let bundleIdentifier: String?
@@ -361,8 +370,12 @@ final class ClipboardRestoringTextPaster {
     private func waitForTargetActivation(_ target: DictationPasteTarget, timeout: TimeInterval) -> Bool {
         guard timeout > 0 else { return false }
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
+        let start = Date()
+        while ClipboardTargetActivationPolicy.shouldWait(
+            targetIsFrontmost: false,
+            elapsed: Date().timeIntervalSince(start),
+            timeout: timeout
+        ) {
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
             if target.matchesCurrentFrontmostApp() {
                 return true

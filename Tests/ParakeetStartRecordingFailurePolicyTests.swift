@@ -1,3 +1,29 @@
+// ParakeetStartRecordingFailurePolicyTests.swift
+//
+// Two kinds of coverage live in this file; they are NOT the same strength of proof:
+//
+// REAL BEHAVIORAL COVERAGE (compiled): every `runSuite` from the top of the file
+// down through the CoreAudio-error mapping suites exercises Foundation-pure decision
+// types that are actually compiled into the fast-test runner —
+// ParakeetStartRecordingFailurePolicy, ParakeetDeviceRecoveryFailurePolicy /
+// ReadinessPolicy / TimeoutPolicy, ParakeetAudioEngineRetirementPolicy,
+// ParakeetASRManagerCleanupPolicy, ParakeetASRInferenceActivityState,
+// ParakeetAudioFormatReadinessPolicy, ParakeetInputOverrideSettlePolicy, and
+// ParakeetTapSampleRatePolicy. These run the real logic and assert real outputs.
+//
+// IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the final two suites
+// ("zombie watchdog marks recording idle before graph reset" and "stopRecording
+// cancels pending zombie restart while idle") read Sources/Speech/ParakeetEngine.swift
+// as TEXT and grep for relative ordering of statements. ParakeetEngine's teardown is
+// CoreAudio/Carbon-wired and is NOT compiled into this Foundation-only runner, so these
+// greps pin source structure, not runtime behavior. They guard REAL invariants that
+// caused real AirPods / zombie-recording bugs (mark recording idle before touching
+// CoreAudio; gate the zombie retry on the pending-restart flag so a user stop can cancel
+// it). They are intentionally kept as source-text contracts rather than a runtime seam:
+// extracting a seam would restructure real-time CoreAudio teardown control flow, which is
+// too risky to refactor for testability. If you move/rename these functions or reorder
+// their statements, update both the source and these greps together.
+
 import Foundation
 
 func testParakeetStartRecordingFailurePolicy() {

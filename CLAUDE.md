@@ -74,7 +74,7 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 
 ### Running a single test
 
-Fast tests are top-level functions, not XCTest cases. To run one in isolation, temporarily reduce the manifest to that one entry and run `bash run-tests.sh`, or invoke the compiled runner under `build/tests/` directly. For the SPM target use `swift test --filter <TestName>` (e.g. `swift test --filter MicRecordingFileMergerTests`).
+Fast tests are top-level functions, not XCTest cases. To run one in isolation, use `bash run-tests.sh --filter <entryFn|File>` (e.g. `bash run-tests.sh --filter testJSONLWriter`); the selector matches an entry function, a file name, or a case-insensitive substring of either, and `bash run-tests.sh --list` prints the known entry functions. For the SPM target use `swift test --filter <TestName>` (e.g. `swift test --filter MicRecordingFileMergerTests`).
 
 ## Build-system shape
 

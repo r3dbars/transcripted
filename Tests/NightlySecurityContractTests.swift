@@ -1,3 +1,9 @@
+// Repo-structure / contract suite, not behavioral coverage.
+// The suites parsing config/security/nightly-security-manifest.json are real data
+// contracts (they decode and validate manifest values). The remaining doc and
+// checker-script suites are structural greps that confirm files exist and stay in
+// sync; none of them exercise runtime security logic.
+
 import Foundation
 
 func testNightlySecurityContract() {

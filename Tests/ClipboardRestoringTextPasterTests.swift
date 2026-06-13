@@ -230,16 +230,51 @@ func testClipboardRestoringTextPaster() async {
         }
 
         runSuite("ClipboardRestoringTextPaster — waits briefly for menu-triggered target activation") {
-            let source = readClipboardPasterSource()
-
             assertTrue(
                 TranscriptedConstants.clipboardTargetActivationWait > 0
                     && TranscriptedConstants.clipboardTargetActivationWait < 0.5,
                 "activation wait should be short but non-zero"
             )
+
             assertTrue(
-                source.contains("waitForTargetActivation(target, timeout: activationWait)"),
-                "paste-back should wait briefly before treating target activation as focus loss"
+                ClipboardTargetActivationPolicy.shouldWait(
+                    targetIsFrontmost: false,
+                    elapsed: 0,
+                    timeout: 0.2
+                ),
+                "paste-back should keep waiting while the target is not frontmost and the timeout has not elapsed"
+            )
+            assertTrue(
+                ClipboardTargetActivationPolicy.shouldWait(
+                    targetIsFrontmost: false,
+                    elapsed: 0.19,
+                    timeout: 0.2
+                ),
+                "paste-back should keep waiting just under the activation timeout"
+            )
+            assertFalse(
+                ClipboardTargetActivationPolicy.shouldWait(
+                    targetIsFrontmost: true,
+                    elapsed: 0,
+                    timeout: 0.2
+                ),
+                "paste-back should stop waiting as soon as the target becomes frontmost"
+            )
+            assertFalse(
+                ClipboardTargetActivationPolicy.shouldWait(
+                    targetIsFrontmost: false,
+                    elapsed: 0.2,
+                    timeout: 0.2
+                ),
+                "paste-back should stop waiting once the activation timeout has elapsed"
+            )
+            assertFalse(
+                ClipboardTargetActivationPolicy.shouldWait(
+                    targetIsFrontmost: false,
+                    elapsed: 0.5,
+                    timeout: 0.2
+                ),
+                "paste-back should stop waiting after the activation timeout is exceeded"
             )
         }
     }
@@ -746,12 +781,6 @@ func testClipboardRestoringTextPaster() async {
         }
         assertNil(clipboardAfterFailure, "failed copied fallback should not restore stale clipboard content")
     }
-}
-
-private func readClipboardPasterSource() -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent("Sources/Support/ClipboardRestoringTextPaster.swift")
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }
 
 @MainActor

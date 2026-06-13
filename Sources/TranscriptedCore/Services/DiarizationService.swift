@@ -299,7 +299,7 @@ public class DiarizationService: ObservableObject {
     }
 
     /// Convert FluidAudio's string speaker ID (e.g., "speaker_0") to integer
-    private nonisolated func speakerIdFromString(_ id: String) -> Int {
+    nonisolated func speakerIdFromString(_ id: String) -> Int {
         // Sortformer uses "speaker_0", "speaker_1", etc.
         if let separator = id.lastIndex(of: "_"),
            let intId = Int(id[id.index(after: separator)...]) {
