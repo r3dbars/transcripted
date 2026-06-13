@@ -268,6 +268,7 @@ APP_SOURCES=(
     "Sources/Support/DockVisibilityPreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/QuitConfirmationPreferences.swift"
+    "Sources/Support/AutoCallDetectionPreferences.swift"
     "Sources/Support/AudioStoragePreferences.swift"
     "Sources/Support/LiveMeetingCodexPreferences.swift"
     "Sources/Support/LocalMeetingSummaryPreferences.swift"

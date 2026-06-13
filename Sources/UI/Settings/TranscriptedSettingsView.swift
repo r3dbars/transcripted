@@ -61,6 +61,7 @@ struct TranscriptedSettingsView: View {
     @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
+    @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
@@ -284,6 +285,9 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .localSpeakerPrefsDidChange)) { _ in
             splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .autoCallDetectionPrefsDidChange)) { _ in
+            autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
         }
         .onReceive(NotificationCenter.default.publisher(for: .microphoneProcessingPrefsDidChange)) { _ in
             // Accepting the mid-meeting mic-boost prompt flips this preference
@@ -1808,6 +1812,26 @@ struct TranscriptedSettingsView: View {
                         message: "When this is on, Transcripted asks before quitting during a live meeting so you do not stop a recording by accident."
                     ),
                     automationIdentifier: "transcripted.settings.general.confirm-meeting-quits"
+                )
+
+                GeneralToggleRow(
+                    title: "Auto-detect calls",
+                    isOn: Binding(
+                        get: { autoDetectCallsEnabled },
+                        set: { newValue in
+                            autoDetectCallsEnabled = newValue
+                            trackSettingsToggle("auto_call_detection", enabled: newValue, page: .general)
+                            AutoCallDetectionPreferences.setEnabled(newValue)
+                        }
+                    ),
+                    help: autoDetectCallsEnabled
+                        ? "Offer to record when a call starts, even without a calendar invite."
+                        : "Only detect meetings from your calendar and conferencing apps.",
+                    info: GeneralInfo(
+                        title: "Auto-detect calls",
+                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone — like a spontaneous Google Meet — and offers to record it. It only checks which app holds the mic on your Mac; nothing about the audio ever leaves your device."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.auto-detect-calls"
                 )
             }
 

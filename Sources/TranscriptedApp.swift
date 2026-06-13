@@ -80,7 +80,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     lazy var meetingOverlayController = MeetingOverlayController()
     @available(macOS 14.0, *)
     lazy var meetingPromptDetector = MeetingPromptDetector()
+    @available(macOS 14.0, *)
+    lazy var micActivityMonitor = MicActivityMonitor()
     private var workspaceObservers: [NSObjectProtocol] = []
+    private var micPreferenceObserver: NSObjectProtocol?
     private var terminationCleanupStarted = false
     private var terminationCleanupFinished = false
     private var pendingTerminationReplyCount = 0
@@ -177,7 +180,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 }
                 return presented
             }
+            // Ad-hoc call detection: never prompt while we already hold the mic
+            // (meeting recording or dictation), and feed mic-activity into the
+            // same prompt pipeline. See docs/auto-call-detection-spec.md.
+            meetingPromptDetector.isOwnCaptureActive = { [weak self] in
+                guard let self else { return false }
+                return self.appState.meetingSession.isRecording || self.appState.sttRouter.isRecording
+            }
+            micActivityMonitor.onChange = { [weak self] micUsers in
+                self?.meetingPromptDetector.updateMicInputUsers(micUsers)
+            }
             meetingPromptDetector.start()
+            applyAutoCallDetectionPreference()
+            observeAutoCallDetectionPreference()
             appState.contextCapture.onMeetingToggle = { [weak self] in
                 self?.meetingOverlayController.toggleFromHotkey()
             }
@@ -257,8 +272,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             DistributedNotificationCenter.default().removeObserver(observer)
             singleInstanceReopenObserver = nil
         }
+        if let observer = micPreferenceObserver {
+            NotificationCenter.default.removeObserver(observer)
+            micPreferenceObserver = nil
+        }
         if #available(macOS 14.0, *) {
             meetingPromptDetector.stop()
+            micActivityMonitor.stop()
         }
         appState.shutdown()
         singleInstanceGuard.release()
@@ -765,6 +785,31 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     @available(macOS 14.0, *)
+    @available(macOS 14.0, *)
+    private func applyAutoCallDetectionPreference() {
+        if AutoCallDetectionPreferences.isEnabled() {
+            micActivityMonitor.start()
+        } else {
+            micActivityMonitor.stop()
+            // Drop any in-flight mic candidates so a stale call can't prompt.
+            meetingPromptDetector.updateMicInputUsers([])
+        }
+    }
+
+    @available(macOS 14.0, *)
+    private func observeAutoCallDetectionPreference() {
+        guard micPreferenceObserver == nil else { return }
+        micPreferenceObserver = NotificationCenter.default.addObserver(
+            forName: .autoCallDetectionPrefsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.applyAutoCallDetectionPreference()
+            }
+        }
+    }
+
     private func analyticsProperties(
         for candidate: MeetingPromptDetector.Candidate,
         backoffKind: MeetingPromptBackoffKind? = nil
