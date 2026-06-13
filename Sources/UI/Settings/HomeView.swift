@@ -349,6 +349,48 @@ struct HomeMeetingPreview: Identifiable {
         self.summary = summary
         feedbackTarget = HomeFeedbackTarget.meeting(item)
     }
+
+    private init(
+        id: String,
+        title: String,
+        date: Date,
+        transcriptURL: URL,
+        audio: MeetingAudioAttachment?,
+        markdown: String,
+        readError: String?,
+        summary: RecentMeetingSummaryPreview?,
+        feedbackTarget: HomeFeedbackTarget
+    ) {
+        self.id = id
+        self.title = title
+        self.date = date
+        self.transcriptURL = transcriptURL
+        self.audio = audio
+        self.markdown = markdown
+        self.readError = readError
+        self.summary = summary
+        self.feedbackTarget = feedbackTarget
+    }
+
+    /// Returns a copy reflecting a renamed transcript while keeping the stable `id`
+    /// so the open preview sheet updates in place instead of dismissing and re-presenting.
+    func updatingAfterRename(
+        transcriptURL: URL,
+        title: String,
+        audio: MeetingAudioAttachment?
+    ) -> HomeMeetingPreview {
+        HomeMeetingPreview(
+            id: id,
+            title: title,
+            date: date,
+            transcriptURL: transcriptURL,
+            audio: audio,
+            markdown: markdown,
+            readError: readError,
+            summary: summary,
+            feedbackTarget: feedbackTarget
+        )
+    }
 }
 
 enum HomeMeetingMarkdownReadResult {
@@ -733,6 +775,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
         )
         button.contentTintColor = .secondaryLabelColor
         button.target = context.coordinator
+        button.retainedActionTarget = context.coordinator
         button.action = #selector(Coordinator.showMenu(_:))
         button.setButtonType(.momentaryChange)
         button.setAccessibilityLabel("More options")
@@ -745,6 +788,10 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.items = items
+        if let hoverButton = button as? HoverMenuButton {
+            hoverButton.retainedActionTarget = context.coordinator
+        }
+        button.target = context.coordinator
         button.isEnabled = !items.isEmpty
         button.identifier = NSUserInterfaceItemIdentifier(automationIdentifier)
         button.setAccessibilityIdentifier(automationIdentifier)
@@ -813,6 +860,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
     }
 
     final class HoverMenuButton: NSButton {
+        var retainedActionTarget: AnyObject?
         private var trackingAreaRef: NSTrackingArea?
         private var isHovering = false {
             didSet { updateAppearance() }
@@ -1809,20 +1857,27 @@ struct HomeMeetingPreviewSheet: View {
     let onOpenMarkdown: () -> Void
     let onCopyForAgent: () -> Void
     let onReportIssue: () -> Void
+    let onRenameTitle: (String) -> Void
     let onDone: () -> Void
     private let readableContent: HomeMeetingPreviewContent
+
+    @State private var isEditingTitle = false
+    @State private var draftTitle = ""
+    @FocusState private var isTitleFieldFocused: Bool
 
     init(
         preview: HomeMeetingPreview,
         onOpenMarkdown: @escaping () -> Void,
         onCopyForAgent: @escaping () -> Void,
         onReportIssue: @escaping () -> Void,
+        onRenameTitle: @escaping (String) -> Void,
         onDone: @escaping () -> Void
     ) {
         self.preview = preview
         self.onOpenMarkdown = onOpenMarkdown
         self.onCopyForAgent = onCopyForAgent
         self.onReportIssue = onReportIssue
+        self.onRenameTitle = onRenameTitle
         self.onDone = onDone
         self.readableContent = HomeMeetingPreviewContent.make(from: preview.markdown)
     }
@@ -1831,9 +1886,7 @@ struct HomeMeetingPreviewSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(preview.title)
-                        .font(.system(size: 22, weight: .semibold))
-                        .lineLimit(2)
+                    titleView
                     Text(HomeMeetingPreviewSheet.dateFormatter.string(from: preview.date))
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -1974,6 +2027,46 @@ struct HomeMeetingPreviewSheet: View {
         }
         .padding(24)
         .frame(width: 680, height: 620)
+    }
+
+    @ViewBuilder
+    private var titleView: some View {
+        if isEditingTitle {
+            TextField("Meeting title", text: $draftTitle)
+                .textFieldStyle(.plain)
+                .font(.system(size: 22, weight: .semibold))
+                .focused($isTitleFieldFocused)
+                .onSubmit { commitTitleEdit() }
+                .onExitCommand { cancelTitleEdit() }
+                .accessibilityIdentifier("transcripted.home.meeting-preview.title-field")
+        } else {
+            Text(preview.title)
+                .font(.system(size: 22, weight: .semibold))
+                .lineLimit(2)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { beginTitleEdit() }
+                .help("Double-click to rename")
+                .accessibilityIdentifier("transcripted.home.meeting-preview.title")
+        }
+    }
+
+    private func beginTitleEdit() {
+        draftTitle = preview.title
+        isEditingTitle = true
+        isTitleFieldFocused = true
+    }
+
+    private func commitTitleEdit() {
+        isEditingTitle = false
+        isTitleFieldFocused = false
+        let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != preview.title else { return }
+        onRenameTitle(trimmed)
+    }
+
+    private func cancelTitleEdit() {
+        isEditingTitle = false
+        isTitleFieldFocused = false
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -2408,6 +2501,7 @@ private struct HomeFailedMeetingRow: View {
                     ) {
                         onClear()
                     }
+                    .frame(width: hasRetainedAudioFiles ? 78 : 82, height: 30)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

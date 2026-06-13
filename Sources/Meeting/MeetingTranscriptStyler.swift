@@ -15,7 +15,7 @@ enum MeetingTranscriptStyler {
     private static let titleFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale.current
-        formatter.dateFormat = "MMM d 'at' h:mm a"
+        formatter.dateFormat = "'Meeting at' h:mm a"
         return formatter
     }()
 
@@ -125,7 +125,7 @@ enum MeetingTranscriptStyler {
         let renderedFrontmatter = renderFrontmatter(lines: document.frontmatterLines, title: title)
         let body = renderBody(document: document, title: title)
         let updated = renderedFrontmatter + "\n\n" + body + "\n"
-        let finalURL = renameTranscriptArtifactsIfNeeded(at: url, title: title)
+        let finalURL = renameTranscriptArtifactsIfNeeded(at: url, title: title, recordedAt: document.recordedAt)
 
         if updated != raw {
             do {
@@ -472,86 +472,19 @@ enum MeetingTranscriptStyler {
         return formatter.string(from: TimeInterval(seconds)) ?? fallback
     }
 
-    private static func renameTranscriptArtifactsIfNeeded(at url: URL, title: String) -> URL {
-        let sanitizedStem = sanitizedFileStem(
-            for: title,
+    private static func renameTranscriptArtifactsIfNeeded(at url: URL, title: String, recordedAt: Date) -> URL {
+        let preferredStem = MeetingArtifactRenamer.fileStem(
+            date: recordedAt,
+            title: title,
             fallback: url.deletingPathExtension().lastPathComponent
         )
-        let targetURL = uniqueTranscriptURL(
-            in: url.deletingLastPathComponent(),
-            preferredStem: sanitizedStem,
-            originalURL: url
-        )
-
-        guard targetURL != url else { return url }
-
-        let fm = FileManager.default
-
-        do {
-            try fm.moveItem(at: url, to: targetURL)
-            renameAudioDirectoryIfNeeded(
-                from: audioDirectoryURL(for: url),
-                to: audioDirectoryURL(for: targetURL)
-            )
-            return targetURL
-        } catch {
-            logFailure(
-                event: "meeting_transcript_rename_failed",
-                message: "Failed to rename styled transcript",
-                context: [
-                    "sourceExists": "\(fm.fileExists(atPath: url.path))",
-                    "targetExists": "\(fm.fileExists(atPath: targetURL.path))",
-                    "errorType": "\(type(of: error))"
-                ]
-            )
-            return url
-        }
-    }
-
-    private static func audioDirectoryURL(for transcriptURL: URL) -> URL {
-        transcriptURL
-            .deletingLastPathComponent()
-            .appendingPathComponent("audio", isDirectory: true)
-            .appendingPathComponent("\(transcriptURL.deletingPathExtension().lastPathComponent)_audio", isDirectory: true)
-    }
-
-    private static func renameAudioDirectoryIfNeeded(from sourceURL: URL, to targetURL: URL) {
-        let fm = FileManager.default
-        guard sourceURL != targetURL, fm.fileExists(atPath: sourceURL.path) else { return }
-
-        let finalURL = uniqueAudioDirectoryURL(preferredURL: targetURL)
-
-        do {
-            try fm.moveItem(at: sourceURL, to: finalURL)
-        } catch {
-            logFailure(
-                event: "meeting_audio_directory_rename_failed",
-                message: "Failed to rename retained meeting audio",
-                context: [
-                    "sourceExists": "\(fm.fileExists(atPath: sourceURL.path))",
-                    "targetExists": "\(fm.fileExists(atPath: finalURL.path))",
-                    "errorType": "\(type(of: error))"
-                ]
-            )
-        }
-    }
-
-    private static func uniqueAudioDirectoryURL(preferredURL: URL) -> URL {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: preferredURL.path) else { return preferredURL }
-
-        let directory = preferredURL.deletingLastPathComponent()
-        let stem = preferredURL.lastPathComponent
-        var suffix = 2
-
-        while suffix <= 999 {
-            let candidate = directory.appendingPathComponent("\(stem) \(suffix)", isDirectory: true)
-            if !fm.fileExists(atPath: candidate.path) {
-                return candidate
+        return MeetingArtifactRenamer.rename(
+            transcriptAt: url,
+            toStem: preferredStem,
+            logFailure: { event, context in
+                logFailure(event: event, message: "Failed to rename styled transcript artifact", context: context)
             }
-            suffix += 1
-        }
-        return directory.appendingPathComponent("\(stem) \(UUID().uuidString)", isDirectory: true)
+        )
     }
 
     private static func fallbackTitle(for url: URL) -> String {
@@ -564,43 +497,6 @@ enum MeetingTranscriptStyler {
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: " ")
         fputs("⚠️ MEETING | \(event) | \(message) | \(contextString)\n", stderr)
-    }
-
-    private static func sanitizedFileStem(for title: String, fallback: String) -> String {
-        let invalidCharacters = CharacterSet(charactersIn: "/:\\?%*|\"<>")
-        let collapsedWhitespace = title
-            .replacingOccurrences(of: "\n", with: " ")
-            .components(separatedBy: invalidCharacters)
-            .joined(separator: " ")
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let limited = String(collapsedWhitespace.prefix(80)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return limited.isEmpty ? fallback : limited
-    }
-
-    private static func uniqueTranscriptURL(in directory: URL, preferredStem: String, originalURL: URL) -> URL {
-        let fm = FileManager.default
-        var candidateStem = preferredStem
-        var suffix = 2
-        let originalAudioDirectory = audioDirectoryURL(for: originalURL)
-
-        while suffix <= 999 {
-            let candidateURL = directory.appendingPathComponent(candidateStem).appendingPathExtension("md")
-            let markdownTaken = candidateURL != originalURL && fm.fileExists(atPath: candidateURL.path)
-            let candidateAudioDirectory = audioDirectoryURL(for: candidateURL)
-            let audioTaken = candidateAudioDirectory != originalAudioDirectory
-                && fm.fileExists(atPath: candidateAudioDirectory.path)
-
-            if !markdownTaken && !audioTaken {
-                return candidateURL
-            }
-
-            candidateStem = "\(preferredStem) \(suffix)"
-            suffix += 1
-        }
-        return directory.appendingPathComponent("\(preferredStem) \(UUID().uuidString)").appendingPathExtension("md")
     }
 }
 

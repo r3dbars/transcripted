@@ -11,8 +11,8 @@ func testDictationTranscriptWriter() {
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
 
-        let firstDate = isoDate("2026-04-07T09:15:00-0500")
-        let secondDate = isoDate("2026-04-07T16:45:00-0500")
+        let firstDate = localDate(year: 2026, month: 4, day: 7, hour: 9, minute: 15)
+        let secondDate = localDate(year: 2026, month: 4, day: 7, hour: 16, minute: 45)
 
         let firstSaved = try? DictationTranscriptWriter.save(
             text: "first note from the morning",
@@ -48,7 +48,7 @@ func testDictationTranscriptWriter() {
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
 
-        let createdAt = isoDate("2026-04-07T09:15:00-0500")
+        let createdAt = localDate(year: 2026, month: 4, day: 7, hour: 9, minute: 15)
         let saved = try? DictationTranscriptWriter.save(
             text: "private dictation artifact",
             sourceApp: nil,
@@ -73,7 +73,7 @@ func testDictationTranscriptWriter() {
             text: "second private dictation artifact",
             sourceApp: nil,
             delivery: .copied,
-            createdAt: isoDate("2026-04-07T16:45:00-0500"),
+            createdAt: localDate(year: 2026, month: 4, day: 7, hour: 16, minute: 45),
             directory: outputDir
         )
 
@@ -91,8 +91,8 @@ func testDictationTranscriptWriter() {
         try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: tempRoot) }
 
-        let firstDate = isoDate("2026-04-07T23:15:00-0500")
-        let secondDate = isoDate("2026-04-08T00:05:00-0500")
+        let firstDate = localDate(year: 2026, month: 4, day: 7, hour: 23, minute: 15)
+        let secondDate = localDate(year: 2026, month: 4, day: 8, hour: 0, minute: 5)
 
         let firstSaved = try? DictationTranscriptWriter.save(
             text: "late night dictation",
@@ -126,9 +126,21 @@ private func dictationWriterFilePermissions(of url: URL) -> NSNumber? {
     return attributes?[.posixPermissions] as? NSNumber
 }
 
-private func isoDate(_ string: String) -> Date {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZ"
-    return formatter.date(from: string) ?? Date(timeIntervalSince1970: 0)
+// Build the instant for the given wall-clock time in the machine's *local* timezone.
+// DictationTranscriptWriter groups day files and renders section times in the local
+// zone, so anchoring the inputs to local time keeps these assertions deterministic on
+// any machine instead of only passing where the local zone matches a hard-coded offset.
+private func localDate(year: Int, month: Int, day: Int, hour: Int, minute: Int) -> Date {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .current
+    let components = DateComponents(
+        calendar: calendar,
+        year: year,
+        month: month,
+        day: day,
+        hour: hour,
+        minute: minute,
+        second: 0
+    )
+    return components.date ?? Date(timeIntervalSince1970: 0)
 }
