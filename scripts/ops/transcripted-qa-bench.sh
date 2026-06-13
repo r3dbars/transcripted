@@ -30,7 +30,7 @@ PACKAGED_USER_NAME="${TRANSCRIPTED_QA_PACKAGED_USER_NAME:-${USER:-codex}}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live] [options]
+Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|scorecard|live] [options]
 
 Runs a local Transcripted QA bench and writes:
   /tmp/transcripted-qa-bench/<run-id>/qa-report.md
@@ -744,6 +744,53 @@ run_corpus_compare_tail() {
     "python3 scripts/ops/compare-meeting-corpus.py --corpus-root $(shell_quote "${CORPUS_ROOT}") --transcripted-output-dir $(shell_quote "${CORPUS_OUTPUT_DIR}")${map_arg}${ids_arg} --min-recall $(shell_quote "${CORPUS_MIN_RECALL}") --min-content-recall $(shell_quote "${CORPUS_MIN_CONTENT_RECALL}") --json-out $(shell_quote "${RAW_DIR}/meeting-corpus-comparison.json") --markdown-out $(shell_quote "${OUT}/meeting-corpus-comparison-report.md")"
 }
 
+run_scorecard_tail() {
+  local fixtures="scripts/ops/fixtures/board-scorecard"
+  local acc="${RAW_DIR}"
+
+  # Functional evidence: validate-all JSON (non-blocking — we still want to score).
+  run_step "60-scorecard-validate" "Scorecard functional evidence (validate-all)" "no" \
+    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json > $(shell_quote "${RAW_DIR}/validate-all.json")"
+
+  # UI evidence: only when a built app is present and we are not headless.
+  if [[ -d "${REPO_ROOT}/build/Transcripted.app" ]]; then
+    run_step "61-scorecard-ui" "Scorecard UI evidence (ui-smoke)" "no" \
+      "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa ui-smoke --app build/Transcripted.app --report $(shell_quote "${RAW_DIR}/scorecard-ui-smoke.json")"
+  else
+    skip_step "61-scorecard-ui" "Scorecard UI evidence (build/Transcripted.app missing)"
+  fi
+
+  # Accuracy evidence: opt-in via env. Each scorer writes score-<board>.json into RAW_DIR.
+  # We never feed synthetic demo fixtures as if they were real product output.
+  if [[ -n "${TRANSCRIPTED_QA_DIARIZATION_SEGMENTS:-}" ]]; then
+    run_step "62-scorecard-diarization" "Scorecard diarization accuracy" "no" \
+      "python3 scripts/ops/score-diarization.py --segments $(shell_quote "${TRANSCRIPTED_QA_DIARIZATION_SEGMENTS}") --out $(shell_quote "${acc}/score-diarization.json")"
+  fi
+  if [[ -n "${TRANSCRIPTED_QA_DICTATION_CANDIDATE:-}" ]]; then
+    run_step "63-scorecard-dictation" "Scorecard dictation correction accuracy" "no" \
+      "python3 scripts/ops/score-dictation.py --fixture ${fixtures}/dictation-corrections.json --candidate $(shell_quote "${TRANSCRIPTED_QA_DICTATION_CANDIDATE}") --out $(shell_quote "${acc}/score-dictation.json")"
+  fi
+  if [[ -n "${TRANSCRIPTED_QA_DETECTION_CANDIDATE:-}" ]]; then
+    run_step "64-scorecard-detection" "Scorecard meeting-detection accuracy" "no" \
+      "python3 scripts/ops/score-detection.py --fixture ${fixtures}/meeting-detection.json --candidate $(shell_quote "${TRANSCRIPTED_QA_DETECTION_CANDIDATE}") --out $(shell_quote "${acc}/score-detection.json")"
+  fi
+  if [[ -n "${TRANSCRIPTED_QA_SUMMARY_JUDGE:-}" ]]; then
+    run_step "65-scorecard-summary" "Scorecard meeting-summary accuracy" "no" \
+      "python3 scripts/ops/score-summary-judge.py --mode score --judge-result $(shell_quote "${TRANSCRIPTED_QA_SUMMARY_JUDGE}") --out $(shell_quote "${acc}/score-summary.json")"
+  fi
+  if [[ -n "${TRANSCRIPTED_QA_TRANSCRIPTION_SCORE:-}" ]]; then
+    run_step "66-scorecard-transcription" "Scorecard transcription accuracy input" "no" \
+      "cp $(shell_quote "${TRANSCRIPTED_QA_TRANSCRIPTION_SCORE}") $(shell_quote "${acc}/score-transcription.json")"
+  fi
+
+  local ui_arg=""
+  if [[ -f "${RAW_DIR}/scorecard-ui-smoke.json" ]]; then
+    ui_arg=" --ui-json $(shell_quote "${RAW_DIR}/scorecard-ui-smoke.json")"
+  fi
+  run_step "67-scorecard" "Aggregate board scorecard" "yes" \
+    "python3 scripts/ops/score-boards.py --registry .agents/board-scorecard.yml${ui_arg} --functional-json $(shell_quote "${RAW_DIR}/validate-all.json") --accuracy-dir $(shell_quote "${acc}") --json-out $(shell_quote "${RAW_DIR}/board-scorecard.json") --markdown-out $(shell_quote "${OUT}/board-scorecard.md")"
+}
+
 cd "${REPO_ROOT}" || exit 1
 write_manual_scenarios
 
@@ -800,6 +847,10 @@ case "${MODE}" in
     corpus_compare_ids="${CORPUS_IDS:-${CORPUS_COMPARE_DEFAULT_IDS}}"
     run_corpus_tail "${corpus_compare_ids}"
     run_corpus_compare_tail "${corpus_compare_ids}"
+    ;;
+  scorecard)
+    run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
+    run_scorecard_tail
     ;;
   live)
     run_quick

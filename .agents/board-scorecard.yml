@@ -1,0 +1,243 @@
+# Board scorecard registry
+#
+# One entry per testable surface ("board") of the Transcripted app. This file is
+# both the agent's task list and the scoring contract: scripts/ops/score-boards.py
+# reads it, gathers evidence for each board's dimensions, and emits a per-board
+# 0-100 score plus an overall roll-up.
+#
+# Dimensions (any subset per board):
+#   ui          renders + responds. Evidence: transcripted-qa ui-smoke JSON.
+#   functional  flow produces valid artifacts. Evidence: transcripted-qa validate-all JSON.
+#   accuracy    closeness to ground truth. Evidence: a score-<input>.json from a scorer.
+#
+# A board omits a dimension it has no notion of. A dimension present in the
+# registry but with no evidence at run time is INCOMPLETE, never green or red.
+#
+# check_globs match against the `check` field (and, as a fallback, the `target`
+# field) of the validator JSON rows using shell-style globs. They are best-effort
+# and meant to be tightened against real ui-smoke / validate-all output on the
+# first Mac run — see docs/board-scorecard.md.
+#
+# automatable:
+#   auto      fully scorable headlessly on a Mac with permissions granted
+#   hardware  needs real mic / system audio / Bluetooth / meeting apps
+#   human     needs a person's judgement (feel, paste-back in real apps)
+
+version: 1
+
+defaults:
+  weights:
+    ui: 0.34
+    functional: 0.33
+    accuracy: 0.33
+  thresholds:
+    green: 85   # score >= green   -> GREEN
+    yellow: 65  # score >= yellow  -> YELLOW, else RED
+
+boards:
+  # ---- Content surfaces -------------------------------------------------------
+  - id: home
+    name: Home
+    category: ui
+    automatable: auto
+    weight: 1.0
+    ui:
+      check_globs: ["ui/home*", "ui/navigation*", "ui/popover*"]
+    functional:
+      check_globs: ["index/*", "stats/*", "health/*"]
+
+  - id: dictations
+    name: Dictations feed
+    category: ui
+    automatable: auto
+    weight: 1.0
+    ui:
+      check_globs: ["ui/dictation*"]
+    functional:
+      check_globs: ["transcript/dictation*", "log/dictation*"]
+
+  - id: speakers
+    name: Speakers (People)
+    category: ui
+    automatable: auto
+    weight: 1.0
+    ui:
+      check_globs: ["ui/speaker*", "ui/people*"]
+    functional:
+      check_globs: ["speakerdb/*", "transcript/speaker*"]
+    accuracy:
+      input: diarization
+
+  - id: agent-connect
+    name: Connect Agent
+    category: ui
+    automatable: auto
+    weight: 0.75
+    ui:
+      check_globs: ["ui/agent*", "ui/connect*"]
+    functional:
+      check_globs: ["index/*", "artifact/agent*"]
+
+  # ---- Settings pages ---------------------------------------------------------
+  - id: settings-general
+    name: Settings · General
+    category: settings
+    automatable: auto
+    weight: 1.0
+    ui:
+      check_globs: ["ui/general*", "ui/settings.general*"]
+    functional:
+      check_globs: ["artifact/dictionary*", "artifact/preferences*"]
+
+  - id: settings-models
+    name: Settings · Models
+    category: settings
+    automatable: auto
+    weight: 0.75
+    ui:
+      check_globs: ["ui/models*"]
+    functional:
+      check_globs: ["health/model*"]
+
+  - id: settings-shortcuts
+    name: Settings · Shortcuts
+    category: settings
+    automatable: auto
+    weight: 0.75
+    ui:
+      check_globs: ["ui/shortcut*"]
+
+  - id: settings-storage
+    name: Settings · Storage
+    category: settings
+    automatable: auto
+    weight: 0.75
+    ui:
+      check_globs: ["ui/storage*"]
+    functional:
+      check_globs: ["health/disk*", "artifact/retention*"]
+
+  - id: settings-privacy
+    name: Settings · Privacy
+    category: settings
+    automatable: auto
+    weight: 1.0
+    ui:
+      check_globs: ["ui/privacy*"]
+    functional:
+      check_globs: ["log/privacy*", "artifact/privacy*"]
+
+  - id: settings-support
+    name: Settings · Support
+    category: settings
+    automatable: auto
+    weight: 0.5
+    ui:
+      check_globs: ["ui/support*"]
+    functional:
+      check_globs: ["log/*"]
+
+  # ---- Quality / accuracy boards ---------------------------------------------
+  - id: transcription
+    name: Transcription accuracy
+    category: quality
+    automatable: auto
+    weight: 1.5
+    weights:
+      functional: 0.25
+      accuracy: 0.75
+    functional:
+      check_globs: ["transcript/*"]
+    accuracy:
+      input: transcription   # score-transcription.json (from compare-meeting-corpus)
+
+  - id: diarization
+    name: Diarization accuracy
+    category: quality
+    automatable: auto
+    weight: 1.25
+    weights:
+      functional: 0.3
+      accuracy: 0.7
+    functional:
+      check_globs: ["speakerdb/*", "transcript/speaker*"]
+    accuracy:
+      input: diarization
+
+  - id: summary
+    name: Meeting summary (Beta)
+    category: quality
+    automatable: auto
+    weight: 1.0
+    weights:
+      functional: 0.4
+      accuracy: 0.6
+    functional:
+      check_globs: ["artifact/summary*", "transcript/summary*"]
+    accuracy:
+      input: summary         # score-summary.json (from score-summary-judge)
+
+  - id: dictation-quality
+    name: Dictation correction
+    category: quality
+    automatable: auto
+    weight: 1.0
+    weights:
+      functional: 0.4
+      accuracy: 0.6
+    functional:
+      check_globs: ["transcript/dictation*"]
+    accuracy:
+      input: dictation       # score-dictation.json
+
+  - id: meeting-detection
+    name: Meeting detection
+    category: quality
+    automatable: auto
+    weight: 1.0
+    weights:
+      functional: 0.4
+      accuracy: 0.6
+    functional:
+      check_globs: ["log/detection*"]
+    accuracy:
+      input: detection       # score-detection.json
+
+  # ---- Recording surfaces (need hardware / human) -----------------------------
+  - id: dictation-overlay
+    name: Dictation overlay
+    category: capture
+    automatable: hardware
+    weight: 1.0
+    ui:
+      check_globs: ["ui/overlay.dictation*"]
+
+  - id: meeting-overlay
+    name: Meeting overlay
+    category: capture
+    automatable: hardware
+    weight: 1.0
+    ui:
+      check_globs: ["ui/overlay.meeting*"]
+
+  - id: meeting-capture
+    name: Meeting capture (mic + system audio)
+    category: capture
+    automatable: hardware
+    weight: 1.5
+
+  - id: imported-audio
+    name: Imported-audio transcription
+    category: capture
+    automatable: auto
+    weight: 1.0
+    functional:
+      check_globs: ["transcript/*", "artifact/imported*"]
+    accuracy:
+      input: transcription
+
+  - id: speaker-review
+    name: Speaker review + rename
+    category: capture
+    automatable: human
+    weight: 1.0

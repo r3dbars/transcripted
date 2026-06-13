@@ -1,0 +1,15 @@
+{
+  "_comment": "Synthetic diarization segments on a shared timeline (seconds). reference = ground-truth turns, hypothesis = a plausible Transcripted output with one swapped label and a small boundary slip, so the DER scorer exercises miss/false-alarm/confusion. No transcript text.",
+  "reference": [
+    {"speaker": "A", "start": 0.0,  "end": 4.0},
+    {"speaker": "B", "start": 4.0,  "end": 8.0},
+    {"speaker": "A", "start": 8.0,  "end": 11.0},
+    {"speaker": "C", "start": 11.0, "end": 15.0}
+  ],
+  "hypothesis": [
+    {"speaker": "S1", "start": 0.2,  "end": 4.1},
+    {"speaker": "S2", "start": 4.1,  "end": 7.6},
+    {"speaker": "S1", "start": 8.0,  "end": 11.0},
+    {"speaker": "S2", "start": 11.0, "end": 15.0}
+  ]
+}

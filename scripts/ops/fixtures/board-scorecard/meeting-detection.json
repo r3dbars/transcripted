@@ -1,0 +1,13 @@
+{
+  "_comment": "Synthetic meeting-detection cases. Each describes an app-state scenario and whether the prompt SHOULD fire. The candidate file holds the detector's real decision per id, captured by replaying the scenario through the detector on the Mac. No private data.",
+  "items": [
+    {"id": "det-001", "should_prompt": true,  "note": "Zoom meeting window foregrounded with active call"},
+    {"id": "det-002", "should_prompt": true,  "note": "Google Meet tab with mic active"},
+    {"id": "det-003", "should_prompt": true,  "note": "Teams call connected"},
+    {"id": "det-004", "should_prompt": false, "note": "Zoom open but on the home screen, no active call"},
+    {"id": "det-005", "should_prompt": false, "note": "Browser on a YouTube video"},
+    {"id": "det-006", "should_prompt": false, "note": "Calendar shows a meeting but nothing is running"},
+    {"id": "det-007", "should_prompt": true,  "note": "WebRTC call in a browser with mic+audio active"},
+    {"id": "det-008", "should_prompt": false, "note": "Music app playing audio output only"}
+  ]
+}
