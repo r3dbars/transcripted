@@ -1,6 +1,6 @@
 # Spec: ad-hoc call detection via mic activity
 
-- **Status:** Phase 1 complete on branch `feat/auto-call-detection` (Phase 2 deferred). See "Phase 1 — results" below.
+- **Status:** Phase 1 complete + live-verified on branch `feat/auto-call-detection` (Phase 2 deferred). See "Phase 1 — results" below.
 - **Created:** 2026-06-13
 - **Product decisions (2026-06-14):** auto-detection ships **default ON** behind a Settings
   toggle; trigger scope is **browsers + known conferencing apps only** (unknown mic users map
@@ -242,8 +242,11 @@ call via the Phase 0 spike (the mic was held by `com.google.Chrome.helper`).
 the app blocks on `getxattr` until the dialog is answered, and the dialog was sitting
 unclicked. Not endpoint-security, not a code issue; once allowed, the app launches in ~1s.)
 
-**Remaining manual step:** the live end-to-end behavior check — join a spontaneous Meet and
-confirm the prompt appears, and that no prompt fires while Transcripted itself is recording.
+**Live-verified (2026-06-14):** both attribution branches fire correctly during real calls —
+a spontaneous Google Meet with no calendar invite → "Call detected in your browser"
+(browser-family branch, the exact gap this spec targeted), and a native Zoom call → "Zoom
+call detected" (native-app branch with provider-specific copy). (Self-exclusion — no prompt
+while Transcripted itself records — is covered by unit tests.)
 
 ## Phase 2 — optional UDP hardening (only if needed)
 
