@@ -1,3 +1,33 @@
+// BluetoothRouteContractTests.swift
+//
+// Two kinds of coverage live in this file; they are NOT the same strength of proof:
+//
+// REAL BEHAVIORAL COVERAGE (compiled): the route-selection / readiness / recovery suites
+// exercise Foundation-pure decision types compiled into the fast-test runner —
+// DictationInputDeviceSelectionPolicy, ParakeetRouteDiagnosticsPolicy,
+// ParakeetAudioFormatReadinessPolicy, ParakeetDeviceRecoveryReadinessPolicy /
+// TimeoutPolicy, ParakeetTapSampleRatePolicy, ParakeetRecoveryState, and
+// RecordedAudioTimeline. These run the real logic over mocked devices and assert real
+// outputs (selection, route shape, HFP suspicion, readiness, recovery generations).
+// NOTE: these are MOCKED route contracts — automated policy proof, not hardware proof;
+// real connected AirPods/Bluetooth hardware still needs manual verification.
+//
+// IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the suites
+// "engine tap wiring keeps sample-rate pinning" and "input override happens before
+// format reads" read Sources/Speech/ParakeetEngine.swift as TEXT and grep for relative
+// ordering of statements inside installTapAndStartEngine / audioInputSnapshot.
+// ParakeetEngine is CoreAudio/Carbon-wired and is NOT compiled into this Foundation-only
+// runner, so these greps pin source structure, not runtime behavior. They guard REAL
+// invariants behind real AirPods bugs: the dictation tap must derive its sample rate from
+// CoreAudio's delivered buffer.format (not the AirPods HFP hardware rate), and the forced
+// input override must be applied BEFORE any input/output format read so AirPods are moved
+// off the headset mic before the format is sampled. They are intentionally kept as
+// source-text contracts rather than a runtime seam: extracting one would restructure
+// real-time CoreAudio tap/format-read control flow, which is too risky to refactor for
+// testability. The "QA report names mocked proof boundary" suite is a docs/report
+// consistency check, not a runtime check. If you move/rename these functions or reorder
+// their statements, update both the source and these greps together.
+
 import Foundation
 
 func testBluetoothRouteContract() {

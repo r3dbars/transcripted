@@ -155,11 +155,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     private static func dayLabel(for day: Date) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
-        let formatter = Self.daySectionFormatter
-        return formatter.string(from: day)
+        HomeDaySectionLabel.label(for: day)
     }
 
     private func trackActivationReturnProxyIfNeeded(
@@ -185,12 +181,6 @@ final class HomeViewModel: ObservableObject {
         )
     }
 
-    private static let daySectionFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = .current
-        f.dateFormat = "EEEE, MMM d"
-        return f
-    }()
 }
 
 struct HomeDaySection<Item>: Identifiable {
@@ -321,12 +311,7 @@ struct HomeFeedbackTarget: Identifiable {
     }
 
     private static func stableReferenceID(for value: String) -> String {
-        var hash: UInt64 = 1_469_598_103_934_665_603
-        for byte in value.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return String(hash, radix: 16)
+        HomeStableReferenceID.id(for: value)
     }
 }
 
@@ -767,6 +752,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         var items: [HomeRowMenuItem]
+        private var menuActionTargets: [MenuActionTarget] = []
 
         init(items: [HomeRowMenuItem]) {
             self.items = items
@@ -774,17 +760,19 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc func showMenu(_ sender: NSButton) {
             let menu = NSMenu()
+            menuActionTargets = []
             // Without this, AppKit auto-enables every item whose target responds
             // to the action, overriding the per-item isEnabled set below.
             menu.autoenablesItems = false
             for item in items {
+                let target = MenuActionTarget(item: item)
+                menuActionTargets.append(target)
                 let menuItem = NSMenuItem(
                     title: item.title,
-                    action: #selector(performMenuItem(_:)),
+                    action: #selector(MenuActionTarget.perform(_:)),
                     keyEquivalent: ""
                 )
-                menuItem.target = self
-                menuItem.representedObject = item.id
+                menuItem.target = target
                 menuItem.isEnabled = item.isEnabled
                 if let image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: item.title) {
                     image.isTemplate = true
@@ -807,15 +795,19 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                 in: sender
             )
         }
+    }
 
-        @objc private func performMenuItem(_ sender: NSMenuItem) {
-            guard let id = sender.representedObject as? UUID,
-                  let item = items.first(where: { $0.id == id }),
-                  item.isEnabled else {
-                return
-            }
+    final class MenuActionTarget: NSObject {
+        private let item: HomeRowMenuItem
+
+        init(item: HomeRowMenuItem) {
+            self.item = item
+        }
+
+        @objc func perform(_ sender: NSMenuItem) {
+            guard item.isEnabled else { return }
             DispatchQueue.main.async {
-                item.action()
+                self.item.action()
             }
         }
     }
@@ -1621,11 +1613,6 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 
 // MARK: - Capture list
 
-enum HomeCaptureListCopy {
-    static let emptyMeetings = "No recent meetings. Record one or transcribe an audio file from General."
-    static let emptyDictations = "No recent dictations."
-}
-
 struct HomeCaptureListSection<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
@@ -2215,11 +2202,7 @@ private enum HomeMeetingSpeakerColor {
             .systemIndigo,
         ]
 
-        let normalized = speaker.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = normalized.unicodeScalars.reduce(UInt32(0)) { partial, scalar in
-            partial &+ scalar.value
-        }
-        let index = Int(value % UInt32(palette.count))
+        let index = HomeMeetingSpeakerPalette.slotIndex(for: speaker, slotCount: palette.count)
         return Color(nsColor: palette[index])
     }
 }

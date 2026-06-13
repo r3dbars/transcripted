@@ -100,7 +100,7 @@ if [ -n "$changed_paths" ]; then
             add_command "bash run-e2e-smoke.sh"
         fi
 
-        if matches_any "$path" "Tests/E2E/SlowPastebackSmoke.swift" "run-slow-pasteback-smoke.sh" "scripts/entrypoints/run-slow-pasteback-smoke.sh"; then
+        if matches_any "$path" "Tests/E2E/SlowPastebackSmoke.swift" "Sources/Support/ClipboardRestoringTextPaster.swift" "Sources/Support/TranscriptedConstants.swift" "run-slow-pasteback-smoke.sh" "scripts/entrypoints/run-slow-pasteback-smoke.sh"; then
             add_command "bash run-slow-pasteback-smoke.sh"
         fi
 
@@ -255,6 +255,7 @@ if [ -n "$changed_paths" ]; then
 
         if matches_any "$path" "Tools/TranscriptedMCP/*"; then
             add_command "swift test --package-path Tools/TranscriptedMCP"
+            add_command "bash run-e2e-smoke.sh"
         fi
 
         if matches_any "$path" "Tools/TranscriptedQA/*"; then

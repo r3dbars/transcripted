@@ -84,10 +84,10 @@ extension Audio {
 
     // MARK: - Silence Detection
 
-    /// Updates silence tracking based on current audio level
-    func updateSilenceTracking(currentLevel: Float) {
-        let now = Date()
-
+    /// Updates silence tracking based on current audio level.
+    /// `now` is injectable so tests can drive deterministic transitions; production
+    /// callers omit it and get the wall-clock time at the call, unchanged.
+    func updateSilenceTracking(currentLevel: Float, now: Date = Date()) {
         if currentLevel > silenceThreshold {
             // Audio detected - reset silence tracking
             lastNonSilentTime = now
@@ -106,9 +106,10 @@ extension Audio {
         }
     }
 
-    /// Reset silence tracking (call when recording starts)
-    func resetSilenceTracking() {
-        lastNonSilentTime = Date()
+    /// Reset silence tracking (call when recording starts).
+    /// `now` is injectable for deterministic tests; production callers omit it.
+    func resetSilenceTracking(now: Date = Date()) {
+        lastNonSilentTime = now
         silenceDuration = 0
         isSilent = false
     }

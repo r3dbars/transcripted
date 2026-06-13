@@ -1,3 +1,8 @@
+// Repo-structure / contract suite, not behavioral coverage.
+// It asserts that menubar sources keep their stable AX identifiers and that
+// the smoke script still references them, so external UI automation stays in sync.
+// It runs no UI and exercises no runtime behavior; it only greps source text.
+
 import Foundation
 
 func testUIAutomationSurfaceContract() {
@@ -111,11 +116,16 @@ func testUIAutomationSurfaceContract() {
         for requiredHomeRendererHook in [
             "title: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
             "HomeRowMoreMenuButton(items:",
-            "DispatchQueue.main.async {\n                item.action()",
+            "MenuActionTarget(item: item)",
+            "DispatchQueue.main.async {\n                self.item.action()",
             "title: \"Copy for agent\"",
         ] {
             assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
+        assertFalse(
+            homeSource.contains("representedObject = item.id"),
+            "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
+        )
 
         for requiredOnboardingHook in [
             "Enable system audio",

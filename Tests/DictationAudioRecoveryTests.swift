@@ -1,3 +1,28 @@
+// DictationAudioRecoveryTests.swift
+//
+// Two kinds of coverage live in this file; they are NOT the same strength of proof:
+//
+// REAL BEHAVIORAL COVERAGE (compiled): the first four suites exercise the Foundation-pure
+// DictationAudioRecovery type compiled into the fast-test runner — silence detection,
+// quiet-speech focus/normalize/retry, sub-threshold burst rejection, and non-finite
+// sample-rate handling. These run the real logic and assert real outputs (analysis flags,
+// diagnostic context, retry sample shaping).
+//
+// IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the final suite
+// ("preserves dictation audio across route recovery") reads
+// Sources/Speech/ParakeetEngine.swift and Sources/UI/Overlay/DictationSessionController.swift
+// as TEXT and asserts presence of specific declarations / call sites and a single
+// canonical `recordingInterrupted = true` assignment. Both sources are
+// CoreAudio/SwiftUI-wired and are NOT compiled into this Foundation-only runner, so these
+// greps pin source structure, not runtime behavior. They guard the REAL invariant that
+// audio buffered before a mid-recording route change is preserved across teardown (so a
+// device switch does not silently drop dictation audio), and that every interruption path
+// routes through the single cleanup helper. They are intentionally kept as source-text
+// contracts rather than a runtime seam: extracting one would restructure real-time
+// CoreAudio recovery/teardown control flow, which is too risky to refactor for
+// testability. If you move/rename these declarations or change the interruption path,
+// update both the source and these greps together.
+
 import Foundation
 
 func testDictationAudioRecovery() {

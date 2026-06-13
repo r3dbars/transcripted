@@ -63,6 +63,23 @@ Important implications:
 
 The current compiled fast test set lives in `Tests/FastTests.manifest`.
 
+To run a single suite instead of the whole set, pass `--filter`:
+
+```bash
+bash run-tests.sh --filter <entryFn|File>
+```
+
+The selector matches an entry function (`testJSONLWriter`), a file name
+(`JSONLWriterTests.swift` or `JSONLWriterTests`), or a case-insensitive
+substring of either. `--only` is an alias. To see the known entry functions:
+
+```bash
+bash run-tests.sh --list
+```
+
+The runner also fails fast on a manifest entry-function typo and on a stale
+`APP_SOURCES` path, instead of surfacing those as raw swiftc errors.
+
 To measure fast-test coverage, run:
 
 ```bash
