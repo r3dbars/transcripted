@@ -1,16 +1,1 @@
-{
-  "tagName": "v1.1.47",
-  "isDraft": false,
-  "isPrerelease": false,
-  "url": "https://github.com/r3dbars/transcripted/releases/tag/v1.1.47",
-  "assets": [
-    {
-      "name": "Transcripted-1.1.47.dmg",
-      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.47/Transcripted-1.1.47.dmg",
-      "contentType": "application/x-apple-diskimage",
-      "size": 535998520,
-      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "state": "uploaded"
-    }
-  ]
-}
+{"assets":[{"contentType":"application/x-apple-diskimage","digest":"sha256:fcca7d19b42b6163de155723cb7b66805736d8397a48fa79f2cffa15a8de2b60","name":"Transcripted-1.1.48.dmg","size":536174328,"state":"uploaded","url":"https://github.com/r3dbars/transcripted/releases/download/v1.1.48/Transcripted-1.1.48.dmg"}],"isDraft":false,"isPrerelease":false,"tagName":"v1.1.48","url":"https://github.com/r3dbars/transcripted/releases/tag/v1.1.48"}
