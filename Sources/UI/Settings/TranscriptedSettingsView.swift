@@ -207,6 +207,9 @@ struct TranscriptedSettingsView: View {
                         homeFeedbackTarget = preview.feedbackTarget
                     }
                 },
+                onRenameTitle: { newTitle in
+                    renameMeetingPreview(preview, to: newTitle)
+                },
                 onDone: {
                     homeMeetingPreview = nil
                 }
@@ -1201,6 +1204,45 @@ struct TranscriptedSettingsView: View {
                 refreshRecentCaptures(force: true)
                 presentHomeDeleteFailure(
                     title: "Could not delete meeting",
+                    error: error
+                )
+            }
+        }
+    }
+
+    private func renameMeetingPreview(_ preview: HomeMeetingPreview, to rawTitle: String) {
+        trackSettingsAction("rename_recent_meeting", page: .home)
+
+        let sourceURL = preview.transcriptURL
+        let attachmentID = preview.audio?.id
+
+        let renameTask = Task.detached(priority: .userInitiated) { () throws -> HomeMeetingRenameResult in
+            if let attachmentID {
+                await MainActor.run {
+                    MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: [attachmentID])
+                }
+            }
+            return try HomeMeetingRename.rename(transcriptAt: sourceURL, to: rawTitle)
+        }
+
+        Task { @MainActor in
+            do {
+                let result = try await renameTask.value
+                let audio = MeetingAudioArchiveResolver.attachment(forTranscript: result.transcriptURL)
+                if homeMeetingPreview?.id == preview.id {
+                    homeMeetingPreview = preview.updatingAfterRename(
+                        transcriptURL: result.transcriptURL,
+                        title: result.title,
+                        audio: audio
+                    )
+                }
+                refreshRecentCaptures(force: true)
+            } catch HomeMeetingRenameError.emptyTitle {
+                // Empty title is treated as a cancelled edit — leave everything untouched.
+            } catch {
+                refreshRecentCaptures(force: true)
+                presentHomeDeleteFailure(
+                    title: "Could not rename meeting",
                     error: error
                 )
             }
