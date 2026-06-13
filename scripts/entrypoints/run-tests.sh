@@ -312,6 +312,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingMicBoostPromptPolicy.swift"
     "Sources/Meeting/MeetingWarmupStatusPolicy.swift"
     "Sources/Meeting/MeetingTranscriptStyler.swift"
+    "Sources/Meeting/MeetingArtifactRenamer.swift"
     "Sources/Meeting/LocalMeetingSummarizer.swift"
     "Sources/Meeting/LiveMeetingCodexSession.swift"
     "Sources/Meeting/LiveMeetingPreviewServer.swift"
