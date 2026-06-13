@@ -732,7 +732,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
             accessibilityDescription: "More options"
         )
         button.contentTintColor = .secondaryLabelColor
-        button.target = context.coordinator
+        button.setRetainedActionTarget(context.coordinator)
         button.action = #selector(Coordinator.showMenu(_:))
         button.setButtonType(.momentaryChange)
         button.setAccessibilityLabel("More options")
@@ -745,6 +745,9 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.items = items
+        if let button = button as? HoverMenuButton {
+            button.setRetainedActionTarget(context.coordinator)
+        }
         button.isEnabled = !items.isEmpty
         button.identifier = NSUserInterfaceItemIdentifier(automationIdentifier)
         button.setAccessibilityIdentifier(automationIdentifier)
@@ -813,6 +816,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
     }
 
     final class HoverMenuButton: NSButton {
+        private var retainedActionTarget: AnyObject?
         private var trackingAreaRef: NSTrackingArea?
         private var isHovering = false {
             didSet { updateAppearance() }
@@ -824,6 +828,11 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         override var isEnabled: Bool {
             didSet { updateAppearance() }
+        }
+
+        func setRetainedActionTarget(_ target: AnyObject) {
+            retainedActionTarget = target
+            self.target = target
         }
 
         override func updateTrackingAreas() {

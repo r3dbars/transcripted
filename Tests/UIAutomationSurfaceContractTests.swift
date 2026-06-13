@@ -116,6 +116,8 @@ func testUIAutomationSurfaceContract() {
         for requiredHomeRendererHook in [
             "title: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
             "HomeRowMoreMenuButton(items:",
+            "setRetainedActionTarget(context.coordinator)",
+            "private var retainedActionTarget: AnyObject?",
             "MenuActionTarget(item: item)",
             "DispatchQueue.main.async {\n                self.item.action()",
             "title: \"Copy for agent\"",
