@@ -109,14 +109,15 @@ func testUIAutomationSurfaceContract() {
             "HomeRowMenuItem(title: \"Open Markdown\"",
             "HomeRowMenuItem(title: \"Report issue\"",
             "HomeRowMenuItem(title: \"Delete meeting\"",
+            "presentFailedMeetingDeleteConfirmation(presentation)",
         ] {
             assertTrue(settingsSource.contains(requiredHomeActionHook), "\(requiredHomeActionHook) should keep Home action coverage visible")
         }
 
         for requiredHomeRendererHook in [
             "title: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
-            "HomeFailedMeetingClearButton(",
-            "override func accessibilityPerformPress() -> Bool",
+            "SettingsInlineActionButton(",
+            "tone: hasRetainedAudioFiles ? .destructive : .neutral",
             "HomeRowMoreMenuButton(items:",
             "MenuActionTarget(item: item)",
             "DispatchQueue.main.async {\n                self.item.action()",
