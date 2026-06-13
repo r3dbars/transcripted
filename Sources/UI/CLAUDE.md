@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (72 Swift files)
+## Files (73 Swift files)
 
 ### Overlay/
 
@@ -194,6 +194,7 @@ Relevant direct coverage:
 - `Tests/HomeCanvasGreetingTests.swift`
 - `Tests/HomePresentationTests.swift`
 - `Tests/HomeMeetingDeletionTests.swift`
+- `Tests/HomeMeetingRenameTests.swift`
 - `Tests/HomeMeetingSummaryBetaPresentationPolicyTests.swift`
 - `Tests/FirstRunExperienceTests.swift`
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
