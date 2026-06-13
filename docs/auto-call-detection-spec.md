@@ -1,6 +1,6 @@
 # Spec: ad-hoc call detection via mic activity
 
-- **Status:** In progress — Phase 0 complete, Phase 1 underway (branch `feat/auto-call-detection`)
+- **Status:** Phase 1 complete on branch `feat/auto-call-detection` (Phase 2 deferred). See "Phase 1 — results" below.
 - **Created:** 2026-06-13
 - **Product decisions (2026-06-14):** auto-detection ships **default ON** behind a Settings
   toggle; trigger scope is **browsers + known conferencing apps only** (unknown mic users map
@@ -203,6 +203,47 @@ scripts/dev/mic-activity-spike.swift [--watch] [--dump]`). Ran on macOS 26.5.1.
 - `Sources/Meeting/MeetingPromptDetector.swift:189` — `evaluate()`; `:199-211` — candidates array; `:278` — `runtimeReminderCandidates`
 - `Sources/Meeting/MeetingPromptHeuristics.swift:3` — `MeetingPromptProvider`; `:19` — `activeBundleIdentifiers`; `:38` — `supportsRuntimeOnlyPrompt`; `:181` — `runtimePresentation`
 - `Sources/Meeting/MeetingSessionController.swift:150` — `isRecording`
+
+## Phase 1 — results (2026-06-14)
+
+Implemented on branch `feat/auto-call-detection` as five atomic commits (Phase 0
+spike, then provider mapping → monitor → detector wiring → app/Settings wiring).
+
+What shipped, and where it diverged from the original sketch:
+- **`MicActivityMonitor`** (`Sources/Meeting/MicActivityMonitor.swift`) emits the set
+  of non-self mic-holding bundle IDs. It uses a device "is-running-somewhere" edge
+  listener **plus a ~2s backstop scan**, not a pure `kAudioHardwarePropertyProcessObjectList`
+  listener — because the Phase 0 live test proved the process list does *not* change
+  when a call starts (the browser helper already exists; only its `IsRunningInput`
+  flips). All CoreAudio + state are confined to one serial queue; results hop to main.
+- **Provider mapping** lives in `MeetingPromptHeuristics`/`MeetingPromptProvider` as pure,
+  tested functions. Browser detection is **family-prefix** (`String.matchesBundleFamily`)
+  so `com.google.Chrome.helper` and `com.apple.WebKit.GPU` attribute correctly. Native
+  conferencing apps map to themselves; any browser maps to `.googleMeet`.
+- **Detector**: `updateMicInputUsers(_:)` + `micInputCandidates(now:)` reuse the
+  `.runtimeApp` source (snooze/dismiss/backoff untouched), score **5**, reason
+  `.micInput` (new, for analytics), candidate id `mic:<provider>`. The inactive edge
+  clears that provider's mic-suppression so the next call re-prompts.
+- **Self-exclusion**: detector `isOwnCaptureActive` (recording OR dictation) gates the
+  whole mic path, plus the monitor drops our own bundle (`com.justinbetker.draft`) by prefix.
+- **Settings**: "Auto-detect calls" on the General page, **default ON**.
+
+Open questions resolved: (1) default **ON**; (2) scope = **browsers + known conferencing
+apps** (unknown mic users → no prompt); (3) **yes**, a distinct `.micInput` reason for
+analytics while still reusing `.runtimeApp` for backoff.
+
+Verification (all green): `bash build.sh --no-open` incl. the GUI launch-smoke; full fast
+suite (5292 tests, incl. new heuristics / monitor / detector / preference coverage);
+`run-integration-smoke.sh`. The live CoreAudio attribution was confirmed against a real Meet
+call via the Phase 0 spike (the mic was held by `com.google.Chrome.helper`).
+
+(One detour worth recording: the launch-smoke first appeared to hang in `getxattr` during
+`MeetingSessionController.init`. It was a first-launch macOS **file-access TCC prompt** —
+the app blocks on `getxattr` until the dialog is answered, and the dialog was sitting
+unclicked. Not endpoint-security, not a code issue; once allowed, the app launches in ~1s.)
+
+**Remaining manual step:** the live end-to-end behavior check — join a spontaneous Meet and
+confirm the prompt appears, and that no prompt fires while Transcripted itself is recording.
 
 ## Phase 2 — optional UDP hardening (only if needed)
 

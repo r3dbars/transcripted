@@ -24,8 +24,9 @@
 - `LocalMeetingSummarizer.swift` — opt-in local meeting-summary runners (Gemma MLX and Apple Foundation Models), transcript chunking, provider metadata, runtime env sanitizing, and stale-transcript write protection; blocking model runs execute on a dedicated queue so they never occupy Swift-concurrency cooperative threads
 - `MeetingMicBoostPromptPolicy.swift` — dependency-free gate for the in-meeting Boost Mic consent prompt and stale prompt actions
 - `MeetingModelDownloader.swift` — loads the selected STT and diarization models together
-- `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
-- `MeetingPromptHeuristics.swift` — shared scoring, prompt reasons, and provider-aware remind/dismiss backoff rules for calendar- and runtime-based prompt candidates
+- `MeetingPromptDetector.swift` — polls upcoming Calendar events, watches supported meeting apps, ingests mic-activity from `MicActivityMonitor`, and asks the overlay to offer recording prompts with provider-aware remind/dismiss backoff
+- `MeetingPromptHeuristics.swift` — shared scoring, prompt reasons, browser-family + mic-input provider mapping, and provider-aware remind/dismiss backoff rules for calendar-, runtime-, and mic-activity-based prompt candidates
+- `MicActivityMonitor.swift` — Core Audio process-object watcher for ad-hoc call detection. Emits the set of non-self bundle IDs currently holding the mic input so the detector can prompt when a call *starts* (including a spontaneous Google Meet with no calendar invite). Metadata-only, no TCC permission; CoreAudio confined to one serial queue. See `docs/auto-call-detection-spec.md`
 - `MeetingRecordingCleanup.swift` — removes scratch audio when a live meeting recording is explicitly discarded instead of saved
 - `MeetingRecordingStartGate.swift` — permission preflight for meeting recording, including missing-permission reasons and user-facing error messages
 - `MeetingSTTAdapter.swift` — adapts the app's shared `STTRouter` to `TranscriptedCore.SpeechToTextEngine`
@@ -62,7 +63,8 @@
 - Imported meeting audio should be copied into app-controlled scratch space before transcription so later cleanup and metadata writes stay consistent with live captures.
 - Retained-audio maintenance must only manage Transcripted meeting transcripts and app-owned retained audio filenames. A transcript is only storage-owned when its frontmatter has `capture_type: meeting` and a valid `capture_id` or `transcript_id`. Be very conservative with deletion: Markdown transcripts stay, unrelated files in capture folders stay, symlinked audio folders are ignored, and converted or pre-existing M4A files should be owner-only.
 - Meeting recording cancellation must be explicit, visible, and confirmed because discard deletes the captured audio. Do not wire Escape to meeting cancellation.
-- `MeetingPromptDetector` can prompt from upcoming calendar events or from recently active supported runtime apps. Zoom and Teams should rely on stronger calendar evidence because app-open/frontmost state is not enough to prove a call is active.
+- `MeetingPromptDetector` can prompt from upcoming calendar events, from recently active supported runtime apps, or from a process actively holding the mic input (ad-hoc call detection). Zoom and Teams should rely on stronger calendar evidence because app-open/frontmost state is not enough to prove a call is active.
+- Ad-hoc call detection (`MicActivityMonitor` → `MeetingPromptDetector.updateMicInputUsers`) must never prompt while Transcripted itself holds the mic: it is gated by `isOwnCaptureActive` (meeting recording or dictation) and the monitor drops our own bundle ID by prefix. Browser calls map to `.googleMeet` via family-prefix matching because the mic is held by helper/service processes (`com.google.Chrome.helper`, `com.apple.WebKit.GPU`), and reuse the `.runtimeApp` source so existing snooze/dismiss/backoff is unchanged. The feature is behind `AutoCallDetectionPreferences` (default on).
 - Prompt dismissals are provider- and source-aware: runtime-only prompts can remind sooner, calendar-linked prompts can stay suppressed until the next relevant window, and Teams gets a longer minimum dismiss interval.
 - Local mic diarization is opt-in and controlled by `Sources/Support/LocalSpeakerPreferences.swift`, so default meeting behavior still keeps the mic side as a single "You" speaker unless the user enables review for people in the room.
 - Live meeting sidecar mode is opt-in and sidecar-only. It can write provisional live files under app support during recording, but the durable meeting Markdown still comes from the existing `TranscriptionTaskManager` save pipeline. Keep live ASR isolated from final transcription work; if another transcript is already processing, prefer deferring live ASR over contending with the final pipeline.
@@ -121,6 +123,7 @@ Relevant direct coverage:
 - `Tests/MeetingFailureExplanationTests.swift`
 - `Tests/MeetingFailureKindTests.swift`
 - `Tests/MeetingPromptHeuristicsTests.swift`
+- `Tests/MicActivityMonitorTests.swift`
 - `Tests/MeetingRecordingStartGateTests.swift`
 - `Tests/MeetingMicBoostPromptPolicyTests.swift`
 - `Tests/MeetingRecordingCleanupTests.swift`
