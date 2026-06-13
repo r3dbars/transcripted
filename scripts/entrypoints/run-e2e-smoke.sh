@@ -67,6 +67,13 @@ SWIFT_SOURCES=(
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift"
 )
 
+for source in "${SWIFT_SOURCES[@]}"; do
+    if [ ! -f "$source" ]; then
+        echo "E2E smoke source missing: $source" >&2
+        exit 1
+    fi
+done
+
 CAPTURE_KIT_BUILD_DIR="$BUILD_DIR/capture-kit"
 mkdir -p "$CAPTURE_KIT_BUILD_DIR"
 
@@ -79,7 +86,8 @@ swiftc \
     -parse-as-library
 
 echo "Compiling deterministic E2E smoke..."
-swiftc \
+COMPILE_STDERR="$BUILD_DIR/compile-stderr.log"
+if ! swiftc \
     "${SWIFT_SOURCES[@]}" \
     -I "$CAPTURE_KIT_BUILD_DIR" \
     -L "$CAPTURE_KIT_BUILD_DIR" \
@@ -87,7 +95,23 @@ swiftc \
     -framework AppKit \
     -lsqlite3 \
     -parse-as-library \
-    -o "$SMOKE_BIN"
+    -o "$SMOKE_BIN" 2> >(tee "$COMPILE_STDERR" >&2); then
+    missing_symbols="$(
+        grep -oE "cannot find (type )?'[^']+' in scope" "$COMPILE_STDERR" 2>/dev/null \
+            | grep -oE "'[^']+'" | tr -d "'" | sort -u || true
+    )"
+    if [ -n "$missing_symbols" ]; then
+        echo "" >&2
+        echo "E2E smoke compile failed with unresolved symbols. It likely needs a new source file added to SWIFT_SOURCES." >&2
+        while IFS= read -r symbol; do
+            [ -z "$symbol" ] && continue
+            echo "  - missing symbol: $symbol" >&2
+            echo "    locate it with: grep -rln \"struct/enum/class/func $symbol\" Sources Tools" >&2
+        done <<< "$missing_symbols"
+        echo "  Add the file that defines the symbol to the SWIFT_SOURCES array in $0." >&2
+    fi
+    exit 1
+fi
 
 echo "Running deterministic E2E smoke..."
 CFFIXED_USER_HOME="$FAKE_HOME" \

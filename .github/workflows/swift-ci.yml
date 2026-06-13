@@ -1,20 +1,23 @@
 name: Swift CI
 
-# Builds the app and runs the fast tests + Core package tests on every PR.
-# This is the machine enforcement behind the local verification contract in
-# .agents/test-matrix.yml — without it, merge safety rests entirely on local
-# discipline.
+# Builds the app and runs the full curated suite — fast tests, Core package
+# tests, integration smoke, E2E smoke, and the Tools package tests — on every
+# PR and on merges to main. This is the machine enforcement behind the local
+# verification contract in .agents/test-matrix.yml.
 #
-# FIRST-RUN VALIDATION NEEDED:
-# - The app targets arm64-apple-macos26.0, so the runner image must carry a
-#   toolchain/SDK that can target macOS 26. If `macos-26` is not yet available
-#   as a hosted image (or the job fails on SDK selection), switch `runs-on` to
-#   a self-hosted runner on a Mac that already builds this repo.
-# - Job is continue-on-error until one green run establishes timing and flake
-#   rate; flip it to a required check after that.
+# This is a required gate: the build-and-test job must pass for a PR to merge.
+# It does not use continue-on-error, so a failure here blocks merge instead of
+# leaving merge safety to local discipline alone.
+#
+# The app targets arm64-apple-macos26.0, so the runner image must carry a
+# toolchain/SDK that can target macOS 26. If `macos-26` is not available as a
+# hosted image (or the job fails on SDK selection), switch `runs-on` to a
+# self-hosted runner on a Mac that already builds this repo.
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -27,7 +30,6 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: macos-26
-    continue-on-error: true
     timeout-minutes: 120
 
     steps:
@@ -44,6 +46,11 @@ jobs:
             deps-frameworks
             deps-tools
           key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+          # Fall back to the newest dep cache for this OS/arch when the exact
+          # key misses, so build-deps.sh warm-starts from a partial cache and
+          # only rebuilds the stale artifacts.
+          restore-keys: |
+            deps-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build dependencies
         shell: bash
@@ -61,9 +68,9 @@ jobs:
         shell: bash
         env:
           TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
-          # Hosted runners have no reliable GUI session for the launch smoke;
-          # it stays covered by local builds and the release path.
-          TRANSCRIPTED_SKIP_LAUNCH_SMOKE: "1"
+        # GitHub-hosted macOS runners boot a real GUI/WindowServer session (the
+        # same reason XCUITest works there), so build.sh runs its launch smoke
+        # here instead of skipping it.
         run: bash build.sh --no-open
 
       - name: Fast tests
@@ -85,3 +92,53 @@ jobs:
         env:
           TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
         run: swift test
+
+      - name: Integration smoke
+        shell: bash
+        env:
+          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+        run: bash run-integration-smoke.sh
+
+      - name: E2E smoke
+        shell: bash
+        env:
+          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+        run: bash run-e2e-smoke.sh
+
+      - name: Tools package tests
+        shell: bash
+        env:
+          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+        run: |
+          set -euo pipefail
+          swift test --package-path Tools/TranscriptedCaptureKit
+          swift test --package-path Tools/TranscriptedCLI
+          swift test --package-path Tools/TranscriptedMCP
+          swift test --package-path Tools/TranscriptedQA
+
+  # Hardware-dependent smokes. These need a physical microphone, a System Audio
+  # Recording TCC grant, and real paste-back focus, which GitHub-hosted runners
+  # cannot provide. They run on a self-hosted Apple Silicon runner or as a
+  # release checklist item — never as part of pull_request, so they can never
+  # block a normal PR.
+  #
+  # This job is workflow_dispatch-only. With no self-hosted runner wired up yet
+  # it just echoes the commands an operator should run on a real Mac; replace
+  # the echo step with `runs-on: [self-hosted, macOS, ARM64]` and the real
+  # smoke invocations once such a runner exists.
+  hardware-smokes:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Document manual hardware smokes
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Hardware-dependent smokes require a physical mic + System Audio"
+          echo "Recording TCC grant + paste-back focus on an Apple Silicon Mac."
+          echo "Run these manually on such a machine (or a self-hosted runner):"
+          echo "  bash run-live-capture-smoke.sh"
+          echo "  bash run-slow-pasteback-smoke.sh"
+          echo "They are intentionally excluded from the PR gate."

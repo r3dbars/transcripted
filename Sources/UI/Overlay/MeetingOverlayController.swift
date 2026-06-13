@@ -1147,10 +1147,7 @@ final class MeetingOverlayRootView: NSView {
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds))
-        let m = total / 60
-        let s = total % 60
-        return String(format: "%02d:%02d", m, s)
+        MeetingDurationFormatter.formatDuration(seconds)
     }
 
     // Clicking a tracked button while its tooltip is up would otherwise
@@ -2216,16 +2213,10 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func makeTranscriptPlainText() -> String {
-        var lines: [String] = []
-        for entry in latestTranscriptFinals {
-            lines.append("\(entry.source == .microphone ? "You" : "Them"): \(entry.text)")
-        }
-        for source in [LiveMeetingCodexSource.microphone, .system] {
-            if let partial = latestTranscriptPartials[source] {
-                lines.append("\(source == .microphone ? "You" : "Them"): \(partial.text)")
-            }
-        }
-        return lines.joined(separator: "\n")
+        LiveTranscriptPlainTextRenderer.makeTranscriptPlainText(
+            finals: latestTranscriptFinals,
+            partials: latestTranscriptPartials
+        )
     }
 
     /// Drawer-header action: opens the tokenized browser preview, the same
@@ -2431,8 +2422,7 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func formatInactiveDuration(_ duration: TimeInterval) -> String {
-        let minutes = max(1, Int(round(duration / 60)))
-        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+        MeetingDurationFormatter.formatInactiveDuration(duration)
     }
 
     // MARK: - View push

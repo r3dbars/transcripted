@@ -32,6 +32,8 @@ rules:
 
   - paths:
       - "Tests/E2E/SlowPastebackSmoke.swift"
+      - "Sources/Support/ClipboardRestoringTextPaster.swift"
+      - "Sources/Support/TranscriptedConstants.swift"
       - "run-slow-pasteback-smoke.sh"
       - "scripts/entrypoints/run-slow-pasteback-smoke.sh"
     checks:
@@ -261,6 +263,7 @@ rules:
       - "Tools/TranscriptedMCP/**"
     checks:
       - "swift test --package-path Tools/TranscriptedMCP"
+      - "bash run-e2e-smoke.sh"
 
   - paths:
       - "Tools/TranscriptedQA/**"

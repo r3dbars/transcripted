@@ -1339,20 +1339,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private func formattedTypingTimeSaved(forDictatedWords wordCount: Int) -> String {
-        guard wordCount > 0 else { return "0h" }
-
-        let hours = Double(wordCount) / 40.0 / 60.0
-        guard hours >= 1 else { return "<1h" }
-
-        if hours < 10 {
-            let roundedTenths = (hours * 10).rounded() / 10
-            if roundedTenths >= 10 {
-                return "\(Int(roundedTenths.rounded()))h"
-            }
-            return String(format: "%.1fh", roundedTenths)
-        }
-
-        return "\(Int(hours.rounded()))h"
+        TypingTimeSavedFormatter.format(dictatedWords: wordCount)
     }
 
     private static let homeIntegerFormatter: NumberFormatter = {
@@ -4339,15 +4326,16 @@ struct TranscriptedSettingsView: View {
     }
 
     private func autoEnterDisplayName(for bundleID: String) -> String {
-        if let candidate = autoEnterAppCandidates.first(where: { $0.bundleID == bundleID }) {
-            return candidate.name
-        }
-
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            return url.deletingPathExtension().lastPathComponent
-        }
-
-        return bundleID
+        AutoEnterDisplayNameResolver.resolve(
+            bundleID: bundleID,
+            candidateNames: autoEnterAppCandidates.map { ($0.bundleID, $0.name) },
+            workspaceLookup: { id in
+                guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else {
+                    return nil
+                }
+                return url.deletingPathExtension().lastPathComponent
+            }
+        )
     }
 
     private var aboutUpdateStatusTitle: String {

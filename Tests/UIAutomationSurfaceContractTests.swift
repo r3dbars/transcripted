@@ -1,3 +1,8 @@
+// Repo-structure / contract suite, not behavioral coverage.
+// It asserts that menubar sources keep their stable AX identifiers and that
+// the smoke script still references them, so external UI automation stays in sync.
+// It runs no UI and exercises no runtime behavior; it only greps source text.
+
 import Foundation
 
 func testUIAutomationSurfaceContract() {

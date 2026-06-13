@@ -1,3 +1,8 @@
+// Repo-structure / contract suite, not behavioral coverage.
+// It asserts that the QA CLI registers the permission-state command, keeps its
+// probe matrix intact, and that the QA bench gates live automation in order.
+// It greps source/script text only and exercises no permission-probe runtime logic.
+
 import Foundation
 
 func testPermissionStateHarnessContract() {

@@ -1,3 +1,8 @@
+// Repo-structure / contract suite, not behavioral coverage.
+// It asserts that the audio-reliability automation script exists and still
+// names every expected synthetic route lane, keeping the matrix in sync.
+// It exercises no runtime audio logic, so it does not cover capture behavior.
+
 import Foundation
 
 func testAudioAutomationCoverageContract() {
