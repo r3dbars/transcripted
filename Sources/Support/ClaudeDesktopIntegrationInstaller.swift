@@ -443,6 +443,7 @@ enum ClaudeDesktopIntegrationInstaller {
         let backupURL = configURL.deletingLastPathComponent()
             .appendingPathComponent("\(configURL.lastPathComponent).backup-\(timestamp)", isDirectory: false)
         try fileManager.copyItem(at: configURL, to: backupURL)
+        fileManager.restrictFileToOwnerOnly(at: backupURL)
         return backupURL
     }
 }

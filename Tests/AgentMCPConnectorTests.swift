@@ -235,6 +235,7 @@ func testAgentMCPConnector() {
 
         try? FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
         try? "model = \"o4\"\n".write(to: paths.codexConfigURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o644)], ofItemAtPath: paths.codexConfigURL.path)
 
         do {
             try AgentMCPConnector.connect(.codex, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
@@ -255,6 +256,11 @@ func testAgentMCPConnector() {
                 (try? String(contentsOf: backupURL, encoding: .utf8)) ?? "",
                 "model = \"o4\"\n",
                 "backup should preserve the pre-write config bytes"
+            )
+            assertEqual(
+                filePermissions(at: backupURL)?.intValue,
+                0o600,
+                "config backups should be owner-only even when the original file was loose"
             )
         }
 
@@ -702,4 +708,9 @@ func testAgentMCPConnector() {
             "ensure should refresh a stale installed helper"
         )
     }
+}
+
+private func filePermissions(at url: URL) -> NSNumber? {
+    let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+    return attributes?[.posixPermissions] as? NSNumber
 }
