@@ -95,12 +95,28 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
             ),
             "the scheduled notice should be dismissible"
         )
+        assertEqual(
+            HomeLocalSummaryNoticeDismissalPolicy.noticeAfterAutoDismiss(
+                current: firstNotice,
+                scheduledNoticeID: firstNotice.id
+            ),
+            nil,
+            "the scheduled notice should clear after its auto-dismiss delay"
+        )
         assertFalse(
             HomeLocalSummaryNoticeDismissalPolicy.shouldDismiss(
                 current: newerNotice,
                 scheduledNoticeID: firstNotice.id
             ),
             "an old dismissal timer should not clear a newer summary notice"
+        )
+        assertEqual(
+            HomeLocalSummaryNoticeDismissalPolicy.noticeAfterAutoDismiss(
+                current: newerNotice,
+                scheduledNoticeID: firstNotice.id
+            ),
+            newerNotice,
+            "an old dismissal timer should leave a newer summary notice visible"
         )
     }
 }
