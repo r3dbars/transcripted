@@ -8,6 +8,7 @@ These are pure-logic / CLI tests — no app, no Mac, no network.
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,14 @@ FIXTURES = OPS_DIR / "fixtures" / "board-scorecard"
 
 sys.path.insert(0, str(OPS_DIR))
 import score_boards_lib as lib  # noqa: E402
+
+
+def load_score_boards_module():
+    spec = importlib.util.spec_from_file_location("score_boards", OPS_DIR / "score-boards.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def run(script: str, *args: str) -> subprocess.CompletedProcess:
@@ -281,6 +290,17 @@ boards:
             payload = json.loads(out_json.read_text())
             self.assertEqual(payload["boards"][0]["score"], 100.0)
 
+    def test_yaml_parser_handles_bare_list_and_bare_mapping_item(self):
+        score_boards = load_score_boards_module()
+        rows = score_boards.tokenize_registry("""
+items:
+  - ui:
+      check_globs: [dictation, summary]
+""")
+        data, index = score_boards.parse_yaml_block(rows, 0, 0)
+        self.assertEqual(index, len(rows))
+        self.assertEqual(data["items"][0]["ui"]["check_globs"], ["dictation", "summary"])
+
     def test_invalid_report_json_is_incomplete_not_crash(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
@@ -314,6 +334,41 @@ boards:
             self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
             payload = json.loads(out_json.read_text())
             self.assertEqual(payload["overallStatus"], lib.STATUS_INCOMPLETE)
+
+    def test_zero_score_dimension_appears_in_markdown_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            registry = tmp / "registry.yml"
+            registry.write_text("""
+version: 1
+defaults:
+  weights:
+    ui: 1.0
+  thresholds:
+    green: 85
+    yellow: 65
+boards:
+  - id: home
+    name: Home
+    category: ui
+    automatable: auto
+    weight: 1.0
+    ui:
+      check_globs: ["settings-home"]
+""")
+            (tmp / "ui.json").write_text(json.dumps({"checks": [
+                {"id": "settings-home", "status": "FAIL", "target": "transcripted.home"}
+            ]}))
+
+            out_json = tmp / "scorecard.json"
+            out_md = tmp / "scorecard.md"
+            proc = run("score-boards.py",
+                       "--registry", str(registry),
+                       "--ui-json", str(tmp / "ui.json"),
+                       "--json-out", str(out_json),
+                       "--markdown-out", str(out_md))
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("ui=0", out_md.read_text())
 
     def test_no_evidence_is_incomplete_not_green(self):
         with tempfile.TemporaryDirectory() as tmp:

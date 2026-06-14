@@ -74,7 +74,11 @@ def parse_yaml_scalar(value: str) -> Any:
     if value == "":
         return ""
     if value.startswith("[") and value.endswith("]"):
-        parsed = ast.literal_eval(value)
+        try:
+            parsed = ast.literal_eval(value)
+        except (SyntaxError, ValueError):
+            inner = value[1:-1].strip()
+            return [] if not inner else [parse_yaml_scalar(part.strip()) for part in inner.split(",")]
         if not isinstance(parsed, list):
             raise ValueError(f"expected inline list in registry, got {type(parsed).__name__}")
         return parsed
@@ -146,8 +150,14 @@ def parse_yaml_list(rows: list[tuple[int, str]], index: int, indent: int) -> tup
             item, index = parse_yaml_block(rows, index, rows[index][0])
         elif ":" in item_text:
             key, value = split_yaml_key_value(item_text)
-            item = {key: parse_yaml_scalar(value)} if value else {key: {}}
-            if index < len(rows) and rows[index][0] > row_indent:
+            if value:
+                item = {key: parse_yaml_scalar(value)}
+            elif index < len(rows) and rows[index][0] > row_indent:
+                child, index = parse_yaml_block(rows, index, rows[index][0])
+                item = {key: child}
+            else:
+                item = {key: {}}
+            if value and index < len(rows) and rows[index][0] > row_indent:
                 extra, index = parse_yaml_mapping(rows, index, rows[index][0])
                 item.update(extra)
         else:
@@ -177,6 +187,10 @@ def load_registry(path: Path) -> dict[str, Any]:
 def normalize_status(value: Any) -> str:
     status = str(value or "FAIL").upper()
     if status == "INCOMPLETE":
+        return "WARN"
+    if status in ("SKIP", "SKIPPED", "N/A", "NA"):
+        return "WARN"
+    if status not in ("PASS", "WARN", "FAIL"):
         return "WARN"
     return status
 
@@ -244,7 +258,11 @@ def load_accuracy_input(accuracy_dir: Optional[Path], input_name: str) -> Dimens
     score = payload.get("score")
     if score is None:
         return DimensionScore.missing("accuracy", detail="scorer produced no score")
-    return DimensionScore.scored("accuracy", float(score), detail=payload.get("detail", input_name))
+    try:
+        numeric_score = float(score)
+    except (TypeError, ValueError):
+        return DimensionScore.missing("accuracy", detail=f"invalid score in {path.name}")
+    return DimensionScore.scored("accuracy", numeric_score, detail=payload.get("detail", input_name))
 
 
 def build_dimension(
@@ -358,7 +376,7 @@ def write_markdown(path: Path, boards: list[BoardScore]) -> None:
         "| --- | --- | --- | ---: | --- | --- |",
     ]
 
-    ordered = sorted(boards, key=lambda b: (status_rank(b.status), -(b.score or -1), b.board_id))
+    ordered = sorted(boards, key=lambda b: (status_rank(b.status), -(b.score if b.score is not None else -1), b.board_id))
     for board in ordered:
         lines.append(
             f"| `{board.board_id}` | {board.category} | {board.automatable} | "
@@ -374,7 +392,7 @@ def write_markdown(path: Path, boards: list[BoardScore]) -> None:
         worst = ", ".join(
             f"{d.name}={fmt_score(d.score)} ({d.detail})"
             for d in board.dimensions
-            if d.present and (d.score or 100) < 85
+            if d.present and (d.score if d.score is not None else 100) < 85
         )
         lines.append(f"- {board.status} `{board.board_id}` ({fmt_score(board.score)}): {worst or board.detail}")
 
