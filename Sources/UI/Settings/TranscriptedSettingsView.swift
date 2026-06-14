@@ -499,17 +499,27 @@ struct TranscriptedSettingsView: View {
 
             if let notice = homeLocalSummaryNotice {
                 SettingsActivityCard(
-                    symbolName: "sparkles",
+                    symbolName: notice.isFailure ? "exclamationmark.circle.fill" : "sparkles",
                     title: notice.title,
                     status: notice.status,
                     detail: notice.detail,
-                    tone: .success,
+                    tone: notice.isFailure ? .caution : .success,
                     progress: nil,
-                    actionTitle: "Open enhanced transcript",
+                    actionTitle: notice.actionTitle,
                     action: {
-                        trackSettingsAction("open_local_meeting_summary_notice", page: .home)
-                        clearHomeLocalSummaryNotice(id: notice.id)
-                        NSWorkspace.shared.open(notice.transcriptURL)
+                        if notice.isFailure {
+                            trackSettingsAction("retry_local_meeting_summary_notice", page: .home)
+                            clearHomeLocalSummaryNotice(id: notice.id)
+                            generateLocalSummary(
+                                transcriptURL: notice.transcriptURL,
+                                title: notice.meetingTitle,
+                                hasExistingSummary: false
+                            )
+                        } else {
+                            trackSettingsAction("open_local_meeting_summary_notice", page: .home)
+                            clearHomeLocalSummaryNotice(id: notice.id)
+                            NSWorkspace.shared.open(notice.transcriptURL)
+                        }
                     }
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -824,8 +834,21 @@ struct TranscriptedSettingsView: View {
     }
 
     private func generateLocalSummary(for item: RecentMeetingItem) {
+        generateLocalSummary(
+            transcriptURL: item.transcriptURL,
+            title: item.title,
+            hasExistingSummary: item.summaryPreview != nil
+        )
+    }
+
+    private func generateLocalSummary(
+        transcriptURL: URL,
+        title: String,
+        hasExistingSummary: Bool
+    ) {
         guard localMeetingSummariesEnabled else { return }
-        guard homeLocalSummaryTasks[item.id] == nil else { return }
+        let summaryID = transcriptURL.path
+        guard homeLocalSummaryTasks[summaryID] == nil else { return }
         if let unavailableReason = localMeetingSummaryUnavailableReason {
             homeDeleteFailure = HomeDeleteFailure(
                 title: "Could not summarize meeting",
@@ -840,38 +863,38 @@ struct TranscriptedSettingsView: View {
             message: "\(provider.title) meeting summary started",
             context: [
                 "provider": provider.rawValue,
-                "has_existing_summary": item.summaryPreview == nil ? "false" : "true",
+                "has_existing_summary": hasExistingSummary ? "true" : "false",
                 "setup_ready": selectedLocalSummaryProviderIsReady ? "true" : "false",
                 "setup_profile": selectedLocalSummaryProviderProfileName,
             ]
         )
         clearHomeLocalSummaryNotice()
-        homeLocalSummaryJobIDs.insert(item.id)
+        homeLocalSummaryJobIDs.insert(summaryID)
 
         let task = Task.detached(priority: .utility) {
             switch provider {
             case .gemmaMLX:
                 return try await LocalMeetingSummarizer().summarize(
-                    transcriptURL: item.transcriptURL,
-                    title: item.title
+                    transcriptURL: transcriptURL,
+                    title: title
                 )
             case .appleFoundation:
                 return try await AppleFoundationMeetingSummarizer().summarize(
-                    transcriptURL: item.transcriptURL,
-                    title: item.title
+                    transcriptURL: transcriptURL,
+                    title: title
                 )
             }
         }
         let taskToken = UUID()
-        homeLocalSummaryTasks[item.id] = task
-        homeLocalSummaryTaskTokens[item.id] = taskToken
+        homeLocalSummaryTasks[summaryID] = task
+        homeLocalSummaryTaskTokens[summaryID] = taskToken
 
         Task { @MainActor in
             defer {
-                if homeLocalSummaryTaskTokens[item.id] == taskToken {
-                    homeLocalSummaryJobIDs.remove(item.id)
-                    homeLocalSummaryTasks[item.id] = nil
-                    homeLocalSummaryTaskTokens[item.id] = nil
+                if homeLocalSummaryTaskTokens[summaryID] == taskToken {
+                    homeLocalSummaryJobIDs.remove(summaryID)
+                    homeLocalSummaryTasks[summaryID] = nil
+                    homeLocalSummaryTaskTokens[summaryID] = nil
                 }
             }
 
@@ -880,6 +903,7 @@ struct TranscriptedSettingsView: View {
                 guard localMeetingSummariesEnabled else { return }
                 presentHomeLocalSummaryNotice(HomeLocalSummaryNotice(
                     transcriptURL: result.transcriptURL,
+                    meetingTitle: title,
                     chunkCount: result.chunkCount
                 ))
                 recordLocalSummaryEvent(
@@ -912,9 +936,13 @@ struct TranscriptedSettingsView: View {
                         "error": error.localizedDescription,
                     ]
                 )
-                homeDeleteFailure = HomeDeleteFailure(
-                    title: "Could not summarize meeting",
-                    message: error.localizedDescription
+                NSSound.beep()
+                presentHomeLocalSummaryNotice(
+                    HomeLocalSummaryNotice(
+                        transcriptURL: transcriptURL,
+                        meetingTitle: title,
+                        failureMessage: error.localizedDescription
+                    )
                 )
             }
         }
@@ -3070,6 +3098,10 @@ struct TranscriptedSettingsView: View {
     private func presentHomeLocalSummaryNotice(_ notice: HomeLocalSummaryNotice) {
         homeLocalSummaryNotice = notice
         homeLocalSummaryNoticeDismissTask?.cancel()
+        guard notice.shouldAutoDismiss else {
+            homeLocalSummaryNoticeDismissTask = nil
+            return
+        }
         homeLocalSummaryNoticeDismissTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: HomeLocalSummaryNoticeDismissalPolicy.autoDismissDelayNanoseconds)
             guard !Task.isCancelled,
