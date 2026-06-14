@@ -297,6 +297,49 @@ func testMeetingPromptDetector() async {
         assertEqual(box.promptCount, 1, "a changed browser-helper set should not spam a second mic prompt for the same call")
         assertEqual(box.candidate?.id, "mic:googleMeet", "the pending candidate id should stay stable across browser helpers")
     }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge clears transient pending state") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 2, "a later call should be able to prompt after only transient pending state existed")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves explicit dismiss backoff") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        if let candidate = box.candidate {
+            _ = detector.dismiss(candidate: candidate)
+        }
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "mute/unmute should not wipe an explicit Not now dismissal")
+    }
 }
 
 @available(macOS 14.0, *)

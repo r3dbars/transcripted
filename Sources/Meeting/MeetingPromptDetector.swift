@@ -330,15 +330,14 @@ final class MeetingPromptDetector {
     // MARK: - Mic-activity candidates (ad-hoc call detection)
 
     /// Pushed by `MicActivityMonitor` with the set of non-self bundle IDs holding
-    /// the mic input. Stores it, resets mic-suppression for any provider that just
-    /// left the call (the "inactive" edge, so the next call re-prompts), and
-    /// re-evaluates.
+    /// the mic input. Stores it, clears transient pending prompt state for any
+    /// provider that just went inactive, and re-evaluates.
     func updateMicInputUsers(_ bundleIDs: Set<String>) {
         guard bundleIDs != micActiveBundleIDs else { return }
         let departed = micProviders(for: micActiveBundleIDs).subtracting(micProviders(for: bundleIDs))
         micActiveBundleIDs = bundleIDs
         for provider in departed {
-            clearMicSuppression(for: provider)
+            clearMicPendingIfNoBackoff(for: provider)
         }
         Task { @MainActor [weak self] in
             await self?.evaluate()
@@ -391,14 +390,14 @@ final class MeetingPromptDetector {
         Set(bundleIDs.compactMap { MeetingPromptProvider.micInputProvider(forBundleID: $0) })
     }
 
-    // Clears the mic-prompt backoff for a provider whose call just ended, so the
-    // next distinct call can prompt again. Within a single call, snooze/dismiss
-    // still suppress as usual.
-    private func clearMicSuppression(for provider: MeetingPromptProvider) {
-        runtimeSuppressedUntil[provider] = nil
+    // Clears only transient presentation cooldown after a mic call goes inactive.
+    // Explicit dismiss/snooze/accept backoff stays intact so mute/unmute or a
+    // brief capture drop cannot undo the user's "not now" choice.
+    private func clearMicPendingIfNoBackoff(for provider: MeetingPromptProvider) {
         let id = micCandidateID(for: provider)
-        snoozedUntil[id] = nil
-        pendingUntil[id] = nil
+        if snoozedUntil[id] == nil {
+            pendingUntil[id] = nil
+        }
     }
 
     private func micCandidateID(for provider: MeetingPromptProvider) -> String {

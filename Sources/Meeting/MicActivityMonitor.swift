@@ -11,16 +11,17 @@
 // and mutable state are confined to a single serial utility queue. We never do
 // heavy work in a property-listener callback beyond scheduling a scan, and we
 // hop to the main actor to deliver results. The class is `@unchecked Sendable`
-// because every stored property is touched only on `queue` except `onChange`,
-// which is read and written only on the main actor.
+// because mutable runtime state is touched only on `queue`; assign `onChange`
+// before `start()` and do not mutate it while the monitor is running.
 //
 // Why a backstop poll on top of listeners: the Phase 0 spike found that a call
 // starting does NOT change kAudioHardwarePropertyProcessObjectList — the browser
 // helper process already exists; only its IsRunningInput flag flips. So a pure
 // process-list listener would miss the start. We listen on the input device's
 // "is running somewhere" edge for low latency on the common path, and run a small
-// periodic scan as a correctness guarantee for any edge a listener doesn't catch
-// (e.g. capture on a non-default device). Each scan is ~40 sub-millisecond reads.
+// slower periodic scan as a correctness guarantee for any edge a listener
+// doesn't catch (e.g. capture on a non-default device). The listener gives the
+// fast common path; the poll is intentionally slower for idle battery life.
 
 import CoreAudio
 import Foundation
@@ -29,8 +30,8 @@ import Foundation
 final class MicActivityMonitor: @unchecked Sendable {
     /// Delivered on the main actor with the set of non-self bundle IDs currently
     /// holding the mic input. An empty set is the explicit "inactive" edge (the
-    /// last mic user stopped) so the detector can reset mic-suppression and
-    /// re-prompt the next call. Assign before calling `start()`.
+    /// last mic user stopped) so the detector can clear transient pending prompt
+    /// state. Assign before calling `start()` and do not mutate while running.
     var onChange: ((Set<String>) -> Void)?
 
     private let ownBundleID: String
@@ -49,7 +50,7 @@ final class MicActivityMonitor: @unchecked Sendable {
     init(
         ownBundleID: String = Bundle.main.bundleIdentifier ?? "",
         debounceInterval: TimeInterval = 1.0,
-        pollInterval: TimeInterval = 2.0
+        pollInterval: TimeInterval = 15.0
     ) {
         self.ownBundleID = ownBundleID
         self.debounceInterval = debounceInterval
