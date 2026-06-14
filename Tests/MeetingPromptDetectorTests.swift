@@ -298,7 +298,7 @@ func testMeetingPromptDetector() async {
         assertEqual(box.candidate?.id, "mic:googleMeet", "the pending candidate id should stay stable across browser helpers")
     }
 
-    await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge clears transient pending state") {
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves transient pending cooldown") {
         let detector = MeetingPromptDetector()
         detector.isOwnCaptureActive = { false }
         let box = CandidateBox()
@@ -315,7 +315,7 @@ func testMeetingPromptDetector() async {
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation()
 
-        assertEqual(box.promptCount, 2, "a later call should be able to prompt after only transient pending state existed")
+        assertEqual(box.promptCount, 1, "mute/unmute should not bypass the short pending cooldown")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves explicit dismiss backoff") {
@@ -339,6 +339,36 @@ func testMeetingPromptDetector() async {
         await waitForPromptEvaluation()
 
         assertEqual(box.promptCount, 1, "mute/unmute should not wipe an explicit Not now dismissal")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — calendar candidate keeps title over mic candidate") {
+        let now = Date()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(
+                    id: "scheduled-meet",
+                    provider: .googleMeet,
+                    startsIn: 30,
+                    now: now
+                )
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "one prompt should be presented")
+        assertEqual(box.candidate?.source, .calendarEvent, "scheduled meetings should keep calendar context over the generic mic prompt")
+        assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "calendar-backed mic calls should keep the meeting title hint")
     }
 }
 

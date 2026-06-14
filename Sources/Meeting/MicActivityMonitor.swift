@@ -30,8 +30,8 @@ import Foundation
 final class MicActivityMonitor: @unchecked Sendable {
     /// Delivered on the main actor with the set of non-self bundle IDs currently
     /// holding the mic input. An empty set is the explicit "inactive" edge (the
-    /// last mic user stopped) so the detector can clear transient pending prompt
-    /// state. Assign before calling `start()` and do not mutate while running.
+    /// last mic user stopped). Assign before calling `start()` and do not mutate
+    /// while running.
     var onChange: ((Set<String>) -> Void)?
 
     private let ownBundleID: String
@@ -50,7 +50,7 @@ final class MicActivityMonitor: @unchecked Sendable {
     init(
         ownBundleID: String = Bundle.main.bundleIdentifier ?? "",
         debounceInterval: TimeInterval = 1.0,
-        pollInterval: TimeInterval = 15.0
+        pollInterval: TimeInterval = 60.0
     ) {
         self.ownBundleID = ownBundleID
         self.debounceInterval = debounceInterval

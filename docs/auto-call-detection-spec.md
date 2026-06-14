@@ -163,8 +163,8 @@ scripts/dev/mic-activity-spike.swift [--watch] [--dump]`). Ran on macOS 26.5.1.
   `kAudioProcessPropertyIsRunningInput == true`, read `kAudioProcessPropertyBundleID`,
   drop our own bundle ID, emit `Set<String>`.
 - Debounce ~1–2s so a blip doesn't fire. Emit an explicit "inactive" edge when
-  the set empties so transient pending prompt state can reset without wiping a
-  user's explicit dismiss/snooze backoff.
+  the set empties, but keep detector cooldowns intact so mute/unmute cannot
+  re-prompt early.
 - Keep it thin: all *decision* logic (bundle→provider, candidate construction,
   self-exclusion) lives in pure functions for testability — the CoreAudio
   listener itself is not unit-testable.
@@ -213,7 +213,7 @@ spike, then provider mapping → monitor → detector wiring → app/Settings wi
 What shipped, and where it diverged from the original sketch:
 - **`MicActivityMonitor`** (`Sources/Meeting/MicActivityMonitor.swift`) emits the set
   of non-self mic-holding bundle IDs. It uses a device "is-running-somewhere" edge
-  listener **plus a slower 15s backstop scan**, not a pure `kAudioHardwarePropertyProcessObjectList`
+  listener **plus a slow 60s backstop scan**, not a pure `kAudioHardwarePropertyProcessObjectList`
   listener — because the Phase 0 live test proved the process list does *not* change
   when a call starts (the browser helper already exists; only its `IsRunningInput`
   flips). All CoreAudio + state are confined to one serial queue; results hop to main.
@@ -223,9 +223,10 @@ What shipped, and where it diverged from the original sketch:
   conferencing apps map to themselves; any browser maps to `.googleMeet`.
 - **Detector**: `updateMicInputUsers(_:)` + `micInputCandidates(now:)` reuse the
   `.runtimeApp` source (snooze/dismiss/backoff untouched), score **5**, reason
-  `.micInput` (new, for analytics), candidate id `mic:<provider>`. The inactive edge
-  clears only transient pending state; explicit dismiss/snooze backoff survives
-  mute/unmute and brief mic drops.
+  `.micInput` (new, for analytics), candidate id `mic:<provider>`. Calendar
+  candidates for the same provider win over mic candidates so scheduled calls
+  keep their title/context. Inactive edges keep pending/dismiss/snooze cooldowns
+  intact so mute/unmute and brief mic drops stay quiet.
 - **Self-exclusion**: detector `isOwnCaptureActive` (recording OR dictation) gates the
   whole mic path, plus the monitor drops our own bundle (`com.justinbetker.draft`) by prefix.
 - **Settings**: "Auto-detect calls" on the General page, **default ON**.
@@ -263,9 +264,9 @@ calls, so Phase 1 alone is likely enough.
 - Our own capture / dictation → self-exclusion (own-bundle filter + `isOwnCaptureActive`).
 - QuickTime, Voice Memos, Photo Booth → map to no provider → no prompt.
 - Repeated nagging → existing `snooze` / `dismiss` / `remindSoon` +
-  `runtimeSuppressedUntil` already handle it. The inactive edge clears only
-  transient pending state, so a later call can re-prompt if the first prompt was
-  merely shown, but an explicit user dismissal stays quiet through mute/unmute.
+  `runtimeSuppressedUntil` already handle it. The inactive edge does not clear
+  prompt cooldowns, so mute/unmute cannot bypass either the short pending
+  cooldown or an explicit user dismissal.
 
 ## Settings / privacy
 
