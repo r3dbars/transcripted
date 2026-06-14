@@ -27,6 +27,7 @@ final class MeetingPromptDetector {
     var shouldSkipPromptEvaluation: (() -> Bool)?
 
     private let calendarReader = MeetingPromptCalendarReader()
+    private let calendarAccessGranted: () -> Bool
     // Cache of upcoming meeting-link events refreshed off-main by each poll cycle.
     // Dismiss/markAccepted/title paths must stay synchronous (overlay callbacks and
     // the recording-start title closure), so they read this cache instead of querying
@@ -45,6 +46,14 @@ final class MeetingPromptDetector {
     // Single fetch window covering both the near-term prompt window and the
     // farthest lookahead used for runtime-dismiss resume dates.
     private let calendarLookaheadInterval: TimeInterval = 12 * 60 * 60
+
+    init(
+        calendarAccessGranted: @escaping () -> Bool = { TranscriptedPermissionAccess.calendarAccessGranted() },
+        calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = []
+    ) {
+        self.calendarAccessGranted = calendarAccessGranted
+        self.calendarEventSnapshots = calendarEventSnapshots
+    }
 
     func start() {
         guard pollingTask == nil else { return }
@@ -165,7 +174,7 @@ final class MeetingPromptDetector {
     }
 
     func currentSuggestedTranscriptTitle(now: Date = Date()) -> String? {
-        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return nil }
+        guard calendarAccessGranted() else { return nil }
         return upcomingCalendarCandidates(
             now: now,
             runningBundleIDs: [],
@@ -190,7 +199,7 @@ final class MeetingPromptDetector {
         guard shouldSkipPromptEvaluation?() != true else { return }
 
         var candidates: [ScoredCandidate] = []
-        if TranscriptedPermissionAccess.calendarAccessGranted() {
+        if calendarAccessGranted() {
             candidates.append(contentsOf: upcomingCalendarCandidates(
                 now: now,
                 runningBundleIDs: runningBundleIDs,
@@ -213,7 +222,7 @@ final class MeetingPromptDetector {
     }
 
     private func refreshCalendarEventSnapshots() async {
-        guard TranscriptedPermissionAccess.calendarAccessGranted() else {
+        guard calendarAccessGranted() else {
             calendarEventSnapshots = []
             return
         }
@@ -363,11 +372,22 @@ final class MeetingPromptDetector {
         for targetProvider: MeetingPromptProvider,
         after now: Date
     ) -> MeetingPromptCalendarEventSnapshot? {
-        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return nil }
+        guard calendarAccessGranted() else { return nil }
 
         return calendarEventSnapshots
-            .filter { $0.provider == targetProvider && $0.endDate > now }
+            .filter { isRuntimeResumeEligibleCalendarSnapshot($0, for: targetProvider, after: now) }
             .min { $0.startDate < $1.startDate }
+    }
+
+    private func isRuntimeResumeEligibleCalendarSnapshot(
+        _ snapshot: MeetingPromptCalendarEventSnapshot,
+        for targetProvider: MeetingPromptProvider,
+        after now: Date
+    ) -> Bool {
+        guard !snapshot.isAllDay else { return false }
+        guard snapshot.provider == targetProvider else { return false }
+        guard snapshot.meetingURL != nil else { return false }
+        return snapshot.endDate > now
     }
 
     private func pruneExpiredEntries(now: Date) {
