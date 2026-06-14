@@ -125,8 +125,8 @@ func testUIAutomationSurfaceContract() {
             "tone: hasRetainedAudioFiles ? .destructive : .neutral",
             "HomeRowMoreMenuButton(items:",
             "retainedActionTarget = context.coordinator",
-            "MenuActionTarget(item: item)",
-            "DispatchQueue.main.async {\n                self.item.action()",
+            "final class ClosureMenuItem: NSMenuItem",
+            "ClosureMenuItem(menuItem: item)",
             "title: \"Copy for agent\"",
         ] {
             assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
@@ -134,6 +134,20 @@ func testUIAutomationSurfaceContract() {
         assertFalse(
             homeSource.contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
+        )
+
+        // Row-interaction affordances from fix/home-row-actions, which have no
+        // behavioral coverage in the fast suite (it greps source, never runs the
+        // UI). The overflow actions only reveal on hover, so the row needs a
+        // full-width hit shape (its idle background is Color.clear) and the
+        // canvas-header action button must not draw a focus ring.
+        assertTrue(
+            homeSource.contains(".focusEffectDisabled()"),
+            "the Home canvas-header action button should keep .focusEffectDisabled() so it draws no focus ring"
+        )
+        assertTrue(
+            homeSource.contains("across the full row.\n        .contentShape(Rectangle())"),
+            "recent-capture rows should keep their full-width .contentShape(Rectangle()) so hover reveals row actions everywhere, not only over the title text"
         )
 
         for requiredOnboardingHook in [
