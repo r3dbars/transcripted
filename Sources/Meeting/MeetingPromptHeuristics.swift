@@ -229,29 +229,50 @@ struct MeetingPromptCalendarEventSnapshot: Equatable {
     let url: URL?
     let location: String?
     let notes: String?
+    let meetingURL: URL?
+    let provider: MeetingPromptProvider?
 
-    var meetingURL: URL? {
-        if let url, Self.provider(for: url) != nil {
-            return url
-        }
+    init(
+        id: String,
+        title: String?,
+        startDate: Date,
+        endDate: Date,
+        isAllDay: Bool,
+        url: URL?,
+        location: String?,
+        notes: String?
+    ) {
+        self.id = id
+        self.title = title
+        self.startDate = startDate
+        self.endDate = endDate
+        self.isAllDay = isAllDay
+        self.url = url
+        self.location = location
+        self.notes = notes
 
-        for source in [location, notes] {
-            guard let source else { continue }
-            guard let url = Self.extractFirstMeetingURL(in: source) else { continue }
-            return url
-        }
-
-        return nil
-    }
-
-    var provider: MeetingPromptProvider? {
-        guard let meetingURL else { return nil }
-        return Self.provider(for: meetingURL)
+        let meetingURL = Self.extractMeetingURL(url: url, location: location, notes: notes)
+        self.meetingURL = meetingURL
+        self.provider = meetingURL.flatMap(Self.provider(for:))
     }
 
     private static let meetingURLDetector = try? NSDataDetector(
         types: NSTextCheckingResult.CheckingType.link.rawValue
     )
+
+    private static func extractMeetingURL(url: URL?, location: String?, notes: String?) -> URL? {
+        if let url, provider(for: url) != nil {
+            return url
+        }
+
+        for source in [location, notes] {
+            guard let source else { continue }
+            guard let url = extractFirstMeetingURL(in: source) else { continue }
+            return url
+        }
+
+        return nil
+    }
 
     private static func extractFirstMeetingURL(in text: String) -> URL? {
         guard let detector = meetingURLDetector else { return nil }

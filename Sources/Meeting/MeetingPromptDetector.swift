@@ -409,7 +409,7 @@ private extension MeetingPromptCalendarEventSnapshot {
         guard let startDate = event.startDate,
               let endDate = event.endDate else { return nil }
 
-        self.init(
+        let snapshot = MeetingPromptCalendarEventSnapshot(
             id: event.calendarItemIdentifier,
             title: event.title,
             startDate: startDate,
@@ -419,6 +419,8 @@ private extension MeetingPromptCalendarEventSnapshot {
             location: event.location,
             notes: event.notes
         )
+        guard snapshot.meetingURL != nil else { return nil }
+        self = snapshot
     }
 }
 
