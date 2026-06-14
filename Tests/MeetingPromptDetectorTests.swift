@@ -208,4 +208,213 @@ func testMeetingPromptDetector() async {
             "runtime-only prompts should not invent a transcript title"
         )
     }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — a browser holding the mic prompts an ad-hoc call") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertNotNil(box.candidate, "a browser holding the mic should surface a prompt with no calendar event")
+        assertEqual(box.candidate?.id, "mic:googleMeet", "a browser mic call should attribute to the browser-call provider")
+        assertEqual(box.candidate?.reason, .micInput, "mic prompts should record the distinct mic-input reason")
+        assertEqual(box.candidate?.source, .runtimeApp, "mic prompts should reuse the runtime source so backoff is unchanged")
+        assertEqual(box.candidate?.suggestedTranscriptTitle, nil, "a browser call has no calendar title to suggest")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — never prompts while our own capture is active") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { true }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertNil(box.candidate, "we must never prompt to record a call while Transcripted itself holds the mic")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — busy presentation state suppresses mic prompts") {
+        let detector = MeetingPromptDetector()
+        detector.shouldSkipPromptEvaluation = { true }
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertNil(box.candidate, "detector-level busy-state gating should block ad-hoc call prompts")
+        assertEqual(box.promptCount, 0, "busy-state suppression should avoid asking the overlay to present")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — disabled mic prompt gate suppresses stale callbacks") {
+        let detector = MeetingPromptDetector()
+        detector.isMicInputPromptEnabled = { false }
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertNil(box.candidate, "a stale monitor callback after disabling auto-detect calls should stay quiet")
+        assertEqual(box.promptCount, 0, "the disabled preference gate should avoid asking the overlay to present")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — pending mic prompt avoids repeats during one call") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers(["com.google.Chrome.helper", "com.apple.WebKit.GPU"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "a changed browser-helper set should not spam a second mic prompt for the same call")
+        assertEqual(box.candidate?.id, "mic:googleMeet", "the pending candidate id should stay stable across browser helpers")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves transient pending cooldown") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "mute/unmute should not bypass the short pending cooldown")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves explicit dismiss backoff") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        if let candidate = box.candidate {
+            _ = detector.dismiss(candidate: candidate)
+        }
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "mute/unmute should not wipe an explicit Not now dismissal")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — native mic candidate keeps calendar title") {
+        let now = Date()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(
+                    id: "scheduled-zoom",
+                    provider: .zoom,
+                    startsIn: 30,
+                    now: now
+                )
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "one prompt should be presented")
+        assertEqual(box.candidate?.source, .calendarEvent, "native mic evidence should keep matching calendar context")
+        assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "native calendar-backed mic calls should keep the meeting title hint")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — generic browser mic candidate does not steal calendar title") {
+        let now = Date()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(
+                    id: "scheduled-meet",
+                    provider: .googleMeet,
+                    startsIn: 30,
+                    now: now
+                )
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "one prompt should be presented")
+        assertEqual(box.candidate?.source, .runtimeApp, "generic browser mic evidence should not borrow an unrelated Meet calendar event")
+        assertNil(box.candidate?.suggestedTranscriptTitle, "browser mic prompts should stay neutral because they could be Meet, Zoom-web, or Teams-web")
+    }
+}
+
+@available(macOS 14.0, *)
+@MainActor
+private final class CandidateBox {
+    var candidate: MeetingPromptDetector.Candidate?
+    var promptCount = 0
+}
+
+// updateMicInputUsers re-evaluates on a detached @MainActor Task; yield/sleep a
+// few times so it can run before we assert.
+@MainActor
+private func waitForPromptEvaluation() async {
+    for _ in 0..<20 {
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 5_000_000)
+    }
 }

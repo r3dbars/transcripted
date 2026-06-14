@@ -96,3 +96,6 @@ iOSInjectionProject/
 
 # Local CLI scratch transcripts / terminal captures
 Tools/TranscriptedCLI/*.txt
+
+# CodeGraph local index (MCP code-intelligence cache)
+.codegraph/

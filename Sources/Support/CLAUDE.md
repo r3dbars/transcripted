@@ -8,6 +8,7 @@
 
 - `ActivationPolicyController.swift` — combines the Dock toggle with live-recording safety so Transcripted can idle as menu-bar-only but still surface itself in the macOS force-quit dialog during active capture
 - `AudioStoragePreferences.swift` — persisted meeting-audio retention window for Settings and background retained-audio maintenance
+- `AutoCallDetectionPreferences.swift` — persisted (default-on) toggle for ad-hoc call detection via mic activity; gates `MicActivityMonitor` and the General-page "Auto-detect calls" setting (see `docs/auto-call-detection-spec.md`)
 - `AgentMCPConnector.swift` — per-agent MCP connect seam: detection, connection state, and config writers for Claude Code (via the `claude` CLI), Codex (`~/.codex/config.toml`), and Cursor (`~/.cursor/mcp.json`), all pointing at the shared installed helper
 - `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges `mcpServers` JSON configs, runs the helper self-test, and silently refreshes a stale installed helper at app launch
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app

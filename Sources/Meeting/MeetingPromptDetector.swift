@@ -26,8 +26,18 @@ final class MeetingPromptDetector {
     var onPromptRequest: ((Candidate) -> Bool)?
     var shouldSkipPromptEvaluation: (() -> Bool)?
 
+    /// Returns true while Transcripted itself holds the mic (meeting recording or
+    /// dictation). Gates the mic-activity path so we never prompt to record our
+    /// own capture — belt-and-suspenders with `MicActivityMonitor`'s own-bundle
+    /// filter. Wired in `TranscriptedApp`.
+    var isOwnCaptureActive: (() -> Bool)?
+    /// Returns false when the Settings toggle is off. This keeps late monitor
+    /// callbacks quiet after the user disables auto call detection.
+    var isMicInputPromptEnabled: (() -> Bool)?
+
     private let calendarReader = MeetingPromptCalendarReader()
     private let calendarAccessGranted: () -> Bool
+    private let refreshesCalendarEventSnapshots: Bool
     // Cache of upcoming meeting-link events refreshed off-main by each poll cycle.
     // Dismiss/markAccepted/title paths must stay synchronous (overlay callbacks and
     // the recording-start title closure), so they read this cache instead of querying
@@ -39,6 +49,8 @@ final class MeetingPromptDetector {
     private var pendingUntil: [String: Date] = [:]
     private var recentNativeActivity: [MeetingPromptProvider: Date] = [:]
     private var runtimeSuppressedUntil: [MeetingPromptProvider: Date] = [:]
+    // Bundle IDs currently holding the mic input, pushed by MicActivityMonitor.
+    private var micActiveBundleIDs: Set<String> = []
 
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
@@ -49,10 +61,12 @@ final class MeetingPromptDetector {
 
     init(
         calendarAccessGranted: @escaping () -> Bool = { TranscriptedPermissionAccess.calendarAccessGranted() },
-        calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = []
+        calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = [],
+        refreshesCalendarEventSnapshots: Bool = true
     ) {
         self.calendarAccessGranted = calendarAccessGranted
         self.calendarEventSnapshots = calendarEventSnapshots
+        self.refreshesCalendarEventSnapshots = refreshesCalendarEventSnapshots
     }
 
     func start() {
@@ -211,8 +225,10 @@ final class MeetingPromptDetector {
             runningBundleIDs: runningBundleIDs,
             frontmostBundleID: frontmostBundleID
         ))
+        candidates.append(contentsOf: micInputCandidates(now: now))
 
-        guard let match = candidates.sorted(by: sortCandidates).first else { return }
+        let sortedCandidates = candidates.sorted(by: sortCandidates)
+        guard let match = preferredCandidate(from: sortedCandidates) else { return }
 
         guard snoozedUntil[match.candidate.id] == nil, pendingUntil[match.candidate.id] == nil else { return }
 
@@ -222,6 +238,7 @@ final class MeetingPromptDetector {
     }
 
     private func refreshCalendarEventSnapshots() async {
+        guard refreshesCalendarEventSnapshots else { return }
         guard calendarAccessGranted() else {
             calendarEventSnapshots = []
             return
@@ -313,6 +330,75 @@ final class MeetingPromptDetector {
                 score: presentation.score
             )
         }
+    }
+
+    // MARK: - Mic-activity candidates (ad-hoc call detection)
+
+    /// Pushed by `MicActivityMonitor` with the set of non-self bundle IDs holding
+    /// the mic input. Stores it and re-evaluates; existing pending/dismiss
+    /// cooldowns survive inactive edges so mute/unmute cannot re-prompt early.
+    func updateMicInputUsers(_ bundleIDs: Set<String>) {
+        guard bundleIDs != micActiveBundleIDs else { return }
+        micActiveBundleIDs = bundleIDs
+        Task { @MainActor [weak self] in
+            await self?.evaluate()
+        }
+    }
+
+    private func micInputCandidates(now: Date) -> [ScoredCandidate] {
+        guard isMicInputPromptEnabled?() != false else { return [] }
+        guard !micActiveBundleIDs.isEmpty else { return [] }
+        // Never prompt to record a call while we already hold the mic ourselves.
+        guard isOwnCaptureActive?() != true else { return [] }
+
+        var seenProviders: Set<MeetingPromptProvider> = []
+        var candidates: [ScoredCandidate] = []
+        for bundleID in micActiveBundleIDs.sorted() {
+            guard let provider = MeetingPromptProvider.micInputProvider(forBundleID: bundleID) else { continue }
+            guard seenProviders.insert(provider).inserted else { continue }
+            if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now { continue }
+
+            // Browser calls map to .googleMeet generically (could be Meet/Zoom-web/
+            // Teams-web), so keep their title neutral instead of mislabeling them.
+            let isBrowserCall = provider == .googleMeet
+            let title = isBrowserCall
+                ? "Call detected in your browser"
+                : "\(provider.displayName) call detected"
+            let presentation = MeetingPromptHeuristics.micInputPresentation(title: title)
+
+            candidates.append(
+                ScoredCandidate(
+                    candidate: Candidate(
+                        id: micCandidateID(for: provider),
+                        title: presentation.title,
+                        detail: presentation.detail,
+                        provider: provider,
+                        reason: .micInput,
+                        source: .runtimeApp,
+                        startDate: now,
+                        endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
+                        meetingURL: nil,
+                        suggestedTranscriptTitle: nil
+                    ),
+                    score: presentation.score
+                )
+            )
+        }
+        return candidates
+    }
+
+    private func micCandidateID(for provider: MeetingPromptProvider) -> String {
+        "mic:\(provider.rawValue)"
+    }
+
+    private func preferredCandidate(from sortedCandidates: [ScoredCandidate]) -> ScoredCandidate? {
+        guard let first = sortedCandidates.first else { return nil }
+        guard first.candidate.reason == .micInput else { return first }
+        guard first.candidate.provider != .googleMeet else { return first }
+        return sortedCandidates.first {
+            $0.candidate.source == .calendarEvent &&
+                $0.candidate.provider == first.candidate.provider
+        } ?? first
     }
 
     private func sortCandidates(_ lhs: ScoredCandidate, _ rhs: ScoredCandidate) -> Bool {
