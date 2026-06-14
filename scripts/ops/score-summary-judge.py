@@ -60,7 +60,11 @@ def rubric_to_score(rubric: dict[str, Any]) -> float:
     weight = 0.0
     for key, w in RUBRIC_WEIGHTS.items():
         if key in rubric:
-            total += w * (float(rubric[key]) / 5.0)
+            try:
+                value = float(rubric[key])
+            except (TypeError, ValueError):
+                continue
+            total += w * (value / 5.0)
             weight += w
     if weight <= 0:
         return 0.0
@@ -139,7 +143,10 @@ def main() -> int:
     if not args.judge_result or not Path(args.judge_result).expanduser().is_file():
         return write_score(out_path, {"present": False, "detail": "no judge result supplied"})
 
-    payload = json.loads(Path(args.judge_result).expanduser().read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(Path(args.judge_result).expanduser().read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return write_score(out_path, {"present": False, "detail": "invalid judge result JSON"})
     meetings = meetings_from_payload(payload)
     return write_score(out_path, score_meetings(meetings))
 

@@ -177,6 +177,28 @@ class SummaryJudgeTests(unittest.TestCase):
             self.assertTrue(data["present"])
             self.assertEqual(data["score"], 100.0)
 
+    def test_invalid_judge_json_is_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            judge = Path(tmp) / "judge.json"
+            out = Path(tmp) / "score-summary.json"
+            judge.write_text("{")
+            proc = run("score-summary-judge.py", "--mode", "score", "--judge-result", str(judge), "--out", str(out))
+            self.assertEqual(proc.returncode, 3, proc.stderr)
+            data = json.loads(out.read_text())
+            self.assertFalse(data["present"])
+
+    def test_non_numeric_rubric_value_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            judge = Path(tmp) / "judge.json"
+            out = Path(tmp) / "score-summary.json"
+            judge.write_text(json.dumps(
+                {"id": "m1", "rubric": {"coverage": "good", "faithfulness": 5, "actionItems": 5, "conciseness": 5}}
+            ))
+            proc = run("score-summary-judge.py", "--mode", "score", "--judge-result", str(judge), "--out", str(out))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(out.read_text())
+            self.assertTrue(data["present"])
+
 
 class AggregatorTests(unittest.TestCase):
     def _registry(self) -> str:
@@ -242,7 +264,7 @@ boards:
     automatable: auto
     weight: 1.0
     ui:
-      check_globs: ["settings-home"]
+      check_globs: ['settings-home']
 """)
             (tmp / "ui.json").write_text(json.dumps({"checks": [
                 {"id": "settings-home", "title": "Home", "status": "PASS", "target": "transcripted.home"}
@@ -258,6 +280,40 @@ boards:
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             payload = json.loads(out_json.read_text())
             self.assertEqual(payload["boards"][0]["score"], 100.0)
+
+    def test_invalid_report_json_is_incomplete_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            registry = tmp / "registry.yml"
+            registry.write_text("""
+version: 1
+defaults:
+  weights:
+    functional: 1.0
+  thresholds:
+    green: 85
+    yellow: 65
+boards:
+  - id: home
+    name: Home
+    category: ui
+    automatable: auto
+    weight: 1.0
+    functional:
+      check_globs: ["index/*"]
+""")
+            (tmp / "functional.json").write_text("{")
+
+            out_json = tmp / "scorecard.json"
+            out_md = tmp / "scorecard.md"
+            proc = run("score-boards.py",
+                       "--registry", str(registry),
+                       "--functional-json", str(tmp / "functional.json"),
+                       "--json-out", str(out_json),
+                       "--markdown-out", str(out_md))
+            self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+            payload = json.loads(out_json.read_text())
+            self.assertEqual(payload["overallStatus"], lib.STATUS_INCOMPLETE)
 
     def test_no_evidence_is_incomplete_not_green(self):
         with tempfile.TemporaryDirectory() as tmp:

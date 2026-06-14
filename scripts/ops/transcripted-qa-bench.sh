@@ -788,8 +788,12 @@ run_scorecard_tail() {
   if [[ -f "${RAW_DIR}/scorecard-ui-smoke.json" ]]; then
     ui_arg=" --ui-json $(shell_quote "${RAW_DIR}/scorecard-ui-smoke.json")"
   fi
+  local functional_arg=""
+  if [[ -s "${RAW_DIR}/validate-all.json" ]]; then
+    functional_arg=" --functional-json $(shell_quote "${RAW_DIR}/validate-all.json")"
+  fi
   run_step "67-scorecard" "Aggregate board scorecard" "yes" \
-    "python3 scripts/ops/score-boards.py --registry .agents/board-scorecard.yml${ui_arg} --functional-json $(shell_quote "${RAW_DIR}/validate-all.json") --accuracy-dir $(shell_quote "${acc}") --json-out $(shell_quote "${RAW_DIR}/board-scorecard.json") --markdown-out $(shell_quote "${OUT}/board-scorecard.md")"
+    "python3 scripts/ops/score-boards.py --registry .agents/board-scorecard.yml${ui_arg}${functional_arg} --accuracy-dir $(shell_quote "${acc}") --json-out $(shell_quote "${RAW_DIR}/board-scorecard.json") --markdown-out $(shell_quote "${OUT}/board-scorecard.md")"
 }
 
 cd "${REPO_ROOT}" || exit 1

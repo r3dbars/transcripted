@@ -28,6 +28,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import json
 import sys
@@ -73,9 +74,12 @@ def parse_yaml_scalar(value: str) -> Any:
     if value == "":
         return ""
     if value.startswith("[") and value.endswith("]"):
-        return json.loads(value)
-    if value.startswith('"') and value.endswith('"'):
-        return json.loads(value)
+        parsed = ast.literal_eval(value)
+        if not isinstance(parsed, list):
+            raise ValueError(f"expected inline list in registry, got {type(parsed).__name__}")
+        return parsed
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return ast.literal_eval(value)
     if value in ("true", "false"):
         return value == "true"
     if value in ("null", "~"):
@@ -183,7 +187,10 @@ def load_report_results(path: Optional[Path]) -> Optional[list[dict[str, Any]]]:
         return None
     if not path.is_file():
         return None
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
     rows = payload.get("results")
     if not isinstance(rows, list):
         rows = payload.get("checks")
@@ -228,7 +235,10 @@ def load_accuracy_input(accuracy_dir: Optional[Path], input_name: str) -> Dimens
     path = accuracy_dir / f"score-{input_name}.json"
     if not path.is_file():
         return DimensionScore.missing("accuracy", detail=f"missing {path.name}")
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return DimensionScore.missing("accuracy", detail=f"invalid {path.name}")
     if not payload.get("present", True):
         return DimensionScore.missing("accuracy", detail=payload.get("detail", "scorer reported no evidence"))
     score = payload.get("score")
@@ -245,6 +255,8 @@ def build_dimension(
     accuracy_dir: Optional[Path],
 ) -> DimensionScore:
     if dim_name == "accuracy":
+        if not isinstance(config, dict):
+            return DimensionScore.missing("accuracy", detail="invalid accuracy config")
         return load_accuracy_input(accuracy_dir, str(config.get("input", "")))
     results = ui_results if dim_name == "ui" else functional_results
     globs = config.get("check_globs", []) if isinstance(config, dict) else []
