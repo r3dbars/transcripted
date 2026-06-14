@@ -310,7 +310,7 @@ func testRepoCommandContract() {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
 
         assertTrue(
-            qaBench.contains("quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live")
+            qaBench.contains("quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|scorecard|live")
                 && qaBench.contains("run_full_tail")
                 && qaBench.contains("60-release-health")
                 && qaBench.contains("61-gemma-summary-plan")
