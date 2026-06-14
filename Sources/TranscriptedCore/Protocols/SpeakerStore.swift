@@ -52,6 +52,7 @@ public protocol SpeakerStore: Sendable {
 
 public extension SpeakerStore {
     func mergeDuplicates(protecting protectedIds: Set<UUID>) {
+        guard protectedIds.isEmpty else { return }
         mergeDuplicates()
     }
 }

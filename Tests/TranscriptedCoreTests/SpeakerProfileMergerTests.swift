@@ -76,6 +76,16 @@ final class SpeakerProfileMergerTests: XCTestCase {
         XCTAssertNotNil(database.getSpeaker(id: second.id))
     }
 
+    func testDefaultProtectedMergeFallbackSkipsWhenIdsAreProtected() {
+        let store = DefaultMergeFallbackSpeakerStore()
+
+        store.mergeDuplicates(protecting: [UUID()])
+        XCTAssertEqual(store.mergeDuplicatesCallCount, 0)
+
+        store.mergeDuplicates(protecting: [])
+        XCTAssertEqual(store.mergeDuplicatesCallCount, 1)
+    }
+
     func testPruneWeakProfilesKeepsDeferredProfilesWithReviewSamples() throws {
         let profileId = UUID()
         _ = database.addOrUpdateSpeaker(
@@ -106,4 +116,42 @@ final class SpeakerProfileMergerTests: XCTestCase {
             "deferred unnamed profiles with review samples should survive pruning"
         )
     }
+}
+
+@available(macOS 14.0, *)
+private final class DefaultMergeFallbackSpeakerStore: SpeakerStore, @unchecked Sendable {
+    var mergeDuplicatesCallCount = 0
+
+    func matchSpeaker(embedding _: [Float], threshold _: Double) -> SpeakerMatchResult? { nil }
+
+    func addOrUpdateSpeaker(embedding: [Float], existingId: UUID?) -> SpeakerProfile {
+        SpeakerProfile(
+            id: existingId ?? UUID(),
+            displayName: nil,
+            nameSource: nil,
+            embedding: embedding,
+            firstSeen: Date(),
+            lastSeen: Date(),
+            callCount: 1,
+            confidence: 0.5,
+            disputeCount: 0
+        )
+    }
+
+    func getSpeaker(id _: UUID) -> SpeakerProfile? { nil }
+    func allSpeakers() -> [SpeakerProfile] { [] }
+    func setDisplayName(id _: UUID, name _: String, source _: String) {}
+    func restoreProfile(_: SpeakerProfile) {}
+    func deleteSpeaker(id _: UUID) {}
+    func mergeProfiles(sourceId _: UUID, into _: UUID) {}
+    func mergeProfilesByName() {}
+
+    func mergeDuplicates() {
+        mergeDuplicatesCallCount += 1
+    }
+
+    func pruneWeakProfiles() {}
+    func incrementDisputeCount(id _: UUID) {}
+    func resetDisputeCount(id _: UUID) {}
+    func findProfilesByName(_: String) -> [SpeakerProfile] { [] }
 }
