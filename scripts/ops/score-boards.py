@@ -147,6 +147,8 @@ def parse_yaml_list(rows: list[tuple[int, str]], index: int, indent: int) -> tup
         item_text = text[2:].strip()
         index += 1
         if not item_text:
+            if index >= len(rows) or rows[index][0] <= row_indent:
+                raise ValueError("empty list item in registry")
             item, index = parse_yaml_block(rows, index, rows[index][0])
         elif ":" in item_text:
             key, value = split_yaml_key_value(item_text)
@@ -157,7 +159,7 @@ def parse_yaml_list(rows: list[tuple[int, str]], index: int, indent: int) -> tup
                 item = {key: child}
             else:
                 item = {key: {}}
-            if value and index < len(rows) and rows[index][0] > row_indent:
+            if index < len(rows) and rows[index][0] > row_indent:
                 extra, index = parse_yaml_mapping(rows, index, rows[index][0])
                 item.update(extra)
         else:
@@ -203,8 +205,8 @@ def load_report_results(path: Optional[Path]) -> Optional[list[dict[str, Any]]]:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"report {path} is not valid JSON") from exc
     rows = payload.get("results")
     if not isinstance(rows, list):
         rows = payload.get("checks")

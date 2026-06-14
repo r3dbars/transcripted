@@ -296,12 +296,15 @@ boards:
 items:
   - ui:
       check_globs: [dictation, summary]
+    functional:
+      check_globs: ['index/*']
 """)
         data, index = score_boards.parse_yaml_block(rows, 0, 0)
         self.assertEqual(index, len(rows))
         self.assertEqual(data["items"][0]["ui"]["check_globs"], ["dictation", "summary"])
+        self.assertEqual(data["items"][0]["functional"]["check_globs"], ["index/*"])
 
-    def test_invalid_report_json_is_incomplete_not_crash(self):
+    def test_invalid_report_json_is_loud_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             registry = tmp / "registry.yml"
@@ -331,9 +334,8 @@ boards:
                        "--functional-json", str(tmp / "functional.json"),
                        "--json-out", str(out_json),
                        "--markdown-out", str(out_md))
-            self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
-            payload = json.loads(out_json.read_text())
-            self.assertEqual(payload["overallStatus"], lib.STATUS_INCOMPLETE)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertFalse(out_json.exists())
 
     def test_zero_score_dimension_appears_in_markdown_flags(self):
         with tempfile.TemporaryDirectory() as tmp:
