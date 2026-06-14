@@ -143,6 +143,20 @@ final class EmbeddingClustererTests: XCTestCase {
         XCTAssertEqual(Set(kept.map(\.speakerId)).count, 3)
     }
 
+    func testConsolidateDoesNotMergeAtAutoAcceptBoundary() {
+        // SpeakerNamingPolicy only auto-accepts above 0.88. The consolidation pass
+        // should use the same strict edge so genuinely similar voices get review.
+        let kept = EmbeddingClusterer.consolidateSameVoiceClusters(
+            segments: [
+                segment(speakerId: 1, startTime: 0, endTime: 40, embedding: [1.0, 0.0]),
+                segment(speakerId: 2, startTime: 40, endTime: 80, embedding: unitVector(cosineToXAxis: 0.88)),
+            ],
+            threshold: 0.88
+        )
+
+        XCTAssertEqual(Set(kept.map(\.speakerId)).count, 2)
+    }
+
     func testConsolidateDoesNotChainCollapseAcrossDissimilarEndpoints() {
         // A≈B and B≈C, but A and C are far apart. Recomputed centroids must stop
         // the transitive collapse that broke the broad pairwise merge.

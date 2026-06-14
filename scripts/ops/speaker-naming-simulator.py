@@ -30,14 +30,14 @@ import json
 import math
 import random
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 # --- Constants mirrored from EmbeddingClusterer.swift ------------------------
 MIN_CLUSTER_DURATION = 30.0
 ABSORPTION_THRESHOLD = 0.72
 MICRO_CLUSTER_DURATION = 10.0
 MICRO_ABSORPTION_THRESHOLD = 0.62
-CONSOLIDATION_THRESHOLD = 0.88  # SpeakerNamingPolicy auto-accept bar.
+CONSOLIDATION_THRESHOLD = 0.88  # SpeakerNamingPolicy auto-accept bar (> 0.88).
 QUALITY_MIN_SCORE = 0.3
 QUALITY_MIN_DURATION = 1.0
 
@@ -49,6 +49,8 @@ class Segment:
     end: float
     embedding: list[float]
     quality: float = 0.95
+    true_speaker: int = 0
+    channel: str = "system"
 
     @property
     def duration(self) -> float:
@@ -175,7 +177,7 @@ def consolidate_same_voice_clusters(
             for j in range(i + 1, len(live)):
                 a, b = live[i], live[j]  # a < b
                 sim = cosine(centroids[a], centroids[b])
-                if sim >= best_sim:
+                if sim > best_sim:
                     best_sim, best_pair = sim, (a, b)
         if best_pair is None:
             break
@@ -197,7 +199,17 @@ def _remap(segments: list[Segment], merge_map: dict[int, int]) -> list[Segment]:
     out = []
     for seg in segments:
         new_id = merge_map.get(seg.speaker_id, seg.speaker_id)
-        out.append(Segment(new_id, seg.start, seg.end, seg.embedding, seg.quality))
+        out.append(
+            Segment(
+                speaker_id=new_id,
+                start=seg.start,
+                end=seg.end,
+                embedding=seg.embedding,
+                quality=seg.quality,
+                true_speaker=seg.true_speaker,
+                channel=seg.channel,
+            )
+        )
     return out
 
 
@@ -224,17 +236,29 @@ class Scenario:
     seg_duration: float = 8.0  # 5 x 8s = 40s -> survives small-cluster absorption
     note: str = ""
     cross_override: float | None = None  # force a specific different-speaker cosine
+    channel: str = "system"
+    local_split_enabled: bool = False
+    known_state: str = "unknown"  # unknown, mature_named, tentative_named
+    expected_review_after: int | None = None
+    expected_cluster_after: int | None = None
+    expected_labels_after: tuple[str, ...] = ()
 
 
 @dataclass
 class Result:
     scenario: str
+    channel: str
     true_speakers: int
     raw_clusters: int
     after_absorb: int
     after_consolidate: int
     names_before: int
     names_after: int
+    expected_review_after: int
+    expected_cluster_after: int
+    labels_after: list[str]
+    expected_labels_after: list[str]
+    false_merge_after: bool
     correct: bool
     note: str = ""
     realized_intra: float = 0.0
@@ -250,6 +274,118 @@ def _mix(a: list[float], b: list[float], frac_a: float) -> list[float]:
     # Combine two unit vectors so the result has ~frac_a cosine^2 with a.
     ca, cb = math.sqrt(frac_a), math.sqrt(1.0 - frac_a)
     return normalize([ca * x + cb * y for x, y in zip(a, b)])
+
+
+KNOWN_NAMES = [
+    "Alex Rivera",
+    "Blair Chen",
+    "Casey Morgan",
+    "Dev Patel",
+    "Emery Stone",
+    "Finley Cruz",
+]
+
+
+def _channel_prefix(scn: Scenario) -> str:
+    return "local" if scn.channel == "mic" else "remote"
+
+
+def _known_name(true_speaker: int) -> str:
+    return KNOWN_NAMES[(true_speaker - 1) % len(KNOWN_NAMES)]
+
+
+def _cluster_truth(segments: list[Segment]) -> dict[int, set[int]]:
+    clusters: dict[int, set[int]] = {}
+    for seg in segments:
+        clusters.setdefault(seg.speaker_id, set()).add(seg.true_speaker)
+    return clusters
+
+
+def false_merge_detected(segments: list[Segment]) -> bool:
+    return any(len(true_speakers) > 1 for true_speakers in _cluster_truth(segments).values())
+
+
+def semantic_labels(scn: Scenario, segments: list[Segment]) -> list[str]:
+    """Labels the user-facing review rows, not just raw diarizer clusters."""
+    prefix = _channel_prefix(scn)
+    if scn.channel == "mic" and not scn.local_split_enabled:
+        return [f"{prefix}:You"]
+
+    clusters = _cluster_truth(segments)
+    has_false_merge = any(len(true_speakers) > 1 for true_speakers in clusters.values())
+
+    # Known speakers that hit the same persistent DB profile are collapsed by the
+    # pipeline before review. Mature matches auto-apply; tentative matches become
+    # one confirmation row per known person.
+    if scn.channel == "system" and scn.known_state != "unknown" and not has_false_merge:
+        labels = []
+        for true_speaker in sorted({next(iter(values)) for values in clusters.values()}):
+            name = _known_name(true_speaker)
+            if scn.known_state == "tentative_named":
+                name = f"{name} (confirm)"
+            labels.append(f"{prefix}:{name}")
+        return labels
+
+    labels = []
+    for speaker_id in sorted(clusters):
+        true_speakers = sorted(clusters[speaker_id])
+        if len(true_speakers) > 1:
+            joined = "+".join(f"voice{idx}" for idx in true_speakers)
+            labels.append(f"{prefix}:FALSE_MERGE({joined})")
+        elif scn.channel == "mic":
+            labels.append(f"{prefix}:room voice {true_speakers[0]}")
+        elif scn.known_state == "mature_named":
+            labels.append(f"{prefix}:{_known_name(true_speakers[0])}")
+        elif scn.known_state == "tentative_named":
+            labels.append(f"{prefix}:{_known_name(true_speakers[0])} (confirm)")
+        else:
+            labels.append(f"{prefix}:new voice {true_speakers[0]}")
+    return labels
+
+
+def review_row_count(scn: Scenario, segments: list[Segment]) -> int:
+    if scn.channel == "mic" and not scn.local_split_enabled:
+        return 0
+    if scn.channel == "system" and scn.known_state == "mature_named":
+        return 0 if not false_merge_detected(segments) else len(semantic_labels(scn, segments))
+    return len(semantic_labels(scn, segments))
+
+
+def expected_labels(scn: Scenario) -> list[str]:
+    if scn.expected_labels_after:
+        return list(scn.expected_labels_after)
+    prefix = _channel_prefix(scn)
+    if scn.channel == "mic" and not scn.local_split_enabled:
+        return [f"{prefix}:You"]
+    labels = []
+    for idx in range(1, scn.true_speakers + 1):
+        if scn.channel == "mic":
+            labels.append(f"{prefix}:room voice {idx}")
+        elif scn.known_state == "mature_named":
+            labels.append(f"{prefix}:{_known_name(idx)}")
+        elif scn.known_state == "tentative_named":
+            labels.append(f"{prefix}:{_known_name(idx)} (confirm)")
+        else:
+            labels.append(f"{prefix}:new voice {idx}")
+    return labels
+
+
+def expected_review_count(scn: Scenario) -> int:
+    if scn.expected_review_after is not None:
+        return scn.expected_review_after
+    if scn.channel == "mic" and not scn.local_split_enabled:
+        return 0
+    if scn.channel == "system" and scn.known_state == "mature_named":
+        return 0
+    return scn.true_speakers
+
+
+def expected_cluster_count(scn: Scenario) -> int:
+    if scn.expected_cluster_after is not None:
+        return scn.expected_cluster_after
+    if scn.channel == "mic" and not scn.local_split_enabled:
+        return 1
+    return scn.true_speakers
 
 
 def build_scenario(
@@ -269,7 +405,7 @@ def build_scenario(
     intra_samples, cross_samples = [], []
     fragment_means_by_speaker: list[list[list[float]]] = []
 
-    for base in bases:
+    for true_speaker, base in enumerate(bases, start=1):
         frag_means = []
         for _ in range(scn.fragments_per_speaker):
             cluster_id = next_id
@@ -280,7 +416,15 @@ def build_scenario(
                 emb = _mix(base, _rand_unit(dim, rng), intra_sim)
                 embs.append(emb)
                 segments.append(
-                    Segment(cluster_id, clock, clock + scn.seg_duration, emb, 0.95)
+                    Segment(
+                        speaker_id=cluster_id,
+                        start=clock,
+                        end=clock + scn.seg_duration,
+                        embedding=emb,
+                        quality=0.95,
+                        true_speaker=true_speaker,
+                        channel=scn.channel,
+                    )
                 )
                 clock += scn.seg_duration
             frag_means.append(mean_embedding(embs))
@@ -299,14 +443,27 @@ def build_scenario(
 
 
 SUITE = [
-    Scenario("one_on_one_oversegmented", 1, 5,
-             note="single remote voice split into 5 large clusters (the reported bug)"),
-    Scenario("one_on_one_clean", 1, 1, note="already one cluster, must stay one"),
-    Scenario("small_group_3", 3, 2, note="3 people, each split in two"),
-    Scenario("crowded_6_clean", 6, 1, note="6 distinct people, no over-segmentation"),
-    Scenario("crowded_5_oversegmented", 5, 2, note="5 people each split in two"),
-    Scenario("similar_voices_pair", 2, 1, cross_override=0.80,
-             note="two genuinely similar voices (~0.80) must stay separate"),
+    Scenario("remote_unknown_1on1_overseg", 1, 5,
+             note="cold-start single remote voice split into 5 review rows"),
+    Scenario("remote_named_repeat_1on1", 1, 5, known_state="mature_named",
+             note="same voice after naming: should auto-apply the saved person"),
+    Scenario("remote_tentative_repeat", 1, 5, known_state="tentative_named",
+             expected_review_after=1,
+             note="known but not mature enough: one confirmation row, not 5 duplicates"),
+    Scenario("remote_unknown_group_3", 3, 2,
+             note="3 remote people, each split in two"),
+    Scenario("remote_crowded_6_clean", 6, 1,
+             note="6 distinct remote people, no over-segmentation"),
+    Scenario("remote_crowded_5_overseg", 5, 2,
+             note="5 remote people each split in two"),
+    Scenario("remote_similar_voice_pair", 2, 1, cross_override=0.86,
+             note="two genuinely similar voices near the threshold must stay separate"),
+    Scenario("local_default_off_shared_room", 3, 1, channel="mic",
+             local_split_enabled=False, expected_review_after=0, expected_cluster_after=1,
+             expected_labels_after=("local:You",),
+             note="default local role: shared mic stays one You row and no review inbox work"),
+    Scenario("local_split_room_3", 3, 1, channel="mic", local_split_enabled=True,
+             note="opt-in local split: local room speakers become review rows"),
 ]
 
 
@@ -315,20 +472,50 @@ def run_scenario(
 ) -> Result:
     rng = random.Random(seed)
     segments, realized_intra, realized_cross = build_scenario(scn, dim, intra_sim, cross_sim, rng)
-    raw = speaker_count(segments)
-    absorbed = absorb_small_clusters(segments)
-    consolidated = post_process(segments, CONSOLIDATION_THRESHOLD)
-    names_before = speaker_count(post_process(segments, None))
-    names_after = speaker_count(consolidated)
+    if scn.channel == "mic" and not scn.local_split_enabled:
+        raw = 1
+        after_absorb = 1
+        after_consolidate = 1
+        names_before = 0
+        names_after = 0
+        labels_after = semantic_labels(scn, segments)
+        false_merge_after = False
+    else:
+        raw = speaker_count(segments)
+        absorbed = absorb_small_clusters(segments)
+        consolidated = post_process(segments, CONSOLIDATION_THRESHOLD)
+        without_consolidation = post_process(segments, None)
+        after_absorb = speaker_count(absorbed)
+        after_consolidate = speaker_count(consolidated)
+        names_before = review_row_count(scn, without_consolidation)
+        names_after = review_row_count(scn, consolidated)
+        labels_after = semantic_labels(scn, consolidated)
+        false_merge_after = false_merge_detected(consolidated)
+
+    expected_review = expected_review_count(scn)
+    expected_clusters = expected_cluster_count(scn)
+    expected_label_list = expected_labels(scn)
+    correct = (
+        names_after == expected_review
+        and after_consolidate == expected_clusters
+        and labels_after == expected_label_list
+        and not false_merge_after
+    )
     return Result(
         scenario=scn.name,
+        channel=scn.channel,
         true_speakers=scn.true_speakers,
         raw_clusters=raw,
-        after_absorb=speaker_count(absorbed),
-        after_consolidate=names_after,
+        after_absorb=after_absorb,
+        after_consolidate=after_consolidate,
         names_before=names_before,
         names_after=names_after,
-        correct=(names_after == scn.true_speakers),
+        expected_review_after=expected_review,
+        expected_cluster_after=expected_clusters,
+        labels_after=labels_after,
+        expected_labels_after=expected_label_list,
+        false_merge_after=false_merge_after,
+        correct=correct,
         note=scn.note,
         realized_intra=realized_intra,
         realized_cross=realized_cross,
@@ -341,17 +528,22 @@ def run_suite(dim: int, intra_sim: float, cross_sim: float, seed: int) -> list[R
 
 
 def print_suite(results: list[Result]) -> None:
-    header = (f"{'scenario':<28}{'true':>5}{'raw':>5}{'absorb':>8}"
-              f"{'names_before':>14}{'names_after':>13}{'ok':>5}")
+    header = (f"{'scenario':<30}{'role':>8}{'true':>5}{'raw':>5}{'post':>6}"
+              f"{'review_before':>15}{'review_after':>14}{'expected':>10}"
+              f"{'false_merge':>13}{'ok':>5}")
     print(header)
     print("-" * len(header))
     for r in results:
-        print(f"{r.scenario:<28}{r.true_speakers:>5}{r.raw_clusters:>5}{r.after_absorb:>8}"
-              f"{r.names_before:>14}{r.names_after:>13}{'  ✓' if r.correct else '  ✗':>5}")
+        role = "local" if r.channel == "mic" else "remote"
+        print(f"{r.scenario:<30}{role:>8}{r.true_speakers:>5}{r.raw_clusters:>5}"
+              f"{r.after_consolidate:>6}{r.names_before:>15}{r.names_after:>14}"
+              f"{r.expected_review_after:>10}{str(r.false_merge_after):>13}"
+              f"{'  ✓' if r.correct else '  ✗':>5}")
+        print(f"{'':<30} labels_after: {', '.join(r.labels_after)}")
     intra = max((r.realized_intra for r in results), default=0.0)
     # Report the typical different-speaker separation from a clean multi-speaker
     # scenario, not the deliberately-similar pair.
-    typical = next((r for r in results if r.scenario == "crowded_6_clean"), None)
+    typical = next((r for r in results if r.scenario == "remote_crowded_6_clean"), None)
     cross = typical.realized_cross if typical else 0.0
     print()
     print(f"realized embedding geometry: same-speaker ~{intra:.2f}, "
@@ -362,7 +554,7 @@ def run_sweep(dim: int, intra_sim: float, cross_sim: float, seed: int) -> None:
     # Columns chosen to show the tradeoff: the 1-on-1 should collapse to its true
     # count, the crowded and similar-voice cases should NOT drop below theirs.
     by_name = {scn.name: (idx, scn) for idx, scn in enumerate(SUITE)}
-    cols = ["one_on_one_oversegmented", "crowded_6_clean", "similar_voices_pair"]
+    cols = ["remote_unknown_1on1_overseg", "remote_crowded_6_clean", "remote_similar_voice_pair"]
     print("Consolidation-threshold sweep (cell = speakers you'd name; want it to match 'true'):\n")
     truth = "  ".join(f"{name} (true {by_name[name][1].true_speakers})" for name in cols)
     print(f"  legend: {truth}\n")
@@ -374,8 +566,10 @@ def run_sweep(dim: int, intra_sim: float, cross_sim: float, seed: int) -> None:
             idx, scn = by_name[name]
             rng = random.Random(seed + idx)
             segments, _, _ = build_scenario(scn, dim, intra_sim, cross_sim, rng)
-            count = speaker_count(post_process(segments, threshold))
-            flag = "" if count == scn.true_speakers else "  <-off"
+            processed = post_process(segments, threshold)
+            count = review_row_count(scn, processed)
+            off = count != expected_review_count(scn) or false_merge_detected(processed)
+            flag = "" if not off else "  <-off"
             row += f"{f'{count}{flag}':>28}"
         print(row)
     print("\nLower = merges more aggressively (fewer names, but distinct voices start to collapse).")
@@ -400,7 +594,7 @@ def main() -> int:
 
     results = run_suite(args.dim, args.intra_sim, args.cross_sim, args.seed)
     if args.json:
-        print(json.dumps([r.__dict__ for r in results], indent=2))
+        print(json.dumps([asdict(r) for r in results], indent=2))
     else:
         print_suite(results)
 

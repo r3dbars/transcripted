@@ -173,12 +173,18 @@ scripts/ops/speaker-naming-simulator.py --json     # machine-readable suite outp
 It generates synthetic offline-diarization output — true speakers over-segmented
 into several clusters, the way VBx splits one remote voice — and runs a faithful
 pure-Python model of `EmbeddingClusterer` post-processing (small-cluster
-absorption + same-voice consolidation). The suite reports `names_before` vs
-`names_after` per scenario and exits non-zero if any scenario fails to reduce to
-its true speaker count, so it doubles as a regression check on the consolidation
-thresholds. The `--sweep` view shows where an over-segmented one-on-one collapses
-correctly versus where genuinely similar distinct voices start to wrongly merge,
-which is how to pick the consolidation threshold.
+absorption + same-voice consolidation). The suite reports review-row counts
+before/after consolidation, expected labels, channel role, and false-merge
+flags, so it catches the user-facing failure: duplicate speaker rows in the
+post-meeting review sheet. The fixtures cover cold unknown voices, repeated
+named speakers, tentative known speakers, remote groups, local default-off
+`You` behavior, opt-in local room split, and near-threshold similar voices. The
+script exits non-zero if any scenario misses its expected review count, expected
+labels, expected cluster count, or false-merge guard.
+
+The `--sweep` view shows where an over-segmented one-on-one collapses correctly
+versus where genuinely similar distinct voices start to wrongly merge, which is
+how to pick the consolidation threshold.
 
 The thresholds in the script mirror
 `Sources/TranscriptedCore/Speaker/EmbeddingClusterer.swift`; keep them in sync

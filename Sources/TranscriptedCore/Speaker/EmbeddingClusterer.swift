@@ -40,8 +40,8 @@ public enum EmbeddingClusterer {
     ///   same-voice consolidation pass that collapses over-segmented large
     ///   clusters of one speaker. Pass `nil` to skip it. Defaults to the
     ///   `SpeakerNamingPolicy` auto-accept bar (0.88) so two clusters only merge
-    ///   when they are as similar as we'd demand to auto-accept them as the same
-    ///   known person.
+    ///   when they are more similar than we'd demand to auto-accept them as the
+    ///   same known person.
     public static func postProcess(
         segments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile],
@@ -294,7 +294,7 @@ public enum EmbeddingClusterer {
     /// "speakers" the user has to name for a single person.
     ///
     /// This pass compares the mean embedding of every surviving cluster pair and
-    /// merges those at or above `threshold`. Two safeguards keep genuine
+    /// merges those above `threshold`. Two safeguards keep genuine
     /// multi-speaker meetings intact:
     /// - The threshold is high (0.88 by default — the `SpeakerNamingPolicy`
     ///   auto-accept bar). Distinct speakers rarely exceed ~0.6 cosine
@@ -343,7 +343,7 @@ public enum EmbeddingClusterer {
         var mergeMap: [Int: Int] = [:]
         for id in clusterEmbeddings.keys { mergeMap[id] = id }
 
-        // Repeatedly merge the single most-similar pair at or above threshold,
+        // Repeatedly merge the single most-similar pair above threshold,
         // recomputing the merged centroid each round until nothing qualifies.
         while centroids.count >= 2 {
             let liveIds = centroids.keys.sorted()
@@ -354,7 +354,7 @@ public enum EmbeddingClusterer {
                     let a = liveIds[i], b = liveIds[j]
                     guard let ea = centroids[a], let eb = centroids[b] else { continue }
                     let sim = Float(Transcription.cosineSimilarityStatic(ea, eb))
-                    if sim >= bestSim {
+                    if sim > bestSim {
                         bestSim = sim
                         bestPair = (keep: a, drop: b)  // liveIds sorted, so a < b
                     }
