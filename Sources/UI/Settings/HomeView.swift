@@ -430,6 +430,7 @@ struct HomeCanvasHeader: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .focusEffectDisabled()
             .opacity(isHovering ? 1 : 0.9)
             .onHover { isHovering = $0 }
             .animation(.easeOut(duration: 0.12), value: isHovering)
@@ -799,7 +800,6 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         var items: [HomeRowMenuItem]
-        private var menuActionTargets: [MenuActionTarget] = []
 
         init(items: [HomeRowMenuItem]) {
             self.items = items
@@ -807,20 +807,11 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc func showMenu(_ sender: NSButton) {
             let menu = NSMenu()
-            menuActionTargets = []
             // Without this, AppKit auto-enables every item whose target responds
             // to the action, overriding the per-item isEnabled set below.
             menu.autoenablesItems = false
             for item in items {
-                let target = MenuActionTarget(item: item)
-                menuActionTargets.append(target)
-                let menuItem = NSMenuItem(
-                    title: item.title,
-                    action: #selector(MenuActionTarget.perform(_:)),
-                    keyEquivalent: ""
-                )
-                menuItem.target = target
-                menuItem.isEnabled = item.isEnabled
+                let menuItem = ClosureMenuItem(menuItem: item)
                 if let image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: item.title) {
                     image.isTemplate = true
                     menuItem.image = image.withSymbolConfiguration(
@@ -844,18 +835,33 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
         }
     }
 
-    final class MenuActionTarget: NSObject {
-        private let item: HomeRowMenuItem
+    /// A menu item that owns its action closure and acts as its own target.
+    ///
+    /// The menu retains its items for the whole `popUp` tracking loop, so the
+    /// handler stays alive and fires no matter how SwiftUI tears down and
+    /// recreates this representable's coordinator while the menu is open. The
+    /// earlier design stored a separate target on the (weakly referenced)
+    /// `NSMenuItem.target` and deferred the call with `DispatchQueue.main.async`;
+    /// the target could be deallocated before the deferred block ran, so the
+    /// closures silently never fired (delete, reveal, and report all no-op'd).
+    final class ClosureMenuItem: NSMenuItem {
+        private let handler: () -> Void
 
-        init(item: HomeRowMenuItem) {
-            self.item = item
+        init(menuItem: HomeRowMenuItem) {
+            self.handler = menuItem.action
+            super.init(title: menuItem.title, action: #selector(invoke), keyEquivalent: "")
+            target = self
+            isEnabled = menuItem.isEnabled
         }
 
-        @objc func perform(_ sender: NSMenuItem) {
-            guard item.isEnabled else { return }
-            DispatchQueue.main.async {
-                self.item.action()
-            }
+        @available(*, unavailable)
+        required init(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        @objc private func invoke() {
+            guard isEnabled else { return }
+            handler()
         }
     }
 
@@ -989,6 +995,10 @@ private struct HomeActivityRowShell<Content: View>: View {
                     .padding(.vertical, compact ? 7 : 9)
             }
         }
+        // The idle row background is Color.clear, so without an explicit hit
+        // shape only the opaque title/time text triggers hover — actions then
+        // reveal in a narrow band instead of across the full row.
+        .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .animation(SettingsInteractionPalette.animation, value: isHovering)
     }

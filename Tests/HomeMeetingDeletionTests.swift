@@ -59,6 +59,33 @@ func testHomeMeetingDeletion() {
         }
     }
 
+    runSuite("HomeMeetingDeletion resolves the on-disk URL for date-prefixed, accented filenames") {
+        withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
+            // Mirror a real capture-library filename: date-prefixed title with
+            // diacritics. The scanned RecentMeetingItem.transcriptURL must point
+            // at the exact on-disk file so delete and reveal resolve it.
+            let transcriptURL = meetingsRoot.appendingPathComponent(
+                "2026-06-13 Conversación técnica Observabilidad.md"
+            )
+            try writeDeletionMeeting(title: "Conversación técnica Observabilidad", transcriptURL: transcriptURL)
+
+            guard let item = deletionMeetingItem(transcriptURL) else {
+                assertionFailure("accented meeting should scan")
+                return
+            }
+
+            assertEqual(item.transcriptURL.path, transcriptURL.path, "scanned URL should match the on-disk path byte-for-byte")
+            assertTrue(FileManager.default.fileExists(atPath: item.transcriptURL.path), "scanned URL should resolve to an existing file")
+
+            do {
+                _ = try HomeMeetingDeletion.delete(item)
+                assertFalse(FileManager.default.fileExists(atPath: transcriptURL.path), "accented transcript should be deleted")
+            } catch {
+                assertionFailure("delete should not throw: \(error)")
+            }
+        }
+    }
+
     runSuite("HomeMeetingDeletion removes duplicate app-owned retranscriptions with matching retained audio") {
         withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
             let firstURL = meetingsRoot.appendingPathComponent("Quick notes.md")

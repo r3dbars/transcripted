@@ -3082,3 +3082,23 @@ private extension SystemAudioStatus {
         }
     }
 }
+
+@available(macOS 14.0, *)
+extension MeetingPromptSessionPromptState {
+    init(_ state: MeetingSessionController.State) {
+        switch state {
+        case .idle:
+            self = .idle
+        case .loadingModels:
+            self = .loadingModels
+        case .ready:
+            self = .ready
+        case .recording:
+            self = .recording
+        case .transcribing:
+            self = .transcribing
+        case .error:
+            self = .error
+        }
+    }
+}
