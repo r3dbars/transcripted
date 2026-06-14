@@ -394,10 +394,17 @@ final class MeetingPromptDetector {
     private func preferredCandidate(from sortedCandidates: [ScoredCandidate]) -> ScoredCandidate? {
         guard let first = sortedCandidates.first else { return nil }
         guard first.candidate.reason == .micInput else { return first }
-        guard first.candidate.provider != .googleMeet else { return first }
-        return sortedCandidates.first {
+        let calendarCandidate = sortedCandidates.first {
             $0.candidate.source == .calendarEvent &&
                 $0.candidate.provider == first.candidate.provider
+        }
+        guard first.candidate.provider == .googleMeet else {
+            return calendarCandidate ?? first
+        }
+        return sortedCandidates.first {
+            $0.candidate.source == .calendarEvent &&
+                $0.candidate.provider == first.candidate.provider &&
+                (pendingUntil[$0.candidate.id] != nil || snoozedUntil[$0.candidate.id] != nil)
         } ?? first
     }
 

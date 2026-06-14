@@ -400,6 +400,39 @@ func testMeetingPromptDetector() async {
         assertEqual(box.candidate?.source, .runtimeApp, "generic browser mic evidence should not borrow an unrelated Meet calendar event")
         assertNil(box.candidate?.suggestedTranscriptTitle, "browser mic prompts should stay neutral because they could be Meet, Zoom-web, or Teams-web")
     }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — browser mic does not replace pending calendar prompt") {
+        let now = Date()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(
+                    id: "scheduled-meet",
+                    provider: .googleMeet,
+                    startsIn: 30,
+                    now: now
+                )
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.start()
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        detector.stop()
+
+        assertEqual(box.promptCount, 1, "generic browser mic should not bypass an already-pending calendar prompt")
+        assertEqual(box.candidate?.source, .calendarEvent, "the visible scheduled prompt should keep its calendar context")
+        assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "the scheduled prompt should keep the meeting title hint")
+    }
 }
 
 @available(macOS 14.0, *)
