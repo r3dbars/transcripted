@@ -47,6 +47,7 @@ Modes:
                    run only the fake slow Cmd+V pasteback target smoke
   corpus           validate a local private meeting corpus
   corpus-compare   validate corpus, then compare Transcripted Markdown to Zoom truth
+  scorecard        aggregate per-board QA evidence into a scorecard
   live             full + live mic/system-audio smoke
 
 Options:
@@ -177,7 +178,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|live) ;;
+  quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|scorecard|live) ;;
   *)
     echo "Unknown mode: $MODE" >&2
     usage >&2

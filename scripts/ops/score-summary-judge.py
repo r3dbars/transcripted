@@ -13,7 +13,11 @@ Two modes:
                   packet next to --out. Content stays local; nothing is uploaded.
 
   --mode score    Ingest the agent's rubric scores and fold them into a 0-100
-                  board score. Judge result JSON:
+                  board score. Judge result JSON can be one object from prompt
+                  mode, or a batch:
+                    {"id": "m1", "rubric": {
+                       "coverage": 0-5, "faithfulness": 0-5,
+                       "actionItems": 0-5, "conciseness": 0-5}}
                     {"meetings": [
                        {"id": "m1", "rubric": {
                           "coverage": 0-5, "faithfulness": 0-5,
@@ -75,6 +79,18 @@ def score_meetings(meetings: list[dict[str, Any]]) -> dict[str, Any]:
     return {"present": True, "score": round(mean, 1), "meetingsJudged": len(scores)}
 
 
+def meetings_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        meetings = payload.get("meetings")
+        if isinstance(meetings, list):
+            return [m for m in meetings if isinstance(m, dict)]
+        if isinstance(payload.get("rubric"), dict):
+            return [payload]
+    if isinstance(payload, list):
+        return [m for m in payload if isinstance(m, dict)]
+    return []
+
+
 def write_score(out_path: Path, result: dict[str, Any]) -> int:
     present = result.get("present", False)
     detail = f"judged {result['meetingsJudged']} meeting(s)" if present else result.get("detail", "")
@@ -124,7 +140,7 @@ def main() -> int:
         return write_score(out_path, {"present": False, "detail": "no judge result supplied"})
 
     payload = json.loads(Path(args.judge_result).expanduser().read_text(encoding="utf-8"))
-    meetings = payload.get("meetings", [])
+    meetings = meetings_from_payload(payload)
     return write_score(out_path, score_meetings(meetings))
 
 

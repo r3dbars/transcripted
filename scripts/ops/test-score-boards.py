@@ -164,6 +164,19 @@ class SummaryJudgeTests(unittest.TestCase):
             self.assertGreater(data["score"], 60.0)
             self.assertLess(data["score"], 100.0)
 
+    def test_single_prompt_result_scores(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            judge = Path(tmp) / "judge.json"
+            out = Path(tmp) / "score-summary.json"
+            judge.write_text(json.dumps(
+                {"id": "m1", "rubric": {"coverage": 5, "faithfulness": 5, "actionItems": 5, "conciseness": 5}}
+            ))
+            proc = run("score-summary-judge.py", "--mode", "score", "--judge-result", str(judge), "--out", str(out))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            data = json.loads(out.read_text())
+            self.assertTrue(data["present"])
+            self.assertEqual(data["score"], 100.0)
+
 
 class AggregatorTests(unittest.TestCase):
     def _registry(self) -> str:
@@ -209,6 +222,42 @@ class AggregatorTests(unittest.TestCase):
             self.assertIsNone(boards["meeting-capture"]["score"])
             # markdown report exists and is non-empty
             self.assertTrue(out_md.read_text().startswith("# Transcripted Board Scorecard"))
+
+    def test_ui_smoke_checks_shape_maps_id_to_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            registry = tmp / "registry.yml"
+            registry.write_text("""
+version: 1
+defaults:
+  weights:
+    ui: 1.0
+  thresholds:
+    green: 85
+    yellow: 65
+boards:
+  - id: home
+    name: Home
+    category: ui
+    automatable: auto
+    weight: 1.0
+    ui:
+      check_globs: ["settings-home"]
+""")
+            (tmp / "ui.json").write_text(json.dumps({"checks": [
+                {"id": "settings-home", "title": "Home", "status": "PASS", "target": "transcripted.home"}
+            ]}))
+
+            out_json = tmp / "scorecard.json"
+            out_md = tmp / "scorecard.md"
+            proc = run("score-boards.py",
+                       "--registry", str(registry),
+                       "--ui-json", str(tmp / "ui.json"),
+                       "--json-out", str(out_json),
+                       "--markdown-out", str(out_md))
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            payload = json.loads(out_json.read_text())
+            self.assertEqual(payload["boards"][0]["score"], 100.0)
 
     def test_no_evidence_is_incomplete_not_green(self):
         with tempfile.TemporaryDirectory() as tmp:

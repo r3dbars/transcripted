@@ -49,25 +49,156 @@ from score_boards_lib import (  # noqa: E402
     status_rank,
 )
 
-import yaml  # noqa: E402
+
+def strip_yaml_comment(line: str) -> str:
+    in_single = False
+    in_double = False
+    escaped = False
+    for idx, ch in enumerate(line):
+        if ch == "\\" and in_double and not escaped:
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single and not escaped:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double:
+            return line[:idx]
+        escaped = False
+    return line
+
+
+def parse_yaml_scalar(value: str) -> Any:
+    value = value.strip()
+    if value == "":
+        return ""
+    if value.startswith("[") and value.endswith("]"):
+        return json.loads(value)
+    if value.startswith('"') and value.endswith('"'):
+        return json.loads(value)
+    if value in ("true", "false"):
+        return value == "true"
+    if value in ("null", "~"):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def split_yaml_key_value(text: str) -> tuple[str, str]:
+    if ":" not in text:
+        raise ValueError(f"invalid registry line: {text}")
+    key, value = text.split(":", 1)
+    return key.strip(), value.strip()
+
+
+def tokenize_registry(text: str) -> list[tuple[int, str]]:
+    rows: list[tuple[int, str]] = []
+    for raw in text.splitlines():
+        without_comment = strip_yaml_comment(raw).rstrip()
+        if not without_comment.strip():
+            continue
+        rows.append((len(without_comment) - len(without_comment.lstrip(" ")), without_comment.strip()))
+    return rows
+
+
+def parse_yaml_mapping(rows: list[tuple[int, str]], index: int, indent: int) -> tuple[dict[str, Any], int]:
+    result: dict[str, Any] = {}
+    while index < len(rows):
+        row_indent, text = rows[index]
+        if row_indent < indent:
+            break
+        if row_indent > indent:
+            raise ValueError(f"unexpected indentation in registry near: {text}")
+        if text.startswith("- "):
+            break
+        key, value = split_yaml_key_value(text)
+        index += 1
+        if value:
+            result[key] = parse_yaml_scalar(value)
+        elif index < len(rows) and rows[index][0] > row_indent:
+            result[key], index = parse_yaml_block(rows, index, rows[index][0])
+        else:
+            result[key] = {}
+    return result, index
+
+
+def parse_yaml_list(rows: list[tuple[int, str]], index: int, indent: int) -> tuple[list[Any], int]:
+    result: list[Any] = []
+    while index < len(rows):
+        row_indent, text = rows[index]
+        if row_indent < indent:
+            break
+        if row_indent != indent or not text.startswith("- "):
+            break
+        item_text = text[2:].strip()
+        index += 1
+        if not item_text:
+            item, index = parse_yaml_block(rows, index, rows[index][0])
+        elif ":" in item_text:
+            key, value = split_yaml_key_value(item_text)
+            item = {key: parse_yaml_scalar(value)} if value else {key: {}}
+            if index < len(rows) and rows[index][0] > row_indent:
+                extra, index = parse_yaml_mapping(rows, index, rows[index][0])
+                item.update(extra)
+        else:
+            item = parse_yaml_scalar(item_text)
+        result.append(item)
+    return result, index
+
+
+def parse_yaml_block(rows: list[tuple[int, str]], index: int, indent: int) -> tuple[Any, int]:
+    if index >= len(rows):
+        return {}, index
+    if rows[index][1].startswith("- "):
+        return parse_yaml_list(rows, index, indent)
+    return parse_yaml_mapping(rows, index, indent)
 
 
 def load_registry(path: Path) -> dict[str, Any]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    rows = tokenize_registry(path.read_text(encoding="utf-8"))
+    data, index = parse_yaml_block(rows, 0, 0)
+    if index != len(rows):
+        raise ValueError(f"registry {path} has trailing unparsed rows")
     if not isinstance(data, dict) or "boards" not in data:
         raise ValueError(f"registry {path} has no 'boards' list")
     return data
 
 
+def normalize_status(value: Any) -> str:
+    status = str(value or "FAIL").upper()
+    if status == "INCOMPLETE":
+        return "WARN"
+    return status
+
+
 def load_report_results(path: Optional[Path]) -> Optional[list[dict[str, Any]]]:
-    """Load the `results` rows from a ValidationReport JSON, or None if absent."""
+    """Load check rows from ValidationReport or ui-smoke JSON, or None if absent."""
     if path is None:
         return None
     if not path.is_file():
         return None
     payload = json.loads(path.read_text(encoding="utf-8"))
-    results = payload.get("results")
-    return results if isinstance(results, list) else []
+    rows = payload.get("results")
+    if not isinstance(rows, list):
+        rows = payload.get("checks")
+    if not isinstance(rows, list):
+        return []
+    normalized = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        normalized.append({
+            "check": str(row.get("check") or row.get("id") or ""),
+            "target": str(row.get("target", "")),
+            "status": normalize_status(row.get("status")),
+        })
+    return normalized
 
 
 def match_check_statuses(
