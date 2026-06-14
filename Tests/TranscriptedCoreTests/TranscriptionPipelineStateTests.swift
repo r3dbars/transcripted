@@ -202,6 +202,116 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertTrue(SpeakerNamingPolicy.shouldAutoAccept(profile: profile5, similarity: 0.95))
     }
 
+    func testSpeakerClassificationUsesPreMeetingSnapshotForAutoAcceptMaturity() throws {
+        let profileId = UUID()
+        let preMeetingProfile = speakerProfile(
+            id: profileId,
+            displayName: "Maya",
+            callCount: 4,
+            disputeCount: 0
+        )
+        let updatedProfile = speakerProfile(
+            id: profileId,
+            displayName: "Maya",
+            callCount: 5,
+            disputeCount: 0
+        )
+        let (database, directory) = try temporarySpeakerDatabase()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = database.addOrUpdateSpeaker(embedding: updatedProfile.embedding, existingId: profileId)
+        database.restoreProfile(updatedProfile)
+
+        let knowledge = TranscriptionTaskManager.speakerClassificationKnowledge(
+            speakerIds: ["2"],
+            utterances: [
+                utterance(
+                    start: 0,
+                    end: 1,
+                    speakerId: 2,
+                    persistentSpeakerId: profileId,
+                    matchSimilarity: 0.95,
+                    transcript: "hello"
+                )
+            ],
+            contexts: [
+                "2": ChannelSpeakerContext(
+                    persistentSpeakerId: profileId,
+                    sessionEmbedding: [1, 0],
+                    matchedProfileSnapshot: preMeetingProfile,
+                    matchSimilarity: 0.95
+                )
+            ],
+            speakerDB: database
+        )
+
+        XCTAssertEqual(knowledge.count, 1)
+        XCTAssertEqual(knowledge[0].profile.callCount, 4)
+        XCTAssertFalse(
+            SpeakerNamingPolicy.shouldAutoAccept(
+                profile: knowledge[0].profile,
+                similarity: knowledge[0].similarity
+            ),
+            "A profile that only became mature during this meeting should still require speaker review."
+        )
+    }
+
+    func testSpeakerClassificationFallsBackToStoreWhenSnapshotIsMissing() throws {
+        let profileId = UUID()
+        let profile = speakerProfile(
+            id: profileId,
+            displayName: "Maya",
+            callCount: 5,
+            disputeCount: 0
+        )
+        let (database, directory) = try temporarySpeakerDatabase()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = database.addOrUpdateSpeaker(embedding: profile.embedding, existingId: profileId)
+        database.restoreProfile(profile)
+
+        let knowledge = TranscriptionTaskManager.speakerClassificationKnowledge(
+            speakerIds: ["2"],
+            utterances: [
+                utterance(
+                    start: 0,
+                    end: 1,
+                    speakerId: 2,
+                    persistentSpeakerId: profileId,
+                    matchSimilarity: 0.95,
+                    transcript: "hello"
+                )
+            ],
+            contexts: [:],
+            speakerDB: database
+        )
+
+        XCTAssertEqual(knowledge.count, 1)
+        XCTAssertEqual(knowledge[0].profile.id, profileId)
+        XCTAssertEqual(knowledge[0].profile.callCount, 5)
+    }
+
+    func testPendingReviewProfileIdsCollectsSystemNeedsActionAndQueuedMicSpeakers() {
+        let systemReviewId = UUID()
+        let systemAcceptedId = UUID()
+        let micReviewId = UUID()
+        let micAutoAcceptedButQueuedId = UUID()
+
+        let ids = TranscriptionTaskManager.pendingReviewProfileIds(
+            systemUtterances: [
+                utterance(start: 0, end: 1, speakerId: 1, persistentSpeakerId: systemReviewId, transcript: "review"),
+                utterance(start: 1, end: 2, speakerId: 2, persistentSpeakerId: systemAcceptedId, transcript: "accepted"),
+            ],
+            micUtterances: [
+                utterance(start: 0, end: 1, channel: 0, speakerId: 0, persistentSpeakerId: micReviewId, transcript: "local"),
+                utterance(start: 1, end: 2, channel: 0, speakerId: 1, persistentSpeakerId: micAutoAcceptedButQueuedId, transcript: "known local")
+            ],
+            systemNeedsActionIds: ["1"],
+            micQueuedReviewIds: ["0", "1"]
+        )
+
+        XCTAssertEqual(ids, Set([systemReviewId, micReviewId, micAutoAcceptedButQueuedId]))
+        XCTAssertFalse(ids.contains(systemAcceptedId))
+    }
+
     func testNamingPolicyConfidenceTiers() {
         XCTAssertEqual(SpeakerNamingPolicy.confidence(similarity: 0.90, callCount: 10), .high)
         // Falls back to medium when similarity exactly at 0.85 (strictly >).
@@ -360,12 +470,13 @@ final class TranscriptionPipelineStateTests: XCTestCase {
     }
 
     private func speakerProfile(
+        id: UUID = UUID(),
         displayName: String?,
         callCount: Int,
         disputeCount: Int
     ) -> SpeakerProfile {
         SpeakerProfile(
-            id: UUID(),
+            id: id,
             displayName: displayName,
             nameSource: displayName == nil ? nil : NameSource.userManual,
             embedding: [1, 0],
@@ -375,5 +486,12 @@ final class TranscriptionPipelineStateTests: XCTestCase {
             confidence: 0.8,
             disputeCount: disputeCount
         )
+    }
+
+    private func temporarySpeakerDatabase() throws -> (SpeakerDatabase, URL) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptionPipelineStateTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return (SpeakerDatabase(path: directory.appendingPathComponent("speakers.sqlite").path), directory)
     }
 }
