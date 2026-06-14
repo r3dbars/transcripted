@@ -224,9 +224,11 @@ What shipped, and where it diverged from the original sketch:
 - **Detector**: `updateMicInputUsers(_:)` + `micInputCandidates(now:)` reuse the
   `.runtimeApp` source (snooze/dismiss/backoff untouched), score **5**, reason
   `.micInput` (new, for analytics), candidate id `mic:<provider>`. Calendar
-  candidates for the same provider win over mic candidates so scheduled calls
-  keep their title/context. Inactive edges keep pending/dismiss/snooze cooldowns
-  intact so mute/unmute and brief mic drops stay quiet.
+  candidates for the same native provider win over mic candidates so scheduled
+  native-app calls keep their title/context. Generic browser mic calls stay
+  neutral because they may be Meet, Zoom-web, or Teams-web. Inactive edges keep
+  pending/dismiss/snooze cooldowns intact so mute/unmute and brief mic drops stay
+  quiet.
 - **Self-exclusion**: detector `isOwnCaptureActive` (recording OR dictation) gates the
   whole mic path, plus the monitor drops our own bundle (`com.justinbetker.draft`) by prefix.
 - **Settings**: "Auto-detect calls" on the General page, **default ON**.

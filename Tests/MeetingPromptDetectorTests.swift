@@ -341,7 +341,37 @@ func testMeetingPromptDetector() async {
         assertEqual(box.promptCount, 1, "mute/unmute should not wipe an explicit Not now dismissal")
     }
 
-    await runSuite("MeetingPromptDetector.updateMicInputUsers — calendar candidate keeps title over mic candidate") {
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — native mic candidate keeps calendar title") {
+        let now = Date()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(
+                    id: "scheduled-zoom",
+                    provider: .zoom,
+                    startsIn: 30,
+                    now: now
+                )
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "one prompt should be presented")
+        assertEqual(box.candidate?.source, .calendarEvent, "native mic evidence should keep matching calendar context")
+        assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "native calendar-backed mic calls should keep the meeting title hint")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — generic browser mic candidate does not steal calendar title") {
         let now = Date()
         let detector = MeetingPromptDetector(
             calendarAccessGranted: { true },
@@ -367,8 +397,8 @@ func testMeetingPromptDetector() async {
         await waitForPromptEvaluation()
 
         assertEqual(box.promptCount, 1, "one prompt should be presented")
-        assertEqual(box.candidate?.source, .calendarEvent, "scheduled meetings should keep calendar context over the generic mic prompt")
-        assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "calendar-backed mic calls should keep the meeting title hint")
+        assertEqual(box.candidate?.source, .runtimeApp, "generic browser mic evidence should not borrow an unrelated Meet calendar event")
+        assertNil(box.candidate?.suggestedTranscriptTitle, "browser mic prompts should stay neutral because they could be Meet, Zoom-web, or Teams-web")
     }
 }
 
