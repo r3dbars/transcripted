@@ -837,13 +837,20 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
     /// A menu item that owns its action closure and acts as its own target.
     ///
-    /// The menu retains its items for the whole `popUp` tracking loop, so the
-    /// handler stays alive and fires no matter how SwiftUI tears down and
-    /// recreates this representable's coordinator while the menu is open. The
-    /// earlier design stored a separate target on the (weakly referenced)
-    /// `NSMenuItem.target` and deferred the call with `DispatchQueue.main.async`;
-    /// the target could be deallocated before the deferred block ran, so the
-    /// closures silently never fired (delete, reveal, and report all no-op'd).
+    /// Two things have to hold for a handler to both fire *and* be able to drive
+    /// SwiftUI presentation:
+    ///   1. The item owns its handler instead of pointing `NSMenuItem.target` at
+    ///      a separately, weakly-retained object. The `NSMenu` retains its items
+    ///      for the whole `popUp` tracking loop, so the handler can't be torn
+    ///      down with the SwiftUI coordinator while the menu is open. (The old
+    ///      design's weak target could deallocate first, so closures silently
+    ///      never fired — delete, reveal, and report all no-op'd.)
+    ///   2. The handler runs on the next main-runloop turn, *after* `popUp`'s
+    ///      modal tracking loop exits. A handler that mutates SwiftUI state to
+    ///      present an `.alert(item:)`/`.sheet(item:)` (e.g. the Home delete
+    ///      confirmation) won't present if it runs synchronously inside that
+    ///      loop. The async block captures `handler` strongly, so deferring is
+    ///      safe here — the dealloc trap from (1) does not reappear.
     final class ClosureMenuItem: NSMenuItem {
         private let handler: () -> Void
 
@@ -861,7 +868,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc private func invoke() {
             guard isEnabled else { return }
-            handler()
+            DispatchQueue.main.async { [handler] in handler() }
         }
     }
 
