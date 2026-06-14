@@ -234,6 +234,69 @@ func testSyntheticMeetingPrompts() {
         assertEqual(snoozed.suppressionReason, .snoozedCandidate, "snooze should avoid prompt spam")
     }
 
+    runSuite("SyntheticMeetingPrompts — expired cooldowns allow a calendar prompt to return") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [syntheticCalendarEvent(id: "expired-cooldown")],
+            snoozedUntil: ["calendar:expired-cooldown": syntheticPromptNow.addingTimeInterval(-1)],
+            pendingUntil: ["calendar:expired-cooldown": syntheticPromptNow.addingTimeInterval(-1)]
+        )
+
+        assertTrue(result.shouldPrompt, "expired pending and snooze entries should not create a prompt loop")
+        assertEqual(result.candidate?.id, "calendar:expired-cooldown", "the original calendar candidate should return")
+    }
+
+    runSuite("SyntheticMeetingPrompts — calendar pending state does not fall through to another popup") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(id: "primary-calendar", startsIn: 10),
+                syntheticCalendarEvent(id: "secondary-calendar", startsIn: 45)
+            ],
+            pendingUntil: ["calendar:primary-calendar": syntheticPromptNow.addingTimeInterval(60)]
+        )
+
+        assertFalse(result.shouldPrompt, "a visible calendar prompt should suppress other calendar prompts in the same pass")
+        assertEqual(result.suppressionReason, .pendingCandidate, "the pending top candidate should explain the suppression")
+    }
+
+    runSuite("SyntheticMeetingPrompts — app-only pending state does not double-trigger") {
+        let result = evaluateSyntheticPrompt(
+            calendarAccessGranted: false,
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                runningBundleIDs: [
+                    "com.cisco.webexmeetingsapp",
+                    "com.apple.FaceTime"
+                ],
+                frontmostBundleID: "com.cisco.webexmeetingsapp",
+                recentNativeActivity: [.facetime: syntheticPromptNow.addingTimeInterval(-30)]
+            ),
+            pendingUntil: ["runtime:webex": syntheticPromptNow.addingTimeInterval(60)]
+        )
+
+        assertFalse(result.shouldPrompt, "an app-only prompt that is already visible should not fall through to another app")
+        assertEqual(result.suppressionReason, .pendingCandidate, "pending app prompts should be treated as active popups")
+    }
+
+    runSuite("SyntheticMeetingPrompts — dismissed calendar prompt suppresses lower-priority app fallback") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(id: "dismissed-zoom", startsIn: 10)
+            ],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                runningBundleIDs: [
+                    "us.zoom.xos",
+                    "com.cisco.webexmeetingsapp"
+                ],
+                frontmostBundleID: "us.zoom.xos",
+                recentNativeActivity: [.webex: syntheticPromptNow.addingTimeInterval(-30)]
+            ),
+            snoozedUntil: ["calendar:dismissed-zoom": syntheticPromptNow.addingTimeInterval(60)]
+        )
+
+        assertFalse(result.shouldPrompt, "a dismissed calendar prompt should not immediately reappear as an app prompt")
+        assertEqual(result.suppressionReason, .snoozedCandidate, "dismissed prompt cooldown should win over fallback candidates")
+    }
+
     runSuite("SyntheticMeetingPrompts — runtime suppression blocks app-only follow-up") {
         let result = evaluateSyntheticPrompt(
             calendarAccessGranted: false,
@@ -246,6 +309,94 @@ func testSyntheticMeetingPrompts() {
         )
 
         assertEqual(result.suppressionReason, .noCandidate, "provider runtime suppression should keep app-only prompts quiet")
+    }
+
+    runSuite("SyntheticMeetingPrompts — active recording suppresses calendar and app signals together") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [syntheticCalendarEvent(id: "recording-zoom", startsIn: 10)],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                runningBundleIDs: [
+                    "us.zoom.xos",
+                    "com.cisco.webexmeetingsapp"
+                ],
+                frontmostBundleID: "us.zoom.xos",
+                recentNativeActivity: [.webex: syntheticPromptNow.addingTimeInterval(-30)]
+            ),
+            presentationSnapshot: MeetingPromptPresentationSnapshot(
+                sessionState: .recording,
+                overlayState: .idle
+            )
+        )
+
+        assertFalse(result.shouldPrompt, "prompt detection should stay quiet while Transcripted is recording")
+        assertEqual(result.suppressionReason, .presentationBlocked, "active recording should use the presentation gate")
+    }
+
+    runSuite("SyntheticMeetingPrompts — existing popup suppresses another valid popup") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [syntheticCalendarEvent(id: "overlay-prompt", startsIn: 10)],
+            presentationSnapshot: MeetingPromptPresentationSnapshot(
+                sessionState: .ready,
+                overlayState: .prompt
+            )
+        )
+
+        assertFalse(result.shouldPrompt, "a detected-meeting prompt should not stack another prompt on top")
+        assertEqual(result.suppressionReason, .presentationBlocked, "existing prompt state should block reevaluation")
+    }
+
+    runSuite("SyntheticMeetingPrompts — Zoom and browser WebRTC calendar routes behave once") {
+        let zoom = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(id: "zoom-webrtc-route", startsIn: 10)
+            ],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                runningBundleIDs: ["us.zoom.xos", "com.google.Chrome"],
+                frontmostBundleID: "us.zoom.xos"
+            )
+        )
+        let zoomRepeat = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(id: "zoom-webrtc-route", startsIn: 10)
+            ],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                runningBundleIDs: ["us.zoom.xos", "com.google.Chrome"],
+                frontmostBundleID: "us.zoom.xos"
+            ),
+            pendingUntil: ["calendar:zoom-webrtc-route": syntheticPromptNow.addingTimeInterval(60)]
+        )
+        let browserWebRTC = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(
+                    id: "meet-webrtc-route",
+                    startsIn: 10,
+                    url: URL(string: "https://meet.google.com/abc-defg-hij")
+                )
+            ],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "com.google.Chrome"
+            )
+        )
+        let browserWebRTCRepeat = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(
+                    id: "meet-webrtc-route",
+                    startsIn: 10,
+                    url: URL(string: "https://meet.google.com/abc-defg-hij")
+                )
+            ],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "com.google.Chrome"
+            ),
+            pendingUntil: ["calendar:meet-webrtc-route": syntheticPromptNow.addingTimeInterval(60)]
+        )
+
+        assertEqual(zoom.candidate?.id, "calendar:zoom-webrtc-route", "Zoom route evidence plus Calendar should stay one calendar prompt")
+        assertEqual(zoom.candidate?.reason, .calendarPlusRuntimeMatch, "Zoom app evidence should strengthen the calendar prompt")
+        assertEqual(zoomRepeat.suppressionReason, .pendingCandidate, "Zoom route repeats should stay quiet while the prompt is pending")
+        assertEqual(browserWebRTC.candidate?.id, "calendar:meet-webrtc-route", "browser WebRTC evidence plus Calendar should stay one calendar prompt")
+        assertEqual(browserWebRTC.candidate?.reason, .calendarPlusRuntimeMatch, "browser WebRTC evidence should strengthen browser-hosted calendar prompts")
+        assertEqual(browserWebRTCRepeat.suppressionReason, .pendingCandidate, "browser WebRTC route repeats should stay quiet while the prompt is pending")
     }
 
     runSuite("SyntheticMeetingPrompts — presentation gate suppresses busy meeting states") {
