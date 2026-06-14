@@ -77,6 +77,33 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Sentry crash scrubber drops native image paths") {
+        let contents = readRepoTextFile("Sources/Observability/CrashReporter.swift")
+        let eventBlock = sourceSlice(
+            contents,
+            from: "private func sanitize(event: Event) -> Event {",
+            to: "private func sanitize(stacktrace: SentryStacktrace?)"
+        )
+        let stacktraceBlock = sourceSlice(
+            contents,
+            from: "private func sanitize(stacktrace: SentryStacktrace?)",
+            to: "private func sentryLevel(for level: EventLevel) -> SentryLevel"
+        )
+
+        assertTrue(
+            eventBlock.contains("debugImage.codeFile = nil"),
+            "Sentry debug image code-file paths should be dropped before crash events leave the app"
+        )
+        assertTrue(
+            stacktraceBlock.contains("frame.package = nil"),
+            "Sentry native frame package paths should be dropped before crash events leave the app"
+        )
+        assertFalse(
+            stacktraceBlock.contains("frame.package = SentryPayloadSanitizer.sanitizeText(package)"),
+            "native package paths should be removed, not merely redacted after SDK capture"
+        )
+    }
+
     runSuite("Repo command contract - PostHog health probe uses the query API") {
         let contents = readRepoTextFile("scripts/ops/health-probe.sh")
 
