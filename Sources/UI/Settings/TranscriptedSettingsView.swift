@@ -108,6 +108,50 @@ struct TranscriptedSettingsView: View {
         _sparkleUpdater = ObservedObject(wrappedValue: appState.sparkleUpdater)
     }
 
+    private enum SettingsRootAlert: Identifiable {
+        case homeDeleteConfirmation(HomeDeleteConfirmation)
+        case homeDeleteFailure(HomeDeleteFailure)
+        case audioRetentionWindow(AudioRetentionWindow)
+
+        var id: String {
+            switch self {
+            case .homeDeleteConfirmation(let confirmation):
+                return "home-delete-confirmation-\(confirmation.id.uuidString)"
+            case .homeDeleteFailure(let failure):
+                return "home-delete-failure-\(failure.id.uuidString)"
+            case .audioRetentionWindow(let window):
+                return "audio-retention-\(window.id)"
+            }
+        }
+    }
+
+    private var settingsRootAlert: Binding<SettingsRootAlert?> {
+        Binding<SettingsRootAlert?>(
+            get: {
+                if let homeDeleteConfirmation {
+                    return .homeDeleteConfirmation(homeDeleteConfirmation)
+                }
+                if let homeDeleteFailure {
+                    return .homeDeleteFailure(homeDeleteFailure)
+                }
+                if let pendingAudioRetentionWindow {
+                    return .audioRetentionWindow(pendingAudioRetentionWindow)
+                }
+                return nil
+            },
+            set: { newValue in
+                guard newValue == nil else { return }
+                if homeDeleteConfirmation != nil {
+                    homeDeleteConfirmation = nil
+                } else if homeDeleteFailure != nil {
+                    homeDeleteFailure = nil
+                } else {
+                    pendingAudioRetentionWindow = nil
+                }
+            }
+        )
+    }
+
     var body: some View {
         NavigationSplitView(columnVisibility: $settingsColumnVisibility) {
             List(selection: $navigation.selectedPage) {
@@ -216,32 +260,33 @@ struct TranscriptedSettingsView: View {
                 }
             )
         }
-        .alert(item: $homeDeleteConfirmation) { confirmation in
-            Alert(
-                title: Text(confirmation.title),
-                message: Text(confirmation.message),
-                primaryButton: .destructive(Text(confirmation.confirmTitle)) {
-                    confirmation.perform()
-                },
-                secondaryButton: .cancel()
-            )
-        }
-        .alert(item: $homeDeleteFailure) { failure in
-            Alert(
-                title: Text(failure.title),
-                message: Text(failure.message),
-                dismissButton: .default(Text("OK"))
-            )
-        }
-        .alert(item: $pendingAudioRetentionWindow) { window in
-            Alert(
-                title: Text("Delete old replay audio?"),
-                message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
-                primaryButton: .destructive(Text("Delete Old Audio")) {
-                    applyAudioRetentionWindow(window)
-                },
-                secondaryButton: .cancel()
-            )
+        .alert(item: settingsRootAlert) { alert in
+            switch alert {
+            case .homeDeleteConfirmation(let confirmation):
+                Alert(
+                    title: Text(confirmation.title),
+                    message: Text(confirmation.message),
+                    primaryButton: .destructive(Text(confirmation.confirmTitle)) {
+                        confirmation.perform()
+                    },
+                    secondaryButton: .cancel()
+                )
+            case .homeDeleteFailure(let failure):
+                Alert(
+                    title: Text(failure.title),
+                    message: Text(failure.message),
+                    dismissButton: .default(Text("OK"))
+                )
+            case .audioRetentionWindow(let window):
+                Alert(
+                    title: Text("Delete old replay audio?"),
+                    message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
+                    primaryButton: .destructive(Text("Delete Old Audio")) {
+                        applyAudioRetentionWindow(window)
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
         }
         .task(id: navigation.presentationID) {
             refreshState()

@@ -131,9 +131,44 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
+        let closureMenuItemSource = uiAutomationSourceSlice(
+            homeSource,
+            from: "final class ClosureMenuItem: NSMenuItem",
+            to: "final class HoverMenuButton"
+        )
+        assertTrue(
+            closureMenuItemSource.contains("private let handler: () -> Void")
+                && closureMenuItemSource.contains("DispatchQueue.main.async { [handler] in")
+                && closureMenuItemSource.contains("handler()"),
+            "Home row menu handlers should stay item-owned and defer off the AppKit menu loop before presenting SwiftUI sheets or alerts"
+        )
         assertFalse(
             homeSource.contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
+        )
+
+        assertEqual(
+            uiAutomationOccurrenceCount(of: ".alert(item:", in: settingsSource),
+            1,
+            "Settings should keep one root legacy alert presenter so Home delete and failure alerts are not shadowed"
+        )
+        assertTrue(
+            settingsSource.contains("private enum SettingsRootAlert: Identifiable")
+                && settingsSource.contains("private var settingsRootAlert: Binding<SettingsRootAlert?>")
+                && settingsSource.contains("case homeDeleteConfirmation(HomeDeleteConfirmation)")
+                && settingsSource.contains("case homeDeleteFailure(HomeDeleteFailure)")
+                && settingsSource.contains("case audioRetentionWindow(AudioRetentionWindow)")
+                && settingsSource.contains(".alert(item: settingsRootAlert)")
+                && settingsSource.contains("homeDeleteConfirmation = nil")
+                && settingsSource.contains("homeDeleteFailure = nil")
+                && settingsSource.contains("pendingAudioRetentionWindow = nil"),
+            "Settings root alert state should merge Home delete, Home failure, and audio-retention prompts without changing their call sites"
+        )
+        assertFalse(
+            settingsSource.contains(".alert(item: $homeDeleteConfirmation)")
+                || settingsSource.contains(".alert(item: $homeDeleteFailure)")
+                || settingsSource.contains(".alert(item: $pendingAudioRetentionWindow)"),
+            "Home alerts should not be re-stacked as separate legacy .alert(item:) modifiers"
         )
 
         // Row-interaction affordances from fix/home-row-actions, which have no
@@ -389,4 +424,27 @@ func testUIAutomationSurfaceContract() {
 
 private func readUIAutomationContractFile(_ relativePath: String) -> String {
     (try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8)) ?? ""
+}
+
+private func uiAutomationSourceSlice(_ contents: String, from start: String, to end: String) -> String {
+    guard
+        let startRange = contents.range(of: start),
+        let endRange = contents.range(of: end, range: startRange.upperBound..<contents.endIndex)
+    else {
+        return ""
+    }
+
+    return String(contents[startRange.lowerBound..<endRange.lowerBound])
+}
+
+private func uiAutomationOccurrenceCount(of needle: String, in haystack: String) -> Int {
+    guard !needle.isEmpty else { return 0 }
+
+    var count = 0
+    var searchRange = haystack.startIndex..<haystack.endIndex
+    while let range = haystack.range(of: needle, range: searchRange) {
+        count += 1
+        searchRange = range.upperBound..<haystack.endIndex
+    }
+    return count
 }

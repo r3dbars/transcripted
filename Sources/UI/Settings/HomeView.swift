@@ -838,12 +838,8 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
     /// A menu item that owns its action closure and acts as its own target.
     ///
     /// The menu retains its items for the whole `popUp` tracking loop, so the
-    /// handler stays alive and fires no matter how SwiftUI tears down and
-    /// recreates this representable's coordinator while the menu is open. The
-    /// earlier design stored a separate target on the (weakly referenced)
-    /// `NSMenuItem.target` and deferred the call with `DispatchQueue.main.async`;
-    /// the target could be deallocated before the deferred block ran, so the
-    /// closures silently never fired (delete, reveal, and report all no-op'd).
+    /// handler stays alive even when the work is deferred off AppKit's menu
+    /// event-tracking loop before presenting SwiftUI alerts or sheets.
     final class ClosureMenuItem: NSMenuItem {
         private let handler: () -> Void
 
@@ -861,7 +857,9 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc private func invoke() {
             guard isEnabled else { return }
-            handler()
+            DispatchQueue.main.async { [handler] in
+                handler()
+            }
         }
     }
 
