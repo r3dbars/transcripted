@@ -109,13 +109,22 @@ func testUIAutomationSurfaceContract() {
             "HomeRowMenuItem(title: \"Open Markdown\"",
             "HomeRowMenuItem(title: \"Report issue\"",
             "HomeRowMenuItem(title: \"Delete meeting\"",
+            "HomeDeleteConfirmationPolicy.failedMeeting",
+            "homeDeleteConfirmation = HomeDeleteConfirmation(",
         ] {
             assertTrue(settingsSource.contains(requiredHomeActionHook), "\(requiredHomeActionHook) should keep Home action coverage visible")
         }
+        assertFalse(
+            settingsSource.contains("presentFailedMeetingDeleteConfirmation("),
+            "failed-meeting delete confirmation should use SwiftUI alert state instead of a hand-built NSAlert"
+        )
 
         for requiredHomeRendererHook in [
             "title: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
+            "SettingsInlineActionButton(",
+            "tone: hasRetainedAudioFiles ? .destructive : .neutral",
             "HomeRowMoreMenuButton(items:",
+            "retainedActionTarget = context.coordinator",
             "MenuActionTarget(item: item)",
             "DispatchQueue.main.async {\n                self.item.action()",
             "title: \"Copy for agent\"",

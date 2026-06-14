@@ -163,7 +163,9 @@ final class UIAutomationSmokeRunner {
                 executableURL: executableURL,
                 isolatedHome: isolatedHome,
                 logFileName: "ui-smoke-app.log",
-                launchReportFileName: "launch-ui-smoke.json"
+                launchReportFileName: "launch-ui-smoke.json",
+                onboardingCompleted: true,
+                forceOnboarding: false
             )
             launchedProcess = launched.process
             builder.appLogPath = launched.logURL.path
@@ -437,7 +439,9 @@ final class UIAutomationSmokeRunner {
                 executableURL: executableURL,
                 isolatedHome: onboardingHome,
                 logFileName: "ui-smoke-onboarding-app.log",
-                launchReportFileName: "launch-ui-smoke-onboarding.json"
+                launchReportFileName: "launch-ui-smoke-onboarding.json",
+                onboardingCompleted: false,
+                forceOnboarding: true
             )
             builder.onboardingAppLogPath = launched.logURL.path
         } catch {
@@ -457,6 +461,7 @@ final class UIAutomationSmokeRunner {
         let appAX = AXUIElementCreateApplication(launched.process.processIdentifier)
         AXUIElementSetMessagingTimeout(appAX, 2)
         let appInspector = AXInspector(root: appAX)
+        let onboardingMaxDepth = 24
 
         guard waitUntil(timeout: timeout, description: "onboarding AX tree", condition: {
             launched.process.isRunning && !appInspector.snapshot(maxDepth: 4, maxNodes: 40).isEmpty
@@ -471,13 +476,13 @@ final class UIAutomationSmokeRunner {
         }
 
         let navPrimaryID = "transcripted.onboarding.nav.primary"
-        guard let welcomeObserved = waitForObservedElements([navPrimaryID], inspector: appInspector) else {
+        guard let welcomeObserved = waitForObservedElements([navPrimaryID], inspector: appInspector, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-window",
                 "First-run onboarding window is visible",
                 target: navPrimaryID,
                 detail: "The first-run onboarding primary button was not found.",
-                observed: observedElements(for: [navPrimaryID], inspector: appInspector)
+                observed: observedElements(for: [navPrimaryID], inspector: appInspector, maxDepth: onboardingMaxDepth)
             ))
             return false
         }
@@ -488,7 +493,7 @@ final class UIAutomationSmokeRunner {
             observed: welcomeObserved
         ))
 
-        guard appInspector.performPressOrClick(identifier: navPrimaryID) else {
+        guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-navigation",
                 "Onboarding primary navigation advances to use-case choice",
@@ -499,7 +504,7 @@ final class UIAutomationSmokeRunner {
         }
         pauseForUITransition()
 
-        guard appInspector.performPressOrClick(identifier: navPrimaryID) else {
+        guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-navigation",
                 "Onboarding primary navigation advances to use-case choice",
@@ -516,13 +521,13 @@ final class UIAutomationSmokeRunner {
             navPrimaryID,
             "transcripted.onboarding.nav.back",
         ]
-        guard let useCaseObserved = waitForObservedElements(useCaseIDs, inspector: appInspector) else {
+        guard let useCaseObserved = waitForObservedElements(useCaseIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-use-case",
                 "Onboarding exposes meeting and dictation use-case choices",
                 target: "Transcripted onboarding",
                 detail: "The use-case step did not expose the expected automation identifiers.",
-                observed: observedElements(for: useCaseIDs, inspector: appInspector)
+                observed: observedElements(for: useCaseIDs, inspector: appInspector, maxDepth: onboardingMaxDepth)
             ))
             return false
         }
@@ -533,7 +538,7 @@ final class UIAutomationSmokeRunner {
             observed: useCaseObserved
         ))
 
-        guard appInspector.performPressOrClick(identifier: "transcripted.onboarding.use-case.dictation") else {
+        guard appInspector.performPressOrClick(identifier: "transcripted.onboarding.use-case.dictation", maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-dictation-path",
                 "Onboarding can choose the dictation setup path",
@@ -544,7 +549,7 @@ final class UIAutomationSmokeRunner {
         }
         pauseForUITransition()
 
-        guard appInspector.performPressOrClick(identifier: navPrimaryID) else {
+        guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-dictation-path",
                 "Onboarding can choose the dictation setup path",
@@ -559,13 +564,13 @@ final class UIAutomationSmokeRunner {
             "transcripted.onboarding.permissions.microphone",
             "transcripted.onboarding.permissions.accessibility",
         ]
-        guard let dictationObserved = waitForObservedElements(dictationPermissionIDs, inspector: appInspector) else {
+        guard let dictationObserved = waitForObservedElements(dictationPermissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-dictation-permissions",
                 "Dictation onboarding exposes required permission actions",
                 target: "Transcripted onboarding",
                 detail: "The dictation permission step did not expose microphone and accessibility actions.",
-                observed: observedElements(for: dictationPermissionIDs, inspector: appInspector)
+                observed: observedElements(for: dictationPermissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth)
             ))
             return false
         }
@@ -576,7 +581,7 @@ final class UIAutomationSmokeRunner {
             observed: dictationObserved
         ))
 
-        guard appInspector.performPressOrClick(identifier: "transcripted.onboarding.nav.back") else {
+        guard appInspector.performPressOrClick(identifier: "transcripted.onboarding.nav.back", maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-meeting-path",
                 "Onboarding can return and choose the meetings setup path",
@@ -587,8 +592,8 @@ final class UIAutomationSmokeRunner {
         }
         pauseForUITransition()
 
-        guard waitForObservedElements(useCaseIDs, inspector: appInspector) != nil,
-              appInspector.performPressOrClick(identifier: "transcripted.onboarding.use-case.meetings") else {
+        guard waitForObservedElements(useCaseIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) != nil,
+              appInspector.performPressOrClick(identifier: "transcripted.onboarding.use-case.meetings", maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-meeting-path",
                 "Onboarding can return and choose the meetings setup path",
@@ -599,7 +604,7 @@ final class UIAutomationSmokeRunner {
         }
         pauseForUITransition()
 
-        guard appInspector.performPressOrClick(identifier: navPrimaryID) else {
+        guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-meeting-path",
                 "Onboarding can return and choose the meetings setup path",
@@ -615,13 +620,13 @@ final class UIAutomationSmokeRunner {
             "transcripted.onboarding.permissions.system-audio",
             "transcripted.onboarding.permissions.leave-dictation-shortcuts-off",
         ]
-        guard let meetingObserved = waitForObservedElements(meetingPermissionIDs, inspector: appInspector) else {
+        guard let meetingObserved = waitForObservedElements(meetingPermissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-meeting-permissions",
                 "Meeting onboarding exposes required permission actions",
                 target: "Transcripted onboarding",
                 detail: "The meeting permission step did not expose microphone, system audio, and shortcut preference actions.",
-                observed: observedElements(for: meetingPermissionIDs, inspector: appInspector)
+                observed: observedElements(for: meetingPermissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth)
             ))
             return false
         }
@@ -671,10 +676,22 @@ final class UIAutomationSmokeRunner {
         executableURL: URL,
         isolatedHome: URL,
         logFileName: String,
-        launchReportFileName: String
+        launchReportFileName: String,
+        onboardingCompleted: Bool,
+        forceOnboarding: Bool
     ) throws -> LaunchedApp {
         let process = Process()
         process.executableURL = executableURL
+        process.arguments = [
+            "-permissionsOnboardingCompleted",
+            onboardingCompleted ? "YES" : "NO",
+            "-forcePermissionsOnboarding",
+            forceOnboarding ? "YES" : "NO",
+            "-observability-anonymous-analytics-enabled",
+            "NO",
+            "-observability-crash-reporting-enabled",
+            "NO",
+        ]
 
         let logsDirectory = isolatedHome.appendingPathComponent("Library/Application Support/Transcripted/logs", isDirectory: true)
         try fileManager.createDirectory(at: logsDirectory, withIntermediateDirectories: true)
@@ -682,6 +699,7 @@ final class UIAutomationSmokeRunner {
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = isolatedHome.path
         environment["CFFIXED_USER_HOME"] = isolatedHome.path
+        environment.removeValue(forKey: "__CFBundleIdentifier")
         environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
         environment["TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS"] = "1"
         environment["TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"] = "1"
@@ -719,8 +737,8 @@ final class UIAutomationSmokeRunner {
         })
     }
 
-    private func observedElements(for identifiers: [String], inspector: AXInspector) -> [AXObservedElement] {
-        let nodes = inspector.snapshotNodes(maxDepth: 12)
+    private func observedElements(for identifiers: [String], inspector: AXInspector, maxDepth: Int = 12) -> [AXObservedElement] {
+        let nodes = inspector.snapshotNodes(maxDepth: maxDepth)
         return identifiers.map { identifier in
             nodes.first { $0.observed.identifier == identifier }?.observed
                 ?? AXObservedElement(identifier: identifier, title: nil, role: nil, description: nil, help: nil, isEnabled: nil, frame: nil)
@@ -796,8 +814,8 @@ private struct LaunchedApp {
 private struct AXInspector {
     let root: AXUIElement
 
-    func first(identifier: String) -> AXNode? {
-        snapshotNodes(maxDepth: 12).first { $0.observed.identifier == identifier }
+    func first(identifier: String, maxDepth: Int = 12, maxNodes: Int = 2_000) -> AXNode? {
+        snapshotNodes(maxDepth: maxDepth, maxNodes: maxNodes).first { $0.observed.identifier == identifier }
     }
 
     func performPress(identifier: String, maxDepth: Int = 12, maxNodes: Int = 2_000) -> Bool {
@@ -834,7 +852,7 @@ private struct AXInspector {
         if performPress(identifier: identifier, maxDepth: maxDepth, maxNodes: maxNodes) {
             return true
         }
-        guard let frame = first(identifier: identifier)?.observed.frame else {
+        guard let frame = first(identifier: identifier, maxDepth: maxDepth, maxNodes: maxNodes)?.observed.frame else {
             return false
         }
         return Self.performClick(frame: frame)
