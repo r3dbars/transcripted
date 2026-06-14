@@ -5,6 +5,65 @@ import AVFoundation
 
 extension TranscriptionTaskManager {
 
+    struct SpeakerClassificationKnowledge: Sendable {
+        let speakerId: String
+        let profile: SpeakerProfile
+        let similarity: Double
+    }
+
+    nonisolated static func speakerClassificationKnowledge(
+        speakerIds: [String],
+        utterances: [TranscriptionUtterance],
+        contexts: [String: ChannelSpeakerContext],
+        speakerDB: any SpeakerStore
+    ) -> [SpeakerClassificationKnowledge] {
+        var knowledge: [SpeakerClassificationKnowledge] = []
+        var seenIds: Set<String> = []
+
+        for sid in speakerIds where seenIds.insert(sid).inserted {
+            if let context = contexts[sid],
+               let snapshot = context.matchedProfileSnapshot,
+               let similarity = context.matchSimilarity {
+                knowledge.append(SpeakerClassificationKnowledge(
+                    speakerId: sid,
+                    profile: snapshot,
+                    similarity: similarity
+                ))
+                continue
+            }
+
+            if let utterance = utterances.first(where: { String($0.speakerId) == sid }),
+               let persistentId = utterance.persistentSpeakerId,
+               let similarity = utterance.matchSimilarity,
+               let profile = speakerDB.getSpeaker(id: persistentId) {
+                knowledge.append(SpeakerClassificationKnowledge(
+                    speakerId: sid,
+                    profile: profile,
+                    similarity: similarity
+                ))
+            }
+        }
+
+        return knowledge
+    }
+
+    nonisolated static func pendingReviewProfileIds(
+        systemUtterances: [TranscriptionUtterance],
+        micUtterances: [TranscriptionUtterance],
+        systemNeedsActionIds: Set<String>,
+        micQueuedReviewIds: Set<String>
+    ) -> Set<UUID> {
+        let systemIds = systemUtterances.compactMap { utterance -> UUID? in
+            guard systemNeedsActionIds.contains(String(utterance.speakerId)) else { return nil }
+            return utterance.persistentSpeakerId
+        }
+        let micIds = micUtterances.compactMap { utterance -> UUID? in
+            guard micQueuedReviewIds.contains(String(utterance.speakerId)) else { return nil }
+            return utterance.persistentSpeakerId
+        }
+        return Set(systemIds + micIds)
+    }
+
     /// Transcribe a captured meeting using system audio plus optional mic audio.
     /// - Returns: URL of saved transcript with speaker attribution
     /// Note: nonisolated to keep heavy async work off the main thread
@@ -111,18 +170,12 @@ extension TranscriptionTaskManager {
         // Build DB knowledge snapshot: what do we already know about these speakers?
         let speakerIds = Array(result.systemSpeakerIds).sorted()
         let speakerDB = await MainActor.run { transcription.speakerDB }
-        var dbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)] = []
-
-        for utterance in result.systemUtterances {
-            let sid = String(utterance.speakerId)
-            // Only process each speaker ID once
-            guard !dbKnowledge.contains(where: { $0.speakerId == sid }) else { continue }
-            if let persistentId = utterance.persistentSpeakerId,
-               let similarity = utterance.matchSimilarity,
-               let profile = speakerDB.getSpeaker(id: persistentId) {
-                dbKnowledge.append((speakerId: sid, profile: profile, similarity: similarity))
-            }
-        }
+        let dbKnowledge = Self.speakerClassificationKnowledge(
+            speakerIds: speakerIds,
+            utterances: result.systemUtterances,
+            contexts: result.systemSpeakerContexts,
+            speakerDB: speakerDB
+        )
 
         // Per-speaker classification: auto-accept high-confidence known speakers,
         // track which ones need naming or confirmation
@@ -190,16 +243,12 @@ extension TranscriptionTaskManager {
         var micAutoAcceptedIds: Set<String> = []
         if splitLocalSpeakers && result.micPersistentSpeakerIds.count > 0 {
             let micSpeakerIds = Array(result.micSpeakerIds).sorted()
-            var micDbKnowledge: [(speakerId: String, profile: SpeakerProfile, similarity: Double)] = []
-            for utterance in result.micUtterances {
-                let sid = String(utterance.speakerId)
-                guard !micDbKnowledge.contains(where: { $0.speakerId == sid }) else { continue }
-                if let persistentId = utterance.persistentSpeakerId,
-                   let similarity = utterance.matchSimilarity,
-                   let profile = speakerDB.getSpeaker(id: persistentId) {
-                    micDbKnowledge.append((speakerId: sid, profile: profile, similarity: similarity))
-                }
-            }
+            let micDbKnowledge = Self.speakerClassificationKnowledge(
+                speakerIds: micSpeakerIds,
+                utterances: result.micUtterances,
+                contexts: result.micSpeakerContexts,
+                speakerDB: speakerDB
+            )
 
             for sid in micSpeakerIds {
                 if let entry = micDbKnowledge.first(where: { $0.speakerId == sid }) {
@@ -240,8 +289,21 @@ extension TranscriptionTaskManager {
             ])
         }
 
-        // Clean up speaker profiles: first merge obvious duplicates, then prune orphans
-        speakerDB.mergeDuplicates()
+        let queuedMicReviewIds: Set<String>
+        if splitLocalSpeakers && micURL != nil && !result.micPersistentSpeakerIds.isEmpty {
+            queuedMicReviewIds = result.micSpeakerIds
+        } else {
+            queuedMicReviewIds = micNeedsActionIds
+        }
+        let protectedReviewProfileIds = Self.pendingReviewProfileIds(
+            systemUtterances: result.systemUtterances,
+            micUtterances: result.micUtterances,
+            systemNeedsActionIds: needsActionIds,
+            micQueuedReviewIds: queuedMicReviewIds
+        )
+
+        // Clean up speaker profiles without deleting IDs still referenced by pending review rows.
+        speakerDB.mergeDuplicates(protecting: protectedReviewProfileIds)
         speakerDB.pruneWeakProfiles()
 
         // Build diarizer-channel-qualified speaker key → persistent DB UUID mapping for YAML.

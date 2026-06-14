@@ -128,6 +128,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingSession.calendarSuggestedTitleProvider = { [weak self] in
                 self?.meetingPromptDetector.currentSuggestedTranscriptTitle()
             }
+            meetingPromptDetector.shouldSkipPromptEvaluation = { [weak self] in
+                guard let self else { return false }
+                return !MeetingPromptSessionPromptState(
+                    self.appState.meetingSession.state
+                ).allowsDetectedMeetingPrompt
+            }
             meetingOverlayController.setup(meetingSession: meetingSession)
             meetingOverlayController.onPromptRecord = { [weak self] candidate in
                 guard let self else { return }
@@ -186,6 +192,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.isOwnCaptureActive = { [weak self] in
                 guard let self else { return false }
                 return self.appState.meetingSession.isRecording || self.appState.sttRouter.isRecording
+            }
+            meetingPromptDetector.isMicInputPromptEnabled = {
+                AutoCallDetectionPreferences.isEnabled()
             }
             micActivityMonitor.onChange = { [weak self] micUsers in
                 self?.meetingPromptDetector.updateMicInputUsers(micUsers)
@@ -784,7 +793,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         _ = settingsTextPaster.paste(latestText, target: pasteTarget)
     }
 
-    @available(macOS 14.0, *)
     @available(macOS 14.0, *)
     private func applyAutoCallDetectionPreference() {
         if AutoCallDetectionPreferences.isEnabled() {
