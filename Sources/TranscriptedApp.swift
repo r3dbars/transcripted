@@ -125,6 +125,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingSession.calendarSuggestedTitleProvider = { [weak self] in
                 self?.meetingPromptDetector.currentSuggestedTranscriptTitle()
             }
+            meetingPromptDetector.shouldSkipPromptEvaluation = { [weak self] in
+                guard let self else { return false }
+                return !MeetingPromptSessionPromptState(
+                    self.appState.meetingSession.state
+                ).allowsDetectedMeetingPrompt
+            }
             meetingOverlayController.setup(meetingSession: meetingSession)
             meetingOverlayController.onPromptRecord = { [weak self] candidate in
                 guard let self else { return }
