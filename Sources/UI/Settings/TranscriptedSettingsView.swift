@@ -1100,7 +1100,9 @@ struct TranscriptedSettingsView: View {
                     surface: .homeMenu,
                     artifactDate: item.date
                 )
-                NSWorkspace.shared.activateFileViewerSelecting([item.transcriptURL])
+                NSWorkspace.shared.activateFileViewerSelecting(
+                    HomeMeetingRowActionTargets.transcriptRevealURLs(for: item)
+                )
             }
         ])
 
@@ -1140,28 +1142,31 @@ struct TranscriptedSettingsView: View {
             )
         }
 
-        if let audio = item.audio, let firstAudio = audio.urls.first {
-            if audio.retranscriptionInput != nil {
+        if let audio = item.audio {
+            let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)
+            if !audioRevealURLs.isEmpty {
+                if audio.retranscriptionInput != nil {
+                    items.append(
+                        HomeRowMenuItem(
+                            title: "Re-transcribe with speaker ID",
+                            symbolName: "person.2.fill",
+                            isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
+                                hasSpeakerReviewWork: hasPendingSpeakerReview
+                            )
+                        ) {
+                            handleRetranscribeMeeting(item)
+                        }
+                    )
+                }
+
                 items.append(
-                    HomeRowMenuItem(
-                        title: "Re-transcribe with speaker ID",
-                        symbolName: "person.2.fill",
-                        isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
-                            globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason,
-                            hasSpeakerReviewWork: hasPendingSpeakerReview
-                        )
-                    ) {
-                        handleRetranscribeMeeting(item)
+                    HomeRowMenuItem(title: "Show audio in Finder", symbolName: "waveform") {
+                        trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
+                        NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)
                     }
                 )
             }
-
-            items.append(
-                HomeRowMenuItem(title: "Show audio in Finder", symbolName: "waveform") {
-                    trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
-                    NSWorkspace.shared.activateFileViewerSelecting([firstAudio])
-                }
-            )
         }
 
         items.append(
@@ -1256,11 +1261,12 @@ struct TranscriptedSettingsView: View {
     }
 
     private func revealFailedMeetingAudio(_ item: MeetingSessionController.FailedMeetingItem) {
-        guard let firstAudioURL = item.audioURLs.first else {
+        let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: item.audioURLs)
+        guard !audioRevealURLs.isEmpty else {
             NSSound.beep()
             return
         }
-        NSWorkspace.shared.activateFileViewerSelecting([firstAudioURL])
+        NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)
     }
 
     private func requestClearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {

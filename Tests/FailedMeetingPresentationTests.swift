@@ -183,6 +183,26 @@ func testFailedMeetingPresentation() {
         )
     }
 
+    runSuite("Home failed meeting row reveals partial audio separately from retry readiness") {
+        let homeSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Settings/HomeView.swift"),
+            encoding: .utf8
+        )) ?? ""
+
+        assertTrue(
+            homeSource.contains("if hasRetainedAudioFiles {\n                Button {\n                    onRevealAudio()"),
+            "failed rows should keep Show Audio visible when any retained audio URL exists"
+        )
+        assertTrue(
+            homeSource.contains("private var retryDisabled: Bool {\n        !canRetry || !item.isRetryable || !item.hasAudioFiles || item.isRetrying"),
+            "failed rows should keep retry readiness tied to complete retryable audio, not mere visibility"
+        )
+        assertTrue(
+            homeSource.contains("private var hasRetainedAudioFiles: Bool {\n        !item.audioURLs.isEmpty"),
+            "failed rows should use available retained audio URLs for the reveal affordance"
+        )
+    }
+
     runSuite("FailedMeetingPresentation labels retained WAVs as raw audio") {
         let source = (try? String(
             contentsOf: repoFixtureURL("Sources/Meeting/FailedMeetingPresentation.swift"),
