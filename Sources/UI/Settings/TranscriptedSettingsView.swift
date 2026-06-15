@@ -1246,26 +1246,42 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    /// Whichever Home alert state is currently set, in presentation priority order.
-    /// At most one is non-nil at a time in practice.
-    private var activeRootAlert: RootAlert? {
-        if let confirmation = homeDeleteConfirmation { return .deleteConfirmation(confirmation) }
-        if let failure = homeDeleteFailure { return .deleteFailure(failure) }
-        if let window = pendingAudioRetentionWindow { return .audioRetention(window) }
-        return nil
+    /// Snapshot of which Home alert states are currently set, fed to
+    /// `HomeRootAlertPolicy` so presentation priority and dismissal stay in sync.
+    private var rootAlertStates: HomeRootAlertStates {
+        HomeRootAlertStates(
+            hasDeleteConfirmation: homeDeleteConfirmation != nil,
+            hasDeleteFailure: homeDeleteFailure != nil,
+            hasAudioRetention: pendingAudioRetentionWindow != nil
+        )
     }
 
-    /// Binds the single alert presenter to the three underlying states. Dismissal
-    /// clears all of them (only one is ever set), so call sites keep setting their
-    /// own `@State` directly.
+    /// Whichever Home alert should present, in `HomeRootAlertPolicy` priority order.
+    private var activeRootAlert: RootAlert? {
+        switch HomeRootAlertPolicy.activeSlot(rootAlertStates) {
+        case .deleteConfirmation: return homeDeleteConfirmation.map(RootAlert.deleteConfirmation)
+        case .deleteFailure: return homeDeleteFailure.map(RootAlert.deleteFailure)
+        case .audioRetention: return pendingAudioRetentionWindow.map(RootAlert.audioRetention)
+        case .none: return nil
+        }
+    }
+
+    /// Binds the single alert presenter to the three underlying states. On
+    /// dismissal it clears only the alert being dismissed, not all three: a
+    /// confirm action can set a follow-up alert (e.g. a delete failure) before
+    /// SwiftUI writes nil, and clearing everything would wipe it before it can
+    /// present. Call sites keep setting their own `@State` directly.
     private var rootAlertBinding: Binding<RootAlert?> {
         Binding(
             get: { activeRootAlert },
             set: { newValue in
                 guard newValue == nil else { return }
-                homeDeleteConfirmation = nil
-                homeDeleteFailure = nil
-                pendingAudioRetentionWindow = nil
+                switch activeRootAlert {
+                case .deleteConfirmation: homeDeleteConfirmation = nil
+                case .deleteFailure: homeDeleteFailure = nil
+                case .audioRetention: pendingAudioRetentionWindow = nil
+                case .none: break
+                }
             }
         )
     }
@@ -1401,10 +1417,13 @@ struct TranscriptedSettingsView: View {
 
     private func presentHomeActionFailure(title: String, message: String) {
         NSSound.beep()
-        homeDeleteFailure = HomeDeleteFailure(
-            title: title,
-            message: message
-        )
+        // Defer to the next runloop turn so a failure raised synchronously inside
+        // an alert's confirm action lands after that alert finishes dismissing.
+        // SwiftUI won't present a second alert during the first one's dismissal,
+        // and the shared binding clears the dismissed alert on the same turn.
+        DispatchQueue.main.async {
+            homeDeleteFailure = HomeDeleteFailure(title: title, message: message)
+        }
     }
 
     private func retryFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
