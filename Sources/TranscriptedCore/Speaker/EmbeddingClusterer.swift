@@ -35,6 +35,12 @@ public enum EmbeddingClusterer {
     /// instead of silently drifting.
     public static let sameVoiceConsolidationThreshold: Float = 0.88
 
+    /// Lower bar used only to detect "these centroids may belong to different
+    /// known speakers" before consolidation. This mirrors the lowest adaptive
+    /// profile-match threshold used by `TranscriptionPipeline`, so we preserve
+    /// plausible known-speaker conflicts for the later naming/review path.
+    private static let knownProfileConflictThreshold: Float = 0.70
+
     /// Post-process diarization segments: merge fragmented speakers,
     /// absorb tiny orphan clusters, then split clusters that contain
     /// multiple known DB voices.
@@ -66,7 +72,11 @@ public enum EmbeddingClusterer {
         }
         result = absorbSmallClusters(segments: result)
         if let consolidationThreshold {
-            result = consolidateSameVoiceClusters(segments: result, threshold: consolidationThreshold)
+            result = consolidateSameVoiceClusters(
+                segments: result,
+                threshold: consolidationThreshold,
+                existingProfiles: existingProfiles
+            )
         }
         result = dbInformedSplit(segments: result, profiles: existingProfiles)
         return result
@@ -314,7 +324,8 @@ public enum EmbeddingClusterer {
     ///   that made the broad pairwise merge unsafe on VBx output.
     static func consolidateSameVoiceClusters(
         segments: [SpeakerSegment],
-        threshold: Float = sameVoiceConsolidationThreshold
+        threshold: Float = sameVoiceConsolidationThreshold,
+        existingProfiles: [SpeakerProfile] = []
     ) -> [SpeakerSegment] {
         let distinctIds = Set(segments.map { $0.speakerId })
         guard distinctIds.count >= 2 else { return segments }
@@ -363,6 +374,13 @@ public enum EmbeddingClusterer {
                     let a = liveIds[i], b = liveIds[j]
                     guard let ea = centroids[a], let eb = centroids[b] else { continue }
                     let sim = Float(Transcription.cosineSimilarityStatic(ea, eb))
+                    if hasKnownProfileConflict(
+                        ea,
+                        eb,
+                        profiles: existingProfiles
+                    ) {
+                        continue
+                    }
                     if sim > bestSim {
                         bestSim = sim
                         bestPair = (keep: a, drop: b)  // liveIds sorted, so a < b
@@ -398,6 +416,33 @@ public enum EmbeddingClusterer {
                 qualityScore: segment.qualityScore
             )
         }
+    }
+
+    private static func hasKnownProfileConflict(
+        _ lhs: [Float],
+        _ rhs: [Float],
+        profiles: [SpeakerProfile]
+    ) -> Bool {
+        guard !profiles.isEmpty else { return false }
+        let lhsMatches = knownProfileMatches(for: lhs, profiles: profiles)
+        let rhsMatches = knownProfileMatches(for: rhs, profiles: profiles)
+        guard !lhsMatches.isEmpty, !rhsMatches.isEmpty else { return false }
+
+        return lhsMatches.union(rhsMatches).count > 1
+    }
+
+    private static func knownProfileMatches(
+        for embedding: [Float],
+        profiles: [SpeakerProfile]
+    ) -> Set<UUID> {
+        Set(profiles.compactMap { profile in
+            guard profile.disputeCount == 0,
+                  profile.embedding.count == embedding.count else {
+                return nil
+            }
+            let similarity = Float(Transcription.cosineSimilarityStatic(embedding, profile.embedding))
+            return similarity >= knownProfileConflictThreshold ? profile.id : nil
+        })
     }
 
     // MARK: - DB-Informed Split

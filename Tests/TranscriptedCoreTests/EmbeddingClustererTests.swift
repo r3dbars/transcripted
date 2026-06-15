@@ -171,6 +171,59 @@ final class EmbeddingClustererTests: XCTestCase {
         )
     }
 
+    func testPostProcessDoesNotConsolidateConflictingKnownProfilesBeforeDbSplit() {
+        let alexId = UUID()
+        let blairId = UUID()
+        let blairEmbedding = unitVector(cosineToXAxis: 0.90)
+        let profiles = [
+            speakerProfile(id: alexId, embedding: [1.0, 0.0], name: "Alex"),
+            speakerProfile(id: blairId, embedding: blairEmbedding, name: "Blair")
+        ]
+        let segments = [
+            segment(speakerId: 1, startTime: 0, endTime: 40, embedding: [1.0, 0.0]),
+            segment(speakerId: 2, startTime: 40, endTime: 80, embedding: blairEmbedding)
+        ]
+
+        let processed = EmbeddingClusterer.postProcess(
+            segments: segments,
+            existingProfiles: profiles,
+            pairwiseMergeThreshold: nil
+        )
+
+        XCTAssertEqual(
+            Set(processed.map(\.speakerId)).count,
+            2,
+            "Known distinct profiles should stay separate even when their centroids sit above the consolidation bar"
+        )
+    }
+
+    func testPostProcessPreservesKnownProfileConflictsBelowConsolidationBar() {
+        let alexId = UUID()
+        let blairId = UUID()
+        let alexSegmentEmbedding: [Float] = [1.0, 0.0]
+        let blairSegmentEmbedding = unitVector(cosineToXAxis: 0.90)
+        let profiles = [
+            speakerProfile(id: alexId, embedding: unitVector(degrees: -36.87), name: "Alex"),
+            speakerProfile(id: blairId, embedding: unitVector(degrees: 62.71), name: "Blair")
+        ]
+        let segments = [
+            segment(speakerId: 1, startTime: 0, endTime: 40, embedding: alexSegmentEmbedding),
+            segment(speakerId: 2, startTime: 40, endTime: 80, embedding: blairSegmentEmbedding)
+        ]
+
+        let processed = EmbeddingClusterer.postProcess(
+            segments: segments,
+            existingProfiles: profiles,
+            pairwiseMergeThreshold: nil
+        )
+
+        XCTAssertEqual(
+            Set(processed.map(\.speakerId)).count,
+            2,
+            "Plausible matches to different known profiles should block consolidation even below the 0.88 auto-accept bar"
+        )
+    }
+
     func testConsolidateDoesNotChainCollapseAcrossDissimilarEndpoints() {
         // A≈B and B≈C, but A and C are far apart. Recomputed centroids must stop
         // the transitive collapse that broke the broad pairwise merge.
