@@ -72,14 +72,22 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
     runSuite("HomeLocalSummaryNoticeDismissalPolicy clears only the scheduled notice") {
         let firstNotice = HomeLocalSummaryNotice(
             transcriptURL: URL(fileURLWithPath: "/tmp/first.md"),
+            meetingTitle: "First",
             chunkCount: 1
         )
         let newerNotice = HomeLocalSummaryNotice(
             transcriptURL: URL(fileURLWithPath: "/tmp/newer.md"),
+            meetingTitle: "Newer",
             chunkCount: 2
         )
 
         assertEqual(firstNotice.status, "Saved", "completed summary notices should read as saved, not ongoing")
+        assertEqual(
+            firstNotice.actionTitle,
+            "Open enhanced transcript",
+            "saved summaries should point to the enhanced transcript"
+        )
+        assertTrue(firstNotice.shouldAutoDismiss, "saved summaries should clear themselves after a short scan window")
         assertTrue(
             HomeLocalSummaryNoticeDismissalPolicy.autoDismissDelayNanoseconds >= 4_000_000_000,
             "success notice should stay visible long enough to scan"
@@ -101,6 +109,27 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
                 scheduledNoticeID: firstNotice.id
             ),
             "an old dismissal timer should not clear a newer summary notice"
+        )
+    }
+
+    runSuite("HomeLocalSummaryNotice keeps failed summaries visible with retry copy") {
+        let notice = HomeLocalSummaryNotice(
+            transcriptURL: URL(fileURLWithPath: "/tmp/failed.md"),
+            meetingTitle: "Failed Setup",
+            failureMessage: "model load failed:\nmissing model cache"
+        )
+
+        assertEqual(notice.title, "AI summary failed", "failure notice should be explicit")
+        assertEqual(notice.status, "Needs retry", "failure notice should not look complete")
+        assertEqual(notice.actionTitle, "Retry summary", "failure notice should offer retry")
+        assertFalse(notice.shouldAutoDismiss, "failure notice should persist until the user acts")
+        assertTrue(
+            notice.detail.contains("model load failed: missing model cache"),
+            "failure detail should collapse noisy line breaks into readable copy"
+        )
+        assertTrue(
+            notice.detail.contains("Nothing was changed"),
+            "failure detail should reassure the user that the transcript was not rewritten"
         )
     }
 }
