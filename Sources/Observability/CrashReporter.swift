@@ -234,6 +234,11 @@ final class CrashReporter {
         }
 
         sanitize(stacktrace: event.stacktrace)
+        if let debugMeta = event.debugMeta {
+            for debugImage in debugMeta {
+                debugImage.codeFile = nil
+            }
+        }
 
         event.request = nil
         event.user = nil
@@ -260,9 +265,7 @@ final class CrashReporter {
             if let module = frame.module {
                 frame.module = SentryPayloadSanitizer.sanitizeText(module)
             }
-            if let package = frame.package {
-                frame.package = SentryPayloadSanitizer.sanitizeText(package)
-            }
+            frame.package = nil
         }
     }
 
