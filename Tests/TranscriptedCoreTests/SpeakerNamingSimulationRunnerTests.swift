@@ -83,9 +83,16 @@ final class SpeakerNamingSimulationRunnerTests: XCTestCase {
                     id: "bad-merge-and-split",
                     title: "Bad Merge And Split",
                     segments: [
+                        // One real voice (truth "alex") that VBx over-segmented into two
+                        // clusters which then drifted far enough apart (~0.82 cosine, below
+                        // the 0.88 same-voice consolidation bar) that consolidation correctly
+                        // leaves them split. The user then mislabels the second cluster, so a
+                        // genuine false split survives consolidation for the runner to flag.
+                        // Identical embeddings here would be consolidated away — the feature
+                        // working — and stop exercising the false-split detector.
                         segment(.system, 1, truth: "alex", expected: "Alex Rivera", text: "alex one", start: 0, embedding: alex),
                         segment(.system, 2, truth: "blair", expected: "Blair Stone", text: "blair one", start: 3, embedding: blair),
-                        segment(.system, 3, truth: "alex", expected: "Alex Rivera", text: "alex two", start: 6, embedding: alex)
+                        segment(.system, 3, truth: "alex", expected: "Alex Rivera", text: "alex two", start: 6, embedding: near(alex, degrees: 35))
                     ],
                     actions: [
                         .name(channel: .system, diarizerSpeakerId: 1, as: "Alex Rivera"),
