@@ -3184,7 +3184,10 @@ struct TranscriptedSettingsView: View {
                     current: homeLocalSummaryNotice,
                     scheduledNoticeID: notice.id
                   ) else { return }
-            homeLocalSummaryNotice = nil
+            homeLocalSummaryNotice = HomeLocalSummaryNoticeDismissalPolicy.noticeAfterAutoDismiss(
+                current: homeLocalSummaryNotice,
+                scheduledNoticeID: notice.id
+            )
             homeLocalSummaryNoticeDismissTask = nil
         }
     }

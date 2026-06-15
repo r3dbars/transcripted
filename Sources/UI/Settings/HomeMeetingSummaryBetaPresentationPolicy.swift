@@ -110,6 +110,13 @@ struct HomeLocalSummaryNotice: Identifiable, Equatable {
 enum HomeLocalSummaryNoticeDismissalPolicy {
     static let autoDismissDelayNanoseconds: UInt64 = 6_000_000_000
 
+    static func noticeAfterAutoDismiss(
+        current: HomeLocalSummaryNotice?,
+        scheduledNoticeID: UUID
+    ) -> HomeLocalSummaryNotice? {
+        shouldDismiss(current: current, scheduledNoticeID: scheduledNoticeID) ? nil : current
+    }
+
     static func shouldDismiss(
         current: HomeLocalSummaryNotice?,
         scheduledNoticeID: UUID
