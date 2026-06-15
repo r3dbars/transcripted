@@ -72,6 +72,9 @@ For the active directory map and command surface, prefer `docs/repo-layout.md`.
   Coordinator-ready handoff format, including `COORD_DONE`.
 - `docs/docs.md`
   Documentation tone, drift checks, and follow-up PR rules.
+- `docs/strategy/`
+  Dated, point-in-time product, market, and architecture synthesis for
+  planning context. Use current source and local guides for runtime truth.
 - `docs/release-packaging.md` + `docs/sparkle-updates.md`
   Release, notarization, Sparkle, and Homebrew contract.
 - `docs/archive/`
