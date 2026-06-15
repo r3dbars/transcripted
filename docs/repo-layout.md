@@ -81,6 +81,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Tests/` — fast tests, package tests, and integration smoke sources
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
 - `docs/` — live project docs
+- `docs/strategy/` — dated strategy syntheses and deep dives for product, market, and architecture planning
 - `docs/archive/` — archived planning, reviews, and historical notes
 - `archive/` — historical code and legacy tooling kept out of the live product surface
 - `config/` — app config artifacts including entitlements and nightly security manifests
@@ -108,6 +109,7 @@ Use these docs for these jobs:
 - `docs/agent-closeout.md` — compact coordinator and agent handoff format
 - `docs/agent-connect.md` — saved-folder and MCP handoff guidance for agents
 - `docs/docs.md` - documentation tone, drift checks, and follow-up PR rules
+- `docs/strategy/` - point-in-time strategy synthesis and deep-dive docs for planning context
 - `docs/agent-issue-orchestration.md` - how to queue GitHub issues for the local Codex runner
 - `docs/live-meeting-codex-sidecar.md` — opt-in live meeting sidecar and agent workspace notes
 - `docs/ops-credentials.md` — Sentry, PostHog, GitHub, and Cloudflare credential lanes
