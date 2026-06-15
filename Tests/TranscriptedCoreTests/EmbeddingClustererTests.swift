@@ -157,6 +157,20 @@ final class EmbeddingClustererTests: XCTestCase {
         XCTAssertEqual(Set(kept.map(\.speakerId)).count, 2)
     }
 
+    func testConsolidationThresholdMatchesAutoAcceptBar() {
+        // Drift guard: same-voice consolidation must never merge two clusters we
+        // would not also auto-accept as the same known person. If a future change
+        // moves SpeakerNamingPolicy.autoAcceptSimilarityThreshold (or the
+        // consolidation bar) without the other, this fails instead of silently
+        // letting the two diverge.
+        XCTAssertEqual(
+            EmbeddingClusterer.sameVoiceConsolidationThreshold,
+            Float(SpeakerNamingPolicy.autoAcceptSimilarityThreshold),
+            accuracy: 1e-6,
+            "Consolidation threshold must equal SpeakerNamingPolicy.autoAcceptSimilarityThreshold"
+        )
+    }
+
     func testConsolidateDoesNotChainCollapseAcrossDissimilarEndpoints() {
         // A≈B and B≈C, but A and C are far apart. Recomputed centroids must stop
         // the transitive collapse that broke the broad pairwise merge.

@@ -1,10 +1,17 @@
 import Foundation
 
 public enum SpeakerNamingPolicy {
+    /// Cosine-similarity bar above which a returning known speaker is auto-accepted
+    /// as the same person without asking the user to confirm. This is the canonical
+    /// "same known person" threshold; `EmbeddingClusterer.sameVoiceConsolidationThreshold`
+    /// is tied to it (guarded by `EmbeddingClustererTests`) so same-voice consolidation
+    /// never merges two clusters we would not also auto-accept as one another.
+    public static let autoAcceptSimilarityThreshold: Double = 0.88
+
     public static func shouldAutoAccept(profile: SpeakerProfile, similarity: Double) -> Bool {
         profile.displayName != nil
             && profile.disputeCount == 0
-            && similarity > 0.88
+            && similarity > autoAcceptSimilarityThreshold
             && profile.callCount > 4
     }
 

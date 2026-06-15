@@ -26,6 +26,15 @@ import Accelerate
 
 public enum EmbeddingClusterer {
 
+    /// Cosine-similarity bar for the same-voice consolidation pass. Must equal
+    /// `SpeakerNamingPolicy.autoAcceptSimilarityThreshold` (0.88): consolidation
+    /// should only collapse two clusters into one person when they are at least as
+    /// similar as we'd demand to silently auto-accept them as the same known person.
+    /// `EmbeddingClustererTests.testConsolidationThresholdMatchesAutoAcceptBar`
+    /// asserts the two stay equal, so changing one without the other fails CI
+    /// instead of silently drifting.
+    public static let sameVoiceConsolidationThreshold: Float = 0.88
+
     /// Post-process diarization segments: merge fragmented speakers,
     /// absorb tiny orphan clusters, then split clusters that contain
     /// multiple known DB voices.
@@ -46,7 +55,7 @@ public enum EmbeddingClusterer {
         segments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile],
         pairwiseMergeThreshold: Float? = 0.85,
-        consolidationThreshold: Float? = 0.88
+        consolidationThreshold: Float? = sameVoiceConsolidationThreshold
     ) -> [SpeakerSegment] {
         guard segments.count >= 2 else { return segments }
         var result: [SpeakerSegment]
@@ -305,7 +314,7 @@ public enum EmbeddingClusterer {
     ///   that made the broad pairwise merge unsafe on VBx output.
     static func consolidateSameVoiceClusters(
         segments: [SpeakerSegment],
-        threshold: Float = 0.88
+        threshold: Float = sameVoiceConsolidationThreshold
     ) -> [SpeakerSegment] {
         let distinctIds = Set(segments.map { $0.speakerId })
         guard distinctIds.count >= 2 else { return segments }
