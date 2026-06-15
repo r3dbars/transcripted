@@ -216,32 +216,38 @@ struct TranscriptedSettingsView: View {
                 }
             )
         }
-        .alert(item: $homeDeleteConfirmation) { confirmation in
-            Alert(
-                title: Text(confirmation.title),
-                message: Text(confirmation.message),
-                primaryButton: .destructive(Text(confirmation.confirmTitle)) {
-                    confirmation.perform()
-                },
-                secondaryButton: .cancel()
-            )
-        }
-        .alert(item: $homeDeleteFailure) { failure in
-            Alert(
-                title: Text(failure.title),
-                message: Text(failure.message),
-                dismissButton: .default(Text("OK"))
-            )
-        }
-        .alert(item: $pendingAudioRetentionWindow) { window in
-            Alert(
-                title: Text("Delete old replay audio?"),
-                message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
-                primaryButton: .destructive(Text("Delete Old Audio")) {
-                    applyAudioRetentionWindow(window)
-                },
-                secondaryButton: .cancel()
-            )
+        // One alert modifier, not three. Stacking multiple legacy `.alert(item:)`
+        // on the same view shadows all but the last — which silently killed the
+        // meeting-delete confirmation (first of three). `rootAlertBinding` routes
+        // the three independent states through a single presenter so the active
+        // one always shows; every existing call site stays unchanged.
+        .alert(item: rootAlertBinding) { alert in
+            switch alert {
+            case .deleteConfirmation(let confirmation):
+                return Alert(
+                    title: Text(confirmation.title),
+                    message: Text(confirmation.message),
+                    primaryButton: .destructive(Text(confirmation.confirmTitle)) {
+                        confirmation.perform()
+                    },
+                    secondaryButton: .cancel()
+                )
+            case .deleteFailure(let failure):
+                return Alert(
+                    title: Text(failure.title),
+                    message: Text(failure.message),
+                    dismissButton: .default(Text("OK"))
+                )
+            case .audioRetention(let window):
+                return Alert(
+                    title: Text("Delete old replay audio?"),
+                    message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
+                    primaryButton: .destructive(Text("Delete Old Audio")) {
+                        applyAudioRetentionWindow(window)
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
         }
         .task(id: navigation.presentationID) {
             refreshState()
@@ -1184,6 +1190,51 @@ struct TranscriptedSettingsView: View {
         )
 
         return items
+    }
+
+    // MARK: - Home root alert
+
+    /// The Home surface drives three independent confirmation/failure alerts
+    /// (`homeDeleteConfirmation`, `homeDeleteFailure`, `pendingAudioRetentionWindow`).
+    /// They are presented through a *single* `.alert(item:)` because SwiftUI
+    /// shadows all but the last when several legacy `.alert(item:)` are stacked
+    /// on one view — that is what silently broke the meeting-delete confirmation.
+    private enum RootAlert: Identifiable {
+        case deleteConfirmation(HomeDeleteConfirmation)
+        case deleteFailure(HomeDeleteFailure)
+        case audioRetention(AudioRetentionWindow)
+
+        var id: String {
+            switch self {
+            case .deleteConfirmation(let confirmation): return "delete-confirmation-\(confirmation.id)"
+            case .deleteFailure(let failure): return "delete-failure-\(failure.id)"
+            case .audioRetention(let window): return "audio-retention-\(window.id)"
+            }
+        }
+    }
+
+    /// Whichever Home alert state is currently set, in presentation priority order.
+    /// At most one is non-nil at a time in practice.
+    private var activeRootAlert: RootAlert? {
+        if let confirmation = homeDeleteConfirmation { return .deleteConfirmation(confirmation) }
+        if let failure = homeDeleteFailure { return .deleteFailure(failure) }
+        if let window = pendingAudioRetentionWindow { return .audioRetention(window) }
+        return nil
+    }
+
+    /// Binds the single alert presenter to the three underlying states. Dismissal
+    /// clears all of them (only one is ever set), so call sites keep setting their
+    /// own `@State` directly.
+    private var rootAlertBinding: Binding<RootAlert?> {
+        Binding(
+            get: { activeRootAlert },
+            set: { newValue in
+                guard newValue == nil else { return }
+                homeDeleteConfirmation = nil
+                homeDeleteFailure = nil
+                pendingAudioRetentionWindow = nil
+            }
+        )
     }
 
     private func deleteMeeting(_ item: RecentMeetingItem) {

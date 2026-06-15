@@ -136,6 +136,34 @@ func testUIAutomationSurfaceContract() {
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
         )
 
+        // Regression guards for fix/home-delete-confirmation-menu-loop. The Home
+        // recent-meeting "Delete meeting" confirmation silently no-op'd because of
+        // two stacked defects the fast suite cannot exercise at runtime:
+        //   1. Row-menu handlers fired synchronously inside NSMenu.popUp's modal
+        //      tracking loop, so the SwiftUI alert they set never presented.
+        //      ClosureMenuItem must hop to the next main-runloop turn.
+        //   2. Three legacy `.alert(item:)` modifiers were stacked on the settings
+        //      root view; SwiftUI keeps only the last, shadowing the (first)
+        //      delete confirmation. The three states must share one presenter.
+        assertTrue(
+            homeSource.contains("DispatchQueue.main.async { [handler] in handler() }"),
+            "ClosureMenuItem should defer its handler off the NSMenu.popUp tracking loop so menu-triggered SwiftUI alerts/sheets present"
+        )
+        assertTrue(
+            settingsSource.contains(".alert(item: rootAlertBinding)")
+                && settingsSource.contains("enum RootAlert")
+                && settingsSource.contains("case deleteConfirmation")
+                && settingsSource.contains("case deleteFailure")
+                && settingsSource.contains("case audioRetention"),
+            "the Home delete, delete-failure, and audio-retention alerts should present through one rootAlertBinding so none is shadowed"
+        )
+        assertFalse(
+            settingsSource.contains(".alert(item: $homeDeleteConfirmation)")
+                || settingsSource.contains(".alert(item: $homeDeleteFailure)")
+                || settingsSource.contains(".alert(item: $pendingAudioRetentionWindow)"),
+            "Home alerts must not be re-stacked as separate `.alert(item:)` modifiers — stacked legacy alerts shadow all but the last"
+        )
+
         // Row-interaction affordances from fix/home-row-actions, which have no
         // behavioral coverage in the fast suite (it greps source, never runs the
         // UI). The overflow actions only reveal on hover, so the row needs a
