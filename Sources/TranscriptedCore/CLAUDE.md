@@ -4,15 +4,15 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (67 Swift files)
+## Subsystems (71 Swift files)
 
-- `Audio/` (18 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
+- `Audio/` (21 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
 - `Logging/` (3 files) — shared app logger, JSONL file logger, and log privacy sanitizer
 - `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
 - `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
-- `Speaker/` (11 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, people-review policy, profile merging, retroactive transcript updates
+- `Speaker/` (12 files) — speaker DB, embedding matching / clustering, clip extraction, naming policy / coordinator, people-review policy, profile merging, simulation, and retroactive transcript updates
 - `Stats/` (4 files) — recording stats database, models, queries, and service
 - `Storage/` (6 files) — transcript save, scanner, formatter, format options, shared frontmatter parsing, and retained-recording audio archiving
 - `Utilities/` (2 files) — date formatting and file permission helpers
@@ -88,6 +88,9 @@ Current direct core coverage includes:
 
 - `Tests/TranscriptedCoreTests/AudioInitializationTests.swift`
 - `Tests/TranscriptedCoreTests/AudioDiagnosticsSnapshotTests.swift`
+- `Tests/TranscriptedCoreTests/AudioLevelMonitorSilenceTests.swift`
+- `Tests/TranscriptedCoreTests/AudioPipelineDiagnosticsSnapshotShapeTests.swift`
+- `Tests/TranscriptedCoreTests/AudioResamplerTests.swift`
 - `Tests/TranscriptedCoreTests/BluetoothMeetingRouteContractTests.swift`
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
 - `Tests/TranscriptedCoreTests/DatabaseFilePermissionsTests.swift`
@@ -97,6 +100,7 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/MeetingInputDeviceSelectionPolicyTests.swift`
 - `Tests/TranscriptedCoreTests/MeetingRecordingJournalTests.swift`
 - `Tests/TranscriptedCoreTests/MeetingRouteArtifactFixtureTests.swift`
+- `Tests/TranscriptedCoreTests/DiarizationSpeakerIdParsingTests.swift`
 - `Tests/TranscriptedCoreTests/MicRecordingFileMergerTests.swift`
 - `Tests/MicRecordingMergePlanTests.swift`
 - `Tests/TranscriptedCoreTests/QuietMicAttenuationDetectorTests.swift`
@@ -105,7 +109,9 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/RecordingHealthInfoOverrideTests.swift`
 - `Tests/TranscriptedCoreTests/RetroactiveSpeakerUpdaterTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerMatchingServiceTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerEmbeddingMatcherTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerNamingCoordinatorTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerNamingSimulationRunnerTests.swift`
 - `Tests/SpeakerPeopleReviewPolicyTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerProfileMergerTests.swift`
 - `Tests/TranscriptedCoreTests/StatsDatabaseTests.swift`

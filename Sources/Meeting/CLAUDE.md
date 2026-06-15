@@ -32,7 +32,10 @@
 - `MeetingSTTAdapter.swift` — adapts the app's shared `STTRouter` to `TranscriptedCore.SpeechToTextEngine`
 - `MeetingSessionController.swift` — top-level meeting state machine, permission gating, model warmup, capture start/stop, imported-audio handoff, queued transcription handoff, local-speaker-split handoff, failed-meeting actions, and transcript restyling
 - `MeetingSessionUIPolicy.swift` — centralizes when queued or active transcription work should keep the meeting overlay in its transcribing/saving state
+- `MeetingStartFailureClassifier.swift` — stable analytics classifier for meeting-recording start failures
 - `MeetingStoragePaths.swift` — current split meeting storage layout across the capture library, app state, logs, and temp folders
+- `MeetingSystemAudioStatusCopy.swift` — Foundation-pure system-audio status copy mapping for fast tests
+- `MeetingSystemAudioStatusCopy+SystemAudioStatus.swift` — app-build bridge from `TranscriptedCore.SystemAudioStatus` into the copy mapping
 - `MeetingTranscriptStyler.swift` — restyles saved transcripts and renames files after save
 - `MeetingArtifactRenamer.swift` — shared rename mechanics for a saved meeting's Markdown, retained `audio/<stem>_audio/` directory, and `<stem>.summary.md` sidecar; builds the canonical `YYYY-MM-dd <title>` stem. Used by both the post-save restyle and the Home title-edit flow so naming and sidecar bookkeeping cannot drift
 - `MeetingWarmupStatusPolicy.swift` — centralizes the user-facing warmup progress, copy, visibility, and ready/failure state for dictation + meeting model startup across overlay, menubar, and settings surfaces
@@ -125,6 +128,7 @@ Relevant direct coverage:
 - `Tests/MeetingPromptHeuristicsTests.swift`
 - `Tests/MicActivityMonitorTests.swift`
 - `Tests/MeetingRecordingStartGateTests.swift`
+- `Tests/MeetingStartFailureClassifierTests.swift`
 - `Tests/MeetingMicBoostPromptPolicyTests.swift`
 - `Tests/MeetingRecordingCleanupTests.swift`
 - `Tests/MeetingWarmupStatusPolicyTests.swift`
