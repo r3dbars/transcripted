@@ -163,6 +163,16 @@ func testUIAutomationSurfaceContract() {
                 || settingsSource.contains(".alert(item: $pendingAudioRetentionWindow)"),
             "Home alerts must not be re-stacked as separate `.alert(item:)` modifiers — stacked legacy alerts shadow all but the last"
         )
+        // The shared binding must dismiss only the active alert via
+        // HomeRootAlertPolicy, never clear all three. A confirm action can raise
+        // a follow-up failure alert before SwiftUI writes nil; clearing
+        // everything would wipe it before it presents. (HomeRootAlertPolicyTests
+        // covers the priority/dismissal behavior directly.)
+        assertTrue(
+            settingsSource.contains("HomeRootAlertPolicy.activeSlot")
+                && settingsSource.contains("switch activeRootAlert"),
+            "the shared alert binding should clear only the dismissed alert through HomeRootAlertPolicy, not reset all three states"
+        )
 
         // Row-interaction affordances from fix/home-row-actions, which have no
         // behavioral coverage in the fast suite (it greps source, never runs the
