@@ -268,6 +268,43 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("HomeMeetingRowActionTargets reveal exact transcript and first retained audio") {
+        let transcriptURL = URL(fileURLWithPath: "/tmp/2026-06-13 Conversación técnica Observabilidad.md")
+        let audioDirectory = URL(fileURLWithPath: "/tmp/audio/2026-06-13 Conversación técnica Observabilidad_audio", isDirectory: true)
+        let systemURL = audioDirectory.appendingPathComponent("system_audio.m4a")
+        let micURL = audioDirectory.appendingPathComponent("microphone.m4a")
+        let item = sampleRecentMeetingTitleItem(
+            title: "Conversación técnica Observabilidad",
+            transcriptURL: transcriptURL,
+            audio: MeetingAudioAttachment(
+                directoryURL: audioDirectory,
+                urls: [systemURL, micURL]
+            ),
+            summaryPreview: nil
+        )
+
+        assertEqual(
+            HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
+            [transcriptURL],
+            "Show transcript should select the exact markdown URL from the scanned row"
+        )
+        assertEqual(
+            HomeMeetingRowActionTargets.audioRevealURLs(for: item),
+            [systemURL],
+            "Show audio should select the first retained audio URL exposed by the row attachment"
+        )
+        assertEqual(
+            HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: [micURL, systemURL]),
+            [micURL],
+            "failed-meeting reveal targets should preserve the presentation order"
+        )
+        assertEqual(
+            HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: []),
+            [],
+            "missing retained audio should not fabricate a Finder target"
+        )
+    }
+
     runSuite("SavedMeetingRetranscriptionAvailabilityPolicy blocks while models prepare") {
         assertEqual(
             SavedMeetingRetranscriptionAvailabilityPolicy.unavailableReason(
@@ -1967,6 +2004,8 @@ func testRecentCaptureLoader() async {
 
 private func sampleRecentMeetingTitleItem(
     title: String,
+    transcriptURL: URL = FileManager.default.temporaryDirectory.appendingPathComponent("synthetic-meeting.md"),
+    audio: MeetingAudioAttachment? = nil,
     summaryPreview: RecentMeetingSummaryPreview?
 ) -> RecentMeetingItem {
     RecentMeetingItem(
@@ -1974,8 +2013,8 @@ private func sampleRecentMeetingTitleItem(
         date: Date(timeIntervalSinceReferenceDate: 10),
         startDate: nil,
         endDate: nil,
-        transcriptURL: FileManager.default.temporaryDirectory.appendingPathComponent("synthetic-meeting.md"),
-        audio: nil,
+        transcriptURL: transcriptURL,
+        audio: audio,
         speakerStatus: .ready,
         summaryPreview: summaryPreview
     )

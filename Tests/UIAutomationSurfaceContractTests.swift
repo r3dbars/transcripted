@@ -340,8 +340,10 @@ func testUIAutomationSurfaceContract() {
 
         assertTrue(
             settingsSource.contains("HomeRowMenuItem(title: \"Review speakers\"")
-                && settingsSource.contains("HomeRowMenuItem(\n                        title: \"Re-transcribe with speaker ID\""),
-            "meeting speaker review and re-transcribe actions should stay reachable from the row menu"
+                && settingsSource.contains("let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)")
+                && settingsSource.contains("if !audioRevealURLs.isEmpty")
+                && settingsSource.contains("title: \"Re-transcribe with speaker ID\""),
+            "meeting speaker review and re-transcribe actions should stay reachable from the row menu when retained audio has a Finder target"
         )
 
         for identifier in [
