@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (73 Swift files)
+## Files (75 Swift files)
 
 ### Overlay/
 
@@ -80,6 +80,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HomeDeleteConfirmationPolicy.swift` — confirmation copy for deleting recent home captures
 - `Settings/HomeFailedMeetingInlinePresentation.swift` — presentation policy for failed-meeting inline recovery rows on Home
 - `Settings/HomePresentation.swift` — Foundation-pure Home copy, day labels, stable feedback ids, and speaker palette slot selection
+- `Settings/HomeRootAlertPolicy.swift` — Foundation-pure priority and dismissal routing for the single Home alert presenter
 - `Settings/HomeMeetingSummaryBetaPresentationPolicy.swift` — presentation gates for the opt-in local AI meeting-summary beta on the Home dashboard
 - `Settings/HomeMeetingPreviewFormatter.swift` — formats recent meeting preview metadata for the Settings home dashboard
 - `Settings/HomeTranscriptionActivityPresentation.swift` — presentation model derived from `MeetingSessionController` state for the home page's live transcription activity card (tone, progress, transcript URL)
@@ -194,6 +195,7 @@ Relevant direct coverage:
 - `Tests/FeedbackIssueBuilderTests.swift`
 - `Tests/HomeCanvasGreetingTests.swift`
 - `Tests/HomePresentationTests.swift`
+- `Tests/HomeRootAlertPolicyTests.swift`
 - `Tests/HomeMeetingDeletionTests.swift`
 - `Tests/HomeMeetingRenameTests.swift`
 - `Tests/HomeMeetingSummaryBetaPresentationPolicyTests.swift`
