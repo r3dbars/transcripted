@@ -85,7 +85,7 @@ final class SpeakerNamingSimulationRunnerTests: XCTestCase {
                     segments: [
                         segment(.system, 1, truth: "alex", expected: "Alex Rivera", text: "alex one", start: 0, embedding: alex),
                         segment(.system, 2, truth: "blair", expected: "Blair Stone", text: "blair one", start: 3, embedding: blair),
-                        segment(.system, 3, truth: "alex", expected: "Alex Rivera", text: "alex two", start: 6, embedding: alex)
+                        segment(.system, 3, truth: "alex", expected: "Alex Rivera", text: "alex two", start: 6, embedding: casey)
                     ],
                     actions: [
                         .name(channel: .system, diarizerSpeakerId: 1, as: "Alex Rivera"),
