@@ -107,16 +107,24 @@ enum AudioRecordingFormatPolicy {
     }
 }
 
-enum AudioInputTapTeardownStep: Equatable {
+public enum AudioInputTapTeardownStep: Equatable, Sendable {
     case stopEngine
     case waitForStoppedInputCallbacks
     case removeInputTap
 }
 
-enum AudioInputTapTeardownPolicy {
-    static let inputCallbackDrainDelay: TimeInterval = 0.05
+/// Single source of truth for the order in which an AVAudioEngine input tap may
+/// be torn down. A running graph MUST stop and let in-flight input callbacks
+/// drain BEFORE the tap is removed; otherwise CoreAudio can deliver input to a
+/// node that has neither a tap nor a sink and trips the fatal assertion
+/// `required condition is false: isSink || tap != nullptr`.
+///
+/// Shared by the meeting/mic capture path (`Audio.tearDownInputTapSafely`) and
+/// the dictation path (`ParakeetEngine`) so both honor the same ordering.
+public enum AudioInputTapTeardownPolicy {
+    public static let inputCallbackDrainDelay: TimeInterval = 0.05
 
-    static func steps(engineIsRunning: Bool) -> [AudioInputTapTeardownStep] {
+    public static func steps(engineIsRunning: Bool) -> [AudioInputTapTeardownStep] {
         engineIsRunning
             ? [.stopEngine, .waitForStoppedInputCallbacks, .removeInputTap]
             : [.removeInputTap]
