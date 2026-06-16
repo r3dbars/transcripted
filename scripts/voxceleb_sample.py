@@ -119,9 +119,22 @@ def main():
             if tmp:
                 os.unlink(tmp.name)
 
-    kept = {}            # speaker -> count kept
+    # Resume: seed counts from clips already on disk so repeated calls (e.g. one per split)
+    # ACCUMULATE clips per identity instead of overwriting. clips-per-id / identity-cap then
+    # apply to the running totals.
+    kept = {}            # speaker -> count kept (existing + new)
     os.makedirs(args.out_dir, exist_ok=True)
+    for spk in os.listdir(args.out_dir):
+        d = os.path.join(args.out_dir, spk)
+        if os.path.isdir(d):
+            n = len([f for f in os.listdir(d) if f.endswith(".wav")])
+            if n:
+                kept[spk] = n
+    if kept:
+        print(f"[voxceleb] resuming: {len(kept)} ids already on disk "
+              f"({sum(kept.values())} clips)")
     total = 0
+    failed = 0
     for row in ds:
         audio = row.get(audio_col) if audio_col else None
         spk = speaker_of(row, audio)
@@ -138,6 +151,7 @@ def main():
         os.makedirs(d, exist_ok=True)
         idx = kept.get(spk, 0)
         if not write_clip(row.get(audio_col), os.path.join(d, f"{idx:03d}.wav"), args.sr):
+            failed += 1
             continue
         kept[spk] = idx + 1
         total += 1
@@ -145,6 +159,12 @@ def main():
             print(f"[voxceleb] {len(kept)} ids, {total} clips...")
 
     print(f"[voxceleb] done: {len(kept)} identities, {total} clips -> {args.out_dir}")
+    if failed:
+        # Silent read failures are usually unauthenticated HF rate-limiting on bulk per-clip
+        # fetches — surface it instead of mysteriously yielding too few clips.
+        print(f"[voxceleb] WARNING: {failed} clip read(s) failed — likely HF rate-limiting. "
+              "Set HF_TOKEN / `huggingface-cli login` for higher limits and re-run "
+              "(resume picks up where this left off).", file=sys.stderr)
     if not kept:
         print("[voxceleb] nothing sampled — check HF auth/terms and dataset schema", file=sys.stderr)
         sys.exit(1)
