@@ -123,10 +123,12 @@ hard-capped; there is no "download all of VoxCeleb" path.
 | `Sources/speaker-eval-harness/main.swift` | `dump` + `replay` commands |
 | `Package.swift` | depends on root `TranscriptedCore`; mirrors deps link flags |
 | `BASELINE_REPORT.md` | measured baseline (AMI ES2002) + threshold recommendations |
+| `AB_DOT_VS_CLOUD.md` | dot-vs-cloud matcher A/B (cross-meeting re-ID) |
 | `SCALEUP_REPORT.md` | AMI scale-up (~32 mtgs / dozens of identities) results at scale |
 | `../../scripts/run_speaker_eval.sh` | end-to-end driver, keyed by `CORPUS` |
 | `../../scripts/score_speaker_eval.py` | DER + fragmentation + false-merge + re-ID scorer (corpus-agnostic) |
 | `../../scripts/aggregate_sweep.py` | sweep table + closest-to-ideal picker |
+| `../../scripts/ab_dot_vs_cloud.py` | dot-vs-cloud matcher A/B simulator (runs on cached embeddings) |
 | `../../scripts/download_ami.sh` | AMI audio + RTTMs (`es2002` \| `scale` \| `full`) |
 | `../../scripts/download_icsi.sh` | ICSI audio (Edinburgh) + RTTMs (HF, gated) |
 | `../../scripts/download_voxconverse.sh` | VoxConverse dev+test audio + RTTMs |
