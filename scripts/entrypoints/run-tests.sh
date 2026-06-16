@@ -366,6 +366,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/HomeMeetingRowActionTargets.swift"
     "Sources/UI/Shared/HomeMeetingRename.swift"
     "Sources/UI/Settings/HomeMeetingSummaryBetaPresentationPolicy.swift"
+    "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift"
     "Sources/UI/Settings/HomeFailedMeetingInlinePresentation.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/UI/Overlay/DictationMeterPolicy.swift"
