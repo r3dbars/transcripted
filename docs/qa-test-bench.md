@@ -159,6 +159,39 @@ It cannot prove real Zoom, Meet, browser WebRTC, Bluetooth/AirPods, TCC, or
 user-perceived volume behavior. Issue #500 stays manual-required until the
 dated matrix in `docs/qa-issue-500-meeting-audio.md` is run.
 
+## Speaker-Naming Simulator
+
+Use this to reason about how many speakers the post-meeting "Review meeting
+speakers" sheet asks you to name, without needing audio or ML models:
+
+```bash
+scripts/ops/speaker-naming-simulator.py            # scenario suite (table)
+scripts/ops/speaker-naming-simulator.py --sweep    # consolidation-threshold tradeoff
+scripts/ops/speaker-naming-simulator.py --json     # machine-readable suite output
+```
+
+It generates synthetic offline-diarization output — true speakers over-segmented
+into several clusters, the way VBx splits one remote voice — and runs a faithful
+pure-Python model of `EmbeddingClusterer` post-processing (small-cluster
+absorption + same-voice consolidation). The suite reports review-row counts
+before/after consolidation, expected labels, channel role, and false-merge
+flags, so it catches the user-facing failure: duplicate speaker rows in the
+post-meeting review sheet. The fixtures cover cold unknown voices, repeated
+named speakers, tentative known speakers, remote groups, local default-off
+`You` behavior, opt-in local room split, and near-threshold similar voices. The
+script exits non-zero if any scenario misses its expected review count, expected
+labels, expected cluster count, or false-merge guard.
+
+The `--sweep` view shows where an over-segmented one-on-one collapses correctly
+versus where genuinely similar distinct voices start to wrongly merge, which is
+how to pick the consolidation threshold.
+
+The thresholds in the script mirror
+`Sources/TranscriptedCore/Speaker/EmbeddingClusterer.swift`; keep them in sync
+when that file changes. This is a model, not the real Swift path — use it to
+tune and reason, then validate behavior changes with `swift test` and the
+`EmbeddingClustererTests` coverage.
+
 ## Corpus Run
 
 Use this when you want the QA tester to inspect Justin's local meeting corpus
