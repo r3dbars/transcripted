@@ -67,7 +67,7 @@ gitignored under `data/`. Pick the tier that matches the compute you want to spe
 | **AMI full** | all scenario + non-scenario, ~100 h | `scripts/download_ami.sh full` | same | ~9–10 GB (~170 mtgs) | ~1–2 h |
 | **ICSI** | meeting corpus, heavily recurring lab speakers | `scripts/download_icsi.sh` | ICSI Corpus, research-use; RTTMs from HF `diarizers-community/icsi` (gated) | ~0.5–10 GB | ~10–60 min |
 | **VoxConverse** | in-the-wild YouTube, overlap, unknown counts | `scripts/download_voxconverse.sh` | VoxConverse, CC-BY 4.0; RTTMs from joonson/voxconverse | ~4 GB (dev+test) | ~30–90 min |
-| **VoxCeleb** (sample) | cross-recording re-ID / false-positive at scale | `scripts/download_voxceleb_sample.sh` | VoxCeleb1, CC-BY-SA 4.0 (HF mirror, gated) | bounded by cap (~few GB) | ~20–60 min |
+| **VoxCeleb** (sample) | cross-recording re-ID / false-positive (matcher-isolated) | `scripts/download_voxceleb_sample.sh` | VoxCeleb1, CC-BY-SA 4.0 (public `s3prl/mini_voxceleb1` default; larger mirrors gated) | bounded by cap (~few GB) | ~20–60 min |
 
 ¹ Apple-Silicon diarization, ~100–200× realtime. **Excludes** the one-time CoreML model
 download and the per-corpus dataset download (which can dominate — see footprints).
@@ -96,6 +96,8 @@ bash scripts/download_voxceleb_sample.sh &&  CORPUS=voxceleb   scripts/run_speak
 | `VOXCONVERSE_SPLITS` | `dev test` | which VoxConverse splits to fetch |
 | `VOXCELEB_IDENTITY_CAP` | `300` | **HARD CAP** on sampled identities (max 1211; never the full corpus) |
 | `VOXCELEB_CLIPS_PER_ID` | `10` | clips kept per sampled identity |
+| `VOXCELEB_DATASET` | `s3prl/mini_voxceleb1` | HF mirror (public default; swap for a larger/gated one) |
+| `VOXCELEB_MODE` | `singles` | `singles` (1 clip/meeting → isolates the matcher) \| `sessions` (stitched multi-speaker → also stresses diarizer) |
 | `CONSOLIDATION` | `none 0.82 0.85 0.88 0.91` | within-meeting same-voice merge grid |
 | `MATCH` | `0.50 0.55 0.60 0.65 0.70` | cross-meeting DB match grid |
 | `COLLAR` | `0.25` | DER forgiveness collar (AMI convention) |
@@ -110,7 +112,9 @@ hard-capped; there is no "download all of VoxCeleb" path.
 - macOS 14+ on Apple Silicon (CoreML diarizer models, downloaded once from HuggingFace).
 - Prebuilt deps from `build-deps.sh` (`deps-libs/libExternalDeps.a`, `deps-modules/`,
   `deps-frameworks/`). The harness `Package.swift` resolves them relative to the repo root.
-- Python: `pyannote.metrics` (`pip install pyannote.metrics`).
+- Python: `pyannote.metrics` (`pip install pyannote.metrics`) for scoring. The VoxCeleb
+  sampler additionally needs `datasets` + `ffmpeg`; ICSI RTTM materialization needs
+  `datasets` (`pip install datasets`).
 
 ## Files
 
