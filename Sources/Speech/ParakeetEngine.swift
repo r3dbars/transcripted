@@ -232,11 +232,33 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private static func cleanUpLateAudioStart(on audioEngine: AVAudioEngine) {
-        audioEngine.inputNode.removeTap(onBus: 0)
-        if audioEngine.isRunning {
-            audioEngine.stop()
+    /// Remove the input tap without tripping AVAudioEngine's
+    /// `required condition is false: isSink || tap != nullptr` assertion.
+    ///
+    /// Removing a tap while the engine is still running leaves the input node
+    /// with neither a tap nor a downstream sink; the next IO-thread
+    /// `InputAvailable` callback then crashes the process. Stop the engine and
+    /// let in-flight input callbacks drain BEFORE removing the tap, mirroring
+    /// the meeting/mic path's `Audio.tearDownInputTapSafely` via the shared
+    /// `AudioInputTapTeardownPolicy`.
+    ///
+    /// Must be called on `audioEngineQueue` (callers already hop there); the
+    /// drain step briefly blocks that queue, never the CoreAudio render thread.
+    private nonisolated static func safelyRemoveInputTap(on audioEngine: AVAudioEngine) {
+        for step in AudioInputTapTeardownPolicy.steps(engineIsRunning: audioEngine.isRunning) {
+            switch step {
+            case .stopEngine:
+                audioEngine.stop()
+            case .waitForStoppedInputCallbacks:
+                Thread.sleep(forTimeInterval: AudioInputTapTeardownPolicy.inputCallbackDrainDelay)
+            case .removeInputTap:
+                audioEngine.inputNode.removeTap(onBus: 0)
+            }
         }
+    }
+
+    private static func cleanUpLateAudioStart(on audioEngine: AVAudioEngine) {
+        safelyRemoveInputTap(on: audioEngine)
         audioEngine.reset()
     }
 
@@ -1555,7 +1577,11 @@ class ParakeetEngine: ObservableObject {
     private func removeRecordingTap(force: Bool = false) async {
         guard force || inputTapInstalled else { return }
         await runAudioEngineWork { audioEngine in
-            audioEngine.inputNode.removeTap(onBus: 0)
+            // Stop + drain before removing the tap; the canonical stop path
+            // (`removeRecordingTap()` then `stopAudioEngine()`) otherwise removes
+            // the tap while the engine is still recording and can crash the
+            // audio IO thread with `isSink || tap != nullptr`.
+            Self.safelyRemoveInputTap(on: audioEngine)
         }
         inputTapInstalled = false
     }
@@ -1615,10 +1641,7 @@ class ParakeetEngine: ObservableObject {
         }
         audioGraphGeneration += 1
         await runAudioEngineWork { audioEngine in
-            audioEngine.inputNode.removeTap(onBus: 0)
-            if audioEngine.isRunning {
-                audioEngine.stop()
-            }
+            Self.safelyRemoveInputTap(on: audioEngine)
             audioEngine.reset()
         }
         inputTapInstalled = false
@@ -1630,10 +1653,7 @@ class ParakeetEngine: ObservableObject {
         removeAudioEngineConfigObserver()
         let retiredEngine = audioEngine
         await runAudioEngineWork { audioEngine in
-            audioEngine.inputNode.removeTap(onBus: 0)
-            if audioEngine.isRunning {
-                audioEngine.stop()
-            }
+            Self.safelyRemoveInputTap(on: audioEngine)
             audioEngine.reset()
         }
         guard audioEngine === retiredEngine else { return }
@@ -3074,10 +3094,7 @@ class ParakeetEngine: ObservableObject {
         }
         unregisterDefaultInputDeviceListener(inputDeviceChangeListener)
         audioEngineQueue.async { [audioEngine] in
-            audioEngine.inputNode.removeTap(onBus: 0)
-            if audioEngine.isRunning {
-                audioEngine.stop()
-            }
+            ParakeetEngine.safelyRemoveInputTap(on: audioEngine)
             audioEngine.reset()
         }
         ParakeetRetiredAudioEngineStore.shared.retire(audioEngine, reason: "deinit")
