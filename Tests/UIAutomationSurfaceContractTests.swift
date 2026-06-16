@@ -174,6 +174,80 @@ func testUIAutomationSurfaceContract() {
             "the shared alert binding should clear only the dismissed alert through HomeRootAlertPolicy, not reset all three states"
         )
 
+        // Own-file resolution contract (hardening/home-meeting-own-file-resolver).
+        // Every Home/meeting control that touches an app-owned file (transcript,
+        // audio, summary) must route through OwnFileResolver so a path that drifted
+        // after scanning (restyle/rename, WAV→M4A recompression, deletion) surfaces
+        // an error instead of a silent dead click. Behavior is covered by
+        // OwnFileResolverTests; these guard the wiring so a regression that re-adds a
+        // raw stale-path call (the #1126/#1131/#1134 whack-a-mole) fails CI.
+        let ownFileResolverSource = readUIAutomationContractFile("Sources/UI/Shared/OwnFileResolver.swift")
+        let playbackSource = readUIAutomationContractFile("Sources/UI/Shared/MeetingAudioPlayback.swift")
+
+        assertTrue(
+            ownFileResolverSource.contains("static func resolveForReveal(")
+                && ownFileResolverSource.contains("static func resolveExistingFile(")
+                && ownFileResolverSource.contains("static func resolveExistingFiles(")
+                && ownFileResolverSource.contains("case reveal([URL])")
+                && ownFileResolverSource.contains("case unavailable"),
+            "OwnFileResolver must keep both reveal (with enclosing-folder fallback) and open/play (regular-file-only) resolution modes"
+        )
+
+        assertTrue(
+            settingsSource.contains("private func revealOwnFile(")
+                && settingsSource.contains("OwnFileResolver.resolveForReveal(candidateURLs:")
+                && settingsSource.contains("private func openOwnFile(")
+                && settingsSource.contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
+            "Home reveal/open should route through OwnFileResolver helpers, surfacing presentHomeActionFailure on .unavailable instead of a dead click"
+        )
+
+        // No control may pass a possibly-stale row/preview/notice URL straight to
+        // NSWorkspace — those silently no-op when the file moved after scanning.
+        for staleRawCall in [
+            "activateFileViewerSelecting([entry.url])",
+            "activateFileViewerSelecting(audioRevealURLs)",
+            "activateFileViewerSelecting(\n                    HomeMeetingRowActionTargets.transcriptRevealURLs(for: item)",
+            "NSWorkspace.shared.open(entry.url)",
+            "NSWorkspace.shared.open(preview.transcriptURL)",
+            "NSWorkspace.shared.open(item.transcriptURL)",
+            "NSWorkspace.shared.open(notice.transcriptURL)",
+            "NSWorkspace.shared.open(transcriptURL)",
+        ] {
+            assertFalse(
+                settingsSource.contains(staleRawCall),
+                "Home own-file action must not call NSWorkspace on a raw scan-time URL (\(staleRawCall)) — route it through OwnFileResolver"
+            )
+        }
+
+        // Copy/export and re-transcribe must surface a failure, not a silent beep,
+        // when the source file cannot be resolved.
+        assertFalse(
+            settingsSource.contains("NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)"),
+            "failed-meeting reveal audio must route through OwnFileResolver, not beep-or-reveal on raw URLs"
+        )
+        assertTrue(
+            settingsSource.contains("Could not copy meeting")
+                && settingsSource.contains("Could not re-transcribe meeting"),
+            "copy-for-agent and re-transcribe should surface a failure alert when the own file is missing, instead of NSSound.beep()"
+        )
+
+        // Retained-audio playback follows recompressed/moved files instead of going
+        // silently Unavailable on a stale path.
+        assertTrue(
+            playbackSource.contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
+            "meeting audio playback should resolve each source URL through OwnFileResolver so WAV→M4A recompression still plays"
+        )
+
+        // Delete must surface a failure when it removed nothing yet the file is
+        // still on disk (stale path), instead of letting the row reappear
+        // unexplained. Deletion intentionally does not use the lenient resolver.
+        assertTrue(
+            settingsSource.contains("result.removedTranscriptURLs.isEmpty")
+                && settingsSource.contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
+                && settingsSource.contains("presentHomeActionFailure("),
+            "deleteMeeting should detect a no-op delete (stale path) and surface a failure rather than silently re-showing the row"
+        )
+
         // Row-interaction affordances from fix/home-row-actions, which have no
         // behavioral coverage in the fast suite (it greps source, never runs the
         // UI). The overflow actions only reveal on hover, so the row needs a
