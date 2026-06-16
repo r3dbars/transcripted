@@ -47,6 +47,34 @@ final class CrashReporter {
         SentrySDK.start(options: options)
 
         shared.hasStarted = true
+
+        installUnrecognizedSelectorCapture()
+    }
+
+    // MARK: - Unrecognized-selector enrichment
+
+    // Sentry's `enableUncaughtNSExceptionReporting` records that an
+    // NSInvalidArgumentException occurred but not its `reason`, so AppKit
+    // target/action faults arrive as "unrecognized selector sent to NSButton"
+    // with no class/selector — undiagnosable on the dashboard. We chain an
+    // uncaught-exception handler that lifts the (non-PII) class + selector onto
+    // the Sentry scope so they ride on the very crash event, then forward to
+    // whatever handler was already installed (Sentry's) so crash reporting is
+    // fully preserved — never replaced or disabled.
+    private static nonisolated(unsafe) var previousUncaughtHandler: NSUncaughtExceptionHandler?
+    private static nonisolated(unsafe) var hasInstalledSelectorCapture = false
+
+    private static func installUnrecognizedSelectorCapture() {
+        guard !hasInstalledSelectorCapture else { return }
+        hasInstalledSelectorCapture = true
+        previousUncaughtHandler = NSGetUncaughtExceptionHandler()
+        NSSetUncaughtExceptionHandler(transcriptedUnrecognizedSelectorHandler)
+    }
+
+    /// Forward to whatever uncaught handler was installed before us (Sentry's),
+    /// preserving the existing crash-reporting path.
+    static func forwardUncaughtException(_ exception: NSException) {
+        previousUncaughtHandler?(exception)
     }
 
     func capture(error: Error, context: String = "") {
@@ -292,4 +320,20 @@ final class CrashReporter {
             return .warning
         }
     }
+}
+
+/// Top-level handler — `NSSetUncaughtExceptionHandler` takes a `@convention(c)`
+/// function pointer, so this must be a free function with no captured context.
+/// It attaches the parsed class + selector (kept as crash tags, like sanitized
+/// stack-frame symbols) and then forwards to the previously-installed handler.
+private func transcriptedUnrecognizedSelectorHandler(_ exception: NSException) {
+    if let parsed = UnrecognizedSelectorReason.parse(exception.reason) {
+        SentrySDK.configureScope { scope in
+            scope.setTags([
+                "unrecognized_selector": parsed.selector,
+                "unrecognized_selector_class": parsed.receiver,
+            ])
+        }
+    }
+    CrashReporter.forwardUncaughtException(exception)
 }

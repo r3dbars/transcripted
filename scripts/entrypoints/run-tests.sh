@@ -341,6 +341,7 @@ APP_SOURCES=(
     "Sources/Observability/SentryRuntimeConfiguration.swift"
     "Sources/Observability/SentryEventPolicy.swift"
     "Sources/Observability/SentryPayloadSanitizer.swift"
+    "Sources/Observability/UnrecognizedSelectorReason.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"
     "Sources/TranscriptedCore/Audio/MicRecordingSegment.swift"
     "Sources/TranscriptedCore/Models/SpeakerMapping.swift"
