@@ -1027,6 +1027,11 @@ class ParakeetEngine: ObservableObject {
                 }
             } catch {
                 guard !self.recoveryState.isStale(generation: myGeneration) else { return }
+                // A timed-out audio-engine operation means the serial engine queue
+                // is wedged behind a CoreAudio call that never returned (the AirPods
+                // / Bluetooth route-switch hang). Rebuilding on that same queue would
+                // never run, so fail safe by abandoning the blocked graph instead.
+                let audioEngineQueueBlocked = error is ParakeetAudioEngineWorkError
                 let failureAction = ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: shouldRestartRecording)
                 if self.recoveryState.finishRecovery(success: false, generation: myGeneration) {
                     self.cancelConfigRecoveryTimeout()
@@ -1081,7 +1086,14 @@ class ParakeetEngine: ObservableObject {
                             ]
                         ))
                 }
-                await self.rebuildAudioEngine(reason: "device_change_rewarm_failed")
+                switch ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(
+                    audioEngineQueueBlocked: audioEngineQueueBlocked
+                ) {
+                case .queuedOnAudioEngineQueue:
+                    await self.rebuildAudioEngine(reason: "device_change_rewarm_failed")
+                case .abandonBlockedAudioGraph:
+                    self.abandonBlockedAudioEngine(reason: "device_change_rewarm_failed")
+                }
                 if failureAction.schedulePrewarmRetry {
                     self.prewarmRetryCount = 0
                     self.schedulePrewarmRetry()

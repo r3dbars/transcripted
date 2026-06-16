@@ -109,6 +109,37 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(action.schedulePrewarmRetry, "recording recovery should still schedule a follow-up prewarm")
     }
 
+    runSuite("ParakeetDeviceRecoveryFailurePolicy abandons the wedged queue on a blocked rewarm") {
+        // A timed-out recovery snapshot means the serial audio-engine queue is
+        // stuck behind a CoreAudio call that never returned (the AirPods/Bluetooth
+        // route-switch hang). Rebuilding on that same queue would never run, so the
+        // recovery must hard-reset onto a fresh engine + queue instead.
+        assertEqual(
+            ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(audioEngineQueueBlocked: true),
+            .abandonBlockedAudioGraph,
+            "a blocked engine queue must be abandoned, not queued behind, or rewarm hangs until force-quit"
+        )
+    }
+
+    runSuite("ParakeetDeviceRecoveryFailurePolicy rebuilds on the live queue when it is not blocked") {
+        assertEqual(
+            ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(audioEngineQueueBlocked: false),
+            .queuedOnAudioEngineQueue,
+            "a responsive queue can still rebuild the engine in place"
+        )
+    }
+
+    runSuite("ParakeetDeviceRecoveryFailurePolicy blocked-rewarm strategy matches the timeout path") {
+        // The recovery-timeout path already abandons the blocked graph. A blocked
+        // rewarm is the same wedged-queue condition reached a different way, so the
+        // two must agree — otherwise rewarm and timeout diverge on the same hang.
+        assertEqual(
+            ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(audioEngineQueueBlocked: true),
+            ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: true).rebuildStrategy,
+            "blocked rewarm recovery must use the same hard reset as the recovery-timeout path"
+        )
+    }
+
     runSuite("ParakeetDeviceRecoveryReadinessPolicy waits on unsettled route formats") {
         assertEqual(
             ParakeetDeviceRecoveryReadinessPolicy.action(for: .routeNotSettled),
@@ -623,6 +654,48 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(suppressConfigChanges.lowerBound < removeTap.lowerBound, "zombie reset should suppress self-induced config changes before graph teardown")
         assertTrue(pendingRestartGuard.lowerBound < retryStart.lowerBound, "zombie retry should be gated by the pending restart flag so user stop can cancel it")
         assertTrue(clearPendingBeforeRetry.lowerBound < retryStart.lowerBound, "zombie retry should clear pending restart state before attempting the recovery start")
+    }
+
+    runSuite("ParakeetEngine device-change rewarm abandons the wedged queue instead of re-queuing on it") {
+        // Simulates a route change mid-stream: handleAudioConfigChange tears down
+        // and schedules attemptDeviceRecovery; if the recovery snapshot times out
+        // (queue wedged on a CoreAudio call during the AirPods/Bluetooth switch),
+        // the catch block must hard-reset the graph rather than await
+        // rebuildAudioEngine on the same blocked queue (which never returns and
+        // strands the recording until the user force-quits).
+        //
+        // ParakeetEngine's recovery control flow is CoreAudio-wired and not
+        // compiled into this Foundation-only runner, so this pins source structure.
+        // It guards a REAL invariant behind the device_change_rewarm_failed (x207)
+        // and app.unclean_shutdown_detected (x166) Sentry pair. If you move/rename
+        // attemptDeviceRecovery or reorder its catch handling, update this together.
+        let source = readParakeetEngineSource()
+        guard let recoveryStart = source.range(of: "private func attemptDeviceRecovery()"),
+              let recoveryEnd = source.range(of: "private func scheduleConfigRecoveryTimeout", range: recoveryStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the attemptDeviceRecovery body")
+            return
+        }
+        let recovery = String(source[recoveryStart.lowerBound..<recoveryEnd.lowerBound])
+
+        guard let catchClause = recovery.range(of: "} catch {"),
+              let blockedProbe = recovery.range(of: "error is ParakeetAudioEngineWorkError", range: catchClause.upperBound..<recovery.endIndex),
+              let strategySwitch = recovery.range(of: "ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(", range: catchClause.upperBound..<recovery.endIndex),
+              let abandonCase = recovery.range(of: "self.abandonBlockedAudioEngine(reason: \"device_change_rewarm_failed\")", range: catchClause.upperBound..<recovery.endIndex),
+              let queuedRebuildCase = recovery.range(of: "await self.rebuildAudioEngine(reason: \"device_change_rewarm_failed\")", range: catchClause.upperBound..<recovery.endIndex) else {
+            assertTrue(false, "rewarm catch must branch the graph recovery on whether the engine queue is blocked")
+            return
+        }
+
+        assertTrue(blockedProbe.lowerBound < strategySwitch.lowerBound, "rewarm catch should detect a wedged engine queue before choosing a rebuild strategy")
+        assertTrue(strategySwitch.lowerBound < abandonCase.lowerBound, "rewarm catch should route through the rebuild-strategy policy before abandoning the graph")
+        assertTrue(strategySwitch.lowerBound < queuedRebuildCase.lowerBound, "the in-place rebuild must also sit behind the rebuild-strategy switch, not run unconditionally")
+
+        // The blocked-queue rebuild MUST be the synchronous abandon path. An
+        // `await rebuildAudioEngine` reached unconditionally (the old bug) would
+        // hang on the wedged queue, so the awaited rebuild may only appear inside
+        // the strategy switch alongside the abandon case.
+        let queuedCount = recovery.components(separatedBy: "await self.rebuildAudioEngine(reason: \"device_change_rewarm_failed\")").count - 1
+        assertEqual(queuedCount, 1, "there should be exactly one guarded in-place rebuild in the rewarm catch")
     }
 
     runSuite("ParakeetEngine stopRecording cancels pending zombie restart while idle") {
