@@ -290,6 +290,31 @@ boards:
             payload = json.loads(out_json.read_text())
             self.assertEqual(payload["boards"][0]["score"], 100.0)
 
+    def test_repo_registry_matches_current_ui_smoke_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "ui.json").write_text(json.dumps({"checks": [
+                {"id": "settings-home", "title": "Home", "status": "PASS", "target": "Transcripted Settings"},
+                {"id": "settings-pages-toggle", "title": "Settings area opens", "status": "PASS", "target": "Transcripted Settings"},
+                {"id": "settings-navigation", "title": "Settings tabs navigate", "status": "PASS", "target": "General"},
+                {"id": "settings-general", "title": "General controls are visible", "status": "PASS", "target": "General"},
+            ]}))
+
+            out_json = tmp / "scorecard.json"
+            out_md = tmp / "scorecard.md"
+            proc = run("score-boards.py",
+                       "--registry", self._registry(),
+                       "--ui-json", str(tmp / "ui.json"),
+                       "--json-out", str(out_json),
+                       "--markdown-out", str(out_md))
+            self.assertIn(proc.returncode, (0, 3), proc.stdout + proc.stderr)
+            payload = json.loads(out_json.read_text())
+            boards = {board["id"]: board for board in payload["boards"]}
+            home_ui = {dim["name"]: dim for dim in boards["home"]["dimensions"]}["ui"]
+            general_ui = {dim["name"]: dim for dim in boards["settings-general"]["dimensions"]}["ui"]
+            self.assertEqual(home_ui["score"], 100.0)
+            self.assertEqual(general_ui["score"], 100.0)
+
     def test_yaml_parser_handles_bare_list_and_bare_mapping_item(self):
         score_boards = load_score_boards_module()
         rows = score_boards.tokenize_registry("""
