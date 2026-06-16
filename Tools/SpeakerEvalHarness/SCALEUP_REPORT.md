@@ -94,43 +94,56 @@ finding. Full grid in the gitignored `SWEEP.md`.)
 
 ---
 
-## Addendum — VoxCeleb matcher-isolation smoke (preliminary, N=6, real audio)
+## Addendum — VoxCeleb matcher-isolation sweep (30 real identities, 300 meetings)
 
-A small real run on the `voxceleb` corpus, **deliberately isolating the matcher** from the
-diarizer, surfaces the opposite failure mode from AMI — and one AMI structurally cannot show.
+A real run on the `voxceleb` corpus, **deliberately isolating the matcher** from the diarizer,
+surfaces the opposite failure mode from AMI — one AMI structurally cannot show — and quantifies
+it across a full match sweep.
 
-**Setup.** 6 distinct VoxCeleb1 identities (public `s3prl/mini_voxceleb1`), 4 clips each from
-*different source videos*. Two builders:
-- **`sessions`** (stitched multi-speaker) — even with clean single-identity source clips, the
-  diarizer **collapses 4 voices into 1–2 clusters** (DER 0.47, false-merge 5/6). The diarizer
-  confound returns; this mode does **not** isolate the matcher.
-- **`singles`** (one clip = one single-speaker meeting) — diarizer trivially sees one clean
-  voice (**DER 0.07–0.08**), so the metric is purely the DB matcher's cross-recording behavior.
+**Setup.** **30 distinct VoxCeleb1 identities** (public `s3prl/mini_voxceleb1`), 10 clips each
+from different recordings = **300 single-speaker "meetings"** (`--mode singles`: one clip = one
+meeting). Each identity appears 10× across the replay. The diarizer trivially sees one clean
+voice — **278/300 meetings = exactly 1 cluster, DER 0.10** — so the metric is purely the DB
+matcher's cross-recording behavior. (Contrast `--mode sessions`, which stitches clips into
+multi-speaker audio: the diarizer then collapses 4 voices into 1–2 clusters, DER 0.47, and the
+diarizer confound returns. Singles is the matcher-isolating mode.)
 
-**Singles result (match sweep, the clean matcher number):**
+**Match sweep — 30 true identities, ideal `profiles_end` = 30:**
 
-| match | mean DER | false-merge | frag mean | re-ID #2+ | profiles_end (ideal 6) |
+| match | mean DER | false-merge | frag mean | re-ID #2+ | profiles_end (ideal 30) |
 |---|---|---|---|---|---|
-| 0.55 | 0.070 | 1 | 2.33 | 0.33 | 11 |
-| 0.60 | 0.084 | 2 | 2.33 | 0.27 | 13 |
-| 0.65 | 0.084 | 1 | 2.50 | 0.27 | 18 |
-| 0.70 | 0.084 | 1 | 2.67 | 0.21 | 19 |
+| 0.45 | 0.101 | 5 | 2.10 | 0.367 | 28 (slightly over-merged) |
+| **0.50** | 0.103 | 6 | 2.00 | **0.383** | **32 (closest to 30)** |
+| 0.55 | 0.106 | 6 | 2.07 | 0.330 | 42 |
+| **0.60** (prod) | 0.111 | 6 | 2.23 | 0.286 | **53** |
+| 0.65 | 0.111 | 5 | 2.60 | 0.181 | 81 |
+| 0.70 | 0.112 | 10 | 2.60 | 0.156 | 118 |
+| 0.75 | 0.112 | 10 | 2.90 | 0.067 | 168 |
 
-**Reading:** with the diarizer out of the way, the matcher's problem is **not** fusing
-different people (false-merge stays 1–2) — it is **fragmentation / poor cross-recording
-re-ID**: 6 real people explode into 11–19 profiles, and re-ID of a returning speaker is only
-~0.2–0.33. The same person recorded in two different sessions lands *below* the 0.60 match
-threshold and is filed as a new person. This is the real-world "why did it make a new speaker
-for the same person?" failure — invisible on AMI (same-room series + diarizer confound), exposed
-here.
+**Reading.** With the diarizer out of the way, the matcher does **not** mostly fuse different
+people (false-merge stays 5–6 until 0.70). Its dominant failure is **fragmentation / weak
+cross-recording re-ID**: at the production **match 0.60, 30 real people explode into 53
+profiles** (≈1.8 profiles/person) and a returning speaker is re-identified to their first
+profile only **29%** of the time. Raising the threshold makes it dramatically worse (0.75 →
+**168 profiles for 30 people**, re-ID 0.07); the same person in a *different* recording lands
+below threshold and is filed as a new person. The count-optimal operating point here is
+**match ≈ 0.50** (32 profiles ≈ 30, best re-ID 0.38, false-merge no worse than 0.60's).
 
-**Caveats (do not over-read):** N=6 / 4 clips, so this is directional, not certified. VoxCeleb
-is in-the-wild celebrity audio across decades/mics — *more* cross-recording variability than
-Transcripted's typical same-laptop calls, so it likely overstates the fragmentation. The honest
-takeaway: AMI says "0.60 ends at the right count and false-merge is diarizer-bound"; VoxCeleb-clean
-says "0.60 may be too high to re-identify the same person across genuinely different recordings."
-**Resolving that tension is the next real experiment** — a larger capped VoxCeleb singles run
-(`VOXCELEB_IDENTITY_CAP=300`) plus, ideally, in-domain (Zoom-like) labeled audio.
+**The quantified tension.** AMI (consistent in-room recordings) says *"0.60 ends at exactly the
+right count; false-merge is diarizer-bound."* VoxCeleb-clean (cross-recording) says *"0.60 is too
+high to re-identify the same person across different recordings — it fragments them ~1.8×; ~0.50
+is better."* Both are real; they disagree because they stress different things. Transcripted's
+true optimum is likely **between** them, since its same-laptop calls are *more* consistent than
+VoxCeleb's celebrity-audio-across-decades but *less* consistent than AMI's single-session series.
 
-Repro: `scripts/download_voxceleb_sample.sh` (defaults: public mini mirror, `singles` mode) then
-`CORPUS=voxceleb scripts/run_speaker_eval.sh`.
+**Caveats.** 30 ids / 10 clips is a solid sample but VoxCeleb's cross-recording variability is
+harsher than typical Transcripted usage, so this likely *overstates* the fragmentation — read
+the **direction** (0.60 over-fragments cross-recording; lower helps), not the exact profile count.
+The public `mini_voxceleb1` mirror caps at 30 ids; scaling to hundreds needs a larger (gated) HF
+mirror or webdataset handling — and unauthenticated bulk fetches get HF-rate-limited (set
+`HF_TOKEN`). The decisive next experiment is **in-domain (Zoom-like) labeled audio**, where the
+matcher's real operating point can be set without VoxCeleb's domain gap.
+
+Repro: `scripts/download_voxceleb_sample.sh` (public mini mirror, `singles` mode; for the full
+sweep `VOXCELEB_CLIPS_PER_ID=10 VOXCELEB_IDENTITY_CAP=30`) then
+`CORPUS=voxceleb MATCH="0.45 0.50 0.55 0.60 0.65 0.70 0.75" scripts/run_speaker_eval.sh`.
