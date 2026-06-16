@@ -849,10 +849,11 @@ struct TranscriptedSettingsView: View {
         }
 
         // The recorded input paths can drift after scanning (a plain move keeps
-        // the extension; the resolver re-finds it). Require both audio files to
-        // still resolve so a missing source surfaces an error instead of a beep.
-        guard let micURL = OwnFileResolver.resolveExistingFile(candidateURLs: [input.micURL]),
-              let systemURL = OwnFileResolver.resolveExistingFile(candidateURLs: [input.systemURL]) else {
+        // the extension; the resolver re-finds it). The system track is required,
+        // so a missing/unresolvable one surfaces an error instead of a silent
+        // beep; the optional mic track is resolved when present.
+        let micURL = input.micURL.flatMap { OwnFileResolver.resolveExistingFile(candidateURLs: [$0]) }
+        guard let systemURL = OwnFileResolver.resolveExistingFile(candidateURLs: [input.systemURL]) else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
                 message: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
