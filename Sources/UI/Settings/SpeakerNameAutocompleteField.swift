@@ -117,24 +117,28 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
 
         func comboBoxSelectionDidChange(_ notification: Notification) {
             guard let combo = notification.object as? NSComboBox else { return }
-            // Resolve on the next runloop tick: at notification time the combo's
-            // selected index is set but `objectValueOfSelectedItem` is not yet
-            // committed to the field.
+            // Resolve the picked label *now*, while `stringValue` still holds the
+            // typed query and the visible list matches what the user clicked. The
+            // selected index desyncs if we re-filter after the field commits the
+            // (decorated) label, so capturing here is what makes picking a
+            // non-first suggestion work.
+            let index = combo.indexOfSelectedItem
+            let visible = visibleLabels(for: combo.stringValue)
+            guard visible.indices.contains(index) else { return }
+            let label = visible[index]
+            // Map the (possibly decorated) dropdown label back to the plain
+            // display name, matching what the naming sheet stores.
+            let resolved = SpeakerNameSelectionPolicy.option(
+                matching: label,
+                optionsByLabel: optionsByLabel,
+                displayName: { $0.displayName }
+            )?.displayName ?? label
+            // Assign on the next tick so this lands *after* the combo commits its
+            // own selected value, overriding the decorated label with the plain
+            // name instead of being clobbered by it.
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let index = combo.indexOfSelectedItem
-                let visible = self.visibleLabels(for: combo.stringValue)
-                guard visible.indices.contains(index) else { return }
-                let label = visible[index]
-                // Map the (possibly decorated) dropdown label back to the plain
-                // display name, matching what the naming sheet stores.
-                let resolved = SpeakerNameSelectionPolicy.option(
-                    matching: label,
-                    optionsByLabel: self.optionsByLabel,
-                    displayName: { $0.displayName }
-                )?.displayName ?? label
                 combo.stringValue = resolved
-                self.parent.text = resolved
+                self?.parent.text = resolved
             }
         }
 
