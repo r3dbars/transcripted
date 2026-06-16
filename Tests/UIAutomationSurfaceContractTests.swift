@@ -356,6 +356,28 @@ func testUIAutomationSurfaceContract() {
             "meeting speaker review and re-transcribe actions should stay reachable from the row menu when retained audio has a Finder target"
         )
 
+        // Reveal-in-Finder must route through the resilient resolver so a stale
+        // row path (transcript restyle/rename, WAV→M4A audio recompression)
+        // surfaces an error instead of a silent dead click. (Behavior covered by
+        // HomeArtifactRevealResolverTests; this guards the wiring.)
+        assertTrue(
+            settingsSource.contains("revealMeetingArtifact(")
+                && settingsSource.contains("HomeArtifactRevealResolver.resolve(candidateURLs:"),
+            "Home reveal-in-Finder actions should resolve through HomeArtifactRevealResolver, not call activateFileViewerSelecting on a possibly-stale path directly"
+        )
+        assertFalse(
+            settingsSource.contains("NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)")
+                || settingsSource.contains("activateFileViewerSelecting(\n                    HomeMeetingRowActionTargets.transcriptRevealURLs(for: item)"),
+            "Home meeting reveal actions must not call activateFileViewerSelecting on raw row URLs — those silently no-op when the file moved after scanning"
+        )
+        // Delete must surface a failure when it removed nothing yet the file is
+        // still on disk, instead of letting the row reappear unexplained.
+        assertTrue(
+            settingsSource.contains("result.removedTranscriptURLs.isEmpty")
+                && settingsSource.contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)"),
+            "deleteMeeting should detect a no-op delete (stale path) and surface a failure rather than silently re-showing the row"
+        )
+
         for identifier in [
             "transcripted.onboarding.nav.back",
             "transcripted.onboarding.nav.skip",

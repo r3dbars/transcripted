@@ -1138,8 +1138,10 @@ struct TranscriptedSettingsView: View {
                     surface: .homeMenu,
                     artifactDate: item.date
                 )
-                NSWorkspace.shared.activateFileViewerSelecting(
-                    HomeMeetingRowActionTargets.transcriptRevealURLs(for: item)
+                revealMeetingArtifact(
+                    candidateURLs: HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
+                    failureTitle: "Could not show transcript",
+                    failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
                 )
             }
         ])
@@ -1201,7 +1203,11 @@ struct TranscriptedSettingsView: View {
                 items.append(
                     HomeRowMenuItem(title: "Show audio in Finder", symbolName: "waveform") {
                         trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
-                        NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)
+                        revealMeetingArtifact(
+                            candidateURLs: audioRevealURLs,
+                            failureTitle: "Could not show audio",
+                            failureMessage: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+                        )
                     }
                 )
             }
@@ -1302,8 +1308,19 @@ struct TranscriptedSettingsView: View {
 
         Task { @MainActor in
             do {
-                _ = try await deletionTask.value
+                let result = try await deletionTask.value
                 refreshRecentCaptures(force: true)
+                // The delete can succeed yet remove nothing when the row's
+                // recorded path went stale (a restyle/rename moved the file
+                // after the dashboard was scanned). Without this the row simply
+                // reappears on refresh with no explanation. Surface it instead.
+                if result.removedTranscriptURLs.isEmpty,
+                   FileManager.default.fileExists(atPath: item.transcriptURL.path) {
+                    presentHomeActionFailure(
+                        title: "Could not delete meeting",
+                        message: "Transcripted couldn't remove this meeting's files. They may have been moved or renamed outside the app — reopen Settings and try again."
+                    )
+                }
             } catch {
                 refreshRecentCaptures(force: true)
                 presentHomeDeleteFailure(
@@ -1360,12 +1377,11 @@ struct TranscriptedSettingsView: View {
     }
 
     private func revealFailedMeetingAudio(_ item: MeetingSessionController.FailedMeetingItem) {
-        let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: item.audioURLs)
-        guard !audioRevealURLs.isEmpty else {
-            NSSound.beep()
-            return
-        }
-        NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)
+        revealMeetingArtifact(
+            candidateURLs: HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: item.audioURLs),
+            failureTitle: "Could not show audio",
+            failureMessage: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or already cleared."
+        )
     }
 
     private func requestClearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
@@ -1408,6 +1424,23 @@ struct TranscriptedSettingsView: View {
                 title: failureTitle,
                 message: "Transcripted could not update the failed-meeting queue. Check the capture folder, then try again."
             )
+        }
+    }
+
+    /// Reveals a Home capture artifact in Finder, tolerant to the file having
+    /// moved since the row was scanned (transcript restyle/rename, WAV→M4A audio
+    /// recompression). Never silently no-ops: if nothing can be revealed it
+    /// surfaces a failure alert instead of a dead click.
+    private func revealMeetingArtifact(
+        candidateURLs: [URL],
+        failureTitle: String,
+        failureMessage: String
+    ) {
+        switch HomeArtifactRevealResolver.resolve(candidateURLs: candidateURLs) {
+        case .reveal(let urls):
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+        case .unavailable:
+            presentHomeActionFailure(title: failureTitle, message: failureMessage)
         }
     }
 
