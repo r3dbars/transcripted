@@ -1676,8 +1676,25 @@ final class MeetingSessionController: ObservableObject {
         Task { @MainActor [weak self] in
             let styled = await restyle.value
             let transcriptURL = styled.url
+            // The restyle may have renamed the transcript + its audio/<stem>_audio
+            // directory. Tell Home so any cached URLs for the old stem re-resolve.
+            if styled.url != url {
+                CaptureLibraryChangeBroadcaster.shared.noteArtifactsChanged(
+                    transcriptURLs: [styled.url]
+                )
+            }
             Task.detached(priority: .utility) {
-                await MeetingAudioStorageManager.processSavedTranscript(at: transcriptURL)
+                let didChangeArtifacts = await MeetingAudioStorageManager
+                    .processSavedTranscript(at: transcriptURL)
+                // Recompression (WAV->M4A) and retention pruning rewrite the audio
+                // paths Home cached at scan time; signal so the cache re-resolves.
+                if didChangeArtifacts {
+                    await MainActor.run {
+                        CaptureLibraryChangeBroadcaster.shared.noteArtifactsChanged(
+                            transcriptURLs: [transcriptURL]
+                        )
+                    }
+                }
             }
             guard let self, self.savedTranscriptRestyleTask == restyle else { return }
             self.lastSavedTranscriptURL = styled.url

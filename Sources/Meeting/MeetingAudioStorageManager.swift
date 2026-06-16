@@ -505,6 +505,11 @@ enum MeetingAudioStorageManager {
         )
     }
 
+    /// - Returns: `true` when this pass changed the saved meeting's on-disk audio
+    ///   files (a playback mix was created, a WAV was recompressed to M4A, or
+    ///   retained audio was pruned). Home caches audio URLs at scan time, so the
+    ///   caller uses this to decide whether to broadcast a capture-changed signal.
+    @discardableResult
     static func processSavedTranscript(
         at transcriptURL: URL,
         retentionWindow: AudioRetentionWindow = AudioStoragePreferences.deleteAudioAfter(),
@@ -513,16 +518,16 @@ enum MeetingAudioStorageManager {
         converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
         validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator(),
         playbackMixer: MeetingAudioPlaybackMixing = AVFoundationMeetingAudioPlaybackMixer()
-    ) async {
+    ) async -> Bool {
         let audioDirectory = audioDirectoryURL(forTranscript: transcriptURL)
-        await createPlaybackMixIfNeeded(
+        let didMix = await createPlaybackMixIfNeeded(
             in: audioDirectory,
             now: now,
             fileManager: fileManager,
             validator: validator,
             playbackMixer: playbackMixer
         )
-        await compressWAVAudio(
+        let convertedCount = await compressWAVAudio(
             in: audioDirectory,
             now: now,
             fileManager: fileManager,
@@ -530,12 +535,14 @@ enum MeetingAudioStorageManager {
             validator: validator
         )
 
-        pruneRetainedAudio(
+        let prunedCount = pruneRetainedAudio(
             in: transcriptURL.deletingLastPathComponent(),
             retentionWindow: retentionWindow,
             now: now,
             fileManager: fileManager
         )
+
+        return didMix || convertedCount > 0 || prunedCount > 0
     }
 
     @discardableResult
