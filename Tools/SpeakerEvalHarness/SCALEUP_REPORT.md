@@ -67,10 +67,12 @@ To get a real near-zero-false-positive number you need corpora where a *single c
 identity per source* removes the diarizer-mixing confound, so the metric isolates the DB
 matcher's cross-recording discipline:
 
-- **VoxCeleb (sample, hard-capped)** — each clip is one clean speaker; synthetic
-  multi-identity sessions give an exact RTTM with **no** within-source mixing, so
-  false-merge measures *only* the matcher fusing two genuinely-different people. This is
-  the cleanest false-positive test. (Wired, gated; `scripts/download_voxceleb_sample.sh`.)
+- **VoxCeleb (sample, hard-capped)** — each clip is one clean speaker. Use **`singles`
+  mode** (one clip = one single-speaker meeting): the diarizer trivially sees one voice, so
+  the metric isolates *only* the DB matcher's cross-recording re-ID / false-positive. This is
+  the cleanest matcher test. (NOTE: the `sessions` mode that stitches clips into multi-speaker
+  recordings re-introduces the diarizer confound — see the Addendum below. Run via
+  `scripts/download_voxceleb_sample.sh`; default public mirror, no HF login.)
 - **VoxConverse** — in-the-wild overlap/codec stress with real RTTMs, the over-segmentation
   regime where the 0.88 consolidation knob can finally fire. (Wired, gated.)
 - **ICSI** — heavily recurring lab speakers across many meetings, a second meeting-domain
@@ -89,3 +91,46 @@ estimates. The gated tiers are wired but intentionally not auto-run.
 
 (Consolidation collapsed because all four values are identical at every match — the inertia
 finding. Full grid in the gitignored `SWEEP.md`.)
+
+---
+
+## Addendum — VoxCeleb matcher-isolation smoke (preliminary, N=6, real audio)
+
+A small real run on the `voxceleb` corpus, **deliberately isolating the matcher** from the
+diarizer, surfaces the opposite failure mode from AMI — and one AMI structurally cannot show.
+
+**Setup.** 6 distinct VoxCeleb1 identities (public `s3prl/mini_voxceleb1`), 4 clips each from
+*different source videos*. Two builders:
+- **`sessions`** (stitched multi-speaker) — even with clean single-identity source clips, the
+  diarizer **collapses 4 voices into 1–2 clusters** (DER 0.47, false-merge 5/6). The diarizer
+  confound returns; this mode does **not** isolate the matcher.
+- **`singles`** (one clip = one single-speaker meeting) — diarizer trivially sees one clean
+  voice (**DER 0.07–0.08**), so the metric is purely the DB matcher's cross-recording behavior.
+
+**Singles result (match sweep, the clean matcher number):**
+
+| match | mean DER | false-merge | frag mean | re-ID #2+ | profiles_end (ideal 6) |
+|---|---|---|---|---|---|
+| 0.55 | 0.070 | 1 | 2.33 | 0.33 | 11 |
+| 0.60 | 0.084 | 2 | 2.33 | 0.27 | 13 |
+| 0.65 | 0.084 | 1 | 2.50 | 0.27 | 18 |
+| 0.70 | 0.084 | 1 | 2.67 | 0.21 | 19 |
+
+**Reading:** with the diarizer out of the way, the matcher's problem is **not** fusing
+different people (false-merge stays 1–2) — it is **fragmentation / poor cross-recording
+re-ID**: 6 real people explode into 11–19 profiles, and re-ID of a returning speaker is only
+~0.2–0.33. The same person recorded in two different sessions lands *below* the 0.60 match
+threshold and is filed as a new person. This is the real-world "why did it make a new speaker
+for the same person?" failure — invisible on AMI (same-room series + diarizer confound), exposed
+here.
+
+**Caveats (do not over-read):** N=6 / 4 clips, so this is directional, not certified. VoxCeleb
+is in-the-wild celebrity audio across decades/mics — *more* cross-recording variability than
+Transcripted's typical same-laptop calls, so it likely overstates the fragmentation. The honest
+takeaway: AMI says "0.60 ends at the right count and false-merge is diarizer-bound"; VoxCeleb-clean
+says "0.60 may be too high to re-identify the same person across genuinely different recordings."
+**Resolving that tension is the next real experiment** — a larger capped VoxCeleb singles run
+(`VOXCELEB_IDENTITY_CAP=300`) plus, ideally, in-domain (Zoom-like) labeled audio.
+
+Repro: `scripts/download_voxceleb_sample.sh` (defaults: public mini mirror, `singles` mode) then
+`CORPUS=voxceleb scripts/run_speaker_eval.sh`.
