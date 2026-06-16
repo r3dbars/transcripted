@@ -63,6 +63,36 @@ func testMeetingMicBoostPromptPolicy() {
         )
     }
 
+    runSuite("MeetingMicBoostPromptPolicy.shouldPresent — recent declines suppress future recordings") {
+        let now = Date(timeIntervalSince1970: 2_000)
+        assertFalse(
+            MeetingMicBoostPromptPolicy.shouldPresent(
+                isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: true,
+                voiceProcessingPreferenceEnabled: false,
+                currentOutcome: .notShown,
+                now: now,
+                lastDeclinedAt: now.addingTimeInterval(-60),
+                declinedPromptCooldown: 300
+            ),
+            "declining the boost prompt should suppress it across later recordings for the cooldown window"
+        )
+        assertTrue(
+            MeetingMicBoostPromptPolicy.shouldPresent(
+                isRecording: true,
+                isFinishingRecording: false,
+                sessionStateIsRecording: true,
+                voiceProcessingPreferenceEnabled: false,
+                currentOutcome: .notShown,
+                now: now,
+                lastDeclinedAt: now.addingTimeInterval(-301),
+                declinedPromptCooldown: 300
+            ),
+            "after the cooldown expires, a fresh attenuated recording may offer the boost again"
+        )
+    }
+
     runSuite("MeetingMicBoostPromptPolicy.shouldPresent — blocked when not recording") {
         assertFalse(
             MeetingMicBoostPromptPolicy.shouldPresent(

@@ -838,7 +838,8 @@ final class MeetingSessionController: ObservableObject {
             isFinishingRecording: isFinishingRecording,
             sessionStateIsRecording: state == .recording,
             voiceProcessingPreferenceEnabled: MicrophoneProcessingPreferences.isVoiceProcessingEnabled(),
-            currentOutcome: micBoostPromptOutcome
+            currentOutcome: micBoostPromptOutcome,
+            lastDeclinedAt: MicrophoneProcessingPreferences.lastMicBoostPromptDeclinedAt()
         ) else { return }
         micBoostPromptOutcome = .shown
         micBoostPromptRecordingIdentity = activeRecordingIdentity
@@ -901,6 +902,7 @@ final class MeetingSessionController: ObservableObject {
         micBoostPromptOutcome = .declined
         isMicBoostPromptVisible = false
         micBoostPromptRecordingIdentity = nil
+        MicrophoneProcessingPreferences.markMicBoostPromptDeclined()
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_mic_boost_prompt_actioned",

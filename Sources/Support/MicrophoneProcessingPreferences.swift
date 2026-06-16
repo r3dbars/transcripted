@@ -29,6 +29,7 @@ import Foundation
 enum MicrophoneProcessingPreferences {
 
     static let voiceProcessingEnabledKey = "meeting-mic-voice-processing-enabled"
+    static let micBoostPromptDeclinedAtKey = "meeting-mic-boost-prompt-declined-at"
 
     /// Whether Apple's AUVoiceProcessingIO (VPIO) is armed on Transcripted's
     /// mic engines. Default: false. Read once at recording start; changes
@@ -46,6 +47,19 @@ enum MicrophoneProcessingPreferences {
     ) {
         userDefaults.set(enabled, forKey: voiceProcessingEnabledKey)
         NotificationCenter.default.post(name: .microphoneProcessingPrefsDidChange, object: nil)
+    }
+
+    static func lastMicBoostPromptDeclinedAt(userDefaults: UserDefaults = .standard) -> Date? {
+        let timestamp = userDefaults.double(forKey: micBoostPromptDeclinedAtKey)
+        guard timestamp > 0 else { return nil }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    static func markMicBoostPromptDeclined(
+        at date: Date = Date(),
+        userDefaults: UserDefaults = .standard
+    ) {
+        userDefaults.set(date.timeIntervalSince1970, forKey: micBoostPromptDeclinedAtKey)
     }
 }
 
