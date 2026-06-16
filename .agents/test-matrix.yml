@@ -175,6 +175,14 @@ rules:
       - "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
 
   - paths:
+      - "scripts/ops/speaker-naming-simulator.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/speaker-naming-simulator.py"
+      - "scripts/ops/speaker-naming-simulator.py"
+      - "scripts/ops/speaker-naming-simulator.py --sweep"
+
+  - paths:
       - "scripts/ops/dictation-stop-autoeval.sh"
       - "scripts/ops/dictation-recovery-autoeval.rb"
       - "docs/autoeval-dictation-stop-speed-*.md"

@@ -111,6 +111,10 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Corpus compare usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare --corpus-ids meeting-0024,meeting-0025`
   - Live usage: `bash scripts/ops/transcripted-qa-bench.sh --mode live`
   - Writes local evidence under `/tmp/transcripted-qa-bench/<run-id>/`
+- `scripts/ops/speaker-naming-simulator.py` — deterministic synthetic speaker-review simulator for tuning `EmbeddingClusterer` same-voice consolidation without audio or private transcripts
+  - Usage: `scripts/ops/speaker-naming-simulator.py`
+  - Sweep usage: `scripts/ops/speaker-naming-simulator.py --sweep`
+  - JSON usage: `scripts/ops/speaker-naming-simulator.py --json`
 - `scripts/ops/validate-meeting-corpus.py` — local-only validator for the private meeting corpus in `~/Downloads/meeting-corpus`; parses metadata, audio presence/duration, and Zoom caption structure without printing transcript text
 - `scripts/ops/compare-meeting-corpus.py` — local-only comparator for Transcripted Markdown against private Zoom caption truth; reports redacted recall and speaker-label scores without printing transcript text or speaker names
 - `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`
