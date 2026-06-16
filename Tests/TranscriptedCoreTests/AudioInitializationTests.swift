@@ -95,6 +95,33 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    /// Regression guard for the fatal audio-thread crash
+    /// `com.apple.coreaudio.avfaudio: required condition is false: isSink || tap != nullptr`
+    /// (Sentry r3dbars/apple-macos issue 7479438309). Both the meeting/mic path
+    /// (`Audio.tearDownInputTapSafely`) and the dictation path
+    /// (`ParakeetEngine.safelyRemoveInputTap`) now route every input-tap teardown
+    /// through this policy, so for any running engine the tap must never be
+    /// removed before the engine is stopped — otherwise CoreAudio can deliver
+    /// input to a tap-less, sink-less node and crash the process.
+    func testRunningEngineTeardownNeverRemovesTapBeforeStopping() {
+        let steps = AudioInputTapTeardownPolicy.steps(engineIsRunning: true)
+        let stopIndex = steps.firstIndex(of: .stopEngine)
+        let removeIndex = steps.firstIndex(of: .removeInputTap)
+
+        let stop = try? XCTUnwrap(stopIndex, "Running-engine teardown must stop the engine")
+        let remove = try? XCTUnwrap(removeIndex, "Teardown must remove the input tap")
+
+        if let stop, let remove {
+            XCTAssertLessThan(
+                stop,
+                remove,
+                "Stopping the engine must come before removing the tap to avoid the isSink || tap != nullptr assertion"
+            )
+        } else {
+            XCTFail("Running-engine teardown must contain both .stopEngine and .removeInputTap")
+        }
+    }
+
     func testStopOnIdleAudioDoesNotCrashAndBumpsGeneration() {
         // The stop refactor moves engine teardown to a background queue.
         // On a fresh Audio with no engine, stop() should still:
