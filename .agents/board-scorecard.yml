@@ -42,7 +42,7 @@ boards:
     automatable: auto
     weight: 1.0
     ui:
-      check_globs: ["ui/home*", "ui/navigation*", "ui/popover*"]
+      check_globs: ["settings-home"]
     functional:
       check_globs: ["index/*", "stats/*", "health/*"]
 
@@ -85,7 +85,7 @@ boards:
     automatable: auto
     weight: 1.0
     ui:
-      check_globs: ["ui/general*", "ui/settings.general*"]
+      check_globs: ["settings-pages-toggle", "settings-navigation", "settings-general"]
     functional:
       check_globs: ["artifact/dictionary*", "artifact/preferences*"]
 
