@@ -37,6 +37,12 @@ case "$CORPUS" in
   *) echo "unknown CORPUS='$CORPUS' (ami|icsi|voxconverse|voxceleb)"; exit 2 ;;
 esac
 
+# VoxConverse RTTM labels (spk00, spk01, ...) are PER-FILE and reused across files —
+# namespace true ids by file so the cross-file overlap matrix doesn't conflate distinct
+# people. AMI/ICSI use globally-recurring participant ids; VoxCeleb sessions are built
+# with globally-unique ids — those leave it off so cross-meeting re-ID stays meaningful.
+PERFILE=""; [ "$CORPUS" = "voxconverse" ] && PERFILE="--per-file-ids"
+
 # Meeting list: explicit SERIES, else every meeting that has an RTTM (sorted -> stable
 # replay order; for AMI this keeps each series' a–d consecutive).
 if [ -n "${SERIES:-}" ]; then
@@ -89,7 +95,7 @@ for cons in $CONSOLIDATION; do
     "$BIN" replay --inputs "$INPUTS" --consolidation "$cons" --match "$mt" --out "$res" \
       2>&1 | grep -vE "\.pcm|while processing" | tail -1
     python3 "$ROOT/scripts/score_speaker_eval.py" --result "$res" --rttm-dir "$ROOT/$RTTM_DIR" \
-      --collar "$COLLAR" --out-json "$score" >/dev/null
+      --collar "$COLLAR" $PERFILE --out-json "$score" >/dev/null
     SWEEP_JSONS="${SWEEP_JSONS:+$SWEEP_JSONS,}$score"
   done
 done

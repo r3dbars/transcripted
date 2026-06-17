@@ -26,8 +26,15 @@ except Exception as e:  # pragma: no cover
     print(f"error: pyannote.metrics required ({e})", file=sys.stderr); sys.exit(2)
 
 
-def parse_rttm(path):
-    """Return list of (start, end, speaker_global_id)."""
+def parse_rttm(path, meeting=None, per_file=False):
+    """Return list of (start, end, speaker_global_id).
+
+    With per_file=True the speaker label is namespaced by `meeting`
+    (``meeting␟spk00``). Corpora whose RTTM labels are PER-FILE and reused
+    across files (e.g. VoxConverse: every file has its own ``spk00``) MUST use
+    this, or the cross-file overlap matrix conflates distinct people. Corpora
+    with globally-recurring ids (AMI ``FEE005``...) leave it off so the
+    cross-meeting re-ID curve still sees the same identity across meetings."""
     out = []
     with open(path) as f:
         for line in f:
@@ -35,6 +42,8 @@ def parse_rttm(path):
             if not p or p[0] != "SPEAKER":
                 continue
             start, dur, spk = float(p[3]), float(p[4]), p[7]
+            if per_file and meeting is not None:
+                spk = f"{meeting}␟{spk}"
             out.append((start, start + dur, spk))
     return out
 
@@ -72,6 +81,10 @@ def main():
     ap.add_argument("--rttm-dir", required=True)
     ap.add_argument("--collar", type=float, default=0.25,
                     help="DER forgiveness collar in seconds (AMI convention: 0.25)")
+    ap.add_argument("--per-file-ids", action="store_true",
+                    help="Namespace RTTM speaker ids by file. Required for corpora with "
+                         "per-file labels reused across files (VoxConverse). Leave off for "
+                         "globally-recurring ids (AMI) so cross-meeting re-ID stays meaningful.")
     ap.add_argument("--out-json")
     ap.add_argument("--out-md")
     args = ap.parse_args()
@@ -92,7 +105,7 @@ def main():
     for mr in result["meetings"]:
         meeting = mr["meeting"]
         meeting_order.append(meeting)
-        ref = parse_rttm(f"{args.rttm_dir}/{meeting}.rttm")
+        ref = parse_rttm(f"{args.rttm_dir}/{meeting}.rttm", meeting, args.per_file_ids)
         hyp = [(a["start"], a["end"], a["dbProfile"]) for a in mr["assignments"]]
 
         der = der_metric(annotation_from(ref), annotation_from(hyp), detailed=True)
@@ -164,7 +177,7 @@ def main():
                 first_anchor[tid] = dom_pid
             anchor = first_anchor.get(tid)
             # fraction of this session's speech assigned to the anchor profile
-            covered = sec_assigned(result, meeting, tid, anchor, args.rttm_dir)
+            covered = sec_assigned(result, meeting, tid, anchor, args.rttm_dir, args.per_file_ids)
             acc = covered / ref_sec if ref_sec else 0.0
             reid_by_appearance[k].append(acc)
             reid_detail.append({"meeting": meeting, "true": tid, "appearance": k,
@@ -202,12 +215,12 @@ def main():
         open(args.out_md, "w").write(format_md(summary))
 
 
-def sec_assigned(result, meeting, tid, anchor_pid, rttm_dir):
+def sec_assigned(result, meeting, tid, anchor_pid, rttm_dir, per_file=False):
     """Seconds of true speaker `tid`'s reference speech in `meeting` that overlap
     hypothesis segments labeled `anchor_pid`."""
     if anchor_pid is None:
         return 0.0
-    ref = parse_rttm(f"{rttm_dir}/{meeting}.rttm")
+    ref = parse_rttm(f"{rttm_dir}/{meeting}.rttm", meeting, per_file)
     ref = [(s, e) for (s, e, t) in ref if t == tid]
     mr = next(m for m in result["meetings"] if m["meeting"] == meeting)
     hyp = sorted([(a["start"], a["end"]) for a in mr["assignments"] if a["dbProfile"] == anchor_pid])

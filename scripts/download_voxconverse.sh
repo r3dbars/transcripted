@@ -32,8 +32,18 @@ echo "[vox] rttm files: $(ls "$DEST/rttm" | wc -l | tr -d ' ')"
 
 for sp in $SPLITS; do
   zip="$DEST/_tmp/voxconverse_${sp}_wav.zip"
-  echo "[vox] $sp audio zip..."
-  curl -fsSL --retry 3 -o "$zip" "$AUDIO_BASE/voxconverse_${sp}_wav.zip"
+  url="$AUDIO_BASE/voxconverse_${sp}_wav.zip"
+  echo "[vox] $sp audio zip (resumable; KAIST mirror drops mid-transfer)..."
+  # The mirror frequently closes the connection mid-stream (curl exit 18). Resume the
+  # partial with -C - until the local size reaches the server's Content-Length.
+  target="$(curl -fsSLI "$url" 2>/dev/null | awk 'tolower($1)=="content-length:"{print $2}' | tr -d '\r' | tail -1)"
+  for _ in $(seq 1 60); do
+    have=$(stat -f%z "$zip" 2>/dev/null || stat -c%s "$zip" 2>/dev/null || echo 0)
+    if [ -n "$target" ] && [ "$have" -ge "$target" ] 2>/dev/null; then break; fi
+    curl -fsSL -C - --retry 8 --retry-delay 3 --connect-timeout 30 --speed-time 60 --speed-limit 1024 \
+         -o "$zip" "$url" && [ -z "$target" ] && break
+    sleep 2
+  done
   echo "[vox] $sp extracting..."
   unzip -oq "$zip" -d "$DEST/_tmp/${sp}_extract"
   # zips extract to .../audio/<id>.wav — flatten into data/voxconverse/audio/
