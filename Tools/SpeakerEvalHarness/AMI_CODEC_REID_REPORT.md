@@ -25,11 +25,12 @@ Grid: consolidation none × match {0.40 … 0.70}. Re-ID scoring on (AMI ids rec
 **Compression does NOT want a lower match threshold — the opposite.** It holds at ~0.60 or rises,
 because codec degradation inflates the *different-speaker* similarity band (strangers start looking
 alike: 0.28 → 0.60) while same-speaker similarity stays flat. Lowering toward 0.50 would **increase**
-false positives, not reduce them. The match threshold is the **weakest** lever. The two real levers for
-fewer false positives are (0) **mean-centering embeddings before matching** — newly proven here to undo
-nearly all the codec damage essentially for free — and (1) **compression-robust embeddings + a
-multi-party diarizer**, since the diarizer's under-segmentation is the dominant error source at every
-compression level.
+false positives, not reduce them. The match threshold is the **weakest** lever. The one lever with real
+headroom is the **diarizer**: ~28 of 30 trapped speakers are fused *within a meeting* before matching
+ever runs, so the dominant false-positive source is upstream and untouchable by any matcher-side knob.
+A matcher-side follow-up (§3a) shows **mean-centering does *not* reduce downstream false positives** — it
+only un-collapses mega-profiles on heavy codecs (a fragmentation effect), and no online form is deployable.
+Pair the diarizer fix with compression-robust embeddings for the smaller cross-meeting tail.
 
 **🟢 GREEN.** The eval ran clean, the control reproduces SCALEUP exactly, the headline survived
 adversarial re-derivation under three threshold definitions, and the degradation ordering held in 8/8
@@ -98,10 +99,45 @@ the codec injects into every embedding, whose magnitude grows with bitrate loss.
 After centering, all six arms land in a tight **0.77–0.81** band — the codec ordering disappears and
 opus8k ties clean. The different-speaker band drops to ≈ −0.04 (uncorrelated) for every arm.
 
-**Implication:** the embeddings still carry speaker identity even at Opus 8k. A *fixed global cosine
-threshold* fails because of a removable mean-shift — so **running / per-source mean-centering before
-matching recovers near-clean discriminability without retraining the model.** (Proven on the bands;
-gate on a matcher-side arm before shipping.)
+**Implication (band level):** the embeddings still carry speaker identity even at Opus 8k — the codec adds
+a *removable* shared mean-shift, not irrecoverable loss. **But this is a statement about the embedding
+bands, not the matcher.** We then tested whether it translates into fewer downstream false positives by
+replaying centered embeddings through the real matcher — **it does not** (§3a). Read §3a before treating
+mean-centering as a fix.
+
+## 3a. Follow-up: does centering actually reduce false positives through the matcher? **No.**
+
+We applied mean-centering to the cached dump embeddings and replayed them through the real clusterer + DB
+matcher (modes: `normonly` control, `global` oracle, `running`/`frozen` online; measurement only, no app
+code). Cleanly recomputed precision metrics (mass-weighted, collapse-robust) overturn the optimistic read:
+
+- **At profile-count-matched operating points, centering does not move the precision frontier.** Merge-
+  contamination (`fp_mass`) is within ±0.02 of baseline on clean/opus12k/g711u (clean −0.022, **opus12k
+  +0.011 — slightly *worse***, g711u −0.031), and **every `fp_mass` drop is paid for by a near-equal
+  `fn_mass` rise** — it converts merge errors into split errors (collapse → fragmentation), not removing
+  error. Mean best-profile recall falls in every arm; clean 1:1 identity recovery (`iso1:1`) barely moves
+  (Δ +1/−3/+1/+2) and never approaches 32. Baseline and `global` ride the **same fp-vs-profiles curve** —
+  `global` just slides the operating point rightward to more profiles.
+- **The only genuine effect is un-collapsing mega-profiles** on heavy codecs (opus8k baseline survives on
+  5 profiles, `fp_mass` up to 0.87 → `global` ~20 profiles). That restores band separation and a countable
+  profile set; it does **not** recover clean identities (people-trapped stays ~30/32 through the un-collapse).
+- **The residual is a within-meeting diarizer floor centering cannot touch.** Centering only changes
+  embedding vectors, never the diarizer's clusters/timings (verified byte-for-byte; `normonly` ≡ baseline).
+  **~75–88 % of fused pairs and ~28 of ~30 trapped speakers are speakers the diarizer co-clustered inside a
+  single meeting** — only ~2 speakers/arm are matcher-side (cross-meeting), and `global` leaves that thin
+  tail flat (clean 8→8). A matcher-free floor of ~28–32 trapped speakers exists on **every** arm before any
+  matching runs.
+- **No deployable online estimator approaches the oracle.** The oracle `global` mean averages over all 32
+  meetings' speakers, cancelling content and leaving only the codec direction — a property no causal window
+  has until it has effectively seen everything. Best online variant (running EMA α=0.005) recovers ~71 % of
+  the band-sep gain on opus12k but ~4 % on opus8k and still over-fragments; the original α=0.05 (~20-segment
+  window) tracks the current speaker and destroys separation; frozen-warmup (calibrate on meeting 1) matches
+  the oracle direction (cos ~0.8) but is too noisy and under-merges. A real fix needs **out-of-band per-codec
+  calibration**, not live-stream estimation.
+
+**Correction to the lever ranking below:** "mean-center embeddings before matching" is **not** a precision
+lever and is **downgraded** — it is a narrow *offline anti-collapse* remedy for heavy codecs only. The
+dominant ceiling is the diarizer's within-meeting co-clustering.
 
 ## 4. Diarizer & DER — the bottleneck, and the "1→9" fear
 
@@ -145,23 +181,28 @@ raw `false_merge.count` is misleading at low thresholds because the DB collapses
 at Opus 8k, lowering to 0.50 fuses 32 people into **3 profiles**. The honest measure is identity collapse /
 people-trapped, which is worse at lower thresholds.)
 
+*(Ranking revised after the §3a matcher experiment — mean-centering is demoted; the diarizer is promoted.)*
+
 | # | Lever | Measured justification | Status |
 |---|---|---|---|
-| **0** | **Mean-center embeddings before matching** | Restores separation to 0.77–0.81 on *every* arm incl. opus8k; diff band → −0.04 | **cheapest real win**; proven on bands, gate on a matcher-side arm |
-| 1 | **Compression-robust / codec-augmented embeddings** | Root cause = diff band rising 0.28 → 0.60; FM pressure 5 % → 53 % | highest durable impact; fine-tune WeSpeaker with Opus/G.711 augmentation |
-| 2 | **Fix the under-segmenting diarizer** | confusion = 68 % of DER even on clean; clusters/true < 1 everywhere; confusion is 100 % upstream | the *current* bottleneck even on clean audio |
-| 3 | **Quality-adaptive threshold RAISE on degraded audio** | optimal X rises with compression (0.60 → 0.65–0.70) | cheap, real, modest ceiling — mitigates, doesn't fix |
-| 4 | **Pre-embedding denoise / bandwidth-extension** | motivated by the shared-coloration mechanism | **UNVALIDATED — no arm run**; gate behind a measured BWE arm |
-| 5 | **Global match-threshold tuning** | doesn't drop to 0.50; clean 0.60, all compressed ≥ 0.60; no clean win | **weakest lever** — the one people reach for first |
+| **1** | **Fix the diarizer's within-meeting co-clustering** | ~28/30 trapped speakers + 75–88 % of fused pairs are within-meeting diarizer co-clusters; confusion = 68 % of DER even on clean; clusters/true < 1 everywhere; matcher-free floor ~28–32 trapped | **the only lever with headroom** on real false positives; nothing matcher-side moves it |
+| 2 | **Compression-robust / codec-augmented embeddings** | root cause of the *cross-meeting* tail = diff band rising 0.28 → 0.60; FM pressure 5 % → 53 % | durable fix for the (smaller) matcher-side tail; fine-tune WeSpeaker with Opus/G.711 augmentation |
+| 3 | **Quality-adaptive threshold tuning** | moves you *along* the fp-vs-profiles frontier; optimal X holds/rises with compression | honest precision/fragmentation trade — no free lunch; never *lower* it |
+| 4 | **Offline (oracle) mean-centering** | restores band separation to 0.77–0.81 and un-collapses mega-profiles on heavy codecs | **narrow anti-collapse use only — NOT a precision lever** (§3a: Δfp ≤ 0.02 at matched profile count; fn rises in lockstep) |
+| 5 | **Pre-embedding denoise / bandwidth-extension** | motivated by the shared-coloration mechanism | **UNVALIDATED — no arm run**; gate behind a measured BWE arm |
+| 6 | **Online running-EMA centering** | best variant α=0.005 recovers ~71 %/4 % of oracle band-sep, over-fragments | **not deployable as-is**; needs out-of-band per-codec calibration |
+| 7 | **Lowering the global match threshold** | doesn't drop to 0.50; lowering collapses identities (opus8k → 3 profiles) | **actively harmful** on compressed audio |
 
 ## 7. Recommendation for production
 
 - **Keep the global match threshold at 0.60** (0.62–0.65 if you weight re-ID over false-merge). **Do not
   lower it.** Add a quality-adaptive **raise to 0.65–0.70** on detected narrowband / low-bitrate sources.
-- **Invest in levers 0–2, not the threshold.** Mean-centering is a near-free first step; codec-augmented
-  embeddings + a multi-party/compression-tuned diarizer are the durable fixes.
-- Opus 8k / narrowband telephony is **structurally unrecoverable by threshold tuning alone** — only
-  centering + better embeddings move it.
+- **The one lever with real headroom is the diarizer** — reducing within-meeting speaker co-clustering is
+  the only thing that moves the ~28/30 people-trapped floor. Pair it with codec-augmented embeddings for the
+  cross-meeting tail. **Do not rely on mean-centering as a precision fix** (§3a) — it only un-collapses
+  mega-profiles on heavy codecs and is not deployable online.
+- Opus 8k / narrowband telephony is **structurally unrecoverable by matcher-side tuning** (threshold *or*
+  centering) — it needs a better diarizer + embeddings.
 
 ## 8. What this eval cannot justify
 
@@ -171,8 +212,8 @@ people-trapped, which is worse at lower thresholds.)
   difficulty.
 - **Any denoise / bandwidth-extension gain** — no such arm was run (lever 4 is a hypothesis).
 - **Highest-value next experiment:** a small **labelled real Zoom/Meet/Teams corpus** with recurring
-  identities, plus a **denoise/BWE front-end arm** on the existing opus8k/g711u dumps (promotes levers 0
-  and 4 from hypothesis to measurement).
+  identities, plus — most importantly — a **diarizer arm** (a multi-party / compression-tuned segmenter) to
+  attack the within-meeting co-clustering floor that §3a shows is the real ceiling.
 
 ## Reproduce
 
@@ -184,5 +225,14 @@ python3 scripts/aggregate_codec_arms.py --out-md data/eval/AMI_CODEC_SWEEP.md   
 python3 scripts/recompute_bands_verify.py    # independent band recompute + mean-centering test
 python3 scripts/jackknife_series_bands.py    # leave-one-series-out robustness
 python3 scripts/bootstrap_series_bands.py    # paired cluster bootstrap (ordering)
+
+# §3a mean-centering matcher experiment
+ARMS="clean opus24k opus16k opus12k opus8k g711u" MODES="normonly global running" \
+  bash scripts/run_centering_experiment.sh     # center dumps -> replay real matcher -> score
+python3 scripts/compare_centering.py --out-md data/eval/CENTERING_COMPARE.md   # people-trapped view
+python3 scripts/center_purity_analysis.py       # collapse-robust precision frontier (fp_mass/fn_mass)
+python3 scripts/q3_attribution.py ; python3 scripts/q3_floor.py   # within-meeting diarizer floor
+bash scripts/dev/run_online_centering_sweep.sh  # alpha-sweep + frozen-warmup deployability test
 ```
 All `data/` artifacts are gitignored. Re-ID uses AMI's recurring participant ids (no `--per-file-ids`).
+`scripts/center_dumps.py` modes: normonly (control) · global (oracle) · running (online EMA) · frozen (warmup).
