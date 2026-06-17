@@ -91,7 +91,9 @@ final class MeetingOverlayTooltipView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 7
         layer?.masksToBounds = true
-        layer?.backgroundColor = NSColor(calibratedWhite: 0.10, alpha: 0.98).cgColor
+        layer?.backgroundColor = AccessibilityDisplayPolicy.backdropColor(
+            NSColor(calibratedWhite: 0.10, alpha: 0.98)
+        ).cgColor
         layer?.borderWidth = 0.5
         layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
 
@@ -200,7 +202,7 @@ final class MeetingOverlayRootView: NSView {
         wantsLayer = true
         layer?.cornerRadius = MeetingOverlayTokens.cornerRadius
         layer?.masksToBounds = true
-        layer?.backgroundColor = MeetingOverlayTokens.panelBg.cgColor
+        layer?.backgroundColor = AccessibilityDisplayPolicy.backdropColor(MeetingOverlayTokens.panelBg).cgColor
         layer?.borderWidth = 0.5
         layer?.borderColor = MeetingOverlayTokens.panelStroke.cgColor
 
@@ -2495,7 +2497,7 @@ final class MeetingOverlayController: NSObject {
         }
 
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.20
+            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.20)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             panel.animator().setFrame(target, display: true)
         }

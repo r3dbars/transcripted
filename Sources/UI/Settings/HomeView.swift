@@ -754,6 +754,7 @@ struct HomeRowActionButtons: View {
         }
         .buttonStyle(SettingsHoverButtonStyle(cornerRadius: 7))
         .help(help)
+        .accessibilityLabel(Text(help))
         .accessibilityIdentifier("transcripted.home.row.copy")
     }
 }
@@ -2228,6 +2229,7 @@ private struct HomePodcastPlayerButton: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.42 : 1)
         .help(help)
+        .accessibilityLabel(Text(help))
         .accessibilityIdentifier(automationIdentifier)
     }
 

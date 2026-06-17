@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject private var sttRouter: STTRouter
     @ObservedObject private var meetingSession: MeetingSessionController
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
@@ -121,7 +122,14 @@ struct TranscriptedSettingsView: View {
                     settingsPagesToggle
                     settingsSidebarFooter
                 }
-                .background(.thinMaterial)
+                .background {
+                    // Solid backdrop when the user opts into Reduce Transparency.
+                    if reduceTransparency {
+                        Color(nsColor: .windowBackgroundColor)
+                    } else {
+                        Rectangle().fill(.thinMaterial)
+                    }
+                }
             }
         } detail: {
             ZStack {

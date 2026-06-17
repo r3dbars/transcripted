@@ -123,15 +123,17 @@ class FloatingOverlayController {
             defer: true
         )
 
-        // Glassmorphism: NSVisualEffectView behind content
+        // Glassmorphism: NSVisualEffectView behind content. Under Reduce
+        // Transparency we drop the live blur and fall back to a solid backdrop.
+        let reduceTransparency = AccessibilityDisplayPolicy.reduceTransparency
         let blurView = NSVisualEffectView()
         blurView.appearance = NSAppearance(named: .darkAqua)
         blurView.material = .underWindowBackground
         blurView.blendingMode = .behindWindow
-        blurView.state = .active
+        blurView.state = reduceTransparency ? .inactive : .active
         blurView.wantsLayer = true
         blurView.layer?.cornerRadius = OverlayTokens.cornerRadius
-        blurView.layer?.backgroundColor = OverlayTokens.panelBg.cgColor
+        blurView.layer?.backgroundColor = AccessibilityDisplayPolicy.backdropColor(OverlayTokens.panelBg).cgColor
         blurView.layer?.borderWidth = 1
         blurView.layer?.borderColor = OverlayTokens.panelStroke.cgColor
         blurView.frame = panel.contentView?.bounds ?? .zero
@@ -317,14 +319,17 @@ class FloatingOverlayController {
         panel.orderFrontRegardless()
 
         if !isCursorMiniPanelMode, let contentLayer = panel.contentView?.layer {
-            let spring = CASpringAnimation(keyPath: "transform.scale")
-            spring.fromValue = 0.88
-            spring.toValue = 1.0
-            spring.damping = 18
-            spring.stiffness = 280
-            spring.initialVelocity = 3
-            spring.duration = spring.settlingDuration
-            contentLayer.add(spring, forKey: "entranceScale")
+            // Skip the entrance spring entirely under Reduce Motion.
+            if !AccessibilityDisplayPolicy.reduceMotion {
+                let spring = CASpringAnimation(keyPath: "transform.scale")
+                spring.fromValue = 0.88
+                spring.toValue = 1.0
+                spring.damping = 18
+                spring.stiffness = 280
+                spring.initialVelocity = 3
+                spring.duration = spring.settlingDuration
+                contentLayer.add(spring, forKey: "entranceScale")
+            }
         }
 
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -395,7 +400,7 @@ class FloatingOverlayController {
             }
         })
 
-        if let contentLayer = panel.contentView?.layer {
+        if !AccessibilityDisplayPolicy.reduceMotion, let contentLayer = panel.contentView?.layer {
             let shrink = CABasicAnimation(keyPath: "transform.scale")
             shrink.fromValue = 1.0
             shrink.toValue = 0.93
