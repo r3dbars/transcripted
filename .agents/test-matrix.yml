@@ -175,6 +175,14 @@ rules:
       - "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
 
   - paths:
+      - "scripts/ops/speaker-naming-simulator.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/speaker-naming-simulator.py"
+      - "scripts/ops/speaker-naming-simulator.py"
+      - "scripts/ops/speaker-naming-simulator.py --sweep"
+
+  - paths:
       - "scripts/ops/dictation-stop-autoeval.sh"
       - "scripts/ops/dictation-recovery-autoeval.rb"
       - "docs/autoeval-dictation-stop-speed-*.md"
@@ -269,6 +277,21 @@ rules:
       - "Tools/TranscriptedQA/**"
     checks:
       - "swift test --package-path Tools/TranscriptedQA"
+
+  - paths:
+      - "Tools/SpeakerEvalHarness/**"
+      - "scripts/download_ami.sh"
+      - "scripts/run_speaker_eval.sh"
+      - "scripts/score_speaker_eval.py"
+      - "scripts/aggregate_sweep.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/download_ami.sh"
+      - "bash -n scripts/run_speaker_eval.sh"
+      - "python3 -m py_compile scripts/score_speaker_eval.py"
+      - "python3 -m py_compile scripts/aggregate_sweep.py"
+      - "bash build-deps.sh --force"
+      - "swift build --package-path Tools/SpeakerEvalHarness"
 
   - paths:
       - "README.md"

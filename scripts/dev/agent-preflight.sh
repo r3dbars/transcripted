@@ -210,6 +210,13 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
         fi
 
+        if matches_any "$path" "scripts/ops/speaker-naming-simulator.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/speaker-naming-simulator.py"
+            add_command "scripts/ops/speaker-naming-simulator.py"
+            add_command "scripts/ops/speaker-naming-simulator.py --sweep"
+        fi
+
         if matches_any "$path" "scripts/ops/dictation-stop-autoeval.sh" "scripts/ops/dictation-recovery-autoeval.rb" "docs/autoeval-dictation-stop-speed-*.md" "docs/autoeval-dictation-recovery-time-*.md"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n scripts/ops/dictation-stop-autoeval.sh"
@@ -260,6 +267,16 @@ if [ -n "$changed_paths" ]; then
 
         if matches_any "$path" "Tools/TranscriptedQA/*"; then
             add_command "swift test --package-path Tools/TranscriptedQA"
+        fi
+
+        if matches_any "$path" "Tools/SpeakerEvalHarness/*" "Tools/SpeakerEvalHarness/*/*" "Tools/SpeakerEvalHarness/*/*/*" "scripts/download_ami.sh" "scripts/run_speaker_eval.sh" "scripts/score_speaker_eval.py" "scripts/aggregate_sweep.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/download_ami.sh"
+            add_command "bash -n scripts/run_speaker_eval.sh"
+            add_command "python3 -m py_compile scripts/score_speaker_eval.py"
+            add_command "python3 -m py_compile scripts/aggregate_sweep.py"
+            add_command "bash build-deps.sh --force"
+            add_command "swift build --package-path Tools/SpeakerEvalHarness"
         fi
 
         if matches_any "$path" "build-beta.sh" "scripts/entrypoints/build-beta.sh" "scripts/release/*" "docs/release-packaging.md" "docs/sparkle-updates.md" "Casks/*" "docs/appcast.xml"; then

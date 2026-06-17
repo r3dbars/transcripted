@@ -71,7 +71,7 @@ Override the grids via env: `SERIES`, `CONSOLIDATION`, `MATCH`, `COLLAR`.
 | `../../scripts/run_speaker_eval.sh` | end-to-end driver |
 | `../../scripts/score_speaker_eval.py` | DER + fragmentation + false-merge + re-ID scorer |
 | `../../scripts/aggregate_sweep.py` | sweep table + closest-to-ideal picker |
-| `../../data/ami/download.sh` | fetch the AMI subset |
+| `../../scripts/download_ami.sh` | fetch the AMI subset |
 
 ## Caveats
 

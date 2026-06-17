@@ -8,11 +8,13 @@
 - `TranscriptedCLI/` — local context and offline diarization CLI
 - `TranscriptedMCP/` — read-only MCP server for saved meetings and dictations
 - `TranscriptedQA/` — artifact validation and QA CLI
+- `SpeakerEvalHarness/` — headless AMI speaker-naming eval harness for diarization, embedding, clustering, and cross-meeting match sweeps
 
 ## Read first
 
 Each package has its own local `CLAUDE.md` and `Package.swift`.
 
+- `Tools/SpeakerEvalHarness/CLAUDE.md`
 - `Tools/TranscriptedCaptureKit/CLAUDE.md`
 - `Tools/TranscriptedCLI/CLAUDE.md`
 - `Tools/TranscriptedMCP/CLAUDE.md`

@@ -36,6 +36,10 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
 - `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark
+- `scripts/download_ami.sh` — fetch the gitignored AMI ES2002 audio/RTTM subset used by `Tools/SpeakerEvalHarness`
+- `scripts/run_speaker_eval.sh` — build and run the AMI speaker-naming sweep, writing local reports under `data/eval/`
+- `scripts/score_speaker_eval.py` — score speaker-eval hypotheses against AMI RTTM labels without printing private transcript text
+- `scripts/aggregate_sweep.py` — aggregate speaker-eval sweep scores and highlight closest-to-target threshold combinations
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
@@ -111,6 +115,10 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Corpus compare usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare --corpus-ids meeting-0024,meeting-0025`
   - Live usage: `bash scripts/ops/transcripted-qa-bench.sh --mode live`
   - Writes local evidence under `/tmp/transcripted-qa-bench/<run-id>/`
+- `scripts/ops/speaker-naming-simulator.py` — deterministic synthetic speaker-review simulator for tuning `EmbeddingClusterer` same-voice consolidation without audio or private transcripts
+  - Usage: `scripts/ops/speaker-naming-simulator.py`
+  - Sweep usage: `scripts/ops/speaker-naming-simulator.py --sweep`
+  - JSON usage: `scripts/ops/speaker-naming-simulator.py --json`
 - `scripts/ops/validate-meeting-corpus.py` — local-only validator for the private meeting corpus in `~/Downloads/meeting-corpus`; parses metadata, audio presence/duration, and Zoom caption structure without printing transcript text
 - `scripts/ops/compare-meeting-corpus.py` — local-only comparator for Transcripted Markdown against private Zoom caption truth; reports redacted recall and speaker-label scores without printing transcript text or speaker names
 - `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`
