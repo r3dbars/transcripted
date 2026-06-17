@@ -60,6 +60,25 @@ enum ParakeetDeviceRecoveryFailurePolicy {
             schedulePrewarmRetry: true
         )
     }
+
+    /// Choose how to recover the audio graph after a device-change rewarm fails.
+    ///
+    /// A rewarm fails when the recovery snapshot throws. The only non-stale throw
+    /// it can produce is a timed-out audio-engine operation — which means the
+    /// serial `audioEngineQueue` is wedged behind a CoreAudio call that never
+    /// returned (the classic AirPods/Bluetooth route-switch hang). Queuing a
+    /// `rebuildAudioEngine` on that same blocked queue would never run, so the
+    /// recovery task hangs forever and the engine stays dead until the user
+    /// force-quits (surfacing as `app.unclean_shutdown_detected`).
+    ///
+    /// When the queue is blocked, abandon the wedged graph instead: swap in a
+    /// fresh `AVAudioEngine` and a fresh queue synchronously, mirroring the
+    /// recovery-timeout path (`ParakeetDeviceRecoveryTimeoutPolicy`) and the
+    /// start-recording timeout path. Non-blocked failures can still rebuild on
+    /// the existing queue.
+    static func rebuildStrategy(audioEngineQueueBlocked: Bool) -> ParakeetAudioEngineRebuildStrategy {
+        audioEngineQueueBlocked ? .abandonBlockedAudioGraph : .queuedOnAudioEngineQueue
+    }
 }
 
 enum ParakeetDeviceRecoveryReadinessPolicy {
