@@ -178,6 +178,44 @@ func testMeetingAudioStorageManager() async {
         assertFalse(FileManager.default.fileExists(atPath: systemWAV.path), "raw system WAV should still follow normal compression")
     }
 
+    await runSuite("MeetingAudioStorageManager reports uncompressed playback mix backfills") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let transcriptURL = try! makeTranscript(named: "Compressed Split Backfill", in: directory, ageDays: 1)
+        let audioDirectory = makeAudioDirectory(for: transcriptURL)
+        try! Data("m4a".utf8).write(to: audioDirectory.appendingPathComponent("microphone.m4a"))
+        try! Data("m4a".utf8).write(to: audioDirectory.appendingPathComponent("system_audio.m4a"))
+
+        let result = await MeetingAudioStorageManager.processExistingRetainedAudio(
+            in: directory,
+            retentionWindow: .never,
+            converter: FakeMeetingAudioConverter(shouldFail: true),
+            validator: FakeMeetingAudioValidator(),
+            playbackMixer: FakeMeetingAudioPlaybackMixer()
+        )
+
+        assertEqual(
+            result,
+            MeetingAudioStorageMaintenanceResult(
+                scannedDirectories: 1,
+                convertedFiles: 0,
+                prunedDirectories: 0,
+                createdPlaybackMixes: 1
+            ),
+            "backfill should report playback mix creation even when later M4A compression fails"
+        )
+        assertTrue(result.changedArtifacts, "playback mix creation should trigger Home cache refresh")
+        assertTrue(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("playback.wav").path),
+            "created playback WAV should remain usable when compression fails"
+        )
+        assertFalse(
+            FileManager.default.fileExists(atPath: audioDirectory.appendingPathComponent("playback.m4a").path),
+            "failed compression should not leave a fake M4A playback file"
+        )
+    }
+
     await runSuite("MeetingAudioStorageManager falls back to usable compressed split audio for playback mix") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -4339,9 +4339,9 @@ struct TranscriptedSettingsView: View {
                 in: MeetingStoragePaths.transcriptsFolder,
                 retentionWindow: window
             )
-            // A retention change can recompress/prune retained audio across the
+            // A retention change can create/recompress/prune retained audio across the
             // library; signal Home so cached audio URLs re-resolve from disk.
-            if result.convertedFiles > 0 || result.prunedDirectories > 0 {
+            if result.changedArtifacts {
                 await MainActor.run {
                     CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
                 }
