@@ -71,6 +71,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
     @State private var homeShowsAllFailedMeetings = false
     @State private var homeShowsStatsDetails = false
+    @State private var homeMeetingSearchQuery = ""
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State private var homeLocalSummaryJobIDs: Set<String> = []
@@ -535,10 +536,23 @@ struct TranscriptedSettingsView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            if homeMeetingSearchIsAvailable {
+                HomeMeetingSearchField(query: $homeMeetingSearchQuery)
+                    .padding(.top, 6)
+            }
+
             homeMeetingsListSection
-                .padding(.top, 6)
+                .padding(.top, homeMeetingSearchIsAvailable ? 0 : 6)
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
+    }
+
+    /// Show the meetings filter once there is at least one loaded meeting to
+    /// filter, or while a query is active so the user can always clear it.
+    private var homeMeetingSearchIsAvailable: Bool {
+        !homeMeetingSearchQuery.isEmpty
+            || !homeViewModel.meetingDaySections.isEmpty
+            || !meetingSession.failedMeetings.isEmpty
     }
 
     @ViewBuilder
@@ -587,7 +601,9 @@ struct TranscriptedSettingsView: View {
     private var homeMeetingsListSection: some View {
         HomeCaptureListSection(
             sections: homeMeetingDaySections,
-            emptyMessage: HomeCaptureListCopy.emptyMeetings,
+            emptyMessage: homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? HomeCaptureListCopy.emptyMeetings
+                : HomeCaptureListCopy.noMeetingMatches,
             isLoading: homeViewModel.isLoading,
             isLoadingMore: homeViewModel.isLoadingMore,
             canLoadMore: homeViewModel.canLoadMoreMeetings,
@@ -1589,14 +1605,40 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
-        let savedMeetings = homeViewModel.meetingDaySections.flatMap { section in
-            section.items.map(HomeMeetingListItem.saved)
-        }
-        let failedMeetings = meetingSession.failedMeetings.map(HomeMeetingListItem.failed)
+        let query = homeMeetingSearchQuery
+        let savedMeetings = homeViewModel.meetingDaySections
+            .flatMap { $0.items }
+            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+            .map(HomeMeetingListItem.saved)
+        let failedMeetings = meetingSession.failedMeetings
+            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+            .map(HomeMeetingListItem.failed)
         let items = (savedMeetings + failedMeetings)
             .sorted { $0.date > $1.date }
 
         return HomeViewModel.groupByDay(items, dateForItem: \.date)
+    }
+
+    /// Already-loaded text fields the meetings filter matches against. Kept to
+    /// metadata (title, generated title, summary, date) so filtering never
+    /// touches transcript bodies on disk.
+    private static func searchFields(for meeting: RecentMeetingItem) -> [String] {
+        var fields = [meeting.displayTitle, meeting.title]
+        if let summary = meeting.summaryPreview {
+            fields.append(summary.summary)
+            fields.append(contentsOf: summary.sections.flatMap { [$0.title, $0.text] })
+        }
+        fields.append(HomeMeetingListFilter.dateSearchText(for: meeting.date))
+        return fields
+    }
+
+    private static func searchFields(for meeting: MeetingSessionController.FailedMeetingItem) -> [String] {
+        [
+            meeting.title,
+            meeting.detail,
+            meeting.meta,
+            HomeMeetingListFilter.dateSearchText(for: meeting.timestamp)
+        ]
     }
 
     private var canRetryFailedMeetings: Bool {
