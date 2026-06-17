@@ -1629,11 +1629,61 @@ private struct HomeMeetingAudioControl: View {
 
 }
 
+// MARK: - Empty state
+
+/// Friendly first-run empty state for a capture list: a single line describing
+/// what the screen is for plus one clear primary action.
+struct HomeListEmptyState {
+    let symbolName: String
+    let title: String
+    let message: String
+    let actionTitle: String
+    let automationIdentifier: String
+    let action: () -> Void
+}
+
+private struct HomeEmptyStateView: View {
+    let state: HomeListEmptyState
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: state.symbolName)
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.tertiary)
+
+            VStack(spacing: 5) {
+                Text(state.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+
+                Text(state.message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 360)
+            }
+
+            Button(action: state.action) {
+                Text(state.actionTitle)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.top, 2)
+            .accessibilityIdentifier(state.automationIdentifier)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .padding(.horizontal, 16)
+    }
+}
+
 // MARK: - Day-grouped list
 
 struct HomeDayGroupedList<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
+    var emptyState: HomeListEmptyState? = nil
     let getID: (Item) -> AnyHashable
     var sectionSpacing: CGFloat = 12
     var headerSpacing: CGFloat = 2
@@ -1641,14 +1691,18 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 
     var body: some View {
         if sections.isEmpty {
-            HStack {
-                Text(emptyMessage)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
+            if let emptyState {
+                HomeEmptyStateView(state: emptyState)
+            } else {
+                HStack {
+                    Text(emptyMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 28)
+                .padding(.horizontal, 4)
             }
-            .padding(.vertical, 28)
-            .padding(.horizontal, 4)
         } else {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
@@ -1681,6 +1735,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 struct HomeCaptureListSection<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
+    var emptyState: HomeListEmptyState? = nil
     let isLoading: Bool
     let isLoadingMore: Bool
     let canLoadMore: Bool
@@ -1704,6 +1759,7 @@ struct HomeCaptureListSection<Item, Row: View>: View {
                 HomeDayGroupedList(
                     sections: sections,
                     emptyMessage: emptyMessage,
+                    emptyState: emptyState,
                     getID: getID,
                     sectionSpacing: 14,
                     headerSpacing: 2,
