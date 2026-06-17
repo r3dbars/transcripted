@@ -2948,8 +2948,14 @@ func testRepoCommandContract() {
         assertTrue(
             deleteBlock.contains("Task.detached(priority: .userInitiated)") &&
                 deleteBlock.contains("try HomeMeetingDeletion.delete(plan)") &&
-                deleteBlock.contains("_ = try await deletionTask.value"),
+                deleteBlock.contains("try await deletionTask.value"),
             "Home delete should run filesystem cleanup away from the main Settings UI path"
+        )
+        assertTrue(
+            deleteBlock.contains("result.removedTranscriptURLs.isEmpty")
+                && deleteBlock.contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
+                && deleteBlock.contains("presentHomeActionFailure("),
+            "a confirmed Home delete that removes nothing while the file is still on disk (stale path) should surface a failure instead of silently re-showing the row"
         )
         assertTrue(
             homeContents.contains("func removeVisibleMeeting(id: String)")

@@ -363,6 +363,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/HomeRootAlertPolicy.swift"
     "Sources/UI/Settings/HomeCanvasGreeting.swift"
     "Sources/UI/Shared/HomeMeetingDeletion.swift"
+    "Sources/UI/Shared/OwnFileResolver.swift"
     "Sources/UI/Shared/HomeMeetingRowActionTargets.swift"
     "Sources/UI/Shared/HomeMeetingRename.swift"
     "Sources/UI/Settings/HomeMeetingSummaryBetaPresentationPolicy.swift"
