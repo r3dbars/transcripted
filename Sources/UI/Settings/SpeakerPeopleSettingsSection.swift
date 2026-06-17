@@ -67,6 +67,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published var searchText: String = ""
     @Published private(set) var reviewQueueItems: [SpeakerPendingReviewItem] = []
     @Published private(set) var hasLoadedProfiles = false
+    /// Bumped to ask the "Search speakers" field to take focus (⌘F).
+    @Published private(set) var searchFocusRequestToken = 0
 
     private let speakerDatabase: SpeakerDatabase
     private let preferredClipsDirectory: URL
@@ -118,6 +120,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             return profile.id.uuidString.lowercased().contains(query)
         }
         return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(matches, duplicateIds: duplicateIds)
+    }
+
+    /// Asks the "Search speakers" field to take keyboard focus. Drives the ⌘F
+    /// "Find Speaker" menu command.
+    func requestSearchFocus() {
+        searchFocusRequestToken += 1
     }
 
     func refresh() {
@@ -1006,11 +1014,20 @@ private struct SpeakerDuplicateNameChip: View {
 
 private struct SpeakerSearchRow: View {
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             TextField("Search speakers", text: $model.searchText)
                 .textFieldStyle(.roundedBorder)
+                .focused($isSearchFocused)
+                // Fires on first appearance and whenever ⌘F bumps the token,
+                // so "Find Speaker" focuses the field whether or not the
+                // Speakers page was already open.
+                .task(id: model.searchFocusRequestToken) {
+                    guard model.searchFocusRequestToken > 0 else { return }
+                    isSearchFocused = true
+                }
 
             Button {
                 model.refresh()

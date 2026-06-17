@@ -89,6 +89,26 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Conventional ⌘ shortcut for the primary sidebar sections, surfaced in
+    /// the "Go" menu and as the sidebar row tooltip. `nil` for gear-gated
+    /// settings pages, which have no navigation shortcut.
+    var navigationShortcutKey: String? {
+        switch self {
+        case .home: return "1"
+        case .dictations: return "2"
+        case .people: return "3"
+        case .connectAgent: return "4"
+        default: return nil
+        }
+    }
+
+    /// Tooltip text for a sidebar row, including its navigation shortcut when
+    /// one exists (e.g. "Speakers  ⌘3").
+    var navigationHelp: String {
+        guard let key = navigationShortcutKey else { return summary }
+        return "\(title)  ⌘\(key)"
+    }
+
     var systemImage: String {
         switch self {
         case .home: return "house.fill"
