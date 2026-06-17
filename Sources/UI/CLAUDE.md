@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (75 Swift files)
+## Files (79 Swift files)
 
 ### Overlay/
 
@@ -89,8 +89,10 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
 - `Settings/SettingsContentLayoutPolicy.swift` — layout policy for compact settings content spacing and scroll behavior
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
+- `Settings/SpeakerNameAutocompleteField.swift` — SwiftUI `NSComboBox` wrapper that gives the Speakers screen's "Who is this?" field the same name autocomplete (via `SpeakerNameSelectionPolicy`) the post-meeting naming sheet uses
 - `Settings/SpeakerNamingSheet.swift` — sheet for reviewing speakers in a completed meeting, grouped into local room speakers vs remote participants, with a "Keep as You" escape hatch for local mic splits
 - `Settings/SpeakerPeopleSettingsSection.swift` — settings section and view model for the speakers surface: a voice-to-name queue grouped to one row per distinct voice, compact duplicate-merge suggestions, and a searchable all-speakers list with per-row play, rename, merge, and delete
+- `Settings/SpeakerVoiceRowPresentation.swift` — Foundation-pure presentation/policy for the voice-to-name rows: the play/pause toggle state machine, overflow-menu actions, and name-autocomplete data source, kept view-free for unit tests
 - `Settings/TranscriptedSettingsGeneralControls.swift` — shared General-page headings, grouped rows, disclosure rows, and info popovers
 - `Settings/TranscriptedOnboardingWindowController.swift` — dedicated first-launch window that hosts onboarding before users drop into the menubar flow
 - `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback, copy/send diagnostics) injected into the settings view
@@ -109,11 +111,13 @@ onboarding connect stage. Both keep one mental model:
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy
+- `Shared/HomeCaptureRefreshObserver.swift` — bridges `.meetingCaptureArtifactsDidChange` into a plain callback so Home's scan-time cache silently reloads its transcript/audio URLs after background recompression or transcript rename
 - `Shared/HomeMeetingDeletion.swift` — shared deletion service for Home meeting rows, including transcript, summary, and retained-audio cleanup
 - `Shared/HomeMeetingRename.swift` — renames an app-owned meeting from the Home preview's editable title: rewrites the `title:` frontmatter and body heading, then moves the transcript, retained audio, and summary sidecar to the canonical `YYYY-MM-dd <title>` stem via `MeetingArtifactRenamer`
 - `Shared/HomeMeetingRowActionTargets.swift` — resolves transcript and retained-audio Finder reveal targets for Home meeting row menu actions
 - `Shared/MeetingAudioArchiveResolver.swift` — resolves retained meeting-audio attachments that belong to a saved transcript for review playback
 - `Shared/MeetingAudioPlayback.swift` — shared play/pause/resume `NSSound`-backed controller for recent-meeting audio previews in Settings
+- `Shared/OwnFileResolver.swift` — single resilient resolver every Home/meeting own-file access routes through; tolerates post-scan file drift (WAV→M4A recompression, transcript/audio rename) for reveal-in-Finder and open/read/play, and fails loud instead of dead-clicking
 - `Shared/RecentCaptureScanners.swift` — `RecentMeetingsScanner` that loads recent meeting transcripts plus retained audio attachments for the Settings home page
 - `Shared/SpeakerClipPlayback.swift` — reusable audio-preview helper for persisted speaker sample clips
 - `Shared/SpeakerReviewQueueScanner.swift` — loads saved speaker-review queue items for the people settings and review flows
@@ -194,6 +198,7 @@ Relevant direct coverage:
 - `Tests/DictationSoundsTests.swift`
 - `Tests/FeedbackIssueBuilderTests.swift`
 - `Tests/HomeCanvasGreetingTests.swift`
+- `Tests/HomeCaptureRefreshTests.swift`
 - `Tests/HomePresentationTests.swift`
 - `Tests/HomeRootAlertPolicyTests.swift`
 - `Tests/HomeMeetingDeletionTests.swift`
@@ -206,12 +211,14 @@ Relevant direct coverage:
 - `Tests/MeetingDurationFormatterTests.swift`
 - `Tests/LiveTranscriptPlainTextRendererTests.swift`
 - `Tests/MeetingPillRestPolicyTests.swift`
+- `Tests/OwnFileResolverTests.swift`
 - `Tests/RecentCaptureScannersTests.swift`
 - `Tests/SettingsContentLayoutPolicyTests.swift`
 - `Tests/SettingsRecentCaptureRefreshPolicyTests.swift`
 - `Tests/AutoEnterDisplayNameResolverTests.swift`
 - `Tests/TypingTimeSavedFormatterTests.swift`
 - `Tests/SpeakerReviewQueueScannerTests.swift`
+- `Tests/SpeakerVoiceRowPresentationTests.swift`
 - `Tests/SupportDiagnosticsBundleTests.swift`
 - `Tests/UIAutomationSurfaceContractTests.swift`
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ui` for live AX smoke of first-run onboarding, menu bar, Home, Settings, and navigation
