@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor
 func testCaptureLibraryChangeBroadcaster() async {
-    await runSuite("CaptureLibraryChangeBroadcaster coalesces a burst into one debounced notification") {
+    runSuite("CaptureLibraryChangeBroadcaster coalesces a burst into one debounced notification") {
         let center = NotificationCenter()
         var capturedIDs: [[String]] = []
         let token = center.addObserver(
@@ -48,7 +48,7 @@ func testCaptureLibraryChangeBroadcaster() async {
         )
     }
 
-    await runSuite("CaptureLibraryChangeBroadcaster reports a library-wide change as empty ids") {
+    runSuite("CaptureLibraryChangeBroadcaster reports a library-wide change as empty ids") {
         let center = NotificationCenter()
         var capturedIDs: [[String]] = []
         let token = center.addObserver(
@@ -78,7 +78,7 @@ func testCaptureLibraryChangeBroadcaster() async {
         assertEqual(capturedIDs.first, [], "a library-wide change should carry an empty id list")
     }
 
-    await runSuite("CaptureLibraryChangeBroadcaster is idempotent with nothing pending") {
+    runSuite("CaptureLibraryChangeBroadcaster is idempotent with nothing pending") {
         let center = NotificationCenter()
         var postCount = 0
         let token = center.addObserver(
