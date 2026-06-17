@@ -4335,10 +4335,17 @@ struct TranscriptedSettingsView: View {
         trackSettingsAction("audio_retention_changed", page: .storage)
         AudioStoragePreferences.setDeleteAudioAfter(window)
         Task.detached(priority: .utility) {
-            await MeetingAudioStorageManager.processExistingRetainedAudio(
+            let result = await MeetingAudioStorageManager.processExistingRetainedAudio(
                 in: MeetingStoragePaths.transcriptsFolder,
                 retentionWindow: window
             )
+            // A retention change can recompress/prune retained audio across the
+            // library; signal Home so cached audio URLs re-resolve from disk.
+            if result.convertedFiles > 0 || result.prunedDirectories > 0 {
+                await MainActor.run {
+                    CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
+                }
+            }
         }
     }
 

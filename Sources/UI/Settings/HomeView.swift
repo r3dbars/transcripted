@@ -24,6 +24,27 @@ final class HomeViewModel: ObservableObject {
     private var dictationLimit = 10
     private var meetingLimit = 10
     private var didTrackActivationReturnProxy = false
+    private var captureRefreshObserver: HomeCaptureRefreshObserver?
+
+    init() {
+        // Background post-save work (WAV->M4A recompression, transcript rename)
+        // rewrites the files whose URLs this cache resolved at scan time. Re-resolve
+        // from disk whenever that happens so cached transcript/audio URLs never
+        // outlive the real files. The broadcaster is already debounced.
+        captureRefreshObserver = HomeCaptureRefreshObserver { _ in
+            Task { @MainActor [weak self] in
+                self?.refreshAfterCaptureArtifactsChanged()
+            }
+        }
+    }
+
+    /// Silent re-resolution of the currently visible captures after the on-disk
+    /// artifacts changed underneath the cache. Keeps the current paging window and
+    /// avoids flipping the loading spinners so a passive background refresh does
+    /// not flash the UI.
+    func refreshAfterCaptureArtifactsChanged() {
+        loadCurrentLimits(isInitialLoad: false, isSilent: true)
+    }
 
     // Settings Home must open instantly, even for users with thousands of dictations.
     // Keep the dashboard to a small recent slice and leave deep history to the dedicated pages/files.
@@ -82,11 +103,11 @@ final class HomeViewModel: ObservableObject {
         loadCurrentLimits(isInitialLoad: false)
     }
 
-    private func loadCurrentLimits(isInitialLoad: Bool) {
+    private func loadCurrentLimits(isInitialLoad: Bool, isSilent: Bool = false) {
         refreshTask?.cancel()
         refreshGeneration += 1
-        isLoading = isInitialLoad
-        isLoadingMore = !isInitialLoad
+        isLoading = isInitialLoad && !isSilent
+        isLoadingMore = !isInitialLoad && !isSilent
         let generation = refreshGeneration
         let requestedDictationLimit = dictationLimit
         let requestedMeetingLimit = meetingLimit
