@@ -137,6 +137,19 @@ func testSentryPayloadSanitizer() {
         assertNil(sanitized["error"], "free-form runtime errors should still be dropped")
     }
 
+    runSuite("SentryPayloadSanitizer.sanitizeCrashRuntimeTags exposes only reviewed workflow state") {
+        let sanitized = SentryPayloadSanitizer.sanitizeCrashRuntimeTags([
+            "last_event": "dictation_transcribing",
+            "session_kind": "dictation",
+            "session_stage": "transcribing",
+            "transcript_path": "/Users/redbars/Library/Application Support/Transcripted/captures/meetings/private.md",
+            "error": "private raw failure",
+        ])
+
+        assertEqual(sanitized["last_event"], "dictation_transcribing", "last runtime event should be queryable as a crash tag")
+        assertEqual(Set(sanitized.keys), ["last_event"], "crash runtime tags should stay limited to one reviewed workflow dimension")
+    }
+
     runSuite("SentryPayloadSanitizer.sanitizeText redacts emails hostnames and non-home paths") {
         let input = "Contact me at person@example.com from Redbarss-MacBook-Pro.local and inspect /private/var/folders/demo/file.txt"
         let sanitized = SentryPayloadSanitizer.sanitizeText(input)

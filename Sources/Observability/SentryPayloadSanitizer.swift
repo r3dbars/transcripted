@@ -2,6 +2,9 @@ import Foundation
 
 enum SentryPayloadSanitizer {
     private static let maxValueLength = 240
+    private static let crashRuntimeTagKeys: Set<String> = [
+        "last_event",
+    ]
     private static let explicitlySafeKeys: Set<String> = [
         "mic_file_available",
         "system_file_available",
@@ -55,6 +58,11 @@ enum SentryPayloadSanitizer {
         }
 
         return sanitized
+    }
+
+    static func sanitizeCrashRuntimeTags(_ context: [String: String]) -> [String: String] {
+        let tagCandidates = context.filter { crashRuntimeTagKeys.contains($0.key) }
+        return sanitizeTags(tagCandidates)
     }
 
     static func sanitizeAnyDictionary(_ dictionary: [String: Any]) -> [String: Any] {
