@@ -12,6 +12,15 @@ appcast for in-app Sparkle updates is at
 Entries marked **[CRITICAL]** are flagged as `sparkle:criticalUpdate` and are
 force-installed by Sparkle so existing users recover from a regression.
 
+## [Unreleased]
+
+### Added
+- Keyboard shortcuts in the macOS menu bar for the top daily actions: Start
+  Dictation (⌘D), Start / Stop Meeting Recording (⌘R), Transcribe Audio File
+  (⌘O), jump to Home/Dictations/Speakers/Agent (⌘1–⌘4), and Find Speaker (⌘F,
+  focuses the speaker search). Sidebar rows now show their shortcut as a
+  tooltip. Existing recordable dictation/meeting triggers are unchanged.
+
 ## [1.1.47] - 2026-06-08
 
 ### Added

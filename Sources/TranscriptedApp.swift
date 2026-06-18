@@ -16,6 +16,9 @@ struct TranscriptedApp: App {
 
     var body: some Scene {
         Settings { EmptyView() }
+            .commands {
+                TranscriptedMenuCommands(appDelegate: appDelegate)
+            }
     }
 }
 
@@ -831,6 +834,39 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             properties["backoff_kind"] = backoffKind.rawValue
         }
         return properties
+    }
+
+    // MARK: - Menu Bar Commands
+
+    /// Thin entry points for `TranscriptedMenuCommands`. They live here (rather
+    /// than in an extension) so they can reuse the existing private action
+    /// helpers. Each one mirrors a path users already have via the popover, the
+    /// sidebar, or a recordable trigger — nothing here remaps those triggers.
+
+    func menuStartDictation() {
+        startDictationFromSettings()
+    }
+
+    func menuToggleMeetingRecording() {
+        guard #available(macOS 14.0, *) else {
+            NSSound.beep()
+            return
+        }
+        // Same start/stop toggle the meeting trigger uses, so ⌘R behaves like
+        // the recordable meeting shortcut.
+        meetingOverlayController.toggleFromHotkey()
+    }
+
+    func menuImportAudio() {
+        importAudioFileFromSettings()
+    }
+
+    func menuOpenPage(_ page: TranscriptedSettingsPage) {
+        showSettingsWindow(page: page, source: "menu_command")
+    }
+
+    func menuFindSpeaker() {
+        settingsWindowController.focusSpeakerSearch(source: "menu_command")
     }
 
     // MARK: - NSPopoverDelegate

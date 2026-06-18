@@ -43,6 +43,7 @@ struct SettingsSidebarRow: View {
                 shadowRadius: 7
             )
             .accessibilityIdentifier(page.automationIdentifier)
+            .help(page.navigationHelp)
             .onHover { isHovering = $0 }
     }
 }
