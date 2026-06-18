@@ -101,8 +101,13 @@ risk category. Prefer **CnCeleb / in-house CAM++ checkpoints** to reduce it.
   inferred from GMACs/params, **not profiled on ANE.**
 - **Domain gap:** all numbers are **AMI 4-party in-room**; codec arms proxy call compression but **no real
   captured Zoom audio was tested.** Codec-robustness is the most transferable result; absolute DER is not.
-- **Known gaps:** ECAPA g711u not evaluable (extraction in flight); ReDimNet opus12k dip warrants one confirming
-  re-run.
+- **Known gaps:** ReDimNet opus12k dip warrants one confirming re-run. (ECAPA is now evaluated on all 6 arms —
+  g711u cov 0.797 / DER 0.281 / AUC 1.0, confirming it as a strong, fully-evaluable runner-up.)
+- **Negative control (validity):** x-vector (`spkrec-xvect-voxceleb`, a weaker model) was run as a control and
+  **does not beat WeSpeaker** — within-meeting DER 0.49–0.51 (worst of the field) on clean/opus8k/g711u. So the
+  bake-off is not "any model swap helps"; only genuinely strong models (ReDimNet, ECAPA) win. (Note x-vector
+  still has high cross-meeting AUC ~0.997 — coarse cross-call ID and fine within-meeting separation are
+  different capabilities; the strong models win on both.)
 
 ## 5. Recommended path to ship
 
