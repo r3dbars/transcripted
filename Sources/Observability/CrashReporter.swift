@@ -109,9 +109,13 @@ final class CrashReporter {
 
         let sanitizedContext = SentryPayloadSanitizer.sanitizeContext(context)
         guard !sanitizedContext.isEmpty else { return }
+        let sanitizedTags = SentryPayloadSanitizer.sanitizeCrashRuntimeTags(context)
 
         SentrySDK.configureScope { scope in
             scope.setContext(value: sanitizedContext, key: "runtime")
+            if !sanitizedTags.isEmpty {
+                scope.setTags(sanitizedTags)
+            }
         }
     }
 
