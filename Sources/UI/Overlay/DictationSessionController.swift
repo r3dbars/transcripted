@@ -841,7 +841,7 @@ class DictationSessionController: ObservableObject {
                       self.currentDictationSessionID == taskSessionID else { return }
                 guard appState.sttRouter.isModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
-                    overlayController.showError("Voice model failed to load")
+                    overlayController.showError("The voice model didn't load. Please try dictating again in a moment.")
                     isDictating = false
                     appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_unavailable")
                     return

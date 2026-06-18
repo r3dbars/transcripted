@@ -1488,7 +1488,7 @@ struct TranscriptedSettingsView: View {
         if !didClear {
             presentHomeActionFailure(
                 title: failureTitle,
-                message: "Transcripted could not update the failed-meeting queue. Check the capture folder, then try again."
+                message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again."
             )
         }
     }
