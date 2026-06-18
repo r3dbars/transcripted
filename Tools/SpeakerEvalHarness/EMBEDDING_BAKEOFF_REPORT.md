@@ -24,7 +24,37 @@ models. But "best accuracy" and "best to ship on-device" are **different answers
 win is **capped by a separate within-meeting consolidation knob** (`0.88`) that must be loosened next.
 
 **🟢 GREEN** — broad, statistically-robust win (opus8k 30/32 meetings, p=2.5e-7), verified end-to-end through
-the real matcher, with an honest shippability caveat.
+the real matcher.
+
+---
+
+## Update (2026-06-18): CAM++ benched — the shippable winner is now confirmed
+
+We subsequently ran **CAM++** and **ERes2Net** (Alibaba 3D-Speaker, via modelscope; front-end handled by the
+official toolkit, sanity-gated: same-spk cosine 0.90 vs diff 0.10) through the exact same bench. This **closes
+the one gap** in the original recommendation — the shippable model now has real in-harness numbers, and they're
+top-tier:
+
+| model | dim | clean DER | opus8k DER | g711u DER | cross-call AUC | isotropic? | on-device path |
+|---|---|---|---|---|---|---|---|
+| WeSpeaker (current) | 256 | 0.319 | 0.480 | 0.432 | 0.95–0.98 | yes | shipping |
+| **CAM++** | 512 | **0.274** | **0.301** | **0.294** | **1.0000 (all arms)** | yes | **official ONNX → CoreML (cleanest)** |
+| ERes2Net | 192 | **0.238** | 0.329 | 0.274 | 1.0000 | yes | official ONNX → CoreML |
+| ReDimNet-b6 | 192 | 0.252 | 0.276 | 0.221 | ~1.0 | yes | **export blocker (ANE-hostile)** |
+| ECAPA-TDNN | 192 | 0.267 | 0.307 | 0.281 | ~1.0 | yes | DIY ONNX |
+
+**Revised recommendation: ship CAM++.** It matches ReDimNet/ECAPA on accuracy (DER ~0.27–0.30 flat across all
+compression vs WeSpeaker's 0.32→0.48; AUC a perfect 1.0 on every arm; purity 0.84–0.87 — highest tier), is
+**isotropic** (clean drop-in, no whitening), is **lighter than today's model**, and has the **cleanest
+on-device conversion** (official ONNX → coremltools → ANE). The earlier tension ("ReDimNet most accurate but
+unshippable; CAM++ shippable but unmeasured") is **resolved — CAM++ is both.** ERes2Net (192-dim, best clean
+DER) is the runner-up; ReDimNet-b6/ECAPA remain strong but are harder to ship.
+
+Full per-arm numbers for all 8 models: **[MASTER_SCORECARD.md](MASTER_SCORECARD.md)**. The original
+ReDimNet-focused analysis below still stands; CAM++ simply makes the *shippable* pick a measured one.
+
+> **Negative control held:** x-vector (a deliberately weak model) was worst on every arm (DER ~0.5),
+> confirming only genuinely strong models win — this is not "any swap helps."
 
 ---
 

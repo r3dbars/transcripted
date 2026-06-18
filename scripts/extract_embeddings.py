@@ -70,16 +70,15 @@ class Embedder:
             mn = model.split("_", 1)[1] if "_" in model else "b6"
             self.net = torch.hub.load("IDRnD/ReDimNet", "ReDimNet", model_name=mn,
                                       train_type="ft_lm", dataset="vox2", verbose=False).to(device).eval()
-        elif model.startswith("campplus") or model.startswith("eres2net") or model.startswith("wspk"):
-            self.kind = "wespeaker"; self.device = device
-            import wespeaker
-            preset = {"campplus": "campplus", "eres2net": "eres2net"}.get(model.split("_")[0], "campplus")
-            # wespeaker hub names; fall back to english ResNet if preset missing
-            try:
-                self.ws = wespeaker.load_model_local(f".venv_emb/wespeaker_{model}")
-            except Exception:
-                self.ws = wespeaker.load_model("english")
-            self.ws.set_device(device)
+        elif model in ("campplus", "eres2net", "eres2netv2"):
+            # 3D-Speaker (Alibaba) models via modelscope — handles the kaldi-fbank front-end
+            # correctly (hand-rolling it risks garbage embeddings). Runs on CPU.
+            self.kind = "modelscope"; self.device = "cpu"
+            from modelscope.pipelines import pipeline
+            mid = {"campplus": "iic/speech_campplus_sv_en_voxceleb_16k",
+                   "eres2net": "iic/speech_eres2net_sv_en_voxceleb_16k",
+                   "eres2netv2": "iic/speech_eres2netv2_sv_en_voxceleb_16k"}[model]
+            self.sv = pipeline(task="speaker-verification", model=mid)
         else:
             raise SystemExit(f"unknown model {model}")
 
@@ -104,12 +103,15 @@ class Embedder:
             emb = self.net(batch.to(self.device))
             if isinstance(emb, (tuple, list)):
                 emb = emb[0]
-        elif self.kind == "wespeaker":
-            embs = []
-            for w in wavs:
-                t = torch.from_numpy(w).unsqueeze(0)
-                embs.append(torch.as_tensor(self.ws.extract_embedding_from_pcm(t, SR)))
-            emb = torch.stack(embs)
+        elif self.kind == "modelscope":
+            wl = [w.astype("float32") for w in wavs]
+            try:
+                arr = np.array(self.sv(wl, output_emb=True)["embs"])
+                if arr.shape[0] != len(wl):
+                    raise ValueError("batch size mismatch")
+            except Exception:
+                arr = np.array([self.sv([w], output_emb=True)["embs"][0] for w in wl])
+            emb = torch.from_numpy(arr).float()
         emb = torch.nn.functional.normalize(emb, dim=-1)
         return emb.detach().cpu().float().numpy()
 
