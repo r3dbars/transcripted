@@ -600,6 +600,17 @@ struct TranscriptedSettingsView: View {
         HomeCaptureListSection(
             sections: homeMeetingDaySections,
             emptyMessage: HomeCaptureListCopy.emptyMeetings,
+            emptyState: HomeListEmptyState(
+                symbolName: "waveform",
+                title: "No meetings yet",
+                message: "Record a meeting and Transcripted transcribes it, labels each speaker, and saves the transcript here. You can also transcribe an existing audio file from General.",
+                actionTitle: "Start a meeting",
+                automationIdentifier: "transcripted.home.meetings.empty.start",
+                action: {
+                    trackSettingsAction("empty_start_meeting", page: .home)
+                    actions.startMeeting()
+                }
+            ),
             isLoading: homeViewModel.isLoading,
             isLoadingMore: homeViewModel.isLoadingMore,
             canLoadMore: homeViewModel.canLoadMoreMeetings,
@@ -656,6 +667,17 @@ struct TranscriptedSettingsView: View {
         HomeCaptureListSection(
             sections: homeViewModel.dictationDaySections,
             emptyMessage: HomeCaptureListCopy.emptyDictations,
+            emptyState: HomeListEmptyState(
+                symbolName: "mic",
+                title: "No dictations yet",
+                message: "Hold your dictation shortcut and speak in any app — Transcripted types it out for you and keeps a copy here.",
+                actionTitle: "Start a dictation",
+                automationIdentifier: "transcripted.home.dictations.empty.start",
+                action: {
+                    trackSettingsAction("empty_start_dictation", page: .dictations)
+                    actions.startDictation()
+                }
+            ),
             isLoading: homeViewModel.isLoading,
             isLoadingMore: homeViewModel.isLoadingMore,
             canLoadMore: homeViewModel.canLoadMoreDictations,
