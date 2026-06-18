@@ -84,6 +84,30 @@ func testFeedbackIssueBuilder() {
         assertFalse(body.contains("person@example.com"), "emails in user notes should be scrubbed")
         assertFalse(body.contains("https://example.com/log"), "diagnostic URLs should be scrubbed")
     }
+
+    runSuite("FeedbackIssueBuilder honors contextual diagnostics opt out") {
+        let report = FeedbackReport(
+            sourceKind: "meeting",
+            referenceID: "meeting-abc",
+            occurredAt: Date(timeIntervalSince1970: 1_714_000_000),
+            issueKind: "Bad transcript",
+            userNotes: "Please check the transcript quality.",
+            appVersion: "Version 1.2.3",
+            includeDiagnostics: false
+        )
+        let url = FeedbackIssueBuilder.emailURL(report: report, rawLogLines: [
+            "[12:01:00.000] ERROR | wrote /Users/redbars/private.txt for person@example.com",
+            "[12:02:00.000] TOKEN | sk-test-secret via https://example.com/private-log"
+        ])
+        let body = feedbackBody(from: url)
+
+        assertTrue(body.contains("User chose not to attach diagnostics."), "opt-out feedback should state that diagnostics were not attached")
+        assertFalse(body.contains("ERROR | wrote"), "opt-out feedback should not include raw log markers")
+        assertFalse(body.contains("/Users/redbars/"), "opt-out feedback should not include file paths from raw logs")
+        assertFalse(body.contains("person@example.com"), "opt-out feedback should not include emails from raw logs")
+        assertFalse(body.contains("sk-test-secret"), "opt-out feedback should not include tokens from raw logs")
+        assertFalse(body.contains("https://example.com/private-log"), "opt-out feedback should not include URLs from raw logs")
+    }
 }
 
 private func feedbackBody(from url: URL?) -> String {
