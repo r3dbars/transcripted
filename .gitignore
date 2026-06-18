@@ -102,3 +102,4 @@ Tools/TranscriptedCLI/*.txt
 
 # Eval harness datasets (AMI research-use license; do not commit)
 data/
+.venv_emb/
