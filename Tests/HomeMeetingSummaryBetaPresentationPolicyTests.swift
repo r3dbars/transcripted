@@ -69,6 +69,44 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
         )
     }
 
+    runSuite("HomeMeetingSummaryBetaPresentationPolicy keeps original title for unsummarized meetings") {
+        let item = sampleHomeMeetingSummaryBetaItem(summaryPreview: nil)
+
+        assertEqual(
+            HomeMeetingSummaryBetaPresentationPolicy.displayTitle(for: item, isEnabled: true),
+            "Quick notes",
+            "beta on should not invent a generated title when no summary preview exists"
+        )
+        assertNil(
+            HomeMeetingSummaryBetaPresentationPolicy.visibleSummaryPreview(for: item, isEnabled: true),
+            "beta on should still return nil when a meeting has no summary preview"
+        )
+    }
+
+    runSuite("HomeLocalSummaryNotice saved detail uses singular and plural pass copy") {
+        let singlePass = HomeLocalSummaryNotice(
+            transcriptURL: sampleHomeLocalSummaryNoticeURL("single.md"),
+            meetingTitle: "Summary Notice",
+            chunkCount: 1
+        )
+        let multiPass = HomeLocalSummaryNotice(
+            transcriptURL: sampleHomeLocalSummaryNoticeURL("multi.md"),
+            meetingTitle: "Summary Notice",
+            chunkCount: 3
+        )
+
+        assertTrue(
+            singlePass.detail.contains("one local Gemma pass"),
+            "one chunk should use singular pass copy"
+        )
+        assertTrue(
+            multiPass.detail.contains("3 local Gemma passes"),
+            "multiple chunks should use plural pass copy"
+        )
+        assertEqual(singlePass.title, "AI summary saved", "saved notices should read as complete")
+        assertTrue(singlePass.shouldAutoDismiss, "saved notices should auto-dismiss")
+    }
+
     runSuite("HomeLocalSummaryNoticeDismissalPolicy clears only the scheduled notice") {
         let firstNotice = HomeLocalSummaryNotice(
             transcriptURL: URL(fileURLWithPath: "/tmp/first.md"),
@@ -148,6 +186,45 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
             "failure detail should reassure the user that the transcript was not rewritten"
         )
     }
+
+    runSuite("HomeLocalSummaryNotice uses setup guidance for blank failure messages") {
+        let notice = HomeLocalSummaryNotice(
+            transcriptURL: sampleHomeLocalSummaryNoticeURL("blank-failure.md"),
+            meetingTitle: "Summary Notice",
+            failureMessage: " \n\t "
+        )
+
+        assertEqual(notice.status, "Needs retry", "blank failure notices should still be actionable")
+        assertFalse(notice.shouldAutoDismiss, "blank failure notices should stay visible")
+        assertTrue(
+            notice.detail.contains("Check Beta setup, then try again."),
+            "blank failure text should fall back to setup guidance"
+        )
+        assertTrue(
+            notice.detail.contains("Nothing was changed"),
+            "blank failure detail should keep the guardrail copy"
+        )
+    }
+
+    runSuite("HomeLocalSummaryNotice caps long failure messages") {
+        let rawMessage = String(repeating: "a", count: 240)
+        let notice = HomeLocalSummaryNotice(
+            transcriptURL: sampleHomeLocalSummaryNoticeURL("long-failure.md"),
+            meetingTitle: "Summary Notice",
+            failureMessage: rawMessage
+        )
+
+        if case .failed(let message) = notice.kind {
+            assertEqual(message.count, 183, "long failure messages should be capped to 180 characters plus an ellipsis")
+            assertTrue(message.hasSuffix("..."), "truncated failure messages should be visibly abbreviated")
+        } else {
+            assertTrue(false, "long failure input should create a failure notice")
+        }
+        assertTrue(
+            notice.detail.contains("Nothing was changed"),
+            "truncated failure detail should preserve the no-mutation guardrail"
+        )
+    }
 }
 
 private func sampleHomeMeetingSummaryBetaItem(
@@ -174,4 +251,10 @@ private func sampleHomeMeetingSummaryBetaPreview() -> RecentMeetingSummaryPrevie
         ],
         url: URL(fileURLWithPath: "/tmp/quick-notes.md")
     )
+}
+
+private func sampleHomeLocalSummaryNoticeURL(_ filename: String) -> URL {
+    URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("home-summary-notice-tests", isDirectory: true)
+        .appendingPathComponent(filename)
 }
