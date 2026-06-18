@@ -341,9 +341,9 @@ class TranscriptedAppState: ObservableObject {
             let result = await MeetingAudioStorageManager.processExistingRetainedAudio(
                 in: MeetingStoragePaths.transcriptsFolder
             )
-            // Launch backfill can recompress/prune many meetings' audio; if it
+            // Launch backfill can create/recompress/prune many meetings' audio; if it
             // changed anything, tell Home so cached audio URLs re-resolve.
-            if result.convertedFiles > 0 || result.prunedDirectories > 0 {
+            if result.changedArtifacts {
                 await MainActor.run {
                     CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
                 }

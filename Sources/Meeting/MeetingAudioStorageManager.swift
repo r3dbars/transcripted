@@ -433,6 +433,23 @@ struct MeetingAudioStorageMaintenanceResult: Equatable {
     let scannedDirectories: Int
     let convertedFiles: Int
     let prunedDirectories: Int
+    let createdPlaybackMixes: Int
+
+    init(
+        scannedDirectories: Int,
+        convertedFiles: Int,
+        prunedDirectories: Int,
+        createdPlaybackMixes: Int = 0
+    ) {
+        self.scannedDirectories = scannedDirectories
+        self.convertedFiles = convertedFiles
+        self.prunedDirectories = prunedDirectories
+        self.createdPlaybackMixes = createdPlaybackMixes
+    }
+
+    var changedArtifacts: Bool {
+        convertedFiles > 0 || prunedDirectories > 0 || createdPlaybackMixes > 0
+    }
 }
 
 struct FailedMeetingAudioCompressionCandidate: Equatable {
@@ -481,14 +498,17 @@ enum MeetingAudioStorageManager {
         )
 
         var convertedFiles = 0
+        var createdPlaybackMixes = 0
         for directory in directories {
-            await createPlaybackMixIfNeeded(
+            if await createPlaybackMixIfNeeded(
                 in: directory,
                 now: now,
                 fileManager: fileManager,
                 validator: validator,
                 playbackMixer: playbackMixer
-            )
+            ) {
+                createdPlaybackMixes += 1
+            }
             convertedFiles += await compressWAVAudio(
                 in: directory,
                 now: now,
@@ -501,7 +521,8 @@ enum MeetingAudioStorageManager {
         return MeetingAudioStorageMaintenanceResult(
             scannedDirectories: directories.count,
             convertedFiles: convertedFiles,
-            prunedDirectories: prunedDirectories
+            prunedDirectories: prunedDirectories,
+            createdPlaybackMixes: createdPlaybackMixes
         )
     }
 
