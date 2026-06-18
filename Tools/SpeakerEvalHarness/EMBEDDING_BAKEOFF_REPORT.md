@@ -50,6 +50,15 @@ on-device conversion** (official ONNX → coremltools → ANE). The earlier tens
 unshippable; CAM++ shippable but unmeasured") is **resolved — CAM++ is both.** ERes2Net (192-dim, best clean
 DER) is the runner-up; ReDimNet-b6/ECAPA remain strong but are harder to ship.
 
+**End-to-end confirmation (CAM++ through the real matcher, match threshold swept):** the win reaches the
+matcher. At each arm's best operating point CAM++ beats WeSpeaker on DER and restores profile granularity
+WeSpeaker can't reach on compressed audio — clean 0.44→0.36, opus12k 0.50→0.46, opus8k 0.61→**0.55**
+(profiles 5–10→21), g711u 0.57→**0.49** (profiles 12–27→38). Recommended CAM++ match threshold ≈ **0.60**
+(0.55 clean, ~0.65 heavy compression — don't inherit WeSpeaker's exact value). **Same cap as ReDimNet:**
+people-trapped stays ~28–31 at every operating point because the within-meeting `0.88` consolidation + diarizer
+under-segmentation bound recovery. So the model swap improves DER and granularity everywhere, but the two
+changes — **better embedding + loosen `0.88`** — must ship together to drive user-facing merges down.
+
 Full per-arm numbers for all 8 models: **[MASTER_SCORECARD.md](MASTER_SCORECARD.md)**. The original
 ReDimNet-focused analysis below still stands; CAM++ simply makes the *shippable* pick a measured one.
 
