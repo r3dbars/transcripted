@@ -171,6 +171,12 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 scripts/ops/generate-nightly-digest.py --self-test"
         fi
 
+        if matches_any "$path" "scripts/ops/posthog-product-dashboard-summary.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/posthog-product-dashboard-summary.py"
+            add_command "python3 scripts/ops/posthog-product-dashboard-summary.py --self-test"
+        fi
+
         if matches_any "$path" "scripts/ops/nightly-security-check.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/nightly-security-check.py"

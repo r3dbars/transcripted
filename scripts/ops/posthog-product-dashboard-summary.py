@@ -74,6 +74,15 @@ DASHBOARD_EVENTS = (
     "update_installed",
 )
 
+UPDATE_EVENTS = (
+    "update_check_finished",
+    "update_download_started",
+    "update_download_finished",
+    "update_ready_to_install",
+    "update_relaunching",
+    "update_installed",
+)
+
 WORKFLOW_EVENTS = (
     "app_launched",
     "dictation_started",
@@ -173,6 +182,19 @@ def app_version_filter(app_version: str | None) -> str:
     return f"AND properties['app_version'] = {sql_quote(app_version)}"
 
 
+def app_or_update_target_version_filter(app_version: str | None) -> str:
+    if not app_version:
+        return ""
+    quoted_version = sql_quote(app_version)
+    update_events = sql_list(UPDATE_EVENTS)
+    return (
+        "AND ("
+        f"(event IN ({update_events}) AND properties['version'] = {quoted_version}) "
+        f"OR (event NOT IN ({update_events}) AND properties['app_version'] = {quoted_version})"
+        ")"
+    )
+
+
 def run_hogql(host: str, project_id: str, token: str, query: str) -> dict[str, Any]:
     payload = {
         "query": {"kind": "HogQLQuery", "query": query},
@@ -234,12 +256,12 @@ SELECT
   uniqIf(distinct_id, event IN ('meeting_prompt_shown', 'meeting_prompt_record_selected')) AS meeting_prompt_devices,
   countIf(event = 'meeting_prompt_record_selected') AS meeting_prompt_record_events,
   countIf(event = 'meeting_prompt_suppressed') AS meeting_prompt_suppressed_events,
-  countIf(event IN ('update_check_finished', 'update_download_started', 'update_download_finished', 'update_ready_to_install', 'update_relaunching', 'update_installed')) AS update_events,
+  countIf(event IN ({sql_list(UPDATE_EVENTS)})) AS update_events,
   countIf(event = 'update_installed') AS update_installed_events
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(DASHBOARD_EVENTS)})
-  {app_version_filter(app_version)}
+  {app_or_update_target_version_filter(app_version)}
 """
 
 
@@ -266,7 +288,7 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(DASHBOARD_EVENTS)})
-  {app_version_filter(app_version)}
+  {app_or_update_target_version_filter(app_version)}
 GROUP BY app_version
 ORDER BY active_devices DESC, launches DESC
 LIMIT 8
