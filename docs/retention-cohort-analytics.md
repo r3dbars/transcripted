@@ -50,9 +50,10 @@ Treat these as aggregate habit signals, not user forensics.
   first artifact.
 - Useful proxy: `activation_return_proxy_observed`, which means Home observed
   a prior saved artifact after 18h+.
-- Weak proxy: `activation_agent_prompt_action_clicked`, which means an in-app
-  prompt/setup/copy/open action happened. It does not prove an external agent
-  actually read the file or answered with sources.
+- Weak proxy: `activation_agent_prompt_action_clicked` or
+  `activation_agent_setup_cta_clicked`, which means an in-app prompt, setup,
+  copy, or open action happened. It does not prove an external agent actually
+  read the file or answered with sources.
 - First-run drop-off: mature first-run devices with one active day and no
   artifact in the first 7 days.
 
@@ -65,8 +66,9 @@ Treat these as aggregate habit signals, not user forensics.
 - First-artifact and first-run cohorts depend on first observed events in the
   configured lookback, so telemetry that started late can make old devices look
   new.
-- Version adoption should use latest observed version per device. Event counts by
-  version can over-count devices that upgraded during the window.
+- Version adoption should use latest observed version per device. The report
+  highlights the most common latest-observed version; event counts by version can
+  over-count devices that upgraded during the window.
 
 ## Privacy Rules
 

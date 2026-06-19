@@ -27,6 +27,7 @@ RETENTION_EVENTS = (
     "meeting_transcript_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
+    "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
 )
 
@@ -143,7 +144,7 @@ WITH device_rollup AS (
     countIf(event = 'meeting_transcript_saved') AS meeting_saved,
     countIf(event IN ({artifact_events})) AS artifact_events,
     countIf(event = 'activation_return_proxy_observed') AS return_proxy_events,
-    countIf(event = 'activation_agent_prompt_action_clicked') AS agent_prompt_events,
+    countIf(event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked')) AS agent_action_events,
     countIf(event = 'activation_artifact_action_clicked') AS artifact_action_events,
     min(timestamp) AS first_seen,
     max(timestamp) AS last_seen
@@ -170,8 +171,8 @@ SELECT
   countIf(artifact_events >= 2) AS repeat_artifact_devices,
   countIf(return_proxy_events > 0) AS return_proxy_devices,
   sum(return_proxy_events) AS return_proxy_events,
-  countIf(agent_prompt_events > 0) AS agent_prompt_devices,
-  sum(agent_prompt_events) AS agent_prompt_events,
+  countIf(agent_action_events > 0) AS agent_action_devices,
+  sum(agent_action_events) AS agent_action_events,
   countIf(artifact_action_events > 0) AS artifact_action_devices
 FROM device_rollup
 LIMIT 100
@@ -218,7 +219,7 @@ post_artifact AS (
     fa.first_artifact_event AS first_artifact_event,
     countIf(e.timestamp > fa.first_artifact_at + INTERVAL 18 HOUR) AS post_18h_7d_events,
     countIf(e.event = 'activation_return_proxy_observed') AS return_proxy_events,
-    countIf(e.event = 'activation_agent_prompt_action_clicked') AS agent_prompt_events,
+    countIf(e.event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked')) AS agent_action_events,
     countIf(e.event IN ({artifact_events})) AS second_artifact_events
   FROM first_artifacts AS fa
   LEFT JOIN events AS e ON e.distinct_id = fa.distinct_id
@@ -237,8 +238,8 @@ SELECT
   sum(return_proxy_events) AS return_proxy_events,
   countIf(second_artifact_events > 0) AS second_artifact_devices,
   sum(second_artifact_events) AS second_artifact_events,
-  countIf(agent_prompt_events > 0) AS agent_prompt_devices,
-  sum(agent_prompt_events) AS agent_prompt_events
+  countIf(agent_action_events > 0) AS agent_action_devices,
+  sum(agent_action_events) AS agent_action_events
 FROM post_artifact
 LIMIT 100
 """.strip()
@@ -337,7 +338,7 @@ def run_report(days: int, first_seen_lookback_days: int) -> dict[str, Any]:
     }
 
 
-def top_version(rows: list[list[Any]]) -> tuple[str, int]:
+def most_common_latest_version(rows: list[list[Any]]) -> tuple[str, int]:
     if not rows:
         return ("unknown", 0)
     row = rows[0]
@@ -378,15 +379,15 @@ def render_markdown(report: dict[str, Any]) -> str:
     repeat_artifact_devices = int(number(summary, 14))
     return_proxy_devices = int(number(summary, 15))
     return_proxy_events = int(number(summary, 16))
-    agent_prompt_devices = int(number(summary, 17))
-    agent_prompt_events = int(number(summary, 18))
+    agent_action_devices = int(number(summary, 17))
+    agent_action_events = int(number(summary, 18))
     artifact_action_devices = int(number(summary, 19))
 
     first_artifact_devices = int(number(first_artifact, 0))
     mature_artifact_devices = int(number(first_artifact, 3))
     returned_after_artifact_devices = int(number(first_artifact, 4))
     second_artifact_devices = int(number(first_artifact, 7))
-    post_artifact_agent_prompt_devices = int(number(first_artifact, 9))
+    post_artifact_agent_action_devices = int(number(first_artifact, 9))
 
     first_run_devices = int(number(first_run, 0))
     mature_24h_devices = int(number(first_run, 1))
@@ -397,8 +398,8 @@ def render_markdown(report: dict[str, Any]) -> str:
     one_day_no_artifact_devices = int(number(first_run, 6))
     onboarding_completed_devices = int(number(first_run, 7))
 
-    latest_version, latest_version_devices = top_version(versions)
-    version_share = pct(latest_version_devices, devices)
+    common_version, common_version_devices = most_common_latest_version(versions)
+    version_share = pct(common_version_devices, devices)
 
     lines = [
         "# Transcripted Retention Cohort Report",
@@ -414,15 +415,15 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Repeat dictation: {repeat_dictation_devices}/{dictation_devices} dictation devices repeated ({pct(repeat_dictation_devices, dictation_devices)}); {dictation_events} dictation completions.",
         f"- Repeat meetings: {repeat_meeting_devices}/{meeting_devices} meeting devices repeated ({pct(repeat_meeting_devices, meeting_devices)}); {meeting_events} meeting transcript saves.",
         f"- Artifact depth: {artifact_devices} devices saved an artifact; {repeat_artifact_devices} repeated ({pct(repeat_artifact_devices, artifact_devices)}).",
-        f"- Return proxy: {return_proxy_devices} devices had {return_proxy_events} Home return-proxy events after an older saved artifact; {agent_prompt_devices} devices had {agent_prompt_events} agent-prompt actions; {artifact_action_devices} devices clicked an artifact action.",
-        f"- Version adoption: latest observed version is {latest_version} on {latest_version_devices}/{devices} active devices ({version_share}).",
+        f"- Return proxy: {return_proxy_devices} devices had {return_proxy_events} Home return-proxy events after an older saved artifact; {agent_action_devices} devices had {agent_action_events} agent prompt/setup actions; {artifact_action_devices} devices clicked an artifact action.",
+        f"- Version adoption: most common latest-observed version is {common_version} on {common_version_devices}/{devices} active devices ({version_share}).",
         "",
         "## First Artifact Cohort",
         "",
         f"- First-artifact devices: {first_artifact_devices}; mature 18h cohort: {mature_artifact_devices}.",
         f"- Returned 18h-7d after first artifact: {returned_after_artifact_devices}/{mature_artifact_devices} ({pct(returned_after_artifact_devices, mature_artifact_devices)}).",
         f"- Saved another artifact within 7d after first artifact: {second_artifact_devices}/{first_artifact_devices} ({pct(second_artifact_devices, first_artifact_devices)}).",
-        f"- Agent prompt within 7d after first artifact: {post_artifact_agent_prompt_devices}/{first_artifact_devices} ({pct(post_artifact_agent_prompt_devices, first_artifact_devices)}).",
+        f"- Agent prompt/setup action within 7d after first artifact: {post_artifact_agent_action_devices}/{first_artifact_devices} ({pct(post_artifact_agent_action_devices, first_artifact_devices)}).",
         "",
         "## First Run Drop-Off",
         "",
@@ -436,7 +437,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "## Blind Spots",
         "",
         "- Return proxy means Home observed a prior saved artifact after 18h+. It is not proof of a sourced agent answer.",
-        "- Agent-prompt actions measure in-app copy/open/setup clicks. External agent reads are not measured.",
+        "- Agent prompt/setup actions measure in-app copy/open/setup clicks. External agent reads are not measured.",
         f"- First-artifact and first-run cohorts use first observed events in the last {report['first_seen_lookback_days']} days, so older telemetry gaps can misclassify returning devices as new.",
         "- Counts are anonymous-device aggregates. Do not join them to transcript text, file paths, titles, names, emails, tokens, raw URLs, or person records.",
     ]
