@@ -14,6 +14,12 @@ struct AnalyticsEventPolicy: Equatable {
         allowedPolicies.keys.sorted()
     }
 
+    /// All allowlisted analytics policies, sorted by event name. Tests use this
+    /// to keep the public taxonomy doc in lockstep with the compiled allowlist.
+    static var allPolicies: [AnalyticsEventPolicy] {
+        allowedPolicies.keys.sorted().compactMap { allowedPolicies[$0] }
+    }
+
     private static let meetingCaptureDiagnosticProperties: Set<String> = [
         "attenuation_kind",
         "buffer_success_bucket",

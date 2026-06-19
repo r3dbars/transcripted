@@ -14,6 +14,203 @@ func testAnalyticsEventPolicy() {
         )
     }
 
+    runSuite("AnalyticsEventPolicy taxonomy blocks sensitive property names") {
+        let forbiddenFragments = [
+            "audio_path",
+            "audio_ref",
+            "authorization",
+            "bundle",
+            "credential",
+            "device_id",
+            "distinct_id",
+            "email",
+            "file",
+            "filename",
+            "identity",
+            "invitee",
+            "meeting_title",
+            "person_id",
+            "raw_url",
+            "referrer",
+            "speaker",
+            "source_app",
+            "text",
+            "title",
+            "token",
+            "transcript",
+            "url",
+            "user_id",
+        ]
+        let properties = allAllowedAnalyticsPropertyNames()
+
+        for property in properties {
+            let normalized = property.lowercased()
+            for fragment in forbiddenFragments {
+                assertFalse(
+                    normalized.contains(fragment),
+                    "\(property) should not include forbidden analytics fragment \(fragment)"
+                )
+            }
+        }
+    }
+
+    runSuite("AnalyticsEventPolicy taxonomy requires reviewed non-bucket property shapes") {
+        let reviewedNonBucketProperties: Set<String> = [
+            "action",
+            "action_id",
+            "action_kind",
+            "agent_cta",
+            "agent_target",
+            "analytics_available",
+            "anonymous_usage_enabled",
+            "app_signal",
+            "app_version",
+            "artifact_kind",
+            "attenuation_kind",
+            "auto_send",
+            "automatic_downloads_enabled",
+            "available",
+            "backoff_kind",
+            "build_version",
+            "calendar_confidence",
+            "calendar_status",
+            "call_state",
+            "capture_activity",
+            "capture_quality",
+            "captured_input_volume_before",
+            "captured_input_volume_changed",
+            "captured_input_volume_dropped",
+            "captured_input_volume_during",
+            "cleanup_changed",
+            "cleanup_enabled",
+            "completion_flow",
+            "cooldown_reason",
+            "copy_reason",
+            "crash_reporting_available",
+            "crash_reporting_enabled",
+            "cta",
+            "cta_type",
+            "default_input_class",
+            "default_input_volume_after",
+            "default_input_volume_before",
+            "default_input_volume_changed",
+            "default_input_volume_dropped",
+            "default_input_volume_during",
+            "default_output_class",
+            "default_output_volume_after",
+            "default_output_volume_before",
+            "default_output_volume_changed",
+            "default_output_volume_dropped",
+            "default_output_volume_during",
+            "default_system_output_volume_after",
+            "default_system_output_volume_before",
+            "default_system_output_volume_changed",
+            "default_system_output_volume_dropped",
+            "default_system_output_volume_during",
+            "delivery",
+            "dictation_ready",
+            "enabled",
+            "entrypoint",
+            "failure_code",
+            "failure_kind",
+            "first_dictation_saved",
+            "format_ready",
+            "from_status",
+            "has_target",
+            "hfp_suspected",
+            "import_stage",
+            "input_channels",
+            "input_device_class",
+            "input_rate_hz",
+            "input_volume_scalar_available",
+            "last_event",
+            "location_type",
+            "meeting_dry_run_completed",
+            "meeting_recording_ready",
+            "mic_boost_prompt",
+            "mic_processed_peak",
+            "mic_processing",
+            "mic_raw_peak",
+            "mic_recovering",
+            "mic_status",
+            "mic_stream_present",
+            "missing_permission",
+            "model_state",
+            "os_major",
+            "outcome",
+            "output_channels",
+            "output_device_class",
+            "output_ducking_detected",
+            "output_rate_hz",
+            "page_id",
+            "paste_available",
+            "pasteback_status",
+            "permission_kind",
+            "previous_clean_shutdown",
+            "previous_version",
+            "prior_artifact_kind",
+            "prior_status",
+            "prompt_kind",
+            "prompt_reason",
+            "provider",
+            "proxy_kind",
+            "quiet_mic_recovered",
+            "quiet_mic_unrecovered",
+            "realtime_agc",
+            "reason",
+            "recent_meetings_available",
+            "recovering",
+            "reporting_kind",
+            "required",
+            "result",
+            "route_ready",
+            "route_shape",
+            "sample_flow_started",
+            "save_outcome",
+            "selected_input_class",
+            "selection_overrode_default",
+            "selection_reason",
+            "session_active",
+            "session_kind",
+            "session_stage",
+            "setting_id",
+            "setup_kind",
+            "source",
+            "stall_kind",
+            "stall_stage",
+            "state",
+            "step_id",
+            "step_index",
+            "stop_timed_out",
+            "suppression_reason",
+            "surface",
+            "system_backend",
+            "system_channels",
+            "system_failed",
+            "system_output_device_class",
+            "system_output_rate_hz",
+            "system_peak",
+            "system_rate_hz",
+            "system_status",
+            "system_stream_present",
+            "to_status",
+            "trigger",
+            "update_state",
+            "version",
+            "voice_processing",
+            "voice_processing_active",
+            "was_recording",
+        ]
+        let properties = allAllowedAnalyticsPropertyNames()
+
+        for property in properties where !property.hasSuffix("_bucket") {
+            assertTrue(
+                reviewedNonBucketProperties.contains(property),
+                "\(property) must be explicitly reviewed as an enum, boolean, public version, count, or coarse numeric diagnostic"
+            )
+        }
+    }
+
     runSuite("AnalyticsEventPolicy allows explicit onboarding funnel events") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "onboarding_shown")
         let stepViewed = AnalyticsEventPolicy.policy(forEvent: "onboarding_step_viewed")
@@ -986,6 +1183,10 @@ private func documentedAnalyticsEvents() -> [String] {
 
         return String(trimmed.dropFirst(3).dropLast())
     }
+}
+
+private func allAllowedAnalyticsPropertyNames() -> [String] {
+    Set(AnalyticsEventPolicy.allPolicies.flatMap { $0.allowedProperties }).sorted()
 }
 
 private func markdownSection(named heading: String, in text: String) -> String {
