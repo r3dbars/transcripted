@@ -243,6 +243,7 @@ enum FirstRunExperience {
         systemAudioGranted: Bool,
         calendarGranted: Bool,
         meetingPromptsEnabled: Bool,
+        firstDictationSaved: Bool,
         anonymousUsageEnabled: Bool,
         crashReportingEnabled: Bool,
         elapsedSeconds: Double?
@@ -255,6 +256,7 @@ enum FirstRunExperience {
             ),
             "completion_flow": completionPath.rawValue,
             "crash_reporting_enabled": booleanString(crashReportingEnabled),
+            "first_dictation_saved": booleanString(firstDictationSaved),
             "meeting_recording_ready": booleanString(systemAudioGranted),
             "step_id": "done",
         ]
