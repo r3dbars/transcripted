@@ -125,6 +125,10 @@ struct ParakeetASRInferenceActivityState: Equatable {
         activeCount > 0
     }
 
+    func canStartImmediately(reservedHandoffCount: Int) -> Bool {
+        !isActive && reservedHandoffCount <= 0
+    }
+
     mutating func begin() {
         activeCount += 1
     }

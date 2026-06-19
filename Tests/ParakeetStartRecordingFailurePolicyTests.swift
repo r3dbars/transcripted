@@ -198,9 +198,18 @@ func testParakeetStartRecordingFailurePolicy() {
     runSuite("ParakeetASRInferenceActivityState stays active until all inference exits") {
         var state = ParakeetASRInferenceActivityState()
 
+        assertTrue(
+            state.canStartImmediately(reservedHandoffCount: 0),
+            "idle inference should start immediately when no handoff is reserved"
+        )
+
         state.begin()
         state.begin()
         assertTrue(state.isActive, "any active CoreML inference should block manager cleanup")
+        assertFalse(
+            state.canStartImmediately(reservedHandoffCount: 0),
+            "active decoder work should serialize the next inference"
+        )
         assertEqual(state.activeCount, 2, "nested activity should keep an exact count")
 
         state.finish()
@@ -210,6 +219,10 @@ func testParakeetStartRecordingFailurePolicy() {
         state.finish()
         assertFalse(state.isActive, "cleanup protection can clear once every inference is done")
         assertEqual(state.activeCount, 0, "activity count should return to zero")
+        assertFalse(
+            state.canStartImmediately(reservedHandoffCount: 1),
+            "a reserved handoff should block another caller from slipping into CoreML before the next waiter begins"
+        )
 
         state.finish()
         assertEqual(state.activeCount, 0, "extra finish calls should not underflow")
@@ -696,6 +709,34 @@ func testParakeetStartRecordingFailurePolicy() {
         // the strategy switch alongside the abandon case.
         let queuedCount = recovery.components(separatedBy: "await self.rebuildAudioEngine(reason: \"device_change_rewarm_failed\")").count - 1
         assertEqual(queuedCount, 1, "there should be exactly one guarded in-place rebuild in the rewarm catch")
+    }
+
+    runSuite("ParakeetEngine ASR inference gate reserves handoff before admitting another decoder call") {
+        // The TDT decoder is a shared CoreML object. If one inference finishes and
+        // resumes a waiting continuation, a third caller must not observe
+        // activeCount == 0 and start immediately before that resumed waiter begins.
+        // This source contract pins the tiny handoff window that protects
+        // dictation, meeting, and imported-audio transcription from overlapping
+        // decoder calls.
+        let source = readParakeetEngineSource()
+        guard let gateStart = source.range(of: "private func beginASRInference()"),
+              let gateEnd = source.range(of: "private func finishASRInference()", range: gateStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the ASR inference gate")
+            return
+        }
+        let gate = String(source[gateStart.lowerBound..<gateEnd.lowerBound])
+
+        guard let admissionCheck = gate.range(of: "asrInferenceActivity.canStartImmediately(reservedHandoffCount: asrInferenceHandoffCount)"),
+              let begin = gate.range(of: "asrInferenceActivity.begin()"),
+              let enqueueWaiter = gate.range(of: "asrInferenceWaiters.append(continuation)"),
+              let consumeHandoff = gate.range(of: "asrInferenceHandoffCount = max(0, asrInferenceHandoffCount - 1)") else {
+            assertTrue(false, "ASR inference admission should account for the reserved handoff slot")
+            return
+        }
+
+        assertTrue(admissionCheck.lowerBound < begin.lowerBound, "handoff-aware admission should run before starting decoder work")
+        assertTrue(begin.lowerBound < enqueueWaiter.lowerBound, "immediate starts should happen only before the wait path")
+        assertTrue(enqueueWaiter.lowerBound < consumeHandoff.lowerBound, "queued waiters should consume the reserved handoff only after resuming")
     }
 
     runSuite("ParakeetEngine stopRecording cancels pending zombie restart while idle") {
