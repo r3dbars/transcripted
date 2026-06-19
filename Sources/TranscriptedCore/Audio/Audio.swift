@@ -680,6 +680,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
         self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
     }
 
+    init(
+        paths: CoreStoragePaths = .default,
+        systemAudioCaptureForTesting systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?
+    ) {
+        self.paths = paths
+        self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        self.systemAudioCapture = systemAudioCapture
+        if let systemAudioCapture {
+            wireSystemAudioStatusPublisher(from: systemAudioCapture)
+        }
+    }
+
     func ensureCaptureInfrastructureConfigured() {
         guard systemAudioCapture == nil else { return }
 
@@ -689,12 +701,19 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // Screen Recording flows.
         let capture = SCKAudioCapture()
         systemAudioCapture = capture
+        wireSystemAudioStatusPublisher(from: capture)
+        installWorkspaceSleepWakeObservers()
+    }
+
+    private func wireSystemAudioStatusPublisher(from capture: any SystemAudioCaptureEngine) {
         systemAudioCancellable = capture.errorMessagePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] errorMessage in
                 self?.updateSystemAudioStatus(fromError: errorMessage)
             }
+    }
 
+    func installWorkspaceSleepWakeObservers() {
         // MARK: - Sleep/Wake Observers (Phase 1: Invisible Reliability)
         // Handle macOS sleep/wake to prevent AVAudioEngine crashes and log gaps
 
