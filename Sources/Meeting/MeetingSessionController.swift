@@ -2827,6 +2827,13 @@ final class MeetingSessionController: ObservableObject {
                     baseProperties,
                     uniquingKeysWith: { _, new in new }
                 )
+                ActivationTelemetry.trackArtifactCreated(
+                    artifactKind: .meeting,
+                    surface: .meetingSave,
+                    trigger: properties["trigger"] ?? StartTrigger.unknown.rawValue,
+                    wordCountBucket: properties["word_count_bucket"],
+                    durationBucket: properties["duration_bucket"]
+                )
                 ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
                     artifactKind: .meeting,
                     surface: .meetingSave,

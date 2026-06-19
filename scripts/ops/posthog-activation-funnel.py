@@ -41,6 +41,10 @@ RELEVANT_EVENTS = (
     "onboarding_first_dictation_saved",
     "dictation_completed",
     "meeting_transcript_saved",
+    "artifact_created",
+    "artifact_opened",
+    "artifact_revealed",
+    "artifact_copied",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
@@ -57,6 +61,10 @@ WORKFLOW_EVENTS = (
     "dictation_completed",
     "meeting_recording_started",
     "meeting_transcript_saved",
+    "artifact_created",
+    "artifact_opened",
+    "artifact_revealed",
+    "artifact_copied",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
@@ -117,23 +125,23 @@ REACH_STEPS = (
     StepDefinition(
         "strict_saved_markdown_devices",
         "Strict saved Markdown",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved')",
+        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'artifact_created')",
         "observed",
-        "Saved onboarding dictation Markdown or saved meeting Markdown. General saved dictation lacks a dedicated remote event.",
+        "Saved onboarding dictation Markdown, meeting Markdown, or the general saved-artifact lifecycle event.",
     ),
     StepDefinition(
         "saved_markdown_plus_dictation_proxy_devices",
         "Saved Markdown plus dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'artifact_created', 'dictation_completed')",
         "proxy",
-        "Adds dictation completion as a product-success proxy because general dictation save is only local diagnostics today.",
+        "Adds dictation completion as a product-success proxy beside observed saved-artifact events.",
     ),
     StepDefinition(
         "artifact_action_devices",
         "Artifact opened or revealed",
-        "event = 'activation_artifact_action_clicked'",
+        "event IN ('artifact_opened', 'artifact_revealed', 'artifact_copied', 'activation_artifact_action_clicked')",
         "observed",
-        "Home/onboarding artifact actions such as open Markdown, preview, and reveal folder.",
+        "Home artifact lifecycle actions such as open Markdown, reveal folder, copy, and legacy activation action clicks.",
     ),
     StepDefinition(
         "agent_prompt_devices",
@@ -172,11 +180,11 @@ SEQUENCE_STEPS = (
     ("Dictation started", "event IN ('onboarding_first_dictation_started', 'dictation_started')"),
     (
         "Saved Markdown or dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'artifact_created', 'dictation_completed')",
     ),
     (
         "Artifact opened or prompt copied",
-        "event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked')",
+        "event IN ('artifact_opened', 'artifact_revealed', 'artifact_copied', 'activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked')",
     ),
     (
         "Agent setup/prompt signal",
@@ -374,18 +382,37 @@ LIMIT 20
 def artifact_actions_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT
+  event,
   properties['artifact_kind'] AS artifact_kind,
-  properties['action_kind'] AS action_kind,
+  coalesce(properties['action_kind'], replaceRegexpOne(event, '^artifact_', '')) AS action_kind,
   properties['surface'] AS surface,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event = 'activation_artifact_action_clicked'
+  AND event IN ('artifact_opened', 'artifact_revealed', 'artifact_copied', 'activation_artifact_action_clicked')
   {app_version_filter(app_version)}
-GROUP BY artifact_kind, action_kind, surface
+GROUP BY event, artifact_kind, action_kind, surface
 ORDER BY events DESC
 LIMIT 40
+"""
+
+
+def weekly_artifact_streak_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  count() AS devices
+FROM (
+  SELECT
+    distinct_id,
+    uniq(toStartOfWeek(timestamp)) AS artifact_weeks
+  FROM events
+  WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+    AND event = 'artifact_created'
+    {app_version_filter(app_version)}
+  GROUP BY distinct_id
+  HAVING artifact_weeks >= 2
+)
 """
 
 
@@ -421,6 +448,7 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "sequence": sequence_query(days, app_version),
         "onboarding_completion": onboarding_completion_query(days, app_version),
         "artifact_actions": artifact_actions_query(days, app_version),
+        "weekly_artifact_streak": weekly_artifact_streak_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
     }
 
@@ -548,12 +576,14 @@ def render_report(data: dict[str, Any]) -> str:
     agent_signal = as_int(reach.get("agent_setup_devices"))
     true_agent_query = as_int(reach.get("true_agent_query_devices"))
     return_proxy = as_int(reach.get("return_proxy_devices"))
+    weekly_streak = as_int((data["results"].get("weekly_artifact_streak") or [{}])[0].get("devices"))
     app_version = data.get("app_version") or "all app versions"
 
     limitations = [
         "`permission ready` uses `onboarding_completed` as a proxy. The app guards completion on required dictation permissions, but this does not count users who became ready outside onboarding.",
-        "`strict saved Markdown` counts onboarding first-dictation saves and meeting transcript saves. General dictation save currently has local diagnostics but no dedicated remote saved-artifact event.",
-        "`dictation_completed` is included only in the proxy saved-Markdown row. It can prove useful dictation volume, but not every general saved Markdown write.",
+        "`strict saved Markdown` counts onboarding first-dictation saves, meeting transcript saves, and `artifact_created` lifecycle saves.",
+        "`dictation_completed` is included only in the proxy saved-Markdown row for continuity with older builds before general saved-artifact telemetry.",
+        "`weekly artifact streak` is derived from aggregate `artifact_created` weeks. It does not export user rows or local artifact details.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
     ]
@@ -561,10 +591,11 @@ def render_report(data: dict[str, Any]) -> str:
     recommended_tiles = [
         "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
         "Saved artifact quality: strict saved Markdown vs dictation-completed proxy, split by artifact kind.",
-        "Artifact actions: open Markdown, preview, reveal folder, and copy-for-agent surfaces.",
+        "Artifact lifecycle: `artifact_created`, `artifact_opened`, `artifact_revealed`, `artifact_copied`, plus legacy activation action clicks.",
+        "Repeat value: weekly artifact streak devices from aggregate `artifact_created` weeks.",
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
-        "Data quality: missing true-agent-use event and general dictation saved-artifact gap.",
+        "Data quality: missing true-agent-use event and older-build saved-artifact proxy gaps.",
     ]
 
     lines = [
@@ -581,6 +612,7 @@ def render_report(data: dict[str, Any]) -> str:
         f"- Strict saved Markdown reach: **{strict_saved} devices** ({pct(strict_saved, launch)} of launch).",
         f"- Saved Markdown plus dictation proxy reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
+        f"- Weekly artifact streak: **{weekly_streak} devices** created artifacts in at least 2 calendar weeks in-window.",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
         f"- True agent-query proof: **{true_agent_query} devices**. Treat this as unknown, not green, until instrumentation exists.",
         "",
@@ -622,7 +654,7 @@ def render_report(data: dict[str, Any]) -> str:
         render_top_rows(
             "Artifact Actions",
             data["results"].get("artifact_actions", []),
-            ["artifact_kind", "action_kind", "surface", "events", "devices"],
+            ["event", "artifact_kind", "action_kind", "surface", "events", "devices"],
         ),
         render_top_rows(
             "Agent Signals",
@@ -639,7 +671,7 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         "## Next Best Action",
         "",
-        "Add one privacy-safe first-use event for `activation_first_artifact_saved` and one for `agent_capture_query_observed`, then make the dashboard's primary KPI the share of launch devices that reach true sourced-agent-use within 7 days.",
+        "Keep `artifact_created/opened/revealed/copied` as the value lifecycle, use #1199's `agent_capture_query_observed` for true agent use, and make the primary KPI the share of launch devices that reach true sourced-agent-use within 7 days.",
         "",
     ]
     return "\n".join(lines)

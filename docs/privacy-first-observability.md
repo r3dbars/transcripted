@@ -99,6 +99,10 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `onboarding_dismissed`
 - `activation_artifact_action_clicked`
 - `activation_first_artifact_saved`
+- `artifact_created`
+- `artifact_opened`
+- `artifact_revealed`
+- `artifact_copied`
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `activation_return_proxy_observed`

@@ -84,6 +84,10 @@ Operational scripts query aggregate counts only:
 | --- | --- |
 | `activation_artifact_action_clicked` | `action_kind`, `artifact_age_bucket`, `artifact_kind`, `surface` |
 | `activation_first_artifact_saved` | `artifact_kind`, `duration_bucket`, `surface`, `trigger`, `word_count_bucket` |
+| `artifact_created` | `artifact_kind`, `duration_bucket`, `surface`, `trigger`, `word_count_bucket` |
+| `artifact_opened` | `artifact_age_bucket`, `artifact_kind`, `surface` |
+| `artifact_revealed` | `artifact_age_bucket`, `artifact_kind`, `surface` |
+| `artifact_copied` | `artifact_age_bucket`, `artifact_kind`, `surface` |
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
@@ -180,10 +184,12 @@ aggregate reliability sizing and should not be expanded to raw device names.
 
 ## Biggest Blind Spots
 
-- `agent_capture_query_observed` does not exist yet, so PostHog cannot prove
-  that an agent actually answered from a saved Transcripted artifact.
-- General dictation saved-Markdown writes still rely on `dictation_completed`
-  as a proxy, while onboarding dictation and meeting saves have stricter events.
+- `agent_capture_query_observed` is owned by draft PR #1199, so this branch does
+  not add another agent-use signal. Until that lands, PostHog cannot prove that
+  an agent actually answered from a saved Transcripted artifact.
+- General dictation saved-Markdown writes now emit `artifact_created`; the
+  older strict-saved row still keeps onboarding dictation and meeting saves
+  separate for release-to-release continuity.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
 - Local summary beta behavior is not a first-class funnel. Summary attempts,
@@ -200,7 +206,7 @@ Prefer a small number of lifecycle events over broad click tracking.
 
 | Event | When to fire | Properties |
 | --- | --- | --- |
-| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
+| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | Owned by PR #1199; keep it aggregate and enum-only |
 | `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
@@ -230,7 +236,8 @@ save/open a useful artifact, connect an agent, recover from failure, or return?
 
 `app_launched` -> `onboarding_shown` / `onboarding_step_viewed` ->
 permission ready -> `dictation_started` / `meeting_recording_started` ->
-`activation_first_artifact_saved` -> `activation_artifact_action_clicked` ->
+`activation_first_artifact_saved` / `artifact_created` ->
+`artifact_opened` / `artifact_revealed` / `artifact_copied` ->
 `activation_agent_prompt_action_clicked` / `activation_agent_setup_cta_clicked`
 -> `agent_capture_query_observed` -> `activation_return_proxy_observed`.
 
@@ -261,9 +268,9 @@ state, latency bucket, result, and failure kind only.
 
 ### Agent And Markdown Value Loop
 
-`activation_first_artifact_saved` -> open/reveal/preview ->
-agent prompt/setup -> `agent_capture_query_observed` -> next-day return ->
-second artifact saved.
+`activation_first_artifact_saved` / `artifact_created` ->
+open/reveal/copy -> agent prompt/setup -> `agent_capture_query_observed` ->
+next-day return -> second artifact saved.
 
 This is the north-star dashboard. Treat prompt-copy and setup clicks as intent,
 not proof.
@@ -274,6 +281,10 @@ not proof.
 - first successful `dictation_completed`
 - first successful `meeting_transcript_saved`
 - `activation_first_artifact_saved`
+- `artifact_created`
+- `artifact_opened`
+- `artifact_revealed`
+- `artifact_copied`
 - update lifecycle events
 - Sentry release health next to PostHog usage, without joining personal data
 
@@ -292,7 +303,7 @@ prove the full saved-artifact -> sourced-agent-answer -> return loop.
 
 ## Smallest Next Implementation
 
-Add `agent_capture_query_observed` from the read-only MCP/agent surface when an
-opted-in device observes a query against saved captures. Keep it enum-only and
-bucketed. That is higher leverage than broad click tracking because it closes
-the biggest product-learning gap without inspecting content.
+Land #1199's `agent_capture_query_observed` from the read-only MCP/agent
+surface when an opted-in device observes a query against saved captures. Keep it
+enum-only and bucketed. That closes the biggest product-learning gap without
+inspecting content.

@@ -104,6 +104,73 @@ enum ActivationTelemetry {
         )
     }
 
+    static func trackArtifactCreated(
+        artifactKind: ArtifactKind,
+        surface: Surface,
+        trigger: String,
+        wordCountBucket: String? = nil,
+        durationBucket: String? = nil
+    ) {
+        var properties = [
+            "artifact_kind": artifactKind.rawValue,
+            "surface": surface.rawValue,
+            "trigger": trigger,
+        ]
+        if let wordCountBucket {
+            properties["word_count_bucket"] = wordCountBucket
+        }
+        if let durationBucket {
+            properties["duration_bucket"] = durationBucket
+        }
+
+        AnalyticsReporter.track("artifact_created", properties: properties)
+    }
+
+    static func trackArtifactOpened(
+        artifactKind: ArtifactKind,
+        surface: Surface,
+        artifactDate: Date? = nil,
+        now: Date = Date()
+    ) {
+        trackArtifactValueAction(
+            "artifact_opened",
+            artifactKind: artifactKind,
+            surface: surface,
+            artifactDate: artifactDate,
+            now: now
+        )
+    }
+
+    static func trackArtifactRevealed(
+        artifactKind: ArtifactKind,
+        surface: Surface,
+        artifactDate: Date? = nil,
+        now: Date = Date()
+    ) {
+        trackArtifactValueAction(
+            "artifact_revealed",
+            artifactKind: artifactKind,
+            surface: surface,
+            artifactDate: artifactDate,
+            now: now
+        )
+    }
+
+    static func trackArtifactCopied(
+        artifactKind: ArtifactKind,
+        surface: Surface,
+        artifactDate: Date? = nil,
+        now: Date = Date()
+    ) {
+        trackArtifactValueAction(
+            "artifact_copied",
+            artifactKind: artifactKind,
+            surface: surface,
+            artifactDate: artifactDate,
+            now: now
+        )
+    }
+
     @discardableResult
     static func markFirstArtifactSavedTrackedIfNeeded(userDefaults: UserDefaults = .standard) -> Bool {
         guard !userDefaults.bool(forKey: firstArtifactSavedTrackedKey) else { return false }
@@ -238,5 +305,22 @@ enum ActivationTelemetry {
         default:
             return "older"
         }
+    }
+
+    private static func trackArtifactValueAction(
+        _ eventName: String,
+        artifactKind: ArtifactKind,
+        surface: Surface,
+        artifactDate: Date?,
+        now: Date
+    ) {
+        AnalyticsReporter.track(
+            eventName,
+            properties: [
+                "artifact_age_bucket": artifactAgeBucket(since: artifactDate, now: now),
+                "artifact_kind": artifactKind.rawValue,
+                "surface": surface.rawValue,
+            ]
+        )
     }
 }

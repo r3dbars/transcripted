@@ -207,7 +207,14 @@ struct TranscriptedSettingsView: View {
                     openOwnFile(
                         candidateURLs: [preview.transcriptURL],
                         failureTitle: "Could not open transcript",
-                        failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                        failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app.",
+                        onOpened: {
+                            ActivationTelemetry.trackArtifactOpened(
+                                artifactKind: .meeting,
+                                surface: .homePreview,
+                                artifactDate: preview.date
+                            )
+                        }
                     )
                 },
                 onCopyForAgent: {
@@ -515,7 +522,13 @@ struct TranscriptedSettingsView: View {
                             openOwnFile(
                                 candidateURLs: [transcriptURL],
                                 failureTitle: "Could not open transcript",
-                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment."
+                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment.",
+                                onOpened: {
+                                    ActivationTelemetry.trackArtifactOpened(
+                                        artifactKind: .meeting,
+                                        surface: .homeCurrentActivity
+                                    )
+                                }
                             )
                         }
                     }
@@ -709,7 +722,14 @@ struct TranscriptedSettingsView: View {
                     openOwnFile(
                         candidateURLs: [entry.url],
                         failureTitle: "Could not open dictation",
-                        failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                        failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app.",
+                        onOpened: {
+                            ActivationTelemetry.trackArtifactOpened(
+                                artifactKind: .dictation,
+                                surface: .homeRow,
+                                artifactDate: entry.createdAt
+                            )
+                        }
                     )
                 },
                 onCopy: { handleCopyDictation(entry) },
@@ -788,6 +808,11 @@ struct TranscriptedSettingsView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(entry.text, forType: .string)
+        ActivationTelemetry.trackArtifactCopied(
+            artifactKind: .dictation,
+            surface: .homeRow,
+            artifactDate: entry.createdAt
+        )
         flashCopied(rowID: entry.id)
     }
 
@@ -827,6 +852,11 @@ struct TranscriptedSettingsView: View {
             )
             return
         }
+        ActivationTelemetry.trackArtifactCopied(
+            artifactKind: .meeting,
+            surface: .homeRow,
+            artifactDate: item.date
+        )
         flashCopied(rowID: item.id)
     }
 
@@ -854,6 +884,11 @@ struct TranscriptedSettingsView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        ActivationTelemetry.trackArtifactCopied(
+            artifactKind: .meeting,
+            surface: .homePreview,
+            artifactDate: preview.date
+        )
         ActivationTelemetry.trackAgentPromptAction(
             promptKind: bundle == nil ? .meetingMarkdown : .meetingBundle,
             actionKind: .copied,
@@ -1146,7 +1181,14 @@ struct TranscriptedSettingsView: View {
                 openOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not open dictation",
-                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app.",
+                    onOpened: {
+                        ActivationTelemetry.trackArtifactOpened(
+                            artifactKind: .dictation,
+                            surface: .homeMenu,
+                            artifactDate: entry.createdAt
+                        )
+                    }
                 )
             },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
@@ -1164,7 +1206,14 @@ struct TranscriptedSettingsView: View {
                 revealOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not show dictation",
-                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app.",
+                    onRevealed: {
+                        ActivationTelemetry.trackArtifactRevealed(
+                            artifactKind: .dictation,
+                            surface: .homeMenu,
+                            artifactDate: entry.createdAt
+                        )
+                    }
                 )
             },
             HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
@@ -1234,7 +1283,14 @@ struct TranscriptedSettingsView: View {
                 revealOwnFile(
                     candidateURLs: HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
                     failureTitle: "Could not show transcript",
-                    failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app.",
+                    onRevealed: {
+                        ActivationTelemetry.trackArtifactRevealed(
+                            artifactKind: .meeting,
+                            surface: .homeMenu,
+                            artifactDate: item.date
+                        )
+                    }
                 )
             }
         ])
@@ -1530,11 +1586,13 @@ struct TranscriptedSettingsView: View {
     private func revealOwnFile(
         candidateURLs: [URL],
         failureTitle: String,
-        failureMessage: String
+        failureMessage: String,
+        onRevealed: (() -> Void)? = nil
     ) {
         switch OwnFileResolver.resolveForReveal(candidateURLs: candidateURLs) {
         case .reveal(let urls):
             NSWorkspace.shared.activateFileViewerSelecting(urls)
+            onRevealed?()
         case .unavailable:
             presentHomeActionFailure(title: failureTitle, message: failureMessage)
         }
@@ -1548,13 +1606,15 @@ struct TranscriptedSettingsView: View {
     private func openOwnFile(
         candidateURLs: [URL],
         failureTitle: String,
-        failureMessage: String
+        failureMessage: String,
+        onOpened: (() -> Void)? = nil
     ) -> Bool {
         guard let url = OwnFileResolver.resolveExistingFile(candidateURLs: candidateURLs) else {
             presentHomeActionFailure(title: failureTitle, message: failureMessage)
             return false
         }
         NSWorkspace.shared.open(url)
+        onOpened?()
         return true
     }
 

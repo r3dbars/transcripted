@@ -122,6 +122,12 @@ struct AnalyticsEventPolicy: Equatable {
         "word_count_bucket",
     ]
 
+    private static let artifactValueActionProperties: Set<String> = [
+        "artifact_age_bucket",
+        "artifact_kind",
+        "surface",
+    ]
+
     private static let activationAgentPromptActionProperties: Set<String> = [
         "action_kind",
         "agent_target",
@@ -320,6 +326,22 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_first_artifact_saved": .init(
             name: "activation_first_artifact_saved",
             allowedProperties: activationFirstArtifactProperties
+        ),
+        "artifact_created": .init(
+            name: "artifact_created",
+            allowedProperties: activationFirstArtifactProperties
+        ),
+        "artifact_opened": .init(
+            name: "artifact_opened",
+            allowedProperties: artifactValueActionProperties
+        ),
+        "artifact_revealed": .init(
+            name: "artifact_revealed",
+            allowedProperties: artifactValueActionProperties
+        ),
+        "artifact_copied": .init(
+            name: "artifact_copied",
+            allowedProperties: artifactValueActionProperties
         ),
         "activation_agent_prompt_action_clicked": .init(
             name: "activation_agent_prompt_action_clicked",

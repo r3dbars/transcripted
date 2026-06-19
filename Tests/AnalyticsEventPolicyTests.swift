@@ -81,12 +81,20 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy allows post-artifact activation events") {
         let artifact = AnalyticsEventPolicy.policy(forEvent: "activation_artifact_action_clicked")
         let firstArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_first_artifact_saved")
+        let artifactCreated = AnalyticsEventPolicy.policy(forEvent: "artifact_created")
+        let artifactOpened = AnalyticsEventPolicy.policy(forEvent: "artifact_opened")
+        let artifactRevealed = AnalyticsEventPolicy.policy(forEvent: "artifact_revealed")
+        let artifactCopied = AnalyticsEventPolicy.policy(forEvent: "artifact_copied")
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
         assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
+        assertEqual(artifactCreated?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "artifact creation should stay bucketed")
+        assertEqual(artifactOpened?.allowedProperties ?? Set<String>(), ["artifact_age_bucket", "artifact_kind", "surface"], "artifact open events should stay bucketed")
+        assertEqual(artifactRevealed?.allowedProperties ?? Set<String>(), ["artifact_age_bucket", "artifact_kind", "surface"], "artifact reveal events should stay bucketed")
+        assertEqual(artifactCopied?.allowedProperties ?? Set<String>(), ["artifact_age_bucket", "artifact_kind", "surface"], "artifact copy events should stay bucketed")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
@@ -94,6 +102,10 @@ func testAnalyticsEventPolicy() {
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
             .union(firstArtifact?.allowedProperties ?? Set<String>())
+            .union(artifactCreated?.allowedProperties ?? Set<String>())
+            .union(artifactOpened?.allowedProperties ?? Set<String>())
+            .union(artifactRevealed?.allowedProperties ?? Set<String>())
+            .union(artifactCopied?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",

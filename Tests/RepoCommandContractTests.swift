@@ -182,6 +182,10 @@ func testRepoCommandContract() {
             "meeting_transcript_saved",
             "onboarding_agent_cta_clicked",
             "activation_first_artifact_saved",
+            "artifact_created",
+            "artifact_opened",
+            "artifact_revealed",
+            "artifact_copied",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
@@ -194,6 +198,10 @@ func testRepoCommandContract() {
         }
         for event in [
             "activation_first_artifact_saved",
+            "artifact_created",
+            "artifact_opened",
+            "artifact_revealed",
+            "artifact_copied",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",

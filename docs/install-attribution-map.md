@@ -27,8 +27,8 @@ through `AnalyticsEventPolicy` and `AnalyticsPayloadSanitizer`.
 | Release download | GitHub release asset download count | GitHub Releases | Counts public DMG downloads, including repeat downloads and automation. |
 | In-app update download | `update_check_finished`, `update_download_started`, `update_download_finished`, `update_ready_to_install`, `update_relaunching`, `update_installed` | PostHog | App-side update funnel. Use version-scoped aggregate counts. |
 | First launch | `app_launched` with `app_version` and `build_version` default properties | PostHog | Anonymous device/session signal only. |
-| First useful artifact | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Shows local Markdown value without inspecting content. |
-| Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
+| First useful artifact | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved`, `artifact_created` | PostHog | Shows local Markdown value without inspecting content. |
+| Agent payoff | `artifact_opened`, `artifact_revealed`, `artifact_copied`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening/revealing/copying artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
 | Reliability filter | Release-scoped issues and allowed non-fatal events | Sentry | Use to avoid mistaking broken first-run paths for weak demand. |
 
 ## Standard Read-Only Checks
