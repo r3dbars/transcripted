@@ -36,6 +36,8 @@ struct TranscriptedSettingsView: View {
     @State private var showAdvancedCorrectionsText = false
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var showAdvancedModelControls = false
+    @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
+    @State private var showSpeakerEmbedderControls = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
@@ -2253,6 +2255,33 @@ struct TranscriptedSettingsView: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                }
+                .padding(.top, 8)
+            }
+
+            DisclosureGroup("Speaker voiceprint (experimental)", isExpanded: $showSpeakerEmbedderControls) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("Voiceprint model", selection: Binding(
+                        get: { preferredSpeakerEmbedder },
+                        set: { newValue in
+                            preferredSpeakerEmbedder = newValue
+                            SpeakerEmbedderPreferences.setPreferredChoice(newValue)
+                        }
+                    )) {
+                        ForEach(SpeakerEmbedderChoice.allCases) { choice in
+                            Text(choice.shortTitle).tag(choice)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    Text(preferredSpeakerEmbedder.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Restart Transcripted to apply. ERes2Net keeps its own separate speaker memory.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 8)
             }
