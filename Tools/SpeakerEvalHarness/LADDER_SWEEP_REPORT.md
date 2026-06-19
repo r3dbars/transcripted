@@ -4,11 +4,13 @@
 returning meeting speaker is recognized, at **near-zero false auto-naming** — and which
 gate design gets us there?
 
-**Status:** data + analysis are decision-ready for two domains (AMI in-room, VoxCeleb
-clean), **each now swept across 11 audio qualities** (codec/bitrate/telephone/noise/reverb —
-see **§11**). This PR changes **no production behavior** (the only production diff is making
-three already-pure functions `public` so the harness can call the real matcher; see §8). The
-decision on what to ship is the human's, after reading the frontier below.
+**Status:** data + analysis are decision-ready for **three domains** — AMI in-room (incl.
+**AMI-full, 175 speakers** for high-N false-auto certification), VoxCeleb clean, and
+VoxConverse in-the-wild — **swept across up to 11 audio qualities** (codec/bitrate/telephone/
+noise/reverb), ≈**375k policy-sims** on the real pipeline (see **§11**). This PR changes **no
+production behavior** (the only production diff is making three already-pure functions `public`
+so the harness can call the real matcher; see §8). The decision on what to ship is the
+human's, after reading the frontier below.
 
 > **Read §1 and §11 together.** §1's clean-audio recommendation (AUTO bar 0.80) is the
 > *prompt-minimizing* point on pristine audio. §11 shows that point is **not robust to audio
@@ -467,3 +469,42 @@ together*; lowering the bar to chase prompt savings (§1's clean-only 0.80) sile
 the moment audio degrades. (Per-quality AMI auto denominators are modest — 12–36 — so the
 worst-quality CI is wide; pooled 0/148 bounds false-auto well under 2%. Larger N or more
 sessions/person would tighten it further; VoxConverse adds the in-the-wild domain, §11.7.)
+
+## 11.7 In-the-wild domain (VoxConverse) — the promotion gate protects novel speakers
+
+VoxConverse (real YouTube conversational audio, overlapping speech, unknown speaker counts)
+is the genuine in-the-wild domain. Its speaker labels are per-file, so with
+`--namespace-speakers` every speaker is globally distinct and appears **exactly once** — by
+construction there is **no recurrence** (50 files → 168 distinct speakers, all single-appearance).
+That makes it the clean test of one thing the other corpora can't isolate: *when a stream of
+never-before-seen in-the-wild people flows past an accumulating DB, does anyone get silently
+auto-named?*
+
+| quality | distinct speakers | autos (wrong/total) | wrong-SUGGEST per novel speaker |
+|---|---:|---:|---:|
+| orig | 168 | 0 / 0 | 0.11 |
+| mp3_32 | 159 | 0 / 0 | 0.11 |
+| tel_g711 | 121 | 0 / 0 | 0.09 |
+| reverb | 133 | 0 / 0 | 0.08 |
+| noisy_snr5 | 110 | 0 / 0 | 0.09 |
+| opus_8k | 90 | 0 / 0 | 0.12 |
+
+**Findings:**
+1. **The promotion gate fully protects novel speakers from false AUTO — 0 autos, 0 false-auto
+   across every quality.** A brand-new in-the-wild speaker has no accumulated appearances, so it
+   can never clear `callCount`/evidence promotion and is never silently named. The expensive
+   failure mode (silent mislabel) does not occur in-the-wild; this is the AUTO/SUGGEST/UNKNOWN
+   tiering working as designed.
+2. **The residual cost is a one-tap reject ≈ 8–12% of the time:** the floor matcher (0.60)
+   matches a novel speaker to an existing *different* person above the floor and proposes a
+   (wrong) name — recoverable with a single "no" tap, never a silent error. This is the true
+   in-the-wild false-positive surface, and raising `suggestFloor` trades it against UNKNOWN
+   re-types. It is roughly flat across qualities (degradation doesn't dramatically inflate it).
+3. **Heavy degradation collapses diarization** (distinct speakers 168 → 90 at `opus_8k`): the
+   diarizer under-segments / merges speakers on very-low-bitrate audio — a *recall* failure
+   (people missed) distinct from the re-ID *precision* failures of §11.3.
+
+So across all three domains the picture is consistent: **the silent-mislabel risk (false AUTO)
+is controlled by the promotion gate + a high bar + margin; the remaining cost is recoverable
+SUGGEST taps.** No gate change is needed to keep novel in-the-wild speakers safe — that tier
+already holds.
