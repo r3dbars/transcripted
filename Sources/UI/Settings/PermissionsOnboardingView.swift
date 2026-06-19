@@ -606,6 +606,7 @@ struct PermissionsOnboardingView: View {
                 systemAudioGranted: screenRecordingGranted,
                 calendarGranted: calendarGranted,
                 meetingPromptsEnabled: meetingPromptsEnabled,
+                firstDictationSaved: PermissionsOnboardingPreferences.hasTrackedFirstDictationSaved(),
                 anonymousUsageEnabled: AnalyticsPreferences.isEnabled(),
                 crashReportingEnabled: CrashReportingPreferences.isEnabled(),
                 elapsedSeconds: flowStartedAt.map { CFAbsoluteTimeGetCurrent() - $0 }

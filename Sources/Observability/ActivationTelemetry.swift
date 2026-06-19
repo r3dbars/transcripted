@@ -1,6 +1,8 @@
 import Foundation
 
 enum ActivationTelemetry {
+    static let firstArtifactSavedTrackedKey = "activationFirstArtifactSavedTracked"
+
     enum ArtifactKind: String {
         case dictation
         case meeting
@@ -21,6 +23,8 @@ enum ActivationTelemetry {
         case homeCurrentActivity = "home_current_activity"
         case agentSettings = "agent_settings"
         case meetingOverlay = "meeting_overlay"
+        case dictationSave = "dictation_save"
+        case meetingSave = "meeting_save"
     }
 
     enum AgentPromptKind: String {
@@ -98,6 +102,43 @@ enum ActivationTelemetry {
                 "surface": surface.rawValue,
             ]
         )
+    }
+
+    @discardableResult
+    static func markFirstArtifactSavedTrackedIfNeeded(userDefaults: UserDefaults = .standard) -> Bool {
+        guard !userDefaults.bool(forKey: firstArtifactSavedTrackedKey) else { return false }
+
+        userDefaults.set(true, forKey: firstArtifactSavedTrackedKey)
+        return true
+    }
+
+    @discardableResult
+    static func trackFirstArtifactSavedIfNeeded(
+        artifactKind: ArtifactKind,
+        surface: Surface,
+        trigger: String,
+        wordCountBucket: String? = nil,
+        durationBucket: String? = nil,
+        userDefaults: UserDefaults = .standard
+    ) -> Bool {
+        guard markFirstArtifactSavedTrackedIfNeeded(userDefaults: userDefaults) else {
+            return false
+        }
+
+        var properties = [
+            "artifact_kind": artifactKind.rawValue,
+            "surface": surface.rawValue,
+            "trigger": trigger,
+        ]
+        if let wordCountBucket {
+            properties["word_count_bucket"] = wordCountBucket
+        }
+        if let durationBucket {
+            properties["duration_bucket"] = durationBucket
+        }
+
+        AnalyticsReporter.track("activation_first_artifact_saved", properties: properties)
+        return true
     }
 
     static func trackAgentPromptAction(

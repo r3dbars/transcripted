@@ -2795,12 +2795,20 @@ final class MeetingSessionController: ObservableObject {
             }
             let transcriptProperties = Self.savedTranscriptAnalyticsProperties(transcriptURL: transcriptURL)
             await MainActor.run {
+                let properties = transcriptProperties.merging(
+                    baseProperties,
+                    uniquingKeysWith: { _, new in new }
+                )
+                ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+                    artifactKind: .meeting,
+                    surface: .meetingSave,
+                    trigger: properties["trigger"] ?? StartTrigger.unknown.rawValue,
+                    wordCountBucket: properties["word_count_bucket"],
+                    durationBucket: properties["duration_bucket"]
+                )
                 AnalyticsReporter.track(
                     "meeting_transcript_saved",
-                    properties: transcriptProperties.merging(
-                        baseProperties,
-                        uniquingKeysWith: { _, new in new }
-                    )
+                    properties: properties
                 )
             }
         }

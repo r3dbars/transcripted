@@ -17,6 +17,10 @@ enum PermissionsOnboardingPreferences {
         userDefaults.removeObject(forKey: forceKey)
     }
 
+    static func hasTrackedFirstDictationSaved(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: firstDictationSavedTrackedKey)
+    }
+
     static func markFirstDictationSavedTrackedIfNeeded(userDefaults: UserDefaults = .standard) -> Bool {
         guard !hasCompleted(userDefaults: userDefaults) else { return false }
         guard !userDefaults.bool(forKey: firstDictationSavedTrackedKey) else { return false }

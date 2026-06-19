@@ -58,6 +58,10 @@ func testPermissionsOnboardingPreferences() {
             defaults.bool(forKey: PermissionsOnboardingPreferences.firstDictationSavedTrackedKey),
             "first saved dictation tracking should persist"
         )
+        assertTrue(
+            PermissionsOnboardingPreferences.hasTrackedFirstDictationSaved(userDefaults: defaults),
+            "first saved dictation readback should reflect the persisted tracking bit"
+        )
     }
 
     runSuite("PermissionsOnboardingPreferences skips first saved dictation after completion") {

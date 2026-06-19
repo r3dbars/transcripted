@@ -80,26 +80,32 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy allows post-artifact activation events") {
         let artifact = AnalyticsEventPolicy.policy(forEvent: "activation_artifact_action_clicked")
+        let firstArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_first_artifact_saved")
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
+        assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
+            .union(firstArtifact?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",
                 "agent_target": "codex",
                 "artifact_age_bucket": "24_48h",
                 "artifact_kind": "meeting",
+                "duration_bucket": "10_29m",
                 "prompt_kind": "meeting_bundle",
                 "result": "success",
                 "surface": "home_preview",
+                "trigger": "detected_prompt",
+                "word_count_bucket": "300_plus",
                 "transcript": "private words",
                 "meeting_title": "Customer call",
                 "speaker_name": "Alice",
@@ -116,9 +122,12 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["agent_target"], "codex", "agent target should survive")
         assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
         assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
+        assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
+        assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
         assertNil(sanitized["transcript"], "raw transcript text must not be sent")
         assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
         assertNil(sanitized["speaker_name"], "speaker names must not be sent")
@@ -129,8 +138,11 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 
-    runSuite("ActivationTelemetry buckets artifact age and next-day return proxy") {
+    runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, and next-day return proxy") {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
+        let suiteName = "ActivationTelemetryTests.first-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
 
         assertEqual(
             ActivationTelemetry.artifactAgeBucket(since: now.addingTimeInterval(-3 * 3_600), now: now),
@@ -155,6 +167,14 @@ func testAnalyticsEventPolicy() {
             ActivationTelemetry.returnWindowBucket(since: now.addingTimeInterval(-96 * 3_600), now: now),
             "3_7d",
             "late return proxy should stay bucketed"
+        )
+        assertTrue(
+            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
+            "first saved artifact should be marked once per install"
+        )
+        assertFalse(
+            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
+            "first saved artifact should not be marked twice"
         )
     }
 
