@@ -2220,6 +2220,40 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - failed meeting transcripts carry capture diagnostics") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let failureBlock = sourceSlice(
+            controllerContents,
+            from: "case .failed(let message):",
+            to: "case .gettingReady:"
+        )
+
+        assertTrue(
+            controllerContents.contains("activeTranscriptionCaptureDiagnostics = job.captureDiagnostics"),
+            "failed meeting transcript diagnostics should use the capture health context stored with the active queued job"
+        )
+        assertTrue(
+            failureBlock.contains("let failureTelemetryContext = meetingFailureTelemetryContext("),
+            "failed meeting transcript diagnostics should compose shared failure telemetry through the stable helper"
+        )
+        assertFalse(
+            failureBlock.contains("capture.pipelineDiagnosticsSnapshot()"),
+            "failed meeting transcript diagnostics should not sample the live capture singleton after transcription fails"
+        )
+        assertTrue(
+            failureBlock.contains("\"queue_depth_bucket\": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)"),
+            "failed meeting transcript diagnostics should include bucketed queue depth"
+        )
+        assertTrue(
+            failureBlock.contains("context: baseDiagnosticsContext(extra: failureDiagnosticsContext)"),
+            "failed meeting transcript Sentry context should use the enriched diagnostics context"
+        )
+        assertTrue(
+            failureBlock.contains("properties: failureTelemetryContext"),
+            "analytics and diagnostics should share the same privacy-safe failure telemetry context"
+        )
+    }
+
     runSuite("Repo command contract - shutdown preservation clears live sidecar waits") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let terminationBlock = sourceSlice(
