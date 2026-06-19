@@ -24,6 +24,7 @@ QDIR = ROOT / "data" / "eval" / "qmatrix"
 # display order: clean -> increasingly degraded
 QORDER = ["orig", "mp3_64", "aac_32", "mp3_32", "opus_16k", "mp3_16", "opus_8k",
           "tel_g711", "reverb", "noisy_snr10", "noisy_snr5"]
+KNOWN_QUALITIES = set(QORDER)  # guards against e.g. corpus="ami" matching "ami_scale_*"
 
 FLOATCOLS = {"suggestFloor","autoBar","marginMin","promoParam","emaAlpha","promptsPerPerson",
              "typesPerPerson","tapsPerPerson","suggestPrecision","falseAutoRate","pctReachedAuto",
@@ -55,6 +56,8 @@ def discover(corpus):
     for d in sorted(glob.glob(str(QDIR / f"{corpus}_*"))):
         tag = os.path.basename(d)
         q = tag[len(corpus) + 1:]
+        if q not in KNOWN_QUALITIES:   # skip e.g. ami_scale_* when corpus == "ami"
+            continue
         csvp = Path(d) / "ladder" / f"ladder_policies_{tag}.csv"
         if csvp.exists() and csvp.stat().st_size > 0:
             cells[q] = load_cell(csvp)

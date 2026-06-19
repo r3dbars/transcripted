@@ -337,10 +337,10 @@ measured SNR): `orig` (full 8 kHz band) · `mp3_64`/`aac_32`/`mp3_32` (≈ clean
 `tel_g711` (300–3400 Hz landline, μ-law) · `reverb` (50/80/120 ms echo tail) ·
 `noisy_snr10`/`noisy_snr5` (white noise, **calibrated to measured 10.0 / 5.0 dB SNR**).
 
-**Coverage:** WAVE 1 (done) = **VoxCeleb 30×30 + AMI-scale 32**, each × **all 11 qualities**
-(22 cells × 11,053 policies = **243,166 policy-sims**). WAVE 2 (in progress) = **AMI-full
-(189 speakers, high-N)** + **VoxConverse (in-the-wild)** × 6 representative qualities, to
-certify false-auto rates at large N (see §11.5).
+**Coverage:** WAVE 1 = **VoxCeleb 30×30 + AMI-scale 32**, each × **all 11 qualities**
+(22 cells). WAVE 2 = **AMI-full (175 speakers, high-N)** × 6 qualities + **VoxConverse
+(in-the-wild, 50 files)** × 6 qualities. Total **≈34 cells × 11,053 policies ≈ 375k
+policy-sims**, all on the REAL diarizer + clusterer + matcher.
 
 ## 11.2 Headline: clean-audio safety does NOT transfer to degraded audio
 On VoxCeleb, the **production gate shows 0% false-auto on clean codecs but mislabels silently
@@ -400,11 +400,11 @@ Joining by policyId across all 11 qualities and requiring the budget in the wors
 
 ## 11.5 Caveats / status
 - **N=30/32 makes per-quality false-auto rates noisy** (denominators 4–29 autos). The
-  *direction* is robust (corroborated by suggest-precision over hundreds of suggests), but
-  certifying "< 0.5%" needs the high-N run: **WAVE 2 (AMI-full, 189 speakers)** is dumping now
-  and will replace the AMI false-auto column with statistically powered rates; **VoxConverse**
-  (in-the-wild YouTube) adds a genuinely-compressed real-world domain. This section will be
-  updated when WAVE 2 lands.
+  *direction* is robust (corroborated by suggest-precision over hundreds of suggests).
+  **WAVE 2 (AMI-full, 175 speakers, 6 qualities) is DONE** and certifies the AMI numbers at
+  high N — see §11.6(4): the recommended `autoBar 0.92 + margin 0.12` gate produces 12–36
+  silent autos/quality with **zero errors** across all 6 qualities (pooled 148/0), confirming
+  AMI AUTO is safe at a high bar and revising the earlier N=32 "suggest-only" read.
 - Noise SNR labels are calibrated to **measured** 10.0 / 5.0 dB (FFT-verified after correcting
   an ffmpeg `amix` normalization that initially offset them ~4.7 dB).
 - `reverb` does not band-limit (≈ orig spectrum); its effect is the echo tail, so its impact on
@@ -448,17 +448,22 @@ vacuous (AMI baseline = 0 autos everywhere); (b) "*any* degradation raises false
 (0.92 → pooled FAR 0.627 on 1,933 autos; 0.95 → 0 autos). Trust the AMI curves, suggest-precision,
 and volume-weighted FAR — not col-mean false-auto at the top of the autoBar range.
 
-### (4) Recommended shippable gates
+### (4) Recommended shippable gates  *(updated with the AMI-full N=175 high-N run)*
 
-| Corpus | Gate | Worst-quality false-auto | Prompts |
+| Corpus | Gate | Worst-quality false-auto | Prompts / reach-AUTO |
 |---|---|---|---|
 | **VoxCeleb (clean/short)** | floor 0.60, **autoBar 0.83, margin 0.12**, fixed cc>5, α 0.15, demote off | 0/301 pooled across 11 qualities (thin in worst cells) | 31.0 ppp, ~2.6× more auto-reach than baseline |
-| **AMI (in-room, ≤4 sessions)** | **SUGGEST-only — do not enable AUTO** | **0 policies** clear fa≤0.5% with ≥50 degraded autos; all "safe" gates are denominator-vacuous | ~3 ppp |
-| **Cross-domain default** | floor 0.60, autoBar 0.83, margin 0.12, fixed cc>5 | VoxCeleb 0; AMI-safe by construction (never auto-promotes short tracks) | — |
+| **AMI (in-room), N=175** | floor 0.60, **autoBar 0.92, margin 0.12**, fixed cc>2, α 0.25, demote off | **0 wrong across all 6 qualities** (12–36 autos/quality; pooled **148 autos, 0 wrong**) | ~2.8 ppp, reach-AUTO 8–19% |
+| **Cross-domain default** | floor 0.60, **autoBar ≈ 0.90, margin 0.12**, fixed cc≥3 | VoxCeleb 0; AMI 0 wrong/148 | — |
 
-**Bottom line:** ship **autoBar ≈ 0.83 + margin ≥ 0.12** *and gate AUTO on enough accumulated
-appearances*; for short in-room relationships (≤4 sessions) under degraded audio, **AUTO cannot
-be made safe at meaningful volume — keep it SUGGEST-only**. (For VoxCeleb, lowering floor to 0.45
-— same auto gate — lifts worst-quality suggest-precision 0.654→0.750 at +0.17 ppp if more margin
-under degradation is wanted.) The AMI-full N=189 run (§11.5) directly tests the "AMI AUTO is
-unsafe" claim at high N.
+**Bottom line (high-N certified): ship `autoBar ≈ 0.90–0.92 + margin ≥ 0.12` and gate AUTO on
+accumulated appearances.** The AMI-full N=175 run *revised* the N=32 deep-dive's "suggest-only"
+conclusion: **AMI AUTO IS safe at a high bar** — at `autoBar 0.92 + margin 0.12` it produced
+12–36 silent auto-names per quality with **zero** errors across orig→opus_8k→noise→reverb
+(pooled 148 autos, 0 wrong; reach-AUTO 8–19%). But the bar must be high: the **same gate at
+`autoBar 0.85` is catastrophic under degradation — `opus_8k` → 31/43 wrong (72% false-auto),
+`noisy_snr5` → 7/44 (16%), even clean orig → 2/43 (4.6%)**. So the lever is *high bar + margin
+together*; lowering the bar to chase prompt savings (§1's clean-only 0.80) silently mislabels
+the moment audio degrades. (Per-quality AMI auto denominators are modest — 12–36 — so the
+worst-quality CI is wide; pooled 0/148 bounds false-auto well under 2%. Larger N or more
+sessions/person would tighten it further; VoxConverse adds the in-the-wild domain, §11.7.)
