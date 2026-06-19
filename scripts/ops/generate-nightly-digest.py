@@ -70,6 +70,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "agent_capture_query_observed",
 )
 POSTHOG_FIRST_VALUE_EVENTS = (
     "dictation_completed",
@@ -81,6 +82,7 @@ POSTHOG_FIRST_VALUE_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "agent_capture_query_observed",
 )
 TRUSTED_POSTHOG_HOSTS = {
     "https://app.posthog.com",
@@ -2424,6 +2426,7 @@ def run_self_test() -> None:
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
             "activation_return_proxy_observed",
+            "agent_capture_query_observed",
         }
         assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
         assert {
@@ -2432,6 +2435,7 @@ def run_self_test() -> None:
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
             "activation_return_proxy_observed",
+            "agent_capture_query_observed",
         }.issubset(set(POSTHOG_FIRST_VALUE_EVENTS))
         paths = write_reports(payload, output_dir)
         assert Path(paths["latest_html"]).exists()

@@ -185,7 +185,8 @@ func testRepoCommandContract() {
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
-            "activation_return_proxy_observed"
+            "activation_return_proxy_observed",
+            "agent_capture_query_observed"
         ] {
             assertTrue(
                 firstValueEvents.contains(event) && docs.contains(event),
@@ -197,7 +198,8 @@ func testRepoCommandContract() {
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
-            "activation_return_proxy_observed"
+            "activation_return_proxy_observed",
+            "agent_capture_query_observed"
         ] {
             assertTrue(
                 digest.contains(event),

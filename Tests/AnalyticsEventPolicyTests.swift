@@ -154,6 +154,7 @@ func testAnalyticsEventPolicy() {
             "prompt_reason",
             "provider",
             "proxy_kind",
+            "query_kind",
             "quiet_mic_recovered",
             "quiet_mic_unrecovered",
             "realtime_agc",
@@ -281,26 +282,33 @@ func testAnalyticsEventPolicy() {
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
+        let query = AnalyticsEventPolicy.policy(forEvent: "agent_capture_query_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
         assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
+        assertEqual(query?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "source_count_bucket", "surface"], "agent capture query proof should stay enum and bucket only")
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
             .union(firstArtifact?.allowedProperties ?? Set<String>())
+            .union(query?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",
-                "agent_target": "codex",
+                "agent_target": "mcp_client",
                 "artifact_age_bucket": "24_48h",
                 "artifact_kind": "meeting",
+                "capture_age_bucket": "2_7d",
                 "duration_bucket": "10_29m",
                 "prompt_kind": "meeting_bundle",
+                "query_kind": "search",
                 "result": "success",
-                "surface": "home_preview",
+                "return_window_bucket": "3_7d",
+                "source_count_bucket": "2_3",
+                "surface": "mcp",
                 "trigger": "detected_prompt",
                 "word_count_bucket": "300_plus",
                 "transcript": "private words",
@@ -310,19 +318,26 @@ func testAnalyticsEventPolicy() {
                 "file_path": "/Users/redbars/private.md",
                 "meeting_url": "https://example.com/private",
                 "prompt_text": "Read my transcript",
+                "query_text": "customer roadmap objection",
+                "raw_capture_id": "cap_private",
+                "source_app_name": "Slack",
                 "word_count": "4217",
             ],
             allowedKeys: activationAllowedProperties
         )
 
         assertEqual(sanitized["action_kind"], "open_markdown", "action kind should survive")
-        assertEqual(sanitized["agent_target"], "codex", "agent target should survive")
+        assertEqual(sanitized["agent_target"], "mcp_client", "agent target should survive")
         assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
         assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["capture_age_bucket"], "2_7d", "capture age bucket should survive")
         assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
+        assertEqual(sanitized["query_kind"], "search", "query kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
-        assertEqual(sanitized["surface"], "home_preview", "surface should survive")
+        assertEqual(sanitized["return_window_bucket"], "3_7d", "return window bucket should survive")
+        assertEqual(sanitized["source_count_bucket"], "2_3", "source count bucket should survive")
+        assertEqual(sanitized["surface"], "mcp", "surface should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
         assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
         assertNil(sanitized["transcript"], "raw transcript text must not be sent")
@@ -332,6 +347,9 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["file_path"], "file paths must not be sent")
         assertNil(sanitized["meeting_url"], "meeting URLs must not be sent")
         assertNil(sanitized["prompt_text"], "raw prompt text must not be sent")
+        assertNil(sanitized["query_text"], "raw query text must not be sent")
+        assertNil(sanitized["raw_capture_id"], "raw capture IDs must not be sent")
+        assertNil(sanitized["source_app_name"], "source app names must not be sent")
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 

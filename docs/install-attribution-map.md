@@ -28,7 +28,7 @@ through `AnalyticsEventPolicy` and `AnalyticsPayloadSanitizer`.
 | In-app update download | `update_check_finished`, `update_download_started`, `update_download_finished`, `update_ready_to_install`, `update_relaunching`, `update_installed` | PostHog | App-side update funnel. Use version-scoped aggregate counts. |
 | First launch | `app_launched` with `app_version` and `build_version` default properties | PostHog | Anonymous device/session signal only. |
 | First useful artifact | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Shows local Markdown value without inspecting content. |
-| Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
+| Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `agent_capture_query_observed`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, successful MCP capture queries, and later return via Home. |
 | Reliability filter | Release-scoped issues and allowed non-fatal events | Sentry | Use to avoid mistaking broken first-run paths for weak demand. |
 
 ## Standard Read-Only Checks
@@ -73,8 +73,9 @@ For the attribution story, report:
 - `app_launched` does not prove a first useful artifact. Use
   `dictation_completed`, `onboarding_first_dictation_saved`, and
   `meeting_transcript_saved` for value.
-- Artifact events do not prove agent answer quality. The closest safe proxy is
-  `activation_agent_prompt_action_clicked` plus `activation_return_proxy_observed`.
+- Artifact and prompt events do not prove agent answer quality. Use
+  `agent_capture_query_observed` for successful saved-capture MCP reads/searches,
+  then pair it with `activation_return_proxy_observed` for return behavior.
 
 If the story is still fuzzy after these checks, prefer adding a coarse
 allowlisted event or aggregate script output over adding tracking IDs.
