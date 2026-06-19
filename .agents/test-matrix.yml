@@ -28,6 +28,7 @@ rules:
       - "run-e2e-smoke.sh"
       - "scripts/entrypoints/run-e2e-smoke.sh"
     checks:
+      - "python3 scripts/dev/check-build-source-lists.py"
       - "bash run-e2e-smoke.sh"
 
   - paths:
@@ -37,6 +38,7 @@ rules:
       - "run-slow-pasteback-smoke.sh"
       - "scripts/entrypoints/run-slow-pasteback-smoke.sh"
     checks:
+      - "python3 scripts/dev/check-build-source-lists.py"
       - "bash run-slow-pasteback-smoke.sh"
 
   - paths:
@@ -51,8 +53,10 @@ rules:
   - paths:
       - "build.sh"
       - "scripts/entrypoints/build.sh"
+      - "scripts/entrypoints/lib/swiftc-app-args.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
+      - "python3 scripts/dev/check-build-source-lists.py"
       - "bash -n build.sh"
       - "bash -n scripts/entrypoints/build.sh"
       - "bash build.sh --no-open"
@@ -63,6 +67,7 @@ rules:
       - "Tests/FastTests.manifest"
     checks:
       - "scripts/dev/agent-preflight.sh"
+      - "python3 scripts/dev/check-build-source-lists.py"
       - "bash -n run-tests.sh"
       - "bash -n scripts/entrypoints/run-tests.sh"
       - "bash run-tests.sh"
@@ -97,6 +102,13 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/dev/onboarding.sh"
+
+  - paths:
+      - "scripts/dev/check-build-source-lists.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/dev/check-build-source-lists.py"
+      - "python3 scripts/dev/check-build-source-lists.py"
 
   - paths:
       - "scripts/dev/benchmark-home-recent-captures.sh"

@@ -35,6 +35,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 ## Active helper scripts
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
+- `scripts/dev/check-build-source-lists.py` — fast raw-`swiftc` guardrail for app, fast-test, and smoke source-list drift
 - `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark
 - `scripts/download_ami.sh` — fetch the gitignored AMI ES2002 audio/RTTM subset used by `Tools/SpeakerEvalHarness`
 - `scripts/run_speaker_eval.sh` — build and run the AMI speaker-naming sweep, writing local reports under `data/eval/`

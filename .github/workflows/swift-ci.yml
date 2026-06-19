@@ -36,6 +36,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Build source-list contracts
+        shell: bash
+        run: python3 scripts/dev/check-build-source-lists.py
+
       - name: Cache prebuilt dependencies
         id: deps-cache
         uses: actions/cache@v4
