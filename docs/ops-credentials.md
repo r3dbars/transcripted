@@ -61,6 +61,22 @@ proxies only; they are not proof that an agent answered from a saved artifact.
 The desired true-use event is `agent_capture_query_observed`, which should stay
 zero/unknown until that privacy-safe instrumentation exists.
 
+For the normal health lane's product-task loop, run:
+
+```bash
+python3 scripts/ops/posthog-product-dashboard-summary.py --days 30
+```
+
+`health-probe.sh posthog` runs this helper automatically when credentials are
+present. The report summarizes the five product-learning dashboard families
+and returns ranked product tasks from aggregate counts only. For CI or dry-run
+use:
+
+```bash
+python3 scripts/ops/posthog-product-dashboard-summary.py --self-test
+python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json
+```
+
 ### Cloudflare Read vs Deploy
 
 The health probe reads Pages project/deployment status and zone analytics for
