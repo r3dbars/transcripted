@@ -14,6 +14,125 @@ func testAnalyticsEventPolicy() {
         )
     }
 
+    runSuite("AnalyticsEventPolicy keeps property names privacy-safe across the whole taxonomy") {
+        let forbiddenPropertyFragments = [
+            "app_bundle",
+            "app_name",
+            "audio_file",
+            "audio_path",
+            "audio_ref",
+            "audio_url",
+            "bundle_id",
+            "device_name",
+            "email",
+            "file_name",
+            "filename",
+            "invitee",
+            "meeting_title",
+            "participant_name",
+            "path",
+            "prompt_text",
+            "raw_device",
+            "raw_text",
+            "source_app",
+            "speaker",
+            "text",
+            "title",
+            "token",
+            "transcript",
+            "url",
+        ]
+        let reviewedExceptions: Set<String> = [
+            "mic_raw_peak",
+        ]
+
+        for (event, properties) in AnalyticsEventPolicy.allAllowedPropertiesByEvent {
+            assertTrue(
+                event.range(of: #"^[a-z][a-z0-9_]*$"#, options: .regularExpression) != nil,
+                "\(event) should use stable snake_case event names"
+            )
+
+            for property in properties {
+                assertTrue(
+                    property.range(of: #"^[a-z][a-z0-9_]*$"#, options: .regularExpression) != nil,
+                    "\(event).\(property) should use stable snake_case property names"
+                )
+                guard !reviewedExceptions.contains(property) else { continue }
+
+                let normalized = property.lowercased()
+                for fragment in forbiddenPropertyFragments {
+                    assertFalse(
+                        normalized.contains(fragment),
+                        "\(event).\(property) must not add raw content, identity, source-app, path, URL, token, or raw-device fields"
+                    )
+                }
+            }
+        }
+    }
+
+    runSuite("AnalyticsEventPolicy keeps raw counts and timings bucketed across the taxonomy") {
+        let allowedRawNumericProperties: Set<String> = [
+            "captured_input_volume_before",
+            "captured_input_volume_changed",
+            "captured_input_volume_dropped",
+            "captured_input_volume_during",
+            "default_input_volume_after",
+            "default_input_volume_before",
+            "default_input_volume_changed",
+            "default_input_volume_dropped",
+            "default_input_volume_during",
+            "default_output_volume_after",
+            "default_output_volume_before",
+            "default_output_volume_changed",
+            "default_output_volume_dropped",
+            "default_output_volume_during",
+            "default_system_output_volume_after",
+            "default_system_output_volume_before",
+            "default_system_output_volume_changed",
+            "default_system_output_volume_dropped",
+            "default_system_output_volume_during",
+            "input_channels",
+            "input_rate_hz",
+            "mic_processed_peak",
+            "mic_raw_peak",
+            "os_major",
+            "output_channels",
+            "output_rate_hz",
+            "system_channels",
+            "system_output_rate_hz",
+            "system_peak",
+            "system_rate_hz",
+        ]
+        let rawShapeFragments = [
+            "_count",
+            "_duration",
+            "_latency",
+            "_ms",
+            "_seconds",
+            "attempts",
+            "duration_seconds",
+            "duration_ms",
+            "latency_ms",
+            "queue_depth",
+            "retry_count",
+            "word_count",
+        ]
+
+        for (event, properties) in AnalyticsEventPolicy.allAllowedPropertiesByEvent {
+            for property in properties {
+                guard !property.hasSuffix("_bucket") else { continue }
+                guard !allowedRawNumericProperties.contains(property) else { continue }
+
+                for fragment in rawShapeFragments {
+                    assertFalse(
+                        property.contains(fragment),
+                        "\(event).\(property) should use a coarse *_bucket property instead of raw numeric shape"
+                    )
+                }
+            }
+        }
+    }
+
     runSuite("AnalyticsEventPolicy allows explicit onboarding funnel events") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "onboarding_shown")
         let stepViewed = AnalyticsEventPolicy.policy(forEvent: "onboarding_step_viewed")

@@ -67,6 +67,56 @@ func testAnalyticsPayloadSanitizer() {
         assertEqual(sanitized["duration_bucket"], "10_29s", "unrelated coarse properties should remain")
     }
 
+    runSuite("AnalyticsPayloadSanitizer rejects risky taxonomy names even if allowlisted") {
+        let riskyProperties = [
+            "app_bundle_id": "com.example.private",
+            "app_name": "Private Browser",
+            "audio_file": "customer.wav",
+            "audio_path": "/Users/redbars/customer.wav",
+            "audio_ref": "/Users/redbars/customer.wav",
+            "audio_url": "https://example.com/customer.wav",
+            "device_name": "Desk Microphone",
+            "email": "person@example.com",
+            "file_name": "customer.md",
+            "file_path": "/Users/redbars/customer.md",
+            "invitee_name": "Alice",
+            "meeting_title": "Customer Roadmap",
+            "participant_name": "Bob",
+            "prompt_text": "Summarize my meeting",
+            "raw_device": "Private AirPods",
+            "raw_text": "private words",
+            "source_app": "Safari",
+            "source_app_bundle": "com.apple.Safari",
+            "speaker_label": "Speaker 1",
+            "speaker_name": "Alice",
+            "text": "private words",
+            "title": "Customer Roadmap",
+            "token": "sk-private",
+            "transcript": "private words",
+            "transcript_text": "private words",
+            "url": "https://example.com/private",
+        ]
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            riskyProperties.merging(
+                [
+                    "duration_bucket": "10_29m",
+                    "trigger": "hotkey",
+                    "word_count_bucket": "300_plus",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: Set(riskyProperties.keys).union(["duration_bucket", "trigger", "word_count_bucket"])
+        )
+
+        assertEqual(sanitized["duration_bucket"], "10_29m", "coarse duration bucket should survive beside rejected risky fields")
+        assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive beside rejected risky fields")
+        assertEqual(sanitized["word_count_bucket"], "300_plus", "coarse word count bucket should survive beside rejected risky fields")
+        for key in riskyProperties.keys {
+            assertNil(sanitized[key], "\(key) should be dropped even when mistakenly included in allowedKeys")
+        }
+    }
+
     runSuite("AnalyticsPayloadSanitizer scrubs support-facing diagnostic context") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeDiagnosticContextForDisplay([
             "audio_device": "Private AirPods",

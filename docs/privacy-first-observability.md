@@ -162,6 +162,12 @@ without joining against any sensitive context.
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
 
+`Tests/AnalyticsEventPolicyTests.swift` enforces this taxonomy across every
+allowlisted PostHog property. New properties must stay snake_case, coarse, and
+free of raw transcript/audio/title/speaker/email/path/source-app/raw-device/URL/token
+fields. `Tests/AnalyticsPayloadSanitizerTests.swift` also rejects those risky
+property names even if a caller accidentally includes them in an allowlist.
+
 ## Nightly guardrail sweep
 
 The nightly security automation should start with the deterministic checker:

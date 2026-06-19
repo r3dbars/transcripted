@@ -15,6 +15,7 @@ enum AnalyticsPayloadSanitizer {
         "name",
         "password",
         "path",
+        "raw_device",
         "speaker",
         "source_app",
         "secret",
