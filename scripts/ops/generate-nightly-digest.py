@@ -66,6 +66,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
@@ -77,6 +78,7 @@ POSTHOG_FIRST_VALUE_EVENTS = (
     "meeting_transcript_saved",
     "onboarding_agent_cta_clicked",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
@@ -2420,6 +2422,7 @@ def run_self_test() -> None:
             "meeting_transcript_failed",
             "meeting_transcript_skipped",
             "activation_first_artifact_saved",
+            "activation_second_artifact_saved",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
@@ -2428,6 +2431,7 @@ def run_self_test() -> None:
         assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
         assert {
             "activation_first_artifact_saved",
+            "activation_second_artifact_saved",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",

@@ -2,6 +2,9 @@ import Foundation
 
 enum ActivationTelemetry {
     static let firstArtifactSavedTrackedKey = "activationFirstArtifactSavedTracked"
+    static let firstArtifactSavedKindKey = "activationFirstArtifactSavedKind"
+    static let firstArtifactSavedAtKey = "activationFirstArtifactSavedAt"
+    static let secondArtifactSavedTrackedKey = "activationSecondArtifactSavedTracked"
 
     enum ArtifactKind: String {
         case dictation
@@ -105,10 +108,26 @@ enum ActivationTelemetry {
     }
 
     @discardableResult
-    static func markFirstArtifactSavedTrackedIfNeeded(userDefaults: UserDefaults = .standard) -> Bool {
+    static func markFirstArtifactSavedTrackedIfNeeded(
+        artifactKind: ArtifactKind? = nil,
+        date: Date = Date(),
+        userDefaults: UserDefaults = .standard
+    ) -> Bool {
         guard !userDefaults.bool(forKey: firstArtifactSavedTrackedKey) else { return false }
 
         userDefaults.set(true, forKey: firstArtifactSavedTrackedKey)
+        if let artifactKind {
+            userDefaults.set(artifactKind.rawValue, forKey: firstArtifactSavedKindKey)
+            userDefaults.set(date.timeIntervalSinceReferenceDate, forKey: firstArtifactSavedAtKey)
+        }
+        return true
+    }
+
+    @discardableResult
+    static func markSecondArtifactSavedTrackedIfNeeded(userDefaults: UserDefaults = .standard) -> Bool {
+        guard !userDefaults.bool(forKey: secondArtifactSavedTrackedKey) else { return false }
+
+        userDefaults.set(true, forKey: secondArtifactSavedTrackedKey)
         return true
     }
 
@@ -119,9 +138,21 @@ enum ActivationTelemetry {
         trigger: String,
         wordCountBucket: String? = nil,
         durationBucket: String? = nil,
+        now: Date = Date(),
         userDefaults: UserDefaults = .standard
     ) -> Bool {
-        guard markFirstArtifactSavedTrackedIfNeeded(userDefaults: userDefaults) else {
+        guard markFirstArtifactSavedTrackedIfNeeded(
+            artifactKind: artifactKind,
+            date: now,
+            userDefaults: userDefaults
+        ) else {
+            trackSecondArtifactSavedIfNeeded(
+                secondArtifactKind: artifactKind,
+                surface: surface,
+                trigger: trigger,
+                now: now,
+                userDefaults: userDefaults
+            )
             return false
         }
 
@@ -138,6 +169,38 @@ enum ActivationTelemetry {
         }
 
         AnalyticsReporter.track("activation_first_artifact_saved", properties: properties)
+        return true
+    }
+
+    @discardableResult
+    static func trackSecondArtifactSavedIfNeeded(
+        secondArtifactKind: ArtifactKind,
+        surface: Surface,
+        trigger: String,
+        now: Date = Date(),
+        userDefaults: UserDefaults = .standard
+    ) -> Bool {
+        guard userDefaults.bool(forKey: firstArtifactSavedTrackedKey),
+              !userDefaults.bool(forKey: secondArtifactSavedTrackedKey),
+              let firstArtifactKind = firstArtifactKind(userDefaults: userDefaults),
+              let firstArtifactDate = firstArtifactDate(userDefaults: userDefaults)
+        else {
+            return false
+        }
+        guard markSecondArtifactSavedTrackedIfNeeded(userDefaults: userDefaults) else {
+            return false
+        }
+
+        AnalyticsReporter.track(
+            "activation_second_artifact_saved",
+            properties: [
+                "days_since_first_bucket": daysSinceFirstBucket(since: firstArtifactDate, now: now),
+                "first_artifact_kind": firstArtifactKind.rawValue,
+                "second_artifact_kind": secondArtifactKind.rawValue,
+                "surface": surface.rawValue,
+                "trigger": trigger,
+            ]
+        )
         return true
     }
 
@@ -238,5 +301,36 @@ enum ActivationTelemetry {
         default:
             return "older"
         }
+    }
+
+    static func daysSinceFirstBucket(since date: Date, now: Date = Date()) -> String {
+        let hours = max(0, now.timeIntervalSince(date)) / 3_600
+
+        switch hours {
+        case ..<24:
+            return "same_day"
+        case ..<48:
+            return "1_2d"
+        case ..<168:
+            return "2_7d"
+        case ..<720:
+            return "7_30d"
+        default:
+            return "older"
+        }
+    }
+
+    private static func firstArtifactKind(userDefaults: UserDefaults) -> ArtifactKind? {
+        guard let rawValue = userDefaults.string(forKey: firstArtifactSavedKindKey) else {
+            return nil
+        }
+        return ArtifactKind(rawValue: rawValue)
+    }
+
+    private static func firstArtifactDate(userDefaults: UserDefaults) -> Date? {
+        guard userDefaults.object(forKey: firstArtifactSavedAtKey) != nil else {
+            return nil
+        }
+        return Date(timeIntervalSinceReferenceDate: userDefaults.double(forKey: firstArtifactSavedAtKey))
     }
 }

@@ -81,12 +81,14 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy allows post-artifact activation events") {
         let artifact = AnalyticsEventPolicy.policy(forEvent: "activation_artifact_action_clicked")
         let firstArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_first_artifact_saved")
+        let secondArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_second_artifact_saved")
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
         assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
+        assertEqual(secondArtifact?.allowedProperties ?? Set<String>(), ["days_since_first_bucket", "first_artifact_kind", "second_artifact_kind", "surface", "trigger"], "second artifact saves should stay enum and bucket only")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
@@ -94,18 +96,23 @@ func testAnalyticsEventPolicy() {
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
             .union(firstArtifact?.allowedProperties ?? Set<String>())
+            .union(secondArtifact?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",
                 "agent_target": "codex",
                 "artifact_age_bucket": "24_48h",
                 "artifact_kind": "meeting",
+                "days_since_first_bucket": "2_7d",
                 "duration_bucket": "10_29m",
+                "first_artifact_kind": "dictation",
                 "prompt_kind": "meeting_bundle",
                 "result": "success",
+                "second_artifact_kind": "meeting",
                 "surface": "home_preview",
                 "trigger": "detected_prompt",
                 "word_count_bucket": "300_plus",
+                "first_artifact_date": "2026-06-19T00:00:00Z",
                 "transcript": "private words",
                 "meeting_title": "Customer call",
                 "speaker_name": "Alice",
@@ -122,12 +129,16 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["agent_target"], "codex", "agent target should survive")
         assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
         assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["days_since_first_bucket"], "2_7d", "second-artifact age bucket should survive")
         assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
+        assertEqual(sanitized["first_artifact_kind"], "dictation", "first artifact kind should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
+        assertEqual(sanitized["second_artifact_kind"], "meeting", "second artifact kind should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
         assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
+        assertNil(sanitized["first_artifact_date"], "raw dates must not be sent")
         assertNil(sanitized["transcript"], "raw transcript text must not be sent")
         assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
         assertNil(sanitized["speaker_name"], "speaker names must not be sent")
@@ -168,13 +179,31 @@ func testAnalyticsEventPolicy() {
             "3_7d",
             "late return proxy should stay bucketed"
         )
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: now.addingTimeInterval(-12 * 3_600), now: now),
+            "same_day",
+            "second artifact should bucket same-day saves"
+        )
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: now.addingTimeInterval(-72 * 3_600), now: now),
+            "2_7d",
+            "second artifact should bucket multi-day saves"
+        )
         assertTrue(
-            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
+            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(artifactKind: .dictation, date: now, userDefaults: defaults),
             "first saved artifact should be marked once per install"
         )
         assertFalse(
-            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
+            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(artifactKind: .meeting, date: now, userDefaults: defaults),
             "first saved artifact should not be marked twice"
+        )
+        assertTrue(
+            ActivationTelemetry.markSecondArtifactSavedTrackedIfNeeded(userDefaults: defaults),
+            "second saved artifact should be marked once per install"
+        )
+        assertFalse(
+            ActivationTelemetry.markSecondArtifactSavedTrackedIfNeeded(userDefaults: defaults),
+            "second saved artifact should not be marked twice"
         )
     }
 

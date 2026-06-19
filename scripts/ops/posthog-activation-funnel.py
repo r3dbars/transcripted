@@ -47,6 +47,7 @@ RELEVANT_EVENTS = (
     "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "agent_capture_query_observed",
 )
 
@@ -61,6 +62,7 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "activation_second_artifact_saved",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {
@@ -639,7 +641,7 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         "## Next Best Action",
         "",
-        "Add one privacy-safe first-use event for `activation_first_artifact_saved` and one for `agent_capture_query_observed`, then make the dashboard's primary KPI the share of launch devices that reach true sourced-agent-use within 7 days.",
+        "Add one privacy-safe `agent_capture_query_observed` event, then make the dashboard's primary KPI the share of launch devices that reach true sourced-agent-use within 7 days. Use `activation_second_artifact_saved` for repeat-value conversion.",
         "",
     ]
     return "\n".join(lines)
