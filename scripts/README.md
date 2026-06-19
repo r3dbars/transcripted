@@ -62,6 +62,11 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Release-scoped usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30 --app-version 1.1.48`
   - Writes local Markdown and JSON under `/tmp/transcripted-posthog-activation-funnel/<run-id>/`
   - Self-test: `python3 scripts/ops/posthog-activation-funnel.py --self-test`
+- `scripts/ops/posthog-product-dashboard-summary.py` — print the five aggregate PostHog product-learning dashboard summaries for the health lane: 100 WAU Operating, Activation, Reliability, Feature Adoption, and Release Health
+  - Usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --days 7`
+  - Release-scoped usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --days 7 --app-version 1.1.48`
+  - Missing PostHog read credentials render all five sections as `UNKNOWN` with the missing prerequisite instead of failing green
+  - Self-test: `python3 scripts/ops/posthog-product-dashboard-summary.py --self-test`
 - `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
   - Usage: `bash run-daily-audio-reliability.sh`
   - Synthetic-only usage: `bash run-daily-audio-reliability.sh --synthetic`

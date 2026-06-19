@@ -61,6 +61,20 @@ proxies only; they are not proof that an agent answered from a saved artifact.
 The desired true-use event is `agent_capture_query_observed`, which should stay
 zero/unknown until that privacy-safe instrumentation exists.
 
+For the compact health-lane product-learning read, run:
+
+```bash
+python3 scripts/ops/posthog-product-dashboard-summary.py --days 7
+```
+
+That helper prints the five dashboard sections the Transcripted health brief
+expects: `100 WAU Operating`, `Activation`, `Reliability`, `Feature Adoption`,
+and `Release Health`. It uses aggregate HogQL only and does not export raw rows,
+people rows, transcript text, recording references, titles, paths, URLs, or
+identities. If `POSTHOG_PERSONAL_API_KEY` or `POSTHOG_PROJECT_ID` is missing,
+it renders all five sections as `UNKNOWN` with the missing prerequisite instead
+of treating PostHog as green.
+
 ### Cloudflare Read vs Deploy
 
 The health probe reads Pages project/deployment status and zone analytics for
