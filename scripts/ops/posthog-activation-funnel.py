@@ -181,7 +181,7 @@ SEQUENCE_STEPS = (
     ("Dictation started", "event IN ('onboarding_first_dictation_started', 'dictation_started')"),
     (
         "Saved Markdown or dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed', 'activation_second_artifact_saved')",
+        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
     ),
     ("Second saved artifact", "event = 'activation_second_artifact_saved'"),
     (

@@ -152,6 +152,10 @@ enum ActivationTelemetry {
         savedAt: Date = Date(),
         userDefaults: UserDefaults = .standard
     ) -> Bool {
+        guard AnalyticsPreferences.isEnabled(userDefaults: userDefaults) else {
+            return false
+        }
+
         let saveState = recordArtifactSave(
             artifactKind: artifactKind,
             savedAt: savedAt,

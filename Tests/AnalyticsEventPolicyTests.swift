@@ -453,6 +453,36 @@ func testAnalyticsEventPolicy() {
         assertEqual(legacySecond.secondArtifact?.daysSinceFirstBucket, "unknown", "legacy second-artifact event should avoid inventing first date")
     }
 
+    runSuite("ActivationTelemetry does not retain opted-out first artifact metadata") {
+        let suiteName = "ActivationTelemetryTests.opt-out-first-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        AnalyticsPreferences.setEnabled(false, userDefaults: defaults)
+        let disabledResult = ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+            artifactKind: .dictation,
+            surface: .dictationSave,
+            trigger: "hotkey",
+            savedAt: Date(timeIntervalSinceReferenceDate: 4_000_000),
+            userDefaults: defaults
+        )
+        assertFalse(disabledResult, "opted-out first artifact should not report")
+        assertFalse(defaults.bool(forKey: ActivationTelemetry.firstArtifactSavedTrackedKey), "opted-out first artifact should not mark first-save telemetry state")
+        assertNil(defaults.string(forKey: ActivationTelemetry.firstArtifactKindKey), "opted-out first artifact should not store kind for later reporting")
+        assertNil(defaults.object(forKey: ActivationTelemetry.firstArtifactSavedAtKey), "opted-out first artifact should not store date for later reporting")
+
+        AnalyticsPreferences.setEnabled(true, userDefaults: defaults)
+        let enabledResult = ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+            artifactKind: .meeting,
+            surface: .meetingSave,
+            trigger: "manual",
+            savedAt: Date(timeIntervalSinceReferenceDate: 4_100_000),
+            userDefaults: defaults
+        )
+        assertTrue(enabledResult, "first artifact after analytics opt-in should be treated as the first observable artifact")
+        assertEqual(defaults.string(forKey: ActivationTelemetry.firstArtifactKindKey), "meeting", "only opted-in artifact kind should be retained")
+    }
+
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
         let menuOpened = AnalyticsEventPolicy.policy(forEvent: "menu_bar_opened")
         let menuAction = AnalyticsEventPolicy.policy(forEvent: "menu_bar_action_clicked")
