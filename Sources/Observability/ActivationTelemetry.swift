@@ -170,6 +170,18 @@ enum ActivationTelemetry {
         priorStatus: AgentSetupPriorStatus = .unknown,
         result: AgentSetupResult = .success
     ) {
+        WorkflowTelemetry.trackStarted(
+            workflowKind: .agentSetup,
+            entrypoint: setupKind.rawValue,
+            trigger: surface.rawValue
+        )
+        WorkflowTelemetry.trackFinished(
+            workflowKind: .agentSetup,
+            result: result.workflowResult,
+            stage: "setup_cta",
+            trigger: surface.rawValue,
+            failureKind: result.workflowFailureKind
+        )
         AnalyticsReporter.track(
             "activation_agent_setup_cta_clicked",
             properties: [
@@ -238,5 +250,111 @@ enum ActivationTelemetry {
         default:
             return "older"
         }
+    }
+}
+
+private extension ActivationTelemetry.AgentSetupResult {
+    var workflowResult: WorkflowTelemetry.Result {
+        switch self {
+        case .success:
+            return .success
+        case .fallbackCopied:
+            return .partialSuccess
+        case .failed:
+            return .failed
+        }
+    }
+
+    var workflowFailureKind: String? {
+        switch self {
+        case .success:
+            return nil
+        case .fallbackCopied:
+            return "fallback_copied"
+        case .failed:
+            return "setup_failed"
+        }
+    }
+}
+
+enum WorkflowTelemetry {
+    enum WorkflowKind: String {
+        case agentSetup = "agent_setup"
+        case dictation
+        case localSummary = "local_summary"
+        case meeting
+    }
+
+    enum Result: String {
+        case abandoned
+        case failed
+        case partialSuccess = "partial_success"
+        case success
+    }
+
+    static func trackStarted(
+        workflowKind: WorkflowKind,
+        entrypoint: String,
+        trigger: String? = nil
+    ) {
+        var properties = [
+            "entrypoint": entrypoint,
+            "workflow_kind": workflowKind.rawValue,
+        ]
+        if let trigger {
+            properties["trigger"] = trigger
+        }
+
+        AnalyticsReporter.track("workflow_started", properties: properties)
+    }
+
+    static func trackFinished(
+        workflowKind: WorkflowKind,
+        result: Result,
+        stage: String,
+        trigger: String? = nil,
+        failureKind: String? = nil,
+        durationBucket: String? = nil,
+        wordCountBucket: String? = nil
+    ) {
+        var properties = [
+            "result": result.rawValue,
+            "stage": stage,
+            "workflow_kind": workflowKind.rawValue,
+        ]
+        if let trigger {
+            properties["trigger"] = trigger
+        }
+        if let failureKind {
+            properties["failure_kind"] = failureKind
+        }
+        if let durationBucket {
+            properties["duration_bucket"] = durationBucket
+        }
+        if let wordCountBucket {
+            properties["word_count_bucket"] = wordCountBucket
+        }
+
+        AnalyticsReporter.track("workflow_finished", properties: properties)
+    }
+
+    static func trackRecoveryAttempted(
+        workflowKind: WorkflowKind,
+        recoveryKind: String,
+        trigger: String? = nil,
+        priorFailureKind: String? = nil
+    ) {
+        var properties = [
+            "recovery_kind": recoveryKind,
+            "workflow_kind": workflowKind.rawValue,
+        ]
+        if let trigger {
+            properties["trigger"] = trigger
+        }
+        if let priorFailureKind {
+            properties["prior_failure_kind"] = priorFailureKind
+        }
+
+        AnalyticsReporter.track("workflow_recovery_attempted", properties: properties)
     }
 }

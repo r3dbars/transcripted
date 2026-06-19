@@ -146,6 +146,24 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let workflowLifecycleProperties: Set<String> = [
+        "duration_bucket",
+        "entrypoint",
+        "failure_kind",
+        "result",
+        "stage",
+        "trigger",
+        "word_count_bucket",
+        "workflow_kind",
+    ]
+
+    private static let workflowRecoveryProperties: Set<String> = [
+        "prior_failure_kind",
+        "recovery_kind",
+        "trigger",
+        "workflow_kind",
+    ]
+
     private static let meetingPromptProperties: Set<String> = [
         "app_signal",
         "calendar_confidence",
@@ -332,6 +350,18 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "workflow_started": .init(
+            name: "workflow_started",
+            allowedProperties: workflowLifecycleProperties
+        ),
+        "workflow_finished": .init(
+            name: "workflow_finished",
+            allowedProperties: workflowLifecycleProperties
+        ),
+        "workflow_recovery_attempted": .init(
+            name: "workflow_recovery_attempted",
+            allowedProperties: workflowRecoveryProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",

@@ -102,6 +102,9 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `activation_return_proxy_observed`
+- `workflow_started`
+- `workflow_finished`
+- `workflow_recovery_attempted`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
@@ -158,6 +161,13 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
+
+Generic workflow lifecycle events are the cross-product envelope for dictation,
+meetings, local summaries, and agent setup. They should only carry
+`workflow_kind`, `entrypoint`, `trigger`, `stage`, `result`,
+`failure_kind`, `recovery_kind`, and coarse duration/word-count buckets. Do not
+add transcript text, titles, source apps, raw paths, speaker names, audio
+references, or raw counts to these events.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.

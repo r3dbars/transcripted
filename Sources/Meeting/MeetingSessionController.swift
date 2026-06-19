@@ -461,6 +461,13 @@ final class MeetingSessionController: ObservableObject {
                 "meeting_recording_start_failed",
                 properties: failureProperties
             )
+            WorkflowTelemetry.trackFinished(
+                workflowKind: .meeting,
+                result: .failed,
+                stage: "start",
+                trigger: trigger.rawValue,
+                failureKind: meetingStartFailureKind(from: failureMessage)
+            )
             state = .error(failureMessage)
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_failed")
             return false
@@ -487,6 +494,11 @@ final class MeetingSessionController: ObservableObject {
                 ["trigger": trigger.rawValue],
                 uniquingKeysWith: { _, new in new }
             )
+        )
+        WorkflowTelemetry.trackStarted(
+            workflowKind: .meeting,
+            entrypoint: trigger.rawValue,
+            trigger: trigger.rawValue
         )
         return true
     }
@@ -1152,6 +1164,13 @@ final class MeetingSessionController: ObservableObject {
                     "import_stage": "preparation",
                 ]
             )
+            WorkflowTelemetry.trackFinished(
+                workflowKind: .meeting,
+                result: .failed,
+                stage: "import",
+                trigger: StartTrigger.fileImport.rawValue,
+                failureKind: failureKind
+            )
             state = .error(displayMessage)
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "file_import_failed")
             return false
@@ -1184,6 +1203,11 @@ final class MeetingSessionController: ObservableObject {
             properties: [
                 "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
             ]
+        )
+        WorkflowTelemetry.trackStarted(
+            workflowKind: .meeting,
+            entrypoint: StartTrigger.fileImport.rawValue,
+            trigger: StartTrigger.fileImport.rawValue
         )
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
         return true
@@ -1455,6 +1479,16 @@ final class MeetingSessionController: ObservableObject {
                 "mic_stream_present": boolString(micAudioURL != nil),
                 "trigger": StartTrigger.savedMeetingRetranscription.rawValue
             ]
+        )
+        WorkflowTelemetry.trackRecoveryAttempted(
+            workflowKind: .meeting,
+            recoveryKind: "saved_audio_retranscription",
+            trigger: StartTrigger.savedMeetingRetranscription.rawValue
+        )
+        WorkflowTelemetry.trackStarted(
+            workflowKind: .meeting,
+            entrypoint: StartTrigger.savedMeetingRetranscription.rawValue,
+            trigger: StartTrigger.savedMeetingRetranscription.rawValue
         )
 
         if case .idle = state {
@@ -2544,6 +2578,12 @@ final class MeetingSessionController: ObservableObject {
                     "trigger": transcriptionTrigger.rawValue,
                 ]
             )
+            WorkflowTelemetry.trackFinished(
+                workflowKind: .meeting,
+                result: .success,
+                stage: "transcript_save",
+                trigger: transcriptionTrigger.rawValue
+            )
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_saved")
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
             activeQueuedTranscriptionJobID = nil
@@ -2577,6 +2617,13 @@ final class MeetingSessionController: ObservableObject {
                 AnalyticsReporter.track(
                     "meeting_transcript_skipped",
                     properties: failureTelemetryContext
+                )
+                WorkflowTelemetry.trackFinished(
+                    workflowKind: .meeting,
+                    result: .failed,
+                    stage: "transcription",
+                    trigger: transcriptionTrigger.rawValue,
+                    failureKind: failureKind.rawValue
                 )
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind.rawValue)
@@ -2615,6 +2662,13 @@ final class MeetingSessionController: ObservableObject {
                         "trigger": transcriptionTrigger.rawValue,
                     ]
                 )
+                WorkflowTelemetry.trackFinished(
+                    workflowKind: .meeting,
+                    result: .partialSuccess,
+                    stage: "speaker_finalization",
+                    trigger: transcriptionTrigger.rawValue,
+                    failureKind: failureKind.rawValue
+                )
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "speaker_finalization_failed")
                 finalizeBackgroundTranscriptionStateIfNeeded()
@@ -2647,6 +2701,13 @@ final class MeetingSessionController: ObservableObject {
             AnalyticsReporter.track(
                 "meeting_transcript_failed",
                 properties: failureTelemetryContext
+            )
+            WorkflowTelemetry.trackFinished(
+                workflowKind: .meeting,
+                result: .failed,
+                stage: "transcription",
+                trigger: transcriptionTrigger.rawValue,
+                failureKind: failureKind.rawValue
             )
             activeTranscriptionCaptureDiagnostics = nil
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_failed")

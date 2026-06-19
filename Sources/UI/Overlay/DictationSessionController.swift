@@ -180,6 +180,11 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        WorkflowTelemetry.trackStarted(
+            workflowKind: .dictation,
+            entrypoint: trigger.rawValue,
+            trigger: trigger.rawValue
+        )
     }
 
     private func trackDictationStartFailed(
@@ -195,6 +200,13 @@ class DictationSessionController: ObservableObject {
             properties: dictationAnalyticsProperties(
                 extra: properties
             )
+        )
+        WorkflowTelemetry.trackFinished(
+            workflowKind: .dictation,
+            result: .failed,
+            stage: "start",
+            trigger: currentDictationTrigger.rawValue,
+            failureKind: failureKind
         )
     }
 
@@ -895,6 +907,14 @@ class DictationSessionController: ObservableObject {
                         ]
                     )
                 )
+                WorkflowTelemetry.trackFinished(
+                    workflowKind: .dictation,
+                    result: .failed,
+                    stage: "transcription",
+                    trigger: currentDictationTrigger.rawValue,
+                    failureKind: "no_speech",
+                    durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime)
+                )
                 NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                 AppSoundPlayer.shared.play(.noSpeech)
                 overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue)
@@ -1012,6 +1032,21 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
+            let workflowResult: WorkflowTelemetry.Result = saveFailureMessage == nil && pasteOutcome.delivery != .failed
+                ? .success
+                : .partialSuccess
+            let workflowFailureKind: String? = saveFailureMessage != nil
+                ? "markdown_save_failed"
+                : (pasteOutcome.delivery == .failed ? "delivery_failed" : nil)
+            WorkflowTelemetry.trackFinished(
+                workflowKind: .dictation,
+                result: workflowResult,
+                stage: "delivery",
+                trigger: currentDictationTrigger.rawValue,
+                failureKind: workflowFailureKind,
+                durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)
+            )
             if saveFailureMessage == nil {
                 ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
                     artifactKind: .dictation,
@@ -1062,6 +1097,14 @@ class DictationSessionController: ObservableObject {
                     "trigger": currentDictationTrigger.rawValue,
                 ]
             )
+        )
+        WorkflowTelemetry.trackFinished(
+            workflowKind: .dictation,
+            result: .abandoned,
+            stage: "recording",
+            trigger: currentDictationTrigger.rawValue,
+            failureKind: "user_cancelled",
+            durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime)
         )
     }
 

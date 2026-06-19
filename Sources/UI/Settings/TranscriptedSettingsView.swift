@@ -950,6 +950,11 @@ struct TranscriptedSettingsView: View {
         }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         let provider = localMeetingSummaryProvider
+        WorkflowTelemetry.trackStarted(
+            workflowKind: .localSummary,
+            entrypoint: hasExistingSummary ? "regenerate" : "generate",
+            trigger: "home"
+        )
         recordLocalSummaryEvent(
             event: "local_meeting_summary_started",
             message: "\(provider.title) meeting summary started",
@@ -1007,6 +1012,12 @@ struct TranscriptedSettingsView: View {
                         "profile": result.profileName,
                     ]
                 )
+                WorkflowTelemetry.trackFinished(
+                    workflowKind: .localSummary,
+                    result: .success,
+                    stage: "summary_save",
+                    trigger: "home"
+                )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
                 recordLocalSummaryEvent(
@@ -1016,9 +1027,17 @@ struct TranscriptedSettingsView: View {
                         "provider": provider.rawValue,
                     ]
                 )
+                WorkflowTelemetry.trackFinished(
+                    workflowKind: .localSummary,
+                    result: .abandoned,
+                    stage: "generation",
+                    trigger: "home",
+                    failureKind: "cancelled"
+                )
                 return
             } catch {
                 guard localMeetingSummariesEnabled else { return }
+                let failureKind = localSummaryWorkflowFailureKind(for: error)
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_failed",
@@ -1027,6 +1046,13 @@ struct TranscriptedSettingsView: View {
                         "provider": provider.rawValue,
                         "error": error.localizedDescription,
                     ]
+                )
+                WorkflowTelemetry.trackFinished(
+                    workflowKind: .localSummary,
+                    result: .failed,
+                    stage: "generation",
+                    trigger: "home",
+                    failureKind: failureKind
                 )
                 NSSound.beep()
                 presentHomeLocalSummaryNotice(
@@ -3396,6 +3422,33 @@ struct TranscriptedSettingsView: View {
             message: message,
             context: context
         )
+    }
+
+    private func localSummaryWorkflowFailureKind(for error: Error) -> String {
+        guard let summaryError = error as? LocalMeetingSummaryError else {
+            return "summary_failed"
+        }
+
+        switch summaryError {
+        case .emptyTranscript:
+            return "empty_transcript"
+        case .insufficientMemory:
+            return "insufficient_memory"
+        case .runtimeUnavailable:
+            return "runtime_unavailable"
+        case .appleFoundationUnavailable:
+            return "apple_foundation_unavailable"
+        case .missingBundledRunner:
+            return "missing_bundled_runner"
+        case .transcriptChanged:
+            return "transcript_changed"
+        case .processTimedOut:
+            return "timeout"
+        case .processFailed:
+            return "process_failed"
+        case .outputMissing:
+            return "output_missing"
+        }
     }
 
     private func openUVInstallGuide() {

@@ -138,6 +138,71 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 
+    runSuite("AnalyticsEventPolicy allows coarse workflow lifecycle events") {
+        let started = AnalyticsEventPolicy.policy(forEvent: "workflow_started")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "workflow_finished")
+        let recovery = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_attempted")
+
+        assertEqual(
+            started?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "entrypoint", "failure_kind", "result", "stage", "trigger", "word_count_bucket", "workflow_kind"],
+            "workflow starts should share the narrow lifecycle property set"
+        )
+        assertEqual(
+            finished?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "entrypoint", "failure_kind", "result", "stage", "trigger", "word_count_bucket", "workflow_kind"],
+            "workflow finishes should share the narrow lifecycle property set"
+        )
+        assertEqual(
+            recovery?.allowedProperties ?? Set<String>(),
+            ["prior_failure_kind", "recovery_kind", "trigger", "workflow_kind"],
+            "workflow recovery should stay enum-only"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "meeting",
+                "entrypoint": "hotkey",
+                "trigger": "hotkey",
+                "stage": "transcript_save",
+                "result": "success",
+                "failure_kind": "no_speech",
+                "duration_bucket": "10_29m",
+                "word_count_bucket": "300_plus",
+                "recovery_kind": "saved_audio_retranscription",
+                "prior_failure_kind": "system_audio",
+                "transcript": "private words",
+                "meeting_title": "Customer call",
+                "speaker_name": "Alice",
+                "audio_path": "/Users/redbars/private.wav",
+                "file_path": "/Users/redbars/private.md",
+                "source_app_name": "Zoom",
+                "raw_duration_seconds": "1234",
+            ],
+            allowedKeys: (started?.allowedProperties ?? [])
+                .union(finished?.allowedProperties ?? [])
+                .union(recovery?.allowedProperties ?? [])
+        )
+
+        assertEqual(sanitized["workflow_kind"], "meeting", "workflow kind should survive")
+        assertEqual(sanitized["entrypoint"], "hotkey", "entrypoint enum should survive")
+        assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive")
+        assertEqual(sanitized["stage"], "transcript_save", "stage enum should survive")
+        assertEqual(sanitized["result"], "success", "result enum should survive")
+        assertEqual(sanitized["failure_kind"], "no_speech", "normalized failure kind should survive")
+        assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
+        assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
+        assertEqual(sanitized["recovery_kind"], "saved_audio_retranscription", "recovery kind should survive")
+        assertEqual(sanitized["prior_failure_kind"], "system_audio", "prior failure kind should survive")
+        assertNil(sanitized["transcript"], "raw transcript text must not be sent")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["source_app_name"], "source app names must not be sent")
+        assertNil(sanitized["raw_duration_seconds"], "raw timings should stay out of workflow analytics")
+    }
+
     runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, and next-day return proxy") {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
         let suiteName = "ActivationTelemetryTests.first-artifact.\(UUID().uuidString)"
