@@ -107,18 +107,11 @@ For a thin packaging smoke that also skips notarization, keep every opt-out visi
 SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
-After `build-beta.sh` succeeds, run the packaged-app smoke before publishing
-anything:
-
-```bash
-python3 scripts/ops/packaged-app-smoke.py
-```
-
-That smoke checks the packaged `build/Transcripted.app`, the versioned DMG,
-Sparkle feed URL and public key, appcast coherence, signing and entitlements,
-dSYM UUID evidence, an isolated launch/menu report, and generated launch-log
-privacy. For a stricter release-candidate report after packaging, compose it
-with:
+After `build-beta.sh` succeeds, run the packaged app smoke described below
+before publishing anything. It checks the existing `build/Transcripted.app` and
+versioned DMG for Sparkle config, signing, dSYM UUID evidence, optional UI
+smoke, and local log privacy. For a stricter release-candidate report after
+packaging, compose it with:
 
 ```bash
 python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts --include-packaged-app-smoke --require-release-debug-files
