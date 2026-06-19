@@ -58,6 +58,19 @@ aggregate-only and separates strict saved-Markdown proof from proxy rows like
 For the full product-learning telemetry map, current event taxonomy, blind
 spots, and dashboard plan, see `docs/posthog-product-learning-plan.md`.
 
+## PostHog Product Context Pack
+
+Use this when an agent needs the short decision context, not the full funnel:
+
+```bash
+python3 scripts/ops/posthog-product-context-pack.py --days 30
+```
+
+The script writes `product-context-pack.json` and `product-context-pack.md`
+under `/tmp/transcripted-posthog-product-context/<run-id>/`. It stays
+aggregate-only and returns explicit `UNKNOWN` states when credentials, events,
+or denominators are missing.
+
 ## Guardrails
 
 - Do not add transcript text, meeting titles, speaker names, file paths, source

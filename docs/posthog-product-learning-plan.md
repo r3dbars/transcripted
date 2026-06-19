@@ -42,6 +42,7 @@ Operational scripts query aggregate counts only:
 
 - `scripts/ops/health-probe.sh posthog`
 - `scripts/ops/posthog-activation-funnel.py`
+- `scripts/ops/posthog-product-context-pack.py`
 - `scripts/ops/release-health-card.py`
 - `scripts/ops/generate-nightly-digest.py`
 - `scripts/ops/nightly-security-check.py`
@@ -267,6 +268,27 @@ second artifact saved.
 
 This is the north-star dashboard. Treat prompt-copy and setup clicks as intent,
 not proof.
+
+### Agent Product Context Pack
+
+When Codex or another agent needs product context for prioritization, run:
+
+```bash
+python3 scripts/ops/posthog-product-context-pack.py --days 30
+```
+
+This produces a compact JSON and Markdown pack with:
+
+- current activation bottleneck
+- strongest repeat-use signal
+- highest reliability pain
+- release-version anomaly
+- strongest feature adoption signal
+- top three recommended next PRs
+
+Use the pack in Transcripted health/nightly reports when the goal is an
+agent-readable decision artifact. Keep the activation funnel report for deeper
+diagnosis.
 
 ### Release Health By App Version
 
