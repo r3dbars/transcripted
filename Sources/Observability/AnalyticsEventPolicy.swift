@@ -161,6 +161,16 @@ struct AnalyticsEventPolicy: Equatable {
         "workflow_kind",
     ]
 
+    private static let productFrictionProperties: Set<String> = [
+        "elapsed_bucket",
+        "failure_kind",
+        "model_state",
+        "result",
+        "route_shape",
+        "stage",
+        "surface",
+    ]
+
     private static let meetingPromptProperties: Set<String> = [
         "app_signal",
         "calendar_confidence",
@@ -351,6 +361,10 @@ struct AnalyticsEventPolicy: Equatable {
         "workflow_abandoned": .init(
             name: "workflow_abandoned",
             allowedProperties: workflowAbandonedProperties
+        ),
+        "product_friction_observed": .init(
+            name: "product_friction_observed",
+            allowedProperties: productFrictionProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",
