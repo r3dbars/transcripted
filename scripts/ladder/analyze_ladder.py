@@ -88,8 +88,8 @@ def main():
 
         # write per-corpus frontier csv
         fcsv = ROOT / "data" / "eval" / c / "ladder" / f"pareto_{c}.csv"
-        with open(fcsv, "w") as f:
-            w = csv.writer(f)
+        with open(fcsv, "w", newline="") as f:
+            w = csv.writer(f, lineterminator="\n")
             w.writerow(["promptsPerPerson","falseAutoRate","autoBar","suggestFloor","marginMin",
                         "promo","emaAlpha","demote","pctReachedAuto","medMeetingsToAuto","suggestPrecision"])
             for r in front:

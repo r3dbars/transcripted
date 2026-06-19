@@ -30,6 +30,9 @@ echo "$(date '+%F %T') [matrix:$CORPUS] qualities: $QLIST  max=$MAX" | tee -a "$
 t0=$(date +%s)
 for q in $QLIST; do
   echo "$(date '+%T') [matrix:$CORPUS] === cell $CORPUS/$q ===" | tee -a "$LOG"
-  bash scripts/ladder/run_quality_cell.sh "$CORPUS" "$q" "$MAX" 2>&1 | tail -1 | tee -a "$LOG"
+  if ! bash scripts/ladder/run_quality_cell.sh "$CORPUS" "$q" "$MAX" 2>&1 | tail -1 | tee -a "$LOG"; then
+    echo "$(date '+%F %T') [matrix:$CORPUS] FAILED at quality=$q" | tee -a "$LOG"
+    exit 1
+  fi
 done
 echo "$(date '+%F %T') [matrix:$CORPUS] ALL DONE in $(( ($(date +%s) - t0) / 60 ))min" | tee -a "$LOG"

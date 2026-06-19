@@ -57,3 +57,6 @@ for audio in "${files[@]}"; do
   fi
 done
 echo "$(date '+%H:%M:%S') [dumps:$CORPUS] DONE: $done ok, $failed failed, of $total" | tee -a "$LOG"
+if [ "$failed" -gt 0 ]; then
+  exit 1
+fi

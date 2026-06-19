@@ -64,6 +64,9 @@ func runDumpBatch(_ args: [String]) async {
     }
     await service.cleanup()
     log("[dump-batch] DONE: \(ok) ok, \(failed) failed, \(String(format: "%.1f", Date().timeIntervalSince(t0)))s")
+    if failed > 0 {
+        die("dump-batch failed for \(failed) clip(s); see log output above")
+    }
 }
 
 func fileNonEmpty(_ path: String) -> Bool {
