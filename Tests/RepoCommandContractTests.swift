@@ -2229,8 +2229,16 @@ func testRepoCommandContract() {
         )
 
         assertTrue(
-            failureBlock.contains("let failureTelemetryContext = meetingCaptureAnalyticsProperties(snapshot: capture.pipelineDiagnosticsSnapshot()).merging("),
-            "failed meeting transcript diagnostics should include privacy-safe capture health context"
+            controllerContents.contains("activeTranscriptionCaptureDiagnostics = job.captureDiagnostics"),
+            "failed meeting transcript diagnostics should use the capture health context stored with the active queued job"
+        )
+        assertTrue(
+            failureBlock.contains("let failureTelemetryContext = meetingFailureTelemetryContext("),
+            "failed meeting transcript diagnostics should compose shared failure telemetry through the stable helper"
+        )
+        assertFalse(
+            failureBlock.contains("capture.pipelineDiagnosticsSnapshot()"),
+            "failed meeting transcript diagnostics should not sample the live capture singleton after transcription fails"
         )
         assertTrue(
             failureBlock.contains("\"queue_depth_bucket\": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)"),
