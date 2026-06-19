@@ -304,14 +304,27 @@ enum LocalMeetingSummaryStore {
         for transcriptURL: URL,
         fileManager: FileManager = .default
     ) throws -> Bool {
+        var didRemove = false
         let url = summaryURL(for: transcriptURL)
-        guard fileManager.fileExists(atPath: url.path),
-              let values = try TranscriptFrontmatter.readValues(from: url),
-              values["capture_type"] == "meeting_summary",
-              values["source_transcript"] == transcriptURL.lastPathComponent else {
-            return false
+        if fileManager.fileExists(atPath: url.path),
+           let values = try TranscriptFrontmatter.readValues(from: url),
+           values["capture_type"] == "meeting_summary",
+           values["source_transcript"] == transcriptURL.lastPathComponent {
+            try fileManager.removeItem(at: url)
+            didRemove = true
         }
-        try fileManager.removeItem(at: url)
+
+        guard fileManager.fileExists(atPath: transcriptURL.path),
+              let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
+              values["capture_type"]?.lowercased() == "meeting" else {
+            return didRemove
+        }
+
+        let raw = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let updated = LocalMeetingSummaryMarkdownUpdater.removingGeneratedSummary(from: raw)
+        guard updated != raw else { return didRemove }
+        try updated.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        fileManager.restrictFileToOwnerOnly(at: transcriptURL)
         return true
     }
 }
@@ -1789,6 +1802,65 @@ enum LocalMeetingSummaryMarkdownUpdater {
     static func removingLocalSummaryMarkers(from body: String) -> String {
         body.replacingOccurrences(of: startMarker, with: "")
             .replacingOccurrences(of: endMarker, with: "")
+    }
+
+    static func removingGeneratedSummary(from markdown: String) -> String {
+        guard let document = TranscriptFrontmatter.document(in: markdown) else {
+            return removingLocalSummaryBlock(from: markdown)
+        }
+
+        var removedFrontmatter = false
+        let retainedFrontmatter = document.lines.filter { line in
+            guard let key = frontmatterKey(in: line) else { return true }
+            let shouldRetain = !managedFrontmatterKeys.contains(key)
+            if !shouldRetain { removedFrontmatter = true }
+            return shouldRetain
+        }
+        let untrimmedBody = removingLocalSummaryBlock(from: document.body)
+        guard removedFrontmatter || untrimmedBody != document.body else {
+            return markdown
+        }
+        let body = untrimmedBody
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return """
+        ---
+        \(retainedFrontmatter.joined(separator: "\n"))
+        ---
+
+        \(body)
+        """
+    }
+
+    static func updatingSourceTranscriptFilename(
+        in markdown: String,
+        from oldFilename: String,
+        to newFilename: String
+    ) -> String? {
+        guard oldFilename != newFilename else { return nil }
+
+        var didChange = false
+        let updatedLines = markdown.components(separatedBy: "\n").map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if frontmatterKey(in: trimmed) == "local_summary_source_transcript",
+               trimmed.contains(oldFilename) {
+                didChange = true
+                return yamlLine("local_summary_source_transcript", newFilename)
+            }
+
+            let oldSourceLine = "Source transcript: `\(oldFilename)`"
+            if line.contains(oldSourceLine) {
+                didChange = true
+                return line.replacingOccurrences(
+                    of: oldSourceLine,
+                    with: "Source transcript: `\(newFilename)`"
+                )
+            }
+
+            return line
+        }
+
+        return didChange ? updatedLines.joined(separator: "\n") : nil
     }
 
     private static func frontmatterKey(in line: String) -> String? {
