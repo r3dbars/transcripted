@@ -49,6 +49,7 @@ SAFE_EVENTS = (
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
+    "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
     "update_check_finished",
@@ -324,7 +325,7 @@ SELECT
     event IN ('dictation_started', 'dictation_completed'), 'dictation',
     event IN ('meeting_recording_started', 'meeting_transcript_saved'), 'meetings',
     event IN ('activation_artifact_action_clicked', 'activation_first_artifact_saved'), 'artifact_actions',
-    event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked'), 'agent_bridge',
+    event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked'), 'agent_bridge',
     event IN ('update_check_finished', 'update_download_finished'), 'updates',
     'other'
   ) AS feature,
@@ -522,13 +523,23 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
         active_total = sum(as_int(row.get("active_devices")) for row in release_rows)
         unknown_release = next((row for row in release_rows if str(row.get("app_version")) == "unknown"), None)
         unknown_share = pct(as_int((unknown_release or {}).get("active_devices")), active_total)
-        top = release_top or {}
-        failure_devices = as_int(top.get("failure_devices", top.get("failure_events")))
-        success_devices = as_int(top.get("success_devices"))
+        failing_versions = sorted(
+            [
+                row for row in release_rows
+                if as_int(row.get("active_devices")) >= 3
+                and as_int(row.get("failure_devices", row.get("failure_events"))) > as_int(row.get("success_devices"))
+            ],
+            key=lambda row: (
+                as_int(row.get("failure_devices", row.get("failure_events"))) - as_int(row.get("success_devices")),
+                as_int(row.get("failure_devices", row.get("failure_events"))),
+            ),
+            reverse=True,
+        )
         if unknown_share is not None and unknown_share >= 10:
             release_anomaly = f"{unknown_share}% of active devices have unknown app_version."
-        elif failure_devices > success_devices and as_int(top.get("active_devices")) >= 3:
-            release_anomaly = f"{top.get('app_version')} has more failure devices than success devices."
+        elif failing_versions:
+            failing = failing_versions[0]
+            release_anomaly = f"{failing.get('app_version')} has more failure devices than success devices."
         else:
             release_anomaly = "No obvious release-version anomaly in aggregate PostHog data."
     else:
@@ -767,6 +778,9 @@ def run_self_test() -> int:
         return 1
     if pack["activation"]["true_agent_query_devices"] != 0:
         print("self-test failed: fixture should preserve zero true-agent-query proof", file=sys.stderr)
+        return 1
+    if "onboarding_agent_cta_clicked" not in SAFE_EVENTS:
+        print("self-test failed: onboarding agent setup events should be queryable", file=sys.stderr)
         return 1
     if not pack["recommendations"] or "sourced-agent-use" not in pack["recommendations"][0]["title"]:
         print("self-test failed: first recommendation should close agent-use proof", file=sys.stderr)
