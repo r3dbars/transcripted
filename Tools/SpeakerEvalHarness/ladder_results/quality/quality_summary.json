@@ -1,0 +1,282 @@
+{
+  "voxceleb": {
+    "qualities": [
+      "orig",
+      "mp3_64",
+      "aac_32",
+      "mp3_32",
+      "opus_16k",
+      "mp3_16",
+      "opus_8k",
+      "tel_g711",
+      "reverb",
+      "noisy_snr10",
+      "noisy_snr5"
+    ],
+    "target": 0.005,
+    "per_quality": {
+      "orig": {
+        "baseline_prompts": 31.9333,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.1333,
+        "rec_prompts": 28.6667,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.12 promo=fixed(cc>3) alpha=0.15 demote=off"
+      },
+      "mp3_64": {
+        "baseline_prompts": 31.8333,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.1667,
+        "rec_prompts": 28.7667,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.12 promo=fixed(cc>3) alpha=0.15 demote=off"
+      },
+      "aac_32": {
+        "baseline_prompts": 32.0,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.1,
+        "rec_prompts": 29.7667,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.12 promo=fixed(cc>3) alpha=0.15 demote=off"
+      },
+      "mp3_32": {
+        "baseline_prompts": 32.0,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.1333,
+        "rec_prompts": 29.8333,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.12 promo=fixed(cc>3) alpha=0.10 demote=off"
+      },
+      "opus_16k": {
+        "baseline_prompts": 31.6,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.1,
+        "rec_prompts": 29.2667,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.12 promo=fixed(cc>3) alpha=0.15 demote=off"
+      },
+      "mp3_16": {
+        "baseline_prompts": 30.4,
+        "baseline_false_auto": 0.1034,
+        "baseline_reach": 0.4,
+        "rec_prompts": 28.0,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.50 auto=0.80 margin=0.08 promo=fixed(cc>4) alpha=0.10 demote=off"
+      },
+      "opus_8k": {
+        "baseline_prompts": 32.4667,
+        "baseline_false_auto": 0.4,
+        "baseline_reach": 0.1,
+        "rec_prompts": 30.7667,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.12 promo=fixed(cc>3) alpha=0.15 demote=off"
+      },
+      "tel_g711": {
+        "baseline_prompts": 32.6667,
+        "baseline_false_auto": 0.0833,
+        "baseline_reach": 0.3,
+        "rec_prompts": 29.1,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.55 auto=0.80 margin=0.12 promo=fixed(cc>3) alpha=0.15 demote=off"
+      },
+      "reverb": {
+        "baseline_prompts": 31.8333,
+        "baseline_false_auto": 0.5,
+        "baseline_reach": 0.2,
+        "rec_prompts": 31.3,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.12 promo=evid(>=0.40) alpha=0.15 demote=off"
+      },
+      "noisy_snr10": {
+        "baseline_prompts": 32.6333,
+        "baseline_false_auto": 0.25,
+        "baseline_reach": 0.0667,
+        "rec_prompts": 31.4667,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.55 auto=0.80 margin=0.08 promo=fixed(cc>5) alpha=0.15 demote=off"
+      },
+      "noisy_snr5": {
+        "baseline_prompts": 32.1667,
+        "baseline_false_auto": 0.3333,
+        "baseline_reach": 0.1,
+        "rec_prompts": 31.3333,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.55 auto=0.80 margin=0.08 promo=evid(>=0.25) alpha=0.10 demote=off"
+      }
+    },
+    "robust": {
+      "mean_prompts": 31.00605454545454,
+      "worst_false_auto": 0.0,
+      "mean_reach": 0.4242545454545455,
+      "policyId": 9418,
+      "desc": "floor=0.60 auto=0.83 margin=0.12 promo=fixed(cc>5) alpha=0.15 demote=off",
+      "per_quality_prompts": {
+        "orig": 30.4,
+        "mp3_64": 30.6333,
+        "aac_32": 31.0667,
+        "mp3_32": 30.9333,
+        "opus_16k": 30.5,
+        "mp3_16": 29.5333,
+        "opus_8k": 31.7,
+        "tel_g711": 30.7,
+        "reverb": 31.5,
+        "noisy_snr10": 32.2,
+        "noisy_snr5": 31.9
+      },
+      "per_quality_false_auto": {
+        "orig": 0.0,
+        "mp3_64": 0.0,
+        "aac_32": 0.0,
+        "mp3_32": 0.0,
+        "opus_16k": 0.0,
+        "mp3_16": 0.0,
+        "opus_8k": 0.0,
+        "tel_g711": 0.0,
+        "reverb": 0.0,
+        "noisy_snr10": 0.0,
+        "noisy_snr5": 0.0
+      }
+    },
+    "n_robust_eligible": 2159
+  },
+  "ami_scale": {
+    "qualities": [
+      "orig",
+      "mp3_64",
+      "aac_32",
+      "mp3_32",
+      "opus_16k",
+      "mp3_16",
+      "opus_8k",
+      "tel_g711",
+      "reverb",
+      "noisy_snr10",
+      "noisy_snr5"
+    ],
+    "target": 0.005,
+    "per_quality": {
+      "orig": {
+        "baseline_prompts": 3.1562,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.5312,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.12 promo=evid(>=0.25) alpha=0.25 demote=off"
+      },
+      "mp3_64": {
+        "baseline_prompts": 3.0968,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.9032,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.55 auto=0.92 margin=0.00 promo=evid(>=0.25) alpha=0.25 demote=demote"
+      },
+      "aac_32": {
+        "baseline_prompts": 3.1333,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.8,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.92 margin=0.08 promo=evid(>=0.25) alpha=0.25 demote=off"
+      },
+      "mp3_32": {
+        "baseline_prompts": 3.2414,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 3.0,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.90 margin=0.00 promo=evid(>=0.25) alpha=0.25 demote=demote"
+      },
+      "opus_16k": {
+        "baseline_prompts": 3.0968,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.4194,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.83 margin=0.00 promo=evid(>=0.25) alpha=0.10 demote=off"
+      },
+      "mp3_16": {
+        "baseline_prompts": 3.3929,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.5357,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.85 margin=0.08 promo=evid(>=0.25) alpha=0.25 demote=off"
+      },
+      "opus_8k": {
+        "baseline_prompts": 3.6667,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.963,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.83 margin=0.00 promo=evid(>=0.25) alpha=0.15 demote=off"
+      },
+      "tel_g711": {
+        "baseline_prompts": 2.8621,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.5172,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.00 promo=evid(>=0.40) alpha=0.10 demote=off"
+      },
+      "reverb": {
+        "baseline_prompts": 3.3438,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.625,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.55 auto=0.80 margin=0.12 promo=evid(>=0.25) alpha=0.25 demote=off"
+      },
+      "noisy_snr10": {
+        "baseline_prompts": 3.3125,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.8125,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.80 margin=0.08 promo=fixed(cc>2) alpha=0.10 demote=off"
+      },
+      "noisy_snr5": {
+        "baseline_prompts": 3.4194,
+        "baseline_false_auto": 0.0,
+        "baseline_reach": 0.0,
+        "rec_prompts": 2.8065,
+        "rec_false_auto": 0.0,
+        "rec_desc": "floor=0.60 auto=0.90 margin=0.00 promo=evid(>=0.60) alpha=0.15 demote=off"
+      }
+    },
+    "robust": {
+      "mean_prompts": 3.0177636363636355,
+      "worst_false_auto": 0.0,
+      "mean_reach": 0.07793636363636364,
+      "policyId": 11002,
+      "desc": "floor=0.60 auto=0.95 margin=0.12 promo=evid(>=0.25) alpha=0.15 demote=off",
+      "per_quality_prompts": {
+        "orig": 2.9062,
+        "mp3_64": 3.0323,
+        "aac_32": 3.0667,
+        "mp3_32": 3.1724,
+        "opus_16k": 2.9677,
+        "mp3_16": 2.8929,
+        "opus_8k": 3.1852,
+        "tel_g711": 2.7241,
+        "reverb": 3.2812,
+        "noisy_snr10": 3.0312,
+        "noisy_snr5": 2.9355
+      },
+      "per_quality_false_auto": {
+        "orig": 0.0,
+        "mp3_64": 0.0,
+        "aac_32": 0.0,
+        "mp3_32": 0.0,
+        "opus_16k": 0.0,
+        "mp3_16": 0.0,
+        "opus_8k": 0.0,
+        "tel_g711": 0.0,
+        "reverb": 0.0,
+        "noisy_snr10": 0.0,
+        "noisy_snr5": 0.0
+      }
+    },
+    "n_robust_eligible": 3566
+  }
+}

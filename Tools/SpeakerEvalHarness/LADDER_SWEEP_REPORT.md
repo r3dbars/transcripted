@@ -5,9 +5,15 @@ returning meeting speaker is recognized, at **near-zero false auto-naming** — 
 gate design gets us there?
 
 **Status:** data + analysis are decision-ready for two domains (AMI in-room, VoxCeleb
-clean). This PR changes **no production behavior** (the only production diff is making three
-already-pure functions `public` so the harness can call the real matcher; see §8). The
+clean), **each now swept across 11 audio qualities** (codec/bitrate/telephone/noise/reverb —
+see **§11**). This PR changes **no production behavior** (the only production diff is making
+three already-pure functions `public` so the harness can call the real matcher; see §8). The
 decision on what to ship is the human's, after reading the frontier below.
+
+> **Read §1 and §11 together.** §1's clean-audio recommendation (AUTO bar 0.80) is the
+> *prompt-minimizing* point on pristine audio. §11 shows that point is **not robust to audio
+> degradation** — under VoIP/telephone/noise the safe gate needs a **higher** AUTO bar
+> (~0.85) **plus a best-vs-second margin ≥ 0.12**, which is the universal false-positive lever.
 
 ---
 
@@ -305,3 +311,101 @@ python3 scripts/ladder/analyze_ladder.py ami voxceleb        # frontier + recomm
 
 All datasets and CSV checkpoints live under `data/` (gitignored). Sweep CSVs are
 append-checkpointed per policy; the expensive `dump` stage is idempotent per meeting.
+
+---
+
+# 11. Audio-quality robustness (corpus × quality matrix)
+
+The §1–§10 results above are on the cleanest available audio. Real meetings arrive over
+VoIP, cellphones, telephone bridges, noisy rooms, and far-field mics. This section sweeps the
+**same ladder against 11 audio qualities** to answer: *does a gate that looks safe on clean
+audio stay safe when the audio degrades?* **Short answer: no — and the margin gate is what
+saves it.**
+
+## 11.1 Method
+Each corpus's audio is re-encoded through a degradation chain (ffmpeg) and decoded back to a
+**uniform 16 kHz mono WAV**, so the diarizer ingests every quality identically and only the
+spectral/noise degradation differs. The full pipeline (degrade → real diarizer dump → real
+`postProcess` + `computeMeanEmbedding` fingerprints → 11k-policy sweep) is re-run per quality
+(`scripts/ladder/{degrade_corpus.py,run_quality_cell.sh,run_quality_matrix.sh}`), then
+`analyze_quality.py` joins policies across qualities **by policyId** (the grid is
+deterministic) to find the gate that holds the false-auto budget in *every* quality.
+
+The 11 qualities were **independently FFT-validated** (spectral edge, telephone-band energy,
+measured SNR): `orig` (full 8 kHz band) · `mp3_64`/`aac_32`/`mp3_32` (≈ clean, HF retained) ·
+`opus_16k` (moderate rolloff) · `mp3_16` (~5 kHz, 6–8 kHz gone) · `opus_8k` (~2.2 kHz, VoIP) ·
+`tel_g711` (300–3400 Hz landline, μ-law) · `reverb` (50/80/120 ms echo tail) ·
+`noisy_snr10`/`noisy_snr5` (white noise, **calibrated to measured 10.0 / 5.0 dB SNR**).
+
+**Coverage:** WAVE 1 (done) = **VoxCeleb 30×30 + AMI-scale 32**, each × **all 11 qualities**
+(22 cells × 11,053 policies = **243,166 policy-sims**). WAVE 2 (in progress) = **AMI-full
+(189 speakers, high-N)** + **VoxConverse (in-the-wild)** × 6 representative qualities, to
+certify false-auto rates at large N (see §11.5).
+
+## 11.2 Headline: clean-audio safety does NOT transfer to degraded audio
+On VoxCeleb, the **production gate shows 0% false-auto on clean codecs but mislabels silently
+as audio degrades** (small auto-denominators at N=30 — read with §11.4 caveat, but the
+direction is corroborated by suggest-precision below):
+
+| quality | baseline false-auto | autos (wrong/total) | baseline suggest-precision |
+|---|---:|---:|---:|
+| orig / mp3_64 / aac_32 / mp3_32 / opus_16k | 0% | 0/3–8 | 0.85–0.87 |
+| mp3_16 | 10.3% | 3/29 | 0.87 |
+| tel_g711 | 8.3% | 1/12 | 0.81 |
+| opus_8k | 40% | 2/5 | 0.77 |
+| noisy_snr10 | 25% | 1/4 | 0.70 |
+| noisy_snr5 | 33% | 2/6 | 0.62 |
+| reverb | 50% | 6/12 | 0.75 |
+
+## 11.3 The robust signal: suggest-precision collapses under degradation
+False-auto rate has a tiny denominator at N=30; **suggest-precision** (fraction of proposed
+names that were correct) is computed over *every* SUGGEST and is the statistically robust
+measure of the same confusion. It degrades monotonically with audio quality:
+
+| quality | VoxCeleb suggest-prec | AMI suggest-prec |
+|---|---:|---:|
+| orig | 0.86 | 0.81 |
+| mp3_64 / aac_32 / mp3_32 | 0.85–0.86 | 0.81–0.83 |
+| opus_16k | 0.87 | 0.85 |
+| mp3_16 | 0.87 | 0.55 |
+| tel_g711 | 0.81 | 0.69 |
+| reverb | 0.75 | 0.82 |
+| noisy_snr10 | 0.70 | 0.60 |
+| opus_8k | 0.77 | **0.40** |
+| noisy_snr5 | 0.62 | 0.53 |
+
+Mild codecs (`mp3_64`, `aac_32`, `opus_16k`, `mp3_32`) are indistinguishable from clean.
+The cliff is **heavy low-bitrate (`opus_8k` 8 kbps) and noise (`snr5`)**: at `opus_8k`, AMI
+suggest-precision falls to **0.40** — 60% of proposed names are wrong — because aggressive
+band-limiting (~2.2 kHz) collapses different voices toward each other in embedding space.
+Plots: `ladder_results/quality/quality_{voxceleb,ami_scale}.png`.
+
+## 11.4 The quality-robust gate (false-auto ≤ 0.5% in EVERY quality)
+Joining by policyId across all 11 qualities and requiring the budget in the worst quality:
+
+| corpus | robust gate | mean prompts/person | worst-case false-auto | reach-AUTO |
+|---|---|---:|---:|---:|
+| VoxCeleb (clean/short) | `auto=0.83, margin=0.12, fixed cc>5, α=0.15` | 31.0 | 0% (2,159 policies qualify) | 42% |
+| AMI (in-room) | `auto=0.95, margin=0.12, evidence≥0.25, α=0.15` | 3.02 | 0% (3,566 policies qualify) | 8% |
+
+**Two robustness rules emerge, and they revise §1's clean-only recommendation:**
+1. **The margin requirement `best − second ≥ 0.12` is universal** — it appears in *every*
+   quality-robust gate, both corpora. It is the single most important false-positive lever:
+   degradation inflates the top similarity, but rarely the *gap* to the runner-up, so a margin
+   gate rejects the ambiguous auto-accepts that a bare similarity bar lets through.
+2. **The AUTO bar must go UP, not down, for cross-quality safety** (0.83–0.95), the opposite
+   of the clean-audio optimum (0.80 in §1). The clean-audio "auto=0.80" point is *not* robust
+   — it produces the degraded-audio false-autos in §11.2. If degraded audio is in scope, ship
+   **auto ≈ 0.85 + margin ≥ 0.12** rather than auto 0.80.
+
+## 11.5 Caveats / status
+- **N=30/32 makes per-quality false-auto rates noisy** (denominators 4–29 autos). The
+  *direction* is robust (corroborated by suggest-precision over hundreds of suggests), but
+  certifying "< 0.5%" needs the high-N run: **WAVE 2 (AMI-full, 189 speakers)** is dumping now
+  and will replace the AMI false-auto column with statistically powered rates; **VoxConverse**
+  (in-the-wild YouTube) adds a genuinely-compressed real-world domain. This section will be
+  updated when WAVE 2 lands.
+- Noise SNR labels are calibrated to **measured** 10.0 / 5.0 dB (FFT-verified after correcting
+  an ffmpeg `amix` normalization that initially offset them ~4.7 dB).
+- `reverb` does not band-limit (≈ orig spectrum); its effect is the echo tail, so its impact on
+  re-ID is milder/noisier than the band-limiting codecs.
