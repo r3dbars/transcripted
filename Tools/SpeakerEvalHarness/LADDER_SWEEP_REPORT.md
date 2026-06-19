@@ -29,7 +29,7 @@ Three findings that change how to think about the ladder:
    (AMI: 2.53 vs 2.78 prompts/person), and ties it when audio is poor (VoxCeleb). It reaches
    AUTO faster for confident matches without lowering the bar for shaky ones.
 3. **Demote-on-dispute and un-blend are *not* the lever for false-positives or
-   contamination — and on AMI demote consistently *increases* false-auto** (+7.5 pp across
+   contamination — and on AMI demote consistently *increases* false-auto** (+8.2 pp across
    3,675 matched policy pairs; 0% of pairs improved). The margin gate, not demotion, is the
    false-positive control. (Mechanism + caveats in §6.)
 
@@ -185,10 +185,10 @@ parameter groups per domain — *not* a raw mean, which would be dominated by re
 
 | Domain | mode | Δ false-auto | Δ contam-drift | Δ prompts/person | reduces false-auto in |
 |---|---|---:|---:|---:|---:|
-| AMI | demote vs off | **+7.49 pp** | −0.0017 | +0.19 | **0% of groups** |
-| AMI | demote+un-blend vs off | **+7.49 pp** | −0.0016 | +0.19 | 0% of groups |
-| VoxCeleb | demote vs off | −2.54 pp | −0.0000 | +0.39 | 33% of groups |
-| VoxCeleb | demote+un-blend vs off | +1.16 pp | +0.0043 | +0.35 | 15% of groups |
+| AMI | demote vs off | **+8.20 pp** | −0.0018 | +0.18 | **0% of groups** |
+| AMI | demote+un-blend vs off | **+8.20 pp** | −0.0018 | +0.18 | 0% of groups |
+| VoxCeleb | demote vs off | −2.28 pp | −0.0000 | +0.38 | 31% of groups |
+| VoxCeleb | demote+un-blend vs off | −0.22 pp | +0.0032 | +0.36 | 20% of groups |
 
 **Counterintuitive but consistent: demotion does not reduce contamination, and on AMI it
 *increases* false-auto.** Two mechanisms:
@@ -199,8 +199,8 @@ parameter groups per domain — *not* a raw mean, which would be dominated by re
    0%→5.3% (16→19 autos, 1 of the new ones wrong).
 2. **Demotion/un-blend can't touch the dominant contamination.** The biggest contamination
    source is the *silent* false-auto blend, which by definition is never disputed — so drift
-   barely moves (≤0.004), and un-blend's rollback to a stale pre-poison centroid can even make
-   drift *worse* (VoxCeleb +0.004).
+   barely moves (≤0.003), and un-blend's rollback to a stale pre-poison centroid can even make
+   drift *worse* (VoxCeleb +0.003).
 
 **Implication:** the false-auto and contamination levers are the **margin gate** and **not
 auto-accepting low-margin matches** — not post-hoc demotion. *Caveat:* this rests on the

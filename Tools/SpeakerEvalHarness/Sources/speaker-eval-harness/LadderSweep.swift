@@ -181,6 +181,12 @@ func simulate(_ policy: Policy, _ cache: FpCache,
     }
 
     func enroll(_ idx: Int, _ query: [Float], correct: Bool, sim: Double, marginGate: Double) {
+        // Snapshot the CLEAN pre-poison centroid BEFORE blending the wrong fingerprint in,
+        // so demote+un-blend can later restore it (else it restores the already-poisoned vector).
+        if !correct && !profiles[idx].poisoned {
+            profiles[idx].prePoison = profiles[idx].embedding
+            profiles[idx].poisoned = true
+        }
         profiles[idx].embedding = emaBlend(existing: profiles[idx].embedding, incoming: query, alpha: policy.emaAlpha)
         profiles[idx].callCount += 1
         profiles[idx].confidence = min(1.0, profiles[idx].confidence + 0.1)
@@ -188,8 +194,6 @@ func simulate(_ policy: Policy, _ cache: FpCache,
         if correct {
             vadd(&profiles[idx].cleanSum, query)
             profiles[idx].cleanCount += 1
-        } else {
-            if !profiles[idx].poisoned { profiles[idx].prePoison = profiles[idx].embedding; profiles[idx].poisoned = true }
         }
     }
 
@@ -201,13 +205,17 @@ func simulate(_ policy: Policy, _ cache: FpCache,
         byLabel[lbl] = profiles.count - 1
     }
 
-    // route a fingerprint to its correct profile (create or merge-by-name); returns whether new
+    // route a fingerprint to its correct profile (create or merge-by-name); returns whether new.
+    // Evidence/credit must reflect THIS profile (the one being updated), not the rejected/global
+    // gate candidate — so recompute the similarity against the true target's centroid here. A
+    // user-confirmed correction is unambiguous, so the margin is treated as no-competitor (∞).
     @discardableResult
-    func routeToCorrect(_ gt: String, _ query: [Float], sim: Double, marginGate: Double) -> Bool {
+    func routeToCorrect(_ gt: String, _ query: [Float]) -> Bool {
         if let idx = byLabel[gt] {
             // repair a disputed profile when the user names it correctly
             if profiles[idx].disputeCount > 0 { profiles[idx].disputeCount = 0 }
-            enroll(idx, query, correct: true, sim: sim, marginGate: marginGate)
+            let trueSim = Transcription.cosineSimilarityStatic(query, profiles[idx].embedding)
+            enroll(idx, query, correct: true, sim: trueSim, marginGate: .infinity)
             return false
         } else {
             createProfile(gt, query)
@@ -239,7 +247,7 @@ func simulate(_ policy: Policy, _ cache: FpCache,
                 perPerson[gt]!.types += 1
                 r.types += 1
                 let existedBefore = byLabel[gt] != nil
-                routeToCorrect(gt, query, sim: best, marginGate: marginGate)
+                routeToCorrect(gt, query)
                 if existedBefore { r.falseUnknowns += 1 }   // missed recurrence
                 correct = true   // user typed the right name -> transcript correct
             } else {
@@ -285,7 +293,7 @@ func simulate(_ policy: Policy, _ cache: FpCache,
                         }
                         // user then names the correct person: new type, or tap-select existing
                         let isNew = (byLabel[gt] == nil)
-                        routeToCorrect(gt, query, sim: best, marginGate: marginGate)
+                        routeToCorrect(gt, query)
                         if isNew { perPerson[gt]!.types += 1; r.types += 1 }
                         else { perPerson[gt]!.taps += 1; r.taps += 1 }
                     }

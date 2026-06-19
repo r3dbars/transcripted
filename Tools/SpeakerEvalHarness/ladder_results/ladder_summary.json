@@ -54,37 +54,37 @@
     "demote_stats": {
       "off": {
         "n": 3675,
-        "meanContamDrift": 0.0311314013605438,
-        "meanFalseAutoRate": 0.038994911564625374,
-        "meanPoisoned": 0.46993197278911564
+        "meanContamDrift": 0.0312995102040812,
+        "meanFalseAutoRate": 0.03578699319727846,
+        "meanPoisoned": 0.3964625850340136
       },
       "demote": {
         "n": 3702,
-        "meanContamDrift": 0.02948581847649921,
-        "meanFalseAutoRate": 0.11307774176121001,
-        "meanPoisoned": 0.9405726634251755
+        "meanContamDrift": 0.029484575904916363,
+        "meanFalseAutoRate": 0.1169759589411128,
+        "meanPoisoned": 0.979740680713128
       },
       "demoteUnblend": {
         "n": 3675,
-        "meanContamDrift": 0.029525823129251765,
-        "meanFalseAutoRate": 0.11390851700680257,
-        "meanPoisoned": 0.9474829931972789
+        "meanContamDrift": 0.02948087074829921,
+        "meanFalseAutoRate": 0.11783537414965976,
+        "meanPoisoned": 0.986938775510204
       }
     },
     "demote_paired": {
       "demote": {
         "n_pairs": 3675,
-        "meanDeltaFalseAuto": 0.07491360544217622,
-        "meanDeltaDrift": -0.0016736054421768636,
-        "meanDeltaPrompts": 0.1933296870748318,
+        "meanDeltaFalseAuto": 0.0820483809523805,
+        "meanDeltaDrift": -0.0018429659863945427,
+        "meanDeltaPrompts": 0.18346783673469524,
         "fracReducesFalseAuto": 0.0,
         "fracReducesDrift": 0.4897959183673469
       },
       "demoteUnblend": {
         "n_pairs": 3675,
-        "meanDeltaFalseAuto": 0.07491360544217622,
-        "meanDeltaDrift": -0.001605578231292507,
-        "meanDeltaPrompts": 0.1933296870748318,
+        "meanDeltaFalseAuto": 0.0820483809523805,
+        "meanDeltaDrift": -0.0018186394557822942,
+        "meanDeltaPrompts": 0.18346783673469524,
         "fracReducesFalseAuto": 0.0,
         "fracReducesDrift": 0.4897959183673469
       }
@@ -141,44 +141,44 @@
       "promptsPerPerson": 19.5333,
       "falseAutoRate": 0.0,
       "pctReachedAuto": 0.5667,
-      "desc": "floor=0.60 auto=0.80 margin=0.08 promo=evidence(>=0.60) alpha=0.15 demote=off mat=1 sep=1"
+      "desc": "floor=0.60 auto=0.80 margin=0.08 promo=evidence(>=0.40) alpha=0.15 demote=off mat=1 sep=1"
     },
     "demote_stats": {
       "off": {
         "n": 3675,
-        "meanContamDrift": 0.01758454421768677,
-        "meanFalseAutoRate": 0.12051066666666728,
-        "meanPoisoned": 0.8
+        "meanContamDrift": 0.017574802721088145,
+        "meanFalseAutoRate": 0.11554446258503469,
+        "meanPoisoned": 0.773061224489796
       },
       "demote": {
         "n": 3702,
-        "meanContamDrift": 0.017471799027552404,
-        "meanFalseAutoRate": 0.09460715829281477,
-        "meanPoisoned": 0.7544570502431118
+        "meanContamDrift": 0.01746923284710942,
+        "meanFalseAutoRate": 0.09227639113992442,
+        "meanPoisoned": 0.7339276066990815
       },
       "demoteUnblend": {
         "n": 3675,
-        "meanContamDrift": 0.021884761904762063,
-        "meanFalseAutoRate": 0.13213001360544194,
-        "meanPoisoned": 0.7583673469387755
+        "meanContamDrift": 0.02075839455782324,
+        "meanFalseAutoRate": 0.11332114285714215,
+        "meanPoisoned": 0.7692517006802722
       }
     },
     "demote_paired": {
       "demote": {
         "n_pairs": 3675,
-        "meanDeltaFalseAuto": -0.025371700680272113,
-        "meanDeltaDrift": -4.527891156462607e-05,
-        "meanDeltaPrompts": 0.38862737414966764,
-        "fracReducesFalseAuto": 0.3333333333333333,
-        "fracReducesDrift": 0.1404081632653061
+        "meanDeltaFalseAuto": -0.02275338775510208,
+        "meanDeltaDrift": -3.8122448979591975e-05,
+        "meanDeltaPrompts": 0.38365687074830546,
+        "fracReducesFalseAuto": 0.3072108843537415,
+        "fracReducesDrift": 0.12299319727891156
       },
       "demoteUnblend": {
         "n_pairs": 3675,
-        "meanDeltaFalseAuto": 0.01161934693877556,
-        "meanDeltaDrift": 0.004300217687074825,
-        "meanDeltaPrompts": 0.3488532789115637,
-        "fracReducesFalseAuto": 0.15401360544217688,
-        "fracReducesDrift": 0.004625850340136055
+        "meanDeltaFalseAuto": -0.0022233197278911563,
+        "meanDeltaDrift": 0.0031835918367346828,
+        "meanDeltaPrompts": 0.3567165170068034,
+        "fracReducesFalseAuto": 0.20217687074829932,
+        "fracReducesDrift": 0.0024489795918367346
       }
     },
     "target": 0.005
