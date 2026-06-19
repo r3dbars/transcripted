@@ -86,6 +86,39 @@ func testLocalMeetingSummarizer() async {
         }
     }
 
+    runSuite("LocalSummaryTelemetry uses coarse model families and failure kinds") {
+        assertEqual(
+            LocalSummaryTelemetry.modelFamily(for: .gemmaMLX),
+            "gemma",
+            "Gemma summaries should report only the coarse model family"
+        )
+        assertEqual(
+            LocalSummaryTelemetry.modelFamily(for: .appleFoundation),
+            "apple_foundation",
+            "Apple summaries should report only the coarse provider family"
+        )
+        assertEqual(
+            LocalSummaryTelemetry.failureKind(for: LocalMeetingSummaryError.transcriptChanged),
+            "transcript_changed",
+            "stale transcript failures should have a stable taxonomy"
+        )
+        assertEqual(
+            LocalSummaryTelemetry.failureKind(for: LocalMeetingSummaryError.processTimedOut(label: "direct")),
+            "timeout",
+            "timeouts should not expose prompt labels or stderr"
+        )
+        assertEqual(
+            LocalSummaryTelemetry.failureKind(for: CancellationError()),
+            "cancelled",
+            "cancelled summaries should stay distinguishable from model failures"
+        )
+        assertEqual(
+            LocalSummaryTelemetry.failureKind(for: NSError(domain: "private", code: 1)),
+            "unknown",
+            "unknown errors should collapse before analytics"
+        )
+    }
+
     runSuite("LocalMeetingSummarySetupStatus reports runtime and low-memory readiness") {
         let gib = UInt64(1024 * 1024 * 1024)
         let temporaryDirectory = FileManager.default.temporaryDirectory

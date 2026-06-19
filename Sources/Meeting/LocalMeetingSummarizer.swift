@@ -94,6 +94,46 @@ struct LocalMeetingSummaryRunMetadata: Equatable, Sendable {
     }
 }
 
+enum LocalSummaryTelemetry {
+    static func modelFamily(for provider: LocalMeetingSummaryProvider) -> String {
+        switch provider {
+        case .gemmaMLX:
+            return "gemma"
+        case .appleFoundation:
+            return "apple_foundation"
+        }
+    }
+
+    static func failureKind(for error: Error) -> String {
+        if error is CancellationError {
+            return "cancelled"
+        }
+        guard let summaryError = error as? LocalMeetingSummaryError else {
+            return "unknown"
+        }
+        switch summaryError {
+        case .emptyTranscript:
+            return "empty_transcript"
+        case .insufficientMemory:
+            return "insufficient_memory"
+        case .runtimeUnavailable:
+            return "runtime_unavailable"
+        case .appleFoundationUnavailable:
+            return "apple_foundation_unavailable"
+        case .missingBundledRunner:
+            return "missing_runner"
+        case .transcriptChanged:
+            return "transcript_changed"
+        case .processTimedOut:
+            return "timeout"
+        case .processFailed:
+            return "process_failed"
+        case .outputMissing:
+            return "output_missing"
+        }
+    }
+}
+
 struct LocalGemmaSummaryConfiguration: Equatable, Sendable {
     let modelID: String
     let runtimePackage: String

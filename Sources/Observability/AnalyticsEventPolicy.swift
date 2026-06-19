@@ -157,6 +157,14 @@ struct AnalyticsEventPolicy: Equatable {
         "source",
     ]
 
+    private static let localSummaryProperties: Set<String> = [
+        "duration_bucket",
+        "failure_kind",
+        "model_family",
+        "provider",
+        "result",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -332,6 +340,18 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "local_summary_requested": .init(
+            name: "local_summary_requested",
+            allowedProperties: localSummaryProperties
+        ),
+        "local_summary_finished": .init(
+            name: "local_summary_finished",
+            allowedProperties: localSummaryProperties
+        ),
+        "local_summary_failed": .init(
+            name: "local_summary_failed",
+            allowedProperties: localSummaryProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",

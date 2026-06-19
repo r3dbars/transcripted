@@ -102,6 +102,9 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `activation_return_proxy_observed`
+- `local_summary_requested`
+- `local_summary_finished`
+- `local_summary_failed`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
@@ -158,6 +161,11 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
+
+Local summary analytics are limited to request / finish / failure stages with
+`provider`, coarse `model_family`, `duration_bucket`, `result`, and normalized
+`failure_kind`. They must not include transcript text, meeting title, speaker
+names, file paths, local model paths, exact model IDs, prompts, or raw errors.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.

@@ -950,6 +950,12 @@ struct TranscriptedSettingsView: View {
         }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         let provider = localMeetingSummaryProvider
+        let summaryStartedAt = Date()
+        trackLocalSummaryAnalytics(
+            event: "local_summary_requested",
+            provider: provider,
+            result: "requested"
+        )
         recordLocalSummaryEvent(
             event: "local_meeting_summary_started",
             message: "\(provider.title) meeting summary started",
@@ -1007,6 +1013,12 @@ struct TranscriptedSettingsView: View {
                         "profile": result.profileName,
                     ]
                 )
+                trackLocalSummaryAnalytics(
+                    event: "local_summary_finished",
+                    provider: result.provider,
+                    result: "success",
+                    duration: Date().timeIntervalSince(summaryStartedAt)
+                )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
                 recordLocalSummaryEvent(
@@ -1015,6 +1027,13 @@ struct TranscriptedSettingsView: View {
                     context: [
                         "provider": provider.rawValue,
                     ]
+                )
+                trackLocalSummaryAnalytics(
+                    event: "local_summary_failed",
+                    provider: provider,
+                    result: "cancelled",
+                    duration: Date().timeIntervalSince(summaryStartedAt),
+                    failureKind: "cancelled"
                 )
                 return
             } catch {
@@ -1028,6 +1047,13 @@ struct TranscriptedSettingsView: View {
                         "error": error.localizedDescription,
                     ]
                 )
+                trackLocalSummaryAnalytics(
+                    event: "local_summary_failed",
+                    provider: provider,
+                    result: "failed",
+                    duration: Date().timeIntervalSince(summaryStartedAt),
+                    failureKind: LocalSummaryTelemetry.failureKind(for: error)
+                )
                 NSSound.beep()
                 presentHomeLocalSummaryNotice(
                     HomeLocalSummaryNotice(
@@ -1038,6 +1064,27 @@ struct TranscriptedSettingsView: View {
                 )
             }
         }
+    }
+
+    private func trackLocalSummaryAnalytics(
+        event: String,
+        provider: LocalMeetingSummaryProvider,
+        result: String,
+        duration: TimeInterval? = nil,
+        failureKind: String? = nil
+    ) {
+        var properties = [
+            "model_family": LocalSummaryTelemetry.modelFamily(for: provider),
+            "provider": provider.rawValue,
+            "result": result,
+        ]
+        if let duration {
+            properties["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: duration)
+        }
+        if let failureKind {
+            properties["failure_kind"] = failureKind
+        }
+        AnalyticsReporter.track(event, properties: properties)
     }
 
     private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {

@@ -138,6 +138,52 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 
+    runSuite("AnalyticsEventPolicy allows privacy-safe local summary telemetry") {
+        let requested = AnalyticsEventPolicy.policy(forEvent: "local_summary_requested")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "local_summary_finished")
+        let failed = AnalyticsEventPolicy.policy(forEvent: "local_summary_failed")
+        let expected: Set<String> = [
+            "duration_bucket",
+            "failure_kind",
+            "model_family",
+            "provider",
+            "result",
+        ]
+
+        assertEqual(requested?.allowedProperties ?? Set<String>(), expected, "summary requests should use the reviewed local summary payload")
+        assertEqual(finished?.allowedProperties ?? Set<String>(), expected, "summary finishes should use the reviewed local summary payload")
+        assertEqual(failed?.allowedProperties ?? Set<String>(), expected, "summary failures should use the reviewed local summary payload")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "provider": "gemmaMLX",
+                "model_family": "gemma",
+                "duration_bucket": "10_29m",
+                "result": "failed",
+                "failure_kind": "timeout",
+                "transcript": "private transcript text",
+                "title": "Customer roadmap call",
+                "speaker_name": "Maya",
+                "file_path": "/Users/redbars/Library/Application Support/Transcripted/captures/meetings/private.md",
+                "model_path": "/Users/redbars/.cache/huggingface/models/private",
+                "model_id": "mlx-community/gemma-4-12B-it-4bit",
+            ],
+            allowedKeys: expected.union(["transcript", "title", "speaker_name", "file_path", "model_path", "model_id"])
+        )
+
+        assertEqual(sanitized["provider"], "gemmaMLX", "provider enum should survive")
+        assertEqual(sanitized["model_family"], "gemma", "model family should survive")
+        assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
+        assertEqual(sanitized["result"], "failed", "coarse result should survive")
+        assertEqual(sanitized["failure_kind"], "timeout", "failure taxonomy should survive")
+        assertNil(sanitized["transcript"], "raw transcript text must not be sent")
+        assertNil(sanitized["title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["model_path"], "local model paths must not be sent")
+        assertNil(sanitized["model_id"], "exact model IDs should stay out of local summary analytics")
+    }
+
     runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, and next-day return proxy") {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
         let suiteName = "ActivationTelemetryTests.first-artifact.\(UUID().uuidString)"

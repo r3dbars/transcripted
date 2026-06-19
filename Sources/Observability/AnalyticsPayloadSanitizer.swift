@@ -12,6 +12,7 @@ enum AnalyticsPayloadSanitizer {
         "email",
         "error",
         "file",
+        "model_id",
         "name",
         "password",
         "path",
