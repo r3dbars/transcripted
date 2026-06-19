@@ -113,6 +113,7 @@ func testAnalyticsEventPolicy() {
             "entrypoint",
             "failure_code",
             "failure_kind",
+            "first_artifact_kind",
             "first_dictation_saved",
             "format_ready",
             "from_status",
@@ -170,6 +171,7 @@ func testAnalyticsEventPolicy() {
             "selected_input_class",
             "selection_overrode_default",
             "selection_reason",
+            "second_artifact_kind",
             "session_active",
             "session_kind",
             "session_stage",
@@ -278,12 +280,14 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy allows post-artifact activation events") {
         let artifact = AnalyticsEventPolicy.policy(forEvent: "activation_artifact_action_clicked")
         let firstArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_first_artifact_saved")
+        let secondArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_second_artifact_saved")
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
         assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
+        assertEqual(secondArtifact?.allowedProperties ?? Set<String>(), ["days_since_first_bucket", "first_artifact_kind", "second_artifact_kind", "surface", "trigger"], "second artifact saves should stay bucketed")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
@@ -291,18 +295,23 @@ func testAnalyticsEventPolicy() {
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
             .union(firstArtifact?.allowedProperties ?? Set<String>())
+            .union(secondArtifact?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",
                 "agent_target": "codex",
                 "artifact_age_bucket": "24_48h",
                 "artifact_kind": "meeting",
+                "days_since_first_bucket": "2_7d",
                 "duration_bucket": "10_29m",
+                "first_artifact_kind": "dictation",
                 "prompt_kind": "meeting_bundle",
                 "result": "success",
+                "second_artifact_kind": "meeting",
                 "surface": "home_preview",
                 "trigger": "detected_prompt",
                 "word_count_bucket": "300_plus",
+                "first_artifact_saved_at": "2026-06-19T12:00:00Z",
                 "transcript": "private words",
                 "meeting_title": "Customer call",
                 "speaker_name": "Alice",
@@ -319,12 +328,16 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["agent_target"], "codex", "agent target should survive")
         assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
         assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["days_since_first_bucket"], "2_7d", "days since first bucket should survive")
         assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
+        assertEqual(sanitized["first_artifact_kind"], "dictation", "first artifact kind should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
+        assertEqual(sanitized["second_artifact_kind"], "meeting", "second artifact kind should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
         assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
+        assertNil(sanitized["first_artifact_saved_at"], "raw first-save timestamps must not be sent")
         assertNil(sanitized["transcript"], "raw transcript text must not be sent")
         assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
         assertNil(sanitized["speaker_name"], "speaker names must not be sent")
@@ -373,6 +386,71 @@ func testAnalyticsEventPolicy() {
             ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
             "first saved artifact should not be marked twice"
         )
+    }
+
+    runSuite("ActivationTelemetry tracks first and second artifact saves once per install") {
+        let now = Date(timeIntervalSinceReferenceDate: 2_000_000)
+        let suiteName = "ActivationTelemetryTests.second-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .dictation,
+            savedAt: now,
+            userDefaults: defaults
+        )
+        assertTrue(first.firstArtifact, "first durable artifact should be recognized")
+        assertNil(first.secondArtifact, "first durable artifact should not also be second")
+
+        let second = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .meeting,
+            savedAt: now.addingTimeInterval(3 * 86_400),
+            userDefaults: defaults
+        )
+        assertFalse(second.firstArtifact, "second durable artifact should not retrigger first")
+        assertEqual(second.secondArtifact?.firstKind.rawValue, "dictation", "second event should preserve the first artifact kind enum")
+        assertEqual(second.secondArtifact?.daysSinceFirstBucket, "2_7d", "second event should bucket days since first")
+
+        let third = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .meeting,
+            savedAt: now.addingTimeInterval(4 * 86_400),
+            userDefaults: defaults
+        )
+        assertFalse(third.firstArtifact, "later durable artifacts should not retrigger first")
+        assertNil(third.secondArtifact, "second durable artifact should only be tracked once")
+
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: now.addingTimeInterval(-6 * 3_600), now: now),
+            "same_day",
+            "same-day second artifacts should stay coarse"
+        )
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: now.addingTimeInterval(-20 * 86_400), now: now),
+            "8_30d",
+            "longer second-artifact gaps should stay bucketed"
+        )
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: nil, now: now),
+            "unknown",
+            "legacy installs without first-save date should not invent a raw timestamp"
+        )
+    }
+
+    runSuite("ActivationTelemetry emits second artifact for legacy first-artifact installs") {
+        let suiteName = "ActivationTelemetryTests.legacy-second-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(true, forKey: ActivationTelemetry.firstArtifactSavedTrackedKey)
+
+        let legacySecond = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .meeting,
+            savedAt: Date(timeIntervalSinceReferenceDate: 3_000_000),
+            userDefaults: defaults
+        )
+        assertFalse(legacySecond.firstArtifact, "legacy installs should not retrigger first artifact")
+        assertEqual(legacySecond.secondArtifact?.firstKind.rawValue, "unknown", "legacy second-artifact event should avoid inventing first kind")
+        assertEqual(legacySecond.secondArtifact?.daysSinceFirstBucket, "unknown", "legacy second-artifact event should avoid inventing first date")
     }
 
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {

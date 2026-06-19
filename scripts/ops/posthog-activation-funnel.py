@@ -47,6 +47,7 @@ RELEVANT_EVENTS = (
     "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "agent_capture_query_observed",
 )
 
@@ -61,6 +62,7 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "activation_second_artifact_saved",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {
@@ -136,6 +138,13 @@ REACH_STEPS = (
         "Home/onboarding artifact actions such as open Markdown, preview, and reveal folder.",
     ),
     StepDefinition(
+        "second_artifact_devices",
+        "Second saved artifact",
+        "event = 'activation_second_artifact_saved'",
+        "observed",
+        "Devices that reached a second durable saved Markdown artifact, bucketed from first save.",
+    ),
+    StepDefinition(
         "agent_prompt_devices",
         "Agent prompt copied/opened",
         "event = 'activation_agent_prompt_action_clicked'",
@@ -172,8 +181,9 @@ SEQUENCE_STEPS = (
     ("Dictation started", "event IN ('onboarding_first_dictation_started', 'dictation_started')"),
     (
         "Saved Markdown or dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed', 'activation_second_artifact_saved')",
     ),
+    ("Second saved artifact", "event = 'activation_second_artifact_saved'"),
     (
         "Artifact opened or prompt copied",
         "event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked')",
@@ -389,6 +399,25 @@ LIMIT 40
 """
 
 
+def second_artifact_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  properties['first_artifact_kind'] AS first_artifact_kind,
+  properties['second_artifact_kind'] AS second_artifact_kind,
+  properties['days_since_first_bucket'] AS days_since_first_bucket,
+  properties['surface'] AS surface,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event = 'activation_second_artifact_saved'
+  {app_version_filter(app_version)}
+GROUP BY first_artifact_kind, second_artifact_kind, days_since_first_bucket, surface
+ORDER BY devices DESC, events DESC
+LIMIT 40
+"""
+
+
 def agent_signals_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT
@@ -421,6 +450,7 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "sequence": sequence_query(days, app_version),
         "onboarding_completion": onboarding_completion_query(days, app_version),
         "artifact_actions": artifact_actions_query(days, app_version),
+        "second_artifacts": second_artifact_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
     }
 
@@ -545,6 +575,7 @@ def render_report(data: dict[str, Any]) -> str:
     launch = as_int(reach.get("launch_devices"))
     strict_saved = as_int(reach.get("strict_saved_markdown_devices"))
     saved_proxy = as_int(reach.get("saved_markdown_plus_dictation_proxy_devices"))
+    second_artifact = as_int(reach.get("second_artifact_devices"))
     agent_signal = as_int(reach.get("agent_setup_devices"))
     true_agent_query = as_int(reach.get("true_agent_query_devices"))
     return_proxy = as_int(reach.get("return_proxy_devices"))
@@ -555,12 +586,14 @@ def render_report(data: dict[str, Any]) -> str:
         "`strict saved Markdown` counts onboarding first-dictation saves and meeting transcript saves. General dictation save currently has local diagnostics but no dedicated remote saved-artifact event.",
         "`dictation_completed` is included only in the proxy saved-Markdown row. It can prove useful dictation volume, but not every general saved Markdown write.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
+        "`activation_second_artifact_saved` proves a second durable artifact save on the same anonymous device, but does not inspect artifact content or join identity.",
         "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
     ]
 
     recommended_tiles = [
         "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
         "Saved artifact quality: strict saved Markdown vs dictation-completed proxy, split by artifact kind.",
+        "Second value moment: `activation_second_artifact_saved` by first/second artifact kind and days-since-first bucket.",
         "Artifact actions: open Markdown, preview, reveal folder, and copy-for-agent surfaces.",
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
@@ -580,6 +613,7 @@ def render_report(data: dict[str, Any]) -> str:
         f"- Launch reach in-window: **{launch} anonymous devices**.",
         f"- Strict saved Markdown reach: **{strict_saved} devices** ({pct(strict_saved, launch)} of launch).",
         f"- Saved Markdown plus dictation proxy reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
+        f"- Second saved artifact reach: **{second_artifact} devices** ({pct(second_artifact, launch)} of launch).",
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
         f"- True agent-query proof: **{true_agent_query} devices**. Treat this as unknown, not green, until instrumentation exists.",
@@ -625,6 +659,11 @@ def render_report(data: dict[str, Any]) -> str:
             ["artifact_kind", "action_kind", "surface", "events", "devices"],
         ),
         render_top_rows(
+            "Second Saved Artifacts",
+            data["results"].get("second_artifacts", []),
+            ["first_artifact_kind", "second_artifact_kind", "days_since_first_bucket", "surface", "events", "devices"],
+        ),
+        render_top_rows(
             "Agent Signals",
             data["results"].get("agent_signals", []),
             ["event", "prompt_kind", "setup_kind", "agent_target", "result", "surface", "events", "devices"],
@@ -639,7 +678,7 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         "## Next Best Action",
         "",
-        "Add one privacy-safe first-use event for `activation_first_artifact_saved` and one for `agent_capture_query_observed`, then make the dashboard's primary KPI the share of launch devices that reach true sourced-agent-use within 7 days.",
+        "Use `activation_second_artifact_saved` as the second-value KPI, then add `agent_capture_query_observed` so the dashboard can separate repeated saved-artifact value from true sourced-agent-use.",
         "",
     ]
     return "\n".join(lines)
@@ -672,6 +711,7 @@ def run_self_test() -> int:
                 "strict_saved_markdown_devices": 2,
                 "saved_markdown_plus_dictation_proxy_devices": 3,
                 "artifact_action_devices": 2,
+                "second_artifact_devices": 1,
                 "agent_prompt_devices": 1,
                 "agent_setup_devices": 1,
                 "return_proxy_devices": 1,
@@ -682,6 +722,7 @@ def run_self_test() -> int:
             "daily_active": [{"day": "2026-06-19", "active_devices": 3}],
             "onboarding_completion": [],
             "artifact_actions": [],
+            "second_artifacts": [],
             "agent_signals": [],
         },
     }
@@ -702,6 +743,7 @@ def run_self_test() -> int:
         sequence_query(30, None),
         onboarding_completion_query(30, None),
         artifact_actions_query(30, None),
+        second_artifact_query(30, None),
         agent_signals_query(30, None),
     ):
         if "SELECT *" in query.upper():

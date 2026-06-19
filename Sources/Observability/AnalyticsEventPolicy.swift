@@ -128,6 +128,14 @@ struct AnalyticsEventPolicy: Equatable {
         "word_count_bucket",
     ]
 
+    private static let activationSecondArtifactProperties: Set<String> = [
+        "days_since_first_bucket",
+        "first_artifact_kind",
+        "second_artifact_kind",
+        "surface",
+        "trigger",
+    ]
+
     private static let activationAgentPromptActionProperties: Set<String> = [
         "action_kind",
         "agent_target",
@@ -326,6 +334,10 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_first_artifact_saved": .init(
             name: "activation_first_artifact_saved",
             allowedProperties: activationFirstArtifactProperties
+        ),
+        "activation_second_artifact_saved": .init(
+            name: "activation_second_artifact_saved",
+            allowedProperties: activationSecondArtifactProperties
         ),
         "activation_agent_prompt_action_clicked": .init(
             name: "activation_agent_prompt_action_clicked",
