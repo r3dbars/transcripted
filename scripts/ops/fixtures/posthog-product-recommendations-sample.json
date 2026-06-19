@@ -1,0 +1,143 @@
+{
+  "app_version": "fixture",
+  "generated_at": "2026-06-19T00:00:00+00:00",
+  "results": {
+    "activation_bridge": [],
+    "dictation_outcomes": [],
+    "event_counts": [
+      {
+        "devices": 50,
+        "event": "app_launched",
+        "events": 150
+      },
+      {
+        "devices": 40,
+        "event": "onboarding_shown",
+        "events": 60
+      },
+      {
+        "devices": 40,
+        "event": "onboarding_step_viewed",
+        "events": 110
+      },
+      {
+        "devices": 14,
+        "event": "onboarding_dismissed",
+        "events": 16
+      },
+      {
+        "devices": 18,
+        "event": "onboarding_completed",
+        "events": 20
+      },
+      {
+        "devices": 30,
+        "event": "dictation_started",
+        "events": 70
+      },
+      {
+        "devices": 22,
+        "event": "dictation_completed",
+        "events": 42
+      },
+      {
+        "devices": 8,
+        "event": "dictation_no_speech",
+        "events": 10
+      },
+      {
+        "devices": 4,
+        "event": "dictation_start_failed",
+        "events": 5
+      },
+      {
+        "devices": 18,
+        "event": "meeting_transcript_saved",
+        "events": 28
+      },
+      {
+        "devices": 4,
+        "event": "meeting_transcript_failed",
+        "events": 5
+      },
+      {
+        "devices": 22,
+        "event": "activation_first_artifact_saved",
+        "events": 26
+      },
+      {
+        "devices": 10,
+        "event": "activation_artifact_action_clicked",
+        "events": 14
+      },
+      {
+        "devices": 4,
+        "event": "activation_agent_prompt_action_clicked",
+        "events": 5
+      },
+      {
+        "devices": 10,
+        "event": "meeting_summary_requested",
+        "events": 12
+      },
+      {
+        "devices": 4,
+        "event": "meeting_summary_finished",
+        "events": 5
+      },
+      {
+        "devices": 3,
+        "event": "app_unclean_shutdown_detected",
+        "events": 4
+      }
+    ],
+    "meeting_outcomes": [],
+    "onboarding_exits": [
+      {
+        "devices": 9,
+        "events": 10,
+        "model_state": "downloading",
+        "step_id": "permissions",
+        "step_index": 2
+      }
+    ],
+    "overview": [
+      {
+        "activation_bridge_devices": 14,
+        "agent_query_devices": 0,
+        "dictation_completed_devices": 22,
+        "dictation_problem_devices": 12,
+        "dictation_started_devices": 30,
+        "first_artifact_devices": 22,
+        "launch_devices": 50,
+        "meeting_failed_devices": 4,
+        "meeting_saved_devices": 18,
+        "onboarding_completed_devices": 18,
+        "onboarding_exit_devices": 14,
+        "onboarding_touched_devices": 40,
+        "summary_finished_devices": 4,
+        "summary_requested_devices": 10
+      }
+    ],
+    "release_health": [
+      {
+        "app_version": "1.1.48",
+        "devices": 3,
+        "event": "app_unclean_shutdown_detected",
+        "events": 4
+      }
+    ],
+    "release_failure_summary": [
+      {
+        "release_failure_devices": 3,
+        "release_failure_events": 4
+      }
+    ],
+    "summary_outcomes": []
+  },
+  "source": {
+    "kind": "fixture",
+    "privacy": "aggregate enum/count rows only"
+  },
+  "window_days": 30
+}

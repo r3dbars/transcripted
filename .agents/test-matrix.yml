@@ -126,6 +126,15 @@ rules:
       - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
+      - "scripts/ops/posthog-product-recommendations.py"
+      - "scripts/ops/fixtures/posthog-product-recommendations-sample.json"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-product-recommendations.py"
+      - "python3 scripts/ops/posthog-product-recommendations.py --self-test"
+      - "python3 scripts/ops/posthog-product-recommendations.py --fixture scripts/ops/fixtures/posthog-product-recommendations-sample.json --write-dir build/posthog-product-recommendations-fixture"
+
+  - paths:
       - "scripts/ops/nightly-security-check.py"
     checks:
       - "scripts/dev/agent-preflight.sh"

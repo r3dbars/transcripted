@@ -42,6 +42,7 @@ Operational scripts query aggregate counts only:
 
 - `scripts/ops/health-probe.sh posthog`
 - `scripts/ops/posthog-activation-funnel.py`
+- `scripts/ops/posthog-product-recommendations.py`
 - `scripts/ops/release-health-card.py`
 - `scripts/ops/generate-nightly-digest.py`
 - `scripts/ops/nightly-security-check.py`
@@ -233,6 +234,30 @@ permission ready -> `dictation_started` / `meeting_recording_started` ->
 `activation_first_artifact_saved` -> `activation_artifact_action_clicked` ->
 `activation_agent_prompt_action_clicked` / `activation_agent_setup_cta_clicked`
 -> `agent_capture_query_observed` -> `activation_return_proxy_observed`.
+
+### Product Recommendation Loop
+
+Run this when the coordinator needs product work, not just dashboard status:
+
+```bash
+python3 scripts/ops/posthog-product-recommendations.py --days 30
+```
+
+It converts aggregate dashboard signals into ranked tasks with deterministic
+rules. Current rules cover onboarding exits, dictation retry/failure spikes,
+meeting transcript failures, saved meetings without true agent-query proof,
+summary starts without finishes, summary telemetry blind spots, and
+release-version failure signals that should trigger a Sentry drill-in before
+release confidence goes green.
+
+The output is intentionally coordinator-shaped: each recommendation includes the
+trigger, aggregate evidence, confidence, owner lane, and a concrete PR-thread
+prompt. Use the fixture for offline smoke or examples:
+
+```bash
+python3 scripts/ops/posthog-product-recommendations.py \
+  --fixture scripts/ops/fixtures/posthog-product-recommendations-sample.json
+```
 
 ### Dictation Reliability Funnel
 

@@ -58,6 +58,25 @@ aggregate-only and separates strict saved-Markdown proof from proxy rows like
 For the full product-learning telemetry map, current event taxonomy, blind
 spots, and dashboard plan, see `docs/posthog-product-learning-plan.md`.
 
+## PostHog Product Recommendations
+
+Use this after the funnel when the question is "what should we build next?":
+
+```bash
+python3 scripts/ops/posthog-product-recommendations.py --days 30
+```
+
+The script writes a coordinator-ready ranked task report under
+`/tmp/transcripted-posthog-product-recommendations/<run-id>/`. It uses
+deterministic rules over aggregate PostHog rows, so each recommendation includes
+the trigger, evidence, confidence, owner lane, and a PR-thread prompt. For an
+offline sample:
+
+```bash
+python3 scripts/ops/posthog-product-recommendations.py \
+  --fixture scripts/ops/fixtures/posthog-product-recommendations-sample.json
+```
+
 ## Guardrails
 
 - Do not add transcript text, meeting titles, speaker names, file paths, source
