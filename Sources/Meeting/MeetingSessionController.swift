@@ -260,10 +260,20 @@ final class MeetingSessionController: ObservableObject {
         _ = MeetingStoragePaths.recordingsScratch
         _ = MeetingStoragePaths.audioArchiveFolder
 
+        // Speaker embedding model selection. ERes2Net (codec-robust, 192-dim) runs
+        // after diarization to drive same-voice consolidation + cross-call matching;
+        // WeSpeaker (256-dim, diarizer-native) is the default. The two produce
+        // different-dimension vectors, so each gets its own speaker database file —
+        // a SpeakerProfile row must never mix dimensions. If ERes2Net is selected
+        // but its model can't be loaded, makeEmbedder returns nil and we transparently
+        // fall back to the WeSpeaker path (native embedding + default DB).
+        let embedderChoice = SpeakerEmbedderPreferences.effectiveChoice()
+        let segmentEmbedder = SpeakerEmbedderFactory.makeEmbedder(for: embedderChoice)
+
         // Build app-owned CoreStoragePaths so captures and internal state stay split.
         self.storagePaths = CoreStoragePaths(
             transcripts: MeetingStoragePaths.transcriptsFolder,
-            speakerDB: MeetingStoragePaths.speakersDatabase,
+            speakerDB: SpeakerEmbedderFactory.activeSpeakerDBURL(),
             statsDB: MeetingStoragePaths.statsDatabase,
             failedQueue: MeetingStoragePaths.failedTranscriptionsFile,
             speakerClips: MeetingStoragePaths.speakerClipsFolder,
@@ -280,7 +290,9 @@ final class MeetingSessionController: ObservableObject {
 
         // Diarization: Core's concrete DiarizationService already conforms to
         // DiarizationEngine via an empty extension (see DiarizationService.swift).
-        self.diarization = DiarizationService()
+        // When a segment embedder is present, the diarizer re-embeds each segment
+        // with it (e.g. ERes2Net) before the speaker identity stack runs.
+        self.diarization = DiarizationService(segmentEmbedder: segmentEmbedder)
 
         // Speaker store: app-owned SQLite file under state/.
         self.speakerDatabase = SpeakerDatabase(path: storagePaths.speakerDB.path)

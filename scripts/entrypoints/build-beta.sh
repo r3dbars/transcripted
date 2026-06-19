@@ -439,6 +439,20 @@ else
     fi
 fi
 
+# Bundle the ERes2Net speaker-embedding CoreML model (optional). When absent, the
+# app falls back to the diarizer's built-in WeSpeaker embedding, so this never
+# fails the build. Selected at runtime via SpeakerEmbedderPreferences.
+ERES2NET_SRC="$HOME/Library/Application Support/FluidAudio/Models/eres2net-embedding"
+ERES2NET_DEST="$APP_BUNDLE/Contents/Resources/eres2net-embedding"
+if [ -d "$ERES2NET_SRC/Model.mlmodelc" ]; then
+    echo "Bundling ERes2Net speaker-embedding model..."
+    mkdir -p "$ERES2NET_DEST"
+    rm -rf "$ERES2NET_DEST/Model.mlmodelc"
+    ditto "$ERES2NET_SRC/Model.mlmodelc" "$ERES2NET_DEST/Model.mlmodelc"
+else
+    echo "ℹ️  ERes2Net speaker-embedding model not bundled — speaker ID will use built-in WeSpeaker"
+fi
+
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
 /usr/libexec/PlistBuddy -c "Set :TranscriptedBuildChannel release" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
