@@ -268,6 +268,25 @@ enum FirstRunExperience {
         return properties
     }
 
+    static func workflowAbandonedAnalyticsProperties(
+        workflowKind: String,
+        stage: String,
+        reasonKind: String,
+        elapsedSeconds: Double?
+    ) -> [String: String] {
+        var properties: [String: String] = [
+            "reason_kind": reasonKind,
+            "stage": stage,
+            "workflow_kind": workflowKind,
+        ]
+
+        if let elapsedSeconds {
+            properties["elapsed_bucket"] = AnalyticsReporter.durationBucket(seconds: elapsedSeconds)
+        }
+
+        return properties
+    }
+
     static func primaryAction(
         hasRequiredPermissions: Bool,
         hasPasteTarget: Bool,

@@ -102,6 +102,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `activation_return_proxy_observed`
+- `workflow_abandoned`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
@@ -158,6 +159,11 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
+
+`workflow_abandoned` is only for flows where the app can confidently infer
+abandonment without content. The first implementation is onboarding window close
+before completion, with only `workflow_kind`, `stage`, `reason_kind`, and
+`elapsed_bucket`.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.

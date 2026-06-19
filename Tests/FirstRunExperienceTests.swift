@@ -170,6 +170,32 @@ func testFirstRunExperience() {
         assertNil(properties["flow_elapsed_bucket"], "missing elapsed time should not invent a duration bucket")
     }
 
+    runSuite("FirstRunExperience.workflowAbandonedAnalyticsProperties — keeps abandonment generic and bucketed") {
+        let properties = FirstRunExperience.workflowAbandonedAnalyticsProperties(
+            workflowKind: "onboarding",
+            stage: "permissions",
+            reasonKind: "window_closed",
+            elapsedSeconds: 75
+        )
+
+        assertEqual(properties["workflow_kind"], "onboarding", "workflow kind should stay enum-like")
+        assertEqual(properties["stage"], "permissions", "stage should stay a coarse funnel stage")
+        assertEqual(properties["reason_kind"], "window_closed", "reason should stay normalized")
+        assertEqual(properties["elapsed_bucket"], "30_119s", "elapsed time should be bucketed")
+        assertNil(properties["transcript"], "abandonment should not include spoken content")
+        assertNil(properties["meeting_title"], "abandonment should not include meeting titles")
+        assertNil(properties["file_path"], "abandonment should not include local paths")
+
+        let untimed = FirstRunExperience.workflowAbandonedAnalyticsProperties(
+            workflowKind: "onboarding",
+            stage: "welcome",
+            reasonKind: "window_closed",
+            elapsedSeconds: nil
+        )
+
+        assertNil(untimed["elapsed_bucket"], "missing elapsed time should not invent a duration bucket")
+    }
+
     runSuite("FirstRunExperience.meetingAction — switches menu copy while recording") {
         let idle = FirstRunExperience.meetingAction(
             dictationReady: true,

@@ -157,6 +157,13 @@ struct AnalyticsEventPolicy: Equatable {
         "source",
     ]
 
+    private static let workflowAbandonedProperties: Set<String> = [
+        "elapsed_bucket",
+        "reason_kind",
+        "stage",
+        "workflow_kind",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -332,6 +339,10 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "workflow_abandoned": .init(
+            name: "workflow_abandoned",
+            allowedProperties: workflowAbandonedProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",

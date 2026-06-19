@@ -138,6 +138,51 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 
+    runSuite("AnalyticsEventPolicy allows only narrow workflow abandonment fields") {
+        let abandoned = AnalyticsEventPolicy.policy(forEvent: "workflow_abandoned")
+
+        assertEqual(
+            abandoned?.allowedProperties ?? Set<String>(),
+            ["elapsed_bucket", "reason_kind", "stage", "workflow_kind"],
+            "workflow abandonment should stay limited to coarse lifecycle fields"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "onboarding",
+                "stage": "permissions",
+                "reason_kind": "window_closed",
+                "elapsed_bucket": "30_119s",
+                "transcript": "private words",
+                "prompt_text": "Ask my agent this",
+                "meeting_title": "Customer call",
+                "speaker_name": "Alice",
+                "source_app_name": "Safari",
+                "source_app_bundle": "com.apple.Safari",
+                "file_path": "/Users/redbars/private.md",
+                "audio_path": "/Users/redbars/private.wav",
+                "meeting_url": "https://example.com/private",
+                "user_id": "private-user",
+            ],
+            allowedKeys: abandoned?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["workflow_kind"], "onboarding", "workflow kind should survive")
+        assertEqual(sanitized["stage"], "permissions", "stage should survive")
+        assertEqual(sanitized["reason_kind"], "window_closed", "reason kind should survive")
+        assertEqual(sanitized["elapsed_bucket"], "30_119s", "elapsed bucket should survive")
+        assertNil(sanitized["transcript"], "raw transcript text must not be sent")
+        assertNil(sanitized["prompt_text"], "raw prompt text must not be sent")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["source_app_name"], "source app names must not be sent")
+        assertNil(sanitized["source_app_bundle"], "source app bundle IDs must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["meeting_url"], "raw URLs must not be sent")
+        assertNil(sanitized["user_id"], "identifiers must not be sent")
+    }
+
     runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, and next-day return proxy") {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
         let suiteName = "ActivationTelemetryTests.first-artifact.\(UUID().uuidString)"
