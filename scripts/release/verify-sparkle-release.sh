@@ -13,6 +13,8 @@ TAG="v${VERSION}"
 APPCAST_PATH="docs/appcast.xml"
 DMG_NAME="Transcripted-${VERSION}.dmg"
 EXPECTED_URL="https://github.com/r3dbars/transcripted/releases/download/${TAG}/${DMG_NAME}"
+EXPECTED_MINIMUM_SYSTEM_VERSION="$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" Info.plist)"
+EXPECTED_HARDWARE_REQUIREMENTS="arm64"
 
 if [ ! -f "$APPCAST_PATH" ]; then
     echo "Missing appcast: $APPCAST_PATH"
@@ -42,11 +44,11 @@ echo "Checking Info.plist Sparkle settings..."
 /usr/libexec/PlistBuddy -c "Print :SUAllowsAutomaticUpdates" Info.plist | grep -F "true" >/dev/null
 
 echo "Checking appcast entry..."
-python3 - "$APPCAST_PATH" "$VERSION" "$EXPECTED_URL" <<'PY'
+python3 - "$APPCAST_PATH" "$VERSION" "$EXPECTED_URL" "$EXPECTED_MINIMUM_SYSTEM_VERSION" "$EXPECTED_HARDWARE_REQUIREMENTS" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
-appcast_path, version, expected_url = sys.argv[1:4]
+appcast_path, version, expected_url, expected_minimum_system_version, expected_hardware_requirements = sys.argv[1:6]
 namespaces = {
     "sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle",
 }
@@ -80,6 +82,22 @@ version_fields = [
 ]
 if not any(version in field for field in version_fields):
     raise SystemExit(f"latest appcast item does not mention version {version}")
+
+minimum_system_version = item.findtext("sparkle:minimumSystemVersion", namespaces=namespaces) or ""
+if minimum_system_version != expected_minimum_system_version:
+    raise SystemExit(
+        "latest appcast minimumSystemVersion mismatch:\n"
+        f"  got: {minimum_system_version}\n"
+        f"  want: {expected_minimum_system_version}"
+    )
+
+hardware_requirements = item.findtext("sparkle:hardwareRequirements", namespaces=namespaces) or ""
+if hardware_requirements != expected_hardware_requirements:
+    raise SystemExit(
+        "latest appcast hardwareRequirements mismatch:\n"
+        f"  got: {hardware_requirements}\n"
+        f"  want: {expected_hardware_requirements}"
+    )
 PY
 
 echo "Sparkle release verified for ${TAG}."
