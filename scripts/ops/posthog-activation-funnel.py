@@ -200,8 +200,6 @@ SEQUENCE_STEPS = (
         "Artifact opened or prompt copied",
         "event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked')",
     ),
-    ("Local summary requested", "event = 'meeting_summary_requested'"),
-    ("Local summary finished", "event = 'meeting_summary_finished'"),
     (
         "Agent setup/prompt signal",
         "event IN ('activation_agent_setup_cta_clicked', 'activation_agent_prompt_action_clicked', 'onboarding_agent_cta_clicked')",
