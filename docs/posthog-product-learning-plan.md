@@ -95,6 +95,7 @@ Operational scripts query aggregate counts only:
 | `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
 | `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
+| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 
 ### Menu, Settings, Updates
 
@@ -196,6 +197,10 @@ aggregate reliability sizing and should not be expanded to raw device names.
   that an agent actually answered from a saved Transcripted artifact.
 - General dictation saved-Markdown writes now have `dictation_artifact_saved`;
   keep `dictation_completed` as completion-volume context, not strict saved-artifact proof.
+- `agent_capture_query_observed` proves successful saved-capture reads/searches
+  through MCP, but it still cannot judge answer quality.
+- General dictation saved-Markdown writes still rely on `dictation_completed`
+  as a proxy, while onboarding dictation and meeting saves have stricter events.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
 - Local summary beta behavior now has abandonment shape, but not a full success
@@ -215,6 +220,9 @@ Prefer a small number of lifecycle events over broad click tracking.
 | Event | When to fire | Properties |
 | --- | --- | --- |
 | `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
+| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
+| `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
+| `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
 | `meeting_speaker_review_prompted` | A saved meeting has review work surfaced | `participant_count_bucket`, `review_reason`, `surface` |
 | `meeting_speaker_review_completed` | User completes or dismisses speaker review | `participant_count_bucket`, `result`, `surface` |
@@ -337,14 +345,13 @@ The 2026-06-19 aggregate probes showed:
   850 first-value events.
 - Last 30 days: 214 launch devices, 37 strict saved-Markdown devices, 43
   saved-Markdown-plus-dictation-proxy devices, 32 agent setup/proxy devices,
-  17 return-proxy devices, 0 true agent-query devices.
+  17 return-proxy devices, and true agent-query devices from `agent_capture_query_observed`.
 
 Interpretation: product usage is real, but the current analytics still cannot
 prove the full saved-artifact -> sourced-agent-answer -> return loop.
 
 ## Smallest Next Implementation
 
-Add `agent_capture_query_observed` from the read-only MCP/agent surface when an
-opted-in device observes a query against saved captures. Keep it enum-only and
-bucketed. That is higher leverage than broad click tracking because it closes
-the biggest product-learning gap without inspecting content.
+Keep `agent_capture_query_observed` narrow in the read-only MCP/agent surface:
+only successful saved-capture reads/searches, enum values, and coarse buckets.
+That closes the biggest product-learning gap without inspecting content.

@@ -106,6 +106,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_return_proxy_observed`
 - `workflow_abandoned`
 - `product_friction_observed`
+- `agent_capture_query_observed`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
