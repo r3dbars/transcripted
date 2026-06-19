@@ -21,7 +21,8 @@ embedding vector differs — a clean controlled comparison) via a throwaway venv
 for a strong discriminative model (ReDimNet-b6 or ECAPA) recovers more speakers within a meeting, **halves the
 error on phone-band audio**, and gives near-perfect cross-call matching — codec-robust, and from *smaller*
 models. But "best accuracy" and "best to ship on-device" are **different answers**, and the full user-facing
-win is **capped by a separate within-meeting consolidation knob** (`0.88`) that must be loosened next.
+win is **capped by the diarizer's upstream under-segmentation** — *not* the `0.88` consolidation knob, which we
+later directly tested and found **inert** (see the CORRECTION below). The residual lever is a better diarizer.
 
 **🟢 GREEN** — broad, statistically-robust win (opus8k 30/32 meetings, p=2.5e-7), verified end-to-end through
 the real matcher.
@@ -54,10 +55,21 @@ DER) is the runner-up; ReDimNet-b6/ECAPA remain strong but are harder to ship.
 matcher. At each arm's best operating point CAM++ beats WeSpeaker on DER and restores profile granularity
 WeSpeaker can't reach on compressed audio — clean 0.44→0.36, opus12k 0.50→0.46, opus8k 0.61→**0.55**
 (profiles 5–10→21), g711u 0.57→**0.49** (profiles 12–27→38). Recommended CAM++ match threshold ≈ **0.60**
-(0.55 clean, ~0.65 heavy compression — don't inherit WeSpeaker's exact value). **Same cap as ReDimNet:**
-people-trapped stays ~28–31 at every operating point because the within-meeting `0.88` consolidation + diarizer
-under-segmentation bound recovery. So the model swap improves DER and granularity everywhere, but the two
-changes — **better embedding + loosen `0.88`** — must ship together to drive user-facing merges down.
+(0.55 clean, ~0.65 heavy compression — don't inherit WeSpeaker's exact value). People-trapped stays ~28–31 at
+every operating point — a residual cap.
+
+> **CORRECTION (2026-06-18, directly tested):** an earlier version of this report (and the AMI-codec /
+> diarizer-arm reports) named the within-meeting `consolidateSameVoiceClusters@0.88` as that cap and said to
+> "loosen it." **That is wrong.** We added a harness-only override of `postProcess`'s `consolidationThreshold`
+> (app default 0.88 preserved) and re-ran CAM++ end-to-end at 0.88 vs 0.95 vs **off** across all four arms:
+> profiles / people-trapped / DER are **identical** (e.g. clean 39/28/0.388 either way; opus8k 21/30/0.552
+> either way). **The 0.88 same-voice consolidation is inert in the real flow** — it can only *merge* clusters,
+> and the diarizer already under-segments to the point that there are no duplicate same-voice clusters left to
+> merge. The binding cap is the **diarizer's upstream under-segmentation** (raw cluster count < true speakers),
+> not the 0.88. The genuine remaining lever is a **better diarizer / re-diarizing with the new embedding**
+> (our bake-off swapped embeddings only in the *matcher*, not in the diarizer's clustering step — untested but
+> the logical next experiment). Net: **ship CAM++ for the matching-quality win (real); do NOT expect loosening
+> 0.88 to help (it doesn't); the within-meeting residual needs the diarizer, not a knob.**
 
 Full per-arm numbers for all 8 models: **[MASTER_SCORECARD.md](MASTER_SCORECARD.md)**. The original
 ReDimNet-focused analysis below still stands; CAM++ simply makes the *shippable* pick a measured one.
@@ -106,11 +118,12 @@ cosine scale runs hotter than WeSpeaker's 0.60):
 - **DER improves at every arm's best operating point:** clean 0.44→0.37, opus8k 0.61→0.54, g711u 0.57→0.51.
 - **Recommended match threshold ≈ 0.62–0.65** (clean 0.55–0.58; opus8k 0.69; g711u 0.62–0.63). Do **not**
   inherit 0.60 — recalibrate per embedding.
-- **Honest cap:** the within-meeting `consolidateSameVoiceClusters@0.88` post-process is now the binding
-  constraint, not the embedding. The diarizer recovers only **3.66 (ReDimNet) vs 3.25 (WeSpeaker)** of 4
-  speakers/meeting on clean before the matcher runs, so user-facing people-trapped stays 26–30/32 at every
-  usable threshold. **Next lever after the embedding swap is the 0.88 consolidation** (and note
-  `--consolidation none` does not disable it — see DIARIZER_ARM_REPORT.md §3).
+- **Honest cap:** the **diarizer's upstream under-segmentation** is the binding constraint, not the embedding.
+  The diarizer recovers only **3.66 (ReDimNet) vs 3.25 (WeSpeaker)** of 4 speakers/meeting on clean before the
+  matcher runs, so user-facing people-trapped stays 26–30/32 at every usable threshold. **Next lever after the
+  embedding swap is the diarizer** (segmentation/clustering), *not* the `0.88` consolidation — which we directly
+  tested and found **inert** (toggling it 0.88↔off leaves profiles/trapped/DER unchanged on all arms; see the
+  CORRECTION in the Update section). The logical experiment: re-diarize with the new embedding and re-measure.
 
 ## 3. Shippability — best accuracy ≠ best to ship on-device
 
@@ -158,8 +171,9 @@ risk category. Prefer **CnCeleb / in-house CAM++ checkpoints** to reduce it.
    check downstream dim assumptions).
 4. **Re-run on-device** to confirm CoreML/ANE parity (quantization shifts cosine scale).
 5. **Recalibrate the match threshold** per embedding (sweep; don't inherit 0.60).
-6. **Then loosen `consolidateSameVoiceClusters@0.88`** — the bake-off proves the embedding is no longer the
-   bottleneck; the within-meeting consolidation is.
+6. **Then attack the within-meeting cap — but it is the *diarizer*, not the `0.88` consolidation** (which we
+   directly tested and found inert). Re-diarize with the new embedding (so the diarizer's clustering also
+   improves, not just the matcher) and re-measure; if still short, a better segmentation/clustering model.
 7. **Validate on real captured Zoom audio** before shipping.
 
 ## Reproduce

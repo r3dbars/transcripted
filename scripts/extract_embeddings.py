@@ -123,6 +123,7 @@ def main():
                     help="ecapa|xvect|resnet|wavlm|unisat|redimnet[_b6]|campplus|eres2net")
     ap.add_argument("--base-dumps", default=None, help="dumps for segment timings (default data/eval/ami_<arm>/dumps)")
     ap.add_argument("--clean-audio", default="data/ami/audio")
+    ap.add_argument("--audio", default=None, help="use this wav directly for ALL base dumps (generic/Zoom mode; skips AMI codec regen)")
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--max-sec", type=float, default=20.0)
     ap.add_argument("--batch", type=int, default=24)
@@ -142,13 +143,16 @@ def main():
             if os.path.exists(outf):
                 continue
             d = json.load(open(f))
-            clean = os.path.join(args.clean_audio, f"{m}.Mix-Headset.wav")
-            wavp = regen_audio(args.arm, clean, os.path.join(td, f"{m}.wav"))
+            if args.audio:                       # generic mode: use the given wav directly
+                wavp = args.audio
+            else:
+                clean = os.path.join(args.clean_audio, f"{m}.Mix-Headset.wav")
+                wavp = regen_audio(args.arm, clean, os.path.join(td, f"{m}.wav"))
             audio, sr = sf.read(wavp)
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)
             audio = audio.astype(np.float32)
-            if args.arm != "clean":
+            if not args.audio and args.arm != "clean":
                 os.remove(wavp)
             segs = d["segments"]
             clips = []

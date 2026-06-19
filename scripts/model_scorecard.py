@@ -47,10 +47,11 @@ def main():
     ap.add_argument("--arm", required=True)
     ap.add_argument("--model", default="", help="'' = WeSpeaker baseline; else ecapa/wavlm/unisat/redimnet_b6/...")
     ap.add_argument("--rttm-dir", default="data/ami/rttm")
+    ap.add_argument("--dumps", default=None, help="explicit dumps dir (overrides the ami_<arm> path; for Zoom/generic)")
     ap.add_argument("--max-pairs", type=int, default=400000)
     ap.add_argument("--out-json")
     args = ap.parse_args()
-    dumps = f"data/eval/ami_{args.arm}/dumps" if not args.model else f"data/eval/ami_{args.arm}__{args.model}/dumps"
+    dumps = args.dumps or (f"data/eval/ami_{args.arm}/dumps" if not args.model else f"data/eval/ami_{args.arm}__{args.model}/dumps")
     der_metric = DiarizationErrorRate(collar=0.25, skip_overlap=False)
 
     per = []
@@ -101,8 +102,31 @@ def main():
         sc_raw.append(float(V[i] @ V[j])); sc_ctr.append(float(Vc[i] @ Vc[j]))
         lab.append(1 if keys[i][1] == keys[j][1] else 0)
     sc_raw = np.array(sc_raw); sc_ctr = np.array(sc_ctr); lab = np.array(lab)
-    same_r = sc_raw[lab == 1]; diff_r = sc_raw[lab == 0]
-    same_c = sc_ctr[lab == 1]; diff_c = sc_ctr[lab == 0]
+    # cross-call metrics need pairs from >=2 recordings with both same- and different-speaker pairs.
+    # A single recording (e.g. one Zoom call) has none -> report cross_meeting as N/A; within-meeting stands.
+    cross_ok = len(lab) > 0 and 0 < int(lab.sum()) < len(lab)
+
+    def m_(x):
+        return round(float(x.mean()), 4) if len(x) else None
+
+    if cross_ok:
+        same_r = sc_raw[lab == 1]; diff_r = sc_raw[lab == 0]
+        same_c = sc_ctr[lab == 1]; diff_c = sc_ctr[lab == 0]
+        cross = {
+            "n_pairs": int(len(lab)), "n_same": int(lab.sum()),
+            "auc_raw": round(float(roc_auc_score(lab, sc_raw)), 4),
+            "auc_centered": round(float(roc_auc_score(lab, sc_ctr)), 4),
+            "eer_raw": round(eer_from(sc_raw, lab), 4) if eer_from(sc_raw, lab) is not None else None,
+            "eer_centered": round(eer_from(sc_ctr, lab), 4) if eer_from(sc_ctr, lab) is not None else None,
+            "same_mean_raw": m_(same_r), "diff_mean_raw": m_(diff_r),
+            "sep_raw": round(m_(same_r) - m_(diff_r), 4),
+            "sep_centered": round(m_(same_c) - m_(diff_c), 4),
+        }
+    else:
+        cross = {"n_pairs": int(len(lab)), "n_same": int(lab.sum()), "auc_raw": None,
+                 "auc_centered": None, "eer_raw": None, "eer_centered": None,
+                 "same_mean_raw": None, "diff_mean_raw": None, "sep_raw": None, "sep_centered": None,
+                 "note": "single recording — cross-call metrics need >=2 recordings with recurring speakers"}
 
     out = {
         "arm": args.arm, "model": args.model or "wespeaker", "n_meetings": len(per),
@@ -113,15 +137,7 @@ def main():
             "mean_der": round(st.mean(p["der"] for p in per), 4),
             "mean_conf": round(st.mean(p["conf"] for p in per), 4),
         },
-        "cross_meeting": {
-            "n_pairs": len(lab), "n_same": int(lab.sum()),
-            "auc_raw": round(float(roc_auc_score(lab, sc_raw)), 4),
-            "auc_centered": round(float(roc_auc_score(lab, sc_ctr)), 4),
-            "eer_raw": round(eer_from(sc_raw, lab), 4) if eer_from(sc_raw, lab) is not None else None,
-            "eer_centered": round(eer_from(sc_ctr, lab), 4) if eer_from(sc_ctr, lab) is not None else None,
-            "same_mean_raw": round(float(same_r.mean()), 4), "diff_mean_raw": round(float(diff_r.mean()), 4),
-            "sep_raw": round(float(same_r.mean() - diff_r.mean()), 4),
-            "sep_centered": round(float(same_c.mean() - diff_c.mean()), 4),
+        "cross_meeting": {**cross,
         },
     }
     print(json.dumps(out, indent=2))

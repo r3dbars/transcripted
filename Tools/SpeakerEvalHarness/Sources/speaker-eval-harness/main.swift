@@ -180,10 +180,20 @@ func runReplay(_ args: [String]) async {
 
         // 1) Within-meeting consolidation — the real clusterer, DB-informed split uses
         //    profiles learned from prior sessions (cross-meeting context), exactly as in app.
+        // SAME_VOICE_THRESHOLD env (eval-only): override the same-voice consolidation bar
+        // (default 0.88) to measure loosening it. Unset -> 0.88 (identical to app default);
+        // "none"/"off" -> nil (disable the consolidation pass). App behavior is unchanged.
+        let svEnv = ProcessInfo.processInfo.environment["SAME_VOICE_THRESHOLD"]
+        let svThreshold: Float? = {
+            guard let e = svEnv?.lowercased() else { return EmbeddingClusterer.sameVoiceConsolidationThreshold }
+            if e == "none" || e == "off" { return nil }
+            return Float(e) ?? EmbeddingClusterer.sameVoiceConsolidationThreshold
+        }()
         let existing = await MainActor.run { db.allSpeakers() }
         let consolidated = await MainActor.run {
             EmbeddingClusterer.postProcess(segments: segs, existingProfiles: existing,
-                                           pairwiseMergeThreshold: consolidation)
+                                           pairwiseMergeThreshold: consolidation,
+                                           consolidationThreshold: svThreshold)
         }
 
         // Group consolidated segments by (post-consolidation) cluster id.
