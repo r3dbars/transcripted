@@ -253,7 +253,7 @@ def reliability_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT
   event,
-  coalesce(properties['failure_kind'], properties['reason'], properties['failure_code'], 'unknown') AS failure_kind,
+  coalesce(properties['failure_kind'], properties['failure_code'], 'unknown') AS failure_kind,
   coalesce(properties['capture_quality'], 'unknown') AS capture_quality,
   coalesce(properties['result'], 'unknown') AS result,
   count() AS events,
@@ -846,6 +846,9 @@ def run_self_test() -> int:
     app_version_query = release_versions_query(30, "1.2.3")
     if "properties['app_version'] = '1.2.3'" not in app_version_query:
         print("self-test failed: app-version runs should scope release rows", file=sys.stderr)
+        return 1
+    if "properties['reason']" in reliability_query(30, None):
+        print("self-test failed: reliability query should not export free-form reason values", file=sys.stderr)
         return 1
     zero_repeat_data = json.loads(json.dumps(data))
     zero_repeat_data["results"]["repeat_breakdown"] = [
