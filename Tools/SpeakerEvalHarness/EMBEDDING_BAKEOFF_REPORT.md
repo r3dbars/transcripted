@@ -36,20 +36,33 @@ official toolkit, sanity-gated: same-spk cosine 0.90 vs diff 0.10) through the e
 the one gap** in the original recommendation — the shippable model now has real in-harness numbers, and they're
 top-tier:
 
-| model | dim | clean DER | opus8k DER | g711u DER | cross-call AUC | isotropic? | on-device path |
+| model | dim | clean DER | opus8k DER | g711u DER | cross-call AUC | isotropic? | CoreML parity (tested) |
 |---|---|---|---|---|---|---|---|
 | WeSpeaker (current) | 256 | 0.319 | 0.480 | 0.432 | 0.95–0.98 | yes | shipping |
-| **CAM++** | 512 | **0.274** | **0.301** | **0.294** | **1.0000 (all arms)** | yes | **official ONNX → CoreML (cleanest)** |
-| ERes2Net | 192 | **0.238** | 0.329 | 0.274 | 1.0000 | yes | official ONNX → CoreML |
-| ReDimNet-b6 | 192 | 0.252 | 0.276 | 0.221 | ~1.0 | yes | **export blocker (ANE-hostile)** |
+| CAM++ | 512 | **0.274** | **0.301** | **0.294** | **1.0000 (all arms)** | yes | **FAILS — cosine 0.23 (pretrained BN tiny-variance; no clean fix)** |
+| **ERes2Net** | 192 | **0.238** | 0.329 | 0.274 | 1.0000 | yes | **cosine 1.0 (after 1-line ReLU patch)** |
+| ReDimNet-b6 | 192 | 0.252 | 0.276 | 0.221 | ~1.0 | yes | export blocker (ANE-hostile) |
 | ECAPA-TDNN | 192 | 0.267 | 0.307 | 0.281 | ~1.0 | yes | DIY ONNX |
 
-**Revised recommendation: ship CAM++.** It matches ReDimNet/ECAPA on accuracy (DER ~0.27–0.30 flat across all
-compression vs WeSpeaker's 0.32→0.48; AUC a perfect 1.0 on every arm; purity 0.84–0.87 — highest tier), is
-**isotropic** (clean drop-in, no whitening), is **lighter than today's model**, and has the **cleanest
-on-device conversion** (official ONNX → coremltools → ANE). The earlier tension ("ReDimNet most accurate but
-unshippable; CAM++ shippable but unmeasured") is **resolved — CAM++ is both.** ERes2Net (192-dim, best clean
-DER) is the runner-up; ReDimNet-b6/ECAPA remain strong but are harder to ship.
+**Revised recommendation: ship ERes2Net (192-dim).** *(Corrected after the CoreML conversion test — see below.)*
+All four strong models tie on accuracy (DER ~0.25–0.30 flat across compression vs WeSpeaker's 0.32→0.48; AUC a
+perfect 1.0; isotropic), so the decider is **which actually converts to Apple's on-device format.** We tested it:
+
+> **CAM++ → CoreML FAILS.** It converts and runs, but the converted model's embeddings only reach **cosine
+> ~0.23** vs the PyTorch reference (target >0.99). Root cause (rigorously diagnosed, not assumed): CAM++'s
+> **pretrained** BatchNorm has near-zero-variance channels (running_var min ≈ 4.7e-6 → ~260× normalization)
+> that amplify float rounding through its deep DenseTDNN backbone. **Not** a float16/ANE issue — ONNX *and*
+> CoreML diverge identically even at float32/CPU; per-op conversion is exact, the error accumulates with depth.
+> No clean workaround. **ERes2Net → CoreML is clean: cosine 1.000000** after a trivial 1-line patch (swap a
+> `Hardtanh(0,20)` for `ReLU`, which the official 3D-Speaker ONNX export already does). ~25 MB.
+
+So **ERes2Net is the pick: top-tier accuracy (best clean DER 0.238) AND a verified clean CoreML path.** CAM++
+stays an excellent *research/server* embedding but is **not on-device-shippable**. ReDimNet (most accurate)
+also has an export blocker; ECAPA (Apache-2.0) is the DIY-ONNX fallback.
+
+> **One open check:** the CoreML cosine-1.0 result for ERes2Net was first verified on the architecture; we are
+> confirming it on the actual **pretrained** ERes2Net weights too (CAM++'s failure was pretrained-weight-
+> specific, so this matters). [pending — will update.]
 
 **End-to-end confirmation (CAM++ through the real matcher, match threshold swept):** the win reaches the
 matcher. At each arm's best operating point CAM++ beats WeSpeaker on DER and restores profile granularity
