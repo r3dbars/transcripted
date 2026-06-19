@@ -45,6 +45,22 @@ For the full anonymous website-to-first-value attribution contract, see
 
 If `POSTHOG_HOST` points at the app ingest host, such as `https://us.i.posthog.com`, the probe normalizes it to the matching PostHog API host before running HogQL. The probe only sends `POSTHOG_PERSONAL_API_KEY` to HTTPS PostHog API hosts by default. Set `POSTHOG_ALLOW_UNTRUSTED_HOST=1` only when using a trusted self-hosted PostHog endpoint.
 
+For a deeper activation decision read, run:
+
+```bash
+python3 scripts/ops/posthog-activation-funnel.py --days 30
+```
+
+That report writes aggregate Markdown and JSON under
+`/tmp/transcripted-posthog-activation-funnel/<run-id>/`. It models the funnel as
+launch -> onboarding -> permission ready -> first dictation -> saved Markdown
+-> artifact action -> agent setup/prompt signal -> return proxy. It does not
+export distinct IDs, person rows, transcript text, file paths, meeting titles,
+raw URLs, or raw payload rows. Treat the agent setup and prompt-copy rows as
+proxies only; they are not proof that an agent answered from a saved artifact.
+The desired true-use event is `agent_capture_query_observed`, which should stay
+zero/unknown until that privacy-safe instrumentation exists.
+
 ### Cloudflare Read vs Deploy
 
 The health probe reads Pages project/deployment status and zone analytics for
