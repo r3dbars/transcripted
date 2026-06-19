@@ -8,13 +8,19 @@ private func syntheticRuntimeSnapshot(
     runningBundleIDs: Set<String> = [],
     frontmostBundleID: String? = nil,
     recentNativeActivity: [MeetingPromptProvider: Date] = [:],
-    runtimeSuppressedUntil: [MeetingPromptProvider: Date] = [:]
+    runtimeSuppressedUntil: [MeetingPromptProvider: Date] = [:],
+    micActiveBundleIDs: Set<String> = [],
+    isOwnCaptureActive: Bool = false,
+    isMicInputPromptEnabled: Bool = true
 ) -> MeetingPromptRuntimeSnapshot {
     MeetingPromptRuntimeSnapshot(
         runningBundleIDs: runningBundleIDs,
         frontmostBundleID: frontmostBundleID,
         recentNativeActivity: recentNativeActivity,
-        runtimeSuppressedUntil: runtimeSuppressedUntil
+        runtimeSuppressedUntil: runtimeSuppressedUntil,
+        micActiveBundleIDs: micActiveBundleIDs,
+        isOwnCaptureActive: isOwnCaptureActive,
+        isMicInputPromptEnabled: isMicInputPromptEnabled
     )
 }
 
@@ -159,6 +165,140 @@ func testSyntheticMeetingPrompts() {
         )
 
         assertEqual(result.suppressionReason, .noCandidate, "a browser alone is not enough evidence for a prompt")
+    }
+
+    runSuite("SyntheticMeetingPrompts — browser WebRTC mic activity prompts without Calendar") {
+        let result = evaluateSyntheticPrompt(
+            calendarAccessGranted: false,
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: [
+                    "com.google.Chrome.helper",
+                    "com.apple.WebKit.GPU"
+                ]
+            )
+        )
+
+        assertTrue(result.shouldPrompt, "a browser process holding the mic is strong enough for an ad-hoc call prompt")
+        assertEqual(result.candidate?.id, "mic:googleMeet", "browser helper noise should collapse to one stable browser-call candidate")
+        assertEqual(result.candidate?.title, "Call detected in your browser", "browser WebRTC copy should stay provider-neutral")
+        assertEqual(result.candidate?.reason, .micInput, "mic activity should keep its own analytics reason")
+        assertNil(result.candidate?.suggestedTranscriptTitle, "ad-hoc browser calls should not invent a calendar title")
+    }
+
+    runSuite("SyntheticMeetingPrompts — native Zoom mic plus Calendar keeps the scheduled prompt") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(id: "zoom-native-mic", startsIn: 20)
+            ],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: ["us.zoom.xos"]
+            )
+        )
+
+        assertEqual(result.candidate?.id, "calendar:zoom-native-mic", "native Zoom mic evidence should not replace a matching calendar prompt")
+        assertEqual(result.candidate?.source, .calendarEvent, "the prompt should keep calendar context for title handoff")
+        assertEqual(result.candidate?.suggestedTranscriptTitle, "Design review", "calendar-backed native calls should keep the meeting title hint")
+    }
+
+    runSuite("SyntheticMeetingPrompts — browser mic stays neutral unless a calendar prompt is already pending") {
+        let activeBrowserCall = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(
+                    id: "meet-calendar",
+                    startsIn: 20,
+                    url: URL(string: "https://meet.google.com/abc-defg-hij")
+                )
+            ],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: ["com.google.Chrome.helper"]
+            )
+        )
+        let pendingCalendar = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(
+                    id: "meet-calendar",
+                    startsIn: 20,
+                    url: URL(string: "https://meet.google.com/abc-defg-hij")
+                )
+            ],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: ["com.google.Chrome.helper"]
+            ),
+            pendingUntil: ["calendar:meet-calendar": syntheticPromptNow.addingTimeInterval(60)]
+        )
+        let expiredCalendarCooldown = evaluateSyntheticPrompt(
+            calendarEvents: [
+                syntheticCalendarEvent(
+                    id: "meet-calendar",
+                    startsIn: 20,
+                    url: URL(string: "https://meet.google.com/abc-defg-hij")
+                )
+            ],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: ["com.google.Chrome.helper"]
+            ),
+            snoozedUntil: ["calendar:meet-calendar": syntheticPromptNow.addingTimeInterval(-1)],
+            pendingUntil: ["calendar:meet-calendar": syntheticPromptNow.addingTimeInterval(-1)]
+        )
+
+        assertEqual(activeBrowserCall.candidate?.id, "mic:googleMeet", "generic browser calls should not borrow a possibly unrelated calendar title")
+        assertNil(activeBrowserCall.candidate?.suggestedTranscriptTitle, "browser calls may be Meet, Zoom web, or Teams web")
+        assertFalse(pendingCalendar.shouldPrompt, "browser mic should not bypass a visible scheduled prompt")
+        assertEqual(pendingCalendar.suppressionReason, .pendingCandidate, "pending calendar prompt should explain the quiet repeat")
+        assertEqual(expiredCalendarCooldown.candidate?.id, "mic:googleMeet", "expired calendar cooldowns should not steal a live browser mic prompt")
+    }
+
+    runSuite("SyntheticMeetingPrompts — mic app flags suppress stale callbacks") {
+        let disabled = evaluateSyntheticPrompt(
+            calendarAccessGranted: false,
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: ["com.google.Chrome.helper"],
+                isMicInputPromptEnabled: false
+            )
+        )
+        let ownCapture = evaluateSyntheticPrompt(
+            calendarAccessGranted: false,
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: ["com.google.Chrome.helper"],
+                isOwnCaptureActive: true
+            )
+        )
+
+        assertEqual(disabled.suppressionReason, .micInputDisabled, "disabled auto-call detection should suppress late mic callbacks")
+        assertEqual(ownCapture.suppressionReason, .ownCaptureActive, "our own recording or dictation should suppress mic prompts")
+    }
+
+    runSuite("SyntheticMeetingPrompts — duplicate mic route noise respects pending cooldown") {
+        let firstPass = evaluateSyntheticPrompt(
+            calendarAccessGranted: false,
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: [
+                    "com.google.Chrome.helper",
+                    "com.google.Chrome.helper.audio",
+                    "com.apple.WebKit.GPU"
+                ]
+            )
+        )
+        let repeatPass = evaluateSyntheticPrompt(
+            calendarAccessGranted: false,
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: [
+                    "com.google.Chrome.helper",
+                    "com.google.Chrome.helper.audio",
+                    "com.apple.WebKit.GPU"
+                ]
+            ),
+            pendingUntil: ["mic:googleMeet": syntheticPromptNow.addingTimeInterval(60)]
+        )
+
+        assertEqual(firstPass.candidate?.id, "mic:googleMeet", "noisy browser helpers should still produce one candidate id")
+        assertFalse(repeatPass.shouldPrompt, "pending mic prompts should not repeat while helper processes churn")
+        assertEqual(repeatPass.suppressionReason, .pendingCandidate, "repeat mic route noise should classify as pending")
     }
 
     runSuite("SyntheticMeetingPrompts — native runtime prompts are provider-limited") {
