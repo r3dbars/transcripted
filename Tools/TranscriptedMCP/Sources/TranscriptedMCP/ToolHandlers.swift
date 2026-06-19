@@ -238,30 +238,35 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
 
     await server.withMethodHandler(CallTool.self) { params in
         do {
+            let result: CallTool.Result
             switch params.name {
             case "list_meetings":
-                return try handleListMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
+                result = try handleListMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "list_dictations":
-                return try handleListDictations(params: params, index: index)
+                result = try handleListDictations(params: params, index: index)
             case "read_meeting":
-                return try handleReadMeeting(params: params, meetingDirs: directories.meetingDirs)
+                result = try handleReadMeeting(params: params, meetingDirs: directories.meetingDirs)
             case "read_dictation":
-                return try handleReadDictation(params: params, dictationDirs: directories.dictationDirs)
+                result = try handleReadDictation(params: params, dictationDirs: directories.dictationDirs)
             case "search":
-                return try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
+                result = try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "search_context":
-                return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs)
+                result = try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "recent_context":
-                return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs)
+                result = try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "who_is":
-                return try handleWhoIs(params: params, index: index)
+                result = try handleWhoIs(params: params, index: index)
             case "recap":
-                return try handleRecap(params: params, index: index, meetingDirs: directories.meetingDirs)
+                result = try handleRecap(params: params, index: index, meetingDirs: directories.meetingDirs)
             default:
-                return textResult("Unknown tool: \(params.name)", isError: true)
+                result = textResult("Unknown tool: \(params.name)", isError: true)
             }
+            AgentCaptureQueryTelemetry.observe(toolName: params.name, result: result)
+            return result
         } catch {
-            return textResult("Error: \(error.localizedDescription)", isError: true)
+            let result = textResult("Error: \(error.localizedDescription)", isError: true)
+            AgentCaptureQueryTelemetry.observe(toolName: params.name, result: result)
+            return result
         }
     }
 }

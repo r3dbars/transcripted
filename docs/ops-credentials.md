@@ -38,7 +38,7 @@ Only report aggregate counts, status codes, deployment IDs, and issue titles. Fo
 
 ### PostHog Probe Shape
 
-The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, and first-value events. It also prints a 7-day daily active-device trend so operators can see whether DAU is rising, flat, or missing without inspecting user-level data. First-value events are limited to `dictation_completed`, `onboarding_first_dictation_saved`, `meeting_transcript_saved`, `onboarding_agent_cta_clicked`, `activation_first_artifact_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, and `activation_return_proxy_observed`, so the health lane can see whether users reached successful dictation, a saved Markdown artifact, or agent payoff without exposing transcript text, file paths, titles, or user identifiers.
+The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, and first-value events. It also prints a 7-day daily active-device trend so operators can see whether DAU is rising, flat, or missing without inspecting user-level data. First-value events are limited to `dictation_completed`, `onboarding_first_dictation_saved`, `meeting_transcript_saved`, `onboarding_agent_cta_clicked`, `activation_first_artifact_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed`, and `agent_capture_query_observed`, so the health lane can see whether users reached successful dictation, a saved Markdown artifact, or agent payoff without exposing transcript text, file paths, titles, or user identifiers.
 
 For the full anonymous website-to-first-value attribution contract, see
 [`install-attribution-map.md`](./install-attribution-map.md).
@@ -58,8 +58,9 @@ launch -> onboarding -> permission ready -> first dictation -> saved Markdown
 export distinct IDs, person rows, transcript text, file paths, meeting titles,
 raw URLs, or raw payload rows. Treat the agent setup and prompt-copy rows as
 proxies only; they are not proof that an agent answered from a saved artifact.
-The desired true-use event is `agent_capture_query_observed`, which should stay
-zero/unknown until that privacy-safe instrumentation exists.
+The true-use event is `agent_capture_query_observed`, emitted from the MCP/tool
+query path with only client family, tool kind, capture kind, result, and
+source-count bucket.
 
 ### Cloudflare Read vs Deploy
 

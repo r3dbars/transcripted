@@ -146,6 +146,14 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let agentCaptureQueryProperties: Set<String> = [
+        "capture_kind",
+        "client_family",
+        "result",
+        "source_count_bucket",
+        "tool_kind",
+    ]
+
     private static let meetingPromptProperties: Set<String> = [
         "app_signal",
         "calendar_confidence",
@@ -332,6 +340,10 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "agent_capture_query_observed": .init(
+            name: "agent_capture_query_observed",
+            allowedProperties: agentCaptureQueryProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",

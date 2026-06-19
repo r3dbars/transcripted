@@ -102,6 +102,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `activation_return_proxy_observed`
+- `agent_capture_query_observed`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
@@ -158,6 +159,12 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
+
+Agent-use analytics are emitted from the read-only MCP helper after a tool call
+returns. The only allowed properties are `client_family`, `tool_kind`,
+`capture_kind`, `result`, and `source_count_bucket`. The helper must not send
+query text, transcript text, meeting titles, speaker names, source app names,
+file paths, entry IDs, filenames, raw counts, or raw client identifiers.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
