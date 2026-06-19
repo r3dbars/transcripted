@@ -41,10 +41,13 @@ Three findings that change how to think about the ladder:
    3,675 matched policy pairs; 0% of pairs improved). The margin gate, not demotion, is the
    false-positive control. (Mechanism + caveats in §6.)
 
-> **Statistical caveat (read before acting):** with 30–32 distinct identities per domain,
-> a "0% false-auto" point rests on **0 wrong auto-accepts out of 16–44** auto decisions. That
-> is consistent with a true rate anywhere up to ~3–6%. The directional conclusions are robust;
-> *certifying* < 0.5% needs a larger-N run (ICSI / full-AMI / 300-identity VoxCeleb — see §7).
+> **Statistical caveat (read before acting):** the §1 numbers are on N=30–32 identities, where
+> a "0% false-auto" point rests on few auto decisions. The high-N follow-up is **done**:
+> **AMI-full (175 speakers) × audio-quality matrix (§11.5–11.6)** certifies AMI at scale —
+> there the safe gate needs a **higher** AUTO bar (~0.92) + margin 0.12, and the clean-audio
+> 0.80 point in this table is **not** robust once audio degrades. **Read §1 as the clean-audio
+> upper bound and §11 as the shippable, quality-robust answer.** (ICSI and a 300-identity
+> VoxCeleb would tighten it further; ICSI is HF-login-gated, §3.)
 
 ---
 
