@@ -278,7 +278,7 @@ LIMIT 20
 """
 
 
-def release_versions_query(days: int) -> str:
+def release_versions_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT
   coalesce(properties['app_version'], 'unknown') AS app_version,
@@ -312,6 +312,7 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(SAFE_EVENTS)})
+  {app_version_filter(app_version)}
 GROUP BY app_version
 ORDER BY active_devices DESC, workflow_events DESC
 LIMIT 12
@@ -376,7 +377,7 @@ def fetch_report_data(days: int, app_version: str | None, fixture_path: Path | N
         "overview": overview_query(days, app_version),
         "event_counts": event_counts_query(days, app_version),
         "reliability_breakdown": reliability_query(days, app_version),
-        "release_versions": release_versions_query(days),
+        "release_versions": release_versions_query(days, app_version),
         "feature_breakdown": feature_breakdown_query(days, app_version),
         "repeat_breakdown": repeat_breakdown_query(days, app_version),
     }
@@ -480,6 +481,20 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
     dictation_completed = as_int(overview.get("dictation_completed_devices"))
     meeting_saved = as_int(overview.get("meeting_saved_devices"))
     workflow_devices = as_int(overview.get("workflow_devices"))
+    has_observed_overview = bool(results.get("event_counts")) or any(
+        value > 0
+        for value in (
+            launch,
+            first_artifact,
+            agent_prompt,
+            agent_setup,
+            true_agent_query,
+            return_proxy,
+            dictation_completed,
+            meeting_saved,
+            workflow_devices,
+        )
+    )
 
     unknowns: list[UnknownReason] = []
     if not results.get("overview"):
@@ -554,7 +569,11 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
         feature_signal = "UNKNOWN: no feature adoption aggregates returned."
         unknowns.append(UnknownReason("feature_adoption.strongest_signal", "No feature adoption aggregate rows were returned."))
 
-    repeat_top = top_row(results.get("repeat_breakdown", []))
+    repeat_rows = [
+        row for row in results.get("repeat_breakdown", [])
+        if as_int(row.get("devices")) > 0 or as_int(row.get("events")) > 0
+    ]
+    repeat_top = top_row(repeat_rows)
     if repeat_top:
         repeat_status = "OBSERVED"
         repeat_signal = f"{repeat_top.get('signal')} with {as_int(repeat_top.get('devices'))} devices."
@@ -572,6 +591,7 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
         reliability_top=reliability_top,
         release_anomaly=release_anomaly,
         feature_top=feature_top,
+        has_observed_overview=has_observed_overview,
     )
 
     return {
@@ -634,9 +654,17 @@ def build_recommendations(
     reliability_top: dict[str, Any] | None,
     release_anomaly: str,
     feature_top: dict[str, Any] | None,
+    has_observed_overview: bool,
 ) -> list[dict[str, Any]]:
     recs: list[dict[str, Any]] = []
-    if true_agent_query == 0:
+    if not has_observed_overview:
+        recs.append({
+            "rank": len(recs) + 1,
+            "title": "Restore aggregate PostHog context access",
+            "why": "PostHog aggregate data was unavailable, so the pack is intentionally UNKNOWN instead of guessing from missing rows.",
+            "suggested_pr": "Wire the health lane to surface missing PostHog credentials/query failures clearly and attach the UNKNOWN context pack for agent runs.",
+        })
+    elif true_agent_query == 0:
         recs.append({
             "rank": len(recs) + 1,
             "title": "Add privacy-safe sourced-agent-use proof",
@@ -794,13 +822,29 @@ def run_self_test() -> int:
         overview_query(30, None),
         event_counts_query(30, None),
         reliability_query(30, None),
-        release_versions_query(30),
+        release_versions_query(30, None),
         feature_breakdown_query(30, None),
         repeat_breakdown_query(30, None),
     ):
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)
             return 1
+    app_version_query = release_versions_query(30, "1.2.3")
+    if "properties['app_version'] = '1.2.3'" not in app_version_query:
+        print("self-test failed: app-version runs should scope release rows", file=sys.stderr)
+        return 1
+    zero_repeat_data = json.loads(json.dumps(data))
+    zero_repeat_data["results"]["repeat_breakdown"] = [
+        {"signal": "activation_return_proxy_observed", "events": 0, "devices": 0},
+        {"signal": "multi_artifact_proxy", "events": 0, "devices": 0},
+    ]
+    zero_repeat_pack = build_context_pack(zero_repeat_data)
+    if zero_repeat_pack["activation"]["strongest_repeat_use_signal"]["status"] != "UNKNOWN":
+        print("self-test failed: zero repeat rows should stay UNKNOWN", file=sys.stderr)
+        return 1
+    if unknown_pack["recommendations"][0]["title"] != "Restore aggregate PostHog context access":
+        print("self-test failed: missing-data pack should not emit data-driven recommendations", file=sys.stderr)
+        return 1
     print("product-context self-test passed")
     return 0
 
