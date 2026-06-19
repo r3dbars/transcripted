@@ -580,6 +580,50 @@ func testLocalMeetingSummarizer() async {
         assertTrue(updated.contains("## Transcript"), "original transcript body should remain in the same file")
     }
 
+    runSuite("LocalMeetingSummaryMarkdownUpdater refreshes only managed source links") {
+        let markdown = """
+        ---
+        capture_type: meeting
+        title: "Quick notes"
+        local_summary_source_transcript: "Quick notes.md"
+        ---
+
+        # Quick notes
+
+        ## Transcript
+
+        **00:01** [Mic/Justin]
+        The note said Source transcript: `Quick notes.md` before we renamed it.
+
+        \(LocalMeetingSummaryMarkdownUpdater.startMarker)
+        ## Local Gemma Summary
+
+        Source transcript: `Quick notes.md`
+
+        ### Summary
+        Useful summary.
+        \(LocalMeetingSummaryMarkdownUpdater.endMarker)
+        """
+        let updated = LocalMeetingSummaryMarkdownUpdater.updatingSourceTranscriptFilename(
+            in: markdown,
+            from: "Quick notes.md",
+            to: "2026-06-05 Launch planning.md"
+        ) ?? markdown
+
+        assertTrue(
+            updated.contains("local_summary_source_transcript: \"2026-06-05 Launch planning.md\""),
+            "managed source frontmatter should refresh"
+        )
+        assertTrue(
+            updated.contains("Source transcript: `2026-06-05 Launch planning.md`"),
+            "managed summary block should refresh"
+        )
+        assertTrue(
+            updated.contains("The note said Source transcript: `Quick notes.md` before we renamed it."),
+            "ordinary transcript text should not be rewritten"
+        )
+    }
+
     runSuite("LocalMeetingSummaryMarkdownUpdater records Apple provider metadata") {
         let markdown = """
         ---
