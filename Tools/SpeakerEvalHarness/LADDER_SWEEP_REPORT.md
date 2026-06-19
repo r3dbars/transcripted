@@ -409,3 +409,56 @@ Joining by policyId across all 11 qualities and requiring the budget in the wors
   an ffmpeg `amix` normalization that initially offset them ~4.7 dB).
 - `reverb` does not band-limit (≈ orig spectrum); its effect is the echo tail, so its impact on
   re-ID is milder/noisier than the band-limiting codecs.
+- **§11.4's per-corpus "robust gate" rows are refined by §11.6.** The analyzer picked the
+  min-prompts policy under the worst-quality budget, but for AMI that optimum is
+  *denominator-vacuous* (it satisfies the budget by almost never auto-accepting). §11.6 (a
+  5-agent parallel deep-dive, volume-weighting false-auto and cross-checking against
+  large-N suggest-precision) carries the honest verdict.
+
+## 11.6 Deep-dive: parameter sensitivity & shippable gate
+
+*Independently verified by a 5-agent analysis (pooled Σ autoWrong/Σ autos, baselines excluded);
+the headline is stress-tested adversarially. The one tension surfaced: a high `autoBar` looks
+"perfectly safe" on VoxCeleb only because its auto-denominator collapses — see (3).*
+
+### (1) Parameter-importance ranking for cross-quality false-auto robustness
+
+| Rank | Param | VoxCeleb | AMI |
+|---|---|---|---|
+| 1 | **autoBar** | dominant, but artifact at the top (see 3) | dominant & clean: pooled FAR 0.341→0.068 as 0.80→0.95, denominators stay populated |
+| 2 | **marginMin** | strong: cliff at 0.08, ~10× cut by 0.12 | inert/slightly harmful (0.234→0.213) |
+| 2 (AMI) | **promoRule / demote** | negligible | corpus-specific 2nd lever (evidence ≪ fixed; demote=off helps) |
+| 5–6 | emaAlpha, **suggestFloor** | minor on autos; suggestFloor is the *prompts/person* knob (≈0 auto cost) | minor |
+
+### (2) margin 0.08 vs 0.12
+**0.12 over 0.08 — VoxCeleb only.** On confusable single-utterance enrollment, 0.12 collapses
+worst-channel false-auto ~10× (reverb 0.574→0.062) at ≤+0.75 prompts/person (~2%); 0.08 is
+insufficient for reverb/opus_8k. On AMI 0.12 buys nothing. **margins 0.00/0.03/0.05 are
+byte-identical no-ops** — the gate first engages at 0.08. Forced to one global value: **0.12**.
+
+### (3) Adversarial verdict — robust or suggestive?
+**Robust as a confusability finding; NOT as a per-baseline false-auto number.** The large-N
+backbone holds: suggest-precision over millions of suggestions degrades monotonically with
+quality (**Spearman −0.78 VoxCeleb / −0.71 AMI**, CIs ±0.0003–0.0013), and the false-auto
+blow-up is *strongest in the ≥30-auto tier* (VoxCeleb reverb 0.627, snr5 0.675) — the opposite
+of a small-N artifact. **Honest caveats:** (a) the production baseline's auto count is genuinely
+vacuous (AMI baseline = 0 autos everywhere); (b) "*any* degradation raises false-auto" is
+**false** — it is noise/SNR/opus_8k/mp3-collapse driven; `reverb` & `opus_16k` on AMI sit
+*below* orig; (c) VoxCeleb `autoBar≥0.92` "0% false-auto" is a **denominator-collapse artifact**
+(0.92 → pooled FAR 0.627 on 1,933 autos; 0.95 → 0 autos). Trust the AMI curves, suggest-precision,
+and volume-weighted FAR — not col-mean false-auto at the top of the autoBar range.
+
+### (4) Recommended shippable gates
+
+| Corpus | Gate | Worst-quality false-auto | Prompts |
+|---|---|---|---|
+| **VoxCeleb (clean/short)** | floor 0.60, **autoBar 0.83, margin 0.12**, fixed cc>5, α 0.15, demote off | 0/301 pooled across 11 qualities (thin in worst cells) | 31.0 ppp, ~2.6× more auto-reach than baseline |
+| **AMI (in-room, ≤4 sessions)** | **SUGGEST-only — do not enable AUTO** | **0 policies** clear fa≤0.5% with ≥50 degraded autos; all "safe" gates are denominator-vacuous | ~3 ppp |
+| **Cross-domain default** | floor 0.60, autoBar 0.83, margin 0.12, fixed cc>5 | VoxCeleb 0; AMI-safe by construction (never auto-promotes short tracks) | — |
+
+**Bottom line:** ship **autoBar ≈ 0.83 + margin ≥ 0.12** *and gate AUTO on enough accumulated
+appearances*; for short in-room relationships (≤4 sessions) under degraded audio, **AUTO cannot
+be made safe at meaningful volume — keep it SUGGEST-only**. (For VoxCeleb, lowering floor to 0.45
+— same auto gate — lifts worst-quality suggest-precision 0.654→0.750 at +0.17 ppp if more margin
+under degradation is wanted.) The AMI-full N=189 run (§11.5) directly tests the "AMI AUTO is
+unsafe" claim at high N.
