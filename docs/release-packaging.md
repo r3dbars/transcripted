@@ -130,6 +130,28 @@ When an agent runs this inside Codex's filesystem sandbox, `codesign`,
 `hdiutil`, and packaged-app launch checks may need an approved unsandboxed rerun
 before calling a package red.
 
+Before publishing the DMG, run the read-only post-DMG audit:
+
+```bash
+python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact build/Transcripted-<version>.dmg
+```
+
+This does not create a GitHub release, update Sparkle, rewrite the Homebrew
+cask, register Sentry, or deploy the website. It compares the intended release
+against the exact GitHub asset URL, committed appcast, Homebrew cask, live
+download routes, live appcast, crawler-facing text, and optional local DMG
+evidence. Missing post-publish surfaces are `PENDING` or `UNKNOWN`, not green.
+Use it again after publishing, appcast/cask updates, and website deployment to
+catch any surface that still points at the older release.
+
+Rollback planning should use the same surfaces. Before changing release
+metadata, note the previously live GitHub release tag, `docs/appcast.xml`
+latest item, `Casks/transcripted.rb` version/sha, website `/download` target,
+and live appcast target. A rollback is not just deleting a bad artifact; it
+means restoring and pushing the appcast/cask/download surfaces, redeploying the
+website when needed, then rerunning the post-DMG audit and strict live-surface
+gate against the restored version.
+
 ## Release Flow
 
 ```bash
@@ -150,6 +172,7 @@ Before you publish a user-facing release note, sanity-check the release state:
 Use the strict release-health gate when validating release surfaces:
 
 ```bash
+python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact build/Transcripted-<version>.dmg
 python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
 python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health
 ```

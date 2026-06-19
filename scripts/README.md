@@ -42,6 +42,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/aggregate_sweep.py` — aggregate speaker-eval sweep scores and highlight closest-to-target threshold combinations
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
+- `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
