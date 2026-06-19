@@ -234,18 +234,31 @@ public class DiarizationService: ObservableObject {
 
     /// Re-derive each segment's embedding with `segmentEmbedder` when present.
     /// Slices the original 16 kHz samples by segment time and replaces the
-    /// embedding; segments where re-embedding fails keep their native vector.
+    /// embedding; segments where re-embedding fails are kept for diarization but
+    /// lose their native vector so model-specific speaker databases do not mix
+    /// embedding dimensions.
     /// No-op (returns input untouched) when no embedder is injected.
     private nonisolated func reembedIfNeeded(segments: [SpeakerSegment], samples: [Float], sampleRate: Int) -> [SpeakerSegment] {
         guard let embedder = segmentEmbedder, !segments.isEmpty else { return segments }
         let total = samples.count
         var replaced = 0
+        func withoutEmbedding(_ segment: SpeakerSegment) -> SpeakerSegment {
+            SpeakerSegment(
+                speakerId: segment.speakerId,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                embedding: nil,
+                qualityScore: segment.qualityScore
+            )
+        }
         let result = segments.map { segment -> SpeakerSegment in
             let a = max(0, Int(segment.startTime * Double(sampleRate)))
             let b = min(total, Int(segment.endTime * Double(sampleRate)))
-            guard b > a else { return segment }
+            guard b > a else { return withoutEmbedding(segment) }
             let slice = Array(samples[a..<b])
-            guard let emb = embedder.embed(samples: slice, sampleRate: sampleRate) else { return segment }
+            guard let emb = embedder.embed(samples: slice, sampleRate: sampleRate) else {
+                return withoutEmbedding(segment)
+            }
             replaced += 1
             return SpeakerSegment(
                 speakerId: segment.speakerId,

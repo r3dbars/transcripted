@@ -273,7 +273,7 @@ final class MeetingSessionController: ObservableObject {
         // Build app-owned CoreStoragePaths so captures and internal state stay split.
         self.storagePaths = CoreStoragePaths(
             transcripts: MeetingStoragePaths.transcriptsFolder,
-            speakerDB: SpeakerEmbedderFactory.activeSpeakerDBURL(),
+            speakerDB: SpeakerEmbedderFactory.speakerDBURL(for: segmentEmbedder),
             statsDB: MeetingStoragePaths.statsDatabase,
             failedQueue: MeetingStoragePaths.failedTranscriptionsFile,
             speakerClips: MeetingStoragePaths.speakerClipsFolder,

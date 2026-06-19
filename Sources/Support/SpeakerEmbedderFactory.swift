@@ -31,17 +31,21 @@ enum SpeakerEmbedderFactory {
         return embedder
     }
 
-    /// Speaker DB path for the *active* embedding model. ERes2Net (192-dim) uses a
+    /// Speaker DB path for the loaded embedding model. ERes2Net (192-dim) uses a
     /// separate file so its vectors never share a `SpeakerProfile` row with the
-    /// WeSpeaker (256-dim) defaults. Falls back to the default `speakers.sqlite`
-    /// when ERes2Net isn't selected or its model isn't on disk. Kept here (not in
-    /// MeetingStoragePaths) so the low-level storage-paths file stays dependency-free.
-    static func activeSpeakerDBURL() -> URL {
+    /// WeSpeaker (256-dim) defaults.
+    static func speakerDBURL(for embedder: (any SpeakerSegmentEmbedder)?) -> URL {
         let state = FileManager.default.transcriptedStateDir
-        let useERes2Net = SpeakerEmbedderPreferences.effectiveChoice() == .eRes2Net
-            && resolveModelURL() != nil
+        let useERes2Net = embedder?.identifier == SpeakerEmbedderChoice.eRes2Net.rawValue
         let name = useERes2Net ? "speakers_eres2net.sqlite" : "speakers.sqlite"
         return state.appendingPathComponent(name, isDirectory: false)
+    }
+
+    /// Speaker DB path for the effective preference. Falls back to the default
+    /// `speakers.sqlite` unless the ERes2Net model actually loads.
+    static func activeSpeakerDBURL() -> URL {
+        let embedder = makeEmbedder(for: SpeakerEmbedderPreferences.effectiveChoice())
+        return speakerDBURL(for: embedder)
     }
 
     /// First match wins: app bundle Resources, then the shared FluidAudio Models
