@@ -146,6 +146,31 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let uxConfusionProperties: Set<String> = [
+        "action_id",
+        "elapsed_bucket",
+        "failure_kind",
+        "page_id",
+        "reason_kind",
+        "retryability",
+        "signal_kind",
+        "step_id",
+        "step_index",
+        "surface",
+        "visit_count_bucket",
+    ]
+
+    private static let uxRecoveryProperties: Set<String> = [
+        "action_id",
+        "failure_kind",
+        "page_id",
+        "reason_kind",
+        "recovery_kind",
+        "result",
+        "retryability",
+        "surface",
+    ]
+
     private static let meetingPromptProperties: Set<String> = [
         "app_signal",
         "calendar_confidence",
@@ -332,6 +357,14 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "ux_confusion_signal_observed": .init(
+            name: "ux_confusion_signal_observed",
+            allowedProperties: uxConfusionProperties
+        ),
+        "ux_recovery_action_taken": .init(
+            name: "ux_recovery_action_taken",
+            allowedProperties: uxRecoveryProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",

@@ -93,6 +93,13 @@ struct TranscriptedSettingsView: View {
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var speakerInboxScrollRequest = 0
     @State private var speakerInboxScrollAwaitingQueue = false
+    @State private var settingsPageVisitCounts: [TranscriptedSettingsPage: Int] = [:]
+    @State private var trackedSettingsVisitBuckets: Set<String> = []
+    @State private var emptyHomeSectionsSeen: Set<String> = []
+    @State private var emptyHomeSectionsResolvedByAction: Set<String> = []
+    @State private var failedMeetingDetailSignalsTracked: Set<UUID> = []
+    @State private var homeCaptureRefreshStarted = false
+    @State private var homeCaptureRefreshCompleted = false
 
     init(
         appState: TranscriptedAppState,
@@ -279,6 +286,11 @@ struct TranscriptedSettingsView: View {
             }
             trackSettingsPageViewed(page, source: "navigation")
         }
+        .onChange(of: homeViewModel.isLoading) { wasLoading, isLoading in
+            guard homeCaptureRefreshStarted, wasLoading, !isLoading else { return }
+            homeCaptureRefreshCompleted = true
+            markVisibleEmptyHomeSectionsIfNeeded()
+        }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, newURL in
             refreshRecentCaptures(force: true)
             if SettingsSpeakerQueueRefreshPolicy.shouldRefreshAfterMeetingTranscriptSave(newURL) {
@@ -321,6 +333,7 @@ struct TranscriptedSettingsView: View {
             refreshShortcutState()
         }
         .onDisappear {
+            trackEmptyHomeExitIfNeeded()
             homeDashboardRefreshTask?.cancel()
             homeDashboardRefreshTask = nil
             homeDashboardRefreshInFlight = false
@@ -587,6 +600,9 @@ struct TranscriptedSettingsView: View {
                 },
                 onShowAll: {
                     trackSettingsAction("home_show_all_failed_meetings", page: .home)
+                    for item in allFailedMeetings {
+                        trackFailedMeetingDetailsOpened(item)
+                    }
                     homeShowsAllFailedMeetings = true
                 }
             )
@@ -616,6 +632,8 @@ struct TranscriptedSettingsView: View {
                 automationIdentifier: "transcripted.home.meetings.empty.start",
                 action: {
                     trackSettingsAction("empty_start_meeting", page: .home)
+                    emptyHomeSectionsSeen.remove("meetings")
+                    emptyHomeSectionsResolvedByAction.insert("meetings")
                     actions.startMeeting()
                 }
             ),
@@ -629,6 +647,9 @@ struct TranscriptedSettingsView: View {
             }
         ) { item in
             homeMeetingListRow(item)
+        }
+        .onAppear {
+            markVisibleEmptyHomeSectionsIfNeeded()
         }
     }
 
@@ -683,6 +704,8 @@ struct TranscriptedSettingsView: View {
                 automationIdentifier: "transcripted.home.dictations.empty.start",
                 action: {
                     trackSettingsAction("empty_start_dictation", page: .dictations)
+                    emptyHomeSectionsSeen.remove("dictations")
+                    emptyHomeSectionsResolvedByAction.insert("dictations")
                     actions.startDictation()
                 }
             ),
@@ -720,6 +743,9 @@ struct TranscriptedSettingsView: View {
                 menuItems: dictationRowMenuItems(for: entry)
             )
         }
+        .onAppear {
+            markVisibleEmptyHomeSectionsIfNeeded()
+        }
     }
 
     private var homeGreeting: String {
@@ -744,6 +770,9 @@ struct TranscriptedSettingsView: View {
         switch issue.destination {
         case .failedMeetings:
             trackSettingsAction("open_needs_attention_failed_meetings", page: .home)
+            for item in meetingSession.failedMeetings {
+                trackFailedMeetingDetailsOpened(item)
+            }
             navigation.selectedPage = .home
             homeShowsAllFailedMeetings = true
         case .speakers:
@@ -1575,6 +1604,15 @@ struct TranscriptedSettingsView: View {
 
     private func retryFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
         let didStart = meetingSession.retryFailedMeeting(id: item.id)
+        UXConfusionTelemetry.trackRecovery(
+            .retryFromFailure,
+            surface: .home,
+            pageID: navigation.selectedPage.analyticsValue,
+            actionID: "home_retry_failed_meeting",
+            failureKind: item.failureKind.rawValue,
+            result: didStart ? .started : .blocked,
+            retryability: item.isRetryable ? "retryable" : "not_retryable"
+        )
         if !didStart {
             presentHomeActionFailure(
                 title: "Could not retry meeting",
@@ -4210,6 +4248,7 @@ struct TranscriptedSettingsView: View {
                 "source": source,
             ]
         )
+        trackRepeatedSettingsVisit(page)
     }
 
     private func trackSettingsAction(_ actionID: String, page: TranscriptedSettingsPage? = nil) {
@@ -4230,6 +4269,70 @@ struct TranscriptedSettingsView: View {
                 "page_id": (page ?? navigation.selectedPage).analyticsValue,
                 "setting_id": settingID,
             ]
+        )
+    }
+
+    private func trackRepeatedSettingsVisit(_ page: TranscriptedSettingsPage) {
+        let count = (settingsPageVisitCounts[page] ?? 0) + 1
+        settingsPageVisitCounts[page] = count
+        guard let bucket = UXConfusionTelemetry.visitCountBucket(count) else { return }
+        let key = "\(page.analyticsValue):\(bucket)"
+        guard !trackedSettingsVisitBuckets.contains(key) else { return }
+        trackedSettingsVisitBuckets.insert(key)
+        UXConfusionTelemetry.trackSignal(
+            .repeatedSettingsVisit,
+            surface: .settings,
+            pageID: page.analyticsValue,
+            visitCountBucket: bucket
+        )
+    }
+
+    private func trackEmptyHomeExitIfNeeded() {
+        for section in emptyHomeSectionsSeen.sorted() {
+            guard !emptyHomeSectionsResolvedByAction.contains(section) else { continue }
+            guard homeSectionIsStillEmpty(section) else { continue }
+            UXConfusionTelemetry.trackSignal(
+                .emptyStateExited,
+                surface: .home,
+                pageID: section == "meetings" ? "home" : "dictations",
+                reasonKind: section
+            )
+        }
+        emptyHomeSectionsSeen.removeAll()
+        emptyHomeSectionsResolvedByAction.removeAll()
+    }
+
+    private func markVisibleEmptyHomeSectionsIfNeeded() {
+        guard homeCaptureRefreshCompleted, !homeViewModel.isLoading else { return }
+        switch navigation.selectedPage {
+        case .home where homeMeetingDaySections.isEmpty:
+            emptyHomeSectionsSeen.insert("meetings")
+        case .dictations where homeViewModel.dictationDaySections.isEmpty:
+            emptyHomeSectionsSeen.insert("dictations")
+        default:
+            break
+        }
+    }
+
+    private func homeSectionIsStillEmpty(_ section: String) -> Bool {
+        switch section {
+        case "meetings":
+            return homeMeetingDaySections.isEmpty
+        case "dictations":
+            return homeViewModel.dictationDaySections.isEmpty
+        default:
+            return false
+        }
+    }
+
+    private func trackFailedMeetingDetailsOpened(_ item: MeetingSessionController.FailedMeetingItem) {
+        guard failedMeetingDetailSignalsTracked.insert(item.id).inserted else { return }
+        UXConfusionTelemetry.trackSignal(
+            .failedMeetingDetailsOpened,
+            surface: .homeRow,
+            pageID: navigation.selectedPage.analyticsValue,
+            failureKind: item.failureKind.rawValue,
+            retryability: item.isRetryable ? "retryable" : "not_retryable"
         )
     }
 
@@ -4405,6 +4508,8 @@ struct TranscriptedSettingsView: View {
         let generation = homeDashboardRefreshGeneration
         lastHomeDashboardRefreshStartedAt = now
         homeDashboardRefreshInFlight = true
+        homeCaptureRefreshStarted = true
+        homeCaptureRefreshCompleted = false
         homeViewModel.refresh()
 
         homeDashboardRefreshTask = Task { @MainActor in
@@ -4559,20 +4664,64 @@ struct TranscriptedSettingsView: View {
 
     private func sendDiagnosticEvent() {
         guard CrashReporter.isAvailable else {
+            UXConfusionTelemetry.trackSignal(
+                .disabledActionAttempted,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                reasonKind: "crash_reporting_unavailable"
+            )
+            UXConfusionTelemetry.trackRecovery(
+                .supportDiagnostics,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                reasonKind: "crash_reporting_unavailable",
+                result: .blocked
+            )
             diagnosticsActionStatus = "Sentry is not configured in this build yet."
             return
         }
 
         guard crashReportingEnabled else {
+            UXConfusionTelemetry.trackSignal(
+                .disabledActionAttempted,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                reasonKind: "crash_reporting_disabled"
+            )
+            UXConfusionTelemetry.trackRecovery(
+                .supportDiagnostics,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                reasonKind: "crash_reporting_disabled",
+                result: .blocked
+            )
             diagnosticsActionStatus = "Turn on crash and error reports first."
             return
         }
 
         guard let eventID = actions.sendDiagnosticEvent() else {
+            UXConfusionTelemetry.trackRecovery(
+                .supportDiagnostics,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                result: .failed
+            )
             diagnosticsActionStatus = "Diagnostic event could not be queued."
             return
         }
 
+        UXConfusionTelemetry.trackRecovery(
+            .supportDiagnostics,
+            surface: .support,
+            pageID: navigation.selectedPage.analyticsValue,
+            actionID: "send_diagnostic_event",
+            result: .queued
+        )
         diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
     }
 

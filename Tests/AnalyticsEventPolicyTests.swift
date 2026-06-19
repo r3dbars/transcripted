@@ -231,6 +231,87 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy allows UX confusion and recovery signals") {
+        let confusion = AnalyticsEventPolicy.policy(forEvent: "ux_confusion_signal_observed")
+        let recovery = AnalyticsEventPolicy.policy(forEvent: "ux_recovery_action_taken")
+
+        assertEqual(
+            confusion?.allowedProperties ?? Set<String>(),
+            [
+                "action_id",
+                "elapsed_bucket",
+                "failure_kind",
+                "page_id",
+                "reason_kind",
+                "retryability",
+                "signal_kind",
+                "step_id",
+                "step_index",
+                "surface",
+                "visit_count_bucket",
+            ],
+            "confusion signals should stay coarse and enum-shaped"
+        )
+        assertEqual(
+            recovery?.allowedProperties ?? Set<String>(),
+            [
+                "action_id",
+                "failure_kind",
+                "page_id",
+                "reason_kind",
+                "recovery_kind",
+                "result",
+                "retryability",
+                "surface",
+            ],
+            "recovery actions should not include private artifacts"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "action_id": "send_diagnostic_event",
+                "elapsed_bucket": "30_119s",
+                "failure_kind": "transcription_inference_failed",
+                "page_id": "support",
+                "reason_kind": "crash_reporting_disabled",
+                "recovery_kind": "support_diagnostics",
+                "result": "blocked",
+                "retryability": "retryable",
+                "signal_kind": "disabled_action_attempted",
+                "step_id": "permissions",
+                "step_index": "3",
+                "surface": "settings",
+                "visit_count_bucket": "3_4",
+                "meeting_title": "Customer call",
+                "audio_path": "/Users/redbars/private.wav",
+                "prompt_text": "read this transcript",
+            ],
+            allowedKeys: (confusion?.allowedProperties ?? []).union(recovery?.allowedProperties ?? [])
+        )
+
+        assertEqual(sanitized["action_id"], "send_diagnostic_event", "action id should survive")
+        assertEqual(sanitized["elapsed_bucket"], "30_119s", "elapsed bucket should survive")
+        assertEqual(sanitized["failure_kind"], "transcription_inference_failed", "normalized failure kind should survive")
+        assertEqual(sanitized["page_id"], "support", "page id should survive")
+        assertEqual(sanitized["reason_kind"], "crash_reporting_disabled", "reason kind should survive")
+        assertEqual(sanitized["recovery_kind"], "support_diagnostics", "recovery kind should survive")
+        assertEqual(sanitized["result"], "blocked", "coarse result should survive")
+        assertEqual(sanitized["retryability"], "retryable", "retryability enum should survive")
+        assertEqual(sanitized["signal_kind"], "disabled_action_attempted", "signal kind should survive")
+        assertEqual(sanitized["step_id"], "permissions", "step id should survive")
+        assertEqual(sanitized["step_index"], "3", "step index should survive")
+        assertEqual(sanitized["surface"], "settings", "surface should survive")
+        assertEqual(sanitized["visit_count_bucket"], "3_4", "visit count bucket should survive")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["prompt_text"], "prompt text must not be sent")
+
+        assertNil(UXConfusionTelemetry.visitCountBucket(2), "first two visits should not count as repeat confusion")
+        assertEqual(UXConfusionTelemetry.visitCountBucket(3), "3_4", "third visit should start repeat bucket")
+        assertEqual(UXConfusionTelemetry.visitCountBucket(7), "5_9", "mid repeat visits should stay bucketed")
+        assertEqual(UXConfusionTelemetry.visitCountBucket(10), "10_plus", "high repeat visits should stay bucketed")
+    }
+
     runSuite("AnalyticsEventPolicy allows update download lifecycle attribution") {
         let started = AnalyticsEventPolicy.policy(forEvent: "update_download_started")
         let finished = AnalyticsEventPolicy.policy(forEvent: "update_download_finished")

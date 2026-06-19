@@ -87,6 +87,8 @@ Operational scripts query aggregate counts only:
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
+| `ux_confusion_signal_observed` | `action_id`, `elapsed_bucket`, `failure_kind`, `page_id`, `reason_kind`, `retryability`, `signal_kind`, `step_id`, `step_index`, `surface`, `visit_count_bucket` |
+| `ux_recovery_action_taken` | `action_id`, `failure_kind`, `page_id`, `reason_kind`, `recovery_kind`, `result`, `retryability`, `surface` |
 
 ### Menu, Settings, Updates
 
@@ -175,6 +177,9 @@ aggregate reliability sizing and should not be expanded to raw device names.
 - First saved artifact across dictation and meeting with coarse artifact kind,
   trigger, duration bucket, and word-count bucket.
 - Artifact open/reveal/preview actions and agent setup or prompt-copy intent.
+- UX/CX confusion and recovery signals: onboarding exit/abandonment, repeated
+  Settings page visits, support diagnostics attempts, failed-meeting detail
+  opens, retry attempts, and empty Home exits.
 - Return proxy when Home observes an older saved artifact.
 - Release health by app version and update lifecycle.
 
@@ -214,6 +219,10 @@ Prefer a small number of lifecycle events over broad click tracking.
 Do not add generic "button clicked" for every control. Track buttons only when
 they answer a product question: did the user start capture, grant permission,
 save/open a useful artifact, connect an agent, recover from failure, or return?
+
+The current implementation covers the first confusion slice through
+`ux_confusion_signal_observed` and `ux_recovery_action_taken`. Keep using those
+for high-signal confusion and recovery moments instead of raw click tracking.
 
 ## Dashboards And Funnels
 
