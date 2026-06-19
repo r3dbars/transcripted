@@ -36,6 +36,7 @@ DASHBOARD_EVENTS = (
     "app_session_stall_detected",
     "onboarding_shown",
     "onboarding_completed",
+    "onboarding_agent_cta_clicked",
     "onboarding_first_dictation_started",
     "onboarding_first_dictation_saved",
     "dictation_started",
@@ -220,7 +221,7 @@ SELECT
   countIf(event = 'app_launched') AS launches,
   uniqIf(distinct_id, event = 'onboarding_completed') AS onboarding_completed_devices,
   uniqIf(distinct_id, event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved')) AS saved_artifact_devices,
-  uniqIf(distinct_id, event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked')) AS agent_bridge_devices,
+  uniqIf(distinct_id, event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')) AS agent_bridge_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed') AS return_proxy_devices,
   uniqIf(distinct_id, event = 'agent_capture_query_observed') AS true_agent_query_devices,
   countIf(event IN ('app_unclean_shutdown_detected', 'app_session_stall_detected', 'dictation_start_failed', 'dictation_no_speech', 'dictation_audio_route_recovery_timeout', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped')) AS reliability_events,
@@ -253,7 +254,7 @@ ORDER BY day ASC
 """
 
 
-def version_query(days: int) -> str:
+def version_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT
   coalesce(toString(properties['app_version']), 'unknown') AS app_version,
@@ -264,6 +265,7 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(DASHBOARD_EVENTS)})
+  {app_version_filter(app_version)}
 GROUP BY app_version
 ORDER BY active_devices DESC, launches DESC
 LIMIT 8
@@ -439,7 +441,7 @@ def fetch_payload(days: int, app_version: str | None) -> dict[str, Any]:
     queries = {
         "dashboard": dashboard_query(days, app_version),
         "daily_active": daily_query(days, app_version),
-        "versions": version_query(days),
+        "versions": version_query(days, app_version),
         "event_counts": event_query(days, app_version),
     }
     results = {
@@ -514,7 +516,7 @@ def run_self_test() -> int:
     if leaked:
         print(f"self-test failed: unsafe output fragment {', '.join(leaked)}", file=sys.stderr)
         return 1
-    queries = (dashboard_query(7, None), daily_query(7, None), version_query(7), event_query(7, None))
+    queries = (dashboard_query(7, None), daily_query(7, None), version_query(7, None), event_query(7, None))
     if any("SELECT *" in query.upper() for query in queries):
         print("self-test failed: query uses SELECT *", file=sys.stderr)
         return 1
