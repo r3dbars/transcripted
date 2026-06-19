@@ -60,6 +60,11 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Release-scoped usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30 --app-version 1.1.48`
   - Writes local Markdown and JSON under `/tmp/transcripted-posthog-activation-funnel/<run-id>/`
   - Self-test: `python3 scripts/ops/posthog-activation-funnel.py --self-test`
+- `scripts/ops/posthog-product-learning-report.py` — build one aggregate PostHog dashboard helper report for 100 WAU, activation, dictation reliability, meeting reliability, local summary beta, agent/Markdown value loop, and release health by app version
+  - Usage: `python3 scripts/ops/posthog-product-learning-report.py --days 30`
+  - Release-scoped usage: `python3 scripts/ops/posthog-product-learning-report.py --days 30 --app-version 1.1.48`
+  - Writes local Markdown and JSON under `/tmp/transcripted-posthog-product-learning/<run-id>/`
+  - Self-test: `python3 scripts/ops/posthog-product-learning-report.py --self-test`
 - `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
   - Usage: `bash run-daily-audio-reliability.sh`
   - Synthetic-only usage: `bash run-daily-audio-reliability.sh --synthetic`

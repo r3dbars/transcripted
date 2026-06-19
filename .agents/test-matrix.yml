@@ -114,6 +114,14 @@ rules:
       - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
+      - "scripts/ops/posthog-product-learning-report.py"
+      - "docs/posthog-product-learning-dashboards.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-product-learning-report.py"
+      - "python3 scripts/ops/posthog-product-learning-report.py --self-test"
+
+  - paths:
       - "scripts/ops/nightly-security-check.py"
     checks:
       - "scripts/dev/agent-preflight.sh"

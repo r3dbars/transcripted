@@ -61,6 +61,19 @@ proxies only; they are not proof that an agent answered from a saved artifact.
 The desired true-use event is `agent_capture_query_observed`, which should stay
 zero/unknown until that privacy-safe instrumentation exists.
 
+For the broader product-learning dashboard bundle, run:
+
+```bash
+python3 scripts/ops/posthog-product-learning-report.py --days 30
+```
+
+That report writes aggregate Markdown and JSON under
+`/tmp/transcripted-posthog-product-learning/<run-id>/`. It covers the 100 WAU
+operating dashboard, activation, dictation reliability, meeting reliability,
+local summary beta, agent/Markdown loop, and release health by app version. It
+also prints a missing-event ledger so dashboards do not turn proxy signals into
+false proof. See [`posthog-product-learning-dashboards.md`](./posthog-product-learning-dashboards.md).
+
 ### Cloudflare Read vs Deploy
 
 The health probe reads Pages project/deployment status and zone analytics for
