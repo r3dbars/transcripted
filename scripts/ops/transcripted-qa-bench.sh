@@ -352,7 +352,12 @@ if report is not None:
     summary = report["summary"]
     failed = int(summary.get("failed", 0) or 0)
     warnings = int(summary.get("warnings", 0) or 0)
-    print("WARN" if failed or warnings else "PASS")
+    if failed:
+        print("FAIL")
+    elif warnings:
+        print("WARN")
+    else:
+        print("PASS")
 elif exit_code == 0:
     print("PASS")
 else:
@@ -685,7 +690,7 @@ run_artifact_validation() {
     run_step "21-qa-validate-all" "TranscriptedQA validate current artifacts" "yes" \
       "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
   else
-    run_warnings_only_step "20-qa-health" "TranscriptedQA health check (warnings-only local state)" \
+    run_step "20-qa-health" "TranscriptedQA health check" "yes" \
       "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa check-health --format json"
     run_warnings_only_step "21-qa-validate-all" "TranscriptedQA validate current artifacts (warnings-only local state)" \
       "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
