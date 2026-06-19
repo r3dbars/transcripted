@@ -43,6 +43,7 @@ final class SpeakerNamingSheet {
     private func present(request: SpeakerNamingRequest) {
         // Avoid stacking — if a previous sheet is still open, close it first.
         currentWindowController?.close()
+        SpeakerReviewTelemetry.trackPrompted(request: request)
 
         let controller = NamingWindowController(request: request) { [weak self] in
             self?.currentWindowController = nil
@@ -105,6 +106,11 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         if !didComplete {
+            SpeakerReviewTelemetry.trackCompleted(
+                request: request,
+                updates: [],
+                explicitResult: .closed
+            )
             request.onComplete([])
             didComplete = true
         }
@@ -120,6 +126,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
     private func finish(with updates: [SpeakerNameUpdate]) {
         guard !didComplete else { return }
         didComplete = true
+        SpeakerReviewTelemetry.trackCompleted(request: request, updates: updates)
         request.onComplete(updates)
         close()
     }

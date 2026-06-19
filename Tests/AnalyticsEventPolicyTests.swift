@@ -712,6 +712,8 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy allows meeting outcome trigger attribution") {
         let saved = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_saved")
+        let reviewPrompted = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_prompted")
+        let reviewCompleted = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_completed")
         let failed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
         let skipped = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_skipped")
@@ -720,6 +722,9 @@ func testAnalyticsEventPolicy() {
         assertEqual(saved?.allowedProperties.contains("duration_bucket"), true, "meeting saves should preserve coarse duration")
         assertEqual(saved?.allowedProperties.contains("word_count_bucket"), true, "meeting saves should preserve coarse word output")
         assertEqual(saved?.allowedProperties.contains("participant_count_bucket"), true, "meeting saves should preserve coarse participant count")
+        let speakerReviewProperties: Set<String> = ["participant_count_bucket", "review_reason", "result", "surface"]
+        assertEqual(reviewPrompted?.allowedProperties, speakerReviewProperties, "speaker review prompts should stay bucketed and enum-only")
+        assertEqual(reviewCompleted?.allowedProperties, speakerReviewProperties, "speaker review completions should stay bucketed and enum-only")
         assertEqual(failed?.allowedProperties.contains("trigger"), true, "meeting failures should preserve trigger attribution")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("trigger"), true, "speaker finalization failures should preserve trigger attribution")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("queue_depth_bucket"), true, "speaker finalization failures should preserve bucketed queue depth")
@@ -785,6 +790,23 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(skipped["failure_kind"], "no_speech_detected", "skipped meetings should keep normalized reason")
 
+        let reviewCompleted = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "participant_count_bucket": "4_9",
+                    "review_reason": "mixed",
+                    "result": "saved",
+                    "surface": "post_meeting_sheet",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_completed")?.allowedProperties ?? []
+        )
+        assertEqual(reviewCompleted["participant_count_bucket"], "4_9", "speaker review should keep participant bucket")
+        assertEqual(reviewCompleted["review_reason"], "mixed", "speaker review should keep reason enum")
+        assertEqual(reviewCompleted["result"], "saved", "speaker review should keep result enum")
+        assertEqual(reviewCompleted["surface"], "post_meeting_sheet", "speaker review should keep surface enum")
+
         let importFailed = AnalyticsPayloadSanitizer.sanitizeProperties(
             privateFields.merging(
                 [
@@ -798,7 +820,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(importFailed["failure_kind"], "unsupported_format", "import failures should keep normalized kind")
         assertEqual(importFailed["import_stage"], "preparation", "import failures should keep coarse stage")
 
-        for sanitized in [saved, failed, skipped, importFailed] {
+        for sanitized in [saved, failed, skipped, reviewCompleted, importFailed] {
             for key in privateFields.keys {
                 assertNil(sanitized[key], "\(key) should not be emitted for meeting outcome analytics")
             }

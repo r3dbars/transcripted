@@ -636,6 +636,24 @@ struct AnalyticsEventPolicy: Equatable {
                 "word_count_bucket",
             ]
         ),
+        "meeting_speaker_review_prompted": .init(
+            name: "meeting_speaker_review_prompted",
+            allowedProperties: [
+                "participant_count_bucket",
+                "review_reason",
+                "result",
+                "surface",
+            ]
+        ),
+        "meeting_speaker_review_completed": .init(
+            name: "meeting_speaker_review_completed",
+            allowedProperties: [
+                "participant_count_bucket",
+                "review_reason",
+                "result",
+                "surface",
+            ]
+        ),
         "meeting_transcript_failed": .init(
             name: "meeting_transcript_failed",
             allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
