@@ -301,7 +301,7 @@ SELECT event, count() AS events, uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(DASHBOARD_EVENTS)})
-  {app_version_filter(app_version)}
+  {app_or_update_target_version_filter(app_version)}
 GROUP BY event
 ORDER BY events DESC, event ASC
 """
@@ -332,6 +332,7 @@ def status_from_ratio(numerator: int, denominator: int, *, warn_under: float, gr
 
 
 def build_summaries(data: dict[str, Any]) -> list[DashboardSummary]:
+    app_version = data.get("app_version")
     row = (data["results"].get("dashboard") or [{}])[0]
     daily = data["results"].get("daily_active") or []
     versions = data["results"].get("versions") or []
@@ -350,6 +351,24 @@ def build_summaries(data: dict[str, Any]) -> list[DashboardSummary]:
     prompt_devices = as_int(row.get("meeting_prompt_devices"))
     latest_version = versions[0].get("app_version") if versions else "unknown"
     latest_version_devices = as_int(versions[0].get("active_devices")) if versions else 0
+    if app_version:
+        target_version_row = next(
+            (version for version in versions if str(version.get("app_version") or "") == app_version),
+            None,
+        )
+        release_version = app_version
+        release_devices = as_int(target_version_row.get("active_devices")) if target_version_row else 0
+        release_summary = (
+            f"target_version={release_version} on {release_devices} active devices; "
+            f"update_events={as_int(row.get('update_events'))}, installs={as_int(row.get('update_installed_events'))}."
+        )
+    else:
+        release_version = str(latest_version)
+        release_devices = latest_version_devices
+        release_summary = (
+            f"top_version={release_version} on {release_devices} active devices; "
+            f"update_events={as_int(row.get('update_events'))}, installs={as_int(row.get('update_installed_events'))}."
+        )
 
     return [
         DashboardSummary(
@@ -411,9 +430,11 @@ def build_summaries(data: dict[str, Any]) -> list[DashboardSummary]:
         ),
         DashboardSummary(
             name="Release Health",
-            status="GREEN" if latest_version_devices > 0 and reliability_events == 0 else ("YELLOW" if latest_version_devices > 0 else "UNKNOWN"),
-            summary=f"top_version={latest_version} on {latest_version_devices} active devices; update_events={as_int(row.get('update_events'))}, installs={as_int(row.get('update_installed_events'))}.",
+            status="GREEN" if release_devices > 0 and reliability_events == 0 else ("YELLOW" if release_devices > 0 else "UNKNOWN"),
+            summary=release_summary,
             metrics={
+                "release_version": release_version,
+                "release_devices": release_devices,
                 "top_versions": versions,
                 "update_events": as_int(row.get("update_events")),
                 "update_installed_events": as_int(row.get("update_installed_events")),
