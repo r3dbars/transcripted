@@ -177,6 +177,7 @@ func testRepoCommandContract() {
         )
 
         for event in [
+            "dictation_markdown_saved",
             "dictation_completed",
             "onboarding_first_dictation_saved",
             "meeting_transcript_saved",
@@ -193,6 +194,7 @@ func testRepoCommandContract() {
             )
         }
         for event in [
+            "dictation_markdown_saved",
             "activation_first_artifact_saved",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",

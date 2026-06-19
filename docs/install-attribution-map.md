@@ -27,7 +27,7 @@ through `AnalyticsEventPolicy` and `AnalyticsPayloadSanitizer`.
 | Release download | GitHub release asset download count | GitHub Releases | Counts public DMG downloads, including repeat downloads and automation. |
 | In-app update download | `update_check_finished`, `update_download_started`, `update_download_finished`, `update_ready_to_install`, `update_relaunching`, `update_installed` | PostHog | App-side update funnel. Use version-scoped aggregate counts. |
 | First launch | `app_launched` with `app_version` and `build_version` default properties | PostHog | Anonymous device/session signal only. |
-| First useful artifact | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Shows local Markdown value without inspecting content. |
+| First useful artifact | `dictation_markdown_saved`, `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Shows local Markdown value without inspecting content. `dictation_completed` remains a legacy proxy; `dictation_markdown_saved` proves the general dictation artifact write. |
 | Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
 | Reliability filter | Release-scoped issues and allowed non-fatal events | Sentry | Use to avoid mistaking broken first-run paths for weak demand. |
 
@@ -57,7 +57,7 @@ For the attribution story, report:
   analytics beacon
 - GitHub latest-release DMG download count and asset size
 - live `/download/latest.dmg`, live appcast, and `llms-full.txt` release parity
-- PostHog 7-day app launches, update events, dictation completions, meeting
+- PostHog 7-day app launches, update events, dictation Markdown saves, meeting
   transcript saves, activation agent/artifact events, and return-proxy events
 - Sentry release blockers that could suppress launch or first value
 
@@ -71,8 +71,9 @@ For the attribution story, report:
   analytics read proves the specific `/download` or `/download/latest.dmg`
   route.
 - `app_launched` does not prove a first useful artifact. Use
-  `dictation_completed`, `onboarding_first_dictation_saved`, and
-  `meeting_transcript_saved` for value.
+  `dictation_markdown_saved`, `onboarding_first_dictation_saved`, and
+  `meeting_transcript_saved` for saved-artifact value. Treat
+  `dictation_completed` as a legacy dictation-success proxy.
 - Artifact events do not prove agent answer quality. The closest safe proxy is
   `activation_agent_prompt_action_clicked` plus `activation_return_proxy_observed`.
 

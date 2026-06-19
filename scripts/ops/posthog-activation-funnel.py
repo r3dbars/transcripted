@@ -40,6 +40,7 @@ RELEVANT_EVENTS = (
     "dictation_started",
     "onboarding_first_dictation_saved",
     "dictation_completed",
+    "dictation_markdown_saved",
     "meeting_transcript_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
@@ -55,6 +56,7 @@ WORKFLOW_EVENTS = (
     "onboarding_completed",
     "dictation_started",
     "dictation_completed",
+    "dictation_markdown_saved",
     "meeting_recording_started",
     "meeting_transcript_saved",
     "activation_artifact_action_clicked",
@@ -117,16 +119,16 @@ REACH_STEPS = (
     StepDefinition(
         "strict_saved_markdown_devices",
         "Strict saved Markdown",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved')",
+        "event IN ('dictation_markdown_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved')",
         "observed",
-        "Saved onboarding dictation Markdown or saved meeting Markdown. General saved dictation lacks a dedicated remote event.",
+        "Saved dictation Markdown, saved onboarding dictation Markdown, or saved meeting Markdown.",
     ),
     StepDefinition(
         "saved_markdown_plus_dictation_proxy_devices",
         "Saved Markdown plus dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "event IN ('dictation_markdown_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
         "proxy",
-        "Adds dictation completion as a product-success proxy because general dictation save is only local diagnostics today.",
+        "Adds dictation completion as a legacy product-success proxy for older builds before dictation_markdown_saved existed.",
     ),
     StepDefinition(
         "artifact_action_devices",
@@ -172,7 +174,7 @@ SEQUENCE_STEPS = (
     ("Dictation started", "event IN ('onboarding_first_dictation_started', 'dictation_started')"),
     (
         "Saved Markdown or dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "event IN ('dictation_markdown_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
     ),
     (
         "Artifact opened or prompt copied",
@@ -552,8 +554,8 @@ def render_report(data: dict[str, Any]) -> str:
 
     limitations = [
         "`permission ready` uses `onboarding_completed` as a proxy. The app guards completion on required dictation permissions, but this does not count users who became ready outside onboarding.",
-        "`strict saved Markdown` counts onboarding first-dictation saves and meeting transcript saves. General dictation save currently has local diagnostics but no dedicated remote saved-artifact event.",
-        "`dictation_completed` is included only in the proxy saved-Markdown row. It can prove useful dictation volume, but not every general saved Markdown write.",
+        "`strict saved Markdown` counts dictation Markdown saves, onboarding first-dictation saves, and meeting transcript saves.",
+        "`dictation_completed` is included only in the proxy saved-Markdown row for older builds. Current general dictation artifact proof should use `dictation_markdown_saved`.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
     ]

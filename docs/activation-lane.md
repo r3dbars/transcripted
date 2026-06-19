@@ -52,8 +52,9 @@ python3 scripts/ops/posthog-activation-funnel.py --days 30
 
 The script writes a Markdown report and JSON data under
 `/tmp/transcripted-posthog-activation-funnel/<run-id>/`. It keeps output
-aggregate-only and separates strict saved-Markdown proof from proxy rows like
-`dictation_completed`, agent setup clicks, and copied starter prompts.
+aggregate-only and separates strict saved-Markdown proof like
+`dictation_markdown_saved` from legacy/proxy rows like `dictation_completed`,
+agent setup clicks, and copied starter prompts.
 
 ## Guardrails
 

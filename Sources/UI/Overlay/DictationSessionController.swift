@@ -1013,12 +1013,23 @@ class DictationSessionController: ObservableObject {
                 )
             )
             if saveFailureMessage == nil {
+                let wordCountBucket = AnalyticsReporter.wordCountBucket(wordCount)
+                let durationBucket = AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime)
+                AnalyticsReporter.track(
+                    "dictation_markdown_saved",
+                    properties: [
+                        "delivery": pasteOutcome.delivery.rawValue,
+                        "duration_bucket": durationBucket,
+                        "trigger": currentDictationTrigger.rawValue,
+                        "word_count_bucket": wordCountBucket,
+                    ]
+                )
                 ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
                     artifactKind: .dictation,
                     surface: .dictationSave,
                     trigger: currentDictationTrigger.rawValue,
-                    wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount),
-                    durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime)
+                    wordCountBucket: wordCountBucket,
+                    durationBucket: durationBucket
                 )
                 self.trackOnboardingFirstDictationSavedIfNeeded(
                     delivery: pasteOutcome.delivery,

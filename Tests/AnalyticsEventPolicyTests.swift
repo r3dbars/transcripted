@@ -368,6 +368,39 @@ func testAnalyticsEventPolicy() {
         assertEqual(dictationCompleted?.allowedProperties.contains("sample_flow_started"), true, "dictation completion should preserve whether audio samples ever flowed")
     }
 
+    runSuite("AnalyticsEventPolicy allows saved dictation Markdown proof without private payloads") {
+        let markdownSaved = AnalyticsEventPolicy.policy(forEvent: "dictation_markdown_saved")
+        assertEqual(
+            markdownSaved?.allowedProperties ?? Set<String>(),
+            ["delivery", "duration_bucket", "trigger", "word_count_bucket"],
+            "dictation markdown saves should only send coarse artifact proof"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "delivery": "pasted",
+                "duration_bucket": "10_29s",
+                "trigger": "menu",
+                "word_count_bucket": "50_149",
+                "source_app_name": "Notes",
+                "source_bundle_id": "com.apple.Notes",
+                "file_path": "/Users/redbars/Library/Application Support/Transcripted/captures/dictations/Dictations_2026-06-19.md",
+                "title": "Private thought",
+                "transcript_text": "private words",
+            ],
+            allowedKeys: markdownSaved?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["delivery"], "pasted", "dictation saved delivery should survive")
+        assertEqual(sanitized["duration_bucket"], "10_29s", "dictation saved duration bucket should survive")
+        assertEqual(sanitized["trigger"], "menu", "dictation saved trigger should survive")
+        assertEqual(sanitized["word_count_bucket"], "50_149", "dictation saved word count bucket should survive")
+        assertNil(sanitized["source_app_name"], "dictation saved analytics must not include source app names")
+        assertNil(sanitized["source_bundle_id"], "dictation saved analytics must not include bundle ids")
+        assertNil(sanitized["file_path"], "dictation saved analytics must not include paths")
+        assertNil(sanitized["title"], "dictation saved analytics must not include generated titles")
+        assertNil(sanitized["transcript_text"], "dictation saved analytics must not include transcript text")
+    }
+
     runSuite("AnalyticsEventPolicy allows dictation start failures with coarse attribution") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
 
@@ -557,6 +590,7 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
+        let markdownSaved = AnalyticsEventPolicy.policy(forEvent: "dictation_markdown_saved")
         let dictationStopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
@@ -566,6 +600,7 @@ func testAnalyticsEventPolicy() {
 
         assertEqual(dictationStartFailed?.allowedProperties.contains("failure_kind"), true, "dictation start failures should allow normalized failure kinds")
         assertEqual(dictationCompleted?.allowedProperties.contains("word_count_bucket"), true, "dictation completion should allow bucketed word counts")
+        assertEqual(markdownSaved?.allowedProperties.contains("duration_bucket"), true, "dictation markdown saved should allow bucketed duration")
         assertEqual(dictationStopLatency?.allowedProperties.contains("stop_to_paste_bucket"), true, "dictation stop latency should allow only bucketed stop-to-paste timing")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")

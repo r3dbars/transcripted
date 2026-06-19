@@ -43,6 +43,7 @@
     "first_value_events"
   ],
   "required_posthog_first_value_events": [
+    "dictation_markdown_saved",
     "dictation_completed",
     "onboarding_first_dictation_saved",
     "meeting_transcript_saved",
