@@ -267,6 +267,12 @@ func testRepoCommandContract() {
             buildDepsScript.contains("newest_dependency_input") && buildDepsScript.contains("deps_are_ready"),
             "build-deps.sh should rebuild stale TranscriptedCore artifacts instead of printing a false ready message"
         )
+        assertTrue(
+            buildDepsScript.contains("dependency_input_digest")
+                && buildDepsScript.contains("dependency_inputs_sha256")
+                && buildDepsScript.contains("Dependency input digest changed."),
+            "build-deps.sh should stamp dependency inputs by content digest, not only by filesystem mtime"
+        )
         // The dual-archive invariant — Core lives in libDraftDeps.a (app path) and is absent
         // from libExternalDeps.a (SPM path) — must stay verified at build time, not just trusted.
         // A raw `ar t | wc -l` object count cannot catch Core leaking into (or vanishing from) an
@@ -391,12 +397,14 @@ func testRepoCommandContract() {
         let expectedChecks = [
             "bash -n scripts/entrypoints/build-deps.sh",
             "bash build-deps.sh --force",
+            "python3 scripts/dev/check-build-source-lists.py",
             "bash -n scripts/entrypoints/build.sh",
             "bash -n scripts/entrypoints/run-tests.sh",
             "bash -n scripts/entrypoints/run-integration-smoke.sh",
             "bash -n scripts/ops/daily-audio-reliability-check.sh",
             "bash -n scripts/ops/health-probe.sh",
             "bash -n scripts/dev/onboarding.sh",
+            "python3 -m py_compile scripts/dev/check-build-source-lists.py",
             "bash -n scripts/dev/benchmark-home-recent-captures.sh",
             "python3 -m py_compile scripts/ops/generate-nightly-digest.py",
             "python3 scripts/ops/generate-nightly-digest.py --self-test",
@@ -505,8 +513,10 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("newest_dependency_input")
                 && contents.contains("deps_build_stamp_info")
+                && contents.contains("dependency_input_digest")
+                && contents.contains("Dependency input digest changed.")
                 && contents.contains("Dependencies are stale for TranscriptedCore."),
-            "integration smoke should refuse stale TranscriptedCore dependency artifacts"
+            "integration smoke should refuse stale TranscriptedCore dependency artifacts by mtime or digest"
         )
     }
 
