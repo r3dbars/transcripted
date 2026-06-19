@@ -42,6 +42,19 @@ Good activation work should improve at least one of these moments:
 | Zoom, Meet, Teams, or meeting prompt trust | `Sources/Meeting/CLAUDE.md`, `Sources/UI/Overlay/MeetingOverlayController.swift`, `docs/qa-issue-500-meeting-audio.md` |
 | activation analytics or health probes | `Sources/Observability/ActivationTelemetry.swift`, `Sources/Observability/AnalyticsEventPolicy.swift`, `docs/privacy-first-observability.md`, `docs/ops-credentials.md` |
 
+## PostHog Funnel Report
+
+Use this for the aggregate product decision layer:
+
+```bash
+python3 scripts/ops/posthog-activation-funnel.py --days 30
+```
+
+The script writes a Markdown report and JSON data under
+`/tmp/transcripted-posthog-activation-funnel/<run-id>/`. It keeps output
+aggregate-only and separates strict saved-Markdown proof from proxy rows like
+`dictation_completed`, agent setup clicks, and copied starter prompts.
+
 ## Guardrails
 
 - Do not add transcript text, meeting titles, speaker names, file paths, source
