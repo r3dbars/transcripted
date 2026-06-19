@@ -134,7 +134,7 @@ def main():
                 fail += 1
                 if fail <= 5: print(f"  [{status}] {info}", file=sys.stderr)
     print(f"[degrade:{a.quality}] {ok} ok, {skip} cached, {fail} failed of {len(work)} -> {a.out_dir}")
-    if fail and ok == 0:
+    if fail:
         sys.exit(1)
 
 if __name__ == "__main__":
