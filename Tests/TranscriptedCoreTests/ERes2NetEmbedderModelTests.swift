@@ -44,28 +44,33 @@ final class ERes2NetEmbedderModelTests: XCTestCase {
     }
 
     func testRejectsNon16kSampleRate() throws {
-        XCTAssertNil(try loadEmbedder().embed(samples: tone(24000), sampleRate: 44100))
+        let e = try loadEmbedder()
+        XCTAssertNil(e.embed(samples: tone(24000), sampleRate: 44100))
     }
 
     func testRejectsEmptyInput() throws {
-        XCTAssertNil(try loadEmbedder().embed(samples: [], sampleRate: 16000))
+        let e = try loadEmbedder()
+        XCTAssertNil(e.embed(samples: [], sampleRate: 16000))
     }
 
     func testShortClipUsesTilingPath() throws {
-        let out = try XCTUnwrap(try loadEmbedder().embed(samples: tone(4000), sampleRate: 16000))
+        let e = try loadEmbedder()
+        let out = try XCTUnwrap(e.embed(samples: tone(4000), sampleRate: 16000))
         XCTAssertEqual(out.count, 192)
         assertFinite(out); assertUnitNorm(out)
     }
 
     func testNormalClip() throws {
-        let out = try XCTUnwrap(try loadEmbedder().embed(samples: tone(24000), sampleRate: 16000))
+        let e = try loadEmbedder()
+        let out = try XCTUnwrap(e.embed(samples: tone(24000), sampleRate: 16000))
         XCTAssertEqual(out.count, 192)
         assertFinite(out); assertUnitNorm(out)
     }
 
     func testLongClipUsesMultiWindowPath() throws {
         // > 480000 samples (30s) exercises windowBounds + meanPoolNormalized.
-        let out = try XCTUnwrap(try loadEmbedder().embed(samples: tone(500_000), sampleRate: 16000))
+        let e = try loadEmbedder()
+        let out = try XCTUnwrap(e.embed(samples: tone(500_000), sampleRate: 16000))
         XCTAssertEqual(out.count, 192)
         assertFinite(out); assertUnitNorm(out)
     }
@@ -88,7 +93,8 @@ final class ERes2NetEmbedderModelTests: XCTestCase {
     }
 
     func testSilenceProducesFiniteEmbedding() throws {
-        let out = try XCTUnwrap(try loadEmbedder().embed(
+        let e = try loadEmbedder()
+        let out = try XCTUnwrap(e.embed(
             samples: Array(repeating: Float(0), count: 24000), sampleRate: 16000))
         XCTAssertEqual(out.count, 192)
         assertFinite(out)  // must not be NaN/Inf even on degenerate all-zero audio
