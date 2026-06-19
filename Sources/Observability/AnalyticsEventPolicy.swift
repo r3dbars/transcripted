@@ -138,6 +138,27 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let meetingSpeakerReviewInventoryProperties: Set<String> = [
+        "known_people_bucket",
+        "local_voice_bucket",
+        "match_suggestion_bucket",
+        "remote_voice_bucket",
+        "review_item_bucket",
+    ]
+
+    private static let meetingSpeakerReviewOutcomeProperties = meetingSpeakerReviewInventoryProperties.union(Set([
+        "collapse_bucket",
+        "confirmed_bucket",
+        "corrected_bucket",
+        "deferred",
+        "discard_bucket",
+        "manual_label_bucket",
+        "match_accept_bucket",
+        "match_reject_bucket",
+        "merge_bucket",
+        "updates_submitted_bucket",
+    ]))
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -632,6 +653,25 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]
         ),
+        "meeting_speaker_review_shown": .init(
+            name: "meeting_speaker_review_shown",
+            allowedProperties: meetingSpeakerReviewInventoryProperties
+        ),
+        "meeting_speaker_review_submitted": .init(
+            name: "meeting_speaker_review_submitted",
+            allowedProperties: meetingSpeakerReviewOutcomeProperties.union(Set([
+                "completion_kind",
+            ]))
+        ),
+        "meeting_speaker_finalization_completed": .init(
+            name: "meeting_speaker_finalization_completed",
+            allowedProperties: meetingSpeakerReviewOutcomeProperties.union(Set([
+                "finalize_reason",
+                "finalize_result",
+                "queue_depth_bucket",
+                "trigger",
+            ]))
+        ),
         "meeting_transcript_skipped": .init(
             name: "meeting_transcript_skipped",
             allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
@@ -658,6 +698,15 @@ struct AnalyticsEventPolicy: Equatable {
             allowedProperties: [
                 "failure_kind",
                 "import_stage",
+            ]
+        ),
+        "speaker_user_label_saved": .init(
+            name: "speaker_user_label_saved",
+            allowedProperties: [
+                "affected_voice_bucket",
+                "label_update_kind",
+                "result",
+                "surface",
             ]
         ),
     ]

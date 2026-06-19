@@ -25,7 +25,7 @@ extension SpeakerDatabase {
 
     func setDisplayNameImpl(id: UUID, name: String, source: String) {
         guard isDatabaseOpen else {
-            AppLogger.speakers.error("setDisplayName failed — database not open", ["speakerId": id.uuidString, "name": name])
+            AppLogger.speakers.error("setDisplayName failed — database not open", ["speakerId": id.uuidString])
             return
         }
         let sql = "UPDATE speakers SET display_name = ?, name_source = ? WHERE id = ?;"
@@ -235,8 +235,8 @@ extension SpeakerDatabase {
         }
 
         AppLogger.speakers.info("Merged profiles", [
-            "source": source.displayName ?? "\(sourceId)",
-            "target": target.displayName ?? "\(targetId)",
+            "sourceId": sourceId.uuidString,
+            "targetId": targetId.uuidString,
             "newCallCount": "\(newCallCount)"
         ])
     }
@@ -304,7 +304,11 @@ extension SpeakerDatabase {
 
                 mergedIds.insert(absorbed.id)
                 mergeCount += 1
-                AppLogger.speakers.info("Merged duplicate speaker", ["absorbed": absorbed.displayName ?? "unnamed", "keeper": keeper.displayName ?? "unnamed", "similarity": String(format: "%.3f", similarity)])
+                AppLogger.speakers.info("Merged duplicate speaker", [
+                    "absorbedId": absorbed.id.uuidString,
+                    "keeperId": keeper.id.uuidString,
+                    "similarity": String(format: "%.3f", similarity)
+                ])
             }
         }
 
@@ -361,7 +365,7 @@ extension SpeakerDatabase {
         }
 
         var mergeCount = 0
-        for (name, profiles) in byName {
+        for (_, profiles) in byName {
             guard profiles.count > 1 else { continue }
 
             // Keep the profile with the highest call count (best embedding data)
@@ -374,7 +378,6 @@ extension SpeakerDatabase {
             }
 
             AppLogger.speakers.info("Merged same-name profiles", [
-                "name": name,
                 "merged": "\(sorted.count - 1)",
                 "keeperId": "\(keeper.id)"
             ])

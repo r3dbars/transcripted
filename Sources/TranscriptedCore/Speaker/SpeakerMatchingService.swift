@@ -90,7 +90,7 @@ extension Transcription {
 
         if bestSimilarity < effectiveThreshold {
             AppLogger.transcription.info("Match rejected: immature profile", [
-                "profile": matched.displayName ?? matched.id.uuidString.prefix(8).description,
+                "profileId": matched.id.uuidString,
                 "callCount": "\(matched.callCount)",
                 "similarity": String(format: "%.3f", bestSimilarity),
                 "effectiveThreshold": String(format: "%.3f", effectiveThreshold)
@@ -101,7 +101,7 @@ extension Transcription {
         // Separation check: reject if two profiles are too close (ambiguous).
         if secondBestSimilarity >= threshold && (bestSimilarity - secondBestSimilarity) < 0.05 {
             AppLogger.transcription.info("Match rejected: ambiguous (two profiles too close)", [
-                "bestProfile": matched.displayName ?? matched.id.uuidString.prefix(8).description,
+                "bestProfileId": matched.id.uuidString,
                 "bestSimilarity": String(format: "%.3f", bestSimilarity),
                 "secondBestSimilarity": String(format: "%.3f", secondBestSimilarity)
             ])

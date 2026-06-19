@@ -541,6 +541,8 @@ func testAnalyticsEventPolicy() {
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
+        let speakerReviewShown = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_shown")
+        let speakerFinalizationCompleted = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_completed")
         let meetingSkipped = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_skipped")
         let unknown = AnalyticsEventPolicy.policy(forEvent: "raw_transcript_uploaded")
 
@@ -551,6 +553,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")
         assertEqual(meetingFailed?.allowedProperties.contains("failure_kind"), true, "meeting failures should allow normalized failure kinds")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("failure_kind"), true, "speaker finalization failures should allow normalized failure kinds")
+        assertEqual(speakerReviewShown?.allowedProperties.contains("review_item_bucket"), true, "speaker review shown should allow only bucketed review counts")
+        assertEqual(speakerFinalizationCompleted?.allowedProperties.contains("finalize_reason"), true, "speaker finalization completion should allow normalized finalization reasons")
         assertEqual(meetingSkipped?.allowedProperties.contains("failure_kind"), true, "skipped meeting transcripts should allow normalized reasons")
         assertNil(unknown, "unreviewed analytics events should not be allowed")
     }
@@ -705,6 +709,116 @@ func testAnalyticsEventPolicy() {
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("queue_depth_bucket"), true, "speaker finalization failures should preserve bucketed queue depth")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("session_stage"), true, "speaker finalization failures should keep save-stage attribution")
         assertEqual(skipped?.allowedProperties.contains("trigger"), true, "skipped meeting transcripts should preserve trigger attribution")
+    }
+
+    runSuite("AnalyticsEventPolicy keeps speaker review telemetry bucketed and nameless") {
+        let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_shown")
+        let submitted = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_submitted")
+        let finalized = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_completed")
+        let userLabel = AnalyticsEventPolicy.policy(forEvent: "speaker_user_label_saved")
+
+        assertEqual(shown?.allowedProperties.contains("review_item_bucket"), true, "review shown should preserve speakers-to-name as a bucket")
+        assertEqual(shown?.allowedProperties.contains("match_suggestion_bucket"), true, "review shown should preserve suggested-match volume as a bucket")
+        assertEqual(shown?.allowedProperties.contains("deferred"), false, "review shown should not mark deferred before user action")
+        assertEqual(shown?.allowedProperties.contains("updates_submitted_bucket"), false, "review shown should not report submission volume before user action")
+        assertEqual(shown?.allowedProperties.contains("match_accept_bucket"), false, "review shown should not report accepted matches before user action")
+        assertEqual(submitted?.allowedProperties.contains("match_accept_bucket"), true, "review submitted should preserve accepted match bucket")
+        assertEqual(submitted?.allowedProperties.contains("match_reject_bucket"), true, "review submitted should preserve rejected match bucket")
+        assertEqual(submitted?.allowedProperties.contains("manual_label_bucket"), true, "review submitted should preserve manual label bucket")
+        assertEqual(submitted?.allowedProperties.contains("completion_kind"), true, "review submitted should preserve save vs later")
+        assertEqual(finalized?.allowedProperties.contains("finalize_result"), true, "finalization should preserve success/failure")
+        assertEqual(finalized?.allowedProperties.contains("finalize_reason"), true, "finalization should preserve normalized reason")
+        assertEqual(userLabel?.allowedProperties.contains("label_update_kind"), true, "People renames should preserve add/change/pending-review kind")
+
+        let privateFields = [
+            "audio_path": "/Users/jane/Private/customer.wav",
+            "meeting_title": "Customer Roadmap",
+            "speaker_name": "Alice Customer",
+            "speaker_id": "private-id",
+            "transcript_text": "private transcript words",
+        ]
+
+        let shownSanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "deferred": "true",
+                    "known_people_bucket": "4_9",
+                    "local_voice_bucket": "1",
+                    "match_accept_bucket": "1",
+                    "match_suggestion_bucket": "2_3",
+                    "remote_voice_bucket": "2_3",
+                    "review_item_bucket": "4_9",
+                    "updates_submitted_bucket": "0",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: shown?.allowedProperties ?? []
+        )
+
+        assertEqual(shownSanitized["review_item_bucket"], "4_9", "review shown should keep speaker count inventory")
+        assertEqual(shownSanitized["match_suggestion_bucket"], "2_3", "review shown should keep suggestion inventory")
+        assertNil(shownSanitized["deferred"], "review shown should drop deferred because no user action happened yet")
+        assertNil(shownSanitized["updates_submitted_bucket"], "review shown should drop submitted update count")
+        assertNil(shownSanitized["match_accept_bucket"], "review shown should drop accepted match count")
+
+        let finalizedSanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "collapse_bucket": "0",
+                    "confirmed_bucket": "1",
+                    "corrected_bucket": "1",
+                    "deferred": "false",
+                    "discard_bucket": "0",
+                    "finalize_reason": "finalized",
+                    "finalize_result": "success",
+                    "known_people_bucket": "4_9",
+                    "local_voice_bucket": "1",
+                    "manual_label_bucket": "2_3",
+                    "match_accept_bucket": "1",
+                    "match_reject_bucket": "1",
+                    "match_suggestion_bucket": "2_3",
+                    "merge_bucket": "1",
+                    "queue_depth_bucket": "0",
+                    "remote_voice_bucket": "2_3",
+                    "review_item_bucket": "4_9",
+                    "trigger": "hotkey",
+                    "updates_submitted_bucket": "4_9",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: finalized?.allowedProperties ?? []
+        )
+
+        assertEqual(finalizedSanitized["review_item_bucket"], "4_9", "review-item bucket should survive")
+        assertEqual(finalizedSanitized["match_accept_bucket"], "1", "accepted match bucket should survive")
+        assertEqual(finalizedSanitized["match_reject_bucket"], "1", "rejected match bucket should survive")
+        assertEqual(finalizedSanitized["manual_label_bucket"], "2_3", "manual label bucket should survive")
+        assertEqual(finalizedSanitized["finalize_result"], "success", "finalization result should survive")
+        assertEqual(finalizedSanitized["finalize_reason"], "finalized", "finalization reason should survive")
+        assertEqual(finalizedSanitized["trigger"], "hotkey", "trigger should survive")
+
+        let userLabelSanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            privateFields.merging(
+                [
+                    "affected_voice_bucket": "2_3",
+                    "label_update_kind": "pending_review",
+                    "result": "success",
+                    "surface": "people_review_queue",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: userLabel?.allowedProperties ?? []
+        )
+        assertEqual(userLabelSanitized["affected_voice_bucket"], "2_3", "affected voice bucket should survive")
+        assertEqual(userLabelSanitized["label_update_kind"], "pending_review", "label update kind should survive")
+        assertEqual(userLabelSanitized["result"], "success", "result enum should survive")
+        assertEqual(userLabelSanitized["surface"], "people_review_queue", "surface enum should survive")
+
+        for sanitized in [finalizedSanitized, userLabelSanitized] {
+            for key in privateFields.keys {
+                assertNil(sanitized[key], "\(key) should not be emitted for speaker review analytics")
+            }
+        }
     }
 
     runSuite("AnalyticsEventPolicy meeting outcomes drop adversarial private fields") {

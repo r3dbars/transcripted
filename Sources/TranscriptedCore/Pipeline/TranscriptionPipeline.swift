@@ -313,7 +313,7 @@ extension Transcription {
                         "similarity": String(format: "%.3f", matchResult.similarity),
                         "threshold": String(format: "%.2f", adaptiveThreshold),
                         "segmentsAveraged": "\(embeddings.count)",
-                        "profileName": matchedProfile?.displayName ?? "unnamed",
+                        "profileId": matchResult.profileId.uuidString,
                         "profileCallCount": "\(matchedProfile?.callCount ?? 0)"
                     ])
                 } else {

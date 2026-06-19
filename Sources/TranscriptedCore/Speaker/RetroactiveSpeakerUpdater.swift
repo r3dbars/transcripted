@@ -103,7 +103,7 @@ extension TranscriptSaver {
 
         if updatedCount > 0 {
             AppLogger.pipeline.info("Retroactively updated speaker in transcripts",
-                ["dbId": dbIdString, "name": newName, "files": "\(updatedCount)"])
+                ["dbId": dbIdString, "files": "\(updatedCount)"])
         }
     }
 

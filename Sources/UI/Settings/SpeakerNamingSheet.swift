@@ -44,6 +44,7 @@ final class SpeakerNamingSheet {
         // Avoid stacking — if a previous sheet is still open, close it first.
         currentWindowController?.close()
 
+        trackReviewShown(request)
         let controller = NamingWindowController(request: request) { [weak self] in
             self?.currentWindowController = nil
         }
@@ -52,6 +53,22 @@ final class SpeakerNamingSheet {
         controller.window?.center()
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func trackReviewShown(_ request: SpeakerNamingRequest) {
+        let review = SpeakerNamingReviewTelemetry.summarize(
+            reviewEntries: request.speakers,
+            updates: []
+        )
+        var properties = MeetingSessionController.speakerReviewAnalyticsProperties(
+            review,
+            includeOutcome: false
+        )
+        properties["known_people_bucket"] = AnalyticsReporter.countBucket(request.knownPeople.count)
+        AnalyticsReporter.track(
+            "meeting_speaker_review_shown",
+            properties: properties
+        )
     }
 
     private func dismissCurrentWindowBecauseRequestCleared() {
@@ -93,10 +110,10 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
 
         contentView.onSave = { [weak self] updates in
-            self?.finish(with: updates)
+            self?.finish(completionKind: "save", updates: updates)
         }
         contentView.onCancel = { [weak self] in
-            self?.finish(with: [])
+            self?.finish(completionKind: "review_later", updates: [])
         }
     }
 
@@ -105,6 +122,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         if !didComplete {
+            trackReviewSubmitted(completionKind: "window_closed", updates: [])
             request.onComplete([])
             didComplete = true
         }
@@ -117,11 +135,32 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         close()
     }
 
-    private func finish(with updates: [SpeakerNameUpdate]) {
+    private func finish(
+        completionKind: String,
+        updates: [SpeakerNameUpdate]
+    ) {
         guard !didComplete else { return }
         didComplete = true
+        trackReviewSubmitted(completionKind: completionKind, updates: updates)
         request.onComplete(updates)
         close()
+    }
+
+    private func trackReviewSubmitted(
+        completionKind: String,
+        updates: [SpeakerNameUpdate]
+    ) {
+        let review = SpeakerNamingReviewTelemetry.summarize(
+            reviewEntries: request.speakers,
+            updates: updates
+        )
+        var properties = MeetingSessionController.speakerReviewAnalyticsProperties(review)
+        properties["completion_kind"] = completionKind
+        properties["known_people_bucket"] = AnalyticsReporter.countBucket(request.knownPeople.count)
+        AnalyticsReporter.track(
+            "meeting_speaker_review_submitted",
+            properties: properties
+        )
     }
 }
 

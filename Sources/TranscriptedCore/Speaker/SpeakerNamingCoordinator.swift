@@ -40,6 +40,7 @@ extension TranscriptionTaskManager {
         systemURL: URL,
         shouldRemoveTemporaryAudio: Bool = true,
         sourceFailedTranscriptionId: UUID? = nil,
+        sourceTrigger: String = "unknown",
         clips: [SpeakerNamingEntry]
     ) {
         let speakerDB = transcription.speakerDB
@@ -47,6 +48,10 @@ extension TranscriptionTaskManager {
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map {
             ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0)
         })
+        let reviewTelemetry = SpeakerNamingReviewTelemetry.summarize(
+            reviewEntries: clips,
+            updates: updates
+        )
 
         // Partition updates: special actions follow different paths than regular
         // name/merge/confirm updates. We process all of them during naming completion.
@@ -90,10 +95,13 @@ extension TranscriptionTaskManager {
                 Task { @MainActor in
                     self?.finishNamingFlow(
                         didFinalizeTranscript: false,
+                        reason: .transcriptNotFound,
+                        reviewTelemetry: reviewTelemetry,
                         updatesCount: updates.count,
                         transcriptId: transcriptId,
                         resolvedURL: transcriptURL,
-                        sourceFailedTranscriptionId: sourceFailedTranscriptionId
+                        sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                        sourceTrigger: sourceTrigger
                     )
                 }
                 return
@@ -114,10 +122,13 @@ extension TranscriptionTaskManager {
                 Task { @MainActor in
                     self?.finishNamingFlow(
                         didFinalizeTranscript: false,
+                        reason: .resolutionPlanFailed,
+                        reviewTelemetry: reviewTelemetry,
                         updatesCount: updates.count,
                         transcriptId: transcriptId,
                         resolvedURL: resolvedURL,
-                        sourceFailedTranscriptionId: sourceFailedTranscriptionId
+                        sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                        sourceTrigger: sourceTrigger
                     )
                 }
                 return
@@ -130,12 +141,19 @@ extension TranscriptionTaskManager {
             let transcriptUpdates = plannedChanges.resolvedUpdates.filter {
                 Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) > 0
             }
-            var didFinalizeTranscript = visibleRegularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
-                transcriptURL: resolvedURL,
-                updates: transcriptUpdates,
-                transcriptionResult: transcriptionResult,
-                speakerStore: speakerDB
-            )
+            var didFinalizeTranscript = true
+            var finalizationReason: SpeakerNamingFinalizationReason = .finalized
+            if !visibleRegularUpdates.isEmpty {
+                didFinalizeTranscript = TranscriptSaver.updateSpeakerNames(
+                    transcriptURL: resolvedURL,
+                    updates: transcriptUpdates,
+                    transcriptionResult: transcriptionResult,
+                    speakerStore: speakerDB
+                )
+                if !didFinalizeTranscript {
+                    finalizationReason = .transcriptRewriteFailed
+                }
+            }
 
             if didFinalizeTranscript, let deferredReviewPlan {
                 didFinalizeTranscript = TranscriptSaver.markSpeakerReviewDeferred(
@@ -143,6 +161,9 @@ extension TranscriptionTaskManager {
                     entries: clips,
                     redirectedSpeakerIdsByKey: deferredReviewPlan.redirectedSpeakerIdsByKey
                 )
+                if !didFinalizeTranscript {
+                    finalizationReason = .deferredReviewWriteFailed
+                }
             }
 
             if didFinalizeTranscript && !collapsedUpdates.isEmpty {
@@ -150,6 +171,9 @@ extension TranscriptionTaskManager {
                     transcriptURL: resolvedURL,
                     collapsedUpdates: collapsedUpdates
                 )
+                if !didFinalizeTranscript {
+                    finalizationReason = .collapseRewriteFailed
+                }
             }
 
             if didFinalizeTranscript && !discardedUpdates.isEmpty {
@@ -157,6 +181,9 @@ extension TranscriptionTaskManager {
                     transcriptURL: resolvedURL,
                     discardedUpdates: discardedUpdates
                 )
+                if !didFinalizeTranscript {
+                    finalizationReason = .discardRewriteFailed
+                }
             }
 
             if didFinalizeTranscript {
@@ -206,11 +233,14 @@ extension TranscriptionTaskManager {
             Task { @MainActor in
                 self?.finishNamingFlow(
                     didFinalizeTranscript: didFinalizeTranscript,
+                    reason: didFinalizeTranscript ? .finalized : finalizationReason,
+                    reviewTelemetry: reviewTelemetry,
                     updatesCount: updates.count,
                     transcriptId: transcriptId,
                     resolvedURL: resolvedURL,
                     sourceFailedTranscriptionId: sourceFailedTranscriptionId,
-                    shouldDeleteSourceFailedAudio: shouldRemoveTemporaryAudio
+                    shouldDeleteSourceFailedAudio: shouldRemoveTemporaryAudio,
+                    sourceTrigger: sourceTrigger
                 )
             }
         }
@@ -390,7 +420,6 @@ extension TranscriptionTaskManager {
             AppLogger.speakers.info("Speaker named", [
                 "originalId": update.persistentSpeakerId.uuidString,
                 "resolvedId": resolvedPersistentSpeakerId.uuidString,
-                "name": resolvedName,
                 "action": "\(update.action)"
             ])
 
@@ -543,8 +572,7 @@ extension TranscriptionTaskManager {
             }
 
             AppLogger.speakers.error("Correction missing session embedding; refusing unsafe profile rewrite", [
-                "speakerId": update.persistentSpeakerId.uuidString,
-                "name": update.newName
+                "speakerId": update.persistentSpeakerId.uuidString
             ])
             return nil
 
@@ -737,17 +765,27 @@ extension TranscriptionTaskManager {
 
     @MainActor private func finishNamingFlow(
         didFinalizeTranscript: Bool,
+        reason: SpeakerNamingFinalizationReason,
+        reviewTelemetry: SpeakerNamingReviewTelemetry,
         updatesCount: Int,
         transcriptId: UUID,
         resolvedURL: URL,
         sourceFailedTranscriptionId: UUID? = nil,
-        shouldDeleteSourceFailedAudio: Bool = true
+        shouldDeleteSourceFailedAudio: Bool = true,
+        sourceTrigger: String = "unknown"
     ) {
         if didFinalizeTranscript {
             AppLogger.pipeline.info("Speaker naming complete", [
                 "named": "\(updatesCount)",
-                "transcript": resolvedURL.lastPathComponent
+                "transcriptId": transcriptId.uuidString
             ])
+            publishSpeakerNamingFinalizationOutcome(
+                transcriptId: transcriptId,
+                result: .success,
+                reason: reason,
+                sourceTrigger: sourceTrigger,
+                reviewTelemetry: reviewTelemetry
+            )
             if let sourceFailedTranscriptionId {
                 if shouldDeleteSourceFailedAudio {
                     failedTranscriptionManager.deleteFailedTranscription(id: sourceFailedTranscriptionId)
@@ -765,8 +803,15 @@ extension TranscriptionTaskManager {
         } else {
             AppLogger.pipeline.error("Speaker naming finalization failed", [
                 "transcriptId": transcriptId.uuidString,
-                "transcript": resolvedURL.lastPathComponent
+                "reason": reason.rawValue
             ])
+            publishSpeakerNamingFinalizationOutcome(
+                transcriptId: transcriptId,
+                result: .failure,
+                reason: reason,
+                sourceTrigger: sourceTrigger,
+                reviewTelemetry: reviewTelemetry
+            )
             if let sourceFailedTranscriptionId {
                 failedTranscriptionManager.updateFailedTranscriptionError(
                     id: sourceFailedTranscriptionId,
@@ -778,5 +823,21 @@ extension TranscriptionTaskManager {
         }
 
         clearCompletedSpeakerNamingRequest(transcriptId: transcriptId)
+    }
+
+    @MainActor private func publishSpeakerNamingFinalizationOutcome(
+        transcriptId: UUID,
+        result: SpeakerNamingFinalizationResult,
+        reason: SpeakerNamingFinalizationReason,
+        sourceTrigger: String,
+        reviewTelemetry: SpeakerNamingReviewTelemetry
+    ) {
+        lastSpeakerNamingFinalizationOutcome = SpeakerNamingFinalizationOutcome(
+            transcriptId: transcriptId,
+            result: result,
+            reason: reason,
+            sourceTrigger: sourceTrigger,
+            reviewTelemetry: reviewTelemetry
+        )
     }
 }

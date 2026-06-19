@@ -77,7 +77,8 @@ extension TranscriptionTaskManager {
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
         sourceFailedTranscriptionId: UUID? = nil,
-        removeSourceAudioAfterArchive: Bool = true
+        removeSourceAudioAfterArchive: Bool = true,
+        speakerReviewSourceTrigger: String = "unknown"
     ) async throws -> URL {
 
         // Require system audio for multichannel transcription
@@ -95,7 +96,8 @@ extension TranscriptionTaskManager {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
-            removeSourceAudioAfterArchive: removeSourceAudioAfterArchive
+            removeSourceAudioAfterArchive: removeSourceAudioAfterArchive,
+            speakerReviewSourceTrigger: speakerReviewSourceTrigger
         )
     }
 
@@ -105,7 +107,8 @@ extension TranscriptionTaskManager {
         outputFolder: URL,
         taskId: UUID,
         meetingTitle: String? = nil,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        speakerReviewSourceTrigger: String = "unknown"
     ) async throws -> URL {
         try await transcribeMultichannelPipeline(
             micURL: nil,
@@ -115,7 +118,8 @@ extension TranscriptionTaskManager {
             healthInfo: nil,
             splitLocalSpeakers: false,
             meetingTitle: meetingTitle,
-            recordingDate: recordingDate
+            recordingDate: recordingDate,
+            speakerReviewSourceTrigger: speakerReviewSourceTrigger
         )
     }
 
@@ -135,7 +139,8 @@ extension TranscriptionTaskManager {
         sourceFailedTranscriptionId: UUID? = nil,
         removeSourceAudioAfterArchive: Bool = true,
         targetTranscriptURL: URL? = nil,
-        archiveRecordingAudio: Bool = true
+        archiveRecordingAudio: Bool = true,
+        speakerReviewSourceTrigger: String = "unknown"
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
@@ -515,6 +520,7 @@ extension TranscriptionTaskManager {
                     micAudioURL: micURL,
                     shouldRemoveTemporaryAudioOnCleanup: shouldRemoveScratchAudio && sourceFailedTranscriptionId == nil,
                     sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                    sourceTrigger: speakerReviewSourceTrigger,
                     onComplete: { [weak self] updates in
                         self?.handleNamingComplete(
                             updates: updates,
@@ -525,6 +531,7 @@ extension TranscriptionTaskManager {
                             systemURL: systemURL,
                             shouldRemoveTemporaryAudio: shouldRemoveScratchAudio,
                             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                            sourceTrigger: speakerReviewSourceTrigger,
                             clips: capturedEntries
                         )
                     }

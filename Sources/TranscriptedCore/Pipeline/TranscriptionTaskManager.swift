@@ -19,6 +19,7 @@ public class TranscriptionTaskManager: ObservableObject {
     @Published public var lastSavedDuration: String? = nil
     @Published public var lastSavedSpeakerCount: Int? = nil
     @Published public private(set) var lastFailureDiagnosticMessage: String? = nil
+    @Published public internal(set) var lastSpeakerNamingFinalizationOutcome: SpeakerNamingFinalizationOutcome? = nil
 
     var lastSavedTranscriptId: UUID?
     private var savedTranscriptTaskIdsByTranscriptId: [UUID: UUID] = [:]
@@ -86,7 +87,8 @@ public class TranscriptionTaskManager: ObservableObject {
         healthInfo: RecordingHealthInfo? = nil,
         meetingTitle: String? = nil,
         splitLocalSpeakers: Bool = false,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        speakerReviewSourceTrigger: String = "unknown"
     ) {
 
         // Guard: reject concurrent pipelines to prevent model contention
@@ -211,7 +213,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     healthInfo: task.healthInfo,
                     splitLocalSpeakers: task.splitLocalSpeakers,
                     meetingTitle: task.meetingTitle,
-                    recordingDate: task.recordingDate
+                    recordingDate: task.recordingDate,
+                    speakerReviewSourceTrigger: speakerReviewSourceTrigger
                 )
 
                 await MainActor.run {
@@ -258,7 +261,8 @@ public class TranscriptionTaskManager: ObservableObject {
         audioURL: URL,
         outputFolder: URL,
         meetingTitle: String? = nil,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        speakerReviewSourceTrigger: String = "unknown"
     ) {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
@@ -304,7 +308,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     outputFolder: outputFolder,
                     taskId: taskId,
                     meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
+                    recordingDate: recordingDate,
+                    speakerReviewSourceTrigger: speakerReviewSourceTrigger
                 )
 
                 await MainActor.run {
@@ -350,6 +355,7 @@ public class TranscriptionTaskManager: ObservableObject {
         splitLocalSpeakers: Bool = false,
         replacementTranscriptURL: URL? = nil,
         recordingDate: Date? = nil,
+        speakerReviewSourceTrigger: String = "unknown",
         onReplacementTranscriptCommitted: (@MainActor @Sendable (URL) -> Void)? = nil
     ) {
         if !activeTasks.isEmpty {
@@ -411,7 +417,8 @@ public class TranscriptionTaskManager: ObservableObject {
                     recordingDate: recordingDate,
                     removeSourceAudioAfterArchive: false,
                     targetTranscriptURL: replacementTranscriptURL,
-                    archiveRecordingAudio: replacementTranscriptURL == nil
+                    archiveRecordingAudio: replacementTranscriptURL == nil,
+                    speakerReviewSourceTrigger: speakerReviewSourceTrigger
                 )
 
                 await MainActor.run {

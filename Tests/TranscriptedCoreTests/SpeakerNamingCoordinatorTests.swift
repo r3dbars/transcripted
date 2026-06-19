@@ -102,6 +102,116 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalSystemURL.path))
     }
 
+    func testSpeakerNamingReviewTelemetryCountsSuggestionOutcomesWithoutNames() throws {
+        let suggestedProfileId = UUID()
+        let rejectedProfileId = UUID()
+        let unknownProfileId = UUID()
+        let localProfileId = UUID()
+        let entries = [
+            SpeakerNamingEntry(
+                id: suggestedProfileId,
+                suggestedProfileId: suggestedProfileId,
+                diarizerSpeakerId: "1",
+                channel: .system,
+                clipURL: tempDirectory.appendingPathComponent("suggested.wav"),
+                sampleText: "sample",
+                currentName: "Suggested Person",
+                matchSimilarity: 0.84,
+                needsNaming: false,
+                needsConfirmation: true
+            ),
+            SpeakerNamingEntry(
+                id: rejectedProfileId,
+                suggestedProfileId: rejectedProfileId,
+                diarizerSpeakerId: "2",
+                channel: .system,
+                clipURL: tempDirectory.appendingPathComponent("rejected.wav"),
+                sampleText: "sample",
+                currentName: "Rejected Person",
+                matchSimilarity: 0.82,
+                needsNaming: false,
+                needsConfirmation: true
+            ),
+            SpeakerNamingEntry(
+                id: unknownProfileId,
+                diarizerSpeakerId: "3",
+                channel: .system,
+                clipURL: tempDirectory.appendingPathComponent("unknown.wav"),
+                sampleText: "sample",
+                currentName: nil,
+                matchSimilarity: nil,
+                needsNaming: true,
+                needsConfirmation: false
+            ),
+            SpeakerNamingEntry(
+                id: localProfileId,
+                diarizerSpeakerId: "1",
+                channel: .mic,
+                clipURL: tempDirectory.appendingPathComponent("local.wav"),
+                sampleText: "sample",
+                currentName: nil,
+                matchSimilarity: nil,
+                needsNaming: true,
+                needsConfirmation: false
+            ),
+        ]
+        let updates = [
+            SpeakerNameUpdate(
+                persistentSpeakerId: suggestedProfileId,
+                diarizerSpeakerId: "1",
+                channel: .system,
+                newName: "Suggested Person",
+                action: .merged(targetProfileId: suggestedProfileId)
+            ),
+            SpeakerNameUpdate(
+                persistentSpeakerId: rejectedProfileId,
+                diarizerSpeakerId: "2",
+                channel: .system,
+                newName: "Correct Person",
+                previousName: "Rejected Person",
+                action: .corrected
+            ),
+            SpeakerNameUpdate(
+                persistentSpeakerId: unknownProfileId,
+                diarizerSpeakerId: "3",
+                channel: .system,
+                newName: "New Person",
+                action: .named
+            ),
+            SpeakerNameUpdate(
+                persistentSpeakerId: localProfileId,
+                diarizerSpeakerId: "1",
+                channel: .mic,
+                newName: "You",
+                action: .collapsedToMe
+            ),
+        ]
+
+        let summary = SpeakerNamingReviewTelemetry.summarize(
+            reviewEntries: entries,
+            updates: updates
+        )
+
+        XCTAssertEqual(summary.reviewItemCount, 4)
+        XCTAssertEqual(summary.localVoiceCount, 1)
+        XCTAssertEqual(summary.remoteVoiceCount, 3)
+        XCTAssertEqual(summary.suggestedMatchCount, 2)
+        XCTAssertEqual(summary.updatesSubmittedCount, 4)
+        XCTAssertEqual(summary.manualLabelCount, 2)
+        XCTAssertEqual(summary.mergedCount, 1)
+        XCTAssertEqual(summary.correctedCount, 1)
+        XCTAssertEqual(summary.collapsedToMeCount, 1)
+        XCTAssertEqual(summary.suggestedMatchAcceptedCount, 1)
+        XCTAssertEqual(summary.suggestedMatchRejectedCount, 1)
+        XCTAssertFalse(summary.didDeferReview)
+
+        let deferred = SpeakerNamingReviewTelemetry.summarize(
+            reviewEntries: entries,
+            updates: []
+        )
+        XCTAssertTrue(deferred.didDeferReview)
+    }
+
     @MainActor
     func testHandleNamingCompletePublishesSuccessAfterTranscriptRewrite() async throws {
         let harness = try makeHarness()
@@ -169,6 +279,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             transcriptionResult: transcriptionResult,
             micURL: micURL,
             systemURL: systemURL,
+            sourceTrigger: "hotkey",
             clips: [
                 SpeakerNamingEntry(
                     id: persistentSpeakerId,
@@ -190,6 +301,11 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         }
 
         XCTAssertEqual(harness.manager.lastSavedTranscriptURL, transcriptURL)
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.result, .success)
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.reason, .finalized)
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.sourceTrigger, "hotkey")
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.reviewTelemetry.reviewItemCount, 1)
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.reviewTelemetry.manualLabelCount, 1)
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
@@ -1862,6 +1978,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             transcriptionResult: transcriptionResult,
             micURL: micURL,
             systemURL: systemURL,
+            sourceTrigger: "file_import",
             clips: [
                 SpeakerNamingEntry(
                     id: persistentSpeakerId,
@@ -1889,6 +2006,11 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             harness.speakerDB.getSpeaker(id: persistentSpeakerId)?.displayName,
             "speaker DB should stay untouched when transcript rewrite fails"
         )
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.result, .failure)
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.reason, .transcriptNotFound)
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.sourceTrigger, "file_import")
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.reviewTelemetry.reviewItemCount, 1)
+        XCTAssertEqual(harness.manager.lastSpeakerNamingFinalizationOutcome?.reviewTelemetry.manualLabelCount, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))

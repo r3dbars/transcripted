@@ -141,8 +141,12 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
 - `meeting_speaker_finalization_failed`
+- `meeting_speaker_review_shown`
+- `meeting_speaker_review_submitted`
+- `meeting_speaker_finalization_completed`
 - `meeting_transcript_skipped`
 - `meeting_saved_audio_retranscription_requested`
+- `speaker_user_label_saved`
 
 ## Allowed property style
 

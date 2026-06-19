@@ -223,6 +223,15 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             )
             DispatchQueue.main.async {
                 self?.applySnapshot(snapshot)
+                AnalyticsReporter.track(
+                    "speaker_user_label_saved",
+                    properties: [
+                        "affected_voice_bucket": AnalyticsReporter.countBucket(matchingReviewItems.count),
+                        "label_update_kind": "pending_review",
+                        "result": allTranscriptUpdatesSucceeded ? "success" : "failure",
+                        "surface": "people_review_queue",
+                    ]
+                )
                 completion?(allTranscriptUpdatesSucceeded)
             }
         }
@@ -233,6 +242,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         let profileId = profile.id
+        let labelUpdateKind = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? "changed"
+            : "added"
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
@@ -247,6 +259,15 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             )
             DispatchQueue.main.async {
                 self?.applySnapshot(snapshot)
+                AnalyticsReporter.track(
+                    "speaker_user_label_saved",
+                    properties: [
+                        "affected_voice_bucket": AnalyticsReporter.countBucket(1),
+                        "label_update_kind": labelUpdateKind,
+                        "result": "success",
+                        "surface": "people_all_voices",
+                    ]
+                )
             }
         }
     }

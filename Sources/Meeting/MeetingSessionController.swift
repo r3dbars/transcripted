@@ -1470,6 +1470,7 @@ final class MeetingSessionController: ObservableObject {
             splitLocalSpeakers: true,
             replacementTranscriptURL: transcriptURL,
             recordingDate: recordingDate,
+            speakerReviewSourceTrigger: StartTrigger.savedMeetingRetranscription.rawValue,
             onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
                 self?.handleReplacementTranscriptCommitted(for: committedTranscriptURL)
             }
@@ -1622,6 +1623,13 @@ final class MeetingSessionController: ObservableObject {
                 let previousStatus = self.displayStatus
                 self.displayStatus = status
                 self.handleDisplayStatusChange(from: previousStatus, to: status)
+            }
+            .store(in: &cancellables)
+
+        taskManager.$lastSpeakerNamingFinalizationOutcome
+            .compactMap { $0 }
+            .sink { [weak self] outcome in
+                self?.trackSpeakerNamingFinalizationOutcome(outcome)
             }
             .store(in: &cancellables)
 
@@ -2344,14 +2352,16 @@ final class MeetingSessionController: ObservableObject {
                 healthInfo: healthInfo,
                 meetingTitle: meetingTitle,
                 splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                speakerReviewSourceTrigger: job.startTrigger.rawValue
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             taskManager.startImportedTranscription(
                 audioURL: audioURL,
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 meetingTitle: suggestedTitle,
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                speakerReviewSourceTrigger: job.startTrigger.rawValue
             )
         }
     }
@@ -2713,6 +2723,44 @@ final class MeetingSessionController: ObservableObject {
         properties["gap_count_bucket"] = AnalyticsReporter.countBucket(snapshot.gapCount)
         properties["route_change_count_bucket"] = AnalyticsReporter.countBucket(snapshot.routeChangeCount)
         properties["recovery_attempt_bucket"] = AnalyticsReporter.countBucket(snapshot.recoveryAttemptCount)
+        return properties
+    }
+
+    private func trackSpeakerNamingFinalizationOutcome(_ outcome: SpeakerNamingFinalizationOutcome) {
+        var properties = Self.speakerReviewAnalyticsProperties(outcome.reviewTelemetry)
+        properties["finalize_result"] = outcome.result.rawValue
+        properties["finalize_reason"] = outcome.reason.rawValue
+        properties["queue_depth_bucket"] = AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)
+        properties["trigger"] = outcome.sourceTrigger
+
+        AnalyticsReporter.track(
+            "meeting_speaker_finalization_completed",
+            properties: properties
+        )
+    }
+
+    nonisolated static func speakerReviewAnalyticsProperties(
+        _ review: SpeakerNamingReviewTelemetry,
+        includeOutcome: Bool = true
+    ) -> [String: String] {
+        var properties = [
+            "review_item_bucket": AnalyticsReporter.countBucket(review.reviewItemCount),
+            "local_voice_bucket": AnalyticsReporter.countBucket(review.localVoiceCount),
+            "remote_voice_bucket": AnalyticsReporter.countBucket(review.remoteVoiceCount),
+            "match_suggestion_bucket": AnalyticsReporter.countBucket(review.suggestedMatchCount),
+        ]
+        guard includeOutcome else { return properties }
+
+        properties["updates_submitted_bucket"] = AnalyticsReporter.countBucket(review.updatesSubmittedCount)
+        properties["match_accept_bucket"] = AnalyticsReporter.countBucket(review.suggestedMatchAcceptedCount)
+        properties["match_reject_bucket"] = AnalyticsReporter.countBucket(review.suggestedMatchRejectedCount)
+        properties["manual_label_bucket"] = AnalyticsReporter.countBucket(review.manualLabelCount)
+        properties["confirmed_bucket"] = AnalyticsReporter.countBucket(review.confirmedCount)
+        properties["corrected_bucket"] = AnalyticsReporter.countBucket(review.correctedCount)
+        properties["merge_bucket"] = AnalyticsReporter.countBucket(review.mergedCount)
+        properties["collapse_bucket"] = AnalyticsReporter.countBucket(review.collapsedToMeCount)
+        properties["discard_bucket"] = AnalyticsReporter.countBucket(review.discardedCount)
+        properties["deferred"] = review.didDeferReview ? "true" : "false"
         return properties
     }
 

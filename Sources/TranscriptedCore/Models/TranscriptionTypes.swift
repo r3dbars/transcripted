@@ -258,6 +258,7 @@ public struct SpeakerNamingRequest {
     public let micAudioURL: URL?
     public let shouldRemoveTemporaryAudioOnCleanup: Bool
     public let sourceFailedTranscriptionId: UUID?
+    public let sourceTrigger: String
     public let onComplete: ([SpeakerNameUpdate]) -> Void
 
     public init(
@@ -269,6 +270,7 @@ public struct SpeakerNamingRequest {
         micAudioURL: URL?,
         shouldRemoveTemporaryAudioOnCleanup: Bool = true,
         sourceFailedTranscriptionId: UUID? = nil,
+        sourceTrigger: String = "unknown",
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
     ) {
         self.speakers = speakers
@@ -279,6 +281,7 @@ public struct SpeakerNamingRequest {
         self.micAudioURL = micAudioURL
         self.shouldRemoveTemporaryAudioOnCleanup = shouldRemoveTemporaryAudioOnCleanup
         self.sourceFailedTranscriptionId = sourceFailedTranscriptionId
+        self.sourceTrigger = sourceTrigger
         self.onComplete = onComplete
     }
 
@@ -388,5 +391,178 @@ public struct SpeakerNameUpdate: Sendable {
         case merged(targetProfileId: UUID)  // user linked this speaker to an existing profile
         case collapsedToMe  // user clicked "Keep as You" — collapse this mic speaker into the single owner
         case discardedFromDatabase  // user kept this review row out of the speaker database
+    }
+}
+
+public struct SpeakerNamingReviewTelemetry: Sendable, Equatable {
+    public let reviewItemCount: Int
+    public let localVoiceCount: Int
+    public let remoteVoiceCount: Int
+    public let suggestedMatchCount: Int
+    public let updatesSubmittedCount: Int
+    public let manualLabelCount: Int
+    public let confirmedCount: Int
+    public let correctedCount: Int
+    public let mergedCount: Int
+    public let collapsedToMeCount: Int
+    public let discardedCount: Int
+    public let suggestedMatchAcceptedCount: Int
+    public let suggestedMatchRejectedCount: Int
+
+    public var didDeferReview: Bool {
+        reviewItemCount > 0 && updatesSubmittedCount == 0
+    }
+
+    public init(
+        reviewItemCount: Int,
+        localVoiceCount: Int,
+        remoteVoiceCount: Int,
+        suggestedMatchCount: Int,
+        updatesSubmittedCount: Int,
+        manualLabelCount: Int,
+        confirmedCount: Int,
+        correctedCount: Int,
+        mergedCount: Int,
+        collapsedToMeCount: Int,
+        discardedCount: Int,
+        suggestedMatchAcceptedCount: Int,
+        suggestedMatchRejectedCount: Int
+    ) {
+        self.reviewItemCount = reviewItemCount
+        self.localVoiceCount = localVoiceCount
+        self.remoteVoiceCount = remoteVoiceCount
+        self.suggestedMatchCount = suggestedMatchCount
+        self.updatesSubmittedCount = updatesSubmittedCount
+        self.manualLabelCount = manualLabelCount
+        self.confirmedCount = confirmedCount
+        self.correctedCount = correctedCount
+        self.mergedCount = mergedCount
+        self.collapsedToMeCount = collapsedToMeCount
+        self.discardedCount = discardedCount
+        self.suggestedMatchAcceptedCount = suggestedMatchAcceptedCount
+        self.suggestedMatchRejectedCount = suggestedMatchRejectedCount
+    }
+
+    public static func summarize(
+        reviewEntries entries: [SpeakerNamingEntry],
+        updates: [SpeakerNameUpdate]
+    ) -> SpeakerNamingReviewTelemetry {
+        let entriesByKey = Dictionary(
+            entries.map {
+                ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let suggestedKeys = Set(entries.filter(isSuggestedMatch).map {
+            $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId)
+        })
+
+        var manualLabelCount = 0
+        var confirmedCount = 0
+        var correctedCount = 0
+        var mergedCount = 0
+        var collapsedToMeCount = 0
+        var discardedCount = 0
+        var acceptedCount = 0
+        var rejectedCount = 0
+
+        for update in updates {
+            let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+            let entry = entriesByKey[key]
+            let hadSuggestion = suggestedKeys.contains(key)
+
+            switch update.action {
+            case .named:
+                manualLabelCount += 1
+                if hadSuggestion { rejectedCount += 1 }
+
+            case .confirmed:
+                confirmedCount += 1
+                if hadSuggestion { acceptedCount += 1 }
+
+            case .corrected:
+                correctedCount += 1
+                manualLabelCount += 1
+                if hadSuggestion { rejectedCount += 1 }
+
+            case .merged(let targetProfileId):
+                mergedCount += 1
+                if hadSuggestion {
+                    if entry?.suggestedProfileId == targetProfileId || entry?.id == targetProfileId {
+                        acceptedCount += 1
+                    } else {
+                        rejectedCount += 1
+                    }
+                }
+
+            case .collapsedToMe:
+                collapsedToMeCount += 1
+                if hadSuggestion { rejectedCount += 1 }
+
+            case .discardedFromDatabase:
+                discardedCount += 1
+                if hadSuggestion { rejectedCount += 1 }
+            }
+        }
+
+        return SpeakerNamingReviewTelemetry(
+            reviewItemCount: entries.count,
+            localVoiceCount: entries.filter { $0.channel == .mic }.count,
+            remoteVoiceCount: entries.filter { $0.channel == .system }.count,
+            suggestedMatchCount: suggestedKeys.count,
+            updatesSubmittedCount: updates.count,
+            manualLabelCount: manualLabelCount,
+            confirmedCount: confirmedCount,
+            correctedCount: correctedCount,
+            mergedCount: mergedCount,
+            collapsedToMeCount: collapsedToMeCount,
+            discardedCount: discardedCount,
+            suggestedMatchAcceptedCount: acceptedCount,
+            suggestedMatchRejectedCount: rejectedCount
+        )
+    }
+
+    private static func isSuggestedMatch(_ entry: SpeakerNamingEntry) -> Bool {
+        entry.needsConfirmation
+            || entry.suggestedProfileId != nil
+            || (entry.currentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                && entry.matchSimilarity != nil)
+    }
+}
+
+public enum SpeakerNamingFinalizationResult: String, Sendable, Equatable {
+    case success
+    case failure
+}
+
+public enum SpeakerNamingFinalizationReason: String, Sendable, Equatable {
+    case finalized
+    case transcriptNotFound = "transcript_not_found"
+    case resolutionPlanFailed = "resolution_plan_failed"
+    case transcriptRewriteFailed = "transcript_rewrite_failed"
+    case deferredReviewWriteFailed = "deferred_review_write_failed"
+    case collapseRewriteFailed = "collapse_rewrite_failed"
+    case discardRewriteFailed = "discard_rewrite_failed"
+}
+
+public struct SpeakerNamingFinalizationOutcome: Sendable, Equatable {
+    public let transcriptId: UUID
+    public let result: SpeakerNamingFinalizationResult
+    public let reason: SpeakerNamingFinalizationReason
+    public let sourceTrigger: String
+    public let reviewTelemetry: SpeakerNamingReviewTelemetry
+
+    public init(
+        transcriptId: UUID,
+        result: SpeakerNamingFinalizationResult,
+        reason: SpeakerNamingFinalizationReason,
+        sourceTrigger: String,
+        reviewTelemetry: SpeakerNamingReviewTelemetry
+    ) {
+        self.transcriptId = transcriptId
+        self.result = result
+        self.reason = reason
+        self.sourceTrigger = sourceTrigger
+        self.reviewTelemetry = reviewTelemetry
     }
 }

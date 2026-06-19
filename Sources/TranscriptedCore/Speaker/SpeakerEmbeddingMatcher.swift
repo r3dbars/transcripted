@@ -30,7 +30,10 @@ extension SpeakerDatabase {
         }
 
         if let match = bestMatch {
-            AppLogger.speakers.info("Matched speaker", ["name": match.displayName ?? match.id.uuidString, "similarity": String(format: "%.3f", bestSimilarity)])
+            AppLogger.speakers.info("Matched speaker", [
+                "profileId": match.id.uuidString,
+                "similarity": String(format: "%.3f", bestSimilarity)
+            ])
             return SpeakerMatchResult(profile: match, similarity: bestSimilarity)
         }
 

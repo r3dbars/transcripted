@@ -532,10 +532,9 @@ public enum EmbeddingClusterer {
                     }
                 }
 
-                let profileName = profiles.first(where: { $0.id == profileId })?.displayName ?? profileId.uuidString.prefix(8).description
                 AppLogger.transcription.info("DB-informed split", [
                     "originalSpkId": "spk\(speakerId)",
-                    "profile": profileName,
+                    "profileId": profileId.uuidString,
                     "assignedSpkId": "spk\(assignedSpkId)",
                     "segments": "\(segmentIndices.count)"
                 ])
