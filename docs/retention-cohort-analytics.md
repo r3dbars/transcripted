@@ -62,8 +62,9 @@ Treat these as aggregate habit signals, not user forensics.
   saved artifact -> agent query -> sourced answer -> later return.
 - External agent reads are not visible unless the user clicks an in-app setup or
   prompt action first.
-- First-run cohorts depend on first observed `app_launched` in the configured
-  lookback, so telemetry that started late can make old devices look new.
+- First-artifact and first-run cohorts depend on first observed events in the
+  configured lookback, so telemetry that started late can make old devices look
+  new.
 - Version adoption should use latest observed version per device. Event counts by
   version can over-count devices that upgraded during the window.
 

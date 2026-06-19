@@ -131,6 +131,7 @@ def pct(numerator: int | float, denominator: int | float) -> str:
 def build_queries(days: int, first_seen_lookback_days: int) -> dict[str, str]:
     retention_events = event_list(RETENTION_EVENTS)
     artifact_events = event_list(ARTIFACT_EVENTS)
+    first_run_events = event_list(RETENTION_EVENTS + ("onboarding_completed",))
 
     summary = f"""
 WITH device_rollup AS (
@@ -205,7 +206,7 @@ WITH first_artifacts AS (
     min(timestamp) AS first_artifact_at,
     argMin(event, timestamp) AS first_artifact_event
   FROM events
-  WHERE timestamp >= now() - INTERVAL {max(days * 2, days + 30)} DAY
+  WHERE timestamp >= now() - INTERVAL {first_seen_lookback_days} DAY
     AND event IN ({artifact_events})
   GROUP BY distinct_id
   HAVING first_artifact_at >= now() - INTERVAL {days} DAY
@@ -215,17 +216,15 @@ post_artifact AS (
     fa.distinct_id AS distinct_id,
     fa.first_artifact_at AS first_artifact_at,
     fa.first_artifact_event AS first_artifact_event,
-    countIf(e.timestamp > fa.first_artifact_at + INTERVAL 18 HOUR
-      AND e.timestamp <= fa.first_artifact_at + INTERVAL 7 DAY
-      AND e.event IN ({retention_events})) AS post_18h_7d_events,
-    countIf(e.timestamp > fa.first_artifact_at
-      AND e.event = 'activation_return_proxy_observed') AS return_proxy_events,
-    countIf(e.timestamp > fa.first_artifact_at
-      AND e.event = 'activation_agent_prompt_action_clicked') AS agent_prompt_events,
-    countIf(e.timestamp > fa.first_artifact_at
-      AND e.event IN ({artifact_events})) AS second_artifact_events
+    countIf(e.timestamp > fa.first_artifact_at + INTERVAL 18 HOUR) AS post_18h_7d_events,
+    countIf(e.event = 'activation_return_proxy_observed') AS return_proxy_events,
+    countIf(e.event = 'activation_agent_prompt_action_clicked') AS agent_prompt_events,
+    countIf(e.event IN ({artifact_events})) AS second_artifact_events
   FROM first_artifacts AS fa
   LEFT JOIN events AS e ON e.distinct_id = fa.distinct_id
+    AND e.timestamp > fa.first_artifact_at
+    AND e.timestamp <= fa.first_artifact_at + INTERVAL 7 DAY
+    AND e.event IN ({retention_events})
   GROUP BY fa.distinct_id, fa.first_artifact_at, fa.first_artifact_event
 )
 SELECT
@@ -261,21 +260,18 @@ first_run_outcomes AS (
     fr.distinct_id AS distinct_id,
     fr.first_launch_at AS first_launch_at,
     fr.first_app_version AS first_app_version,
-    uniqIf(toDate(e.timestamp), e.timestamp >= fr.first_launch_at AND e.timestamp <= fr.first_launch_at + INTERVAL 7 DAY) AS active_days_7d,
+    uniq(toDate(e.timestamp)) AS active_days_7d,
     countIf(e.event IN ({artifact_events})
-      AND e.timestamp >= fr.first_launch_at
       AND e.timestamp <= fr.first_launch_at + INTERVAL 24 HOUR) AS artifact_events_24h,
-    countIf(e.event IN ({artifact_events})
-      AND e.timestamp >= fr.first_launch_at
-      AND e.timestamp <= fr.first_launch_at + INTERVAL 7 DAY) AS artifact_events_7d,
+    countIf(e.event IN ({artifact_events})) AS artifact_events_7d,
     countIf(e.event IN ({retention_events})
-      AND e.timestamp > fr.first_launch_at + INTERVAL 18 HOUR
-      AND e.timestamp <= fr.first_launch_at + INTERVAL 7 DAY) AS returned_18h_7d_events,
-    countIf(e.event = 'onboarding_completed'
-      AND e.timestamp >= fr.first_launch_at
-      AND e.timestamp <= fr.first_launch_at + INTERVAL 7 DAY) AS onboarding_completed_7d
+      AND e.timestamp > fr.first_launch_at + INTERVAL 18 HOUR) AS returned_18h_7d_events,
+    countIf(e.event = 'onboarding_completed') AS onboarding_completed_7d
   FROM first_runs AS fr
   LEFT JOIN events AS e ON e.distinct_id = fr.distinct_id
+    AND e.timestamp >= fr.first_launch_at
+    AND e.timestamp <= fr.first_launch_at + INTERVAL 7 DAY
+    AND e.event IN ({first_run_events})
   GROUP BY fr.distinct_id, fr.first_launch_at, fr.first_app_version
 )
 SELECT
@@ -425,8 +421,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         f"- First-artifact devices: {first_artifact_devices}; mature 18h cohort: {mature_artifact_devices}.",
         f"- Returned 18h-7d after first artifact: {returned_after_artifact_devices}/{mature_artifact_devices} ({pct(returned_after_artifact_devices, mature_artifact_devices)}).",
-        f"- Saved another artifact after first artifact: {second_artifact_devices}/{first_artifact_devices} ({pct(second_artifact_devices, first_artifact_devices)}).",
-        f"- Agent prompt after first artifact: {post_artifact_agent_prompt_devices}/{first_artifact_devices} ({pct(post_artifact_agent_prompt_devices, first_artifact_devices)}).",
+        f"- Saved another artifact within 7d after first artifact: {second_artifact_devices}/{first_artifact_devices} ({pct(second_artifact_devices, first_artifact_devices)}).",
+        f"- Agent prompt within 7d after first artifact: {post_artifact_agent_prompt_devices}/{first_artifact_devices} ({pct(post_artifact_agent_prompt_devices, first_artifact_devices)}).",
         "",
         "## First Run Drop-Off",
         "",
@@ -441,7 +437,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "- Return proxy means Home observed a prior saved artifact after 18h+. It is not proof of a sourced agent answer.",
         "- Agent-prompt actions measure in-app copy/open/setup clicks. External agent reads are not measured.",
-        f"- First-run cohorts use first observed app_launch in the last {report['first_seen_lookback_days']} days, so older telemetry gaps can misclassify returning devices as new.",
+        f"- First-artifact and first-run cohorts use first observed events in the last {report['first_seen_lookback_days']} days, so older telemetry gaps can misclassify returning devices as new.",
         "- Counts are anonymous-device aggregates. Do not join them to transcript text, file paths, titles, names, emails, tokens, raw URLs, or person records.",
     ]
     return "\n".join(lines)
