@@ -163,6 +163,7 @@ func testAnalyticsEventPolicy() {
             "reporting_kind",
             "required",
             "result",
+            "review_reason",
             "route_ready",
             "route_shape",
             "sample_flow_started",
@@ -273,6 +274,64 @@ func testAnalyticsEventPolicy() {
                 "\(event) should keep a narrow activation payload"
             )
         }
+    }
+
+    runSuite("AnalyticsEventPolicy allows privacy-safe speaker review funnel events") {
+        let prompted = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_prompted")
+        let actioned = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_actioned")
+        let completed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_completed")
+
+        let expectedPromptProperties: Set<String> = [
+            "action",
+            "meeting_age_bucket",
+            "participant_count_bucket",
+            "result",
+            "review_reason",
+            "surface",
+            "unresolved_count_bucket",
+        ]
+        let expectedCompletionProperties: Set<String> = [
+            "meeting_age_bucket",
+            "participant_count_bucket",
+            "result",
+            "review_reason",
+            "surface",
+            "unresolved_count_bucket",
+            "update_count_bucket",
+        ]
+
+        assertEqual(prompted?.allowedProperties, expectedPromptProperties, "speaker review prompts should stay bucketed and enum-only")
+        assertEqual(actioned?.allowedProperties, expectedCompletionProperties.union(["action"]), "speaker review actions should include only the action enum plus coarse buckets")
+        assertEqual(completed?.allowedProperties, expectedCompletionProperties, "speaker review completion should not include raw names or transcript context")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "participant_count_bucket": "2_3",
+                "unresolved_count_bucket": "1",
+                "meeting_age_bucket": "lt_10s",
+                "review_reason": "needs_names",
+                "surface": "speaker_review_sheet",
+                "action": "save",
+                "result": "names_submitted",
+                "update_count_bucket": "2_3",
+                "speaker_count_bucket": "2_3",
+                "speaker_name": "Alex",
+                "transcript_title": "Private customer call",
+            ],
+            allowedKeys: expectedCompletionProperties.union(["action", "speaker_count_bucket", "speaker_name", "transcript_title"])
+        )
+
+        assertEqual(sanitized["participant_count_bucket"], "2_3", "participant bucket should survive")
+        assertEqual(sanitized["unresolved_count_bucket"], "1", "unresolved bucket should survive")
+        assertEqual(sanitized["meeting_age_bucket"], "lt_10s", "meeting-age bucket should survive")
+        assertEqual(sanitized["review_reason"], "needs_names", "review reason enum should survive")
+        assertEqual(sanitized["surface"], "speaker_review_sheet", "surface enum should survive")
+        assertEqual(sanitized["action"], "save", "action enum should survive")
+        assertEqual(sanitized["result"], "names_submitted", "result enum should survive")
+        assertEqual(sanitized["update_count_bucket"], "2_3", "update bucket should survive")
+        assertNil(sanitized["speaker_count_bucket"], "speaker property names should still fail closed")
+        assertNil(sanitized["speaker_name"], "speaker names must never survive")
+        assertNil(sanitized["transcript_title"], "meeting titles must never survive")
     }
 
     runSuite("AnalyticsEventPolicy allows post-artifact activation events") {

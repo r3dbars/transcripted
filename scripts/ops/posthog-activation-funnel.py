@@ -41,6 +41,9 @@ RELEVANT_EVENTS = (
     "onboarding_first_dictation_saved",
     "dictation_completed",
     "meeting_transcript_saved",
+    "meeting_speaker_review_prompted",
+    "meeting_speaker_review_actioned",
+    "meeting_speaker_review_completed",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
@@ -48,6 +51,12 @@ RELEVANT_EVENTS = (
     "activation_return_proxy_observed",
     "activation_first_artifact_saved",
     "agent_capture_query_observed",
+)
+
+SPEAKER_REVIEW_EVENTS = (
+    "meeting_speaker_review_prompted",
+    "meeting_speaker_review_actioned",
+    "meeting_speaker_review_completed",
 )
 
 WORKFLOW_EVENTS = (
@@ -410,6 +419,30 @@ LIMIT 60
 """
 
 
+def speaker_review_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  event,
+  properties['review_reason'] AS review_reason,
+  properties['surface'] AS surface,
+  properties['action'] AS action,
+  properties['result'] AS result,
+  properties['participant_count_bucket'] AS participant_bucket,
+  properties['unresolved_count_bucket'] AS unresolved_bucket,
+  properties['meeting_age_bucket'] AS age_bucket,
+  properties['update_count_bucket'] AS update_bucket,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ({sql_list(SPEAKER_REVIEW_EVENTS)})
+  {app_version_filter(app_version)}
+GROUP BY event, review_reason, surface, action, result, participant_bucket, unresolved_bucket, age_bucket, update_bucket
+ORDER BY events DESC
+LIMIT 60
+"""
+
+
 def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
     load_env()
     host, project_id, token = posthog_config()
@@ -422,6 +455,7 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "onboarding_completion": onboarding_completion_query(days, app_version),
         "artifact_actions": artifact_actions_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
+        "speaker_review": speaker_review_query(days, app_version),
     }
 
     results = {
@@ -563,6 +597,7 @@ def render_report(data: dict[str, Any]) -> str:
         "Saved artifact quality: strict saved Markdown vs dictation-completed proxy, split by artifact kind.",
         "Artifact actions: open Markdown, preview, reveal folder, and copy-for-agent surfaces.",
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
+        "Speaker trust: review prompted/actioned/completed by reason, result, participant bucket, and unresolved bucket.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
         "Data quality: missing true-agent-use event and general dictation saved-artifact gap.",
     ]
@@ -629,6 +664,11 @@ def render_report(data: dict[str, Any]) -> str:
             data["results"].get("agent_signals", []),
             ["event", "prompt_kind", "setup_kind", "agent_target", "result", "surface", "events", "devices"],
         ),
+        render_top_rows(
+            "Speaker Review Funnel",
+            data["results"].get("speaker_review", []),
+            ["event", "review_reason", "surface", "action", "result", "participant_bucket", "unresolved_bucket", "age_bucket", "update_bucket", "events", "devices"],
+        ),
         "## Data Limitations",
         "",
         "\n".join(f"- {item}" for item in limitations),
@@ -683,6 +723,21 @@ def run_self_test() -> int:
             "onboarding_completion": [],
             "artifact_actions": [],
             "agent_signals": [],
+            "speaker_review": [
+                {
+                    "event": "meeting_speaker_review_completed",
+                    "review_reason": "mixed",
+                    "surface": "speaker_review_sheet",
+                    "action": None,
+                    "result": "names_submitted",
+                    "participant_bucket": "2_3",
+                    "unresolved_bucket": "1",
+                    "age_bucket": "lt_10s",
+                    "update_bucket": "2_3",
+                    "events": 1,
+                    "devices": 1,
+                }
+            ],
         },
     }
     report = render_report(sample)
@@ -703,6 +758,7 @@ def run_self_test() -> int:
         onboarding_completion_query(30, None),
         artifact_actions_query(30, None),
         agent_signals_query(30, None),
+        speaker_review_query(30, None),
     ):
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)

@@ -51,6 +51,7 @@ final class SpeakerNamingSheet {
         controller.showWindow(nil)
         controller.window?.center()
         controller.window?.makeKeyAndOrderFront(nil)
+        SpeakerReviewAnalytics.trackPrompted(request: request)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -70,6 +71,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
     private let onClose: () -> Void
     private let contentView: SpeakerNamingContentView
     private var didComplete = false
+    private var didTrackCompletion = false
 
     init(request: SpeakerNamingRequest, onClose: @escaping () -> Void) {
         self.request = request
@@ -105,6 +107,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         if !didComplete {
+            trackCompletion(action: .windowClosed, result: .dismissed, updateCount: 0)
             request.onComplete([])
             didComplete = true
         }
@@ -120,8 +123,41 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
     private func finish(with updates: [SpeakerNameUpdate]) {
         guard !didComplete else { return }
         didComplete = true
+        let result = speakerReviewResult(for: updates)
+        let action: SpeakerReviewAnalytics.Action = updates.isEmpty ? .reviewLater : .save
+        trackCompletion(action: action, result: result, updateCount: updates.count)
         request.onComplete(updates)
         close()
+    }
+
+    private func speakerReviewResult(for updates: [SpeakerNameUpdate]) -> SpeakerReviewAnalytics.Result {
+        guard !updates.isEmpty else { return .skipped }
+        return updates.contains(where: { update in
+            switch update.action {
+            case .named, .confirmed, .corrected, .merged, .collapsedToMe, .discardedFromDatabase:
+                return true
+            }
+        }) ? .namesSubmitted : .noChanges
+    }
+
+    private func trackCompletion(
+        action: SpeakerReviewAnalytics.Action,
+        result: SpeakerReviewAnalytics.Result,
+        updateCount: Int
+    ) {
+        guard !didTrackCompletion else { return }
+        didTrackCompletion = true
+        SpeakerReviewAnalytics.trackAction(
+            request: request,
+            action: action,
+            result: result,
+            updateCount: updateCount
+        )
+        SpeakerReviewAnalytics.trackCompleted(
+            request: request,
+            result: result,
+            updateCount: updateCount
+        )
     }
 }
 
@@ -407,6 +443,12 @@ final class SpeakerNamingContentView: NSView {
         for row in micRows {
             row.setCollapsedToMe(localCollapsedToMe)
         }
+        SpeakerReviewAnalytics.trackAction(
+            request: request,
+            action: .keepAsYou,
+            result: localCollapsedToMe ? .namesSubmitted : .noChanges,
+            updateCount: localCollapsedToMe ? micRows.count : 0
+        )
     }
 }
 

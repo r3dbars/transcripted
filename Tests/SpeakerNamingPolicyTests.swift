@@ -142,6 +142,47 @@ func testSpeakerNamingPolicy() {
             assertTrue(false, "changing a suggested match should emit .corrected")
         }
     }
+
+    runSuite("SpeakerReviewAnalytics derives only bucketed review properties") {
+        let transcriptURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("speaker-review-analytics-\(UUID().uuidString).md")
+        FileManager.default.createFile(atPath: transcriptURL.path, contents: Data(), attributes: [
+            .modificationDate: Date(timeIntervalSinceReferenceDate: 1_000)
+        ])
+        defer { try? FileManager.default.removeItem(at: transcriptURL) }
+
+        let request = SpeakerNamingRequest(
+            speakers: [
+                makeSpeakerNamingPolicyEntry(currentName: nil, needsNaming: true),
+                makeSpeakerNamingPolicyEntry(currentName: "Alex", needsConfirmation: true),
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: UUID(),
+            systemAudioURL: URL(fileURLWithPath: "/tmp/system.wav"),
+            micAudioURL: URL(fileURLWithPath: "/tmp/mic.wav"),
+            onComplete: { _ in }
+        )
+
+        let properties = SpeakerReviewAnalytics.properties(
+            request: request,
+            surface: .sheet,
+            action: .save,
+            result: .namesSubmitted,
+            updateCount: 2,
+            now: Date(timeIntervalSinceReferenceDate: 1_006)
+        )
+
+        assertEqual(properties["participant_count_bucket"], "2_3", "speaker review should bucket participant inventory")
+        assertEqual(properties["unresolved_count_bucket"], "1", "speaker review should bucket unresolved-name inventory")
+        assertEqual(properties["meeting_age_bucket"], "lt_10s", "speaker review should bucket meeting age")
+        assertEqual(properties["review_reason"], "mixed", "speaker review should explain why the sheet appeared without content")
+        assertEqual(properties["surface"], "speaker_review_sheet", "speaker review should keep a stable surface enum")
+        assertEqual(properties["action"], "save", "speaker review actions should be enum-only")
+        assertEqual(properties["result"], "names_submitted", "speaker review results should be enum-only")
+        assertEqual(properties["update_count_bucket"], "2_3", "speaker review update counts should stay bucketed")
+        assertFalse(properties.keys.contains { $0.contains("speaker") }, "speaker review properties should avoid speaker-key sanitizer drops")
+        assertFalse(properties.keys.contains { $0.contains("name") }, "speaker review properties should never carry raw names")
+    }
 }
 
 private func makeSpeakerNamingPolicyEntry(

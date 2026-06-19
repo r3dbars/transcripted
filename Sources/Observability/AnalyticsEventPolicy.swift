@@ -659,6 +659,43 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]
         ),
+        "meeting_speaker_review_prompted": .init(
+            name: "meeting_speaker_review_prompted",
+            allowedProperties: [
+                "action",
+                "meeting_age_bucket",
+                "participant_count_bucket",
+                "result",
+                "review_reason",
+                "surface",
+                "unresolved_count_bucket",
+            ]
+        ),
+        "meeting_speaker_review_actioned": .init(
+            name: "meeting_speaker_review_actioned",
+            allowedProperties: [
+                "action",
+                "meeting_age_bucket",
+                "participant_count_bucket",
+                "result",
+                "review_reason",
+                "surface",
+                "unresolved_count_bucket",
+                "update_count_bucket",
+            ]
+        ),
+        "meeting_speaker_review_completed": .init(
+            name: "meeting_speaker_review_completed",
+            allowedProperties: [
+                "meeting_age_bucket",
+                "participant_count_bucket",
+                "result",
+                "review_reason",
+                "surface",
+                "unresolved_count_bucket",
+                "update_count_bucket",
+            ]
+        ),
         "meeting_transcript_skipped": .init(
             name: "meeting_transcript_skipped",
             allowedProperties: meetingCaptureDiagnosticProperties.union(Set([

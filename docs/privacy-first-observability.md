@@ -143,6 +143,9 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
 - `meeting_speaker_finalization_failed`
+- `meeting_speaker_review_prompted`
+- `meeting_speaker_review_actioned`
+- `meeting_speaker_review_completed`
 - `meeting_transcript_skipped`
 - `meeting_saved_audio_retranscription_requested`
 
@@ -158,6 +161,14 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
+
+Speaker review analytics should stay limited to the user-facing review funnel:
+prompted, actioned, completed. Properties must remain coarse buckets and enums
+such as `participant_count_bucket`, `unresolved_count_bucket`, `review_reason`,
+`surface`, `action`, `result`, `meeting_age_bucket`, and
+`update_count_bucket`. Do not send speaker names, labels, transcript text,
+meeting titles, paths, raw counts, or audio references. Avoid property names
+containing `speaker`; the analytics sanitizer drops them by design.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
