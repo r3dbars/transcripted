@@ -592,6 +592,7 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
         release_anomaly=release_anomaly,
         feature_top=feature_top,
         has_observed_overview=has_observed_overview,
+        source_kind=str(data.get("source", {}).get("kind") or "unknown"),
     )
 
     return {
@@ -655,9 +656,18 @@ def build_recommendations(
     release_anomaly: str,
     feature_top: dict[str, Any] | None,
     has_observed_overview: bool,
+    source_kind: str,
 ) -> list[dict[str, Any]]:
     recs: list[dict[str, Any]] = []
     if not has_observed_overview:
+        if source_kind != "unknown":
+            recs.append({
+                "rank": len(recs) + 1,
+                "title": "Widen or remove the empty PostHog context filter",
+                "why": "PostHog aggregate queries succeeded, but the selected window/version had no matching product events.",
+                "suggested_pr": "Have health reports label empty successful reads as no-data/UNKNOWN and rerun without the app-version filter before making product calls.",
+            })
+            return fill_fallback_recommendations(recs)
         recs.append({
             "rank": len(recs) + 1,
             "title": "Restore aggregate PostHog context access",
@@ -710,6 +720,10 @@ def build_recommendations(
             "suggested_pr": "Surface recent dictations on Home with a copyable agent question and keep measuring `activation_return_proxy_observed`.",
         })
 
+    return fill_fallback_recommendations(recs)
+
+
+def fill_fallback_recommendations(recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     fallback_recs = [
         {
             "title": "Keep the product-context pack in nightly health",
@@ -844,6 +858,32 @@ def run_self_test() -> int:
         return 1
     if unknown_pack["recommendations"][0]["title"] != "Restore aggregate PostHog context access":
         print("self-test failed: missing-data pack should not emit data-driven recommendations", file=sys.stderr)
+        return 1
+    empty_success_data = {
+        **json.loads(json.dumps(data)),
+        "source": {"kind": "posthog_hogql_aggregate"},
+        "results": {
+            "overview": [{
+                "launch_devices": 0,
+                "first_artifact_devices": 0,
+                "agent_prompt_devices": 0,
+                "agent_setup_devices": 0,
+                "true_agent_query_devices": 0,
+                "return_proxy_devices": 0,
+                "dictation_completed_devices": 0,
+                "meeting_saved_devices": 0,
+                "workflow_devices": 0,
+            }],
+            "event_counts": [],
+            "reliability_breakdown": [],
+            "release_versions": [],
+            "feature_breakdown": [],
+            "repeat_breakdown": [],
+        },
+    }
+    empty_success_pack = build_context_pack(empty_success_data)
+    if empty_success_pack["recommendations"][0]["title"] == "Restore aggregate PostHog context access":
+        print("self-test failed: empty successful reads should not look like access failures", file=sys.stderr)
         return 1
     print("product-context self-test passed")
     return 0
