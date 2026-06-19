@@ -175,6 +175,22 @@ enum MeetingPromptBackoffKind: String, Equatable {
     case runtimeShortReminder = "runtime_short_reminder"
 }
 
+enum MeetingPromptSuppressionReason: String, Equatable {
+    case ownCaptureActive = "own_capture_active"
+    case micInputDisabled = "mic_input_disabled"
+    case runtimeSuppressed = "runtime_suppressed"
+    case snoozedCandidate = "snoozed_candidate"
+    case pendingCandidate = "pending_candidate"
+    case presentationBlocked = "presentation_blocked"
+}
+
+enum MeetingPromptOwnCaptureActivity: String, Equatable {
+    case none
+    case meetingRecording = "meeting_recording"
+    case dictation
+    case unknown
+}
+
 struct MeetingPromptBackoffDecision: Equatable {
     let kind: MeetingPromptBackoffKind
     let until: Date
@@ -395,6 +411,52 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
 struct MeetingPromptScoredCandidate {
     let candidate: MeetingPromptDetector.Candidate
     let score: Int
+}
+
+@available(macOS 14.0, *)
+struct MeetingPromptSuppression: Equatable {
+    let candidate: MeetingPromptDetector.Candidate
+    let reason: MeetingPromptSuppressionReason
+    let cooldownReason: String?
+    let captureActivity: MeetingPromptOwnCaptureActivity?
+}
+
+@available(macOS 14.0, *)
+extension MeetingPromptDetector.Candidate {
+    var analyticsCalendarConfidence: String {
+        switch reason {
+        case .calendarPlusRuntimeMatch:
+            return "linked_event_runtime_match"
+        case .calendarNearby:
+            return "linked_event"
+        case .micInput, .runtimeOnly:
+            return "none"
+        }
+    }
+
+    var analyticsCallState: String {
+        switch reason {
+        case .micInput:
+            return "mic_active"
+        case .calendarPlusRuntimeMatch, .runtimeOnly:
+            return "app_active"
+        case .calendarNearby:
+            return "scheduled"
+        }
+    }
+
+    var analyticsAppSignal: String {
+        switch reason {
+        case .micInput:
+            return provider == .googleMeet ? "browser_mic" : "native_mic"
+        case .runtimeOnly:
+            return "native_runtime"
+        case .calendarPlusRuntimeMatch:
+            return provider.browserHosted ? "browser_runtime" : "native_runtime"
+        case .calendarNearby:
+            return "none"
+        }
+    }
 }
 
 enum MeetingPromptSessionPromptState: Equatable {

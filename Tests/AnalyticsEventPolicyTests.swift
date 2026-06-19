@@ -841,22 +841,98 @@ func testAnalyticsEventPolicy() {
         let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_shown")
         let dismissed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_dismissed")
         let recorded = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_record_selected")
+        let suppressed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_suppressed")
 
         assertEqual(shown?.allowedProperties.contains("provider"), true, "prompt shown should allow provider attribution")
         assertEqual(shown?.allowedProperties.contains("prompt_reason"), true, "prompt shown should preserve why it appeared")
+        assertEqual(shown?.allowedProperties.contains("calendar_confidence"), true, "prompt shown should keep coarse calendar confidence")
+        assertEqual(shown?.allowedProperties.contains("call_state"), true, "prompt shown should keep coarse in-call state")
+        assertEqual(shown?.allowedProperties.contains("app_signal"), true, "prompt shown should keep coarse app signal")
+        assertEqual(shown?.allowedProperties.contains("route_ready"), true, "prompt shown should preserve route readiness")
+        assertEqual(shown?.allowedProperties.contains("missing_permission"), true, "prompt shown should preserve missing-permission buckets")
         assertEqual(dismissed?.allowedProperties.contains("source"), true, "prompt dismiss should allow source attribution")
         assertEqual(dismissed?.allowedProperties.contains("backoff_kind"), true, "prompt dismiss should preserve which backoff rule fired")
+        assertEqual(dismissed?.allowedProperties.contains("cooldown_reason"), true, "prompt dismiss should preserve cooldown reason")
         assertEqual(recorded?.allowedProperties.contains("provider"), true, "prompt accept should allow provider attribution")
+        assertEqual(suppressed?.allowedProperties.contains("suppression_reason"), true, "prompt suppression should preserve why nothing appeared")
+        assertEqual(suppressed?.allowedProperties.contains("capture_activity"), true, "prompt suppression should preserve already-recording state")
+        assertEqual(suppressed?.allowedProperties.contains("cooldown_reason"), true, "prompt suppression should preserve duplicate/cooldown reason")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
+                "app_signal": "browser_mic",
+                "calendar_confidence": "linked_event_runtime_match",
+                "call_state": "mic_active",
+                "capture_activity": "meeting_recording",
+                "cooldown_reason": "runtime_default_fallback",
+                "missing_permission": "system_audio_recording",
                 "prompt_reason": "calendar_plus_runtime_match",
+                "provider": "googleMeet",
+                "route_ready": "false",
+                "source": "runtime_app",
+                "suppression_reason": "pending_candidate",
                 "backoff_kind": "calendar_teams_extended",
             ],
-            allowedKeys: ["prompt_reason", "backoff_kind"]
+            allowedKeys: suppressed?.allowedProperties.union(dismissed?.allowedProperties ?? []) ?? []
         )
+        assertEqual(sanitized["app_signal"], "browser_mic", "coarse app signal should survive sanitization")
+        assertEqual(sanitized["calendar_confidence"], "linked_event_runtime_match", "calendar confidence should survive sanitization")
+        assertEqual(sanitized["call_state"], "mic_active", "in-call state should survive sanitization")
+        assertEqual(sanitized["capture_activity"], "meeting_recording", "already-recording state should survive sanitization")
+        assertEqual(sanitized["cooldown_reason"], "runtime_default_fallback", "cooldown reason should survive sanitization")
+        assertEqual(sanitized["missing_permission"], "system_audio_recording", "missing permission bucket should survive sanitization")
         assertEqual(sanitized["prompt_reason"], "calendar_plus_runtime_match", "prompt reason should survive sanitization")
+        assertEqual(sanitized["provider"], "googleMeet", "provider enum should survive sanitization")
+        assertEqual(sanitized["route_ready"], "false", "route readiness should survive sanitization")
+        assertEqual(sanitized["source"], "runtime_app", "prompt source should survive sanitization")
+        assertEqual(sanitized["suppression_reason"], "pending_candidate", "suppression reason should survive sanitization")
         assertEqual(sanitized["backoff_kind"], "calendar_teams_extended", "dismiss backoff kind should survive sanitization")
+
+        let privatePromptFields = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "app_signal": "native_mic",
+                "calendar_confidence": "linked_event",
+                "call_state": "scheduled",
+                "provider": "zoom",
+                "source": "calendar_event",
+                "source_app_name": "Private Browser",
+                "source_app_bundle_id": "com.example.private",
+                "meeting_title": "Customer Roadmap",
+                "invitee_name": "Alice Customer",
+                "speaker_name": "Bob Customer",
+                "meeting_url": "https://meet.example.com/private",
+                "prompt_text": "Record Customer Roadmap?",
+                "audio_ref": "/Users/redbars/private.wav",
+                "file_path": "/Users/redbars/private.md",
+                "transcript_text": "private words",
+            ],
+            allowedKeys: (shown?.allowedProperties ?? [])
+                .union([
+                    "source_app_name",
+                    "source_app_bundle_id",
+                    "meeting_title",
+                    "invitee_name",
+                    "speaker_name",
+                    "meeting_url",
+                    "prompt_text",
+                    "audio_ref",
+                    "file_path",
+                    "transcript_text",
+                ])
+        )
+        assertEqual(privatePromptFields["app_signal"], "native_mic", "safe prompt context should survive beside private inputs")
+        assertEqual(privatePromptFields["calendar_confidence"], "linked_event", "safe calendar confidence should survive beside private inputs")
+        assertEqual(privatePromptFields["provider"], "zoom", "safe provider enum should survive beside private inputs")
+        assertNil(privatePromptFields["source_app_name"], "source app names must not be sent")
+        assertNil(privatePromptFields["source_app_bundle_id"], "source app bundle IDs must not be sent")
+        assertNil(privatePromptFields["meeting_title"], "meeting titles must not be sent")
+        assertNil(privatePromptFields["invitee_name"], "invitee names must not be sent")
+        assertNil(privatePromptFields["speaker_name"], "speaker names must not be sent")
+        assertNil(privatePromptFields["meeting_url"], "meeting URLs must not be sent")
+        assertNil(privatePromptFields["prompt_text"], "raw prompt text must not be sent")
+        assertNil(privatePromptFields["audio_ref"], "audio references must not be sent")
+        assertNil(privatePromptFields["file_path"], "file paths must not be sent")
+        assertNil(privatePromptFields["transcript_text"], "transcript text must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy keeps mic boost prompt events narrow") {
