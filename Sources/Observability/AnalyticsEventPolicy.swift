@@ -138,6 +138,17 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let meetingPromptProperties: Set<String> = [
+        "app_signal",
+        "calendar_confidence",
+        "call_state",
+        "missing_permission",
+        "prompt_reason",
+        "provider",
+        "route_ready",
+        "source",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -531,28 +542,26 @@ struct AnalyticsEventPolicy: Equatable {
         ),
         "meeting_prompt_shown": .init(
             name: "meeting_prompt_shown",
-            allowedProperties: [
-                "prompt_reason",
-                "provider",
-                "source",
-            ]
+            allowedProperties: meetingPromptProperties
         ),
         "meeting_prompt_dismissed": .init(
             name: "meeting_prompt_dismissed",
-            allowedProperties: [
+            allowedProperties: meetingPromptProperties.union(Set([
                 "backoff_kind",
-                "prompt_reason",
-                "provider",
-                "source",
-            ]
+                "cooldown_reason",
+            ]))
         ),
         "meeting_prompt_record_selected": .init(
             name: "meeting_prompt_record_selected",
-            allowedProperties: [
-                "prompt_reason",
-                "provider",
-                "source",
-            ]
+            allowedProperties: meetingPromptProperties
+        ),
+        "meeting_prompt_suppressed": .init(
+            name: "meeting_prompt_suppressed",
+            allowedProperties: meetingPromptProperties.union(Set([
+                "capture_activity",
+                "cooldown_reason",
+                "suppression_reason",
+            ]))
         ),
         "meeting_mic_boost_prompt_shown": .init(
             name: "meeting_mic_boost_prompt_shown",
