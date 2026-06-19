@@ -41,6 +41,7 @@ Every emitted event includes default metadata:
 Operational scripts query aggregate counts only:
 
 - `scripts/ops/health-probe.sh posthog`
+- `scripts/ops/posthog-dashboard-queries.py`
 - `scripts/ops/posthog-activation-funnel.py`
 - `scripts/ops/release-health-card.py`
 - `scripts/ops/generate-nightly-digest.py`
@@ -216,6 +217,10 @@ they answer a product question: did the user start capture, grant permission,
 save/open a useful artifact, connect an agent, recover from failure, or return?
 
 ## Dashboards And Funnels
+
+Use `scripts/ops/posthog-dashboard-queries.py --dry-run` for the reusable
+HogQL specs behind these dashboard families. Use `--json-only` when
+`transcripted-health` or another agent needs machine-readable rows.
 
 ### 100 WAU Operating Dashboard
 

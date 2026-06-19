@@ -57,6 +57,12 @@ aggregate-only and separates strict saved-Markdown proof from proxy rows like
 
 For the full product-learning telemetry map, current event taxonomy, blind
 spots, and dashboard plan, see `docs/posthog-product-learning-plan.md`.
+For reusable 100 WAU, activation, reliability, feature-adoption, and
+release-health query specs, use:
+
+```bash
+python3 scripts/ops/posthog-dashboard-queries.py --family activation --dry-run
+```
 
 ## Guardrails
 
