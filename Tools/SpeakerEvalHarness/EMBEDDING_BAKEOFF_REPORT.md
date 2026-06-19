@@ -60,9 +60,13 @@ So **ERes2Net is the pick: top-tier accuracy (best clean DER 0.238) AND a verifi
 stays an excellent *research/server* embedding but is **not on-device-shippable**. ReDimNet (most accurate)
 also has an export blocker; ECAPA (Apache-2.0) is the DIY-ONNX fallback.
 
-> **One open check:** the CoreML cosine-1.0 result for ERes2Net was first verified on the architecture; we are
-> confirming it on the actual **pretrained** ERes2Net weights too (CAM++'s failure was pretrained-weight-
-> specific, so this matters). [pending — will update.]
+> **Confirmed on the pretrained weights (PASS).** The actual pretrained ERes2Net (en/VoxCeleb, `strict=True`
+> load, 0 missing keys) converts to CoreML at **parity cosine 0.99999 (fp16, ANE-eligible) / 1.000000 (fp32,
+> exact)** over 6 real AMI clips, **12.76 MB**, `compute_units=ALL`. The CAM++ failure was **architectural**
+> (its DenseTDNN dense-concat/reshape graph accumulates error in every converter even at fp32), **not**
+> BatchNorm-variance — ERes2Net has *more* extreme tiny-variance BatchNorm yet converts exactly. **ERes2Net is
+> verified on-device-shippable.** Script: `scripts/convert_eres2net_coreml.py`; model: `scripts/out/
+> eres2net_pretrained.mlpackage`.
 
 **End-to-end confirmation (CAM++ through the real matcher, match threshold swept):** the win reaches the
 matcher. At each arm's best operating point CAM++ beats WeSpeaker on DER and restores profile granularity
