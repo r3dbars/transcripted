@@ -31,21 +31,25 @@ enum SpeakerEmbedderFactory {
         return embedder
     }
 
-    /// Speaker DB path for the loaded embedding model. ERes2Net (192-dim) uses a
-    /// separate file so its vectors never share a `SpeakerProfile` row with the
-    /// WeSpeaker (256-dim) defaults.
+    /// Speaker DB path that matches a *resolved* embedder. ERes2Net (192-dim) gets
+    /// its own file, named from the embedder's identifier; a nil embedder (WeSpeaker,
+    /// or an ERes2Net model that could not be loaded) uses the default
+    /// `speakers.sqlite`. Deriving the path from the embedder that actually loaded —
+    /// not from mere model-file existence — guarantees a DB never receives a vector
+    /// of the wrong dimension (e.g. a present-but-unloadable model must NOT route
+    /// 256-d WeSpeaker vectors into the 192-d ERes2Net database). Kept here (not in
+    /// MeetingStoragePaths) so the low-level storage-paths file stays dependency-free.
     static func speakerDBURL(for embedder: (any SpeakerSegmentEmbedder)?) -> URL {
         let state = FileManager.default.transcriptedStateDir
-        let useERes2Net = embedder?.identifier == SpeakerEmbedderChoice.eRes2Net.rawValue
-        let name = useERes2Net ? "speakers_eres2net.sqlite" : "speakers.sqlite"
+        let name = SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: embedder?.identifier)
         return state.appendingPathComponent(name, isDirectory: false)
     }
 
-    /// Speaker DB path for the effective preference. Falls back to the default
-    /// `speakers.sqlite` unless the ERes2Net model actually loads.
+    /// DB path for the active selection where the embedder isn't already in hand
+    /// (e.g. the Settings → People fallback). Resolves the embedder by actually
+    /// loading it so the path agrees with what the meeting pipeline will use.
     static func activeSpeakerDBURL() -> URL {
-        let embedder = makeEmbedder(for: SpeakerEmbedderPreferences.effectiveChoice())
-        return speakerDBURL(for: embedder)
+        speakerDBURL(for: makeEmbedder(for: SpeakerEmbedderPreferences.effectiveChoice()))
     }
 
     /// First match wins: app bundle Resources, then the shared FluidAudio Models
