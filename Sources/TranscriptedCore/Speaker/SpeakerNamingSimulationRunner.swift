@@ -150,6 +150,14 @@ public struct SpeakerNamingSimulationSplitIndicator: Hashable, Sendable {
 }
 
 @available(macOS 14.0, *)
+public struct SpeakerNamingSimulationDuplicateIdentityIndicator: Hashable, Sendable {
+    public let truthSpeakerId: String
+    public let actualLabel: String
+    public let speakerIds: [String]
+    public let caseIds: [String]
+}
+
+@available(macOS 14.0, *)
 public struct SpeakerNamingSimulationCaseReport: Sendable {
     public let id: String
     public let title: String
@@ -177,6 +185,9 @@ public struct SpeakerNamingSimulationReport: Sendable {
     public let confusionPairs: [SpeakerNamingSimulationConfusionPair]
     public let falseMergeIndicators: [SpeakerNamingSimulationMergeIndicator]
     public let falseSplitIndicators: [SpeakerNamingSimulationSplitIndicator]
+    public let duplicateIdentityIndicators: [SpeakerNamingSimulationDuplicateIdentityIndicator]
+    public let identityStabilityChecks: Int
+    public let identityStabilitySuccesses: Int
     public let renamedPropagationChecks: Int
     public let renamedPropagationSuccesses: Int
     public let rollbackChecks: Int
@@ -193,6 +204,10 @@ public struct SpeakerNamingSimulationReport: Sendable {
         renamedPropagationSuccesses == renamedPropagationChecks
     }
 
+    public var identityStabilitySucceeded: Bool {
+        identityStabilitySuccesses == identityStabilityChecks
+    }
+
     public var rollbackSucceeded: Bool {
         rollbackSuccesses == rollbackChecks
     }
@@ -206,6 +221,8 @@ public struct SpeakerNamingSimulationReport: Sendable {
             && (minimumExactLabelAccuracy < 1.0 || confusionPairs.isEmpty)
             && falseMergeIndicators.isEmpty
             && falseSplitIndicators.isEmpty
+            && duplicateIdentityIndicators.isEmpty
+            && identityStabilitySucceeded
             && renamedSpeakerPropagationSucceeded
             && rollbackSucceeded
             && replacementSucceeded
@@ -221,6 +238,8 @@ public struct SpeakerNamingSimulationReport: Sendable {
         lines.append("- Confusion pairs: \(confusionPairs.isEmpty ? "none" : "\(confusionPairs.count)")")
         lines.append("- False merge indicators: \(falseMergeIndicators.isEmpty ? "none" : "\(falseMergeIndicators.count)")")
         lines.append("- False split indicators: \(falseSplitIndicators.isEmpty ? "none" : "\(falseSplitIndicators.count)")")
+        lines.append("- Duplicate identity indicators: \(duplicateIdentityIndicators.isEmpty ? "none" : "\(duplicateIdentityIndicators.count)")")
+        lines.append("- Identity stability: \(identityStabilitySuccesses)/\(identityStabilityChecks)")
         lines.append("- Renamed propagation: \(renamedPropagationSuccesses)/\(renamedPropagationChecks)")
         lines.append("- Rollback: \(rollbackSuccesses)/\(rollbackChecks)")
         lines.append("- Saved-audio retranscription: \(replacementSuccesses)/\(replacementChecks)")
@@ -254,6 +273,14 @@ public struct SpeakerNamingSimulationReport: Sendable {
             lines.append("## False Split Indicators")
             for indicator in falseSplitIndicators {
                 lines.append("- \(indicator.truthSpeakerId): actual labels \(indicator.actualLabels.joined(separator: ", "))")
+            }
+        }
+
+        if !duplicateIdentityIndicators.isEmpty {
+            lines.append("")
+            lines.append("## Duplicate Identity Indicators")
+            for indicator in duplicateIdentityIndicators {
+                lines.append("- \(indicator.truthSpeakerId) / \(indicator.actualLabel): speaker ids \(indicator.speakerIds.joined(separator: ", ")) in cases \(indicator.caseIds.joined(separator: ", "))")
             }
         }
 
@@ -297,7 +324,7 @@ public final class SpeakerNamingSimulationRunner {
         }
 
         var caseReports: [SpeakerNamingSimulationCaseReport] = []
-        var evaluated: [EvaluatedUtterance] = []
+        var evaluatedByCaseId: [String: [EvaluatedUtterance]] = [:]
         var renamedChecks = 0
         var renamedSuccesses = 0
         var rollbackChecks = 0
@@ -308,7 +335,11 @@ public final class SpeakerNamingSimulationRunner {
         for meeting in suite.meetings {
             let outcome = try runMeeting(meeting, state: &state)
             caseReports.append(outcome.caseReport)
-            evaluated.append(contentsOf: outcome.evaluatedUtterances)
+            if let replacementTargetMeetingId = meeting.replacementTargetMeetingId,
+               outcome.caseReport.replacementSucceeded == true {
+                evaluatedByCaseId.removeValue(forKey: replacementTargetMeetingId)
+            }
+            evaluatedByCaseId[meeting.id] = outcome.evaluatedUtterances
             renamedChecks += outcome.renamedChecks
             renamedSuccesses += outcome.renamedSuccesses
             if let rollbackSucceeded = outcome.caseReport.rollbackSucceeded {
@@ -321,9 +352,11 @@ public final class SpeakerNamingSimulationRunner {
             }
         }
 
+        let evaluated = suite.meetings.flatMap { evaluatedByCaseId[$0.id] ?? [] }
         let confusionPairs = aggregateConfusionPairs(evaluated)
         let falseMergeIndicators = falseMergeIndicators(evaluated)
         let falseSplitIndicators = falseSplitIndicators(evaluated)
+        let identityStability = identityStability(evaluated)
 
         return SpeakerNamingSimulationReport(
             suiteName: suite.name,
@@ -334,6 +367,9 @@ public final class SpeakerNamingSimulationRunner {
             confusionPairs: confusionPairs,
             falseMergeIndicators: falseMergeIndicators,
             falseSplitIndicators: falseSplitIndicators,
+            duplicateIdentityIndicators: identityStability.indicators,
+            identityStabilityChecks: identityStability.checks,
+            identityStabilitySuccesses: identityStability.successes,
             renamedPropagationChecks: renamedChecks,
             renamedPropagationSuccesses: renamedSuccesses,
             rollbackChecks: rollbackChecks,
@@ -485,6 +521,7 @@ public final class SpeakerNamingSimulationRunner {
         if let replacementTargetMeetingId = meeting.replacementTargetMeetingId {
             replacementSucceeded = transcriptURL == state.records[replacementTargetMeetingId]?.url
             if replacementSucceeded == true {
+                state.records[replacementTargetMeetingId] = record
                 notes.append("saved-audio retranscription replaced \(replacementTargetMeetingId)")
             } else {
                 notes.append("saved-audio retranscription did not reuse target transcript URL")
@@ -797,7 +834,8 @@ public final class SpeakerNamingSimulationRunner {
                     channel: channel,
                     newName: name,
                     previousName: context.matchedProfileSnapshot?.displayName,
-                    action: .confirmed
+                    action: .confirmed,
+                    resolvedPersistentSpeakerId: nil
                 ))
 
             case .correct(let channel, let diarizerSpeakerId, let previousName, let newName):
@@ -1067,6 +1105,9 @@ public final class SpeakerNamingSimulationRunner {
                 speakerDB.resetDisputeCount(id: resolvedId)
 
             case .confirmed:
+                if resolvedId != update.persistentSpeakerId {
+                    speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: resolvedId)
+                }
                 speakerDB.setDisplayName(id: resolvedId, name: update.newName, source: NameSource.userManual)
                 speakerDB.resetDisputeCount(id: resolvedId)
 
@@ -1193,7 +1234,10 @@ public final class SpeakerNamingSimulationRunner {
                 caseId: record.id,
                 truthSpeakerId: segment.fixture.truthSpeakerId,
                 expected: segment.fixture.expectedDisplayName,
-                actual: actual ?? "(missing)"
+                actual: actual ?? "(missing)",
+                speakerId: record.speakerIdsByKey[
+                    segment.fixture.channel.speakerKey(diarizerSpeakerId: String(segment.effectiveSpeakerId))
+                ]
             )
         }
     }
@@ -1319,6 +1363,51 @@ public final class SpeakerNamingSimulationRunner {
             )
         }
         .sorted { $0.truthSpeakerId < $1.truthSpeakerId }
+    }
+
+    private func identityStability(
+        _ evaluated: [EvaluatedUtterance]
+    ) -> (checks: Int, successes: Int, indicators: [SpeakerNamingSimulationDuplicateIdentityIndicator]) {
+        let rowsWithIdentity = evaluated.compactMap { row -> (row: EvaluatedUtterance, speakerId: UUID)? in
+            guard let speakerId = row.speakerId,
+                  row.actual != "(missing)" else {
+                return nil
+            }
+            return (row, speakerId)
+        }
+        let grouped = Dictionary(grouping: rowsWithIdentity) {
+            "\($0.row.truthSpeakerId)\u{1F}\($0.row.actual)"
+        }
+
+        var checks = 0
+        var successes = 0
+        var indicators: [SpeakerNamingSimulationDuplicateIdentityIndicator] = []
+        for values in grouped.values {
+            guard values.count > 1 else { continue }
+            checks += 1
+
+            let speakerIds = Set(values.map { $0.speakerId.uuidString })
+            if speakerIds.count == 1 {
+                successes += 1
+                continue
+            }
+
+            indicators.append(SpeakerNamingSimulationDuplicateIdentityIndicator(
+                truthSpeakerId: values[0].row.truthSpeakerId,
+                actualLabel: values[0].row.actual,
+                speakerIds: speakerIds.sorted(),
+                caseIds: Set(values.map { $0.row.caseId }).sorted()
+            ))
+        }
+
+        return (
+            checks,
+            successes,
+            indicators.sorted {
+                if $0.truthSpeakerId != $1.truthSpeakerId { return $0.truthSpeakerId < $1.truthSpeakerId }
+                return $0.actualLabel < $1.actualLabel
+            }
+        )
     }
 
     private func correctedTargetId(
@@ -1487,6 +1576,7 @@ public final class SpeakerNamingSimulationRunner {
         let truthSpeakerId: String
         let expected: String
         let actual: String
+        let speakerId: UUID?
 
         var isExactMatch: Bool {
             expected == actual
