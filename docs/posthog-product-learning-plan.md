@@ -87,6 +87,7 @@ Operational scripts query aggregate counts only:
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
+| `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
 
 ### Menu, Settings, Updates
 
@@ -175,6 +176,9 @@ aggregate reliability sizing and should not be expanded to raw device names.
 - First saved artifact across dictation and meeting with coarse artifact kind,
   trigger, duration bucket, and word-count bucket.
 - Artifact open/reveal/preview actions and agent setup or prompt-copy intent.
+- Confident workflow abandonment for onboarding close, meeting-prompt dismissal
+  or suppression, local-summary/model-prep block/cancel/fail, failed agent setup
+  or artifact handoff, and failed-meeting retry dismissal/delete.
 - Return proxy when Home observes an older saved artifact.
 - Release health by app version and update lifecycle.
 
@@ -186,11 +190,13 @@ aggregate reliability sizing and should not be expanded to raw device names.
   as a proxy, while onboarding dictation and meeting saves have stricter events.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
-- Local summary beta behavior is not a first-class funnel. Summary attempts,
-  generated results, failure kind, model readiness, and latency buckets should
-  be captured when the summary flow is product-ready enough to learn from.
+- Local summary beta behavior now has abandonment shape, but not a full success
+  funnel. Summary attempts, generated results, failure kind, model readiness,
+  and latency buckets should be captured when the summary flow is product-ready
+  enough to learn from.
 - Speaker review is visible mainly through meeting outcome and failure events.
-  There is no clean accepted/dismissed/completed review funnel yet.
+  `workflow_abandoned` reserves `speaker_review`, but there is no clean
+  accepted/dismissed/completed review funnel yet.
 - Retention is a return proxy, not a real habit model. It needs day/week active
   cohorts and first-artifact-to-second-artifact conversion in PostHog dashboards.
 
@@ -209,7 +215,7 @@ Prefer a small number of lifecycle events over broad click tracking.
 | `meeting_summary_requested` | User asks for a local summary | `artifact_age_bucket`, `model_state`, `surface` |
 | `meeting_summary_finished` | Summary succeeds or fails | `duration_bucket`, `failure_kind`, `latency_bucket`, `model_state`, `result`, `surface` |
 | `settings_feature_discovered` | A high-leverage feature panel is first viewed | `feature_area`, `page_id`, `source` |
-| `workflow_abandoned` | App can confidently infer abandonment without content | `workflow_kind`, `stage`, `reason_kind`, `elapsed_bucket` |
+| `workflow_abandoned` | App can confidently infer abandonment without content | `workflow_kind`, `stage`, `reason_kind`, `elapsed_bucket`, `surface`, optional `prior_ready_state` |
 
 Do not add generic "button clicked" for every control. Track buttons only when
 they answer a product question: did the user start capture, grant permission,
@@ -233,6 +239,10 @@ permission ready -> `dictation_started` / `meeting_recording_started` ->
 `activation_first_artifact_saved` -> `activation_artifact_action_clicked` ->
 `activation_agent_prompt_action_clicked` / `activation_agent_setup_cta_clicked`
 -> `agent_capture_query_observed` -> `activation_return_proxy_observed`.
+
+Break out `workflow_abandoned` by `workflow_kind`, `stage`, `reason_kind`, and
+`prior_ready_state` beside the ordered funnel. Treat it as an exit map, not a
+click stream.
 
 ### Dictation Reliability Funnel
 
