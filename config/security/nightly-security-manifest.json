@@ -114,6 +114,27 @@
       "com.apple.security.network.client": true
     }
   },
+  "forbidden_entitlements": [
+    "com.apple.security.assets.movies.read-only",
+    "com.apple.security.assets.movies.read-write",
+    "com.apple.security.assets.music.read-only",
+    "com.apple.security.assets.music.read-write",
+    "com.apple.security.assets.pictures.read-only",
+    "com.apple.security.assets.pictures.read-write",
+    "com.apple.security.automation.apple-events",
+    "com.apple.security.device.camera",
+    "com.apple.security.files.bookmarks.app-scope",
+    "com.apple.security.files.bookmarks.document-scope",
+    "com.apple.security.files.downloads.read-only",
+    "com.apple.security.files.downloads.read-write",
+    "com.apple.security.files.user-selected.executable",
+    "com.apple.security.files.user-selected.read-only",
+    "com.apple.security.files.user-selected.read-write",
+    "com.apple.security.network.server",
+    "com.apple.security.personal-information.addressbook",
+    "com.apple.security.personal-information.location",
+    "com.apple.security.personal-information.photos-library"
+  ],
   "required_build_script_substrings": {
     "scripts/entrypoints/build.sh": [
       "config/entitlements/local.plist",
