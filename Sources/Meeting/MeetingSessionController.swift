@@ -241,9 +241,11 @@ final class MeetingSessionController: ObservableObject {
         // after diarization to drive same-voice consolidation + cross-call matching;
         // WeSpeaker (256-dim, diarizer-native) is the default. The two produce
         // different-dimension vectors, so each gets its own speaker database file —
-        // a SpeakerProfile row must never mix dimensions. If ERes2Net is selected
-        // but its model can't be loaded, makeEmbedder returns nil and we transparently
-        // fall back to the WeSpeaker path (native embedding + default DB).
+        // a SpeakerProfile row must never mix dimensions. The DB path is derived from
+        // the *actually-loaded* embedder (not mere model-file presence): if ERes2Net
+        // is selected but its model can't be loaded, makeEmbedder returns nil and we
+        // transparently fall back to the WeSpeaker path — native embedding AND the
+        // default speakers.sqlite — so 256-d vectors can never land in the 192-d DB.
         let embedderChoice = SpeakerEmbedderPreferences.effectiveChoice()
         let segmentEmbedder = SpeakerEmbedderFactory.makeEmbedder(for: embedderChoice)
 

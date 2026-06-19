@@ -238,7 +238,9 @@ public class DiarizationService: ObservableObject {
     /// lose their native vector so model-specific speaker databases do not mix
     /// embedding dimensions.
     /// No-op (returns input untouched) when no embedder is injected.
-    private nonisolated func reembedIfNeeded(segments: [SpeakerSegment], samples: [Float], sampleRate: Int) -> [SpeakerSegment] {
+    /// `internal` (not `private`) so unit tests can exercise the bounds/slicing
+    /// logic directly with a stub embedder, without standing up the real diarizer.
+    nonisolated func reembedIfNeeded(segments: [SpeakerSegment], samples: [Float], sampleRate: Int) -> [SpeakerSegment] {
         guard let embedder = segmentEmbedder, !segments.isEmpty else { return segments }
         let total = samples.count
         var replaced = 0

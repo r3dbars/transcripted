@@ -58,31 +58,20 @@ public final class ERes2NetEmbedder: SpeakerSegmentEmbedder, @unchecked Sendable
         }
         guard !samples.isEmpty else { return nil }
 
-        // Single window: pad-by-tiling short clips up to the model minimum.
-        if samples.count <= maxSamples {
-            let window = samples.count >= minSamples ? samples : tile(samples, to: minSamples)
-            guard let raw = runModel(window) else { return nil }
-            return l2Normalize(raw)
-        }
-
-        // Long segment: split into <= maxSamples windows, mean-pool the
-        // L2-normalized per-window embeddings, then normalize the mean.
-        var acc = [Float](repeating: 0, count: dimension)
-        var used = 0
-        var start = 0
-        while start < samples.count {
-            let end = min(start + maxSamples, samples.count)
+        // Split into <= maxSamples windows (short clips become a single window,
+        // tiled up to the model minimum), embed + L2-normalize each, then mean-pool
+        // the per-window embeddings (a no-op for the common single-window case).
+        // The window math is pure and unit-tested via Self.windowBounds.
+        let bounds = Self.windowBounds(sampleCount: samples.count, minSamples: minSamples, maxSamples: maxSamples)
+        var pooled: [[Float]] = []
+        pooled.reserveCapacity(bounds.count)
+        for (start, end) in bounds {
             var window = Array(samples[start..<end])
-            if window.count < minSamples { window = tile(window, to: minSamples) }
-            if let raw = runModel(window) {
-                let n = l2Normalize(raw)
-                for i in 0..<dimension { acc[i] += n[i] }
-                used += 1
-            }
-            start = end
+            if window.count < minSamples { window = Self.tile(window, to: minSamples) }
+            if let raw = runModel(window) { pooled.append(Self.l2Normalize(raw)) }
         }
-        guard used > 0 else { return nil }
-        return l2Normalize(acc)
+        guard !pooled.isEmpty else { return nil }
+        return pooled.count == 1 ? pooled[0] : Self.meanPoolNormalized(pooled)
     }
 
     // MARK: - CoreML invocation
@@ -121,9 +110,27 @@ public final class ERes2NetEmbedder: SpeakerSegmentEmbedder, @unchecked Sendable
 
     // MARK: - Helpers
 
+    // MARK: - Pure helpers (unit-tested without the model)
+
+    /// Window boundaries for an arbitrary sample count. Short audio yields a single
+    /// window (the caller tiles it up to the model minimum); audio longer than
+    /// `maxSamples` is split into consecutive `maxSamples` windows so each fits the
+    /// model's flexible-length bound. Returns [] for empty input.
+    static func windowBounds(sampleCount: Int, minSamples: Int, maxSamples: Int) -> [(start: Int, end: Int)] {
+        guard sampleCount > 0 else { return [] }
+        if sampleCount <= maxSamples { return [(0, sampleCount)] }
+        var out: [(start: Int, end: Int)] = []
+        var start = 0
+        while start < sampleCount {
+            out.append((start, min(start + maxSamples, sampleCount)))
+            start += maxSamples
+        }
+        return out
+    }
+
     /// Repeat `samples` until it reaches `target` length (keeps frames speech-like
     /// for very short clips instead of padding with silence).
-    private func tile(_ samples: [Float], to target: Int) -> [Float] {
+    static func tile(_ samples: [Float], to target: Int) -> [Float] {
         guard !samples.isEmpty, samples.count < target else { return samples }
         var out = [Float]()
         out.reserveCapacity(target)
@@ -133,7 +140,19 @@ public final class ERes2NetEmbedder: SpeakerSegmentEmbedder, @unchecked Sendable
         return out
     }
 
-    private func l2Normalize(_ v: [Float]) -> [Float] {
+    /// Mean-pool a set of (already L2-normalized) embeddings, then L2-normalize the
+    /// mean. Combines per-window embeddings for long segments.
+    static func meanPoolNormalized(_ vectors: [[Float]]) -> [Float] {
+        guard let first = vectors.first else { return [] }
+        let dim = first.count
+        var acc = [Float](repeating: 0, count: dim)
+        for v in vectors where v.count == dim {
+            for i in 0..<dim { acc[i] += v[i] }
+        }
+        return l2Normalize(acc)
+    }
+
+    static func l2Normalize(_ v: [Float]) -> [Float] {
         var norm: Float = 0
         for x in v { norm += x * x }
         norm = norm.squareRoot()
