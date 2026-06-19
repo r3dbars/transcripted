@@ -2609,31 +2609,32 @@ final class MeetingSessionController: ObservableObject {
                 failedJobID: activeQueuedTranscriptionJobID
             )
             activeQueuedTranscriptionJobID = nil
+            let failureTelemetryContext = meetingCaptureAnalyticsProperties(snapshot: capture.pipelineDiagnosticsSnapshot()).merging(
+                [
+                    "failure_kind": failureKind.rawValue,
+                    "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                    "trigger": transcriptionTrigger.rawValue,
+                ],
+                uniquingKeysWith: { _, new in new }
+            )
+            let failureDiagnosticsContext = failureTelemetryContext.merging(
+                [
+                    "error": message,
+                    "diagnostic_error": diagnosticMessage,
+                    "queue_depth": "\(queuedTranscriptionJobs.count)",
+                ],
+                uniquingKeysWith: { _, new in new }
+            )
             DiagnosticsTrail.record(
                 level: .error,
                 engine: "meeting",
                 event: "meeting_transcript_failed",
                 message: "Meeting transcription failed",
-                context: baseDiagnosticsContext(
-                    extra: [
-                        "error": message,
-                        "diagnostic_error": diagnosticMessage,
-                        "failure_kind": failureKind.rawValue,
-                        "queue_depth": "\(queuedTranscriptionJobs.count)",
-                        "trigger": transcriptionTrigger.rawValue
-                    ]
-                )
+                context: baseDiagnosticsContext(extra: failureDiagnosticsContext)
             )
             AnalyticsReporter.track(
                 "meeting_transcript_failed",
-                properties: meetingCaptureAnalyticsProperties(snapshot: capture.pipelineDiagnosticsSnapshot()).merging(
-                        [
-                        "failure_kind": failureKind.rawValue,
-                        "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
-                        "trigger": transcriptionTrigger.rawValue,
-                        ],
-                    uniquingKeysWith: { _, new in new }
-                )
+                properties: failureTelemetryContext
             )
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_failed")
             finalizeBackgroundTranscriptionStateIfNeeded()

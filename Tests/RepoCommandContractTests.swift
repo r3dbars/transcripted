@@ -2220,6 +2220,32 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - failed meeting transcripts carry capture diagnostics") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let failureBlock = sourceSlice(
+            controllerContents,
+            from: "case .failed(let message):",
+            to: "case .gettingReady:"
+        )
+
+        assertTrue(
+            failureBlock.contains("let failureTelemetryContext = meetingCaptureAnalyticsProperties(snapshot: capture.pipelineDiagnosticsSnapshot()).merging("),
+            "failed meeting transcript diagnostics should include privacy-safe capture health context"
+        )
+        assertTrue(
+            failureBlock.contains("\"queue_depth_bucket\": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)"),
+            "failed meeting transcript diagnostics should include bucketed queue depth"
+        )
+        assertTrue(
+            failureBlock.contains("context: baseDiagnosticsContext(extra: failureDiagnosticsContext)"),
+            "failed meeting transcript Sentry context should use the enriched diagnostics context"
+        )
+        assertTrue(
+            failureBlock.contains("properties: failureTelemetryContext"),
+            "analytics and diagnostics should share the same privacy-safe failure telemetry context"
+        )
+    }
+
     runSuite("Repo command contract - shutdown preservation clears live sidecar waits") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let terminationBlock = sourceSlice(
