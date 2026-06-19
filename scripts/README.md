@@ -80,6 +80,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Writes local Markdown and JSON under `/tmp/transcripted-release-gate/<run-id>/`
   - Exits `0` for GREEN, `3` for YELLOW/unknown, and `1` for RED
   - Missing Sentry/PostHog credentials or manual proof are reported as yellow/unknown, not green
+  - Its first screen separates deterministic proof, mocked/proxy proof, telemetry proof, release-surface proof, timestamped current-run local log proof, and manual/hardware UNKNOWN
 - `scripts/ops/privacy-leak-sweep.py` — synthetic-only privacy sweep for logs/events/reliability JSONL, Sentry/PostHog payloads, QA/local reports, PR/release text, and scanner handoff summaries
   - Usage: `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json`
 - `scripts/ops/performance-budget.rb` — fail a built app that exceeds bundle/resource budgets, ships the wrong Parakeet model set, includes old icon assets, or regresses optional runtime latency budgets

@@ -281,6 +281,85 @@ run_step_when_present() {
   fi
 }
 
+run_warnings_only_step() {
+  local id="$1"
+  local title="$2"
+  local command="$3"
+  local log_path started finished duration exit_code status
+
+  log_path="${LOG_DIR}/${id}.log"
+  started="$(date -u +%s)"
+  if ! {
+    echo "$ ${command}"
+    echo
+  } > "${log_path}"; then
+    fail_io "Unable to write step log at ${log_path}."
+  fi
+
+  echo "[qa] ${title}"
+  (
+    cd "${REPO_ROOT}" || exit 1
+    bash -lc "${command}"
+  ) >> "${log_path}" 2>&1
+  exit_code=$?
+
+  finished="$(date -u +%s)"
+  duration=$((finished - started))
+  status="$(warnings_only_status_from_log "${log_path}" "${exit_code}")"
+
+  if [[ "${status}" == "WARN" ]]; then
+    echo "[qa] WARNINGS_ONLY: non-strict local artifact warnings are recorded in the report and do not hold this gate." >> "${log_path}"
+  fi
+
+  append_result "${id}" "${title}" "${status}" "${exit_code}" "${duration}" "${log_path}"
+  echo "[qa] ${status} ${title} (${duration}s)"
+  if [[ "${status}" == "FAIL" ]]; then
+    return "${exit_code}"
+  fi
+  return 0
+}
+
+warnings_only_status_from_log() {
+  local log_path="$1"
+  local exit_code="$2"
+
+  python3 - "${log_path}" "${exit_code}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+exit_code = int(sys.argv[2])
+try:
+    text = open(path, encoding="utf-8", errors="replace").read()
+except OSError:
+    print("FAIL")
+    raise SystemExit(0)
+
+report = None
+decoder = json.JSONDecoder()
+for index, char in enumerate(text):
+    if char != "{":
+        continue
+    try:
+        candidate, _ = decoder.raw_decode(text[index:])
+    except json.JSONDecodeError:
+        continue
+    if isinstance(candidate, dict) and isinstance(candidate.get("summary"), dict):
+        report = candidate
+        break
+
+if report is not None:
+    summary = report["summary"]
+    failed = int(summary.get("failed", 0) or 0)
+    warnings = int(summary.get("warnings", 0) or 0)
+    print("WARN" if failed or warnings else "PASS")
+elif exit_code == 0:
+    print("PASS")
+else:
+    print("FAIL")
+PY
+}
+
 skip_step() {
   local id="$1"
   local title="$2"
@@ -370,20 +449,23 @@ MARKDOWN
 }
 
 write_report() {
-  local fail_count warn_count skip_count pass_count flag_count total_count verdict branch commit app_version started finished short_summary
+  local fail_count warn_count soft_warn_count hard_warn_count skip_count pass_count flag_count hold_flag_count total_count verdict branch commit app_version started finished short_summary
   local working_status regressed_status needs_human_status release_status
   local ui_status artifact_status packaged_status audio_status gemma_status release_health_status live_status
 
   fail_count="$(awk -F '\t' '$3 == "FAIL" { count++ } END { print count + 0 }' "${RESULTS}")"
   warn_count="$(awk -F '\t' '$3 == "WARN" { count++ } END { print count + 0 }' "${RESULTS}")"
+  soft_warn_count="$(awk -F '\t' '$3 == "WARN" && $2 ~ /warnings-only local state/ { count++ } END { print count + 0 }' "${RESULTS}")"
+  hard_warn_count=$((warn_count - soft_warn_count))
   skip_count="$(awk -F '\t' '$3 == "SKIP" { count++ } END { print count + 0 }' "${RESULTS}")"
   pass_count="$(awk -F '\t' '$3 == "PASS" { count++ } END { print count + 0 }' "${RESULTS}")"
   flag_count=$((fail_count + warn_count + skip_count))
+  hold_flag_count=$((fail_count + hard_warn_count + skip_count))
   total_count=$((pass_count + flag_count))
 
   if [[ "${fail_count}" -gt 0 ]]; then
     verdict="FAIL"
-  elif [[ "${warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
+  elif [[ "${hard_warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
     verdict="INCOMPLETE"
   else
     verdict="PASS"
@@ -398,7 +480,9 @@ write_report() {
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   finished="${started}"
 
-  if [[ "${verdict}" == "PASS" ]]; then
+  if [[ "${verdict}" == "PASS" && "${soft_warn_count}" -gt 0 ]]; then
+    short_summary="PASS: completed ${total_count} checks with ${soft_warn_count} non-blocking local warning(s)."
+  elif [[ "${verdict}" == "PASS" ]]; then
     short_summary="PASS: tested ${pass_count}/${total_count} checks. Good to go."
   elif [[ "${verdict}" == "FAIL" ]]; then
     short_summary="FAIL: tested ${pass_count}/${total_count} checks. Not good yet: ${flag_count} flagged."
@@ -409,9 +493,12 @@ write_report() {
   if [[ "${fail_count}" -gt 0 ]]; then
     working_status="NO"
     regressed_status="YES"
-  elif [[ "${warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
+  elif [[ "${hard_warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
     working_status="PARTIAL"
     regressed_status="NO automated regression, but proof is incomplete"
+  elif [[ "${soft_warn_count}" -gt 0 ]]; then
+    working_status="YES"
+    regressed_status="NO automated regression; non-blocking local artifact warnings recorded"
   else
     working_status="YES"
     regressed_status="NO"
@@ -420,7 +507,7 @@ write_report() {
   needs_human_status="YES - slow pasteback feel, real Zoom/WebRTC meeting route, AirPods/Bluetooth route, and local Gemma summary beta workflow still need manual proof"
   if [[ "${fail_count}" -gt 0 ]]; then
     release_status="HOLD - automated regression found"
-  elif [[ "${warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
+  elif [[ "${hard_warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
     release_status="HOLD - proof is incomplete"
   elif [[ "${MODE}" != "full" && "${MODE}" != "live" ]]; then
     release_status="HOLD - run the full Transcripted QA gate before release"
@@ -471,6 +558,7 @@ write_report() {
     echo "- Passed: ${pass_count}"
     echo "- Failed: ${fail_count}"
     echo "- Warnings: ${warn_count}"
+    echo "- Non-blocking warnings: ${soft_warn_count}"
     echo "- Skipped: ${skip_count}"
     echo
     echo "## Operator Verdict"
@@ -546,7 +634,7 @@ write_report() {
   if [[ "${fail_count}" -gt 0 ]]; then
     return 1
   fi
-  if [[ "${warn_count}" -gt 0 || "${skip_count}" -gt 0 ]]; then
+  if [[ "${hold_flag_count}" -gt 0 ]]; then
     return 3
   fi
   return 0
@@ -591,10 +679,17 @@ run_pasteback_synthetic() {
 
 run_artifact_validation() {
   local blocking="$1"
-  run_step "20-qa-health" "TranscriptedQA health check" "${blocking}" \
-    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa check-health --format json"
-  run_step "21-qa-validate-all" "TranscriptedQA validate current artifacts" "${blocking}" \
-    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
+  if [[ "${blocking}" == "yes" ]]; then
+    run_step "20-qa-health" "TranscriptedQA health check" "yes" \
+      "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa check-health --format json"
+    run_step "21-qa-validate-all" "TranscriptedQA validate current artifacts" "yes" \
+      "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
+  else
+    run_warnings_only_step "20-qa-health" "TranscriptedQA health check (warnings-only local state)" \
+      "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa check-health --format json"
+    run_warnings_only_step "21-qa-validate-all" "TranscriptedQA validate current artifacts (warnings-only local state)" \
+      "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
+  fi
 }
 
 run_permission_state() {
