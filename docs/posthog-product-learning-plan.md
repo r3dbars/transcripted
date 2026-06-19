@@ -42,6 +42,7 @@ Operational scripts query aggregate counts only:
 
 - `scripts/ops/health-probe.sh posthog`
 - `scripts/ops/posthog-activation-funnel.py`
+- `scripts/ops/retention-cohort-report.py`
 - `scripts/ops/release-health-card.py`
 - `scripts/ops/generate-nightly-digest.py`
 - `scripts/ops/nightly-security-check.py`

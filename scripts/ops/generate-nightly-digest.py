@@ -69,6 +69,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
+    "agent_capture_query_observed",
     "activation_return_proxy_observed",
 )
 POSTHOG_FIRST_VALUE_EVENTS = (
@@ -80,6 +81,7 @@ POSTHOG_FIRST_VALUE_EVENTS = (
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
+    "agent_capture_query_observed",
     "activation_return_proxy_observed",
 )
 TRUSTED_POSTHOG_HOSTS = {
@@ -2423,6 +2425,7 @@ def run_self_test() -> None:
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
+            "agent_capture_query_observed",
             "activation_return_proxy_observed",
         }
         assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
@@ -2431,6 +2434,7 @@ def run_self_test() -> None:
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
+            "agent_capture_query_observed",
             "activation_return_proxy_observed",
         }.issubset(set(POSTHOG_FIRST_VALUE_EVENTS))
         paths = write_reports(payload, output_dir)
