@@ -47,6 +47,12 @@ RELEVANT_EVENTS = (
     "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "activation_first_artifact_saved",
+    "meeting_summary_requested",
+    "meeting_summary_finished",
+    "local_meeting_summary_model_prepare_started",
+    "local_meeting_summary_model_prepare_completed",
+    "local_meeting_summary_model_prepare_cancelled",
+    "local_meeting_summary_model_prepare_failed",
     "agent_capture_query_observed",
 )
 
@@ -61,6 +67,8 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "meeting_summary_requested",
+    "meeting_summary_finished",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {
@@ -136,6 +144,20 @@ REACH_STEPS = (
         "Home/onboarding artifact actions such as open Markdown, preview, and reveal folder.",
     ),
     StepDefinition(
+        "summary_requested_devices",
+        "Summary requested",
+        "event = 'meeting_summary_requested'",
+        "observed",
+        "Devices that asked for a local meeting summary from a saved transcript.",
+    ),
+    StepDefinition(
+        "summary_finished_devices",
+        "Summary finished",
+        "event = 'meeting_summary_finished'",
+        "observed",
+        "Devices with a local summary success, failure, or cancellation outcome.",
+    ),
+    StepDefinition(
         "agent_prompt_devices",
         "Agent prompt copied/opened",
         "event = 'activation_agent_prompt_action_clicked'",
@@ -178,6 +200,8 @@ SEQUENCE_STEPS = (
         "Artifact opened or prompt copied",
         "event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked')",
     ),
+    ("Local summary requested", "event = 'meeting_summary_requested'"),
+    ("Local summary finished", "event = 'meeting_summary_finished'"),
     (
         "Agent setup/prompt signal",
         "event IN ('activation_agent_setup_cta_clicked', 'activation_agent_prompt_action_clicked', 'onboarding_agent_cta_clicked')",
@@ -410,6 +434,31 @@ LIMIT 60
 """
 
 
+def meeting_summary_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  event,
+  properties['result'] AS result,
+  properties['failure_kind'] AS failure_kind,
+  properties['model_state'] AS model_state,
+  properties['provider'] AS provider,
+  properties['model_family'] AS model_family,
+  properties['artifact_age_bucket'] AS artifact_age_bucket,
+  properties['duration_bucket'] AS duration_bucket,
+  properties['latency_bucket'] AS latency_bucket,
+  properties['surface'] AS surface,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ('meeting_summary_requested', 'meeting_summary_finished', 'local_meeting_summary_model_prepare_started', 'local_meeting_summary_model_prepare_completed', 'local_meeting_summary_model_prepare_cancelled', 'local_meeting_summary_model_prepare_failed')
+  {app_version_filter(app_version)}
+GROUP BY event, result, failure_kind, model_state, provider, model_family, artifact_age_bucket, duration_bucket, latency_bucket, surface
+ORDER BY events DESC
+LIMIT 80
+"""
+
+
 def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
     load_env()
     host, project_id, token = posthog_config()
@@ -422,6 +471,7 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "onboarding_completion": onboarding_completion_query(days, app_version),
         "artifact_actions": artifact_actions_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
+        "meeting_summary": meeting_summary_query(days, app_version),
     }
 
     results = {
@@ -546,6 +596,8 @@ def render_report(data: dict[str, Any]) -> str:
     strict_saved = as_int(reach.get("strict_saved_markdown_devices"))
     saved_proxy = as_int(reach.get("saved_markdown_plus_dictation_proxy_devices"))
     agent_signal = as_int(reach.get("agent_setup_devices"))
+    summary_requested = as_int(reach.get("summary_requested_devices"))
+    summary_finished = as_int(reach.get("summary_finished_devices"))
     true_agent_query = as_int(reach.get("true_agent_query_devices"))
     return_proxy = as_int(reach.get("return_proxy_devices"))
     app_version = data.get("app_version") or "all app versions"
@@ -562,6 +614,7 @@ def render_report(data: dict[str, Any]) -> str:
         "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
         "Saved artifact quality: strict saved Markdown vs dictation-completed proxy, split by artifact kind.",
         "Artifact actions: open Markdown, preview, reveal folder, and copy-for-agent surfaces.",
+        "Local summary beta: requested vs finished, result, model state, provider family, artifact age, meeting duration, and latency buckets.",
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
         "Data quality: missing true-agent-use event and general dictation saved-artifact gap.",
@@ -580,6 +633,7 @@ def render_report(data: dict[str, Any]) -> str:
         f"- Launch reach in-window: **{launch} anonymous devices**.",
         f"- Strict saved Markdown reach: **{strict_saved} devices** ({pct(strict_saved, launch)} of launch).",
         f"- Saved Markdown plus dictation proxy reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
+        f"- Local summary requested / finished reach: **{summary_requested} / {summary_finished} devices**.",
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
         f"- True agent-query proof: **{true_agent_query} devices**. Treat this as unknown, not green, until instrumentation exists.",
@@ -629,6 +683,11 @@ def render_report(data: dict[str, Any]) -> str:
             data["results"].get("agent_signals", []),
             ["event", "prompt_kind", "setup_kind", "agent_target", "result", "surface", "events", "devices"],
         ),
+        render_top_rows(
+            "Local Meeting Summary Funnel",
+            data["results"].get("meeting_summary", []),
+            ["event", "result", "failure_kind", "model_state", "provider", "model_family", "artifact_age_bucket", "duration_bucket", "latency_bucket", "surface", "events", "devices"],
+        ),
         "## Data Limitations",
         "",
         "\n".join(f"- {item}" for item in limitations),
@@ -672,6 +731,8 @@ def run_self_test() -> int:
                 "strict_saved_markdown_devices": 2,
                 "saved_markdown_plus_dictation_proxy_devices": 3,
                 "artifact_action_devices": 2,
+                "summary_requested_devices": 2,
+                "summary_finished_devices": 1,
                 "agent_prompt_devices": 1,
                 "agent_setup_devices": 1,
                 "return_proxy_devices": 1,
@@ -683,6 +744,20 @@ def run_self_test() -> int:
             "onboarding_completion": [],
             "artifact_actions": [],
             "agent_signals": [],
+            "meeting_summary": [{
+                "event": "meeting_summary_finished",
+                "result": "success",
+                "failure_kind": None,
+                "model_state": "ready",
+                "provider": "gemma_mlx",
+                "model_family": "gemma_mlx",
+                "artifact_age_bucket": "24_48h",
+                "duration_bucket": "10_29m",
+                "latency_bucket": "5s_plus",
+                "surface": "home",
+                "events": 1,
+                "devices": 1,
+            }],
         },
     }
     report = render_report(sample)
@@ -703,6 +778,7 @@ def run_self_test() -> int:
         onboarding_completion_query(30, None),
         artifact_actions_query(30, None),
         agent_signals_query(30, None),
+        meeting_summary_query(30, None),
     ):
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)

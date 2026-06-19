@@ -87,6 +87,12 @@ Operational scripts query aggregate counts only:
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
+| `meeting_summary_requested` | `artifact_age_bucket`, `duration_bucket`, `model_family`, `model_state`, `provider`, `result`, `surface` |
+| `meeting_summary_finished` | `artifact_age_bucket`, `duration_bucket`, `failure_kind`, `latency_bucket`, `model_family`, `model_state`, `provider`, `result`, `surface` |
+| `local_meeting_summary_model_prepare_started` | `model_family`, `model_state`, `provider`, `surface` |
+| `local_meeting_summary_model_prepare_completed` | `model_family`, `model_state`, `provider`, `result`, `surface` |
+| `local_meeting_summary_model_prepare_cancelled` | `failure_kind`, `model_family`, `model_state`, `provider`, `result`, `surface` |
+| `local_meeting_summary_model_prepare_failed` | `failure_kind`, `model_family`, `model_state`, `provider`, `result`, `surface` |
 
 ### Menu, Settings, Updates
 
@@ -175,6 +181,8 @@ aggregate reliability sizing and should not be expanded to raw device names.
 - First saved artifact across dictation and meeting with coarse artifact kind,
   trigger, duration bucket, and word-count bucket.
 - Artifact open/reveal/preview actions and agent setup or prompt-copy intent.
+- Local meeting summary request/finish outcomes, model readiness, provider
+  family, artifact age, meeting-duration bucket, and summary latency bucket.
 - Return proxy when Home observes an older saved artifact.
 - Release health by app version and update lifecycle.
 
@@ -186,9 +194,8 @@ aggregate reliability sizing and should not be expanded to raw device names.
   as a proxy, while onboarding dictation and meeting saves have stricter events.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
-- Local summary beta behavior is not a first-class funnel. Summary attempts,
-  generated results, failure kind, model readiness, and latency buckets should
-  be captured when the summary flow is product-ready enough to learn from.
+- Local summary beta behavior now has a request/finish funnel, but it still
+  does not measure whether the generated summary drove a later agent answer.
 - Speaker review is visible mainly through meeting outcome and failure events.
   There is no clean accepted/dismissed/completed review funnel yet.
 - Retention is a return proxy, not a real habit model. It needs day/week active
@@ -206,8 +213,6 @@ Prefer a small number of lifecycle events over broad click tracking.
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
 | `meeting_speaker_review_prompted` | A saved meeting has review work surfaced | `participant_count_bucket`, `review_reason`, `surface` |
 | `meeting_speaker_review_completed` | User completes or dismisses speaker review | `participant_count_bucket`, `result`, `surface` |
-| `meeting_summary_requested` | User asks for a local summary | `artifact_age_bucket`, `model_state`, `surface` |
-| `meeting_summary_finished` | Summary succeeds or fails | `duration_bucket`, `failure_kind`, `latency_bucket`, `model_state`, `result`, `surface` |
 | `settings_feature_discovered` | A high-leverage feature panel is first viewed | `feature_area`, `page_id`, `source` |
 | `workflow_abandoned` | App can confidently infer abandonment without content | `workflow_kind`, `stage`, `reason_kind`, `elapsed_bucket` |
 

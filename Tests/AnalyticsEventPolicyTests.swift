@@ -135,6 +135,7 @@ func testAnalyticsEventPolicy() {
             "mic_status",
             "mic_stream_present",
             "missing_permission",
+            "model_family",
             "model_state",
             "os_major",
             "outcome",
@@ -333,6 +334,77 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["meeting_url"], "meeting URLs must not be sent")
         assertNil(sanitized["prompt_text"], "raw prompt text must not be sent")
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
+    }
+
+    runSuite("AnalyticsEventPolicy allows local meeting summary funnel events") {
+        let requested = AnalyticsEventPolicy.policy(forEvent: "meeting_summary_requested")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "meeting_summary_finished")
+        let prepareStarted = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_model_prepare_started")
+        let prepareCompleted = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_model_prepare_completed")
+        let prepareCancelled = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_model_prepare_cancelled")
+        let prepareFailed = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_model_prepare_failed")
+
+        assertEqual(
+            requested?.allowedProperties ?? Set<String>(),
+            ["artifact_age_bucket", "duration_bucket", "model_family", "model_state", "provider", "result", "surface"],
+            "summary requests should keep only coarse attribution"
+        )
+        assertEqual(
+            finished?.allowedProperties ?? Set<String>(),
+            ["artifact_age_bucket", "duration_bucket", "failure_kind", "latency_bucket", "model_family", "model_state", "provider", "result", "surface"],
+            "summary finishes should keep only result, failure taxonomy, and buckets"
+        )
+        assertEqual(
+            prepareStarted?.allowedProperties ?? Set<String>(),
+            ["model_family", "model_state", "provider", "surface"],
+            "model-prepare starts should not include result or failure fields"
+        )
+        assertEqual(
+            prepareCompleted?.allowedProperties ?? Set<String>(),
+            ["model_family", "model_state", "provider", "result", "surface"],
+            "model-prepare completion should carry a coarse result"
+        )
+        assertEqual(prepareCancelled?.allowedProperties.contains("failure_kind"), true, "prepare cancellation should use the same failure taxonomy")
+        assertEqual(prepareFailed?.allowedProperties.contains("failure_kind"), true, "prepare failure should use the same failure taxonomy")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "artifact_age_bucket": "24_48h",
+                "duration_bucket": "10_29m",
+                "failure_kind": "process_failed",
+                "latency_bucket": "5s_plus",
+                "model_family": "gemma_mlx",
+                "model_state": "ready",
+                "provider": "gemma_mlx",
+                "result": "failed",
+                "surface": "home",
+                "summary_text": "private summary",
+                "transcript_text": "private transcript",
+                "meeting_title": "Customer call",
+                "speaker_name": "Alice",
+                "model_local_path": "/Users/redbars/.cache/model",
+                "raw_error": "private runtime detail",
+                "meeting_url": "https://example.com/private",
+            ],
+            allowedKeys: finished?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
+        assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
+        assertEqual(sanitized["failure_kind"], "process_failed", "normalized failure kind should survive")
+        assertEqual(sanitized["latency_bucket"], "5s_plus", "latency bucket should survive")
+        assertEqual(sanitized["model_family"], "gemma_mlx", "model family enum should survive")
+        assertEqual(sanitized["model_state"], "ready", "model state enum should survive")
+        assertEqual(sanitized["provider"], "gemma_mlx", "provider enum should survive")
+        assertEqual(sanitized["result"], "failed", "result enum should survive")
+        assertEqual(sanitized["surface"], "home", "surface enum should survive")
+        assertNil(sanitized["summary_text"], "summary text must not be sent")
+        assertNil(sanitized["transcript_text"], "transcript text must not be sent")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["model_local_path"], "model paths must not be sent")
+        assertNil(sanitized["raw_error"], "raw errors must not be sent")
+        assertNil(sanitized["meeting_url"], "URLs must not be sent")
     }
 
     runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, and next-day return proxy") {

@@ -163,6 +163,27 @@ struct AnalyticsEventPolicy: Equatable {
         "source",
     ]
 
+    private static let localMeetingSummaryProperties: Set<String> = [
+        "artifact_age_bucket",
+        "duration_bucket",
+        "failure_kind",
+        "latency_bucket",
+        "model_family",
+        "model_state",
+        "provider",
+        "result",
+        "surface",
+    ]
+
+    private static let localMeetingSummaryModelPrepareProperties: Set<String> = [
+        "failure_kind",
+        "model_family",
+        "model_state",
+        "provider",
+        "result",
+        "surface",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -338,6 +359,38 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "meeting_summary_requested": .init(
+            name: "meeting_summary_requested",
+            allowedProperties: localMeetingSummaryProperties.subtracting([
+                "failure_kind",
+                "latency_bucket",
+            ])
+        ),
+        "meeting_summary_finished": .init(
+            name: "meeting_summary_finished",
+            allowedProperties: localMeetingSummaryProperties
+        ),
+        "local_meeting_summary_model_prepare_started": .init(
+            name: "local_meeting_summary_model_prepare_started",
+            allowedProperties: localMeetingSummaryModelPrepareProperties.subtracting([
+                "failure_kind",
+                "result",
+            ])
+        ),
+        "local_meeting_summary_model_prepare_completed": .init(
+            name: "local_meeting_summary_model_prepare_completed",
+            allowedProperties: localMeetingSummaryModelPrepareProperties.subtracting([
+                "failure_kind",
+            ])
+        ),
+        "local_meeting_summary_model_prepare_cancelled": .init(
+            name: "local_meeting_summary_model_prepare_cancelled",
+            allowedProperties: localMeetingSummaryModelPrepareProperties
+        ),
+        "local_meeting_summary_model_prepare_failed": .init(
+            name: "local_meeting_summary_model_prepare_failed",
+            allowedProperties: localMeetingSummaryModelPrepareProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",

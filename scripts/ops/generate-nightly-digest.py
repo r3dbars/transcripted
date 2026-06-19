@@ -65,6 +65,8 @@ POSTHOG_ACTIVE_EVENTS = (
     "meeting_transcript_saved",
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
+    "meeting_summary_requested",
+    "meeting_summary_finished",
     "activation_first_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
@@ -75,6 +77,7 @@ POSTHOG_FIRST_VALUE_EVENTS = (
     "dictation_completed",
     "onboarding_first_dictation_saved",
     "meeting_transcript_saved",
+    "meeting_summary_finished",
     "onboarding_agent_cta_clicked",
     "activation_first_artifact_saved",
     "activation_artifact_action_clicked",
@@ -2419,6 +2422,8 @@ def run_self_test() -> None:
             "meeting_transcript_saved",
             "meeting_transcript_failed",
             "meeting_transcript_skipped",
+            "meeting_summary_requested",
+            "meeting_summary_finished",
             "activation_first_artifact_saved",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
@@ -2432,6 +2437,7 @@ def run_self_test() -> None:
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
             "activation_return_proxy_observed",
+            "meeting_summary_finished",
         }.issubset(set(POSTHOG_FIRST_VALUE_EVENTS))
         paths = write_reports(payload, output_dir)
         assert Path(paths["latest_html"]).exists()

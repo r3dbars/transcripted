@@ -102,6 +102,12 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `activation_return_proxy_observed`
+- `meeting_summary_requested`
+- `meeting_summary_finished`
+- `local_meeting_summary_model_prepare_started`
+- `local_meeting_summary_model_prepare_completed`
+- `local_meeting_summary_model_prepare_cancelled`
+- `local_meeting_summary_model_prepare_failed`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`

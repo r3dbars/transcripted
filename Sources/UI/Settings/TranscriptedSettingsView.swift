@@ -929,6 +929,8 @@ struct TranscriptedSettingsView: View {
         generateLocalSummary(
             transcriptURL: item.transcriptURL,
             title: item.title,
+            recordingDate: item.startDate ?? item.date,
+            durationSeconds: meetingDurationSeconds(for: item),
             hasExistingSummary: item.summaryPreview != nil
         )
     }
@@ -936,6 +938,8 @@ struct TranscriptedSettingsView: View {
     private func generateLocalSummary(
         transcriptURL: URL,
         title: String,
+        recordingDate: Date? = nil,
+        durationSeconds: TimeInterval? = nil,
         hasExistingSummary: Bool
     ) {
         guard localMeetingSummariesEnabled else { return }
@@ -950,14 +954,18 @@ struct TranscriptedSettingsView: View {
         }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         let provider = localMeetingSummaryProvider
+        let startedAt = Date()
         recordLocalSummaryEvent(
-            event: "local_meeting_summary_started",
+            event: "meeting_summary_requested",
             message: "\(provider.title) meeting summary started",
             context: [
+                "artifact_age_bucket": localSummaryArtifactAgeBucket(since: recordingDate, now: startedAt),
+                "duration_bucket": localSummaryDurationBucket(durationSeconds),
+                "model_family": localSummaryModelFamily(provider),
+                "model_state": localSummaryModelState(for: provider),
                 "provider": provider.rawValue,
-                "has_existing_summary": hasExistingSummary ? "true" : "false",
-                "setup_ready": selectedLocalSummaryProviderIsReady ? "true" : "false",
-                "setup_profile": selectedLocalSummaryProviderProfileName,
+                "result": hasExistingSummary ? "regenerate" : "new",
+                "surface": "home",
             ]
         )
         clearHomeLocalSummaryNotice()
@@ -999,21 +1007,34 @@ struct TranscriptedSettingsView: View {
                     chunkCount: result.chunkCount
                 ))
                 recordLocalSummaryEvent(
-                    event: "local_meeting_summary_completed",
+                    event: "meeting_summary_finished",
                     message: "\(result.provider.title) meeting summary saved",
                     context: [
+                        "artifact_age_bucket": localSummaryArtifactAgeBucket(since: recordingDate, now: Date()),
+                        "duration_bucket": localSummaryDurationBucket(durationSeconds),
+                        "latency_bucket": localSummaryLatencyBucket(since: startedAt),
+                        "model_family": localSummaryModelFamily(result.provider),
+                        "model_state": "ready",
                         "provider": result.provider.rawValue,
-                        "chunk_count": "\(result.chunkCount)",
-                        "profile": result.profileName,
+                        "result": "success",
+                        "surface": "home",
                     ]
                 )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
                 recordLocalSummaryEvent(
-                    event: "local_meeting_summary_cancelled",
+                    event: "meeting_summary_finished",
                     message: "\(provider.title) meeting summary cancelled",
                     context: [
+                        "artifact_age_bucket": localSummaryArtifactAgeBucket(since: recordingDate, now: Date()),
+                        "duration_bucket": localSummaryDurationBucket(durationSeconds),
+                        "failure_kind": "cancelled",
+                        "latency_bucket": localSummaryLatencyBucket(since: startedAt),
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": localSummaryModelState(for: provider),
                         "provider": provider.rawValue,
+                        "result": "cancelled",
+                        "surface": "home",
                     ]
                 )
                 return
@@ -1021,11 +1042,18 @@ struct TranscriptedSettingsView: View {
                 guard localMeetingSummariesEnabled else { return }
                 recordLocalSummaryEvent(
                     level: .error,
-                    event: "local_meeting_summary_failed",
+                    event: "meeting_summary_finished",
                     message: "\(provider.title) meeting summary failed",
                     context: [
+                        "artifact_age_bucket": localSummaryArtifactAgeBucket(since: recordingDate, now: Date()),
+                        "duration_bucket": localSummaryDurationBucket(durationSeconds),
+                        "failure_kind": localSummaryFailureKind(error),
+                        "latency_bucket": localSummaryLatencyBucket(since: startedAt),
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": localSummaryModelState(for: provider),
                         "provider": provider.rawValue,
-                        "error": error.localizedDescription,
+                        "result": "failed",
+                        "surface": "home",
                     ]
                 )
                 NSSound.beep()
@@ -3240,8 +3268,10 @@ struct TranscriptedSettingsView: View {
             event: "local_meeting_summary_model_prepare_started",
             message: "\(provider.title) summary model preparation started",
             context: [
+                "model_family": localSummaryModelFamily(provider),
+                "model_state": localSummaryModelState(for: provider),
                 "provider": provider.rawValue,
-                "setup_profile": selectedLocalSummaryProviderProfileName,
+                "surface": "beta",
             ]
         )
 
@@ -3259,7 +3289,7 @@ struct TranscriptedSettingsView: View {
 
         Task { @MainActor in
             do {
-                let profile = try await task.value
+                _ = try await task.value
                 guard !Task.isCancelled, localSummaryModelPreparationToken == taskToken else { return }
                 isLocalSummaryModelPreparing = false
                 localSummaryModelPreparationTask = nil
@@ -3270,8 +3300,11 @@ struct TranscriptedSettingsView: View {
                     event: "local_meeting_summary_model_prepare_completed",
                     message: "\(provider.title) summary model preparation completed",
                     context: [
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": "ready",
                         "provider": provider.rawValue,
-                        "profile": profile,
+                        "result": "success",
+                        "surface": "beta",
                     ]
                 )
             } catch is CancellationError {
@@ -3284,7 +3317,12 @@ struct TranscriptedSettingsView: View {
                     event: "local_meeting_summary_model_prepare_cancelled",
                     message: "\(provider.title) summary model preparation cancelled",
                     context: [
+                        "failure_kind": "cancelled",
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": localSummaryModelState(for: provider),
                         "provider": provider.rawValue,
+                        "result": "cancelled",
+                        "surface": "beta",
                     ]
                 )
             } catch {
@@ -3299,8 +3337,12 @@ struct TranscriptedSettingsView: View {
                     event: "local_meeting_summary_model_prepare_failed",
                     message: "\(provider.title) summary model preparation failed",
                     context: [
+                        "failure_kind": localSummaryFailureKind(error),
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": localSummaryModelState(for: provider),
                         "provider": provider.rawValue,
-                        "error": error.localizedDescription,
+                        "result": "failed",
+                        "surface": "beta",
                     ]
                 )
             }
@@ -3396,6 +3438,97 @@ struct TranscriptedSettingsView: View {
             message: message,
             context: context
         )
+        AnalyticsReporter.track(event, properties: context)
+    }
+
+    private func meetingDurationSeconds(for item: RecentMeetingItem) -> TimeInterval? {
+        guard let start = item.startDate,
+              let end = item.endDate,
+              end > start else {
+            return nil
+        }
+        return end.timeIntervalSince(start)
+    }
+
+    private func localSummaryArtifactAgeBucket(since date: Date?, now: Date = Date()) -> String {
+        guard let date else {
+            return "unknown"
+        }
+        let ageSeconds = max(0, now.timeIntervalSince(date))
+        if ageSeconds < 3_600 {
+            return "lt_1h"
+        }
+        if ageSeconds < 12 * 3_600 {
+            return "1_12h"
+        }
+        if ageSeconds < 24 * 3_600 {
+            return "12_24h"
+        }
+        if ageSeconds < 48 * 3_600 {
+            return "24_48h"
+        }
+        if ageSeconds < 7 * 24 * 3_600 {
+            return "2_7d"
+        }
+        return "7d_plus"
+    }
+
+    private func localSummaryDurationBucket(_ seconds: TimeInterval?) -> String {
+        guard let seconds, seconds.isFinite, seconds >= 0 else {
+            return "unknown"
+        }
+        return AnalyticsReporter.durationBucket(seconds: seconds)
+    }
+
+    private func localSummaryLatencyBucket(since start: Date, now: Date = Date()) -> String {
+        let milliseconds = max(0, Int(now.timeIntervalSince(start) * 1000))
+        return AnalyticsReporter.latencyBucket(milliseconds: milliseconds)
+    }
+
+    private func localSummaryModelState(for provider: LocalMeetingSummaryProvider) -> String {
+        switch provider {
+        case .gemmaMLX:
+            if isLocalSummaryModelPreparing { return "preparing" }
+            return localSummarySetupStatus.isReady ? "ready" : "not_ready"
+        case .appleFoundation:
+            return appleSummarySetupStatus.isReady ? "ready" : "not_ready"
+        }
+    }
+
+    private func localSummaryModelFamily(_ provider: LocalMeetingSummaryProvider) -> String {
+        switch provider {
+        case .gemmaMLX:
+            return "gemma_mlx"
+        case .appleFoundation:
+            return "apple_foundation"
+        }
+    }
+
+    private func localSummaryFailureKind(_ error: Error) -> String {
+        if error is CancellationError { return "cancelled" }
+        guard let summaryError = error as? LocalMeetingSummaryError else {
+            return "other"
+        }
+        switch summaryError {
+        case .emptyTranscript:
+            return "empty_transcript"
+        case .insufficientMemory:
+            return "insufficient_memory"
+        case .runtimeUnavailable:
+            return "runtime_unavailable"
+        case .appleFoundationUnavailable:
+            return "provider_unavailable"
+        case .missingBundledRunner:
+            return "runner_missing"
+        case .transcriptChanged:
+            return "transcript_changed"
+        case .processTimedOut:
+            return "timeout"
+        case .processFailed:
+            return "process_failed"
+        case .outputMissing:
+            return "output_missing"
+        }
     }
 
     private func openUVInstallGuide() {

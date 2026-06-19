@@ -46,6 +46,7 @@
     "dictation_completed",
     "onboarding_first_dictation_saved",
     "meeting_transcript_saved",
+    "meeting_summary_finished",
     "onboarding_agent_cta_clicked",
     "activation_first_artifact_saved",
     "activation_artifact_action_clicked",
