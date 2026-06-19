@@ -146,6 +146,12 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let settingsFeatureDiscoveryProperties: Set<String> = [
+        "feature_area",
+        "page_id",
+        "source",
+    ]
+
     private static let meetingPromptProperties: Set<String> = [
         "app_signal",
         "calendar_confidence",
@@ -433,6 +439,10 @@ struct AnalyticsEventPolicy: Equatable {
                 "page_id",
                 "source",
             ]
+        ),
+        "settings_feature_discovered": .init(
+            name: "settings_feature_discovered",
+            allowedProperties: settingsFeatureDiscoveryProperties
         ),
         "settings_action_clicked": .init(
             name: "settings_action_clicked",
