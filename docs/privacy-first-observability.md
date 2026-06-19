@@ -162,6 +162,40 @@ without joining against any sensitive context.
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
 
+## Analytics taxonomy review checklist
+
+Every analytics change should update `AnalyticsEventPolicy.swift` and this doc
+in the same PR. `Tests/AnalyticsEventPolicyTests.swift` machine-checks the
+event-name list above and the compiled property taxonomy.
+
+For each new or changed event:
+
+- document the event name in "Allowlisted analytics events"
+- keep event names stable once released; add a new event instead of changing the
+  meaning of an old one
+- use enum, bucket, boolean, or count-bucket properties whenever possible
+- use raw numeric diagnostics only for reviewed audio-health shape, such as
+  sample rate, channel count, scalar volume, or peak buckets needed to debug
+  capture reliability
+- route activation and return-loop events through `ActivationTelemetry` when
+  possible so saved-artifact and agent-payoff signals stay coarse
+- verify `bash run-tests.sh --filter AnalyticsEventPolicy` and
+  `bash run-tests.sh --filter AnalyticsPayloadSanitizer`
+
+Never add analytics properties for:
+
+- transcript text or prompt text
+- audio data, audio paths, or audio references
+- meeting titles
+- speaker names or invitee names
+- absolute file paths or filenames derived from user content
+- source app names or bundle IDs
+- emails, tokens, authorization values, or credentials
+- raw URLs or referrers
+- raw device IDs, advertising IDs, person IDs, user IDs, distinct IDs, or
+  identity-stitching fields
+- free-form error strings or free-form context blobs
+
 ## Nightly guardrail sweep
 
 The nightly security automation should start with the deterministic checker:
