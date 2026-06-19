@@ -549,6 +549,45 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - TranscriptedCore stays free of app UI frameworks") {
+        let disallowedImports = [
+            "import AppKit",
+            "import SwiftUI",
+            "import Cocoa",
+            "import UIKit"
+        ]
+        let matches = repoTextFiles(relativeTo: repoRootURL())
+            .filter { $0.hasPrefix("Sources/TranscriptedCore/") && $0.hasSuffix(".swift") }
+            .flatMap { file -> [String] in
+                let contents = readRepoTextFile(file)
+                return contents
+                    .split(separator: "\n", omittingEmptySubsequences: false)
+                    .enumerated()
+                    .compactMap { index, line in
+                        let trimmed = line.trimmingCharacters(in: .whitespaces)
+                        return disallowedImports.contains(trimmed) ? "\(file):\(index + 1)" : nil
+                    }
+            }
+
+        assertEqual(matches, [], "TranscriptedCore should not import app UI frameworks")
+
+        let packageManifest = readRepoTextFile("Package.swift")
+        assertFalse(
+            packageManifest.contains(".linkedFramework(\"AppKit\")"),
+            "TranscriptedCore package should not link AppKit"
+        )
+    }
+
+    runSuite("Repo command contract - app bridge injects workspace sleep wake notifications") {
+        let bridge = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
+        assertTrue(
+            bridge.contains("center: NSWorkspace.shared.notificationCenter")
+                && bridge.contains("willSleepName: Notification.Name(\"NSWorkspaceWillSleepNotification\")")
+                && bridge.contains("didWakeName: Notification.Name(\"NSWorkspaceDidWakeNotification\")"),
+            "app-side meeting bridge should keep NSWorkspace notification center ownership out of TranscriptedCore"
+        )
+    }
+
     runSuite("Repo command contract - microphone permission callback cannot start after cancellation") {
         let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/Audio.swift")
         assertTrue(
