@@ -55,6 +55,9 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
 - `scripts/ops/release-health-card.py` — print a compact release-health card for one app version by combining local release metadata, GitHub downloads, live public release surfaces, and PostHog update/workflow counts when credentials are present
   - Usage: `python3 scripts/ops/release-health-card.py --version 1.1.47`
+- `scripts/ops/retention-cohort-report.py` — print a privacy-safe PostHog retention cohort report for active days, repeat dictation/meeting use, version adoption, first-artifact return, and first-run drop-off
+  - Usage: `python3 scripts/ops/retention-cohort-report.py`
+  - Offline self-test: `python3 scripts/ops/retention-cohort-report.py --self-test`
 - `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
   - Usage: `bash run-daily-audio-reliability.sh`
   - Synthetic-only usage: `bash run-daily-audio-reliability.sh --synthetic`

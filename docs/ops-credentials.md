@@ -42,6 +42,16 @@ The PostHog probe reports aggregate 7-day counts for active devices, workflow ev
 
 If `POSTHOG_HOST` points at the app ingest host, such as `https://us.i.posthog.com`, the probe normalizes it to the matching PostHog API host before running HogQL. The probe only sends `POSTHOG_PERSONAL_API_KEY` to HTTPS PostHog API hosts by default. Set `POSTHOG_ALLOW_UNTRUSTED_HOST=1` only when using a trusted self-hosted PostHog endpoint.
 
+For retention and habit checks, use:
+
+```bash
+python3 scripts/ops/retention-cohort-report.py
+```
+
+That report stays aggregate-only and covers active days, repeat dictation,
+repeat meeting use, version adoption, return after first artifact, and drop-off
+after first run. See `docs/retention-cohort-analytics.md`.
+
 ### Cloudflare Read vs Deploy
 
 The health probe reads Pages project/deployment status and zone analytics for
