@@ -55,6 +55,9 @@ The script writes a Markdown report and JSON data under
 aggregate-only and separates strict saved-Markdown proof from proxy rows like
 `dictation_completed`, agent setup clicks, and copied starter prompts.
 
+For the full product-learning telemetry map, current event taxonomy, blind
+spots, and dashboard plan, see `docs/posthog-product-learning-plan.md`.
+
 ## Guardrails
 
 - Do not add transcript text, meeting titles, speaker names, file paths, source
