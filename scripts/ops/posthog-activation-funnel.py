@@ -39,6 +39,7 @@ RELEVANT_EVENTS = (
     "onboarding_first_dictation_started",
     "dictation_started",
     "onboarding_first_dictation_saved",
+    "dictation_artifact_saved",
     "dictation_completed",
     "meeting_transcript_saved",
     "activation_artifact_action_clicked",
@@ -54,6 +55,7 @@ WORKFLOW_EVENTS = (
     "app_launched",
     "onboarding_completed",
     "dictation_started",
+    "dictation_artifact_saved",
     "dictation_completed",
     "meeting_recording_started",
     "meeting_transcript_saved",
@@ -117,16 +119,16 @@ REACH_STEPS = (
     StepDefinition(
         "strict_saved_markdown_devices",
         "Strict saved Markdown",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved')",
+        "event IN ('dictation_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved')",
         "observed",
-        "Saved onboarding dictation Markdown or saved meeting Markdown. General saved dictation lacks a dedicated remote event.",
+        "Saved general dictation Markdown, saved onboarding dictation Markdown, or saved meeting Markdown.",
     ),
     StepDefinition(
         "saved_markdown_plus_dictation_proxy_devices",
-        "Saved Markdown plus dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "Saved Markdown plus completion signal",
+        "event IN ('dictation_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
         "proxy",
-        "Adds dictation completion as a product-success proxy because general dictation save is only local diagnostics today.",
+        "Adds dictation completion as useful dictation-volume signal, but saved Markdown proof comes from saved-artifact events.",
     ),
     StepDefinition(
         "artifact_action_devices",
@@ -171,8 +173,8 @@ SEQUENCE_STEPS = (
     ("Permission ready", "event = 'onboarding_completed'"),
     ("Dictation started", "event IN ('onboarding_first_dictation_started', 'dictation_started')"),
     (
-        "Saved Markdown or dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "Saved Markdown or completion signal",
+        "event IN ('dictation_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
     ),
     (
         "Artifact opened or prompt copied",
@@ -552,19 +554,19 @@ def render_report(data: dict[str, Any]) -> str:
 
     limitations = [
         "`permission ready` uses `onboarding_completed` as a proxy. The app guards completion on required dictation permissions, but this does not count users who became ready outside onboarding.",
-        "`strict saved Markdown` counts onboarding first-dictation saves and meeting transcript saves. General dictation save currently has local diagnostics but no dedicated remote saved-artifact event.",
-        "`dictation_completed` is included only in the proxy saved-Markdown row. It can prove useful dictation volume, but not every general saved Markdown write.",
+        "`strict saved Markdown` counts general dictation saved-artifact events, onboarding first-dictation saves, and meeting transcript saves.",
+        "`dictation_completed` is included only in the broader completion-signal row. It can prove useful dictation volume, but strict saved Markdown proof comes from `dictation_artifact_saved`.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
     ]
 
     recommended_tiles = [
-        "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
-        "Saved artifact quality: strict saved Markdown vs dictation-completed proxy, split by artifact kind.",
+        "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/completion signal -> artifact/prompt -> agent setup signal.",
+        "Saved artifact quality: strict saved Markdown vs dictation-completed volume, split by artifact kind.",
         "Artifact actions: open Markdown, preview, reveal folder, and copy-for-agent surfaces.",
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
-        "Data quality: missing true-agent-use event and general dictation saved-artifact gap.",
+        "Data quality: missing true-agent-use event and the dictation completion-vs-saved-artifact split.",
     ]
 
     lines = [
@@ -579,7 +581,7 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         f"- Launch reach in-window: **{launch} anonymous devices**.",
         f"- Strict saved Markdown reach: **{strict_saved} devices** ({pct(strict_saved, launch)} of launch).",
-        f"- Saved Markdown plus dictation proxy reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
+        f"- Saved Markdown plus completion-signal reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
         f"- True agent-query proof: **{true_agent_query} devices**. Treat this as unknown, not green, until instrumentation exists.",

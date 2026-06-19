@@ -178,6 +178,7 @@ func testRepoCommandContract() {
 
         for event in [
             "dictation_completed",
+            "dictation_artifact_saved",
             "onboarding_first_dictation_saved",
             "meeting_transcript_saved",
             "onboarding_agent_cta_clicked",

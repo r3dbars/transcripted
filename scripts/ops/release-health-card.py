@@ -21,6 +21,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "app_launched",
     "dictation_started",
     "dictation_completed",
+    "dictation_artifact_saved",
     "meeting_recording_started",
     "meeting_transcript_saved",
     "meeting_transcript_failed",
@@ -287,6 +288,7 @@ def main() -> int:
             "update_relaunching",
             "update_installed",
             "dictation_completed",
+            "dictation_artifact_saved",
             "meeting_transcript_saved",
             "meeting_transcript_failed",
         ):

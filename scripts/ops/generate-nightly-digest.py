@@ -54,6 +54,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "dictation_started",
     "dictation_start_failed",
     "dictation_completed",
+    "dictation_artifact_saved",
     "dictation_cancelled",
     "dictation_no_speech",
     "dictation_audio_route_recovery_timeout",
@@ -72,6 +73,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "activation_return_proxy_observed",
 )
 POSTHOG_FIRST_VALUE_EVENTS = (
+    "dictation_artifact_saved",
     "dictation_completed",
     "onboarding_first_dictation_saved",
     "meeting_transcript_saved",
@@ -2408,6 +2410,7 @@ def run_self_test() -> None:
             "dictation_started",
             "dictation_start_failed",
             "dictation_completed",
+            "dictation_artifact_saved",
             "dictation_cancelled",
             "dictation_no_speech",
             "dictation_audio_route_recovery_timeout",
@@ -2427,6 +2430,7 @@ def run_self_test() -> None:
         }
         assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
         assert {
+            "dictation_artifact_saved",
             "activation_first_artifact_saved",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",

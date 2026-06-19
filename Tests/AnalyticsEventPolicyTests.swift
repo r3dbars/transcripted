@@ -278,12 +278,14 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy allows post-artifact activation events") {
         let artifact = AnalyticsEventPolicy.policy(forEvent: "activation_artifact_action_clicked")
         let firstArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_first_artifact_saved")
+        let dictationArtifact = AnalyticsEventPolicy.policy(forEvent: "dictation_artifact_saved")
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
         assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
+        assertEqual(dictationArtifact?.allowedProperties ?? Set<String>(), ["delivery", "duration_bucket", "save_outcome", "surface", "trigger", "word_count_bucket"], "dictation saved-artifact events should stay bucketed and enum-only")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
@@ -291,6 +293,7 @@ func testAnalyticsEventPolicy() {
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
             .union(firstArtifact?.allowedProperties ?? Set<String>())
+            .union(dictationArtifact?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",
@@ -300,6 +303,7 @@ func testAnalyticsEventPolicy() {
                 "duration_bucket": "10_29m",
                 "prompt_kind": "meeting_bundle",
                 "result": "success",
+                "save_outcome": "success",
                 "surface": "home_preview",
                 "trigger": "detected_prompt",
                 "word_count_bucket": "300_plus",
@@ -322,6 +326,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
+        assertEqual(sanitized["save_outcome"], "success", "coarse save result should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
         assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
@@ -335,7 +340,7 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 
-    runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, and next-day return proxy") {
+    runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, dictation artifacts, and next-day return proxy") {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
         let suiteName = "ActivationTelemetryTests.first-artifact.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -373,6 +378,20 @@ func testAnalyticsEventPolicy() {
             ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
             "first saved artifact should not be marked twice"
         )
+        let dictationProperties = ActivationTelemetry.dictationArtifactSavedProperties(
+            delivery: "pasted",
+            durationBucket: "30_119s",
+            saveOutcome: "success",
+            surface: .dictationSave,
+            trigger: "hotkey",
+            wordCountBucket: "10_49"
+        )
+        assertEqual(
+            Set(dictationProperties.keys),
+            ["delivery", "duration_bucket", "save_outcome", "surface", "trigger", "word_count_bucket"],
+            "dictation artifact save telemetry should not include raw text, paths, filenames, app names, titles, or counts"
+        )
+        assertEqual(dictationProperties["surface"], "dictation_save", "saved dictation surface should stay coarse")
     }
 
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
@@ -754,6 +773,7 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
+        let dictationArtifactSaved = AnalyticsEventPolicy.policy(forEvent: "dictation_artifact_saved")
         let dictationStopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
@@ -763,6 +783,7 @@ func testAnalyticsEventPolicy() {
 
         assertEqual(dictationStartFailed?.allowedProperties.contains("failure_kind"), true, "dictation start failures should allow normalized failure kinds")
         assertEqual(dictationCompleted?.allowedProperties.contains("word_count_bucket"), true, "dictation completion should allow bucketed word counts")
+        assertEqual(dictationArtifactSaved?.allowedProperties.contains("save_outcome"), true, "strict dictation saved-artifact proof should allow only a reviewed save outcome enum")
         assertEqual(dictationStopLatency?.allowedProperties.contains("stop_to_paste_bucket"), true, "dictation stop latency should allow only bucketed stop-to-paste timing")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")

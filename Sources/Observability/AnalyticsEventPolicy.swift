@@ -494,6 +494,17 @@ struct AnalyticsEventPolicy: Equatable {
                 "word_count_bucket",
             ]))
         ),
+        "dictation_artifact_saved": .init(
+            name: "dictation_artifact_saved",
+            allowedProperties: [
+                "delivery",
+                "duration_bucket",
+                "save_outcome",
+                "surface",
+                "trigger",
+                "word_count_bucket",
+            ]
+        ),
         "dictation_stop_latency_measured": .init(
             name: "dictation_stop_latency_measured",
             allowedProperties: dictationRouteDiagnosticProperties.union(Set([
