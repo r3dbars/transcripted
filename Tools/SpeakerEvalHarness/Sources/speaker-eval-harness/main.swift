@@ -257,19 +257,25 @@ func runReplay(_ args: [String]) async {
 }
 
 // MARK: - entry
+//
+// Top-level entry (this file is named main.swift, which forbids the @main attribute).
 
-@main
-struct Main {
-    static func main() async {
-        let args = Array(CommandLine.arguments.dropFirst())
-        guard #available(macOS 14.0, *) else { die("requires macOS 14+") }
-        guard let cmd = args.first else {
-            die("usage: speaker-eval-harness <dump|replay> ...")
-        }
-        switch cmd {
-        case "dump": await runDump(Array(args.dropFirst()))
-        case "replay": await runReplay(Array(args.dropFirst()))
-        default: die("unknown command \(cmd)")
-        }
+@available(macOS 14.0, *)
+func harnessMain() async {
+    let args = Array(CommandLine.arguments.dropFirst())
+    guard let cmd = args.first else {
+        die("usage: speaker-eval-harness <dump|dump-batch|replay|ladder-fingerprints|ladder-sweep|ladder-parity> ...")
+    }
+    switch cmd {
+    case "dump": await runDump(Array(args.dropFirst()))
+    case "dump-batch": await runDumpBatch(Array(args.dropFirst()))
+    case "replay": await runReplay(Array(args.dropFirst()))
+    case "ladder-fingerprints": await runLadderFingerprints(Array(args.dropFirst()))
+    case "ladder-sweep": await runLadderSweep(Array(args.dropFirst()))
+    case "ladder-parity": await runLadderParity(Array(args.dropFirst()))
+    default: die("unknown command \(cmd)")
     }
 }
+
+guard #available(macOS 14.0, *) else { die("requires macOS 14+") }
+await harnessMain()

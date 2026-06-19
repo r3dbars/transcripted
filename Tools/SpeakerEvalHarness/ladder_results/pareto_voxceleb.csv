@@ -1,0 +1,8 @@
+promptsPerPerson,falseAutoRate,autoBar,suggestFloor,marginMin,promo,emaAlpha,demote,pctReachedAuto,medMeetingsToAuto,suggestPrecision
+18.6667,0.22030,0.8,0.6,0.0,evidence(>=0.25),0.15,off,0.600,12.5,0.914
+18.8667,0.16670,0.8,0.6,0.0,evidence(>=0.40),0.15,off,0.600,12.5,0.911
+18.9333,0.16360,0.8,0.5,0.0,evidence(>=0.60),0.15,off,0.600,12.5,0.915
+19.0000,0.09620,0.8,0.6,0.0,fixed(callCount>3),0.15,off,0.600,12.5,0.902
+19.0667,0.08000,0.8,0.6,0.0,fixed(callCount>4),0.15,off,0.600,12.5,0.903
+19.2333,0.06000,0.8,0.6,0.0,evidence(>=0.60),0.15,off,0.633,12.0,0.884
+19.5000,0.00000,0.8,0.6,0.08,fixed(callCount>3),0.15,off,0.567,13.0,0.878

@@ -1,0 +1,186 @@
+{
+  "ami": {
+    "n_policies": 11053,
+    "baseline": {
+      "promptsPerPerson": 3.1562,
+      "typesPerPerson": 1.3125,
+      "tapsPerPerson": 1.8438,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.0,
+      "medMeetingsToAuto": -1.0,
+      "suggestPrecision": 0.8113,
+      "meanContamDrift": 0.0333,
+      "nPeople": 32,
+      "appearances": 91
+    },
+    "recommended_target": {
+      "policyId": 9115,
+      "suggestFloor": 0.6,
+      "autoBar": 0.8,
+      "marginMin": 0.12,
+      "promoRule": "evidence",
+      "promoParam": 0.25,
+      "emaAlpha": 0.25,
+      "demote": "off",
+      "promptsPerPerson": 2.5312,
+      "typesPerPerson": 1.375,
+      "tapsPerPerson": 1.1562,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.3438,
+      "medMeetingsToAuto": 3.0,
+      "suggestPrecision": 0.8235,
+      "meanContamDrift": 0.014,
+      "desc": "floor=0.60 auto=0.80 margin=0.12 promo=evidence(>=0.25) alpha=0.25 demote=off mat=1 sep=1"
+    },
+    "recommended_zero_fa": {
+      "promptsPerPerson": 2.5312,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.3438,
+      "medMeetingsToAuto": 3.0,
+      "desc": "floor=0.60 auto=0.80 margin=0.12 promo=evidence(>=0.25) alpha=0.25 demote=off mat=1 sep=1"
+    },
+    "best_fixed": {
+      "promptsPerPerson": 2.7812,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.25,
+      "desc": "floor=0.60 auto=0.80 margin=0.12 promo=fixed(callCount>2) alpha=0.25 demote=off mat=1 sep=1"
+    },
+    "best_evidence": {
+      "promptsPerPerson": 2.5312,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.3438,
+      "desc": "floor=0.60 auto=0.80 margin=0.12 promo=evidence(>=0.25) alpha=0.25 demote=off mat=1 sep=1"
+    },
+    "demote_stats": {
+      "off": {
+        "n": 3675,
+        "meanContamDrift": 0.0311314013605438,
+        "meanFalseAutoRate": 0.038994911564625374,
+        "meanPoisoned": 0.46993197278911564
+      },
+      "demote": {
+        "n": 3702,
+        "meanContamDrift": 0.02948581847649921,
+        "meanFalseAutoRate": 0.11307774176121001,
+        "meanPoisoned": 0.9405726634251755
+      },
+      "demoteUnblend": {
+        "n": 3675,
+        "meanContamDrift": 0.029525823129251765,
+        "meanFalseAutoRate": 0.11390851700680257,
+        "meanPoisoned": 0.9474829931972789
+      }
+    },
+    "demote_paired": {
+      "demote": {
+        "n_pairs": 3675,
+        "meanDeltaFalseAuto": 0.07491360544217622,
+        "meanDeltaDrift": -0.0016736054421768636,
+        "meanDeltaPrompts": 0.1933296870748318,
+        "fracReducesFalseAuto": 0.0,
+        "fracReducesDrift": 0.4897959183673469
+      },
+      "demoteUnblend": {
+        "n_pairs": 3675,
+        "meanDeltaFalseAuto": 0.07491360544217622,
+        "meanDeltaDrift": -0.001605578231292507,
+        "meanDeltaPrompts": 0.1933296870748318,
+        "fracReducesFalseAuto": 0.0,
+        "fracReducesDrift": 0.4897959183673469
+      }
+    },
+    "target": 0.005
+  },
+  "voxceleb": {
+    "n_policies": 11053,
+    "baseline": {
+      "promptsPerPerson": 20.9333,
+      "typesPerPerson": 10.3667,
+      "tapsPerPerson": 10.5667,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.1333,
+      "medMeetingsToAuto": 15.5,
+      "suggestPrecision": 0.8807,
+      "meanContamDrift": 0.0083,
+      "nPeople": 30,
+      "appearances": 599
+    },
+    "recommended_target": {
+      "policyId": 9022,
+      "suggestFloor": 0.6,
+      "autoBar": 0.8,
+      "marginMin": 0.08,
+      "promoRule": "fixed",
+      "promoParam": 3.0,
+      "emaAlpha": 0.15,
+      "demote": "off",
+      "promptsPerPerson": 19.5,
+      "typesPerPerson": 10.3667,
+      "tapsPerPerson": 9.1333,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.5667,
+      "medMeetingsToAuto": 13.0,
+      "suggestPrecision": 0.8785,
+      "meanContamDrift": 0.0083,
+      "desc": "floor=0.60 auto=0.80 margin=0.08 promo=fixed(callCount>3) alpha=0.15 demote=off mat=1 sep=1"
+    },
+    "recommended_zero_fa": {
+      "promptsPerPerson": 19.5,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.5667,
+      "medMeetingsToAuto": 13.0,
+      "desc": "floor=0.60 auto=0.80 margin=0.08 promo=fixed(callCount>3) alpha=0.15 demote=off mat=1 sep=1"
+    },
+    "best_fixed": {
+      "promptsPerPerson": 19.5,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.5667,
+      "desc": "floor=0.60 auto=0.80 margin=0.08 promo=fixed(callCount>3) alpha=0.15 demote=off mat=1 sep=1"
+    },
+    "best_evidence": {
+      "promptsPerPerson": 19.5333,
+      "falseAutoRate": 0.0,
+      "pctReachedAuto": 0.5667,
+      "desc": "floor=0.60 auto=0.80 margin=0.08 promo=evidence(>=0.60) alpha=0.15 demote=off mat=1 sep=1"
+    },
+    "demote_stats": {
+      "off": {
+        "n": 3675,
+        "meanContamDrift": 0.01758454421768677,
+        "meanFalseAutoRate": 0.12051066666666728,
+        "meanPoisoned": 0.8
+      },
+      "demote": {
+        "n": 3702,
+        "meanContamDrift": 0.017471799027552404,
+        "meanFalseAutoRate": 0.09460715829281477,
+        "meanPoisoned": 0.7544570502431118
+      },
+      "demoteUnblend": {
+        "n": 3675,
+        "meanContamDrift": 0.021884761904762063,
+        "meanFalseAutoRate": 0.13213001360544194,
+        "meanPoisoned": 0.7583673469387755
+      }
+    },
+    "demote_paired": {
+      "demote": {
+        "n_pairs": 3675,
+        "meanDeltaFalseAuto": -0.025371700680272113,
+        "meanDeltaDrift": -4.527891156462607e-05,
+        "meanDeltaPrompts": 0.38862737414966764,
+        "fracReducesFalseAuto": 0.3333333333333333,
+        "fracReducesDrift": 0.1404081632653061
+      },
+      "demoteUnblend": {
+        "n_pairs": 3675,
+        "meanDeltaFalseAuto": 0.01161934693877556,
+        "meanDeltaDrift": 0.004300217687074825,
+        "meanDeltaPrompts": 0.3488532789115637,
+        "fracReducesFalseAuto": 0.15401360544217688,
+        "fracReducesDrift": 0.004625850340136055
+      }
+    },
+    "target": 0.005
+  }
+}

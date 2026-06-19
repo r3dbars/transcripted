@@ -6,16 +6,19 @@ import Accelerate
 extension Transcription {
 
     /// Result of matching against an in-memory snapshot of profiles
-    struct SnapshotMatchResult {
-        let profileId: UUID
-        let similarity: Double
+    ///
+    /// `public` (visibility only — no behavior change) so the headless speaker-eval
+    /// harness can call the real production matcher instead of reimplementing it.
+    public struct SnapshotMatchResult {
+        public let profileId: UUID
+        public let similarity: Double
     }
 
     // MARK: - Embedding Utilities
 
     /// Compute the L2-normalized mean of multiple embeddings.
     /// Averaging reduces per-segment noise, producing a more stable speaker fingerprint.
-    nonisolated static func computeMeanEmbedding(_ embeddings: [[Float]]) -> [Float] {
+    nonisolated public static func computeMeanEmbedding(_ embeddings: [[Float]]) -> [Float] {
         guard let first = embeddings.first else { return [] }
         let dim = first.count
         guard dim > 0 else { return [] }
@@ -50,7 +53,7 @@ extension Transcription {
     /// Includes two safeguards against false positives:
     /// - **Maturity bonus**: Immature profiles (callCount ≤ 2) require +0.08 higher similarity
     /// - **Separation check**: Rejects match if two profiles are within 0.05 (ambiguous)
-    nonisolated static func matchAgainstProfiles(
+    nonisolated public static func matchAgainstProfiles(
         _ embedding: [Float],
         profiles: [SpeakerProfile],
         threshold: Double
@@ -144,7 +147,7 @@ extension Transcription {
     }
 
     /// Static cosine similarity (no instance needed — used in nonisolated static context)
-    nonisolated static func cosineSimilarityStatic(_ a: [Float], _ b: [Float]) -> Double {
+    nonisolated public static func cosineSimilarityStatic(_ a: [Float], _ b: [Float]) -> Double {
         guard a.count == b.count, !a.isEmpty else { return 0 }
 
         var dotProduct: Float = 0

@@ -1,0 +1,7 @@
+promptsPerPerson,falseAutoRate,autoBar,suggestFloor,marginMin,promo,emaAlpha,demote,pctReachedAuto,medMeetingsToAuto,suggestPrecision
+2.3438,0.12500,0.8,0.5,0.0,evidence(>=0.25),0.25,off,0.438,3.0,0.742
+2.3750,0.08700,0.8,0.5,0.0,evidence(>=0.25),0.15,off,0.438,3.0,0.733
+2.4062,0.05560,0.8,0.6,0.0,evidence(>=0.25),0.15,off,0.375,3.0,0.867
+2.4688,0.05000,0.8,0.55,0.08,evidence(>=0.25),0.25,off,0.406,3.0,0.758
+2.5000,0.04760,0.8,0.5,0.12,evidence(>=0.25),0.25,off,0.406,3.0,0.706
+2.5312,0.00000,0.8,0.6,0.12,evidence(>=0.25),0.25,off,0.344,3.0,0.824

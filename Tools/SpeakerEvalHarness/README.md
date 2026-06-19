@@ -44,6 +44,32 @@ speaker-eval-harness replay --inputs a.json,b.json,c.json,d.json \
     --consolidation none|0.88 --match 0.6 --out result.json
 ```
 
+## Confidence-ladder sweep (multi-meeting AUTO/SUGGEST/UNKNOWN promotion)
+
+Measures **how few times a user must TYPE or TAP** before a returning speaker is
+auto-recognized, at near-zero false auto-naming, across a swept gate-policy grid. Reuses the
+real matcher + EMA blend (proven by `ladder-parity`). See **[LADDER_SWEEP_REPORT.md](LADDER_SWEEP_REPORT.md)**
+and **[ladder_results/](ladder_results/)** (committed frontier + Pareto plot).
+
+```bash
+# 0. prove the simulator math == production (CI gate)
+speaker-eval-harness ladder-parity
+
+# 1. batch-diarize many short clips with ONE model load (e.g. VoxCeleb singles)
+speaker-eval-harness dump-batch --audio-dir <wavs> --out-dir <dumps> [--suffix .wav]
+
+# 2. real EmbeddingClusterer.postProcess + computeMeanEmbedding -> per-(speaker,meeting)
+#    fingerprint cache; clusters attributed to ground truth by max RTTM overlap
+speaker-eval-harness ladder-fingerprints --dumps <dumps> --rttm <rttm> --corpus NAME \
+    --out fingerprints.json [--namespace-speakers]   # namespace for per-file labels (VoxConverse)
+
+# 3. sweep 11k policies (floor × autoBar × margin × promotion{fixed,evidence} × alpha × demote)
+speaker-eval-harness ladder-sweep --fingerprints fingerprints.json --corpus NAME --out-dir <dir>
+
+# 4. Pareto frontier + recommended operating point per domain
+python3 scripts/ladder/analyze_ladder.py ami voxceleb
+```
+
 ## Run the whole thing
 
 ```bash
