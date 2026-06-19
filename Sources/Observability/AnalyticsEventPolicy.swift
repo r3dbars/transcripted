@@ -313,6 +313,14 @@ struct AnalyticsEventPolicy: Equatable {
                 "step_index",
             ]
         ),
+        "onboarding_exited": .init(
+            name: "onboarding_exited",
+            allowedProperties: [
+                "elapsed_bucket",
+                "last_step_id",
+                "permission_readiness",
+            ]
+        ),
         "activation_artifact_action_clicked": .init(
             name: "activation_artifact_action_clicked",
             allowedProperties: activationArtifactActionProperties

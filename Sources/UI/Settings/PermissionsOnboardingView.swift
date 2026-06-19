@@ -50,6 +50,7 @@ struct PermissionsOnboardingView: View {
     @State private var flowStartedAt: CFAbsoluteTime?
     @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
+    @State private var didTrackExit = false
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
     @FocusState private var demoEditorFocused: Bool
 
@@ -117,6 +118,7 @@ struct PermissionsOnboardingView: View {
             trackCurrentStepViewed()
         }
         .onDisappear {
+            trackExitIfNeeded()
             stopPolling()
             copiedResetTask?.cancel()
         }
@@ -614,6 +616,21 @@ struct PermissionsOnboardingView: View {
         )
     }
 
+    private func trackExitIfNeeded() {
+        guard !didTrackCompletion, !didTrackExit else { return }
+        didTrackExit = true
+
+        let now = CFAbsoluteTimeGetCurrent()
+        AnalyticsReporter.track(
+            "onboarding_exited",
+            properties: [
+                "elapsed_bucket": flowElapsedBucket(now: now),
+                "last_step_id": currentStep.kind.analyticsID,
+                "permission_readiness": onboardingPermissionReadiness,
+            ]
+        )
+    }
+
     private func requestPermission(_ kind: TranscriptedPermissionKind, required: Bool) {
         AnalyticsReporter.track(
             "onboarding_permission_cta_clicked",
@@ -708,6 +725,10 @@ struct PermissionsOnboardingView: View {
 
     private func permissionStatus(for kind: TranscriptedPermissionKind) -> String {
         currentPermissionStatuses()[kind] ?? "unknown"
+    }
+
+    private var onboardingPermissionReadiness: String {
+        hasRequiredPermissions ? "required_ready" : "missing_required"
     }
 
     static var hasCompleted: Bool {

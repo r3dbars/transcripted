@@ -24,6 +24,7 @@ func testAnalyticsEventPolicy() {
         let agentClicked = AnalyticsEventPolicy.policy(forEvent: "onboarding_agent_cta_clicked")
         let completed = AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")
         let dismissed = AnalyticsEventPolicy.policy(forEvent: "onboarding_dismissed")
+        let exited = AnalyticsEventPolicy.policy(forEvent: "onboarding_exited")
 
         assertEqual(shown?.allowedProperties.contains("meeting_recording_ready"), true, "onboarding shown should preserve meeting-readiness attribution")
         assertEqual(stepViewed?.allowedProperties.contains("flow_elapsed_bucket"), true, "step views should preserve coarse elapsed time")
@@ -36,25 +37,39 @@ func testAnalyticsEventPolicy() {
         assertEqual(completed?.allowedProperties.contains("first_dictation_saved"), true, "completion should preserve whether first value happened")
         assertEqual(completed?.allowedProperties.contains("flow_elapsed_bucket"), true, "completion should preserve coarse time to finish")
         assertEqual(dismissed?.allowedProperties.contains("step_index"), true, "dismissal should preserve where users dropped")
+        assertEqual(exited?.allowedProperties ?? Set<String>(), ["elapsed_bucket", "last_step_id", "permission_readiness"], "exit telemetry should stay limited to step, elapsed bucket, and coarse permission readiness")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
+                "elapsed_bucket": "30_119s",
+                "last_step_id": "permissions",
                 "meeting_recording_ready": "true",
+                "permission_readiness": "missing_required",
                 "permission_kind": "system_recording",
                 "flow_elapsed_bucket": "30_119s",
                 "step_id": "meeting_setup",
+                "microphone_ready": "false",
+                "permission_detail": "Microphone denied in System Settings",
             ],
             allowedKeys: [
+                "elapsed_bucket",
                 "flow_elapsed_bucket",
+                "last_step_id",
                 "meeting_recording_ready",
+                "permission_readiness",
                 "permission_kind",
                 "step_id",
             ]
         )
+        assertEqual(sanitized["elapsed_bucket"], "30_119s", "exit elapsed bucket should survive sanitization")
+        assertEqual(sanitized["last_step_id"], "permissions", "exit last step should survive sanitization")
+        assertEqual(sanitized["permission_readiness"], "missing_required", "coarse permission readiness should survive sanitization")
         assertEqual(sanitized["meeting_recording_ready"], "true", "meeting_recording_ready should avoid the audio-key sanitizer drop")
         assertEqual(sanitized["permission_kind"], "system_recording", "permission kind should survive as a coarse enum")
         assertEqual(sanitized["flow_elapsed_bucket"], "30_119s", "coarse elapsed buckets should survive sanitization")
         assertEqual(sanitized["step_id"], "meeting_setup", "step id should survive sanitization")
+        assertNil(sanitized["microphone_ready"], "exit telemetry should not allow per-permission readiness keys")
+        assertNil(sanitized["permission_detail"], "exit telemetry should not allow raw permission details")
     }
 
     runSuite("AnalyticsEventPolicy pins active onboarding activation events") {
