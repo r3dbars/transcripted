@@ -48,6 +48,8 @@ RELEVANT_EVENTS = (
     "activation_return_proxy_observed",
     "activation_first_artifact_saved",
     "agent_capture_query_observed",
+    "workflow_recovery_attempted",
+    "workflow_recovery_finished",
 )
 
 WORKFLOW_EVENTS = (
@@ -61,6 +63,13 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "workflow_recovery_attempted",
+    "workflow_recovery_finished",
+)
+
+RECOVERY_EVENTS = (
+    "workflow_recovery_attempted",
+    "workflow_recovery_finished",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {
@@ -410,6 +419,28 @@ LIMIT 60
 """
 
 
+def recovery_outcomes_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  event,
+  properties['workflow_kind'] AS workflow_kind,
+  properties['failure_kind'] AS failure_kind,
+  properties['retry_source'] AS retry_source,
+  properties['result'] AS result,
+  properties['surface'] AS surface,
+  properties['artifact_retained'] AS artifact_retained,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ({sql_list(RECOVERY_EVENTS)})
+  {app_version_filter(app_version)}
+GROUP BY event, workflow_kind, failure_kind, retry_source, result, surface, artifact_retained
+ORDER BY events DESC
+LIMIT 80
+"""
+
+
 def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
     load_env()
     host, project_id, token = posthog_config()
@@ -422,6 +453,7 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "onboarding_completion": onboarding_completion_query(days, app_version),
         "artifact_actions": artifact_actions_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
+        "recovery_outcomes": recovery_outcomes_query(days, app_version),
     }
 
     results = {
@@ -629,6 +661,11 @@ def render_report(data: dict[str, Any]) -> str:
             data["results"].get("agent_signals", []),
             ["event", "prompt_kind", "setup_kind", "agent_target", "result", "surface", "events", "devices"],
         ),
+        render_top_rows(
+            "Workflow Recovery",
+            data["results"].get("recovery_outcomes", []),
+            ["event", "workflow_kind", "failure_kind", "retry_source", "result", "surface", "artifact_retained", "events", "devices"],
+        ),
         "## Data Limitations",
         "",
         "\n".join(f"- {item}" for item in limitations),
@@ -683,6 +720,19 @@ def run_self_test() -> int:
             "onboarding_completion": [],
             "artifact_actions": [],
             "agent_signals": [],
+            "recovery_outcomes": [
+                {
+                    "event": "workflow_recovery_finished",
+                    "workflow_kind": "meeting_transcription",
+                    "failure_kind": "models_not_ready",
+                    "retry_source": "queued_transcription",
+                    "result": "success",
+                    "surface": "meeting",
+                    "artifact_retained": "true",
+                    "events": 2,
+                    "devices": 2,
+                }
+            ],
         },
     }
     report = render_report(sample)
@@ -703,6 +753,7 @@ def run_self_test() -> int:
         onboarding_completion_query(30, None),
         artifact_actions_query(30, None),
         agent_signals_query(30, None),
+        recovery_outcomes_query(30, None),
     ):
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)

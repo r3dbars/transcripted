@@ -960,6 +960,14 @@ struct TranscriptedSettingsView: View {
                 "setup_profile": selectedLocalSummaryProviderProfileName,
             ]
         )
+        let localSummaryStartedAt = CFAbsoluteTimeGetCurrent()
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "local_summary",
+            failureKind: hasExistingSummary ? "regenerate_requested" : "summary_missing",
+            retrySource: "home_summary_action",
+            surface: "home",
+            artifactRetained: true
+        )
         clearHomeLocalSummaryNotice()
         homeLocalSummaryJobIDs.insert(summaryID)
 
@@ -1007,6 +1015,15 @@ struct TranscriptedSettingsView: View {
                         "profile": result.profileName,
                     ]
                 )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "local_summary",
+                    failureKind: hasExistingSummary ? "regenerate_requested" : "summary_missing",
+                    retrySource: "home_summary_action",
+                    result: "success",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - localSummaryStartedAt,
+                    surface: "home",
+                    artifactRetained: true
+                )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
                 recordLocalSummaryEvent(
@@ -1015,6 +1032,15 @@ struct TranscriptedSettingsView: View {
                     context: [
                         "provider": provider.rawValue,
                     ]
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "local_summary",
+                    failureKind: hasExistingSummary ? "regenerate_requested" : "summary_missing",
+                    retrySource: "home_summary_action",
+                    result: "gave_up",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - localSummaryStartedAt,
+                    surface: "home",
+                    artifactRetained: true
                 )
                 return
             } catch {
@@ -1027,6 +1053,15 @@ struct TranscriptedSettingsView: View {
                         "provider": provider.rawValue,
                         "error": error.localizedDescription,
                     ]
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "local_summary",
+                    failureKind: localSummaryFailureKind(for: error),
+                    retrySource: "home_summary_action",
+                    result: "failed",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - localSummaryStartedAt,
+                    surface: "home",
+                    artifactRetained: true
                 )
                 NSSound.beep()
                 presentHomeLocalSummaryNotice(
@@ -3244,6 +3279,14 @@ struct TranscriptedSettingsView: View {
                 "setup_profile": selectedLocalSummaryProviderProfileName,
             ]
         )
+        let modelPreparationStartedAt = CFAbsoluteTimeGetCurrent()
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "model_preparation",
+            failureKind: "summary_model_not_ready",
+            retrySource: "summary_model_prepare",
+            surface: "settings",
+            artifactRetained: false
+        )
 
         let taskToken = UUID()
         let task = Task.detached(priority: .utility) {
@@ -3274,6 +3317,15 @@ struct TranscriptedSettingsView: View {
                         "profile": profile,
                     ]
                 )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "model_preparation",
+                    failureKind: "summary_model_not_ready",
+                    retrySource: "summary_model_prepare",
+                    result: "success",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelPreparationStartedAt,
+                    surface: "settings",
+                    artifactRetained: false
+                )
             } catch is CancellationError {
                 guard localSummaryModelPreparationToken == taskToken else { return }
                 isLocalSummaryModelPreparing = false
@@ -3286,6 +3338,15 @@ struct TranscriptedSettingsView: View {
                     context: [
                         "provider": provider.rawValue,
                     ]
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "model_preparation",
+                    failureKind: "summary_model_not_ready",
+                    retrySource: "summary_model_prepare",
+                    result: "gave_up",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelPreparationStartedAt,
+                    surface: "settings",
+                    artifactRetained: false
                 )
             } catch {
                 guard localSummaryModelPreparationToken == taskToken else { return }
@@ -3302,6 +3363,15 @@ struct TranscriptedSettingsView: View {
                         "provider": provider.rawValue,
                         "error": error.localizedDescription,
                     ]
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "model_preparation",
+                    failureKind: localSummaryFailureKind(for: error),
+                    retrySource: "summary_model_prepare",
+                    result: "failed",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelPreparationStartedAt,
+                    surface: "settings",
+                    artifactRetained: false
                 )
             }
         }
@@ -3396,6 +3466,32 @@ struct TranscriptedSettingsView: View {
             message: message,
             context: context
         )
+    }
+
+    private func localSummaryFailureKind(for error: Error) -> String {
+        guard let summaryError = error as? LocalMeetingSummaryError else {
+            return "unknown"
+        }
+        switch summaryError {
+        case .emptyTranscript:
+            return "empty_content"
+        case .insufficientMemory:
+            return "insufficient_memory"
+        case .runtimeUnavailable:
+            return "runtime_unavailable"
+        case .appleFoundationUnavailable:
+            return "runtime_unavailable"
+        case .missingBundledRunner:
+            return "runner_missing"
+        case .transcriptChanged:
+            return "artifact_changed"
+        case .processTimedOut:
+            return "timeout"
+        case .processFailed:
+            return "process_failed"
+        case .outputMissing:
+            return "output_missing"
+        }
     }
 
     private func openUVInstallGuide() {

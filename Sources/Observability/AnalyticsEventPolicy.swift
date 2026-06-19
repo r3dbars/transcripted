@@ -163,6 +163,17 @@ struct AnalyticsEventPolicy: Equatable {
         "source",
     ]
 
+    private static let workflowRecoveryProperties: Set<String> = [
+        "artifact_retained",
+        "attempt_bucket",
+        "elapsed_bucket",
+        "failure_kind",
+        "result",
+        "retry_source",
+        "surface",
+        "workflow_kind",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -338,6 +349,14 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "workflow_recovery_attempted": .init(
+            name: "workflow_recovery_attempted",
+            allowedProperties: workflowRecoveryProperties.subtracting(["elapsed_bucket", "result"])
+        ),
+        "workflow_recovery_finished": .init(
+            name: "workflow_recovery_finished",
+            allowedProperties: workflowRecoveryProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",

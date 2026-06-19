@@ -912,6 +912,11 @@ class DictationSessionController: ObservableObject {
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
             let pasteOutcome = self.pasteWithClipboardRestore(text)
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
+            self.trackPastebackRecoveryIfNeeded(
+                pasteOutcome,
+                elapsedSeconds: (stopTiming.pastedAt ?? CFAbsoluteTimeGetCurrent())
+                    - (stopTiming.pasteStartedAt ?? CFAbsoluteTimeGetCurrent())
+            )
             let autoSendOutcome: DictationAutoSendOutcome
             let saveFailureMessage: String?
             switch DictationStopFinalizationPolicy.order {
@@ -1631,6 +1636,41 @@ class DictationSessionController: ObservableObject {
         AnalyticsReporter.track(
             "dictation_stop_latency_measured",
             properties: analyticsProperties
+        )
+    }
+
+    private func trackPastebackRecoveryIfNeeded(
+        _ pasteOutcome: DictationPasteOutcome,
+        elapsedSeconds: TimeInterval
+    ) {
+        let failureKind: String
+        let result: String
+        switch pasteOutcome {
+        case .pasted:
+            return
+        case .copied(_, reason: let reason):
+            failureKind = reason.diagnosticName
+            result = "success"
+        case .failed:
+            failureKind = "pasteback_unavailable"
+            result = "gave_up"
+        }
+
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "pasteback",
+            failureKind: failureKind,
+            retrySource: "clipboard_fallback",
+            surface: "dictation",
+            artifactRetained: true
+        )
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "pasteback",
+            failureKind: failureKind,
+            retrySource: "clipboard_fallback",
+            result: result,
+            elapsedSeconds: elapsedSeconds,
+            surface: "dictation",
+            artifactRetained: true
         )
     }
 

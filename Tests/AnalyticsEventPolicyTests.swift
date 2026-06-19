@@ -65,6 +65,7 @@ func testAnalyticsEventPolicy() {
             "anonymous_usage_enabled",
             "app_signal",
             "app_version",
+            "artifact_retained",
             "artifact_kind",
             "attenuation_kind",
             "auto_send",
@@ -163,6 +164,7 @@ func testAnalyticsEventPolicy() {
             "reporting_kind",
             "required",
             "result",
+            "retry_source",
             "route_ready",
             "route_shape",
             "sample_flow_started",
@@ -200,6 +202,7 @@ func testAnalyticsEventPolicy() {
             "voice_processing",
             "voice_processing_active",
             "was_recording",
+            "workflow_kind",
         ]
         let properties = allAllowedAnalyticsPropertyNames()
 
@@ -749,6 +752,60 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["recovery_latency_bucket"], "2_9m", "route recovery latency bucket should survive sanitization")
         assertEqual(sanitized["selected_input_class"], "built_in", "selected input class should survive sanitization")
         assertEqual(sanitized["was_recording"], "true", "recording interruption state should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy allows workflow recovery lifecycle events") {
+        let attempted = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_attempted")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_finished")
+
+        assertEqual(
+            attempted?.allowedProperties ?? Set<String>(),
+            [
+                "artifact_retained",
+                "attempt_bucket",
+                "failure_kind",
+                "retry_source",
+                "surface",
+                "workflow_kind",
+            ],
+            "recovery attempts should carry only coarse workflow shape"
+        )
+        assertEqual(
+            finished?.allowedProperties ?? Set<String>(),
+            [
+                "artifact_retained",
+                "attempt_bucket",
+                "elapsed_bucket",
+                "failure_kind",
+                "result",
+                "retry_source",
+                "surface",
+                "workflow_kind",
+            ],
+            "recovery finishes should add result and elapsed bucket only"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "meeting_transcription",
+                "failure_kind": "models_not_ready",
+                "retry_source": "queued_transcription",
+                "attempt_bucket": "1",
+                "result": "success",
+                "elapsed_bucket": "10_29s",
+                "surface": "meeting",
+                "artifact_retained": "true",
+                "error": "raw error",
+                "transcript_path": "/private/tmp/meeting.md",
+            ],
+            allowedKeys: finished?.allowedProperties ?? Set<String>()
+        )
+        assertEqual(sanitized["workflow_kind"], "meeting_transcription", "workflow kind should survive")
+        assertEqual(sanitized["failure_kind"], "models_not_ready", "failure kind should survive")
+        assertEqual(sanitized["retry_source"], "queued_transcription", "retry source should survive")
+        assertEqual(sanitized["result"], "success", "result should survive")
+        assertNil(sanitized["error"], "raw errors must not be sent")
+        assertNil(sanitized["transcript_path"], "transcript paths must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {

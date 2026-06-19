@@ -917,6 +917,13 @@ class ParakeetEngine: ObservableObject {
         configChangeWasRecording = false
         let myGeneration = recoveryState.generation
         let recoveryStartedAt = CFAbsoluteTimeGetCurrent()
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "dictation",
+            failureKind: "route_changed",
+            retrySource: "audio_route_recovery",
+            surface: "runtime",
+            artifactRetained: shouldRestartRecording
+        )
 
         configRecoveryTask = Task { @MainActor [weak self] in
             // Wait for CoreAudio to finish settling the new device graph.
@@ -983,7 +990,6 @@ class ParakeetEngine: ObservableObject {
                         ]
                     )
                 )
-
                 // If we were recording, try to restart on the new device.
                 // The watchdog (via isRecoveryAttempt=false) catches silent
                 // failures where the device looks functional but produces no
@@ -1004,6 +1010,15 @@ class ParakeetEngine: ObservableObject {
                                     "sample_rate": "\(self.safeNativeSampleRate())",
                                     "attempts": "\(attempt)"
                                 ])
+                            WorkflowRecoveryTelemetry.finished(
+                                workflowKind: "dictation",
+                                failureKind: "route_changed",
+                                retrySource: "audio_route_recovery",
+                                result: "success",
+                                elapsedSeconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt,
+                                surface: "runtime",
+                                artifactRetained: true
+                            )
                             break
                         }
                         // BT format negotiation can take ~1-2s; wait between attempts.
@@ -1023,7 +1038,26 @@ class ParakeetEngine: ObservableObject {
                                     "reason": "recording_restart_budget_exhausted"
                                 ]
                             ))
+                        WorkflowRecoveryTelemetry.finished(
+                            workflowKind: "dictation",
+                            failureKind: "route_changed",
+                            retrySource: "audio_route_recovery",
+                            result: "gave_up",
+                            elapsedSeconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt,
+                            surface: "runtime",
+                            artifactRetained: false
+                        )
                     }
+                } else {
+                    WorkflowRecoveryTelemetry.finished(
+                        workflowKind: "dictation",
+                        failureKind: "route_changed",
+                        retrySource: "audio_route_recovery",
+                        result: "success",
+                        elapsedSeconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt,
+                        surface: "runtime",
+                        artifactRetained: false
+                    )
                 }
             } catch {
                 guard !self.recoveryState.isStale(generation: myGeneration) else { return }
@@ -1047,6 +1081,15 @@ class ParakeetEngine: ObservableObject {
                             "was_recording": "\(shouldRestartRecording)"
                         ]
                     )
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "dictation",
+                    failureKind: "route_changed",
+                    retrySource: "audio_route_recovery",
+                    result: "failed",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt,
+                    surface: "runtime",
+                    artifactRetained: shouldRestartRecording
                 )
                 if failureAction.markRecordingInterrupted {
                     self.interruptRecordingAndClearRecoveredTimeline()
@@ -1124,6 +1167,15 @@ class ParakeetEngine: ObservableObject {
                         "was_recording": "\(wasRecording)"
                     ]
                 )
+            )
+            WorkflowRecoveryTelemetry.finished(
+                workflowKind: "dictation",
+                failureKind: "route_changed",
+                retrySource: "audio_route_recovery",
+                result: "gave_up",
+                elapsedSeconds: Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000,
+                surface: "runtime",
+                artifactRetained: wasRecording
             )
             let diagnosticsEvent = failureAction.reportSentryFailure
                 ? "device_change_recovery_timeout"
