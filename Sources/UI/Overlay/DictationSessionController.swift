@@ -60,6 +60,7 @@ class DictationSessionController: ObservableObject {
     private var sessionStartTime: CFAbsoluteTime = 0
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
+    private var pendingRetryTelemetry: PendingDictationRetryTelemetry?
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
@@ -111,6 +112,7 @@ class DictationSessionController: ObservableObject {
         currentDictationTrigger = trigger
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
+        recordDictationRetryStartedIfNeeded(trigger: trigger)
 
         switch TranscriptedPermissionAccess.microphoneAuthorizationStatus() {
         case .authorized:
@@ -186,6 +188,7 @@ class DictationSessionController: ObservableObject {
         _ failureKind: String,
         extra: [String: String] = [:]
     ) {
+        markDictationRetryCandidate(failureKind: failureKind)
         var properties = extra
         properties["failure_kind"] = failureKind
         properties["trigger"] = currentDictationTrigger.rawValue
@@ -616,6 +619,10 @@ class DictationSessionController: ObservableObject {
             actionTitle: "Try Again",
             action: { [weak self] in
                 guard let self else { return }
+                self.markDictationRetryCandidate(
+                    failureKind: cleanupPlan.outcome,
+                    retrySource: "error_action"
+                )
                 self.startDictation(sourceApp: sourceApp, trigger: self.currentDictationTrigger)
             }
         )
@@ -681,6 +688,10 @@ class DictationSessionController: ObservableObject {
                             )
                             return
                         }
+                        self.markDictationRetryCandidate(
+                            failureKind: self.dictationStartFailureKind(for: status),
+                            retrySource: "permission_action"
+                        )
                         self.startDictation(
                             sourceApp: sourceApp,
                             trigger: self.currentDictationTrigger,
@@ -690,6 +701,10 @@ class DictationSessionController: ObservableObject {
                 case .denied, .restricted:
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 case .authorized:
+                    self.markDictationRetryCandidate(
+                        failureKind: self.dictationStartFailureKind(for: status),
+                        retrySource: "error_action"
+                    )
                     self.startDictation(
                         sourceApp: sourceApp,
                         trigger: self.currentDictationTrigger,
@@ -802,6 +817,10 @@ class DictationSessionController: ObservableObject {
                 actionTitle: "Try Again",
                 action: { [weak self] in
                     guard let self else { return }
+                    self.markDictationRetryCandidate(
+                        failureKind: failureKind,
+                        retrySource: "error_action"
+                    )
                     self.startDictation(sourceApp: self.sessionSourceApp, trigger: self.currentDictationTrigger)
                 }
             )
@@ -843,6 +862,7 @@ class DictationSessionController: ObservableObject {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
                     overlayController.showError("The voice model didn't load. Please try dictating again in a moment.")
                     isDictating = false
+                    self.markDictationRetryCandidate(failureKind: "model_unavailable")
                     appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_unavailable")
                     return
                 }
@@ -895,6 +915,7 @@ class DictationSessionController: ObservableObject {
                         ]
                     )
                 )
+                self.markDictationRetryCandidate(failureKind: "no_speech")
                 NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                 AppSoundPlayer.shared.play(.noSpeech)
                 overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue)
@@ -1116,11 +1137,16 @@ class DictationSessionController: ObservableObject {
                 case .failed(let message):
                     self.startupTask = nil
                     self.isDictating = false
+                    self.markDictationRetryCandidate(failureKind: "model_load_failed")
                     appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_failed")
                     overlayController.showError(
                         "Dictation couldn't start: \(message)",
                         actionTitle: "Retry Dictation",
                         action: { [weak self] in
+                            self?.markDictationRetryCandidate(
+                                failureKind: "model_load_failed",
+                                retrySource: "error_action"
+                            )
                             self?.startDictation(
                                 sourceApp: sourceApp,
                                 trigger: self?.currentDictationTrigger ?? .unknown,
@@ -1139,6 +1165,7 @@ class DictationSessionController: ObservableObject {
             guard !Task.isCancelled else { return }
             self.startupTask = nil
             self.isDictating = false
+            self.markDictationRetryCandidate(failureKind: "model_load_timeout")
             appState.runtimeDiagnostics.recordStall(
                 kind: "dictation",
                 stage: "model_load_timeout",
@@ -1150,6 +1177,10 @@ class DictationSessionController: ObservableObject {
                 "Dictation is still loading. Please try again in a moment.",
                 actionTitle: "Retry Dictation",
                 action: { [weak self] in
+                    self?.markDictationRetryCandidate(
+                        failureKind: "model_load_timeout",
+                        retrySource: "error_action"
+                    )
                     self?.startDictation(
                         sourceApp: sourceApp,
                         trigger: self?.currentDictationTrigger ?? .unknown,
@@ -1346,6 +1377,7 @@ class DictationSessionController: ObservableObject {
         isDictating = false
         appState?.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "interrupted")
         appState?.logger.log("DICTATION | interrupted")
+        markDictationRetryCandidate(failureKind: "recording_interrupted")
         DiagnosticsTrail.record(
             logger: appState?.logger,
             level: .warning,
@@ -1363,6 +1395,10 @@ class DictationSessionController: ObservableObject {
             "Recording was interrupted. Check your microphone or audio device, then try again.",
             actionTitle: "Retry Dictation",
             action: { [weak self] in
+                self?.markDictationRetryCandidate(
+                    failureKind: "recording_interrupted",
+                    retrySource: "error_action"
+                )
                 self?.startDictation(
                     sourceApp: self?.sessionSourceApp,
                     trigger: self?.currentDictationTrigger ?? .unknown,
@@ -1658,6 +1694,36 @@ class DictationSessionController: ObservableObject {
         }
         return properties
     }
+
+    private func markDictationRetryCandidate(
+        failureKind: String,
+        retrySource: String = "manual_start_after_failure"
+    ) {
+        pendingRetryTelemetry = PendingDictationRetryTelemetry(
+            failureKind: failureKind,
+            retrySource: retrySource
+        )
+    }
+
+    private func recordDictationRetryStartedIfNeeded(trigger: DictationTrigger) {
+        guard let retry = pendingRetryTelemetry else { return }
+        pendingRetryTelemetry = nil
+        AnalyticsReporter.track(
+            "dictation_retry_started",
+            properties: dictationAnalyticsProperties(
+                extra: [
+                    "failure_kind": retry.failureKind,
+                    "retry_source": retry.retrySource,
+                    "trigger": trigger.rawValue,
+                ]
+            )
+        )
+    }
+}
+
+private struct PendingDictationRetryTelemetry {
+    let failureKind: String
+    let retrySource: String
 }
 
 @MainActor

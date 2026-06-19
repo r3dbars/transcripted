@@ -478,6 +478,14 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
             ]))
         ),
+        "dictation_retry_started": .init(
+            name: "dictation_retry_started",
+            allowedProperties: dictationRouteDiagnosticProperties.union(Set([
+                "failure_kind",
+                "retry_source",
+                "trigger",
+            ]))
+        ),
         "dictation_completed": .init(
             name: "dictation_completed",
             allowedProperties: dictationRouteDiagnosticProperties.union(Set([

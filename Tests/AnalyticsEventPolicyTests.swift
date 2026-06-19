@@ -428,6 +428,40 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "menu", "non-hotkey triggers should remain attributable")
     }
 
+    runSuite("AnalyticsEventPolicy allows dictation retry starts without private payloads") {
+        let retryStarted = AnalyticsEventPolicy.policy(forEvent: "dictation_retry_started")
+
+        assertEqual(retryStarted?.allowedProperties.contains("failure_kind"), true, "dictation retries should preserve the prior failure bucket")
+        assertEqual(retryStarted?.allowedProperties.contains("retry_source"), true, "dictation retries should preserve the coarse retry source")
+        assertEqual(retryStarted?.allowedProperties.contains("route_shape"), true, "dictation retries should preserve safe route shape")
+        assertEqual(retryStarted?.allowedProperties.contains("trigger"), true, "dictation retries should preserve the new start trigger")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "audio_device": "Desk microphone",
+                "failure_kind": "no_speech",
+                "input_device_class": "built_in",
+                "raw_text": "private dictated words",
+                "retry_count": "2",
+                "retry_source": "manual_start_after_failure",
+                "route_shape": "built_in_input_to_bluetooth_output",
+                "source_app_name": "Private editor",
+                "trigger": "physical_key",
+            ],
+            allowedKeys: retryStarted?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["failure_kind"], "no_speech", "prior failure kind should survive as an enum")
+        assertEqual(sanitized["input_device_class"], "built_in", "coarse input class should survive")
+        assertEqual(sanitized["retry_source"], "manual_start_after_failure", "coarse retry source should survive")
+        assertEqual(sanitized["route_shape"], "built_in_input_to_bluetooth_output", "safe route shape should survive")
+        assertEqual(sanitized["trigger"], "physical_key", "retry start trigger should survive")
+        assertNil(sanitized["audio_device"], "raw audio device names should stay out of retry telemetry")
+        assertNil(sanitized["raw_text"], "dictation text should stay out of retry telemetry")
+        assertNil(sanitized["retry_count"], "raw retry counts should stay out of retry telemetry")
+        assertNil(sanitized["source_app_name"], "source app names should stay out of retry telemetry")
+    }
+
     runSuite("AnalyticsEventPolicy allows dictation stop latency only as coarse buckets") {
         let stopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
 
@@ -556,6 +590,7 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
+        let dictationRetryStarted = AnalyticsEventPolicy.policy(forEvent: "dictation_retry_started")
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
         let dictationStopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
@@ -565,6 +600,7 @@ func testAnalyticsEventPolicy() {
         let unknown = AnalyticsEventPolicy.policy(forEvent: "raw_transcript_uploaded")
 
         assertEqual(dictationStartFailed?.allowedProperties.contains("failure_kind"), true, "dictation start failures should allow normalized failure kinds")
+        assertEqual(dictationRetryStarted?.allowedProperties.contains("retry_source"), true, "dictation retry starts should allow only coarse retry source")
         assertEqual(dictationCompleted?.allowedProperties.contains("word_count_bucket"), true, "dictation completion should allow bucketed word counts")
         assertEqual(dictationStopLatency?.allowedProperties.contains("stop_to_paste_bucket"), true, "dictation stop latency should allow only bucketed stop-to-paste timing")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")

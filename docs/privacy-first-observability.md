@@ -120,6 +120,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `settings_capture_library_changed`
 - `dictation_started`
 - `dictation_start_failed`
+- `dictation_retry_started`
 - `dictation_completed`
 - `dictation_stop_latency_measured`
 - `dictation_cancelled`
