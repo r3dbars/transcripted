@@ -167,6 +167,12 @@ extension Audio {
 
                         self.systemBufferCount += 1
                         let currentBufferCount = self.systemBufferCount
+                        if currentBufferCount == 1 {
+                            // First real buffer: the tap is actually streaming
+                            // (not just installed with a file URL). Promote
+                            // meeting-capture readiness past `.waiting`.
+                            self.markSystemAudioStreamingIfCurrent(sessionGeneration: sessionGeneration)
+                        }
 
                         // Calculate system audio level synchronously (fast, no I/O)
                         self.calculateSystemLevel(buffer: systemBuffer)

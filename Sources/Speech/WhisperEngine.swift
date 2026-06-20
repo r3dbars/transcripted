@@ -138,7 +138,10 @@ final class WhisperEngine: ObservableObject {
                 ]
             )
 
-            return trimmed
+            // Apply the user's custom dictionary, mirroring ParakeetEngine.
+            // Without this, proper-noun corrections silently fail on the Whisper
+            // path. The processor is a no-op when the dictionary is empty.
+            return CustomDictionaryTextProcessor.apply(to: trimmed)
         } catch {
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             EventReporter.shared.capture(

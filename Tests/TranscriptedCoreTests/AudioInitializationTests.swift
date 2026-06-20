@@ -542,6 +542,55 @@ final class AudioInitializationTests: XCTestCase {
         )
         XCTAssertNil(audio.error)
     }
+
+    func testSystemAudioStreamingDefaultsFalseAndResetsOnNewStart() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        XCTAssertFalse(
+            audio.systemAudioStreaming,
+            "a fresh Audio must not claim the system-audio tap is streaming before any buffer arrives"
+        )
+
+        audio.systemAudioStreaming = true
+        audio.prepareForNewRecordingStart()
+        XCTAssertFalse(
+            audio.systemAudioStreaming,
+            "each new recording must re-gate readiness on a fresh first system-audio buffer"
+        )
+    }
+
+    func testMarkSystemAudioStreamingOnlyArmsForTheCurrentSession() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.prepareForNewRecordingStart()
+        let currentGeneration = audio.recordingSessionGeneration
+
+        // A buffer tagged with a finished session must not re-arm readiness.
+        let staleHandled = expectation(description: "stale streaming mark drained")
+        audio.markSystemAudioStreamingIfCurrent(sessionGeneration: currentGeneration &- 1)
+        DispatchQueue.main.async { staleHandled.fulfill() }
+        wait(for: [staleHandled], timeout: 1.0)
+        XCTAssertFalse(
+            audio.systemAudioStreaming,
+            "a first buffer from a previous session must not mark the new session as streaming"
+        )
+
+        // The current session's first buffer marks the tap as streaming.
+        let currentHandled = expectation(description: "current streaming mark drained")
+        audio.markSystemAudioStreamingIfCurrent(sessionGeneration: currentGeneration)
+        DispatchQueue.main.async { currentHandled.fulfill() }
+        wait(for: [currentHandled], timeout: 1.0)
+        XCTAssertTrue(
+            audio.systemAudioStreaming,
+            "the current session's first system-audio buffer must mark the tap as streaming"
+        )
+    }
 }
 
 @available(macOS 14.0, *)

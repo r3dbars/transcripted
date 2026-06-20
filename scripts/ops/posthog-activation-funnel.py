@@ -39,6 +39,7 @@ RELEVANT_EVENTS = (
     "onboarding_first_dictation_started",
     "dictation_started",
     "onboarding_first_dictation_saved",
+    "dictation_artifact_saved",
     "dictation_completed",
     "meeting_transcript_saved",
     "activation_artifact_action_clicked",
@@ -56,6 +57,7 @@ WORKFLOW_EVENTS = (
     "app_launched",
     "onboarding_completed",
     "dictation_started",
+    "dictation_artifact_saved",
     "dictation_completed",
     "meeting_recording_started",
     "meeting_transcript_saved",
@@ -128,9 +130,9 @@ REACH_STEPS = (
     StepDefinition(
         "saved_markdown_plus_dictation_proxy_devices",
         "Saved Markdown plus dictation proxy",
-        "event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "event IN ('activation_first_artifact_saved', 'dictation_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
         "proxy",
-        "Adds legacy saved-artifact events and dictation completion as product-success proxies around the strict first-artifact event.",
+        "Adds dictation completion as useful dictation-volume context, but saved Markdown proof comes from saved-artifact events.",
     ),
     StepDefinition(
         "artifact_action_devices",
@@ -190,7 +192,7 @@ SEQUENCE_STEPS = (
     ("Dictation started", "event IN ('onboarding_first_dictation_started', 'dictation_started')"),
     (
         "Saved Markdown or dictation proxy",
-        "event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "event IN ('activation_first_artifact_saved', 'dictation_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
     ),
     (
         "Artifact opened or prompt copied",
@@ -614,7 +616,7 @@ def render_report(data: dict[str, Any]) -> str:
     limitations = [
         "`permission ready` uses `onboarding_completed` as a proxy. The app guards completion on required dictation permissions, but this does not count users who became ready outside onboarding.",
         "`strict saved Markdown` counts `activation_first_artifact_saved`, emitted once per install from successful dictation and meeting Markdown save paths.",
-        "`dictation_completed`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are included only in the proxy saved-Markdown row for legacy continuity.",
+        "`dictation_artifact_saved`, `dictation_completed`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are included only in the broader proxy row for dictation volume and legacy continuity.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`activation_second_artifact_saved` proves a second durable artifact save on the same anonymous device, but does not inspect artifact content or join identity.",
         "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
@@ -623,13 +625,13 @@ def render_report(data: dict[str, Any]) -> str:
 
     recommended_tiles = [
         "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
-        "Saved artifact quality: strict saved Markdown vs dictation-completed proxy, split by artifact kind.",
+        "Saved artifact quality: strict saved Markdown vs dictation-completed volume, split by artifact kind.",
         "Second value moment: `activation_second_artifact_saved` by first/second artifact kind and days-since-first bucket.",
         "Artifact actions: open Markdown, preview, reveal folder, and copy-for-agent surfaces.",
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Abandonment exits: workflow kind, stage, reason kind, surface, and prior-ready state.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
-        "Data quality: missing true-agent-use event and first-artifact adoption by app version.",
+        "Data quality: missing true-agent-use event and the dictation completion-vs-saved-artifact split.",
     ]
 
     lines = [

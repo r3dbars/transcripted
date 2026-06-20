@@ -88,6 +88,7 @@ Operational scripts query aggregate counts only:
 | --- | --- |
 | `activation_artifact_action_clicked` | `action_kind`, `artifact_age_bucket`, `artifact_kind`, `surface` |
 | `activation_first_artifact_saved` | `artifact_kind`, `duration_bucket`, `surface`, `trigger`, `word_count_bucket` |
+| `dictation_artifact_saved` | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `activation_second_artifact_saved` | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
@@ -131,6 +132,7 @@ Dictation events also allow coarse route fields: `default_input_class`,
 | `dictation_started` | `trigger` |
 | `dictation_start_failed` | `failure_kind`, `start_attempt_bucket`, `trigger` |
 | `dictation_completed` | `auto_send`, `delivery`, `duration_bucket`, `trigger`, `word_count_bucket` |
+| `dictation_artifact_saved` | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_stop_latency_measured` | `auto_enter_bucket`, `auto_send`, `cleanup_bucket`, `cleanup_changed`, `cleanup_enabled`, `copy_reason`, `decode_bucket`, `delivery`, `mic_stop_bucket`, `model_wait_bucket`, `outcome`, `paste_bucket`, `save_bucket`, `save_outcome`, `stop_to_done_bucket`, `stop_to_paste_bucket`, `trigger`, `word_count_bucket` |
 | `dictation_cancelled` | `duration_bucket`, `trigger` |
 | `dictation_no_speech` | `duration_bucket`, `trigger` |
@@ -192,8 +194,8 @@ aggregate reliability sizing and should not be expanded to raw device names.
 
 - `agent_capture_query_observed` does not exist yet, so PostHog cannot prove
   that an agent actually answered from a saved Transcripted artifact.
-- General dictation saved-Markdown writes still rely on `dictation_completed`
-  as a proxy, while onboarding dictation and meeting saves have stricter events.
+- General dictation saved-Markdown writes now have `dictation_artifact_saved`;
+  keep `dictation_completed` as completion-volume context, not strict saved-artifact proof.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
 - Local summary beta behavior now has abandonment shape, but not a full success
@@ -213,7 +215,6 @@ Prefer a small number of lifecycle events over broad click tracking.
 | Event | When to fire | Properties |
 | --- | --- | --- |
 | `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
-| `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
 | `meeting_speaker_review_prompted` | A saved meeting has review work surfaced | `participant_count_bucket`, `review_reason`, `surface` |
 | `meeting_speaker_review_completed` | User completes or dismisses speaker review | `participant_count_bucket`, `result`, `surface` |
@@ -321,7 +322,8 @@ diagnosis.
 ### Release Health By App Version
 
 - active devices by `app_version`
-- first successful `dictation_completed`
+- first successful `dictation_artifact_saved`
+- useful dictation completion volume via `dictation_completed`
 - first successful `meeting_transcript_saved`
 - `activation_first_artifact_saved`
 - update lifecycle events
