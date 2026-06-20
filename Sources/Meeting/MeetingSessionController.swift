@@ -3170,19 +3170,6 @@ private extension MeetingWarmupMeetingState {
     }
 }
 
-private extension ParakeetModelState {
-    var diagnosticName: String {
-        switch self {
-        case .notLoaded: return "not_loaded"
-        case .downloading: return "downloading"
-        case .cached: return "cached"
-        case .loading: return "loading"
-        case .ready: return "ready"
-        case .failed: return "failed"
-        }
-    }
-}
-
 private extension DiarizationModelState {
     var diagnosticName: String {
         switch self {

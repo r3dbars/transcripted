@@ -279,7 +279,7 @@ class TranscriptedAppState: ObservableObject {
                     : "Existing-install model files are cached for first use",
                 context: [
                     "model": self.sttRouter.selectedModel.rawValue,
-                    "model_state": self.prefetchModelStateName(self.sttRouter.modelDownloadState),
+                    "model_state": self.sttRouter.modelDownloadState.diagnosticName,
                 ]
             )
         }
@@ -321,17 +321,6 @@ class TranscriptedAppState: ObservableObject {
             return true
         }
         return false
-    }
-
-    private func prefetchModelStateName(_ state: ParakeetModelState) -> String {
-        switch state {
-        case .notLoaded: return "not_loaded"
-        case .downloading: return "downloading"
-        case .cached: return "cached"
-        case .loading: return "loading"
-        case .ready: return "ready"
-        case .failed: return "failed"
-        }
     }
 
     private func startAudioStorageMaintenanceIfNeeded() {

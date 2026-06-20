@@ -142,7 +142,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 guard let self else { return }
                 AnalyticsReporter.track(
                     "meeting_prompt_record_selected",
-                    properties: self.analyticsProperties(for: candidate)
+                    properties: MeetingPromptTelemetry.properties(
+                        for: candidate,
+                        readiness: self.meetingPromptTelemetryReadiness()
+                    )
                 )
                 Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -160,8 +163,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
                 AnalyticsReporter.track(
                     "meeting_prompt_dismissed",
-                    properties: self.analyticsProperties(
+                    properties: MeetingPromptTelemetry.properties(
                         for: candidate,
+                        readiness: self.meetingPromptTelemetryReadiness(),
                         backoffKind: backoffDecision.kind
                     )
                 )
@@ -170,7 +174,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     stage: "prompt_shown",
                     reasonKind: .dismissed,
                     surface: .meetingOverlay,
-                    priorReadyState: self.meetingPromptReadyState()
+                    priorReadyState: MeetingPromptTelemetry.readyState(
+                        readiness: self.meetingPromptTelemetryReadiness()
+                    )
                 )
             }
             meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
@@ -178,8 +184,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
                 AnalyticsReporter.track(
                     "meeting_prompt_dismissed",
-                    properties: self.analyticsProperties(
+                    properties: MeetingPromptTelemetry.properties(
                         for: candidate,
+                        readiness: self.meetingPromptTelemetryReadiness(),
                         backoffKind: backoffDecision.kind
                     )
                 )
@@ -188,21 +195,28 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     stage: "prompt_shown",
                     reasonKind: .remindedLater,
                     surface: .meetingOverlay,
-                    priorReadyState: self.meetingPromptReadyState()
+                    priorReadyState: MeetingPromptTelemetry.readyState(
+                        readiness: self.meetingPromptTelemetryReadiness()
+                    )
                 )
             }
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
                 AnalyticsReporter.track(
                     "meeting_prompt_suppressed",
-                    properties: self.analyticsProperties(for: suppression)
+                    properties: MeetingPromptTelemetry.properties(
+                        for: suppression,
+                        readiness: self.meetingPromptTelemetryReadiness()
+                    )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
                     workflowKind: .meetingPrompt,
                     stage: "pre_prompt",
                     reasonKind: .suppressed,
                     surface: .meetingOverlay,
-                    priorReadyState: self.meetingPromptReadyState()
+                    priorReadyState: MeetingPromptTelemetry.readyState(
+                        readiness: self.meetingPromptTelemetryReadiness()
+                    )
                 )
             }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
@@ -212,7 +226,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 if presented {
                     AnalyticsReporter.track(
                         "meeting_prompt_shown",
-                        properties: self.analyticsProperties(for: candidate)
+                        properties: MeetingPromptTelemetry.properties(
+                            for: candidate,
+                            readiness: self.meetingPromptTelemetryReadiness()
+                        )
                     )
                 }
                 return presented
@@ -655,7 +672,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func trackMenuBarOpened(entrypoint: String) {
-        let modelState = modelStateAnalyticsName(appState.sttRouter.modelDownloadState)
+        let modelState = appState.sttRouter.modelDownloadState.diagnosticName
 
         let updateState: String
         switch appState.sparkleUpdater.updateStatus.state {
@@ -699,41 +716,19 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "has_target": lastExternalApplication == nil ? "false" : "true",
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
                 "mic_status": microphoneStatusAnalyticsName(TranscriptedPermissionAccess.microphoneAuthorizationStatus()),
-                "model_state": modelStateAnalyticsName(appState.sttRouter.modelDownloadState),
+                "model_state": appState.sttRouter.modelDownloadState.diagnosticName,
                 "pasteback_status": TranscriptedPermissionAccess.isGranted(.accessibility) ? "granted" : "not_granted",
             ]
         )
     }
 
-    private func meetingPromptReadyState() -> String {
-        if appState.meetingSession.isRecording {
-            return "recording_active"
-        }
-        if appState.sttRouter.isRecording {
-            return "dictation_active"
-        }
-        if TranscriptedPermissionAccess.isGranted(.microphone),
-           TranscriptedPermissionAccess.isGranted(.systemAudioRecording) {
-            return "ready"
-        }
-        return "not_ready"
-    }
-
-    private func modelStateAnalyticsName(_ state: ParakeetModelState) -> String {
-        switch state {
-        case .notLoaded:
-            return "not_loaded"
-        case .downloading:
-            return "downloading"
-        case .cached:
-            return "cached"
-        case .loading:
-            return "loading"
-        case .ready:
-            return "ready"
-        case .failed:
-            return "failed"
-        }
+    private func meetingPromptTelemetryReadiness() -> MeetingPromptTelemetryReadiness {
+        MeetingPromptTelemetryReadiness(
+            microphoneGranted: TranscriptedPermissionAccess.isGranted(.microphone),
+            systemAudioRecordingGranted: TranscriptedPermissionAccess.isGranted(.systemAudioRecording),
+            meetingRecordingActive: appState.meetingSession.isRecording,
+            dictationRecordingActive: appState.sttRouter.isRecording
+        )
     }
 
     private func microphoneStatusAnalyticsName(_ status: AVAuthorizationStatus) -> String {
@@ -873,59 +868,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 
-    private func analyticsProperties(
-        for candidate: MeetingPromptDetector.Candidate,
-        backoffKind: MeetingPromptBackoffKind? = nil
-    ) -> [String: String] {
-        var properties = [
-            "app_signal": candidate.analyticsAppSignal,
-            "calendar_confidence": candidate.analyticsCalendarConfidence,
-            "call_state": candidate.analyticsCallState,
-            "missing_permission": missingMeetingRoutePermission(),
-            "prompt_reason": candidate.reason.rawValue,
-            "provider": candidate.provider.rawValue,
-            "route_ready": meetingRouteReady() ? "true" : "false",
-            "source": candidate.source.analyticsValue,
-        ]
-        if let backoffKind {
-            properties["backoff_kind"] = backoffKind.rawValue
-            properties["cooldown_reason"] = backoffKind.rawValue
-        }
-        return properties
-    }
-
-    private func analyticsProperties(for suppression: MeetingPromptSuppression) -> [String: String] {
-        var properties = analyticsProperties(for: suppression.candidate)
-        properties["suppression_reason"] = suppression.reason.rawValue
-        if let cooldownReason = suppression.cooldownReason {
-            properties["cooldown_reason"] = cooldownReason
-        }
-        if let captureActivity = suppression.captureActivity {
-            properties["capture_activity"] = captureActivity.rawValue
-        }
-        return properties
-    }
-
-    private func meetingRouteReady() -> Bool {
-        TranscriptedPermissionAccess.isGranted(.microphone)
-            && TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
-    }
-
-    private func missingMeetingRoutePermission() -> String {
-        let microphoneGranted = TranscriptedPermissionAccess.isGranted(.microphone)
-        let systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
-        switch (microphoneGranted, systemAudioGranted) {
-        case (true, true):
-            return "none"
-        case (false, false):
-            return "microphone_and_system_audio_recording"
-        case (false, true):
-            return "microphone"
-        case (true, false):
-            return "system_audio_recording"
-        }
-    }
-
     // MARK: - Menu Bar Commands
 
     /// Thin entry points for `TranscriptedMenuCommands`. They live here (rather
@@ -965,18 +907,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         menuPanelController.prepareForClose()
         if popover?.contentViewController !== menuPanelController {
             popover?.contentViewController = nil
-        }
-    }
-}
-
-@available(macOS 14.0, *)
-private extension MeetingPromptSource {
-    var analyticsValue: String {
-        switch self {
-        case .calendarEvent:
-            return "calendar_event"
-        case .runtimeApp:
-            return "runtime_app"
         }
     }
 }
