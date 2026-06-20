@@ -573,20 +573,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     nonisolated private static func cosineSimilarity(_ lhs: [Float], _ rhs: [Float]) -> Double? {
         guard lhs.count == rhs.count, !lhs.isEmpty else { return nil }
-
-        var dotProduct: Float = 0
-        var lhsNorm: Float = 0
-        var rhsNorm: Float = 0
-
-        for (left, right) in zip(lhs, rhs) {
-            dotProduct += left * right
-            lhsNorm += left * left
-            rhsNorm += right * right
-        }
-
-        let denominator = sqrt(lhsNorm) * sqrt(rhsNorm)
-        guard denominator > 0 else { return nil }
-        return Double(dotProduct / denominator)
+        return SpeakerVectorMath.cosineSimilarity(lhs, rhs)
     }
 
     nonisolated private static func clipURL(

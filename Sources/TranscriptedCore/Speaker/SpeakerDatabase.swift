@@ -253,7 +253,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
             let blended = zip(existing.embedding, embedding).map { old, new in
                 old * (1 - alpha) + new * alpha
             }
-            let normalized = l2Normalize(blended)
+            let normalized = SpeakerVectorMath.l2Normalize(blended)
             let newConfidence = min(1.0, existing.confidence + 0.1)
 
             var sqlSucceeded = false
@@ -296,7 +296,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         } else {
             // New speaker
             let newId = existingId ?? UUID()
-            let normalized = l2Normalize(embedding)
+            let normalized = SpeakerVectorMath.l2Normalize(embedding)
             let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
 
             var sqlSucceeded = false

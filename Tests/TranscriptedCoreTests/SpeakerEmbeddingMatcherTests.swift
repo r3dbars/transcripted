@@ -89,41 +89,34 @@ final class SpeakerEmbeddingMatcherTests: XCTestCase {
     // MARK: - cosineSimilarity
 
     func testCosineSimilarityIdenticalVectorsIsOne() {
-        let (db, _) = makeDatabase()
-        XCTAssertEqual(db.cosineSimilarity([1, 2, 3], [1, 2, 3]), 1.0, accuracy: 0.000_1)
+        XCTAssertEqual(SpeakerVectorMath.cosineSimilarity([1, 2, 3], [1, 2, 3]), 1.0, accuracy: 0.000_1)
     }
 
     func testCosineSimilarityOrthogonalVectorsIsZero() {
-        let (db, _) = makeDatabase()
-        XCTAssertEqual(db.cosineSimilarity([1, 0], [0, 1]), 0.0, accuracy: 0.000_1)
+        XCTAssertEqual(SpeakerVectorMath.cosineSimilarity([1, 0], [0, 1]), 0.0, accuracy: 0.000_1)
     }
 
     func testCosineSimilarityOppositeVectorsIsNegativeOne() {
-        let (db, _) = makeDatabase()
-        XCTAssertEqual(db.cosineSimilarity([1, 0], [-1, 0]), -1.0, accuracy: 0.000_1)
+        XCTAssertEqual(SpeakerVectorMath.cosineSimilarity([1, 0], [-1, 0]), -1.0, accuracy: 0.000_1)
     }
 
     func testCosineSimilarityMismatchedLengthIsZero() {
-        let (db, _) = makeDatabase()
-        XCTAssertEqual(db.cosineSimilarity([1, 0, 0], [1, 0]), 0.0)
+        XCTAssertEqual(SpeakerVectorMath.cosineSimilarity([1, 0, 0], [1, 0]), 0.0)
     }
 
     func testCosineSimilarityEmptyVectorsIsZero() {
-        let (db, _) = makeDatabase()
-        XCTAssertEqual(db.cosineSimilarity([], []), 0.0)
+        XCTAssertEqual(SpeakerVectorMath.cosineSimilarity([], []), 0.0)
     }
 
     func testCosineSimilarityZeroVectorIsZero() {
-        let (db, _) = makeDatabase()
         // A zero-magnitude vector makes the denominator zero — guarded to 0.
-        XCTAssertEqual(db.cosineSimilarity([0, 0], [1, 0]), 0.0)
+        XCTAssertEqual(SpeakerVectorMath.cosineSimilarity([0, 0], [1, 0]), 0.0)
     }
 
     // MARK: - l2Normalize
 
     func testL2NormalizeProducesUnitVector() {
-        let (db, _) = makeDatabase()
-        let normalized = db.l2Normalize([3, 4])
+        let normalized = SpeakerVectorMath.l2Normalize([3, 4])
 
         XCTAssertEqual(magnitude(normalized), 1.0, accuracy: 0.000_1)
         XCTAssertEqual(normalized[0], 0.6, accuracy: 0.000_1)
@@ -131,17 +124,15 @@ final class SpeakerEmbeddingMatcherTests: XCTestCase {
     }
 
     func testL2NormalizeLeavesAlreadyUnitVectorUnchanged() {
-        let (db, _) = makeDatabase()
-        let normalized = db.l2Normalize([1, 0, 0])
+        let normalized = SpeakerVectorMath.l2Normalize([1, 0, 0])
 
         XCTAssertEqual(magnitude(normalized), 1.0, accuracy: 0.000_1)
         XCTAssertEqual(normalized, [1, 0, 0])
     }
 
     func testL2NormalizeNoOpsZeroVector() {
-        let (db, _) = makeDatabase()
         // Zero magnitude — guarded to return the input untouched.
-        XCTAssertEqual(db.l2Normalize([0, 0, 0]), [0, 0, 0])
+        XCTAssertEqual(SpeakerVectorMath.l2Normalize([0, 0, 0]), [0, 0, 0])
     }
 
     // MARK: - Helpers

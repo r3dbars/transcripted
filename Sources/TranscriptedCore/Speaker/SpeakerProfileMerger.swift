@@ -185,7 +185,7 @@ extension SpeakerDatabase {
         let blended = zip(source.embedding, target.embedding).map { s, t in
             s * sourceWeight + t * targetWeight
         }
-        let normalized = l2Normalize(blended)
+        let normalized = SpeakerVectorMath.l2Normalize(blended)
 
         // Transfer name from source if target has none
         if target.displayName == nil, let name = source.displayName {
@@ -285,7 +285,7 @@ extension SpeakerDatabase {
                 guard !protectedIds.contains(speakers[j].id) else { continue }
                 guard !shouldSkipDuplicateMerge(speakers[i], speakers[j]) else { continue }
 
-                let similarity = cosineSimilarity(speakers[i].embedding, speakers[j].embedding)
+                let similarity = SpeakerVectorMath.cosineSimilarity(speakers[i].embedding, speakers[j].embedding)
                 guard similarity >= threshold else { continue }
 
                 // Determine which profile to keep (more calls = better data)

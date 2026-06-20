@@ -36,15 +36,7 @@ extension Transcription {
         var mean = sum
         var scale = Float(embeddings.count)
         vDSP_vsdiv(mean, 1, &scale, &mean, 1, vDSP_Length(mean.count))
-
-        // L2 normalize
-        var norm: Float = 0
-        vDSP_dotpr(mean, 1, mean, 1, &norm, vDSP_Length(mean.count))
-        norm = sqrt(norm)
-        if norm > 0 {
-            vDSP_vsdiv(mean, 1, &norm, &mean, 1, vDSP_Length(mean.count))
-        }
-        return mean
+        return SpeakerVectorMath.l2Normalize(mean)
     }
 
     /// Match an embedding against a frozen snapshot of speaker profiles.
@@ -137,32 +129,11 @@ extension Transcription {
         var mean = sum
         var scale = totalWeight
         vDSP_vsdiv(mean, 1, &scale, &mean, 1, vDSP_Length(mean.count))
-
-        // L2 normalize
-        var norm: Float = 0
-        vDSP_dotpr(mean, 1, mean, 1, &norm, vDSP_Length(mean.count))
-        norm = sqrt(norm)
-        if norm > 0 {
-            vDSP_vsdiv(mean, 1, &norm, &mean, 1, vDSP_Length(mean.count))
-        }
-        return mean
+        return SpeakerVectorMath.l2Normalize(mean)
     }
 
     /// Static cosine similarity (no instance needed — used in nonisolated static context)
     nonisolated static func cosineSimilarityStatic(_ a: [Float], _ b: [Float]) -> Double {
-        guard a.count == b.count, !a.isEmpty else { return 0 }
-
-        var dotProduct: Float = 0
-        var normA: Float = 0
-        var normB: Float = 0
-
-        vDSP_dotpr(a, 1, b, 1, &dotProduct, vDSP_Length(a.count))
-        vDSP_dotpr(a, 1, a, 1, &normA, vDSP_Length(a.count))
-        vDSP_dotpr(b, 1, b, 1, &normB, vDSP_Length(b.count))
-
-        let denom = sqrt(normA) * sqrt(normB)
-        guard denom > 0 else { return 0 }
-
-        return Double(dotProduct / denom)
+        SpeakerVectorMath.cosineSimilarity(a, b)
     }
 }
