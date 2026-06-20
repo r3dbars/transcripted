@@ -402,14 +402,46 @@ extension Audio {
                 }
                 self.consecutiveMicWriteErrors = 0
             } catch {
-                self.consecutiveMicWriteErrors += 1
-                if self.consecutiveMicWriteErrors <= 3 || self.consecutiveMicWriteErrors == self.maxConsecutiveWriteErrors {
-                    AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription, "consecutive": "\(self.consecutiveMicWriteErrors)"])
-                }
-                if self.consecutiveMicWriteErrors >= self.maxConsecutiveWriteErrors {
-                    AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
-                }
+                self.recordMicWriteFailure(error)
             }
+        }
+    }
+
+    /// Records one mic file-write failure. Bumps the consecutive-error counter,
+    /// logs (rate-limited to the first few and the cap), and — when the cap is
+    /// reached — stops the recording and surfaces the error. Once the cap is hit
+    /// the writer drops every later buffer (the guard at the top of the
+    /// `micAudioFileQueue` block in `handleMicBuffer`), so without this terminal
+    /// stop the recording keeps reporting `isRecording == true` and the duration
+    /// timer keeps counting while no mic audio is being saved. The common
+    /// full-disk cause is already caught by the 30s disk-space check in
+    /// `startTimer()`; this covers the non-disk-full stalls (permission/sandbox
+    /// loss, file deleted under the handle). Returns true when this failure
+    /// tripped the cap. Runs on `micAudioFileQueue`.
+    @discardableResult
+    func recordMicWriteFailure(_ error: Error) -> Bool {
+        consecutiveMicWriteErrors += 1
+        let count = consecutiveMicWriteErrors
+        if count <= 3 || count == maxConsecutiveWriteErrors {
+            AppLogger.audioMic.error("Write failed", ["error": error.localizedDescription, "consecutive": "\(count)"])
+        }
+        guard count >= maxConsecutiveWriteErrors else { return false }
+        AppLogger.audioMic.error("Too many consecutive write errors, stopping mic writes")
+        surfaceWriteFailureAndStop()
+        return true
+    }
+
+    /// Stops the recording and surfaces a write-failure error, mirroring the
+    /// disk-full stop path in `startTimer()`. Callers run on a file-write queue,
+    /// so this hops to main. No-ops if recording already ended (a cap crossed
+    /// during teardown), so it can't double-stop. The user sees a stopped
+    /// recording with a clear reason instead of a dead one that still looks
+    /// alive.
+    func surfaceWriteFailureAndStop() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRecording else { return }
+            self.error = "Recording stopped \u{2014} Transcripted couldn't save audio to disk. Check that there's free space and the save location is still available, then start a new recording."
+            self.stop()
         }
     }
 
