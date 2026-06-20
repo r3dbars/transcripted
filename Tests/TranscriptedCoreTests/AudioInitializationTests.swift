@@ -477,6 +477,71 @@ final class AudioInitializationTests: XCTestCase {
             "when the async file URL arrives after the start finish callback, it should complete the status repair"
         )
     }
+
+    func testMicWriteErrorCapStopsRecordingAndSurfacesError() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.isRecording = true
+
+        var cancellables = Set<AnyCancellable>()
+        let stopped = expectation(description: "recording stops after the write-error cap")
+        audio.$isRecording
+            .dropFirst()
+            .filter { $0 == false }
+            .sink { _ in stopped.fulfill() }
+            .store(in: &cancellables)
+
+        struct WriteFailure: Error {}
+        for attempt in 1...audio.maxConsecutiveWriteErrors {
+            let tripped = audio.recordMicWriteFailure(WriteFailure())
+            XCTAssertEqual(
+                tripped,
+                attempt == audio.maxConsecutiveWriteErrors,
+                "only the cap-th consecutive failure should trip the terminal stop (attempt \(attempt))"
+            )
+        }
+
+        wait(for: [stopped], timeout: 2.0)
+        XCTAssertFalse(
+            audio.isRecording,
+            "hitting the write-error cap must stop the recording, not leave it running silently"
+        )
+        XCTAssertNotNil(
+            audio.error,
+            "hitting the write-error cap must surface a user-facing error"
+        )
+    }
+
+    func testMicWriteFailuresBelowCapKeepRecording() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.isRecording = true
+
+        struct WriteFailure: Error {}
+        for _ in 1..<audio.maxConsecutiveWriteErrors {
+            XCTAssertFalse(
+                audio.recordMicWriteFailure(WriteFailure()),
+                "failures below the cap must not trip the terminal stop"
+            )
+        }
+
+        // Drain the main queue so any erroneously-scheduled stop would land.
+        let pumped = expectation(description: "main queue drained")
+        DispatchQueue.main.async { pumped.fulfill() }
+        wait(for: [pumped], timeout: 1.0)
+
+        XCTAssertTrue(
+            audio.isRecording,
+            "below the cap the recording must keep running"
+        )
+        XCTAssertNil(audio.error)
+    }
 }
 
 @available(macOS 14.0, *)
