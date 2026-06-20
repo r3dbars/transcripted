@@ -61,7 +61,20 @@ file taking precedence when there is any conflict.
 When a worker lane reports back to the Transcripted coordinator, use this exact
 one-line shape and keep it short:
 
-`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action`
+`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | lanes used: Codex=...; Claude=...; Local=...; Windows=... | smallest next action`
+
+For review, merge-room, and worker-thread prompts, include the Maestro lane
+contract. Codex is the final reviewer / merger. Claude is for risky reasoning.
+Mac local models and the Windows worker are cheap first-pass lanes for summaries,
+clustering, log triage, and draft work. If a lane is skipped, say why in the
+closeout.
+
+For non-Codex lanes, use `~/.codex/bin/maestro-delegate` whenever possible, for
+example `maestro-delegate local --label pr-dedupe -- "..."`,
+`maestro-delegate windows --label review -- "..."`, or
+`maestro-delegate claude --label risk-review -- "..."`. A lane only counts as
+used if the closeout includes a real `MAESTRO_PROOF` path, output path, or pasted
+command output.
 
 Use `docs/agent-closeout.md` for the status meanings and GitHub cleanup
 boundaries.

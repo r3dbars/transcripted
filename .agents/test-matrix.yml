@@ -98,6 +98,15 @@ rules:
       - "bash -n scripts/ops/health-probe.sh"
 
   - paths:
+      - "scripts/ops/posthog-product-dashboard-summary.py"
+      - "Tests/Fixtures/posthog-product-dashboard-summary.json"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-product-dashboard-summary.py"
+      - "python3 scripts/ops/posthog-product-dashboard-summary.py --self-test"
+      - "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only"
+
+  - paths:
       - "scripts/dev/onboarding.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
