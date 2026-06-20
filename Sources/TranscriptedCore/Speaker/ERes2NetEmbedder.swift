@@ -19,6 +19,7 @@ public final class ERes2NetEmbedder: SpeakerSegmentEmbedder, @unchecked Sendable
 
     public let dimension = 192
     public let identifier = "eres2net"
+    public let thresholds = SpeakerEmbeddingThresholds.eRes2Net
 
     private let model: MLModel
     private let inputName: String

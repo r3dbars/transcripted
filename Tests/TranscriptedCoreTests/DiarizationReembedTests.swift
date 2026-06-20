@@ -14,11 +14,15 @@ final class DiarizationReembedTests: XCTestCase {
     final class StubEmbedder: SpeakerSegmentEmbedder, @unchecked Sendable {
         let dimension = 192
         let identifier = "stub"
+        let thresholds: SpeakerEmbeddingThresholds
         let result: [Float]?
         private let lock = NSLock()
         private var _seen: [Int] = []
         var seenLengths: [Int] { lock.lock(); defer { lock.unlock() }; return _seen }
-        init(result: [Float]?) { self.result = result }
+        init(result: [Float]?, thresholds: SpeakerEmbeddingThresholds = .weSpeaker) {
+            self.result = result
+            self.thresholds = thresholds
+        }
         func embed(samples: [Float], sampleRate: Int) -> [Float]? {
             lock.lock(); _seen.append(samples.count); lock.unlock()
             return result
