@@ -6,12 +6,14 @@ let package = Package(
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        .package(path: "../TranscriptedCaptureKit"),
     ],
     targets: [
         .executableTarget(
             name: "transcripted-qa",
             dependencies: [
-                .product(name: "ArgumentParser", package: "swift-argument-parser")
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "TranscriptedCaptureKit", package: "TranscriptedCaptureKit"),
             ],
             path: "Sources/TranscriptedQA",
             linkerSettings: [.linkedLibrary("sqlite3")]
