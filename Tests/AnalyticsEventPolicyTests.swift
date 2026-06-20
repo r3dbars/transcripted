@@ -288,13 +288,11 @@ func testAnalyticsEventPolicy() {
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let agentQuery = AnalyticsEventPolicy.policy(forEvent: "agent_capture_query_observed")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
-        let agentQuery = AnalyticsEventPolicy.policy(forEvent: "agent_capture_query_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
         assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
-        assertEqual(agentQuery?.allowedProperties ?? Set<String>(), [], "agent-query observation should carry no payload")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
         assertEqual(agentQuery?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "surface"], "agent query observation should stay enum-only")
 

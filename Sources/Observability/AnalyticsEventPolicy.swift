@@ -354,10 +354,6 @@ struct AnalyticsEventPolicy: Equatable {
             name: "activation_agent_setup_cta_clicked",
             allowedProperties: activationAgentSetupProperties
         ),
-        "agent_capture_query_observed": .init(
-            name: "agent_capture_query_observed",
-            allowedProperties: []
-        ),
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
