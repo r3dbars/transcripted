@@ -1648,22 +1648,76 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - dictation Auto Enter stays after paste readiness") {
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
-        let saveBeforeAutoEnterBlock = sourceSlice(
+        let finalizerBlock = sourceSlice(
             contents,
-            from: "case .saveBeforeAutoEnter:",
-            to: "let wordCount = text.split"
+            from: "let finalization = await DictationStopFinalizer.finalize(",
+            to: "let autoSendOutcome = finalization.autoEnterOutcome"
         )
-        let saveTaskRange = saveBeforeAutoEnterBlock.range(of: "let saveTask = self.startPersistingDictationTranscript")
-        let autoEnterRange = saveBeforeAutoEnterBlock.range(of: "autoSendOutcome = await self.performAutoEnterIfNeeded")
-        let finishSaveRange = saveBeforeAutoEnterBlock.range(of: "saveFailureMessage = await self.finishPersistingDictationTranscript")
+        let startSaveClosure = sourceSlice(
+            finalizerBlock,
+            from: "startSaving: {",
+            to: "},\n                finishSaving:"
+        )
+        let finishSaveClosure = sourceSlice(
+            finalizerBlock,
+            from: "finishSaving: { saveTask in",
+            to: "},\n                saveSynchronously:"
+        )
+        let synchronousSaveClosure = sourceSlice(
+            finalizerBlock,
+            from: "saveSynchronously: {",
+            to: "},\n                performAutoEnter:"
+        )
+        let autoEnterClosure = sourceSlice(
+            finalizerBlock,
+            from: "performAutoEnter: {",
+            to: "}\n            )"
+        )
 
         assertTrue(
-            saveTaskRange != nil
-                && autoEnterRange != nil
-                && finishSaveRange != nil
-                && saveTaskRange!.lowerBound < autoEnterRange!.lowerBound
-                && autoEnterRange!.lowerBound < finishSaveRange!.lowerBound,
-            "default stop finalization should start saving, wait/send Auto Enter, then await the save result"
+            sourceOrder(
+                in: startSaveClosure,
+                needles: [
+                    "stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()",
+                    "return self.startPersistingDictationTranscript",
+                ]
+            ),
+            "finalizer startSaving closure should timestamp save start before launching the async save"
+        )
+        assertTrue(
+            sourceOrder(
+                in: finishSaveClosure,
+                needles: [
+                    "await self.finishPersistingDictationTranscript",
+                    "stopTiming.savedAt = CFAbsoluteTimeGetCurrent()",
+                    "return failure",
+                ]
+            ),
+            "finalizer finishSaving closure should await the save result before timestamping completion"
+        )
+        assertTrue(
+            sourceOrder(
+                in: synchronousSaveClosure,
+                needles: [
+                    "stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()",
+                    "self.persistDictationTranscript",
+                    "stopTiming.savedAt = CFAbsoluteTimeGetCurrent()",
+                    "return failure",
+                ]
+            ),
+            "legacy synchronous save closure should keep save timing around the blocking save"
+        )
+        assertTrue(
+            sourceOrder(
+                in: autoEnterClosure,
+                needles: [
+                    "stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()",
+                    "await self.performAutoEnterIfNeeded",
+                    "stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()",
+                    "return outcome",
+                ]
+            ),
+            "finalizer Auto Enter closure should timestamp around the tested Auto Enter path"
         )
 
         let autoEnterBlock = sourceSlice(
@@ -3419,6 +3473,17 @@ private func sourceSlice(_ contents: String, from start: String, to end: String)
     }
 
     return String(contents[startRange.lowerBound..<endRange.lowerBound])
+}
+
+private func sourceOrder(in contents: String, needles: [String]) -> Bool {
+    var searchStart = contents.startIndex
+    for needle in needles {
+        guard let range = contents.range(of: needle, range: searchStart..<contents.endIndex) else {
+            return false
+        }
+        searchStart = range.upperBound
+    }
+    return true
 }
 
 private func countOccurrences(of needle: String, in haystack: String) -> Int {
