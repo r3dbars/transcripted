@@ -346,21 +346,25 @@ extension Transcription {
             // off to its own profile so it stays independently nameable.
             let linkPlan = Self.planCrossClusterLinks(
                 matchedProfileBySpeaker: speakerMatchResults.mapValues { $0.persistentId },
+                matchSimilarityBySpeaker: speakerMatchResults.mapValues { $0.similarity },
                 meanBySpeaker: matchedMeanPerSpeaker,
                 segmentCountBySpeaker: embeddingsPerSpeaker.mapValues { $0.count }
             )
-            for (other, canonical) in linkPlan.remaps {
-                speakerIdRemap[other] = canonical
+            // Spin-off representatives: a distinct voice (or fragments of one) that only resembled the
+            // matched profile — give it its own identity so review names it separately. Removed from
+            // the matched set so it never writes back into the shared profile.
+            for rep in linkPlan.spinOffs {
+                let repMean = matchedMeanPerSpeaker[rep]
+                    ?? Self.computeMeanEmbedding(embeddingsPerSpeaker[rep] ?? [])
+                let spinoff = speakerDB.addOrUpdateSpeaker(embedding: repMean, existingId: nil)
+                speakerMatchResults.removeValue(forKey: rep)
+                speakerNewProfiles[rep] = spinoff.id
             }
-            for other in linkPlan.spinOffs {
-                // Distinct voice that only coincidentally matched the same profile — give it its own
-                // identity so review names it separately instead of inheriting the matched profile's
-                // name. Removed from the matched set so it never writes back into the shared profile.
-                let otherMean = matchedMeanPerSpeaker[other]
-                    ?? Self.computeMeanEmbedding(embeddingsPerSpeaker[other] ?? [])
-                let spinoff = speakerDB.addOrUpdateSpeaker(embedding: otherMean, existingId: nil)
+            // Group members fuse into their representative; drop their own match so only the
+            // representative writes back (keeper group → shared profile, spin-off group → new profile).
+            for (other, rep) in linkPlan.remaps {
+                speakerIdRemap[other] = rep
                 speakerMatchResults.removeValue(forKey: other)
-                speakerNewProfiles[other] = spinoff.id
             }
             if !linkPlan.remaps.isEmpty {
                 AppLogger.transcription.info("Merged speaker IDs with same DB profile", [
@@ -799,19 +803,21 @@ extension Transcription {
         // full rationale). `nonGhostMeans` holds the matched mean per non-ghost speaker.
         let micLinkPlan = Self.planCrossClusterLinks(
             matchedProfileBySpeaker: speakerMatchResults.mapValues { $0.persistentId },
+            matchSimilarityBySpeaker: speakerMatchResults.mapValues { $0.similarity },
             meanBySpeaker: nonGhostMeans,
             segmentCountBySpeaker: embeddingsPerSpeaker.mapValues { $0.count }
         )
-        for (other, canonical) in micLinkPlan.remaps {
-            speakerIdRemap[other] = canonical
-        }
-        for other in micLinkPlan.spinOffs {
-            let otherMean = nonGhostMeans[other]
-                ?? Self.computeMeanEmbedding(embeddingsPerSpeaker[other] ?? [])
-            let spinoff = speakerDB.addOrUpdateSpeaker(embedding: otherMean, existingId: nil)
-            speakerMatchResults.removeValue(forKey: other)
-            speakerNewProfiles[other] = spinoff.id
+        for rep in micLinkPlan.spinOffs {
+            let repMean = nonGhostMeans[rep]
+                ?? Self.computeMeanEmbedding(embeddingsPerSpeaker[rep] ?? [])
+            let spinoff = speakerDB.addOrUpdateSpeaker(embedding: repMean, existingId: nil)
+            speakerMatchResults.removeValue(forKey: rep)
+            speakerNewProfiles[rep] = spinoff.id
             newlyCreatedProfileIds.insert(spinoff.id)
+        }
+        for (other, rep) in micLinkPlan.remaps {
+            speakerIdRemap[other] = rep
+            speakerMatchResults.removeValue(forKey: other)
         }
 
         // Deferred write-back (#6): blend each surviving matched cluster under the contamination

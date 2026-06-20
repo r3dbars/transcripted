@@ -242,6 +242,7 @@ func runReplay(_ args: [String]) async {
             return a > b
         }
         var spunOffProfileIds: Set<UUID> = []
+        var memberToRep: [Int: Int] = [:]   // (fixes mode) fused member cluster -> representative
         if !writePathFixes {
             // Legacy: match against the live DB, blend every match at the full EMA rate.
             for cid in clusterOrder {
@@ -252,9 +253,9 @@ func runReplay(_ args: [String]) async {
             // 3) Dedup pass — the app runs mergeDuplicates after each transcript.
             await MainActor.run { db.mergeDuplicates(threshold: matchThreshold) }
         } else {
-            // Production mirror of TranscriptionPipeline's write path:
-            //   match-all vs the pre-meeting snapshot → cross-cluster link/merge (#8) →
-            //   gated write-back (#6) → mergeDuplicates protecting spun-off distinct voices.
+            // Production mirror of TranscriptionPipeline's write path: match-all vs the pre-meeting
+            // snapshot → cross-cluster link/merge (#8) via the SAME planner the app uses → gated
+            // write-back (#6) → mergeDuplicates protecting spun-off distinct voices.
             var matchedProfile: [Int: UUID] = [:]
             var matchSim: [Int: Double] = [:]
             var matchSecond: [Int: Double] = [:]
@@ -263,37 +264,24 @@ func runReplay(_ args: [String]) async {
                     matchedProfile[cid] = m.id; matchSim[cid] = m.similarity; matchSecond[cid] = m.second
                 }
             }
-
-            // #8: clusters that matched the same profile only fuse when they are similar to each
-            // other; distinct voices that merely resemble the profile are spun off.
-            var spinOff: Set<Int> = []
-            let byProfile = Dictionary(grouping: matchedProfile.keys) { matchedProfile[$0] }
-            for (_, cids) in byProfile where cids.count >= 2 {
-                let sorted = cids.sorted {
-                    let a = byCluster[$0]!.reduce(0.0) { $0 + ($1.end - $1.start) }
-                    let b = byCluster[$1]!.reduce(0.0) { $0 + ($1.end - $1.start) }
-                    return a == b ? $0 < $1 : a > b
-                }
-                let canonical = sorted[0]
-                for other in sorted.dropFirst() {
-                    let crossSim = cosineSim(clusterEmb[canonical]!, clusterEmb[other]!)
-                    if !SpeakerWritePathPolicy.shouldFuseMatchedClusters(crossClusterSimilarity: crossSim) {
-                        spinOff.insert(other)
-                    }
-                }
-            }
-
-            for cid in clusterOrder {
+            let plan = Transcription.planCrossClusterLinks(
+                matchedProfileBySpeaker: matchedProfile,
+                matchSimilarityBySpeaker: matchSim,
+                meanBySpeaker: clusterEmb,
+                segmentCountBySpeaker: byCluster.mapValues { $0.count }
+            )
+            memberToRep = plan.remaps
+            let spinOffReps = Set(plan.spinOffs)
+            // Write-back for representatives + uncontended clusters only; fused members inherit their
+            // representative (they don't write back, mirroring the pipeline).
+            for cid in clusterOrder where memberToRep[cid] == nil {
                 let emb = clusterEmb[cid]!
-                if spinOff.contains(cid) {
+                if spinOffReps.contains(cid) {
                     let p = await MainActor.run { db.addOrUpdateSpeaker(embedding: emb, existingId: nil) }
                     spunOffProfileIds.insert(p.id)
                 } else if let pid = matchedProfile[cid] {
-                    // #6: gate the EMA blend on match quality.
                     let alpha = SpeakerWritePathPolicy.voiceprintBlendAlpha(
-                        similarity: matchSim[cid] ?? 0,
-                        secondBestSimilarity: matchSecond[cid]
-                    )
+                        similarity: matchSim[cid] ?? 0, secondBestSimilarity: matchSecond[cid])
                     _ = await MainActor.run {
                         db.addOrUpdateSpeaker(embedding: emb, existingId: pid, blendAlpha: alpha)
                     }
@@ -301,18 +289,21 @@ func runReplay(_ args: [String]) async {
                     _ = await MainActor.run { db.addOrUpdateSpeaker(embedding: emb, existingId: nil) }
                 }
             }
-            // Dedup, but protect spun-off distinct voices so they are not immediately re-merged
-            // (mirrors the pipeline runner protecting pending-review profiles).
             await MainActor.run { db.mergeDuplicates(threshold: matchThreshold, protecting: spunOffProfileIds) }
         }
 
-        // Resolve each cluster to its FINAL surviving profile by re-matching its mean
-        // embedding against the post-merge DB (a merge folds a UUID into its survivor).
+        // Resolve each cluster to its FINAL surviving profile. Representatives + uncontended clusters
+        // re-match their mean against the post-merge DB; fused members inherit their representative's
+        // profile (matchSpeaker alone could wrongly route a spun-off member back to the profile it
+        // merely resembled).
         var resolved: [Int: String] = [:]
-        for cid in clusterOrder {
+        for cid in clusterOrder where memberToRep[cid] == nil {
             let emb = clusterEmb[cid]!
             let m: SpeakerMatchResult? = await MainActor.run { db.matchSpeaker(embedding: emb, threshold: matchThreshold) }
             if let m { resolved[cid] = m.profile.id.uuidString }
+        }
+        for (member, rep) in memberToRep where resolved[rep] != nil {
+            resolved[member] = resolved[rep]
         }
         let surviving = Set(await MainActor.run { db.allSpeakers() }.map { $0.id.uuidString })
 
