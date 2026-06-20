@@ -396,6 +396,13 @@ final class MeetingSessionController: ObservableObject {
 
         let startDecision = await resolveStartRecordingPermissionDecision(trigger: trigger)
         guard startDecision.canStart else {
+            ProductFrictionTelemetry.track(
+                surface: .meeting,
+                stage: "permission_start",
+                result: .blocked,
+                failureKind: startDecision.failureReason ?? "permissions",
+                modelState: state.diagnosticName
+            )
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
@@ -460,6 +467,13 @@ final class MeetingSessionController: ObservableObject {
             AnalyticsReporter.track(
                 "meeting_recording_start_failed",
                 properties: failureProperties
+            )
+            ProductFrictionTelemetry.track(
+                surface: .meeting,
+                stage: "meeting_start",
+                result: .failed,
+                failureKind: failureProperties["failure_kind"],
+                modelState: state.diagnosticName
             )
             state = .error(failureMessage)
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_failed")
@@ -560,6 +574,13 @@ final class MeetingSessionController: ObservableObject {
         case .idle, .loadingModels, .error:
             await prepareModels()
             guard case .ready = state else {
+                ProductFrictionTelemetry.track(
+                    surface: .meeting,
+                    stage: "model_warmup",
+                    result: .blocked,
+                    failureKind: "model_not_ready",
+                    modelState: state.diagnosticName
+                )
                 DiagnosticsTrail.record(
                     level: .warning,
                     engine: "meeting",
@@ -574,6 +595,13 @@ final class MeetingSessionController: ObservableObject {
             if !isSpeechModelPreparedForSelection {
                 await prepareModels()
                 guard case .ready = state else {
+                    ProductFrictionTelemetry.track(
+                        surface: .meeting,
+                        stage: "model_warmup",
+                        result: .blocked,
+                        failureKind: "speech_model_not_ready",
+                        modelState: state.diagnosticName
+                    )
                     DiagnosticsTrail.record(
                         level: .warning,
                         engine: "meeting",
@@ -1076,6 +1104,14 @@ final class MeetingSessionController: ObservableObject {
                 uniquingKeysWith: { _, new in new }
             )
         )
+        ProductFrictionTelemetry.track(
+            surface: .meeting,
+            stage: "meeting_recording",
+            result: .cancelled,
+            failureKind: reason.rawValue,
+            elapsedBucket: AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
+            modelState: state.diagnosticName
+        )
         AnalyticsReporter.track(
             "meeting_capture_health_snapshot",
             properties: meetingCaptureHealthSnapshotProperties(
@@ -1151,6 +1187,13 @@ final class MeetingSessionController: ObservableObject {
                     "failure_kind": failureKind,
                     "import_stage": "preparation",
                 ]
+            )
+            ProductFrictionTelemetry.track(
+                surface: .meeting,
+                stage: "imported_audio_prepare",
+                result: .failed,
+                failureKind: failureKind,
+                modelState: state.diagnosticName
             )
             state = .error(displayMessage)
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "file_import_failed")
@@ -1455,6 +1498,12 @@ final class MeetingSessionController: ObservableObject {
                 "mic_stream_present": boolString(micAudioURL != nil),
                 "trigger": StartTrigger.savedMeetingRetranscription.rawValue
             ]
+        )
+        ProductFrictionTelemetry.track(
+            surface: .meeting,
+            stage: "meeting_retry",
+            result: .started,
+            modelState: state.diagnosticName
         )
 
         if case .idle = state {
@@ -2578,6 +2627,13 @@ final class MeetingSessionController: ObservableObject {
                     "meeting_transcript_skipped",
                     properties: failureTelemetryContext
                 )
+                ProductFrictionTelemetry.track(
+                    surface: .meeting,
+                    stage: "meeting_transcription",
+                    result: .giveUp,
+                    failureKind: failureKind.rawValue,
+                    modelState: state.diagnosticName
+                )
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind.rawValue)
                 finalizeBackgroundTranscriptionStateIfNeeded()
@@ -2615,6 +2671,13 @@ final class MeetingSessionController: ObservableObject {
                         "trigger": transcriptionTrigger.rawValue,
                     ]
                 )
+                ProductFrictionTelemetry.track(
+                    surface: .meeting,
+                    stage: "speaker_finalization",
+                    result: .failed,
+                    failureKind: failureKind.rawValue,
+                    modelState: state.diagnosticName
+                )
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "speaker_finalization_failed")
                 finalizeBackgroundTranscriptionStateIfNeeded()
@@ -2647,6 +2710,13 @@ final class MeetingSessionController: ObservableObject {
             AnalyticsReporter.track(
                 "meeting_transcript_failed",
                 properties: failureTelemetryContext
+            )
+            ProductFrictionTelemetry.track(
+                surface: .meeting,
+                stage: "meeting_transcription",
+                result: .failed,
+                failureKind: failureKind.rawValue,
+                modelState: state.diagnosticName
             )
             activeTranscriptionCaptureDiagnostics = nil
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_failed")

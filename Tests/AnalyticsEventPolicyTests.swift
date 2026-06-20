@@ -422,6 +422,50 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["url"], "raw URLs must not be sent")
     }
 
+    runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {
+        let friction = AnalyticsEventPolicy.policy(forEvent: "product_friction_observed")
+        assertEqual(
+            friction?.allowedProperties ?? Set<String>(),
+            ["elapsed_bucket", "failure_kind", "model_state", "result", "route_shape", "stage", "surface"],
+            "product friction should stay narrowly scoped"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "elapsed_bucket": "10_29s",
+                "failure_kind": "pasteback_failed",
+                "model_state": "ready",
+                "result": "failed",
+                "route_shape": "built_in_input_to_bluetooth_output",
+                "stage": "pasteback",
+                "surface": "dictation",
+                "error_message": "private raw error",
+                "audio_path": "/Users/jane/private.wav",
+                "file_path": "/Users/jane/private.md",
+                "meeting_title": "Customer roadmap",
+                "source_app_bundle": "com.example.Private",
+                "transcript_text": "private transcript",
+                "retry_count": "7",
+            ],
+            allowedKeys: friction?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["elapsed_bucket"], "10_29s", "elapsed time should survive only as a bucket")
+        assertEqual(sanitized["failure_kind"], "pasteback_failed", "failure kind should survive as a normalized enum")
+        assertEqual(sanitized["model_state"], "ready", "model state should survive as a coarse enum")
+        assertEqual(sanitized["result"], "failed", "result should survive as a coarse enum")
+        assertEqual(sanitized["route_shape"], "built_in_input_to_bluetooth_output", "route shape should survive as a coarse enum")
+        assertEqual(sanitized["stage"], "pasteback", "stage should survive as a coarse enum")
+        assertEqual(sanitized["surface"], "dictation", "surface should survive as a coarse enum")
+        assertNil(sanitized["error_message"], "raw error strings should stay out of friction analytics")
+        assertNil(sanitized["audio_path"], "audio paths should stay out of friction analytics")
+        assertNil(sanitized["file_path"], "file paths should stay out of friction analytics")
+        assertNil(sanitized["meeting_title"], "meeting titles should stay out of friction analytics")
+        assertNil(sanitized["source_app_bundle"], "source app bundle IDs should stay out of friction analytics")
+        assertNil(sanitized["transcript_text"], "transcript text should stay out of friction analytics")
+        assertNil(sanitized["retry_count"], "raw retry counts should stay out of friction analytics")
+    }
+
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
         let menuOpened = AnalyticsEventPolicy.policy(forEvent: "menu_bar_opened")
         let menuAction = AnalyticsEventPolicy.policy(forEvent: "menu_bar_action_clicked")
