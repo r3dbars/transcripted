@@ -2007,19 +2007,29 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - degraded meeting Sentry context stays bucketed") {
-        let contents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let controller = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let contents = readRepoTextFile("Sources/Meeting/MeetingCaptureHealthTelemetry.swift")
+        assertTrue(
+            controller.contains("MeetingCaptureHealthTelemetry.degradedDiagnosticsContext"),
+            "degraded meeting Sentry context should stay behind the dedicated capture-health helper"
+        )
         let reportBlock = sourceSlice(
             contents,
-            from: "private func reportCaptureHealthIfNeeded(",
-            to: "private func trackSavedTranscriptAnalyticsInBackground("
+            from: "static func degradedDiagnosticsContext(",
+            to: "private static func sharedProperties("
+        )
+        let sharedPropertiesBlock = sourceSlice(
+            contents,
+            from: "private static func sharedProperties(",
+            to: "private static func boolString("
         )
 
         assertTrue(
-            reportBlock.contains("context[\"gap_count_bucket\"] = AnalyticsReporter.countBucket(healthInfo.audioGaps)"),
+            sharedPropertiesBlock.contains("\"gap_count_bucket\": AnalyticsReporter.countBucket(health.audioGaps)"),
             "degraded meeting Sentry events should preserve coarse gap counts"
         )
         assertTrue(
-            reportBlock.contains("context[\"route_change_count_bucket\"] = AnalyticsReporter.countBucket(healthInfo.deviceSwitches)"),
+            sharedPropertiesBlock.contains("\"route_change_count_bucket\": AnalyticsReporter.countBucket(health.deviceSwitches)"),
             "degraded meeting Sentry events should preserve coarse route-change counts"
         )
         assertTrue(

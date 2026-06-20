@@ -387,4 +387,92 @@ func testMeetingCaptureVolumeDiagnostics() {
             "an empty context should never surface the hint"
         )
     }
+
+    runSuite("MeetingCaptureHealthTelemetry builds shared capture health payloads") {
+        let properties = MeetingCaptureHealthTelemetry.snapshotProperties(
+            .init(
+                captureDiagnostics: [
+                    "system_status": "healthy",
+                    "gap_count": "raw",
+                    "route_change_count": "raw",
+                ],
+                health: .init(
+                    captureQuality: "fair",
+                    audioGaps: 3,
+                    deviceSwitches: 2
+                ),
+                trigger: "manual",
+                reason: "user",
+                durationSeconds: 122,
+                systemStreamPresent: true,
+                stopTimedOut: false
+            )
+        )
+
+        assertEqual(properties["system_status"], "healthy", "snapshot payload should keep diagnostics")
+        assertEqual(properties["capture_quality"], "fair", "snapshot payload should include capture quality")
+        assertEqual(properties["gap_count_bucket"], "2_3", "snapshot payload should bucket audio gaps")
+        assertEqual(properties["route_change_count_bucket"], "2_3", "snapshot payload should bucket route switches")
+        assertEqual(properties["system_stream_present"], "true", "snapshot payload should expose system stream presence")
+        assertEqual(properties["stop_timed_out"], "false", "snapshot payload should expose stop timeout")
+    }
+
+    runSuite("MeetingCaptureHealthTelemetry emits degraded context only for real capture risks") {
+        let healthyInput = MeetingCaptureHealthTelemetry.DegradedReportInput(
+            captureDiagnostics: [
+                "gap_count": "raw",
+                "route_change_count": "raw",
+                "system_status": "healthy",
+            ],
+            health: .init(
+                captureQuality: "excellent",
+                audioGaps: 0,
+                deviceSwitches: 0
+            ),
+            trigger: "manual",
+            reason: "user",
+            durationSeconds: 45,
+            micFileAvailable: true,
+            systemStreamPresent: true,
+            stopTimedOut: false,
+            systemFailed: false,
+            systemStatus: "healthy"
+        )
+
+        assertNil(
+            MeetingCaptureHealthTelemetry.degradedDiagnosticsContext(healthyInput),
+            "healthy captures should not emit degraded diagnostics"
+        )
+
+        let degradedInput = MeetingCaptureHealthTelemetry.DegradedReportInput(
+            captureDiagnostics: [
+                "gap_count": "raw",
+                "route_change_count": "raw",
+                "system_status": "failed",
+            ],
+            health: .init(
+                captureQuality: "degraded",
+                audioGaps: 4,
+                deviceSwitches: 1
+            ),
+            trigger: "detected_prompt",
+            reason: "timeout",
+            durationSeconds: 301,
+            micFileAvailable: false,
+            systemStreamPresent: false,
+            stopTimedOut: true,
+            systemFailed: true,
+            systemStatus: "failed"
+        )
+
+        let context = MeetingCaptureHealthTelemetry.degradedDiagnosticsContext(degradedInput)
+        assertEqual(context?["system_status"], "failed", "degraded context should preserve status")
+        assertEqual(context?["gap_count"], nil, "degraded context should drop raw gap counts")
+        assertEqual(context?["route_change_count"], nil, "degraded context should drop raw route counts")
+        assertEqual(context?["capture_quality"], "degraded", "degraded context should include capture quality")
+        assertEqual(context?["gap_count_bucket"], "4_9", "degraded context should include gap bucket")
+        assertEqual(context?["mic_file_available"], "false", "degraded context should include mic file availability")
+        assertEqual(context?["system_stream_present"], "false", "degraded context should include system stream presence")
+        assertEqual(context?["stop_timed_out"], "true", "degraded context should include timeout")
+    }
 }

@@ -716,14 +716,16 @@ final class MeetingSessionController: ObservableObject {
         )
         AnalyticsReporter.track(
             "meeting_capture_health_snapshot",
-            properties: meetingCaptureHealthSnapshotProperties(
-                captureDiagnostics: stopCaptureDiagnostics,
-                healthInfo: recordingSnapshot.healthInfo,
-                trigger: recordingSnapshot.trigger.rawValue,
-                reason: reason.rawValue,
-                durationSeconds: recordingSnapshot.durationSeconds,
-                systemStreamPresent: files.systemURL != nil,
-                stopTimedOut: stopResult.didTimeOut
+            properties: MeetingCaptureHealthTelemetry.snapshotProperties(
+                .init(
+                    captureDiagnostics: stopCaptureDiagnostics,
+                    health: captureHealthFacts(from: recordingSnapshot.healthInfo),
+                    trigger: recordingSnapshot.trigger.rawValue,
+                    reason: reason.rawValue,
+                    durationSeconds: recordingSnapshot.durationSeconds,
+                    systemStreamPresent: files.systemURL != nil,
+                    stopTimedOut: stopResult.didTimeOut
+                )
             )
         )
         reportCaptureHealthIfNeeded(
@@ -1114,14 +1116,16 @@ final class MeetingSessionController: ObservableObject {
         )
         AnalyticsReporter.track(
             "meeting_capture_health_snapshot",
-            properties: meetingCaptureHealthSnapshotProperties(
-                captureDiagnostics: cancelCaptureDiagnostics,
-                healthInfo: recordingSnapshot.healthInfo,
-                trigger: recordingSnapshot.trigger.rawValue,
-                reason: reason.rawValue,
-                durationSeconds: recordingSnapshot.durationSeconds,
-                systemStreamPresent: files.systemURL != nil,
-                stopTimedOut: stopResult.didTimeOut
+            properties: MeetingCaptureHealthTelemetry.snapshotProperties(
+                .init(
+                    captureDiagnostics: cancelCaptureDiagnostics,
+                    health: captureHealthFacts(from: recordingSnapshot.healthInfo),
+                    trigger: recordingSnapshot.trigger.rawValue,
+                    reason: reason.rawValue,
+                    durationSeconds: recordingSnapshot.durationSeconds,
+                    systemStreamPresent: files.systemURL != nil,
+                    stopTimedOut: stopResult.didTimeOut
+                )
             )
         )
     }
@@ -2814,30 +2818,6 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
-    private func meetingCaptureHealthSnapshotProperties(
-        captureDiagnostics: [String: String],
-        healthInfo: RecordingHealthInfo,
-        trigger: String,
-        reason: String,
-        durationSeconds: Double,
-        systemStreamPresent: Bool,
-        stopTimedOut: Bool
-    ) -> [String: String] {
-        captureDiagnostics.merging(
-            [
-                "capture_quality": healthInfo.captureQuality.rawValue,
-                "duration_bucket": AnalyticsReporter.durationBucket(seconds: durationSeconds),
-                "gap_count_bucket": AnalyticsReporter.countBucket(healthInfo.audioGaps),
-                "reason": reason,
-                "route_change_count_bucket": AnalyticsReporter.countBucket(healthInfo.deviceSwitches),
-                "system_stream_present": boolString(systemStreamPresent),
-                "stop_timed_out": boolString(stopTimedOut),
-                "trigger": trigger,
-            ],
-            uniquingKeysWith: { _, new in new }
-        )
-    }
-
     private func reportCaptureHealthIfNeeded(
         snapshot: AudioPipelineDiagnosticsSnapshot,
         captureDiagnostics: [String: String],
@@ -2848,26 +2828,20 @@ final class MeetingSessionController: ObservableObject {
         files: (micURL: URL?, systemURL: URL?),
         stopTimedOut: Bool
     ) {
-        let shouldReport =
-            stopTimedOut ||
-            files.micURL == nil ||
-            healthInfo.captureQuality == .degraded ||
-            snapshot.systemFailed ||
-            snapshot.systemStatus == "failed"
-        guard shouldReport else { return }
-
-        var context = captureDiagnostics
-        context.removeValue(forKey: "gap_count")
-        context.removeValue(forKey: "route_change_count")
-        context["capture_quality"] = healthInfo.captureQuality.rawValue
-        context["duration_bucket"] = AnalyticsReporter.durationBucket(seconds: durationSeconds)
-        context["gap_count_bucket"] = AnalyticsReporter.countBucket(healthInfo.audioGaps)
-        context["mic_file_available"] = boolString(files.micURL != nil)
-        context["reason"] = reason.rawValue
-        context["route_change_count_bucket"] = AnalyticsReporter.countBucket(healthInfo.deviceSwitches)
-        context["stop_timed_out"] = boolString(stopTimedOut)
-        context["system_stream_present"] = boolString(files.systemURL != nil)
-        context["trigger"] = trigger.rawValue
+        guard let context = MeetingCaptureHealthTelemetry.degradedDiagnosticsContext(
+            .init(
+                captureDiagnostics: captureDiagnostics,
+                health: captureHealthFacts(from: healthInfo),
+                trigger: trigger.rawValue,
+                reason: reason.rawValue,
+                durationSeconds: durationSeconds,
+                micFileAvailable: files.micURL != nil,
+                systemStreamPresent: files.systemURL != nil,
+                stopTimedOut: stopTimedOut,
+                systemFailed: snapshot.systemFailed,
+                systemStatus: snapshot.systemStatus
+            )
+        ) else { return }
 
         DiagnosticsTrail.record(
             level: .error,
@@ -2875,6 +2849,14 @@ final class MeetingSessionController: ObservableObject {
             event: "recording_capture_degraded",
             message: "Meeting capture health degraded",
             context: baseDiagnosticsContext(extra: context)
+        )
+    }
+
+    private func captureHealthFacts(from healthInfo: RecordingHealthInfo) -> MeetingCaptureHealthTelemetry.HealthFacts {
+        .init(
+            captureQuality: healthInfo.captureQuality.rawValue,
+            audioGaps: healthInfo.audioGaps,
+            deviceSwitches: healthInfo.deviceSwitches
         )
     }
 
