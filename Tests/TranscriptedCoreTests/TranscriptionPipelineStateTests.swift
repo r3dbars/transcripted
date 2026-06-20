@@ -95,6 +95,23 @@ final class TranscriptionPipelineStateTests: XCTestCase {
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: false,
                 systemAudioFileURL: url,
+                systemAudioStreaming: true,
+                errorMessage: nil
+            ),
+            .waiting
+        )
+    }
+
+    func testMeetingCaptureOutcomeWaitsUntilSystemAudioTapStreams() {
+        // The silent-death tap: recording flag set, file URL assigned, but the
+        // tap has not delivered its first buffer. Must stay `.waiting` so the
+        // start deadline fails it instead of reporting a tap that is silently
+        // writing nothing as ready/recording.
+        XCTAssertEqual(
+            AudioCaptureStartState.meetingCaptureOutcome(
+                isRecording: true,
+                systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
+                systemAudioStreaming: false,
                 errorMessage: nil
             ),
             .waiting
@@ -108,6 +125,7 @@ final class TranscriptionPipelineStateTests: XCTestCase {
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
                 systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
+                systemAudioStreaming: true,
                 errorMessage: ""
             ),
             .ready
@@ -120,6 +138,7 @@ final class TranscriptionPipelineStateTests: XCTestCase {
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
                 systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
+                systemAudioStreaming: true,
                 errorMessage: "permission denied"
             ),
             .failed("permission denied")
