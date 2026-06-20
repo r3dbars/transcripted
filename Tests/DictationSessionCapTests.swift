@@ -92,6 +92,10 @@ func testDictationSessionCap() {
             finalizeBody.contains("persistDictationTranscript(text: text, delivery: .savedWithoutPaste)"),
             "the cap finalize path should persist the transcript to the daily Markdown file"
         )
+        assertTrue(
+            finalizeBody.contains("ActivationTelemetry.trackDictationArtifactSaved("),
+            "the cap finalize path should count successful session-cap saves as dictation artifacts"
+        )
         assertFalse(
             finalizeBody.contains("pasteWithClipboardRestore"),
             "the cap finalize path must not paste into the focused app"

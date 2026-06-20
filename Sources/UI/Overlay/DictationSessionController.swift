@@ -1137,6 +1137,12 @@ class DictationSessionController: ObservableObject {
             overlayController.showError(saveFailureMessage)
         } else {
             overlayController.showSuccessAndDismiss()
+            ActivationTelemetry.trackDictationArtifactSaved(
+                delivery: DictationDelivery.savedWithoutPaste.rawValue,
+                durationBucket: AnalyticsReporter.durationBucket(seconds: durationSeconds),
+                trigger: currentDictationTrigger.rawValue,
+                wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)
+            )
             ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
                 artifactKind: .dictation,
                 surface: .dictationSave,
