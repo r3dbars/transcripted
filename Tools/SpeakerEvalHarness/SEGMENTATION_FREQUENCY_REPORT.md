@@ -28,25 +28,28 @@ The two metrics that answer the question (both already emitted by the scorer):
 ## TL;DR / VERDICT
 
 **The unsupervised within-cluster split is NOT worth the large/regression-risky effort as
-scoped.** Under-segmentation IS frequent — but *only* in 3+-party audio, where it is a
-**diarizer** limitation (clusters are already mixed before the matcher runs), and 3+-party
-in-room/in-the-wild audio is **not** Transcripted's core 1–2-party regime. In the regime that
-*is* the product (single/dual-voice laptop capture, isolated by the VoxCeleb matcher test),
-the dominant failure is the **opposite** — over-segmentation (one person → ~1.8 profiles) —
-which the three existing fixes already target. A cold unsupervised splitter would fire on
-exactly those clean clusters and risk **re-introducing the over-segmentation those three fixes
-exist to suppress**. The roadmap's own hypothesis is confirmed, with one refinement: under-seg
-is common in multi-party audio but is upstream of the split (diarizer-bound) and out of the
-core domain.
+scoped.** Under-segmentation IS frequent — but *only* in 3+-party audio (AMI 69%, VoxConverse
+67% of ≥3-spk files), where it is a **diarizer** limitation (clusters are already mixed before
+the matcher runs), and 3+-party in-room/in-the-wild audio is **not** Transcripted's core
+1–2-party regime. That regime is isolated two ways here — VoxConverse's ≤2-speaker files
+(diarizer 77% exact) and the VoxCeleb single-voice matcher test — and in both the dominant
+failure flips to the **opposite**, over-segmentation (one person → ~1.8 profiles), which the
+three existing fixes already target. A cold unsupervised splitter would fire on exactly those
+clean clusters and risk **re-introducing the over-segmentation those three fixes exist to
+suppress**. The roadmap's own hypothesis is confirmed, with one refinement: under-seg is common
+in multi-party audio but is upstream of the split (diarizer-bound) and out of the core domain.
 
-| Corpus | Regime | under-seg (false-merge) | over-seg (fragmentation) | DER = miss + conf | Dominant error |
+| Corpus | Regime | under-seg | over-seg | DER = miss + conf | Dominant error |
 |---|---|---|---|---|---|
-| **AMI** (in-room, 4-party) | diarizer stress | **22 / 32 mtgs** (11 span 2 ppl, 9 span 3, 2 span 4) | 1.59 / person (≈ideal 1.0) | 0.437 = .105 + **.298** | **UNDER** (diarizer-bound) |
-| **VoxCeleb** (singles, 1 clean voice) | matcher isolation | **6** (low) | **2.23 / person** → 30 ppl = **53 profiles** | 0.111 = .088 + .023 | **OVER** (matcher-bound) |
-| **VoxConverse** (in-the-wild) | diarizer stress | *audio download-bound — RTTM analyzed, diarize pending* | *pending* | *pending* | predicted UNDER (69% of files ≥3 spk) |
+| **AMI** (in-room, 4-party) | diarizer stress | **22 / 32 mtgs** false-merge (11 span 2 ppl, 9 span 3, 2 span 4) | 1.59 / person frag (≈ideal 1.0) | 0.437 = .105 + **.298** | **UNDER** (diarizer-bound) |
+| **VoxConverse** (in-the-wild, 216) | diarizer stress | **50% of files** under-segment; **67% of ≥3-spk files** | 5% of files over-segment | 0.201 = .046 + **.125** | **UNDER** (diarizer-bound, multi-party only) |
+| ↳ VoxConverse **≤2-spk files** (66) | the product's regime | 9 / 66 (14%) | 6 / 66 (9%) — **77% exact** | — | diarizer mostly **correct** |
+| **VoxCeleb** (singles, 1 clean voice) | matcher isolation | **6** false-merge (low) | **2.23 / person** → 30 ppl = **53 profiles** | 0.111 = .088 + .023 | **OVER** (matcher-bound) |
 
-**Net:** under-seg frequency is high only where the diarizer is fed 3+ simultaneous people;
-in the product's actual 1–2-party regime the error is over-segmentation. The split bet loses.
+**Net:** under-seg frequency is high only where the diarizer is fed 3+ simultaneous people
+(AMI 69%, VoxConverse 67% of ≥3-spk files). In the product's actual 1–2-party regime —
+isolated two ways: VoxConverse ≤2-spk files (77% exact) and the VoxCeleb single-voice matcher
+test — under-seg is rare and the dominant error flips to over-segmentation. The split bet loses.
 
 ---
 
@@ -96,31 +99,42 @@ mode, and it is the mode the proposed *split* does **not** help (a split makes m
 fewer). Caveat: VoxCeleb's celebrity-audio-across-decades is harsher than typical Transcripted
 usage, so this overstates absolute fragmentation — read the **direction**, not the exact count.
 
-## 3. VoxConverse — in-the-wild (dev split, 216 files) — PARTIAL, not a silent gap
+## 3. VoxConverse — in-the-wild YouTube (dev split, 216 files, diarized)
 
-`VOXCONVERSE_SPLITS=dev scripts/download_voxconverse.sh && CORPUS=voxconverse scripts/run_speaker_eval.sh`
+`VOXCONVERSE_SPLITS=dev scripts/download_voxconverse.sh && CORPUS=voxconverse CONSOLIDATION=0.88 MATCH=0.60 scripts/run_speaker_eval.sh`
 
-**Status: the full audio diarize did not complete in this run.** The ground-truth RTTMs fetched
-fine (216 dev files), but the ~1.9 GB dev audio zip downloads from the KAIST mirror
-(`mm.kaist.ac.kr`) at ~0.37 MB/s (≈80 min wall-clock), and the mirror dropped the connection
-mid-transfer twice; a resuming retry is still in flight at report time. The zip is a single
-archive with no per-file access, so a bounded subset can't be fetched faster. **This is a
-download-speed limit, not a gated/missing-model block.** Reported explicitly rather than omitted.
+Ground truth: 216 dev files, **mean 4.5 speakers/file, median 4, max 20**; speaker-count
+distribution `{1:22, 2:44, 3:35, 4:24, 5:31, 6:17, 7:12, 8:11, 9:4, 10:6, 11:3, 12:3, 15:2, 17:1, 20:1}`
+→ **1-spk 10% · 2-spk 20% · 3+-spk 69%.** This is the in-the-wild over/under tiebreaker, and it
+splits cleanly by party size.
 
-What **is** measurable without the audio — the ground-truth speaker-count distribution — already
-tells us the regime:
+**Important scoping caveat (handled, not ignored):** VoxConverse RTTM speaker labels are
+**per-file local** (`spk00`, `spk01`, …) and there is **no cross-file identity** (each file is a
+different YouTube video). So the harness's *cross-meeting* metrics — `false_merge` (188),
+`profiles_end` (448), re-ID (0.0) — are **artifacts of label collision** (the scorer buckets every
+file's `spk00` into one global "person") and are **not used here**. The valid, per-file metrics are
+**per-meeting DER** (optimal local label mapping) and the **per-file cluster deficit**
+(hyp clusters vs true speakers) — which is exactly the *within-meeting* under-/over-segmentation
+this question is about.
 
-- 216 dev files, **mean 4.5 speakers/file, median 4, max 20**.
-- distribution: `{1:22, 2:44, 3:35, 4:24, 5:31, 6:17, 7:12, 8:11, 9:4, 10:6, 11:3, 12:3, 15:2, 17:1, 20:1}`
-- **1-speaker: 10% · 2-speaker: 20% · 3+-speaker: 69%.**
+At production `consolidation 0.88 / match 0.60`:
 
-Given AMI's measured behavior (the diarizer under-segments whenever fed >2 simultaneous
-speakers), VoxConverse — *even more* multi-party — is **expected to under-segment heavily**, i.e.
-reinforce the AMI direction. But this is a **prediction from the AMI diarizer measurement + the
-VoxConverse ground truth, not a confirmed diarize**, and it is labeled as such. It does not change
-the verdict: VoxConverse is, like AMI, a 3+-party corpus, so a confirmed under-seg result there
-would still be in the multi-party / diarizer-bound bucket, not the product's core 1–2-party
-regime. (If/when the download finishes, re-run the one-liner above and this section updates.)
+- **DER 0.2012 = miss 0.0458 + false-alarm 0.0306 + confusion 0.1248** — confusion is **62%** of
+  DER, the within-meeting speaker-mixing signature, same shape as AMI.
+- **Per-file cluster count vs truth: 109 / 216 (50%) under-segment, 97 (45%) exact, 10 (5%)
+  over-segment.** Mean cluster delta −1.37 (hyp has *fewer* clusters than people). Under-seg
+  outnumbers over-seg **11:1**.
+- **Split by party size — the decisive cut:**
+  - Files with **≥3 true speakers (150): 67% under-segment** — matches AMI's 69%. The diarizer
+    collapses simultaneous voices whenever there are 3+.
+  - Files with **≤2 true speakers (66): 77% exact (51), 14% under (9), 9% over (6).** In the
+    1–2-party regime — *Transcripted's actual domain* — the diarizer is mostly correct and under-
+    vs over-segmentation are both rare and roughly balanced.
+
+**Reading:** real in-the-wild audio confirms the thesis directly and within a single corpus:
+catastrophic under-segmentation is a **3+-party / diarizer phenomenon**; in the 1–2-party regime it
+mostly doesn't happen. The split's target failure is concentrated exactly where Transcripted
+usually isn't.
 
 ## 4. Write-time contamination drift (sizes roadmap #6)
 
