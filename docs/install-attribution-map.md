@@ -35,6 +35,9 @@ through `AnalyticsEventPolicy` and `AnalyticsPayloadSanitizer`.
 | Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
 | First useful artifact | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved`, `artifact_created` | PostHog | Shows local Markdown value without inspecting content. |
 | Agent payoff | `artifact_opened`, `artifact_revealed`, `artifact_copied`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening/revealing/copying artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
+| Saved-artifact continuity | `dictation_artifact_saved`, `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Strict dictation-save proof plus legacy/proxy rows for older builds and useful-dictation volume. Do not use `dictation_completed` as strict saved-artifact proof when saved-artifact events are available. |
+| Second value moment | `activation_second_artifact_saved` | PostHog | Shows a second durable saved artifact on the same anonymous device, with only kind and day-bucket fields. |
+| Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
 | First useful artifact | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Shows local Markdown value without inspecting content. |
 | Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `agent_capture_query_observed`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, successful MCP capture queries, and later return via Home. |
 | Reliability filter | Release-scoped issues and allowed non-fatal events | Sentry | Use to avoid mistaking broken first-run paths for weak demand. |
@@ -87,6 +90,10 @@ For the attribution story, report:
   `dictation_completed` as completion-volume context only.
   `activation_first_artifact_saved`, `dictation_completed`,
   `onboarding_first_dictation_saved`, and `meeting_transcript_saved` for value.
+  Keep `dictation_artifact_saved`, `onboarding_first_dictation_saved`,
+  `meeting_transcript_saved`, and `dictation_completed` as continuity/proxy
+  signals for older builds and saved-dictation volume. `dictation_completed`
+  remains completion-volume context, not strict saved-artifact proof.
 - `activation_second_artifact_saved` proves repeat saved-artifact value, not
   agent answer quality.
 - Artifact events do not prove agent answer quality. The closest safe proxy is

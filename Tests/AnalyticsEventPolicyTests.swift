@@ -400,14 +400,17 @@ func testAnalyticsEventPolicy() {
                 "agent_target": "mcp_client",
                 "artifact_age_bucket": "24_48h",
                 "artifact_kind": "meeting",
+                "capture_age_bucket": "2_7d",
                 "days_since_first_bucket": "2_7d",
                 "duration_bucket": "10_29m",
                 "first_artifact_kind": "dictation",
                 "prompt_kind": "meeting_bundle",
                 "query_kind": "search",
                 "result": "success",
+                "return_window_bucket": "3_7d",
                 "save_outcome": "success",
                 "second_artifact_kind": "meeting",
+                "source_count_bucket": "2_3",
                 "surface": "home_preview",
                 "trigger": "detected_prompt",
                 "word_count_bucket": "300_plus",
@@ -431,14 +434,17 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["agent_target"], "mcp_client", "agent target should survive")
         assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
         assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["capture_age_bucket"], "2_7d", "capture age bucket should survive")
         assertEqual(sanitized["days_since_first_bucket"], "2_7d", "days since first bucket should survive")
         assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
         assertEqual(sanitized["first_artifact_kind"], "dictation", "first artifact kind should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
         assertEqual(sanitized["query_kind"], "search", "query kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
+        assertEqual(sanitized["return_window_bucket"], "3_7d", "return window bucket should survive")
         assertEqual(sanitized["save_outcome"], "success", "coarse save result should survive")
         assertEqual(sanitized["second_artifact_kind"], "meeting", "second artifact kind should survive")
+        assertEqual(sanitized["source_count_bucket"], "2_3", "source count bucket should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
         assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")

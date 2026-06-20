@@ -79,12 +79,12 @@ final class MeetingCaptureBridge: ObservableObject {
         errorMessage = nil
         micAttenuationCueObserved = false
 
-        // Apply the user's microphone-processing choice before each
-        // recording. VPIO defaults off (no Zoom ducking); enable only when
-        // the user has explicitly opted in for Safari/Firefox WebRTC
-        // calls. Read once at start; mid-session changes don't take effect
-        // until the next recording.
-        audio.enableVoiceProcessing = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+        // Apply the user's microphone-processing choice before each recording.
+        // Read once at start; mid-session changes don't take effect until the
+        // next recording except the explicit Boost Mic consent path below.
+        let micProcessingMode = MicrophoneProcessingPreferences.mode()
+        audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing
+        audio.enableSoftwareAGC = micProcessingMode.allowsSoftwareAutogainFallback
 
         return await withCheckedContinuation { continuation in
             startAttempt.reset()?.resume(returning: false)
@@ -184,6 +184,7 @@ final class MeetingCaptureBridge: ObservableObject {
         switch AudioCaptureStartState.meetingCaptureOutcome(
             isRecording: audio.isRecording,
             systemAudioFileURL: audio.systemAudioFileURL,
+            systemAudioStreaming: audio.systemAudioStreaming,
             errorMessage: errorMessage
         ) {
         case .waiting:
@@ -280,6 +281,11 @@ final class MeetingCaptureBridge: ObservableObject {
 
         sinkStartAttemptTriggers(from: audio.$isRecording)
         sinkStartAttemptTriggers(from: audio.$systemAudioFileURL)
+        // A tap can install (file URL assigned, isRecording true) yet never
+        // stream. Re-evaluate readiness when the first system buffer arrives so
+        // a silent-death tap stays `.waiting` and fails the start deadline
+        // instead of being reported as recording.
+        sinkStartAttemptTriggers(from: audio.$systemAudioStreaming)
     }
 
     private func currentStopResult(didTimeOut: Bool = false) -> CaptureStopResult {

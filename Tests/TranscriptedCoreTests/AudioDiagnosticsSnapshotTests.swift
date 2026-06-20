@@ -47,6 +47,7 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
     func testHandleMicBufferAppliesAGCBeforeMicCallbackAndDiagnostics() throws {
         let audio = makeAudio()
         audio.prepareForNewRecordingStart()
+        audio.enableSoftwareAGC = true
         audio.realtimeAGC = RealtimeAGC()
         defer {
             audio.onMicPCMBuffer = nil
@@ -83,6 +84,50 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
             Double(snapshot.micRawPeak) ?? 1,
             "diagnostics should prove the processed meeting mic path is louder than the raw input"
         )
+        XCTAssertEqual(snapshot.privacySafeContext["realtime_agc"], "true")
+    }
+
+    func testHandleMicBufferLeavesRawCopyWhenSoftwareAGCDisabled() throws {
+        let audio = makeAudio()
+        audio.prepareForNewRecordingStart()
+        audio.enableSoftwareAGC = false
+        audio.refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
+        defer {
+            audio.onMicPCMBuffer = nil
+            audio.realtimeAGC = nil
+        }
+
+        var callbackPeaks: [Float] = []
+        audio.onMicPCMBuffer = { buffer in
+            callbackPeaks.append(audio.linearPeak(buffer: buffer))
+        }
+
+        let rawPeak: Float = 0.04
+        let buffer = try makeMonoSineBuffer(peak: rawPeak)
+        audio.handleMicBuffer(buffer)
+
+        let processedPeak = try XCTUnwrap(callbackPeaks.last)
+        XCTAssertEqual(processedPeak, rawPeak, accuracy: 0.002, "raw/off mode should not boost the mic copy")
+
+        let snapshot = audio.createPipelineDiagnosticsSnapshot()
+        XCTAssertEqual(snapshot.micRawPeak, "0.04000")
+        XCTAssertEqual(snapshot.micProcessedPeak, "0.04000")
+        XCTAssertEqual(snapshot.privacySafeContext["realtime_agc"], "false")
+        XCTAssertEqual(snapshot.privacySafeContext["mic_processing"], "none")
+    }
+
+    func testAppleVoiceProcessingRequestFallsBackToSoftwareAGCWhenVPIOIsNotActive() {
+        let audio = makeAudio()
+        audio.enableVoiceProcessing = true
+        audio.voiceProcessingEnabled = false
+        audio.enableSoftwareAGC = true
+
+        audio.refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
+
+        XCTAssertNotNil(audio.realtimeAGC, "Apple mode should keep software AGC as a fallback when VPIO cannot arm")
+        let snapshot = audio.createPipelineDiagnosticsSnapshot()
+        XCTAssertEqual(snapshot.privacySafeContext["mic_processing"], "apple_voice_processing")
+        XCTAssertEqual(snapshot.privacySafeContext["voice_processing_active"], "false")
         XCTAssertEqual(snapshot.privacySafeContext["realtime_agc"], "true")
     }
 

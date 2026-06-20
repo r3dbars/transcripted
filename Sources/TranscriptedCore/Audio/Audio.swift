@@ -184,6 +184,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var micAudioFileURL: URL?
     @Published public var systemAudioFileURL: URL?
 
+    /// True once the system-audio tap has actually delivered its first buffer
+    /// for the current recording. Meeting-capture readiness
+    /// (`AudioCaptureStartState`) must not promote `.waiting` → `.ready` on
+    /// "I/O proc started + file URL assigned" alone: a tap can install, get a
+    /// file URL, and then silently never stream, losing the entire remote side
+    /// of a call. The setter is module-internal; the flag is flipped from the
+    /// system buffer callback via `markSystemAudioStreamingIfCurrent` and reset
+    /// at each start in `prepareForNewRecordingStart`.
+    @Published public internal(set) var systemAudioStreaming: Bool = false
+
     // Base mic URL set at recording start. If recovery creates additional mic WAV
     // segments, this remains the anchor used to name any merged output passed to
     // the pipeline on stop.
@@ -309,6 +319,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// and assigns this property; `TranscriptedCore` itself never reaches
     /// into UserDefaults.
     public var enableVoiceProcessing: Bool = false
+
+    /// Whether Transcripted should run its software gain control on the copied
+    /// mic buffer when Apple voice processing is not active. Default on for the
+    /// existing quiet-WebRTC recovery path; users with tuned hardware mics can
+    /// turn it off so saved mic audio stays raw.
+    public var enableSoftwareAGC: Bool = true
 
     /// Real-time gain control for the mic tap callback. Used when VPIO is
     /// disabled (the default) to recover attenuated streams (e.g. Safari/
@@ -828,6 +844,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return inputNode.inputFormat(forBus: 1)
     }
 
+    func refreshRealtimeAGCForCurrentProcessingMode(resetExisting: Bool = false) {
+        if voiceProcessingEnabled || !enableSoftwareAGC {
+            realtimeAGC = nil
+        } else if let existing = realtimeAGC {
+            if resetExisting {
+                existing.reset()
+            }
+        } else {
+            realtimeAGC = RealtimeAGC()
+        }
+    }
+
     /// Enable AUVoiceProcessingIO on the meeting input node so Transcripted
     /// gets its own AGC'd copy of the mic stream rather than reading the raw
     /// shared device. Issue #500: when Safari/Firefox WebRTC has VPIO active
@@ -919,6 +947,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         error = nil
         isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
+        systemAudioStreaming = false  // Re-gate readiness on a fresh first buffer
         resetSignalDiagnostics()
         // Fresh instance = clean one-shot latch per recording.
         quietMicAttenuationDetector = QuietMicAttenuationDetector()
@@ -1105,6 +1134,21 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioFileURL = fileURL
         recordingJournal.recordSystemAudio(fileURL, session: journalSession)
         restoreSystemAudioHealthyStatusAfterSuccessfulStart()
+    }
+
+    /// Records that the system-audio tap has started streaming for this
+    /// recording. Called from the system buffer callback on its first buffer
+    /// (on a CoreAudio dispatch thread), so it hops to main to publish
+    /// `systemAudioStreaming`. Generation-guarded so a late buffer from a
+    /// finished session cannot re-arm readiness. This is the signal that
+    /// promotes meeting-capture readiness (`AudioCaptureStartState`) from
+    /// `.waiting` to `.ready`: a tap that installs but never streams never sets
+    /// it, so the start deadline fails it instead of reporting "recording".
+    func markSystemAudioStreamingIfCurrent(sessionGeneration: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.recordingSessionGeneration == sessionGeneration else { return }
+            self.systemAudioStreaming = true
+        }
     }
 
     // MARK: - Stop Recording

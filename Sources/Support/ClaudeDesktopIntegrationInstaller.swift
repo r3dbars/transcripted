@@ -306,8 +306,16 @@ enum ClaudeDesktopIntegrationInstaller {
     static func writeMCPObservabilityConfigIfAvailable(
         configURL: URL = mcpObservabilityConfigURL,
         infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
+        analyticsEnabled: Bool = AnalyticsPreferences.isEnabled(),
         fileManager: FileManager = .default
     ) throws {
+        guard analyticsEnabled else {
+            if fileManager.fileExists(atPath: configURL.path) {
+                try fileManager.removeItem(at: configURL)
+            }
+            return
+        }
+
         guard let apiKey = firstNonEmpty(infoDictionary?[AnalyticsRuntimeConfiguration.apiKeyInfoKey] as? String),
               let host = firstNonEmpty(infoDictionary?[AnalyticsRuntimeConfiguration.hostInfoKey] as? String),
               host.lowercased().hasPrefix("https://") else {

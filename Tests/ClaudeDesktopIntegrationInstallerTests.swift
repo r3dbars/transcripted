@@ -796,6 +796,35 @@ func testClaudeDesktopIntegrationInstaller() {
         )
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable — removes config when analytics is disabled") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperObservabilityOptOutTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        let stale = [
+            AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_old",
+            AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+        ]
+        let staleData = try? PropertyListSerialization.data(fromPropertyList: stale, format: .xml, options: 0)
+        try? staleData?.write(to: configURL)
+
+        try? ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
+            configURL: configURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
+                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+            ],
+            analyticsEnabled: false
+        )
+
+        assertFalse(
+            FileManager.default.fileExists(atPath: configURL.path),
+            "analytics opt-out should remove stale standalone helper analytics config"
+        )
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — never installs fresh") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeHelperNoInstallTests-\(UUID().uuidString)", isDirectory: true)

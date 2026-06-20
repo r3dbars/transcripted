@@ -24,6 +24,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "dictation_started",
     "dictation_start_failed",
     "dictation_completed",
+    "dictation_artifact_saved",
     "dictation_no_speech",
     "dictation_audio_route_recovery_timeout",
     "meeting_recording_started",

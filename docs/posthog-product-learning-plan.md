@@ -108,6 +108,7 @@ Operational scripts query aggregate counts only:
 | `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 | `ux_confusion_signal_observed` | `action_id`, `elapsed_bucket`, `failure_kind`, `page_id`, `reason_kind`, `retryability`, `signal_kind`, `step_id`, `step_index`, `surface`, `visit_count_bucket` |
 | `ux_recovery_action_taken` | `action_id`, `failure_kind`, `page_id`, `reason_kind`, `recovery_kind`, `result`, `retryability`, `surface` |
+| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 
 ### Menu, Settings, Updates
 
@@ -215,6 +216,14 @@ aggregate reliability sizing and should not be expanded to raw device names.
 - `agent_capture_query_observed` proves successful saved-capture reads/searches
   through MCP, but it still cannot judge answer quality or whether the answer
   was useful.
+- `agent_capture_query_observed` does not exist yet, so PostHog cannot prove
+  that an agent actually answered from a saved Transcripted artifact.
+- General dictation saved-Markdown writes now have `dictation_artifact_saved`;
+  keep `dictation_completed` as completion-volume context, not strict saved-artifact proof.
+- `agent_capture_query_observed` proves successful saved-capture reads/searches
+  through MCP, but it still cannot judge answer quality.
+- General dictation saved-Markdown writes still rely on `dictation_completed`
+  as a proxy, while onboarding dictation and meeting saves have stricter events.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
 - Speaker review now has a clean prompted/actioned/completed funnel. Use it to
@@ -234,6 +243,8 @@ Prefer a small number of lifecycle events over broad click tracking.
 | Event | When to fire | Properties |
 | --- | --- | --- |
 | `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
+| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
+| `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
 | `settings_feature_discovered` | A high-leverage feature panel is first viewed | `feature_area`, `page_id`, `source` |

@@ -43,12 +43,11 @@ extension Audio {
             recordRecordingStartCapturedInput(deviceID: activeInputNode.auAudioUnit.deviceID)
             armVoiceProcessing(on: activeInputNode)
 
-            // When VPIO is off (the default — see `enableVoiceProcessing`), run
-            // a software AGC in the mic tap callback to recover attenuated
-            // streams (issue #500: Safari/Firefox WebRTC contention). VPIO
-            // would do this in hardware but engages system-wide ducking of
-            // other apps' audio output; software AGC has no such side effect.
-            realtimeAGC = voiceProcessingEnabled ? nil : RealtimeAGC()
+            // When VPIO is off and software AGC is selected, run gain control
+            // in the mic tap callback to recover attenuated streams (issue
+            // #500). In raw/off mode this deliberately leaves realtimeAGC nil
+            // so tuned USB mics are not boosted by Transcripted.
+            refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
 
             // Read the selected microphone's format after any headset fallback.
             // recordingFormat(for:) returns:
@@ -73,6 +72,7 @@ extension Audio {
             "sampleRate": "\(recordingSnapshot.sampleRate)",
             "channels": "\(recordingSnapshot.channelCount)",
             "voiceProcessing": "\(voiceProcessingEnabled)",
+            "softwareAGCRequested": "\(enableSoftwareAGC)",
             "softwareAGC": "\(realtimeAGC != nil)"
         ])
 
@@ -167,6 +167,12 @@ extension Audio {
 
                         self.systemBufferCount += 1
                         let currentBufferCount = self.systemBufferCount
+                        if currentBufferCount == 1 {
+                            // First real buffer: the tap is actually streaming
+                            // (not just installed with a file URL). Promote
+                            // meeting-capture readiness past `.waiting`.
+                            self.markSystemAudioStreamingIfCurrent(sessionGeneration: sessionGeneration)
+                        }
 
                         // Calculate system audio level synchronously (fast, no I/O)
                         self.calculateSystemLevel(buffer: systemBuffer)
