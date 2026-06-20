@@ -2769,9 +2769,9 @@ private struct HomeFailedMeetingRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: item.failureKind == .recordingTooShort ? "timer" : "exclamationmark.triangle.fill")
+            Image(systemName: presentation.iconSystemName)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(item.failureKind == .recordingTooShort ? Color.secondary : Color.orange)
+                .foregroundStyle(iconColor)
                 .frame(width: 24)
                 .padding(.top, 3)
 
@@ -2837,21 +2837,21 @@ private struct HomeFailedMeetingRow: View {
                         ) {
                             onRetry()
                         }
-                        .disabled(retryDisabled)
-                        .help(retryHelp)
+                        .disabled(presentation.retryDisabled)
+                        .help(presentation.retryHelp)
                     }
 
                     SettingsInlineActionButton(
-                        title: hasRetainedAudioFiles ? "Delete" : "Dismiss",
-                        symbolName: hasRetainedAudioFiles ? "trash" : "xmark",
-                        tone: hasRetainedAudioFiles ? .destructive : .neutral,
-                        automationIdentifier: hasRetainedAudioFiles
+                        title: presentation.clearTitle,
+                        symbolName: presentation.clearSymbolName,
+                        tone: presentation.clearIsDestructive ? .destructive : .neutral,
+                        automationIdentifier: presentation.clearIsDestructive
                             ? "transcripted.home.failed-meetings.delete"
                             : "transcripted.home.failed-meetings.dismiss"
                     ) {
                         onClear()
                     }
-                    .frame(width: hasRetainedAudioFiles ? 78 : 82, height: 30)
+                    .frame(width: presentation.clearIsDestructive ? 78 : 82, height: 30)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2859,31 +2859,20 @@ private struct HomeFailedMeetingRow: View {
         .padding(.vertical, 10)
     }
 
-    private var retryDisabled: Bool {
-        !canRetry || !item.isRetryable || !item.hasAudioFiles || item.isRetrying
+    private var presentation: FailedMeetingRecoveryPresentation {
+        FailedMeetingRecoveryPresentation.make(
+            failureKind: item.failureKind,
+            canRetry: canRetry,
+            retryUnavailableReason: retryUnavailableReason,
+            isRetryable: item.isRetryable,
+            isRetrying: item.isRetrying,
+            hasAudioFiles: item.hasAudioFiles,
+            hasRetainedAudioFiles: !item.audioURLs.isEmpty
+        )
     }
 
-    private var retryHelp: String {
-        if item.isRetrying {
-            return "Retry is already running."
-        }
-        if !item.hasAudioFiles {
-            return "This meeting does not have enough saved audio to retry."
-        }
-        if !item.isRetryable {
-            return "This meeting does not have enough saved audio to retry."
-        }
-        if let retryUnavailableReason {
-            return retryUnavailableReason
-        }
-        if !canRetry {
-            return "Wait for the current meeting work to finish before retrying."
-        }
-        return "Transcribe this saved audio again."
-    }
-
-    private var hasRetainedAudioFiles: Bool {
-        !item.audioURLs.isEmpty
+    private var iconColor: Color {
+        presentation.iconTone == .warning ? Color.orange : Color.secondary
     }
 
     private func selectedPlaybackChoice(for audio: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {
