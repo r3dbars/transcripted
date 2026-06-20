@@ -10,6 +10,14 @@ public protocol SpeakerStore: Sendable {
     /// Add a new speaker or update an existing profile with a new embedding
     func addOrUpdateSpeaker(embedding: [Float], existingId: UUID?) -> SpeakerProfile
 
+    /// Add a new speaker or update an existing matched profile with an explicit EMA blend weight.
+    ///
+    /// `blendAlpha == 0` records the appearance (call-count / last-seen) **without** altering the
+    /// stored voiceprint — used by the write-time contamination gate when a match is too marginal
+    /// or ambiguous to safely adapt the fingerprint. Higher alpha blends as normal. See
+    /// `SpeakerWritePathPolicy.voiceprintBlendAlpha`.
+    func addOrUpdateSpeaker(embedding: [Float], existingId: UUID?, blendAlpha: Float) -> SpeakerProfile
+
     /// Get a specific speaker profile by ID
     func getSpeaker(id: UUID) -> SpeakerProfile?
 
@@ -54,5 +62,12 @@ public extension SpeakerStore {
     func mergeDuplicates(protecting protectedIds: Set<UUID>) {
         guard protectedIds.isEmpty else { return }
         mergeDuplicates()
+    }
+
+    /// Back-compat default: conformers that don't model an EMA blend weight (test doubles, simple
+    /// stores) fall back to the standard write-back, ignoring `blendAlpha`. `SpeakerDatabase`
+    /// provides a real implementation that honours the gate.
+    func addOrUpdateSpeaker(embedding: [Float], existingId: UUID?, blendAlpha: Float) -> SpeakerProfile {
+        addOrUpdateSpeaker(embedding: embedding, existingId: existingId)
     }
 }

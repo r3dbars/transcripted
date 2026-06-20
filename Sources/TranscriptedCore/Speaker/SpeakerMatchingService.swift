@@ -116,6 +116,61 @@ extension Transcription {
                                    secondBestSimilarity: secondBestSimilarity)
     }
 
+    // MARK: - Cross-Cluster Link/Merge (#8)
+
+    /// Plan for resolving multiple diarizer clusters that matched the same DB profile.
+    struct CrossClusterLinkPlan: Equatable {
+        /// `other speakerId -> canonical speakerId`: genuine over-segmentation, fuse into one row.
+        var remaps: [Int: Int] = [:]
+        /// speakerIds whose shared-profile match should be discarded and replaced with a fresh
+        /// profile — a distinct voice that only coincidentally matched the same profile.
+        var spinOffs: [Int] = []
+    }
+
+    /// Decide, for clusters that matched the same DB profile, which are genuine over-segmentation of
+    /// one voice (fuse) and which are distinct voices that merely resemble the profile (spin off).
+    ///
+    /// Decouples the link/merge decision from the per-utterance attach floor (#8): a cluster
+    /// attaches to a profile at the loose adaptive floor (0.70), but two clusters only FUSE when
+    /// they are directly similar to each other (cross-cluster cosine ≥
+    /// `SpeakerWritePathPolicy.crossClusterLinkFloor`). The largest cluster keeps the matched
+    /// identity; smaller distinct voices are spun off.
+    ///
+    /// Pure and deterministic so the eval/unit tests can exercise the two-people-one-profile case
+    /// directly without the full audio pipeline.
+    nonisolated static func planCrossClusterLinks(
+        matchedProfileBySpeaker: [Int: UUID],
+        meanBySpeaker: [Int: [Float]],
+        segmentCountBySpeaker: [Int: Int]
+    ) -> CrossClusterLinkPlan {
+        var plan = CrossClusterLinkPlan()
+        let byProfile = Dictionary(grouping: matchedProfileBySpeaker.keys) { matchedProfileBySpeaker[$0] }
+        for (profileId, speakerIds) in byProfile where profileId != nil && speakerIds.count >= 2 {
+            // Largest cluster (most segments) claims the identity; ties broken by speakerId for
+            // deterministic output.
+            let sorted = speakerIds.sorted { a, b in
+                let ca = segmentCountBySpeaker[a] ?? 0
+                let cb = segmentCountBySpeaker[b] ?? 0
+                return ca == cb ? a < b : ca > cb
+            }
+            let canonical = sorted[0]
+            guard let canonicalMean = meanBySpeaker[canonical] else { continue }
+            for other in sorted.dropFirst() {
+                guard let otherMean = meanBySpeaker[other] else {
+                    plan.spinOffs.append(other)
+                    continue
+                }
+                let crossSim = cosineSimilarityStatic(canonicalMean, otherMean)
+                if SpeakerWritePathPolicy.shouldFuseMatchedClusters(crossClusterSimilarity: crossSim) {
+                    plan.remaps[other] = canonical
+                } else {
+                    plan.spinOffs.append(other)
+                }
+            }
+        }
+        return plan
+    }
+
     /// Compute L2-normalized weighted mean of multiple embeddings.
     /// Higher-weight embeddings contribute more to the mean. Segments recorded while
     /// the local mic was active have lower weight (system audio contaminated by local voice).
