@@ -21,7 +21,7 @@
 #   CONSOLIDATION="none 0.85 0.88" MATCH="0.55 0.6 0.65" scripts/run_speaker_eval.sh
 #
 # Env knobs: CORPUS, SERIES (subset; default = all meetings with RTTMs), CONSOLIDATION,
-#            MATCH, COLLAR.
+#            MATCH, COLLAR, ALLOW_PARTIAL_CORPUS=1.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
@@ -50,6 +50,7 @@ fi
 CONSOLIDATION="${CONSOLIDATION:-none 0.82 0.85 0.88 0.91}"
 MATCH="${MATCH:-0.50 0.55 0.60 0.65 0.70}"
 COLLAR="${COLLAR:-0.25}"
+ALLOW_PARTIAL_CORPUS="${ALLOW_PARTIAL_CORPUS:-0}"
 
 BIN="$ROOT/Tools/SpeakerEvalHarness/.build/release/speaker-eval-harness"
 DUMPS="$ROOT/data/eval/$CORPUS/dumps"
@@ -59,24 +60,62 @@ mkdir -p "$DUMPS" "$RESULTS" "$REPORTS"
 
 echo "==> CORPUS=$CORPUS  meetings=$(echo "$MEETINGS" | wc -w | tr -d ' ')  (audio=$AUDIO_DIR rttm=$RTTM_DIR)"
 
+usable_meetings=()
+missing_inputs=()
+for m in $MEETINGS; do
+  audio="$ROOT/$AUDIO_DIR/$m$SUFFIX"
+  rttm="$ROOT/$RTTM_DIR/$m.rttm"
+  if [ ! -s "$rttm" ]; then
+    missing_inputs+=("missing RTTM $rttm")
+    continue
+  fi
+  if [ ! -s "$audio" ]; then
+    missing_inputs+=("missing audio $audio")
+    continue
+  fi
+  usable_meetings+=("$m")
+done
+
+if [ "${#missing_inputs[@]}" -gt 0 ]; then
+  printf '    !! %s\n' "${missing_inputs[@]}" >&2
+  if [ "$ALLOW_PARTIAL_CORPUS" != "1" ]; then
+    echo "Partial corpus refused. Fetch the missing inputs or rerun with ALLOW_PARTIAL_CORPUS=1 for local iteration only." >&2
+    exit 1
+  fi
+  echo "    !! continuing with partial corpus because ALLOW_PARTIAL_CORPUS=1" >&2
+fi
+[ "${#usable_meetings[@]}" -gt 0 ] || { echo "no complete audio+RTTM meetings found for CORPUS=$CORPUS"; exit 1; }
+
 echo "==> build harness"
 ( cd "$ROOT/Tools/SpeakerEvalHarness" && swift build -c release 2>&1 | grep -vE "\.pcm|while processing" | tail -1 )
 
 echo "==> dump-diarize sessions (cached)"
 INPUTS=""
-for m in $MEETINGS; do
+dump_failures=()
+for m in "${usable_meetings[@]}"; do
   dump="$DUMPS/$m.json"
   audio="$ROOT/$AUDIO_DIR/$m$SUFFIX"
   if [ ! -s "$dump" ]; then
-    if [ ! -s "$audio" ]; then echo "    !! missing audio $audio — skipping $m" >&2; continue; fi
     echo "    diarizing $m ..."
     "$BIN" dump --audio "$audio" --meeting "$m" --out "$dump" \
       2>&1 | grep -E "^\[dump\] $m:" | grep -v processing || true
   else
     echo "    cached $m"
   fi
-  [ -s "$dump" ] && INPUTS="${INPUTS:+$INPUTS,}$dump"
+  if [ -s "$dump" ]; then
+    INPUTS="${INPUTS:+$INPUTS,}$dump"
+  else
+    dump_failures+=("dump failed or produced empty output for $m")
+  fi
 done
+if [ "${#dump_failures[@]}" -gt 0 ]; then
+  printf '    !! %s\n' "${dump_failures[@]}" >&2
+  if [ "$ALLOW_PARTIAL_CORPUS" != "1" ]; then
+    echo "Partial corpus refused after dump failures. Fix the dump errors or rerun with ALLOW_PARTIAL_CORPUS=1 for local iteration only." >&2
+    exit 1
+  fi
+  echo "    !! continuing after dump failures because ALLOW_PARTIAL_CORPUS=1" >&2
+fi
 [ -n "$INPUTS" ] || { echo "no dumps produced — check audio files"; exit 1; }
 
 echo "==> threshold sweep (consolidation × match)"
