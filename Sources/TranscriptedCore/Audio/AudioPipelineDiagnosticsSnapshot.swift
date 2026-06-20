@@ -92,6 +92,7 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     public let systemFailed: Bool
     public let voiceProcessingRequested: Bool
     public let voiceProcessingActive: Bool
+    public let softwareAGCRequested: Bool
     public let realtimeAGCActive: Bool
     public let micRawPeak: String
     public let micProcessedPeak: String
@@ -124,7 +125,7 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "input_channels": inputChannels,
             "input_device_class": inputDeviceClass,
             "input_rate_hz": inputRateHz,
-            "mic_processing": voiceProcessingRequested ? "apple_voice_processing" : "software_agc",
+            "mic_processing": micProcessingLabel,
             "mic_processed_peak": micProcessedPeak,
             "mic_raw_peak": micRawPeak,
             "mic_recovering": boolString(micRecovering),
@@ -148,6 +149,16 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
 
     private func boolString(_ value: Bool) -> String {
         value ? "true" : "false"
+    }
+
+    private var micProcessingLabel: String {
+        if voiceProcessingRequested {
+            return "apple_voice_processing"
+        }
+        if softwareAGCRequested {
+            return "software_agc"
+        }
+        return "none"
     }
 }
 
@@ -186,6 +197,7 @@ extension Audio {
             systemFailed: systemAudioFailed,
             voiceProcessingRequested: enableVoiceProcessing,
             voiceProcessingActive: voiceProcessingEnabled,
+            softwareAGCRequested: enableSoftwareAGC,
             realtimeAGCActive: realtimeAGC != nil,
             micRawPeak: signalSnapshot.micRawPeakString,
             micProcessedPeak: signalSnapshot.micProcessedPeakString,
