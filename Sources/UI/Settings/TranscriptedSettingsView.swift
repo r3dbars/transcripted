@@ -37,7 +37,7 @@ struct TranscriptedSettingsView: View {
     @State private var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State private var showAdvancedModelControls = false
     @State private var preferredSpeakerEmbedder = SpeakerEmbedderPreferences.preferredChoice()
-    @State private var showSpeakerEmbedderControls = false
+    @State private var showSpeakerEmbedderSwitchConfirm = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
@@ -2399,33 +2399,53 @@ struct TranscriptedSettingsView: View {
                 .padding(.top, 8)
             }
 
-            DisclosureGroup("Speaker voiceprint (experimental)", isExpanded: $showSpeakerEmbedderControls) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("Voiceprint model", selection: Binding(
-                        get: { preferredSpeakerEmbedder },
-                        set: { newValue in
-                            preferredSpeakerEmbedder = newValue
-                            SpeakerEmbedderPreferences.setPreferredChoice(newValue)
+            // Speaker matching engine. Outcome-framed (no model jargon); off by
+            // default; gated on the model actually being available; switching on
+            // is non-destructive and reversible, with a one-time confirmation.
+            VStack(alignment: .leading, spacing: 8) {
+                let modelAvailable = SpeakerEmbedderFactory.resolveModelURL() != nil
+                let namedCount = speakerPeopleModel.profiles.filter { $0.displayName != nil }.count
+                SettingsToggleRow(
+                    title: "Better speaker matching on calls",
+                    detail: "Tells people apart more reliably on Zoom, Meet, and phone audio. Your saved people stay safe — switch back anytime.",
+                    isOn: Binding(
+                        get: { preferredSpeakerEmbedder == .eRes2Net },
+                        set: { wantOn in
+                            if wantOn {
+                                if namedCount > 0 {
+                                    showSpeakerEmbedderSwitchConfirm = true
+                                } else {
+                                    applySpeakerEmbedder(.eRes2Net)
+                                }
+                            } else {
+                                applySpeakerEmbedder(.weSpeaker)
+                            }
                         }
-                    )) {
-                        ForEach(SpeakerEmbedderChoice.allCases) { choice in
-                            Text(choice.shortTitle).tag(choice)
-                        }
-                    }
-                    .pickerStyle(.menu)
+                    )
+                )
+                .disabled(!modelAvailable)
 
-                    Text(preferredSpeakerEmbedder.summary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Restart Transcripted to apply. ERes2Net keeps its own separate speaker memory.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if !modelAvailable {
+                    Text("Not available in this build.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if preferredSpeakerEmbedder == .eRes2Net {
+                    Text("Restart Transcripted to start using it. Call matching keeps a separate memory; your original saved people return if you switch this off.")
+                        .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.top, 8)
+            }
+            .alert("Switch to call-optimized matching?", isPresented: $showSpeakerEmbedderSwitchConfirm) {
+                Button("Switch") { applySpeakerEmbedder(.eRes2Net) }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Your \(speakerPeopleModel.profiles.filter { $0.displayName != nil }.count) saved people stay safe. Call matching uses a separate memory, so for the first few meetings it may ask who's who again, then re-learns them. Nothing is deleted, and switching back instantly restores your current people.")
             }
         }
+    }
+
+    private func applySpeakerEmbedder(_ choice: SpeakerEmbedderChoice) {
+        preferredSpeakerEmbedder = choice
+        SpeakerEmbedderPreferences.setPreferredChoice(choice)
     }
 
     private var generalShortcutSettingsEditor: some View {

@@ -130,11 +130,38 @@ distribution build must **not redistribute them**:
   original distributor, not self-hosting the weights), wired through a download path
   like the diarizer models. Until then the feature stays opt-in + local.
 
+## Switching experience (end-user)
+
+The Settings control is **outcome-framed** ("Better speaker matching on calls"), with
+**no model jargon**. It is:
+
+- **Off by default** and **disabled when the model isn't available** (`resolveModelURL()
+  == nil`) — never a phantom switch that silently falls back to WeSpeaker.
+- **Non-destructive + reversible.** Each model keeps its own DB file; `speakers.sqlite`
+  is never deleted, so switching back instantly restores the user's named people.
+- **Confirmed once** when turning it on with named people present, with copy that makes
+  the safety explicit ("your N saved people stay safe… switching back instantly
+  restores them").
+
+### Carry-forward migration (designed; next increment)
+
+So switching doesn't start cold, a "Bring my named people over" pass rebuilds named
+ERes2Net profiles from retained audio. Algorithm (idempotent, cancellable, background,
+local-only): for each saved transcript whose audio is retained, scope to
+`name_source == "user_manual"` speakers, re-diarize with ERes2Net active, map each
+diarizer group back to the old `db_id` via the transcript frontmatter (do **not**
+re-run identity matching — preserve the user's renames/merges), mean the 192-d vectors,
+and `addOrUpdateSpeaker(existingId: oldDbId)` (reuse the UUID so future transcripts'
+`db_id` references stay valid) + copy the name. Keep a migrated-transcript ledger for
+resume/idempotency. Do not migrate auto/unnamed clusters. This is deferred so the
+DB-mutating path lands with its own focused tests.
+
 ## Known limitations / follow-ups
 
 - Switching models in Settings currently requires an app restart (the embedder + DB
   path are bound when `MeetingSessionController` is constructed). A quiescence-gated
-  live rebuild is the planned follow-up.
+  live rebuild is the planned follow-up (the `.speakerEmbedderPreferenceDidChange`
+  notification has no listener yet).
 - The default stays WeSpeaker for everyone; only consider defaulting ERes2Net for new
   installs after a license-clean weight source + verified download path exist.
 ```
