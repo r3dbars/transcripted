@@ -339,17 +339,22 @@ public struct ChannelSpeakerContext: Sendable {
     public let sessionEmbedding: [Float]?
     public let matchedProfileSnapshot: SpeakerProfile?
     public let matchSimilarity: Double?
+    /// Similarity of the next-closest profile that cleared the match floor (the runner-up),
+    /// or nil if unknown / no runner-up. Feeds `SpeakerNamingPolicy`'s auto-accept margin guard.
+    public let matchSecondSimilarity: Double?
 
     public init(
         persistentSpeakerId: UUID,
         sessionEmbedding: [Float]?,
         matchedProfileSnapshot: SpeakerProfile?,
-        matchSimilarity: Double?
+        matchSimilarity: Double?,
+        matchSecondSimilarity: Double? = nil
     ) {
         self.persistentSpeakerId = persistentSpeakerId
         self.sessionEmbedding = sessionEmbedding
         self.matchedProfileSnapshot = matchedProfileSnapshot
         self.matchSimilarity = matchSimilarity
+        self.matchSecondSimilarity = matchSecondSimilarity
     }
 }
 

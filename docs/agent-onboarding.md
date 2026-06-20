@@ -179,6 +179,8 @@ When the issue is vague, classify it before editing:
   Read-only MCP server for saved meetings and dictations.
 - `Tools/TranscriptedQA/CLAUDE.md`
   Standalone artifact validation and QA CLI.
+- `Tools/SpeakerEvalHarness/CLAUDE.md`
+  Local-only AMI speaker-naming eval harness and sweep commands.
 
 ## Historical Zones
 

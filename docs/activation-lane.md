@@ -59,6 +59,22 @@ For the broader 100 WAU dashboard, reliability funnels, local summary beta
 funnel, agent/Markdown value loop, and release-health view, use
 `docs/posthog-100-wau-dashboard.md`.
 
+For the full product-learning telemetry map, current event taxonomy, blind
+spots, and dashboard plan, see `docs/posthog-product-learning-plan.md`.
+
+For the dashboard-to-product-task loop, use:
+
+```bash
+python3 scripts/ops/posthog-product-dashboard-summary.py --days 30
+```
+
+That script reads the five dashboard families (`100 WAU Operating`,
+`Activation`, `Reliability`, `Feature Adoption`, and `Release Health`) and
+outputs the biggest activation leak, biggest reliability leak, strongest
+adoption signal, under-discovered feature, release regression watch, and top
+three PR/task candidates. It has fixture and self-test modes so CI can check
+the ranking logic without PostHog credentials.
+
 ## Guardrails
 
 - Do not add transcript text, meeting titles, speaker names, file paths, source

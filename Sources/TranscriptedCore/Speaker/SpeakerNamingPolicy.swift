@@ -2,17 +2,46 @@ import Foundation
 
 public enum SpeakerNamingPolicy {
     /// Cosine-similarity bar above which a returning known speaker is auto-accepted
-    /// as the same person without asking the user to confirm. This is the canonical
-    /// "same known person" threshold; `EmbeddingClusterer.sameVoiceConsolidationThreshold`
-    /// is tied to it (guarded by `EmbeddingClustererTests`) so same-voice consolidation
-    /// never merges two clusters we would not also auto-accept as one another.
-    public static let autoAcceptSimilarityThreshold: Double = 0.88
+    /// (silently named) without asking the user to confirm.
+    ///
+    /// Raised 0.88 → 0.92 and decoupled from `EmbeddingClusterer.sameVoiceConsolidationThreshold`
+    /// (which stays 0.88). The multi-meeting × audio-quality eval (SpeakerEvalHarness
+    /// LADDER_SWEEP_REPORT §11) showed the old 0.88 bar silently mislabels 8–72% of auto-names
+    /// on compressed/telephone/noisy audio; a higher bar + the margin guard below holds
+    /// false-auto near 0 across all tested qualities (AMI-full N=175: 148 autos, 0 wrong).
+    /// Within-meeting consolidation legitimately uses a *lower* bar (0.88) — it has
+    /// temporal/contextual evidence two same-meeting clusters are one speaker — so the
+    /// invariant is now `sameVoiceConsolidationThreshold <= autoAcceptSimilarityThreshold`.
+    public static let autoAcceptSimilarityThreshold: Double = 0.92
 
-    public static func shouldAutoAccept(profile: SpeakerProfile, similarity: Double) -> Bool {
-        profile.displayName != nil
+    /// Minimum required gap between the best and second-best profile similarity before a
+    /// returning speaker is auto-accepted. Degraded audio inflates the top similarity but
+    /// rarely the *gap* to the runner-up, so this "clear winner" margin is the primary guard
+    /// against silently naming the wrong person. A nil/absent runner-up (only one candidate
+    /// cleared the match floor) is treated as unambiguous and passes.
+    public static let autoAcceptMarginMin: Double = 0.12
+
+    public static func shouldAutoAccept(
+        profile: SpeakerProfile,
+        similarity: Double,
+        secondBestSimilarity: Double?
+    ) -> Bool {
+        let marginOK: Bool
+        switch secondBestSimilarity {
+        case .none:
+            // Runner-up unknown (e.g. a fallback path that didn't carry it) — be conservative
+            // and route to confirm rather than silently auto-name.
+            marginOK = false
+        case .some(let second) where second < 0:
+            marginOK = true   // no confusable runner-up cleared the match floor
+        case .some(let second):
+            marginOK = (similarity - second) >= autoAcceptMarginMin
+        }
+        return profile.displayName != nil
             && profile.disputeCount == 0
             && similarity > autoAcceptSimilarityThreshold
             && profile.callCount > 4
+            && marginOK
     }
 
     public static func confidence(similarity: Double, callCount: Int) -> SpeakerConfidence {
@@ -22,9 +51,10 @@ public enum SpeakerNamingPolicy {
     public static func initialMapping(
         speakerId: String,
         profile: SpeakerProfile,
-        similarity: Double
+        similarity: Double,
+        secondBestSimilarity: Double?
     ) -> SpeakerMapping {
-        guard shouldAutoAccept(profile: profile, similarity: similarity),
+        guard shouldAutoAccept(profile: profile, similarity: similarity, secondBestSimilarity: secondBestSimilarity),
               let name = profile.displayName,
               !name.isEmpty else {
             return SpeakerMapping(speakerId: speakerId)

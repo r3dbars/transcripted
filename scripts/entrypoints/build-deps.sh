@@ -59,15 +59,26 @@ SENTRY_COCOA_VERSION="${SENTRY_COCOA_VERSION:-9.10.0}"
 SPARKLE_SHA256="${SPARKLE_SHA256:-9fec2b888e6e2940b1bfbd5d3d010b9f67076b52170923549095cbb74132403b}"
 SENTRY_COCOA_SHA256="${SENTRY_COCOA_SHA256:-1dd70512f3b5af6c74f1b8f11279531900173fb638d7d541320a7cbc00ed06bc}"
 
-dependency_input_listing() {
+dependency_input_paths() {
     {
         printf '%s\n' "Package.swift"
         printf '%s\n' "scripts/entrypoints/build-deps.sh"
         find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
-    } | while IFS= read -r path; do
+    } | sort
+}
+
+dependency_input_listing() {
+    dependency_input_paths | while IFS= read -r path; do
         [ -e "$path" ] || continue
         printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
     done
+}
+
+dependency_input_digest() {
+    dependency_input_paths | while IFS= read -r path; do
+        [ -f "$path" ] || continue
+        shasum -a 256 "$path"
+    done | shasum -a 256 | awk '{print $1}'
 }
 
 newest_dependency_input() {
@@ -80,6 +91,19 @@ deps_build_stamp_info() {
     fi
 }
 
+deps_build_stamp_digest() {
+    if [ -f "$DEPS_BUILD_STAMP" ]; then
+        awk -F= '$1 == "dependency_inputs_sha256" { print $2; exit }' "$DEPS_BUILD_STAMP"
+    fi
+}
+
+write_deps_build_stamp() {
+    {
+        printf 'dependency_inputs_sha256=%s\n' "$(dependency_input_digest)"
+        printf 'built_at_unix=%s\n' "$(date +%s)"
+    } > "$DEPS_BUILD_STAMP"
+}
+
 deps_are_ready() {
     local newest_input
     local build_stamp
@@ -87,6 +111,8 @@ deps_are_ready() {
     local newest_input_path
     local build_stamp_mtime
     local build_stamp_path
+    local current_digest
+    local stamp_digest
 
     if [ ! -f "$DEPS_LIBS/libDraftDeps.a" ] \
         || [ ! -f "$DEPS_LIBS/libExternalDeps.a" ] \
@@ -114,6 +140,16 @@ deps_are_ready() {
         echo "[build-deps]   $newest_input_path"
         echo "[build-deps] Built deps stamp:"
         echo "[build-deps]   $build_stamp_path"
+        return 1
+    fi
+
+    current_digest="$(dependency_input_digest)"
+    stamp_digest="$(deps_build_stamp_digest)"
+    if [ -z "$stamp_digest" ] || [ "$current_digest" != "$stamp_digest" ]; then
+        echo "[build-deps] Dependencies are stale for TranscriptedCore."
+        echo "[build-deps] Dependency input digest changed."
+        echo "[build-deps]   current: ${current_digest:-missing}"
+        echo "[build-deps]   stamp:   ${stamp_digest:-missing}"
         return 1
     fi
 
@@ -630,7 +666,8 @@ else
     echo "  WARNING: Cmlx source not found — cannot compile Metal shaders"
 fi
 
-touch "$DEPS_BUILD_STAMP"
+cd "$DRAFT_DIR"
+write_deps_build_stamp
 
 # Everything succeeded — swap staged artifacts into their final locations.
 # The window where old artifacts are gone is now a few renames, not the

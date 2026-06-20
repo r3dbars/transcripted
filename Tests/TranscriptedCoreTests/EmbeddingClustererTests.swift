@@ -157,17 +157,15 @@ final class EmbeddingClustererTests: XCTestCase {
         XCTAssertEqual(Set(kept.map(\.speakerId)).count, 2)
     }
 
-    func testConsolidationThresholdMatchesAutoAcceptBar() {
-        // Drift guard: same-voice consolidation must never merge two clusters we
-        // would not also auto-accept as the same known person. If a future change
-        // moves SpeakerNamingPolicy.autoAcceptSimilarityThreshold (or the
-        // consolidation bar) without the other, this fails instead of silently
-        // letting the two diverge.
-        XCTAssertEqual(
+    func testConsolidationThresholdNotAboveAutoAcceptBar() {
+        // Drift guard: within-meeting same-voice consolidation must never merge two clusters
+        // we would not also auto-accept as the same known person across meetings. The auto bar
+        // (0.92) is now stricter than the consolidation bar (0.88) — consolidation may merge at
+        // a lower bar (it has within-meeting evidence), but it must never EXCEED the auto bar.
+        XCTAssertLessThanOrEqual(
             EmbeddingClusterer.sameVoiceConsolidationThreshold,
             Float(SpeakerNamingPolicy.autoAcceptSimilarityThreshold),
-            accuracy: 1e-6,
-            "Consolidation threshold must equal SpeakerNamingPolicy.autoAcceptSimilarityThreshold"
+            "Consolidation threshold must not exceed SpeakerNamingPolicy.autoAcceptSimilarityThreshold"
         )
     }
 
