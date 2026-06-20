@@ -353,6 +353,14 @@ func testAgentConnectionGuide() {
         assertTrue(text.contains("transcripted-search-memory"), "bundle should embed the Search Memory skill")
         assertTrue(text.contains("Source file: \(meetingURL.lastPathComponent)"), "bundle should include source filename")
         assertTrue(
+            text.contains("Recorded at: 2025-12-17T18:00:00.000Z"),
+            "bundle should include the source meeting timestamp"
+        )
+        assertTrue(
+            text.contains("**00:00**  [Speaker 1]"),
+            "bundle should preserve transcript timestamps and speaker labels"
+        )
+        assertTrue(
             text.contains("We decided to ship the agent setup and copy for agent flow."),
             "bundle should include the meeting transcript body"
         )
@@ -384,4 +392,3 @@ private func readAgentConnectionGuideSource() -> String {
         .appendingPathComponent("Sources/UI/Shared/AgentConnectionGuide.swift")
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }
-

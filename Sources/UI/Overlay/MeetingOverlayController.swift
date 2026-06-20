@@ -91,7 +91,9 @@ final class MeetingOverlayTooltipView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 7
         layer?.masksToBounds = true
-        layer?.backgroundColor = NSColor(calibratedWhite: 0.10, alpha: 0.98).cgColor
+        layer?.backgroundColor = AccessibilityDisplayPolicy.backdropColor(
+            NSColor(calibratedWhite: 0.10, alpha: 0.98)
+        ).cgColor
         layer?.borderWidth = 0.5
         layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
 
@@ -200,7 +202,7 @@ final class MeetingOverlayRootView: NSView {
         wantsLayer = true
         layer?.cornerRadius = MeetingOverlayTokens.cornerRadius
         layer?.masksToBounds = true
-        layer?.backgroundColor = MeetingOverlayTokens.panelBg.cgColor
+        layer?.backgroundColor = AccessibilityDisplayPolicy.backdropColor(MeetingOverlayTokens.panelBg).cgColor
         layer?.borderWidth = 0.5
         layer?.borderColor = MeetingOverlayTokens.panelStroke.cgColor
 
@@ -748,6 +750,7 @@ final class MeetingOverlayRootView: NSView {
 
         if isPreparing {
             hideTooltip()
+            setStatusDotPulsing(false)
             warmupTitleLabel.stringValue = currentWarmupStatus.title
             warmupSubtitleLabel.stringValue = currentWarmupStatus.subtitle
             warmupProgress.doubleValue = currentWarmupStatus.progress
@@ -803,8 +806,8 @@ final class MeetingOverlayRootView: NSView {
             closeButton.layer?.borderWidth = 0
             closeButton.layer?.borderColor = nil
         case .transcribing:
-            titleLabel.stringValue = "Saving transcript"
-            updateStatusDot(color: MeetingOverlayTokens.dotPrep)
+            titleLabel.stringValue = "Transcribing meeting…"
+            updateStatusDot(color: MeetingOverlayTokens.dotPrep, haloOpacity: 0.22, haloRadius: 3)
             detailLabel.stringValue = ""
         case .saved:
             titleLabel.stringValue = "Saved to Markdown"
@@ -825,6 +828,12 @@ final class MeetingOverlayRootView: NSView {
             )
             detailLabel.stringValue = copy.detail
         }
+
+        // Transcription has no progress channel to drive a bar, so pulse the
+        // status dot while it runs. Without this the pill reads as finished
+        // ("Saved to Markdown" lookalike) or frozen during the long
+        // transcribe + diarize step that follows stopping a recording.
+        setStatusDotPulsing(state == .transcribing)
 
         if state == .recording {
             timerLabel.stringValue = formatDuration(duration)
@@ -984,6 +993,29 @@ final class MeetingOverlayRootView: NSView {
         statusDot.layer?.shadowColor = color.cgColor
         statusDot.layer?.shadowOpacity = haloOpacity
         statusDot.layer?.shadowRadius = haloRadius
+    }
+
+    /// Gently breathes the status dot's opacity so an in-progress state with
+    /// no determinate progress (transcription) never looks frozen. Idempotent:
+    /// `update(...)` runs on every duration tick, so re-adding the same
+    /// animation is skipped while it's already attached.
+    private func setStatusDotPulsing(_ pulsing: Bool) {
+        let key = "transcribingPulse"
+        guard let layer = statusDot.layer else { return }
+        if pulsing {
+            guard layer.animation(forKey: key) == nil else { return }
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 1.0
+            pulse.toValue = 0.35
+            pulse.duration = 0.7
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            layer.add(pulse, forKey: key)
+        } else {
+            layer.removeAnimation(forKey: key)
+            layer.opacity = 1
+        }
     }
 
     private func stopButtonImage() -> NSImage? {
@@ -2495,7 +2527,7 @@ final class MeetingOverlayController: NSObject {
         }
 
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.20
+            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.20)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             panel.animator().setFrame(target, display: true)
         }

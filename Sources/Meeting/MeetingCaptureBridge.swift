@@ -46,8 +46,14 @@ final class MeetingCaptureBridge: ObservableObject {
     private let startAttempt = MeetingCaptureAttempt<Bool>()
     private var timedOutStopCompletionHandler: ((CaptureStopResult) -> Void)?
 
-    init(audio: Audio = Audio()) {
-        self.audio = audio
+    init(audio: Audio? = nil) {
+        self.audio = audio ?? Audio(
+            sleepWakeNotifications: AudioSleepWakeNotifications(
+                center: NSWorkspace.shared.notificationCenter,
+                willSleepName: Notification.Name("NSWorkspaceWillSleepNotification"),
+                didWakeName: Notification.Name("NSWorkspaceDidWakeNotification")
+            )
+        )
         wireCallbacks()
         wireSubscriptions()
     }

@@ -190,11 +190,18 @@ class DictationSessionController: ObservableObject {
         properties["failure_kind"] = failureKind
         properties["trigger"] = currentDictationTrigger.rawValue
 
+        let analyticsProperties = dictationAnalyticsProperties(extra: properties)
         AnalyticsReporter.track(
             "dictation_start_failed",
-            properties: dictationAnalyticsProperties(
-                extra: properties
-            )
+            properties: analyticsProperties
+        )
+        ProductFrictionTelemetry.track(
+            surface: .dictation,
+            stage: "dictation_start",
+            result: .blocked,
+            failureKind: failureKind,
+            routeShape: analyticsProperties["route_shape"],
+            modelState: ProductFrictionTelemetry.modelState(isReady: appState?.sttRouter.isModelLoaded)
         )
     }
 
@@ -841,7 +848,16 @@ class DictationSessionController: ObservableObject {
                       self.currentDictationSessionID == taskSessionID else { return }
                 guard appState.sttRouter.isModelLoaded else {
                     appState.logger.log("DICTATION | voice model failed to load for transcription")
-                    overlayController.showError("Voice model failed to load")
+                    overlayController.showError("The voice model didn't load. Please try dictating again in a moment.")
+                    ProductFrictionTelemetry.track(
+                        surface: .dictation,
+                        stage: "dictation_transcribe",
+                        result: .blocked,
+                        failureKind: "model_not_ready",
+                        elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                        routeShape: self.dictationAnalyticsProperties()["route_shape"],
+                        modelState: "not_ready"
+                    )
                     isDictating = false
                     appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_unavailable")
                     return
@@ -894,6 +910,15 @@ class DictationSessionController: ObservableObject {
                             "trigger": currentDictationTrigger.rawValue,
                         ]
                     )
+                )
+                ProductFrictionTelemetry.track(
+                    surface: .dictation,
+                    stage: "dictation_transcribe",
+                    result: .giveUp,
+                    failureKind: "no_speech",
+                    elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                    routeShape: self.dictationAnalyticsProperties()["route_shape"],
+                    modelState: ProductFrictionTelemetry.modelState(isReady: appState.sttRouter.isModelLoaded)
                 )
                 NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                 AppSoundPlayer.shared.play(.noSpeech)
@@ -978,6 +1003,11 @@ class DictationSessionController: ObservableObject {
                 cleanupChanged: cleanupResult?.changed ?? false,
                 saveSucceeded: saveFailureMessage == nil
             )
+            trackDictationDeliveryFriction(
+                pasteOutcome: pasteOutcome,
+                saveSucceeded: saveFailureMessage == nil,
+                elapsedSeconds: CFAbsoluteTimeGetCurrent() - sessionStartTime
+            )
             switch pasteOutcome {
             case .pasted:
                 AppSoundPlayer.shared.play(.dictationDelivered)
@@ -1013,6 +1043,13 @@ class DictationSessionController: ObservableObject {
                 )
             )
             if saveFailureMessage == nil {
+                ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+                    artifactKind: .dictation,
+                    surface: .dictationSave,
+                    trigger: currentDictationTrigger.rawValue,
+                    wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount),
+                    durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime)
+                )
                 self.trackOnboardingFirstDictationSavedIfNeeded(
                     delivery: pasteOutcome.delivery,
                     wordCount: wordCount
@@ -1055,6 +1092,15 @@ class DictationSessionController: ObservableObject {
                     "trigger": currentDictationTrigger.rawValue,
                 ]
             )
+        )
+        ProductFrictionTelemetry.track(
+            surface: .dictation,
+            stage: "dictation_recording",
+            result: .cancelled,
+            failureKind: "user_cancelled",
+            elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+            routeShape: dictationAnalyticsProperties()["route_shape"],
+            modelState: ProductFrictionTelemetry.modelState(isReady: appState.sttRouter.isModelLoaded)
         )
     }
 
@@ -1534,6 +1580,45 @@ class DictationSessionController: ObservableObject {
             context: dictationContext(extra: ["error": error.localizedDescription])
         )
         return "Transcripted couldn't save a local copy of this dictation. Check your save location and available disk space."
+    }
+
+    private func trackDictationDeliveryFriction(
+        pasteOutcome: DictationPasteOutcome,
+        saveSucceeded: Bool,
+        elapsedSeconds: Double
+    ) {
+        if pasteOutcome.delivery == .failed {
+            ProductFrictionTelemetry.track(
+                surface: .dictation,
+                stage: "pasteback",
+                result: .failed,
+                failureKind: "pasteback_failed",
+                elapsedBucket: AnalyticsReporter.durationBucket(seconds: elapsedSeconds),
+                routeShape: dictationAnalyticsProperties()["route_shape"],
+                modelState: ProductFrictionTelemetry.modelState(isReady: appState?.sttRouter.isModelLoaded)
+            )
+        } else if let copyReason = pasteOutcome.copyReason {
+            ProductFrictionTelemetry.track(
+                surface: .dictation,
+                stage: "pasteback",
+                result: .fallback,
+                failureKind: "pasteback_\(copyReason.diagnosticName)",
+                elapsedBucket: AnalyticsReporter.durationBucket(seconds: elapsedSeconds),
+                routeShape: dictationAnalyticsProperties()["route_shape"],
+                modelState: ProductFrictionTelemetry.modelState(isReady: appState?.sttRouter.isModelLoaded)
+            )
+        }
+
+        guard !saveSucceeded else { return }
+        ProductFrictionTelemetry.track(
+            surface: .dictation,
+            stage: "artifact_save",
+            result: .failed,
+            failureKind: "dictation_save_failed",
+            elapsedBucket: AnalyticsReporter.durationBucket(seconds: elapsedSeconds),
+            routeShape: dictationAnalyticsProperties()["route_shape"],
+            modelState: ProductFrictionTelemetry.modelState(isReady: appState?.sttRouter.isModelLoaded)
+        )
     }
 
     private func recordDictationStopLatency(

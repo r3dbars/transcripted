@@ -1,5 +1,6 @@
 import XCTest
 @preconcurrency import AVFoundation
+import Combine
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -49,6 +50,78 @@ final class AudioInitializationTests: XCTestCase {
         // after upgrade unless they explicitly opt in via Settings.
         XCTAssertFalse(audio.enableVoiceProcessing,
                        "enableVoiceProcessing must default to false to avoid the system-wide ducking regression")
+    }
+
+    func testInjectedSystemAudioBackendIsPreservedByInfrastructureSetup() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(
+            paths: makeCoreStoragePaths(root: root),
+            systemAudioCaptureForTesting: StubSystemAudioCapture()
+        )
+        let injectedCapture = audio.systemAudioCapture
+
+        audio.ensureCaptureInfrastructureConfigured()
+
+        XCTAssertTrue(
+            (audio.systemAudioCapture as AnyObject) === (injectedCapture as AnyObject),
+            "test-injected system-audio backends must not be replaced with ScreenCaptureKit during setup"
+        )
+    }
+
+    func testInjectedSystemAudioBackendErrorsDriveAudioStatusWithoutHardware() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let capture = StubSystemAudioCapture()
+        let audio = Audio(
+            paths: makeCoreStoragePaths(root: root),
+            systemAudioCaptureForTesting: capture
+        )
+        audio.isRecording = true
+
+        let statusUpdated = expectation(description: "system audio status updated from fake backend")
+        var cancellables = Set<AnyCancellable>()
+        audio.$systemAudioStatus
+            .dropFirst()
+            .sink { status in
+                if status == .failed {
+                    statusUpdated.fulfill()
+                }
+            }
+            .store(in: &cancellables)
+
+        capture.emit(errorMessage: "System audio unavailable in synthetic backend")
+
+        wait(for: [statusUpdated], timeout: 1.0)
+        XCTAssertEqual(audio.systemAudioStatus, .failed)
+    }
+
+    func testStopSynchronouslyTearsDownInjectedSystemAudioBackend() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let capture = StubSystemAudioCapture()
+        let stopped = expectation(description: "fake backend stopSync called")
+        capture.onStopSync = {
+            stopped.fulfill()
+        }
+
+        let audio = Audio(
+            paths: makeCoreStoragePaths(root: root),
+            systemAudioCaptureForTesting: capture
+        )
+
+        audio.stop()
+
+        wait(for: [stopped], timeout: 1.0)
+        capture.onStopSync = nil
+        XCTAssertEqual(capture.stopSyncCallCount, 1)
+        XCTAssertEqual(capture.stopCallCount, 0, "recording teardown should use synchronous backend stop to avoid delayed cleanup racing the next start")
     }
 
     func testAudioRecordingFormatPolicyRejectsInvalidSampleRatesBeforeCreatingFormats() throws {
@@ -403,5 +476,68 @@ final class AudioInitializationTests: XCTestCase {
             .healthy,
             "when the async file URL arrives after the start finish callback, it should complete the status repair"
         )
+    }
+}
+
+@available(macOS 14.0, *)
+private func makeCoreStoragePaths(root: URL) -> CoreStoragePaths {
+    CoreStoragePaths(
+        transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+        speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+        statsDB: root.appendingPathComponent("state/stats.sqlite"),
+        failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+        speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+        audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+        logs: root.appendingPathComponent("logs", isDirectory: true)
+    )
+}
+
+@available(macOS 14.0, *)
+private final class StubSystemAudioCapture: SystemAudioCaptureEngine, @unchecked Sendable {
+    private let subject = PassthroughSubject<String?, Never>()
+    private let lock = NSLock()
+    private var _stopCallCount = 0
+    private var _stopSyncCallCount = 0
+
+    var diagnosticBackendName: String { "stub_system_audio" }
+    var audioFormat: AVAudioFormat?
+    var bufferSuccessRate: Double { 0 }
+    var deliversOwnedAudioBuffers: Bool { true }
+    var errorMessagePublisher: AnyPublisher<String?, Never> {
+        subject.eraseToAnyPublisher()
+    }
+    var onStopSync: (() -> Void)?
+
+    var stopCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _stopCallCount
+    }
+
+    var stopSyncCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _stopSyncCallCount
+    }
+
+    func prepare() throws {}
+
+    func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws {}
+
+    func stop() {
+        lock.lock()
+        _stopCallCount += 1
+        lock.unlock()
+    }
+
+    func stopSync() {
+        lock.lock()
+        _stopSyncCallCount += 1
+        lock.unlock()
+        onStopSync?()
+    }
+
+    func emit(errorMessage: String?) {
+        subject.send(errorMessage)
     }
 }

@@ -64,6 +64,13 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// Opens (or surfaces) the window on the Speakers page and asks the search
+    /// field to take focus. Backs the ⌘F "Find Speaker" menu command.
+    func focusSpeakerSearch(source: String) {
+        present(page: .people, source: source)
+        speakerPeopleModel.requestSearchFocus()
+    }
+
     func windowWillClose(_ notification: Notification) {
         SpeakerClipPlayback.stop()
     }

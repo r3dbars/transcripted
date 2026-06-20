@@ -5,7 +5,8 @@ import Foundation
 private func makeMeetingPromptCandidate(
     id: String,
     provider: MeetingPromptProvider = .zoom,
-    source: MeetingPromptSource
+    source: MeetingPromptSource,
+    reason: MeetingPromptReason? = nil
 ) -> MeetingPromptDetector.Candidate {
     let startDate = Date(timeIntervalSince1970: 2_000)
     return MeetingPromptDetector.Candidate(
@@ -13,7 +14,7 @@ private func makeMeetingPromptCandidate(
         title: "Meeting detected",
         detail: "Design review - starting now",
         provider: provider,
-        reason: MeetingPromptHeuristics.reason(for: source, hasRuntimeContext: false),
+        reason: reason ?? MeetingPromptHeuristics.reason(for: source, hasRuntimeContext: false),
         source: source,
         startDate: startDate,
         endDate: startDate.addingTimeInterval(30 * 60),
@@ -209,6 +210,28 @@ func testMeetingPromptDetector() async {
         )
     }
 
+    runSuite("MeetingPromptDetector.Candidate analytics buckets stay coarse") {
+        let calendarRuntime = makeMeetingPromptCandidate(
+            id: "calendar:runtime",
+            provider: .googleMeet,
+            source: .calendarEvent,
+            reason: .calendarPlusRuntimeMatch
+        )
+        let mic = makeMeetingPromptCandidate(
+            id: "mic:browser",
+            provider: .googleMeet,
+            source: .runtimeApp,
+            reason: .micInput
+        )
+
+        assertEqual(calendarRuntime.analyticsCalendarConfidence, "linked_event_runtime_match", "calendar plus runtime evidence should stay a coarse confidence bucket")
+        assertEqual(calendarRuntime.analyticsCallState, "app_active", "calendar plus runtime evidence should not name the app or meeting")
+        assertEqual(calendarRuntime.analyticsAppSignal, "browser_runtime", "browser-hosted calendar matches should stay a family-level signal")
+        assertEqual(mic.analyticsCalendarConfidence, "none", "ad-hoc mic prompts should not imply calendar evidence")
+        assertEqual(mic.analyticsCallState, "mic_active", "mic prompts should preserve active-call evidence")
+        assertEqual(mic.analyticsAppSignal, "browser_mic", "browser mic prompts should stay family-level, not bundle-level")
+    }
+
     await runSuite("MeetingPromptDetector.updateMicInputUsers — a browser holding the mic prompts an ad-hoc call") {
         let detector = MeetingPromptDetector()
         detector.isOwnCaptureActive = { false }
@@ -288,6 +311,10 @@ func testMeetingPromptDetector() async {
             box.promptCount += 1
             return true
         }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+            box.suppressionCount += 1
+        }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation()
@@ -296,6 +323,9 @@ func testMeetingPromptDetector() async {
 
         assertEqual(box.promptCount, 1, "a changed browser-helper set should not spam a second mic prompt for the same call")
         assertEqual(box.candidate?.id, "mic:googleMeet", "the pending candidate id should stay stable across browser helpers")
+        assertEqual(box.suppressionCount, 1, "duplicate pending candidates should emit one suppression signal")
+        assertEqual(box.suppression?.reason, .pendingCandidate, "duplicate prompt attempts should be classified as pending")
+        assertEqual(box.suppression?.cooldownReason, "prompt_pending", "pending duplicates should keep the prompt-pending cooldown reason")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — inactive edge preserves transient pending cooldown") {
@@ -327,6 +357,10 @@ func testMeetingPromptDetector() async {
             box.promptCount += 1
             return true
         }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+            box.suppressionCount += 1
+        }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
         await waitForPromptEvaluation()
@@ -339,6 +373,34 @@ func testMeetingPromptDetector() async {
         await waitForPromptEvaluation()
 
         assertEqual(box.promptCount, 1, "mute/unmute should not wipe an explicit Not now dismissal")
+        assertEqual(box.suppressionCount, 1, "dismissed mic prompts should emit a cooldown suppression signal when the call returns")
+        assertEqual(box.suppression?.reason, .runtimeSuppressed, "dismissed mic prompts should classify follow-up attempts as runtime-suppressed")
+        assertEqual(box.suppression?.cooldownReason, MeetingPromptBackoffKind.runtimeDefaultFallback.rawValue, "suppression should keep the backoff rule that caused the cooldown")
+    }
+
+    await runSuite("MeetingPromptDetector.updateMicInputUsers — already-recording suppression is reported coarsely") {
+        let detector = MeetingPromptDetector()
+        detector.ownCaptureActivity = { .meetingRecording }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+            box.suppressionCount += 1
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+
+        assertNil(box.candidate, "we should not prompt while a meeting recording is already active")
+        assertEqual(box.promptCount, 0, "already-recording suppression should not ask the overlay to present")
+        assertEqual(box.suppressionCount, 1, "already-recording calls should emit one suppression signal")
+        assertEqual(box.suppression?.reason, .ownCaptureActive, "already-recording calls should use the own-capture suppression reason")
+        assertEqual(box.suppression?.captureActivity, .meetingRecording, "suppression should preserve meeting-vs-dictation activity without app names")
+        assertEqual(box.suppression?.candidate.provider, .googleMeet, "suppression should keep only the coarse provider enum")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — native mic candidate keeps calendar title") {
@@ -439,7 +501,9 @@ func testMeetingPromptDetector() async {
 @MainActor
 private final class CandidateBox {
     var candidate: MeetingPromptDetector.Candidate?
+    var suppression: MeetingPromptSuppression?
     var promptCount = 0
+    var suppressionCount = 0
 }
 
 // updateMicInputUsers re-evaluates on a detached @MainActor Task; yield/sleep a

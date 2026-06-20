@@ -14,6 +14,12 @@ struct AnalyticsEventPolicy: Equatable {
         allowedPolicies.keys.sorted()
     }
 
+    /// All allowlisted analytics policies, sorted by event name. Tests use this
+    /// to keep the public taxonomy doc in lockstep with the compiled allowlist.
+    static var allPolicies: [AnalyticsEventPolicy] {
+        allowedPolicies.keys.sorted().compactMap { allowedPolicies[$0] }
+    }
+
     private static let meetingCaptureDiagnosticProperties: Set<String> = [
         "attenuation_kind",
         "buffer_success_bucket",
@@ -89,6 +95,8 @@ struct AnalyticsEventPolicy: Equatable {
 
     private static let runtimeDiagnosticProperties: Set<String> = [
         "app_version",
+        "build_channel",
+        "build_revision",
         "build_version",
         "duration_bucket",
         "format_ready",
@@ -114,6 +122,14 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let activationFirstArtifactProperties: Set<String> = [
+        "artifact_kind",
+        "duration_bucket",
+        "surface",
+        "trigger",
+        "word_count_bucket",
+    ]
+
     private static let activationAgentPromptActionProperties: Set<String> = [
         "action_kind",
         "agent_target",
@@ -136,6 +152,36 @@ struct AnalyticsEventPolicy: Equatable {
         "proxy_kind",
         "return_window_bucket",
         "surface",
+    ]
+
+    private static let workflowAbandonedProperties: Set<String> = [
+        "elapsed_bucket",
+        "prior_ready_state",
+        "reason_kind",
+        "stage",
+        "surface",
+        "workflow_kind",
+    ]
+
+    private static let productFrictionProperties: Set<String> = [
+        "elapsed_bucket",
+        "failure_kind",
+        "model_state",
+        "result",
+        "route_shape",
+        "stage",
+        "surface",
+    ]
+
+    private static let meetingPromptProperties: Set<String> = [
+        "app_signal",
+        "calendar_confidence",
+        "call_state",
+        "missing_permission",
+        "prompt_reason",
+        "provider",
+        "route_ready",
+        "source",
     ]
 
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
@@ -298,6 +344,10 @@ struct AnalyticsEventPolicy: Equatable {
             name: "activation_artifact_action_clicked",
             allowedProperties: activationArtifactActionProperties
         ),
+        "activation_first_artifact_saved": .init(
+            name: "activation_first_artifact_saved",
+            allowedProperties: activationFirstArtifactProperties
+        ),
         "activation_agent_prompt_action_clicked": .init(
             name: "activation_agent_prompt_action_clicked",
             allowedProperties: activationAgentPromptActionProperties
@@ -309,6 +359,14 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "workflow_abandoned": .init(
+            name: "workflow_abandoned",
+            allowedProperties: workflowAbandonedProperties
+        ),
+        "product_friction_observed": .init(
+            name: "product_friction_observed",
+            allowedProperties: productFrictionProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",
@@ -531,28 +589,26 @@ struct AnalyticsEventPolicy: Equatable {
         ),
         "meeting_prompt_shown": .init(
             name: "meeting_prompt_shown",
-            allowedProperties: [
-                "prompt_reason",
-                "provider",
-                "source",
-            ]
+            allowedProperties: meetingPromptProperties
         ),
         "meeting_prompt_dismissed": .init(
             name: "meeting_prompt_dismissed",
-            allowedProperties: [
+            allowedProperties: meetingPromptProperties.union(Set([
                 "backoff_kind",
-                "prompt_reason",
-                "provider",
-                "source",
-            ]
+                "cooldown_reason",
+            ]))
         ),
         "meeting_prompt_record_selected": .init(
             name: "meeting_prompt_record_selected",
-            allowedProperties: [
-                "prompt_reason",
-                "provider",
-                "source",
-            ]
+            allowedProperties: meetingPromptProperties
+        ),
+        "meeting_prompt_suppressed": .init(
+            name: "meeting_prompt_suppressed",
+            allowedProperties: meetingPromptProperties.union(Set([
+                "capture_activity",
+                "cooldown_reason",
+                "suppression_reason",
+            ]))
         ),
         "meeting_mic_boost_prompt_shown": .init(
             name: "meeting_mic_boost_prompt_shown",

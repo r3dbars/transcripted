@@ -97,10 +97,12 @@ if [ -n "$changed_paths" ]; then
         fi
 
         if matches_any "$path" "Tests/E2E/*" "run-e2e-smoke.sh" "scripts/entrypoints/run-e2e-smoke.sh"; then
+            add_command "python3 scripts/dev/check-build-source-lists.py"
             add_command "bash run-e2e-smoke.sh"
         fi
 
         if matches_any "$path" "Tests/E2E/SlowPastebackSmoke.swift" "Sources/Support/ClipboardRestoringTextPaster.swift" "Sources/Support/TranscriptedConstants.swift" "run-slow-pasteback-smoke.sh" "scripts/entrypoints/run-slow-pasteback-smoke.sh"; then
+            add_command "python3 scripts/dev/check-build-source-lists.py"
             add_command "bash run-slow-pasteback-smoke.sh"
         fi
 
@@ -111,8 +113,9 @@ if [ -n "$changed_paths" ]; then
             add_command "bash build-deps.sh --force"
         fi
 
-        if matches_any "$path" "build.sh" "scripts/entrypoints/build.sh"; then
+        if matches_any "$path" "build.sh" "scripts/entrypoints/build.sh" "scripts/entrypoints/lib/swiftc-app-args.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 scripts/dev/check-build-source-lists.py"
             add_command "bash -n build.sh"
             add_command "bash -n scripts/entrypoints/build.sh"
             add_command "bash build.sh --no-open"
@@ -120,6 +123,7 @@ if [ -n "$changed_paths" ]; then
 
         if matches_any "$path" "run-tests.sh" "scripts/entrypoints/run-tests.sh" "Tests/FastTests.manifest"; then
             add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 scripts/dev/check-build-source-lists.py"
             add_command "bash -n run-tests.sh"
             add_command "bash -n scripts/entrypoints/run-tests.sh"
             add_command "bash run-tests.sh"
@@ -144,9 +148,28 @@ if [ -n "$changed_paths" ]; then
             add_command "bash -n scripts/ops/health-probe.sh"
         fi
 
+        if matches_any "$path" "scripts/ops/release-health-card.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/release-health-card.py"
+            add_command "python3 scripts/ops/release-health-card.py --self-test"
+        fi
+
+        if matches_any "$path" "scripts/ops/posthog-product-dashboard-summary.py" "Tests/Fixtures/posthog-product-dashboard-summary.json"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/posthog-product-dashboard-summary.py"
+            add_command "python3 scripts/ops/posthog-product-dashboard-summary.py --self-test"
+            add_command "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only"
+        fi
+
         if matches_any "$path" "scripts/dev/onboarding.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n scripts/dev/onboarding.sh"
+        fi
+
+        if matches_any "$path" "scripts/dev/check-build-source-lists.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/dev/check-build-source-lists.py"
+            add_command "python3 scripts/dev/check-build-source-lists.py"
         fi
 
         if matches_any "$path" "scripts/dev/benchmark-home-recent-captures.sh" "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"; then
@@ -161,6 +184,12 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 scripts/ops/generate-nightly-digest.py --self-test"
         fi
 
+        if matches_any "$path" "scripts/ops/posthog-dashboard-queries.py" "Tests/Fixtures/posthog-dashboard-query-results.json" "docs/posthog-dashboard-query-helpers.md"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/posthog-dashboard-queries.py"
+            add_command "python3 scripts/ops/posthog-dashboard-queries.py --self-test"
+        fi
+
         if matches_any "$path" "scripts/ops/nightly-security-check.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/nightly-security-check.py"
@@ -171,6 +200,12 @@ if [ -n "$changed_paths" ]; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/release-gate-report.py"
             add_command "python3 scripts/ops/release-gate-report.py --self-test"
+        fi
+
+        if matches_any "$path" "scripts/release/post-dmg-release-audit.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/release/post-dmg-release-audit.py"
+            add_command "python3 scripts/release/post-dmg-release-audit.py --self-test"
         fi
 
         if matches_any "$path" "scripts/ops/packaged-app-smoke.py"; then
@@ -208,6 +243,13 @@ if [ -n "$changed_paths" ]; then
             add_command "swift test --package-path Tools/TranscriptedQA"
             add_command "python3 -m py_compile scripts/ops/validate-meeting-corpus.py"
             add_command "python3 -m py_compile scripts/ops/compare-meeting-corpus.py"
+        fi
+
+        if matches_any "$path" "scripts/ops/speaker-naming-simulator.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/speaker-naming-simulator.py"
+            add_command "scripts/ops/speaker-naming-simulator.py"
+            add_command "scripts/ops/speaker-naming-simulator.py --sweep"
         fi
 
         if matches_any "$path" "scripts/ops/dictation-stop-autoeval.sh" "scripts/ops/dictation-recovery-autoeval.rb" "docs/autoeval-dictation-stop-speed-*.md" "docs/autoeval-dictation-recovery-time-*.md"; then
@@ -262,6 +304,16 @@ if [ -n "$changed_paths" ]; then
             add_command "swift test --package-path Tools/TranscriptedQA"
         fi
 
+        if matches_any "$path" "Tools/SpeakerEvalHarness/*" "Tools/SpeakerEvalHarness/*/*" "Tools/SpeakerEvalHarness/*/*/*" "scripts/download_ami.sh" "scripts/run_speaker_eval.sh" "scripts/score_speaker_eval.py" "scripts/aggregate_sweep.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "bash -n scripts/download_ami.sh"
+            add_command "bash -n scripts/run_speaker_eval.sh"
+            add_command "python3 -m py_compile scripts/score_speaker_eval.py"
+            add_command "python3 -m py_compile scripts/aggregate_sweep.py"
+            add_command "bash build-deps.sh --force"
+            add_command "swift build --package-path Tools/SpeakerEvalHarness"
+        fi
+
         if matches_any "$path" "build-beta.sh" "scripts/entrypoints/build-beta.sh" "scripts/release/*" "docs/release-packaging.md" "docs/sparkle-updates.md" "Casks/*" "docs/appcast.xml"; then
             add_command "bash build-deps.sh --force"
             add_command "bash build.sh --no-open"
@@ -269,7 +321,7 @@ if [ -n "$changed_paths" ]; then
             add_command "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
         fi
 
-        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" "Tests/README.md" "scripts/README.md" "Sources/CLAUDE.md" "Sources/*/CLAUDE.md" "Sources/*/*/CLAUDE.md" "Tools/README.md" "Tools/*/CLAUDE.md" "Tools/*/*/CLAUDE.md" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh"; then
+        if matches_any "$path" "README.md" "AGENT_START.md" "AGENTS.md" "CLAUDE.md" "CONTRIBUTING.md" "WORKFLOW.md" "docs/*" "Tests/README.md" "scripts/README.md" "Sources/CLAUDE.md" "Sources/*/CLAUDE.md" "Sources/*/*/CLAUDE.md" "Tools/README.md" "Tools/*/CLAUDE.md" "Tools/*/*/CLAUDE.md" ".agents/*" ".github/*" "scripts/dev/agent-preflight.sh" "scripts/dev/check-build-source-lists.py"; then
             add_command "scripts/dev/agent-preflight.sh"
         fi
     done <<< "$changed_paths"

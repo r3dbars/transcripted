@@ -16,6 +16,9 @@ struct TranscriptedApp: App {
 
     var body: some Scene {
         Settings { EmptyView() }
+            .commands {
+                TranscriptedMenuCommands(appDelegate: appDelegate)
+            }
     }
 }
 
@@ -162,6 +165,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         backoffKind: backoffDecision.kind
                     )
                 )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "prompt_shown",
+                    reasonKind: .dismissed,
+                    surface: .meetingOverlay,
+                    priorReadyState: self.meetingPromptReadyState()
+                )
             }
             meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
                 guard let self else { return }
@@ -172,6 +182,27 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         for: candidate,
                         backoffKind: backoffDecision.kind
                     )
+                )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "prompt_shown",
+                    reasonKind: .remindedLater,
+                    surface: .meetingOverlay,
+                    priorReadyState: self.meetingPromptReadyState()
+                )
+            }
+            meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
+                guard let self else { return }
+                AnalyticsReporter.track(
+                    "meeting_prompt_suppressed",
+                    properties: self.analyticsProperties(for: suppression)
+                )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "pre_prompt",
+                    reasonKind: .suppressed,
+                    surface: .meetingOverlay,
+                    priorReadyState: self.meetingPromptReadyState()
                 )
             }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
@@ -192,6 +223,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.isOwnCaptureActive = { [weak self] in
                 guard let self else { return false }
                 return self.appState.meetingSession.isRecording || self.appState.sttRouter.isRecording
+            }
+            meetingPromptDetector.ownCaptureActivity = { [weak self] in
+                guard let self else { return .none }
+                if self.appState.meetingSession.isRecording {
+                    return .meetingRecording
+                }
+                if self.appState.sttRouter.isRecording {
+                    return .dictation
+                }
+                return .none
             }
             meetingPromptDetector.isMicInputPromptEnabled = {
                 AutoCallDetectionPreferences.isEnabled()
@@ -664,6 +705,20 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         )
     }
 
+    private func meetingPromptReadyState() -> String {
+        if appState.meetingSession.isRecording {
+            return "recording_active"
+        }
+        if appState.sttRouter.isRecording {
+            return "dictation_active"
+        }
+        if TranscriptedPermissionAccess.isGranted(.microphone),
+           TranscriptedPermissionAccess.isGranted(.systemAudioRecording) {
+            return "ready"
+        }
+        return "not_ready"
+    }
+
     private func modelStateAnalyticsName(_ state: ParakeetModelState) -> String {
         switch state {
         case .notLoaded:
@@ -823,14 +878,85 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         backoffKind: MeetingPromptBackoffKind? = nil
     ) -> [String: String] {
         var properties = [
+            "app_signal": candidate.analyticsAppSignal,
+            "calendar_confidence": candidate.analyticsCalendarConfidence,
+            "call_state": candidate.analyticsCallState,
+            "missing_permission": missingMeetingRoutePermission(),
             "prompt_reason": candidate.reason.rawValue,
             "provider": candidate.provider.rawValue,
+            "route_ready": meetingRouteReady() ? "true" : "false",
             "source": candidate.source.analyticsValue,
         ]
         if let backoffKind {
             properties["backoff_kind"] = backoffKind.rawValue
+            properties["cooldown_reason"] = backoffKind.rawValue
         }
         return properties
+    }
+
+    private func analyticsProperties(for suppression: MeetingPromptSuppression) -> [String: String] {
+        var properties = analyticsProperties(for: suppression.candidate)
+        properties["suppression_reason"] = suppression.reason.rawValue
+        if let cooldownReason = suppression.cooldownReason {
+            properties["cooldown_reason"] = cooldownReason
+        }
+        if let captureActivity = suppression.captureActivity {
+            properties["capture_activity"] = captureActivity.rawValue
+        }
+        return properties
+    }
+
+    private func meetingRouteReady() -> Bool {
+        TranscriptedPermissionAccess.isGranted(.microphone)
+            && TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+    }
+
+    private func missingMeetingRoutePermission() -> String {
+        let microphoneGranted = TranscriptedPermissionAccess.isGranted(.microphone)
+        let systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+        switch (microphoneGranted, systemAudioGranted) {
+        case (true, true):
+            return "none"
+        case (false, false):
+            return "microphone_and_system_audio_recording"
+        case (false, true):
+            return "microphone"
+        case (true, false):
+            return "system_audio_recording"
+        }
+    }
+
+    // MARK: - Menu Bar Commands
+
+    /// Thin entry points for `TranscriptedMenuCommands`. They live here (rather
+    /// than in an extension) so they can reuse the existing private action
+    /// helpers. Each one mirrors a path users already have via the popover, the
+    /// sidebar, or a recordable trigger — nothing here remaps those triggers.
+
+    func menuStartDictation() {
+        startDictationFromSettings()
+    }
+
+    func menuToggleMeetingRecording() {
+        guard #available(macOS 14.0, *) else {
+            NSSound.beep()
+            return
+        }
+        // Same start/stop toggle the meeting trigger uses, so ⌘R behaves like
+        // the recordable meeting shortcut.
+        meetingOverlayController.toggleFromHotkey()
+    }
+
+    func menuImportAudio() {
+        importAudioFileFromSettings()
+    }
+
+    func menuOpenPage(_ page: TranscriptedSettingsPage) {
+        showSettingsWindow(page: page, source: "menu_command")
+    }
+
+    func menuFindSpeaker() {
+        settingsWindowController.focusSpeakerSearch(source: "menu_command")
     }
 
     // MARK: - NSPopoverDelegate

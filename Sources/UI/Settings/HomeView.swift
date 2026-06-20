@@ -24,6 +24,27 @@ final class HomeViewModel: ObservableObject {
     private var dictationLimit = 10
     private var meetingLimit = 10
     private var didTrackActivationReturnProxy = false
+    private var captureRefreshObserver: HomeCaptureRefreshObserver?
+
+    init() {
+        // Background post-save work (WAV->M4A recompression, transcript rename)
+        // rewrites the files whose URLs this cache resolved at scan time. Re-resolve
+        // from disk whenever that happens so cached transcript/audio URLs never
+        // outlive the real files. The broadcaster is already debounced.
+        captureRefreshObserver = HomeCaptureRefreshObserver { _ in
+            Task { @MainActor [weak self] in
+                self?.refreshAfterCaptureArtifactsChanged()
+            }
+        }
+    }
+
+    /// Silent re-resolution of the currently visible captures after the on-disk
+    /// artifacts changed underneath the cache. Keeps the current paging window and
+    /// avoids flipping the loading spinners so a passive background refresh does
+    /// not flash the UI.
+    func refreshAfterCaptureArtifactsChanged() {
+        loadCurrentLimits(isInitialLoad: false, isSilent: true)
+    }
 
     // Settings Home must open instantly, even for users with thousands of dictations.
     // Keep the dashboard to a small recent slice and leave deep history to the dedicated pages/files.
@@ -82,11 +103,11 @@ final class HomeViewModel: ObservableObject {
         loadCurrentLimits(isInitialLoad: false)
     }
 
-    private func loadCurrentLimits(isInitialLoad: Bool) {
+    private func loadCurrentLimits(isInitialLoad: Bool, isSilent: Bool = false) {
         refreshTask?.cancel()
         refreshGeneration += 1
-        isLoading = isInitialLoad
-        isLoadingMore = !isInitialLoad
+        isLoading = isInitialLoad && !isSilent
+        isLoadingMore = !isInitialLoad && !isSilent
         let generation = refreshGeneration
         let requestedDictationLimit = dictationLimit
         let requestedMeetingLimit = meetingLimit
@@ -754,6 +775,7 @@ struct HomeRowActionButtons: View {
         }
         .buttonStyle(SettingsHoverButtonStyle(cornerRadius: 7))
         .help(help)
+        .accessibilityLabel(Text(help))
         .accessibilityIdentifier("transcripted.home.row.copy")
     }
 }
@@ -1629,11 +1651,61 @@ private struct HomeMeetingAudioControl: View {
 
 }
 
+// MARK: - Empty state
+
+/// Friendly first-run empty state for a capture list: a single line describing
+/// what the screen is for plus one clear primary action.
+struct HomeListEmptyState {
+    let symbolName: String
+    let title: String
+    let message: String
+    let actionTitle: String
+    let automationIdentifier: String
+    let action: () -> Void
+}
+
+private struct HomeEmptyStateView: View {
+    let state: HomeListEmptyState
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: state.symbolName)
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.tertiary)
+
+            VStack(spacing: 5) {
+                Text(state.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+
+                Text(state.message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 360)
+            }
+
+            Button(action: state.action) {
+                Text(state.actionTitle)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.top, 2)
+            .accessibilityIdentifier(state.automationIdentifier)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .padding(.horizontal, 16)
+    }
+}
+
 // MARK: - Day-grouped list
 
 struct HomeDayGroupedList<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
+    var emptyState: HomeListEmptyState? = nil
     let getID: (Item) -> AnyHashable
     var sectionSpacing: CGFloat = 12
     var headerSpacing: CGFloat = 2
@@ -1641,14 +1713,18 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 
     var body: some View {
         if sections.isEmpty {
-            HStack {
-                Text(emptyMessage)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
+            if let emptyState {
+                HomeEmptyStateView(state: emptyState)
+            } else {
+                HStack {
+                    Text(emptyMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.vertical, 28)
+                .padding(.horizontal, 4)
             }
-            .padding(.vertical, 28)
-            .padding(.horizontal, 4)
         } else {
             LazyVStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
@@ -1726,6 +1802,7 @@ struct HomeMeetingSearchField: View {
 struct HomeCaptureListSection<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
+    var emptyState: HomeListEmptyState? = nil
     let isLoading: Bool
     let isLoadingMore: Bool
     let canLoadMore: Bool
@@ -1749,6 +1826,7 @@ struct HomeCaptureListSection<Item, Row: View>: View {
                 HomeDayGroupedList(
                     sections: sections,
                     emptyMessage: emptyMessage,
+                    emptyState: emptyState,
                     getID: getID,
                     sectionSpacing: 14,
                     headerSpacing: 2,
@@ -2357,6 +2435,7 @@ private struct HomePodcastPlayerButton: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.42 : 1)
         .help(help)
+        .accessibilityLabel(Text(help))
         .accessibilityIdentifier(automationIdentifier)
     }
 

@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject private var sttRouter: STTRouter
     @ObservedObject private var meetingSession: MeetingSessionController
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
@@ -122,7 +123,14 @@ struct TranscriptedSettingsView: View {
                     settingsPagesToggle
                     settingsSidebarFooter
                 }
-                .background(.thinMaterial)
+                .background {
+                    // Solid backdrop when the user opts into Reduce Transparency.
+                    if reduceTransparency {
+                        Color(nsColor: .windowBackgroundColor)
+                    } else {
+                        Rectangle().fill(.thinMaterial)
+                    }
+                }
             }
         } detail: {
             ZStack {
@@ -197,7 +205,11 @@ struct TranscriptedSettingsView: View {
                         surface: .homePreview,
                         artifactDate: preview.date
                     )
-                    NSWorkspace.shared.open(preview.transcriptURL)
+                    openOwnFile(
+                        candidateURLs: [preview.transcriptURL],
+                        failureTitle: "Could not open transcript",
+                        failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                    )
                 },
                 onCopyForAgent: {
                     handleCopyMeetingPreview(preview)
@@ -315,8 +327,7 @@ struct TranscriptedSettingsView: View {
             homeDashboardRefreshInFlight = false
             homeMeetingPreviewLoadTask?.cancel()
             homeMeetingPreviewLoadTask = nil
-            localSummaryModelPreparationTask?.cancel()
-            localSummaryModelPreparationTask = nil
+            cancelLocalSummaryModelPreparation()
             homeViewModel.cancel()
         }
     }
@@ -501,7 +512,11 @@ struct TranscriptedSettingsView: View {
                                 actionKind: .openMarkdown,
                                 surface: .homeCurrentActivity
                             )
-                            NSWorkspace.shared.open(transcriptURL)
+                            openOwnFile(
+                                candidateURLs: [transcriptURL],
+                                failureTitle: "Could not open transcript",
+                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment."
+                            )
                         }
                     }
                 )
@@ -529,7 +544,11 @@ struct TranscriptedSettingsView: View {
                         } else {
                             trackSettingsAction("open_local_meeting_summary_notice", page: .home)
                             clearHomeLocalSummaryNotice(id: notice.id)
-                            NSWorkspace.shared.open(notice.transcriptURL)
+                            openOwnFile(
+                                candidateURLs: [notice.transcriptURL],
+                                failureTitle: "Could not open transcript",
+                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                            )
                         }
                     }
                 )
@@ -599,11 +618,21 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homeMeetingsListSection: some View {
-        HomeCaptureListSection(
+        let isSearchingMeetings = !homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HomeCaptureListSection(
             sections: homeMeetingDaySections,
-            emptyMessage: homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? HomeCaptureListCopy.emptyMeetings
-                : HomeCaptureListCopy.noMeetingMatches,
+            emptyMessage: isSearchingMeetings ? HomeCaptureListCopy.noMeetingMatches : HomeCaptureListCopy.emptyMeetings,
+            emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
+                symbolName: "waveform",
+                title: "No meetings yet",
+                message: "Record a meeting and Transcripted transcribes it, labels each speaker, and saves the transcript here. You can also transcribe an existing audio file from General.",
+                actionTitle: "Start a meeting",
+                automationIdentifier: "transcripted.home.meetings.empty.start",
+                action: {
+                    trackSettingsAction("empty_start_meeting", page: .home)
+                    actions.startMeeting()
+                }
+            ),
             isLoading: homeViewModel.isLoading,
             isLoadingMore: homeViewModel.isLoadingMore,
             canLoadMore: homeViewModel.canLoadMoreMeetings,
@@ -660,6 +689,17 @@ struct TranscriptedSettingsView: View {
         HomeCaptureListSection(
             sections: homeViewModel.dictationDaySections,
             emptyMessage: HomeCaptureListCopy.emptyDictations,
+            emptyState: HomeListEmptyState(
+                symbolName: "mic",
+                title: "No dictations yet",
+                message: "Hold your dictation shortcut and speak in any app — Transcripted types it out for you and keeps a copy here.",
+                actionTitle: "Start a dictation",
+                automationIdentifier: "transcripted.home.dictations.empty.start",
+                action: {
+                    trackSettingsAction("empty_start_dictation", page: .dictations)
+                    actions.startDictation()
+                }
+            ),
             isLoading: homeViewModel.isLoading,
             isLoadingMore: homeViewModel.isLoadingMore,
             canLoadMore: homeViewModel.canLoadMoreDictations,
@@ -680,7 +720,11 @@ struct TranscriptedSettingsView: View {
                         surface: .homeRow,
                         artifactDate: entry.createdAt
                     )
-                    NSWorkspace.shared.open(entry.url)
+                    openOwnFile(
+                        candidateURLs: [entry.url],
+                        failureTitle: "Could not open dictation",
+                        failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                    )
                 },
                 onCopy: { handleCopyDictation(entry) },
                 onFlag: {
@@ -770,18 +814,31 @@ struct TranscriptedSettingsView: View {
             surface: .homeRow,
             artifactKind: .meeting
         )
+        // Resolve the transcript first so a row whose path drifted (restyle/
+        // rename after scanning) still copies, and a genuinely missing file
+        // surfaces an error instead of silently no-op'ing on the empty clipboard.
+        guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
+            presentHomeActionFailure(
+                title: "Could not copy meeting",
+                message: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+            )
+            return
+        }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         if let bundle = AgentConnectionGuide.portableMeetingBundle(
             title: item.title,
             date: item.date,
-            transcriptURL: item.transcriptURL
+            transcriptURL: transcriptURL
         ) {
             pasteboard.setString(bundle, forType: .string)
-        } else if let raw = try? String(contentsOf: item.transcriptURL, encoding: .utf8) {
+        } else if let raw = try? String(contentsOf: transcriptURL, encoding: .utf8) {
             pasteboard.setString(raw, forType: .string)
         } else {
-            NSSound.beep()
+            presentHomeActionFailure(
+                title: "Could not copy meeting",
+                message: "Transcripted found this meeting's transcript but couldn't read it. The file may be open exclusively elsewhere or corrupted."
+            )
             return
         }
         flashCopied(rowID: item.id)
@@ -828,21 +885,40 @@ struct TranscriptedSettingsView: View {
         }
 
         guard let input = item.audio?.retranscriptionInput else {
-            NSSound.beep()
+            presentHomeActionFailure(
+                title: "Could not re-transcribe meeting",
+                message: "Transcripted couldn't find the retained audio for this meeting. It may have been recompressed or removed by the audio-retention setting."
+            )
+            return
+        }
+
+        // The recorded input paths can drift after scanning (a plain move keeps
+        // the extension; the resolver re-finds it). The system track is required,
+        // so a missing/unresolvable one surfaces an error instead of a silent
+        // beep; the optional mic track is resolved when present.
+        let micURL = input.micURL.flatMap { OwnFileResolver.resolveExistingFile(candidateURLs: [$0]) }
+        guard let systemURL = OwnFileResolver.resolveExistingFile(candidateURLs: [input.systemURL]) else {
+            presentHomeActionFailure(
+                title: "Could not re-transcribe meeting",
+                message: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+            )
             return
         }
 
         trackSettingsAction("retranscribe_saved_meeting", page: .home)
         Task { @MainActor in
             let didStart = await meetingSession.retranscribeSavedMeeting(
-                micAudioURL: input.micURL,
-                systemAudioURL: input.systemURL,
+                micAudioURL: micURL,
+                systemAudioURL: systemURL,
                 title: item.title,
                 transcriptURL: item.transcriptURL,
                 recordingDate: item.startDate ?? item.date
             )
             if !didStart {
-                NSSound.beep()
+                presentHomeActionFailure(
+                    title: "Could not re-transcribe meeting",
+                    message: "Transcripted couldn't start re-transcription from the retained audio. The saved files may be incomplete or already in use."
+                )
             }
         }
     }
@@ -852,7 +928,11 @@ struct TranscriptedSettingsView: View {
 
         if item.summaryPreview != nil {
             trackSettingsAction("open_local_meeting_summary", page: .home)
-            NSWorkspace.shared.open(item.transcriptURL)
+            openOwnFile(
+                candidateURLs: [item.transcriptURL],
+                failureTitle: "Could not open transcript",
+                failureMessage: "Transcripted couldn't find this meeting's enhanced transcript on disk. It may have been moved, renamed, or deleted outside the app."
+            )
             return
         }
 
@@ -876,6 +956,7 @@ struct TranscriptedSettingsView: View {
         let summaryID = transcriptURL.path
         guard homeLocalSummaryTasks[summaryID] == nil else { return }
         if let unavailableReason = localMeetingSummaryUnavailableReason {
+            trackLocalSummaryAbandoned(reason: .blocked, stage: "start", priorReadyState: "not_ready")
             homeDeleteFailure = HomeDeleteFailure(
                 title: "Could not summarize meeting",
                 message: unavailableReason
@@ -943,6 +1024,9 @@ struct TranscriptedSettingsView: View {
                 )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
+                if homeLocalSummaryTaskTokens[summaryID] == taskToken {
+                    trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
+                }
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_cancelled",
                     message: "\(provider.title) meeting summary cancelled",
@@ -953,6 +1037,7 @@ struct TranscriptedSettingsView: View {
                 return
             } catch {
                 guard localMeetingSummariesEnabled else { return }
+                trackLocalSummaryAbandoned(reason: .failed, stage: "generate", priorReadyState: "ready")
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_failed",
@@ -1011,8 +1096,11 @@ struct TranscriptedSettingsView: View {
 
     private static func readMeetingMarkdown(at url: URL) async -> HomeMeetingMarkdownReadResult {
         await Task.detached(priority: .userInitiated) {
+            // Follow a drifted transcript (restyle/rename after scanning) so the
+            // preview still loads instead of falling straight to a read error.
+            let resolved = OwnFileResolver.resolveExistingFile(candidateURLs: [url]) ?? url
             do {
-                return .success(try String(contentsOf: url, encoding: .utf8))
+                return .success(try String(contentsOf: resolved, encoding: .utf8))
             } catch {
                 return .failure(error.localizedDescription)
             }
@@ -1074,7 +1162,11 @@ struct TranscriptedSettingsView: View {
                     surface: .homeMenu,
                     artifactDate: entry.createdAt
                 )
-                NSWorkspace.shared.open(entry.url)
+                openOwnFile(
+                    candidateURLs: [entry.url],
+                    failureTitle: "Could not open dictation",
+                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                )
             },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
                 trackSettingsAction("flag_dictation", page: .home)
@@ -1088,7 +1180,11 @@ struct TranscriptedSettingsView: View {
                     surface: .homeMenu,
                     artifactDate: entry.createdAt
                 )
-                NSWorkspace.shared.activateFileViewerSelecting([entry.url])
+                revealOwnFile(
+                    candidateURLs: [entry.url],
+                    failureTitle: "Could not show dictation",
+                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                )
             },
             HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
                 trackSettingsAction("delete_dictation_request", page: .home)
@@ -1154,8 +1250,10 @@ struct TranscriptedSettingsView: View {
                     surface: .homeMenu,
                     artifactDate: item.date
                 )
-                NSWorkspace.shared.activateFileViewerSelecting(
-                    HomeMeetingRowActionTargets.transcriptRevealURLs(for: item)
+                revealOwnFile(
+                    candidateURLs: HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
+                    failureTitle: "Could not show transcript",
+                    failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
                 )
             }
         ])
@@ -1217,7 +1315,11 @@ struct TranscriptedSettingsView: View {
                 items.append(
                     HomeRowMenuItem(title: "Show audio in Finder", symbolName: "waveform") {
                         trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
-                        NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)
+                        revealOwnFile(
+                            candidateURLs: audioRevealURLs,
+                            failureTitle: "Could not show audio",
+                            failureMessage: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+                        )
                     }
                 )
             }
@@ -1318,8 +1420,22 @@ struct TranscriptedSettingsView: View {
 
         Task { @MainActor in
             do {
-                _ = try await deletionTask.value
+                let result = try await deletionTask.value
                 refreshRecentCaptures(force: true)
+                // The delete can succeed yet remove nothing when the row's
+                // recorded path went stale (a restyle/rename moved the file
+                // after the dashboard was scanned). Deletion deliberately does
+                // NOT route through OwnFileResolver — stem-rematch / enclosing-
+                // folder fallback could remove the wrong file. Instead, detect
+                // the no-op and surface it so the row does not silently reappear
+                // on refresh with no explanation.
+                if result.removedTranscriptURLs.isEmpty,
+                   FileManager.default.fileExists(atPath: item.transcriptURL.path) {
+                    presentHomeActionFailure(
+                        title: "Could not delete meeting",
+                        message: "Transcripted couldn't remove this meeting's files. They may have been moved or renamed outside the app — reopen Settings and try again."
+                    )
+                }
             } catch {
                 refreshRecentCaptures(force: true)
                 presentHomeDeleteFailure(
@@ -1376,12 +1492,11 @@ struct TranscriptedSettingsView: View {
     }
 
     private func revealFailedMeetingAudio(_ item: MeetingSessionController.FailedMeetingItem) {
-        let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: item.audioURLs)
-        guard !audioRevealURLs.isEmpty else {
-            NSSound.beep()
-            return
-        }
-        NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)
+        revealOwnFile(
+            candidateURLs: HomeMeetingRowActionTargets.audioRevealURLs(audioURLs: item.audioURLs),
+            failureTitle: "Could not show audio",
+            failureMessage: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or already cleared."
+        )
     }
 
     private func requestClearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
@@ -1422,9 +1537,52 @@ struct TranscriptedSettingsView: View {
         if !didClear {
             presentHomeActionFailure(
                 title: failureTitle,
-                message: "Transcripted could not update the failed-meeting queue. Check the capture folder, then try again."
+                message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again."
+            )
+        } else {
+            ActivationTelemetry.trackWorkflowAbandoned(
+                workflowKind: .failedMeetingRetry,
+                stage: "retry_available",
+                reasonKind: item.audioURLs.isEmpty ? .dismissed : .deleted,
+                surface: .home,
+                priorReadyState: canRetryFailedMeetings ? "retry_ready" : "retry_blocked"
             )
         }
+    }
+
+    /// Reveals an app-owned capture artifact in Finder, tolerant to the file
+    /// having moved since the row was scanned (transcript restyle/rename,
+    /// WAV→M4A audio recompression). Never silently no-ops: if nothing on disk
+    /// can be revealed it surfaces a failure alert instead of a dead click.
+    private func revealOwnFile(
+        candidateURLs: [URL],
+        failureTitle: String,
+        failureMessage: String
+    ) {
+        switch OwnFileResolver.resolveForReveal(candidateURLs: candidateURLs) {
+        case .reveal(let urls):
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+        case .unavailable:
+            presentHomeActionFailure(title: failureTitle, message: failureMessage)
+        }
+    }
+
+    /// Opens an app-owned capture artifact, tolerant to a stem-only rename
+    /// (e.g. WAV→M4A) since the row was scanned. Requires a real file — it will
+    /// not open an enclosing folder — and surfaces a failure alert instead of a
+    /// silent no-op when nothing on disk backs the URL.
+    @discardableResult
+    private func openOwnFile(
+        candidateURLs: [URL],
+        failureTitle: String,
+        failureMessage: String
+    ) -> Bool {
+        guard let url = OwnFileResolver.resolveExistingFile(candidateURLs: candidateURLs) else {
+            presentHomeActionFailure(title: failureTitle, message: failureMessage)
+            return false
+        }
+        NSWorkspace.shared.open(url)
+        return true
     }
 
     private func presentHomeDeleteFailure(title: String, error: Error) {
@@ -3113,16 +3271,19 @@ struct TranscriptedSettingsView: View {
         switch provider {
         case .gemmaMLX:
             guard localSummarySetupStatus.hasEnoughMemory else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "memory_check")
                 localSummaryModelPreparationStatus = "Gemma needs more memory than this Mac reports."
                 return
             }
 
             guard localSummarySetupStatus.hasRuntime else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "runtime_check")
                 localSummaryModelPreparationStatus = "Install uv first, then Transcripted can download Gemma here."
                 return
             }
         case .appleFoundation:
             guard appleSummarySetupStatus.isReady else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "system_check")
                 localSummaryModelPreparationStatus = appleSummarySetupStatus.unavailableReason
                     ?? "Apple on-device summaries are unavailable on this Mac right now."
                 return
@@ -3175,6 +3336,7 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationTask = nil
                 localSummaryModelPreparationToken = nil
                 localSummaryModelPreparationStatus = nil
+                trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_model_prepare_cancelled",
                     message: "\(provider.title) summary model preparation cancelled",
@@ -3189,6 +3351,7 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationToken = nil
                 refreshLocalSummarySetupStatus()
                 localSummaryModelPreparationStatus = "\(provider.title) setup failed: \(error.localizedDescription)"
+                trackBetaModelPrepAbandoned(reason: .failed, stage: "prepare_model")
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_model_prepare_failed",
@@ -3203,6 +3366,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func cancelLocalSummaryModelPreparation() {
+        if localSummaryModelPreparationTask != nil {
+            trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
+        }
         localSummaryModelPreparationTask?.cancel()
         localSummaryModelPreparationTask = nil
         localSummaryModelPreparationToken = nil
@@ -3229,6 +3395,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func cancelLocalSummaryJobs() {
+        if !homeLocalSummaryTasks.isEmpty {
+            trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
+        }
         for task in homeLocalSummaryTasks.values {
             task.cancel()
         }
@@ -3290,6 +3459,33 @@ struct TranscriptedSettingsView: View {
             event: event,
             message: message,
             context: context
+        )
+    }
+
+    private func trackLocalSummaryAbandoned(
+        reason: ActivationTelemetry.WorkflowAbandonmentReasonKind,
+        stage: String,
+        priorReadyState: String
+    ) {
+        ActivationTelemetry.trackWorkflowAbandoned(
+            workflowKind: .localSummary,
+            stage: stage,
+            reasonKind: reason,
+            surface: .home,
+            priorReadyState: priorReadyState
+        )
+    }
+
+    private func trackBetaModelPrepAbandoned(
+        reason: ActivationTelemetry.WorkflowAbandonmentReasonKind,
+        stage: String
+    ) {
+        ActivationTelemetry.trackWorkflowAbandoned(
+            workflowKind: .betaModelPrep,
+            stage: stage,
+            reasonKind: reason,
+            surface: .home,
+            priorReadyState: selectedLocalSummaryProviderIsReady ? "ready" : "not_ready"
         )
     }
 
@@ -3672,206 +3868,6 @@ struct TranscriptedSettingsView: View {
             }
 
             SupportPrivacyNote()
-        }
-    }
-
-    private struct SupportActionCard: View {
-        enum Tone {
-            case primary
-            case secondary
-        }
-
-        let symbolName: String
-        let title: String
-        let detail: String
-        let buttonTitle: String
-        let buttonSymbolName: String
-        let tone: Tone
-        let status: String?
-        let isEnabled: Bool
-        let action: () -> Void
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: symbolName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(iconForeground)
-                        .frame(width: 34, height: 34)
-                        .background(iconBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(title)
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(Color.primary)
-
-                        Text(detail)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
-                }
-
-                Button(action: action) {
-                    Label(buttonTitle, systemImage: buttonSymbolName)
-                        .font(.callout.weight(.semibold))
-                        .labelStyle(.titleAndIcon)
-                        .lineLimit(1)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .foregroundStyle(buttonForeground)
-                }
-                .buttonStyle(SettingsHoverButtonStyle(
-                    tone: buttonInteractionTone,
-                    cornerRadius: 8,
-                    normalFill: buttonBackground,
-                    normalStroke: buttonStroke,
-                    hoverFill: buttonHoverBackground,
-                    pressedFill: buttonPressedBackground,
-                    hoverStroke: buttonHoverStroke
-                ))
-                .disabled(!isEnabled)
-
-                if let status, !status.isEmpty {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Color(nsColor: .systemGreen))
-
-                        Text(status)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(cardStroke, lineWidth: 1)
-            )
-        }
-
-        private var iconForeground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen)
-            case .secondary:
-                return Color.accentColor
-            }
-        }
-
-        private var iconBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.16)
-            case .secondary:
-                return Color.accentColor.opacity(0.14)
-            }
-        }
-
-        private var cardBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .controlBackgroundColor).opacity(0.9)
-            case .secondary:
-                return Color(nsColor: .controlBackgroundColor).opacity(0.72)
-            }
-        }
-
-        private var cardStroke: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.25)
-            case .secondary:
-                return Color.primary.opacity(0.08)
-            }
-        }
-
-        private var buttonBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen)
-            case .secondary:
-                return Color.secondary.opacity(0.16)
-            }
-        }
-
-        private var buttonInteractionTone: SettingsInteractionTone {
-            switch tone {
-            case .primary:
-                return .accent
-            case .secondary:
-                return .neutral
-            }
-        }
-
-        private var buttonHoverBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.86)
-            case .secondary:
-                return SettingsInteractionPalette.hoverFill(for: .neutral)
-            }
-        }
-
-        private var buttonPressedBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.76)
-            case .secondary:
-                return SettingsInteractionPalette.pressedFill(for: .neutral)
-            }
-        }
-
-        private var buttonStroke: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.24)
-            case .secondary:
-                return Color.primary.opacity(0.08)
-            }
-        }
-
-        private var buttonHoverStroke: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.34)
-            case .secondary:
-                return SettingsInteractionPalette.hoverStroke(for: .neutral)
-            }
-        }
-
-        private var buttonForeground: Color {
-            switch tone {
-            case .primary:
-                return .white
-            case .secondary:
-                return .primary
-            }
-        }
-    }
-
-    private struct SupportPrivacyNote: View {
-        var body: some View {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-
-                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.top, 2)
         }
     }
 
@@ -4260,10 +4256,17 @@ struct TranscriptedSettingsView: View {
         trackSettingsAction("audio_retention_changed", page: .storage)
         AudioStoragePreferences.setDeleteAudioAfter(window)
         Task.detached(priority: .utility) {
-            await MeetingAudioStorageManager.processExistingRetainedAudio(
+            let result = await MeetingAudioStorageManager.processExistingRetainedAudio(
                 in: MeetingStoragePaths.transcriptsFolder,
                 retentionWindow: window
             )
+            // A retention change can create/recompress/prune retained audio across the
+            // library; signal Home so cached audio URLs re-resolve from disk.
+            if result.changedArtifacts {
+                await MainActor.run {
+                    CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
+                }
+            }
         }
     }
 

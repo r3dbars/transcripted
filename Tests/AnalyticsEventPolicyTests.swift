@@ -14,6 +14,210 @@ func testAnalyticsEventPolicy() {
         )
     }
 
+    runSuite("AnalyticsEventPolicy taxonomy blocks sensitive property names") {
+        let forbiddenFragments = [
+            "audio_path",
+            "audio_ref",
+            "authorization",
+            "bundle",
+            "credential",
+            "device_id",
+            "distinct_id",
+            "email",
+            "file",
+            "filename",
+            "identity",
+            "invitee",
+            "meeting_title",
+            "person_id",
+            "raw_url",
+            "referrer",
+            "speaker",
+            "source_app",
+            "text",
+            "title",
+            "token",
+            "transcript",
+            "url",
+            "user_id",
+        ]
+        let properties = allAllowedAnalyticsPropertyNames()
+
+        for property in properties {
+            let normalized = property.lowercased()
+            for fragment in forbiddenFragments {
+                assertFalse(
+                    normalized.contains(fragment),
+                    "\(property) should not include forbidden analytics fragment \(fragment)"
+                )
+            }
+        }
+    }
+
+    runSuite("AnalyticsEventPolicy taxonomy requires reviewed non-bucket property shapes") {
+        let reviewedNonBucketProperties: Set<String> = [
+            "action",
+            "action_id",
+            "action_kind",
+            "agent_cta",
+            "agent_target",
+            "analytics_available",
+            "anonymous_usage_enabled",
+            "app_signal",
+            "app_version",
+            "artifact_kind",
+            "attenuation_kind",
+            "auto_send",
+            "automatic_downloads_enabled",
+            "available",
+            "backoff_kind",
+            "build_channel",
+            "build_revision",
+            "build_version",
+            "calendar_confidence",
+            "calendar_status",
+            "call_state",
+            "capture_activity",
+            "capture_quality",
+            "captured_input_volume_before",
+            "captured_input_volume_changed",
+            "captured_input_volume_dropped",
+            "captured_input_volume_during",
+            "cleanup_changed",
+            "cleanup_enabled",
+            "completion_flow",
+            "cooldown_reason",
+            "copy_reason",
+            "crash_reporting_available",
+            "crash_reporting_enabled",
+            "cta",
+            "cta_type",
+            "default_input_class",
+            "default_input_volume_after",
+            "default_input_volume_before",
+            "default_input_volume_changed",
+            "default_input_volume_dropped",
+            "default_input_volume_during",
+            "default_output_class",
+            "default_output_volume_after",
+            "default_output_volume_before",
+            "default_output_volume_changed",
+            "default_output_volume_dropped",
+            "default_output_volume_during",
+            "default_system_output_volume_after",
+            "default_system_output_volume_before",
+            "default_system_output_volume_changed",
+            "default_system_output_volume_dropped",
+            "default_system_output_volume_during",
+            "delivery",
+            "dictation_ready",
+            "elapsed_bucket",
+            "enabled",
+            "entrypoint",
+            "failure_code",
+            "failure_kind",
+            "first_dictation_saved",
+            "format_ready",
+            "from_status",
+            "has_target",
+            "hfp_suspected",
+            "import_stage",
+            "input_channels",
+            "input_device_class",
+            "input_rate_hz",
+            "input_volume_scalar_available",
+            "last_event",
+            "location_type",
+            "meeting_dry_run_completed",
+            "meeting_recording_ready",
+            "mic_boost_prompt",
+            "mic_processed_peak",
+            "mic_processing",
+            "mic_raw_peak",
+            "mic_recovering",
+            "mic_status",
+            "mic_stream_present",
+            "missing_permission",
+            "model_state",
+            "os_major",
+            "outcome",
+            "output_channels",
+            "output_device_class",
+            "output_ducking_detected",
+            "output_rate_hz",
+            "page_id",
+            "paste_available",
+            "pasteback_status",
+            "permission_kind",
+            "previous_clean_shutdown",
+            "previous_version",
+            "prior_artifact_kind",
+            "prior_ready_state",
+            "prior_status",
+            "prompt_kind",
+            "prompt_reason",
+            "provider",
+            "proxy_kind",
+            "quiet_mic_recovered",
+            "quiet_mic_unrecovered",
+            "realtime_agc",
+            "reason",
+            "recent_meetings_available",
+            "recovering",
+            "reporting_kind",
+            "required",
+            "reason_kind",
+            "result",
+            "route_ready",
+            "route_shape",
+            "sample_flow_started",
+            "save_outcome",
+            "selected_input_class",
+            "selection_overrode_default",
+            "selection_reason",
+            "session_active",
+            "session_kind",
+            "session_stage",
+            "setting_id",
+            "setup_kind",
+            "source",
+            "stall_kind",
+            "stall_stage",
+            "stage",
+            "state",
+            "step_id",
+            "step_index",
+            "stop_timed_out",
+            "suppression_reason",
+            "surface",
+            "system_backend",
+            "system_channels",
+            "system_failed",
+            "system_output_device_class",
+            "system_output_rate_hz",
+            "system_peak",
+            "system_rate_hz",
+            "system_status",
+            "system_stream_present",
+            "to_status",
+            "trigger",
+            "update_state",
+            "version",
+            "voice_processing",
+            "voice_processing_active",
+            "was_recording",
+            "workflow_kind",
+        ]
+        let properties = allAllowedAnalyticsPropertyNames()
+
+        for property in properties where !property.hasSuffix("_bucket") {
+            assertTrue(
+                reviewedNonBucketProperties.contains(property),
+                "\(property) must be explicitly reviewed as an enum, boolean, public version, count, or coarse numeric diagnostic"
+            )
+        }
+    }
+
     runSuite("AnalyticsEventPolicy allows explicit onboarding funnel events") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "onboarding_shown")
         let stepViewed = AnalyticsEventPolicy.policy(forEvent: "onboarding_step_viewed")
@@ -80,26 +284,32 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy allows post-artifact activation events") {
         let artifact = AnalyticsEventPolicy.policy(forEvent: "activation_artifact_action_clicked")
+        let firstArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_first_artifact_saved")
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
+        assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
+            .union(firstArtifact?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",
                 "agent_target": "codex",
                 "artifact_age_bucket": "24_48h",
                 "artifact_kind": "meeting",
+                "duration_bucket": "10_29m",
                 "prompt_kind": "meeting_bundle",
                 "result": "success",
                 "surface": "home_preview",
+                "trigger": "detected_prompt",
+                "word_count_bucket": "300_plus",
                 "transcript": "private words",
                 "meeting_title": "Customer call",
                 "speaker_name": "Alice",
@@ -116,9 +326,12 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["agent_target"], "codex", "agent target should survive")
         assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
         assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
+        assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
+        assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
         assertNil(sanitized["transcript"], "raw transcript text must not be sent")
         assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
         assertNil(sanitized["speaker_name"], "speaker names must not be sent")
@@ -129,8 +342,11 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 
-    runSuite("ActivationTelemetry buckets artifact age and next-day return proxy") {
+    runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, and next-day return proxy") {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
+        let suiteName = "ActivationTelemetryTests.first-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
 
         assertEqual(
             ActivationTelemetry.artifactAgeBucket(since: now.addingTimeInterval(-3 * 3_600), now: now),
@@ -156,6 +372,98 @@ func testAnalyticsEventPolicy() {
             "3_7d",
             "late return proxy should stay bucketed"
         )
+        assertTrue(
+            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
+            "first saved artifact should be marked once per install"
+        )
+        assertFalse(
+            ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
+            "first saved artifact should not be marked twice"
+        )
+    }
+
+    runSuite("AnalyticsEventPolicy allows workflow abandonment taxonomy") {
+        let abandoned = AnalyticsEventPolicy.policy(forEvent: "workflow_abandoned")
+        assertEqual(
+            abandoned?.allowedProperties ?? Set<String>(),
+            ["elapsed_bucket", "prior_ready_state", "reason_kind", "stage", "surface", "workflow_kind"],
+            "workflow abandonment should stay coarse and enum-only"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "failed_meeting_retry",
+                "stage": "retry_available",
+                "reason_kind": "dismissed",
+                "elapsed_bucket": "unknown",
+                "surface": "home",
+                "prior_ready_state": "retry_ready",
+                "meeting_title": "Customer call",
+                "file_path": "/Users/redbars/private.md",
+                "raw_duration": "472.221",
+                "raw_error": "private stack",
+                "source_app": "Zoom",
+                "url": "https://example.com/meeting",
+            ],
+            allowedKeys: abandoned?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["workflow_kind"], "failed_meeting_retry", "workflow kind should survive")
+        assertEqual(sanitized["stage"], "retry_available", "stage should survive")
+        assertEqual(sanitized["reason_kind"], "dismissed", "reason kind should survive")
+        assertEqual(sanitized["elapsed_bucket"], "unknown", "elapsed bucket should survive")
+        assertEqual(sanitized["surface"], "home", "surface should survive")
+        assertEqual(sanitized["prior_ready_state"], "retry_ready", "prior ready state should survive")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["raw_duration"], "raw durations must not be sent")
+        assertNil(sanitized["raw_error"], "raw errors must not be sent")
+        assertNil(sanitized["source_app"], "source apps must not be sent")
+        assertNil(sanitized["url"], "raw URLs must not be sent")
+    }
+
+    runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {
+        let friction = AnalyticsEventPolicy.policy(forEvent: "product_friction_observed")
+        assertEqual(
+            friction?.allowedProperties ?? Set<String>(),
+            ["elapsed_bucket", "failure_kind", "model_state", "result", "route_shape", "stage", "surface"],
+            "product friction should stay narrowly scoped"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "elapsed_bucket": "10_29s",
+                "failure_kind": "pasteback_failed",
+                "model_state": "ready",
+                "result": "failed",
+                "route_shape": "built_in_input_to_bluetooth_output",
+                "stage": "pasteback",
+                "surface": "dictation",
+                "error_message": "private raw error",
+                "audio_path": "/Users/jane/private.wav",
+                "file_path": "/Users/jane/private.md",
+                "meeting_title": "Customer roadmap",
+                "source_app_bundle": "com.example.Private",
+                "transcript_text": "private transcript",
+                "retry_count": "7",
+            ],
+            allowedKeys: friction?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["elapsed_bucket"], "10_29s", "elapsed time should survive only as a bucket")
+        assertEqual(sanitized["failure_kind"], "pasteback_failed", "failure kind should survive as a normalized enum")
+        assertEqual(sanitized["model_state"], "ready", "model state should survive as a coarse enum")
+        assertEqual(sanitized["result"], "failed", "result should survive as a coarse enum")
+        assertEqual(sanitized["route_shape"], "built_in_input_to_bluetooth_output", "route shape should survive as a coarse enum")
+        assertEqual(sanitized["stage"], "pasteback", "stage should survive as a coarse enum")
+        assertEqual(sanitized["surface"], "dictation", "surface should survive as a coarse enum")
+        assertNil(sanitized["error_message"], "raw error strings should stay out of friction analytics")
+        assertNil(sanitized["audio_path"], "audio paths should stay out of friction analytics")
+        assertNil(sanitized["file_path"], "file paths should stay out of friction analytics")
+        assertNil(sanitized["meeting_title"], "meeting titles should stay out of friction analytics")
+        assertNil(sanitized["source_app_bundle"], "source app bundle IDs should stay out of friction analytics")
+        assertNil(sanitized["transcript_text"], "transcript text should stay out of friction analytics")
+        assertNil(sanitized["retry_count"], "raw retry counts should stay out of friction analytics")
     }
 
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
@@ -821,22 +1129,98 @@ func testAnalyticsEventPolicy() {
         let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_shown")
         let dismissed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_dismissed")
         let recorded = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_record_selected")
+        let suppressed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_suppressed")
 
         assertEqual(shown?.allowedProperties.contains("provider"), true, "prompt shown should allow provider attribution")
         assertEqual(shown?.allowedProperties.contains("prompt_reason"), true, "prompt shown should preserve why it appeared")
+        assertEqual(shown?.allowedProperties.contains("calendar_confidence"), true, "prompt shown should keep coarse calendar confidence")
+        assertEqual(shown?.allowedProperties.contains("call_state"), true, "prompt shown should keep coarse in-call state")
+        assertEqual(shown?.allowedProperties.contains("app_signal"), true, "prompt shown should keep coarse app signal")
+        assertEqual(shown?.allowedProperties.contains("route_ready"), true, "prompt shown should preserve route readiness")
+        assertEqual(shown?.allowedProperties.contains("missing_permission"), true, "prompt shown should preserve missing-permission buckets")
         assertEqual(dismissed?.allowedProperties.contains("source"), true, "prompt dismiss should allow source attribution")
         assertEqual(dismissed?.allowedProperties.contains("backoff_kind"), true, "prompt dismiss should preserve which backoff rule fired")
+        assertEqual(dismissed?.allowedProperties.contains("cooldown_reason"), true, "prompt dismiss should preserve cooldown reason")
         assertEqual(recorded?.allowedProperties.contains("provider"), true, "prompt accept should allow provider attribution")
+        assertEqual(suppressed?.allowedProperties.contains("suppression_reason"), true, "prompt suppression should preserve why nothing appeared")
+        assertEqual(suppressed?.allowedProperties.contains("capture_activity"), true, "prompt suppression should preserve already-recording state")
+        assertEqual(suppressed?.allowedProperties.contains("cooldown_reason"), true, "prompt suppression should preserve duplicate/cooldown reason")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
+                "app_signal": "browser_mic",
+                "calendar_confidence": "linked_event_runtime_match",
+                "call_state": "mic_active",
+                "capture_activity": "meeting_recording",
+                "cooldown_reason": "runtime_default_fallback",
+                "missing_permission": "system_audio_recording",
                 "prompt_reason": "calendar_plus_runtime_match",
+                "provider": "googleMeet",
+                "route_ready": "false",
+                "source": "runtime_app",
+                "suppression_reason": "pending_candidate",
                 "backoff_kind": "calendar_teams_extended",
             ],
-            allowedKeys: ["prompt_reason", "backoff_kind"]
+            allowedKeys: suppressed?.allowedProperties.union(dismissed?.allowedProperties ?? []) ?? []
         )
+        assertEqual(sanitized["app_signal"], "browser_mic", "coarse app signal should survive sanitization")
+        assertEqual(sanitized["calendar_confidence"], "linked_event_runtime_match", "calendar confidence should survive sanitization")
+        assertEqual(sanitized["call_state"], "mic_active", "in-call state should survive sanitization")
+        assertEqual(sanitized["capture_activity"], "meeting_recording", "already-recording state should survive sanitization")
+        assertEqual(sanitized["cooldown_reason"], "runtime_default_fallback", "cooldown reason should survive sanitization")
+        assertEqual(sanitized["missing_permission"], "system_audio_recording", "missing permission bucket should survive sanitization")
         assertEqual(sanitized["prompt_reason"], "calendar_plus_runtime_match", "prompt reason should survive sanitization")
+        assertEqual(sanitized["provider"], "googleMeet", "provider enum should survive sanitization")
+        assertEqual(sanitized["route_ready"], "false", "route readiness should survive sanitization")
+        assertEqual(sanitized["source"], "runtime_app", "prompt source should survive sanitization")
+        assertEqual(sanitized["suppression_reason"], "pending_candidate", "suppression reason should survive sanitization")
         assertEqual(sanitized["backoff_kind"], "calendar_teams_extended", "dismiss backoff kind should survive sanitization")
+
+        let privatePromptFields = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "app_signal": "native_mic",
+                "calendar_confidence": "linked_event",
+                "call_state": "scheduled",
+                "provider": "zoom",
+                "source": "calendar_event",
+                "source_app_name": "Private Browser",
+                "source_app_bundle_id": "com.example.private",
+                "meeting_title": "Customer Roadmap",
+                "invitee_name": "Alice Customer",
+                "speaker_name": "Bob Customer",
+                "meeting_url": "https://meet.example.com/private",
+                "prompt_text": "Record Customer Roadmap?",
+                "audio_ref": "/Users/redbars/private.wav",
+                "file_path": "/Users/redbars/private.md",
+                "transcript_text": "private words",
+            ],
+            allowedKeys: (shown?.allowedProperties ?? [])
+                .union([
+                    "source_app_name",
+                    "source_app_bundle_id",
+                    "meeting_title",
+                    "invitee_name",
+                    "speaker_name",
+                    "meeting_url",
+                    "prompt_text",
+                    "audio_ref",
+                    "file_path",
+                    "transcript_text",
+                ])
+        )
+        assertEqual(privatePromptFields["app_signal"], "native_mic", "safe prompt context should survive beside private inputs")
+        assertEqual(privatePromptFields["calendar_confidence"], "linked_event", "safe calendar confidence should survive beside private inputs")
+        assertEqual(privatePromptFields["provider"], "zoom", "safe provider enum should survive beside private inputs")
+        assertNil(privatePromptFields["source_app_name"], "source app names must not be sent")
+        assertNil(privatePromptFields["source_app_bundle_id"], "source app bundle IDs must not be sent")
+        assertNil(privatePromptFields["meeting_title"], "meeting titles must not be sent")
+        assertNil(privatePromptFields["invitee_name"], "invitee names must not be sent")
+        assertNil(privatePromptFields["speaker_name"], "speaker names must not be sent")
+        assertNil(privatePromptFields["meeting_url"], "meeting URLs must not be sent")
+        assertNil(privatePromptFields["prompt_text"], "raw prompt text must not be sent")
+        assertNil(privatePromptFields["audio_ref"], "audio references must not be sent")
+        assertNil(privatePromptFields["file_path"], "file paths must not be sent")
+        assertNil(privatePromptFields["transcript_text"], "transcript text must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy keeps mic boost prompt events narrow") {
@@ -890,6 +1274,10 @@ private func documentedAnalyticsEvents() -> [String] {
 
         return String(trimmed.dropFirst(3).dropLast())
     }
+}
+
+private func allAllowedAnalyticsPropertyNames() -> [String] {
+    Set(AnalyticsEventPolicy.allPolicies.flatMap { $0.allowedProperties }).sorted()
 }
 
 private func markdownSection(named heading: String, in text: String) -> String {

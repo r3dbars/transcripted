@@ -59,6 +59,103 @@ func testUIAutomationSurfaceContract() {
 
     }
 
+    runSuite("UI automation surface contract - app commands expose capture shortcuts") {
+        let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
+
+        for requiredCommandHook in [
+            "CommandMenu(\"Capture\")",
+            "Button(\"Start Dictation\")",
+            "appDelegate.menuStartDictation()",
+            ".keyboardShortcut(\"d\", modifiers: .command)",
+            "Button(\"Start / Stop Meeting Recording\")",
+            "appDelegate.menuToggleMeetingRecording()",
+            ".keyboardShortcut(\"r\", modifiers: .command)",
+            "Button(\"Transcribe Audio File",
+            "appDelegate.menuImportAudio()",
+            ".keyboardShortcut(\"o\", modifiers: .command)",
+        ] {
+            assertTrue(commandsSource.contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the app command menu")
+        }
+    }
+
+    runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
+        let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
+        let pagesSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsPage.swift")
+
+        for requiredCommandHook in [
+            "CommandMenu(\"Go\")",
+            "Button(\"Home\")",
+            "appDelegate.menuOpenPage(.home)",
+            ".keyboardShortcut(\"1\", modifiers: .command)",
+            "Button(\"Dictations\")",
+            "appDelegate.menuOpenPage(.dictations)",
+            ".keyboardShortcut(\"2\", modifiers: .command)",
+            "Button(\"Speakers\")",
+            "appDelegate.menuOpenPage(.people)",
+            ".keyboardShortcut(\"3\", modifiers: .command)",
+            "Button(\"Agent\")",
+            "appDelegate.menuOpenPage(.connectAgent)",
+            ".keyboardShortcut(\"4\", modifiers: .command)",
+            "Button(\"Find Speaker",
+            "appDelegate.menuFindSpeaker()",
+            ".keyboardShortcut(\"f\", modifiers: .command)",
+        ] {
+            assertTrue(commandsSource.contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the Go command menu")
+        }
+
+        for requiredPageHook in [
+            "case .home: return \"1\"",
+            "case .dictations: return \"2\"",
+            "case .people: return \"3\"",
+            "case .connectAgent: return \"4\"",
+            "return \"\\(title)  ⌘\\(key)\"",
+        ] {
+            assertTrue(pagesSource.contains(requiredPageHook), "\(requiredPageHook) should keep sidebar help aligned with Go shortcuts")
+        }
+    }
+
+    runSuite("UI automation surface contract - app commands route through existing delegate entry points") {
+        let appSource = readUIAutomationContractFile("Sources/TranscriptedApp.swift")
+
+        for requiredAppHook in [
+            "TranscriptedMenuCommands(appDelegate: appDelegate)",
+            "func menuStartDictation()",
+            "startDictationFromSettings()",
+            "func menuToggleMeetingRecording()",
+            "meetingOverlayController.toggleFromHotkey()",
+            "func menuImportAudio()",
+            "importAudioFileFromSettings()",
+            "func menuOpenPage(_ page: TranscriptedSettingsPage)",
+            "showSettingsWindow(page: page, source: \"menu_command\")",
+            "func menuFindSpeaker()",
+            "settingsWindowController.focusSpeakerSearch(source: \"menu_command\")",
+        ] {
+            assertTrue(appSource.contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
+        }
+    }
+
+    runSuite("UI automation surface contract - app commands do not remap global trigger preferences") {
+        let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
+
+        for forbiddenTriggerHook in [
+            "PhysicalDictationTriggerPreferences",
+            "HotkeyPreferences",
+            "RegisterEventHotKey",
+            "pushToTalk",
+            "handsFree",
+            ".keyboardShortcut(\"m\"",
+            "modifiers: .option",
+            "modifiers: [.option",
+            "modifiers: .control",
+            "modifiers: [.control",
+        ] {
+            assertFalse(
+                commandsSource.contains(forbiddenTriggerHook),
+                "app-active commands must not remap or shadow global recordable trigger preferences (\(forbiddenTriggerHook))"
+            )
+        }
+    }
+
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
         let pagesSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsPage.swift")
         let settingsSidebarSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
@@ -172,6 +269,80 @@ func testUIAutomationSurfaceContract() {
             settingsSource.contains("HomeRootAlertPolicy.activeSlot")
                 && settingsSource.contains("switch activeRootAlert"),
             "the shared alert binding should clear only the dismissed alert through HomeRootAlertPolicy, not reset all three states"
+        )
+
+        // Own-file resolution contract (hardening/home-meeting-own-file-resolver).
+        // Every Home/meeting control that touches an app-owned file (transcript,
+        // audio, summary) must route through OwnFileResolver so a path that drifted
+        // after scanning (restyle/rename, WAV→M4A recompression, deletion) surfaces
+        // an error instead of a silent dead click. Behavior is covered by
+        // OwnFileResolverTests; these guard the wiring so a regression that re-adds a
+        // raw stale-path call (the #1126/#1131/#1134 whack-a-mole) fails CI.
+        let ownFileResolverSource = readUIAutomationContractFile("Sources/UI/Shared/OwnFileResolver.swift")
+        let playbackSource = readUIAutomationContractFile("Sources/UI/Shared/MeetingAudioPlayback.swift")
+
+        assertTrue(
+            ownFileResolverSource.contains("static func resolveForReveal(")
+                && ownFileResolverSource.contains("static func resolveExistingFile(")
+                && ownFileResolverSource.contains("static func resolveExistingFiles(")
+                && ownFileResolverSource.contains("case reveal([URL])")
+                && ownFileResolverSource.contains("case unavailable"),
+            "OwnFileResolver must keep both reveal (with enclosing-folder fallback) and open/play (regular-file-only) resolution modes"
+        )
+
+        assertTrue(
+            settingsSource.contains("private func revealOwnFile(")
+                && settingsSource.contains("OwnFileResolver.resolveForReveal(candidateURLs:")
+                && settingsSource.contains("private func openOwnFile(")
+                && settingsSource.contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
+            "Home reveal/open should route through OwnFileResolver helpers, surfacing presentHomeActionFailure on .unavailable instead of a dead click"
+        )
+
+        // No control may pass a possibly-stale row/preview/notice URL straight to
+        // NSWorkspace — those silently no-op when the file moved after scanning.
+        for staleRawCall in [
+            "activateFileViewerSelecting([entry.url])",
+            "activateFileViewerSelecting(audioRevealURLs)",
+            "activateFileViewerSelecting(\n                    HomeMeetingRowActionTargets.transcriptRevealURLs(for: item)",
+            "NSWorkspace.shared.open(entry.url)",
+            "NSWorkspace.shared.open(preview.transcriptURL)",
+            "NSWorkspace.shared.open(item.transcriptURL)",
+            "NSWorkspace.shared.open(notice.transcriptURL)",
+            "NSWorkspace.shared.open(transcriptURL)",
+        ] {
+            assertFalse(
+                settingsSource.contains(staleRawCall),
+                "Home own-file action must not call NSWorkspace on a raw scan-time URL (\(staleRawCall)) — route it through OwnFileResolver"
+            )
+        }
+
+        // Copy/export and re-transcribe must surface a failure, not a silent beep,
+        // when the source file cannot be resolved.
+        assertFalse(
+            settingsSource.contains("NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)"),
+            "failed-meeting reveal audio must route through OwnFileResolver, not beep-or-reveal on raw URLs"
+        )
+        assertTrue(
+            settingsSource.contains("Could not copy meeting")
+                && settingsSource.contains("Could not re-transcribe meeting"),
+            "copy-for-agent and re-transcribe should surface a failure alert when the own file is missing, instead of NSSound.beep()"
+        )
+
+        // Retained-audio playback follows recompressed/moved files instead of going
+        // silently Unavailable on a stale path.
+        assertTrue(
+            playbackSource.contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
+            "meeting audio playback should resolve each source URL through OwnFileResolver so WAV→M4A recompression still plays"
+        )
+
+        // Delete must surface a failure when it removed nothing yet the file is
+        // still on disk (stale path), instead of letting the row reappear
+        // unexplained. Deletion intentionally does not use the lenient resolver.
+        assertTrue(
+            settingsSource.contains("result.removedTranscriptURLs.isEmpty")
+                && settingsSource.contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
+                && settingsSource.contains("presentHomeActionFailure("),
+            "deleteMeeting should detect a no-op delete (stale path) and surface a failure rather than silently re-showing the row"
         )
 
         // Row-interaction affordances from fix/home-row-actions, which have no

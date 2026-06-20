@@ -164,6 +164,14 @@ func testRepoCommandContract() {
             workflowEvents.contains("meeting_file_imported") && digest.contains("\"meeting_file_imported\""),
             "aggregate active-device workflow sets should count imported audio activity"
         )
+        assertTrue(
+            workflowEvents.contains("workflow_abandoned") && digest.contains("\"workflow_abandoned\""),
+            "aggregate active-device workflow sets should count abandonment exits"
+        )
+        assertTrue(
+            contents.contains("abandonment_events_7d") && contents.contains("abandonment_events=$abandonment"),
+            "PostHog probe should keep a separate aggregate abandonment count"
+        )
     }
 
     runSuite("Repo command contract - PostHog health probe counts emitted first-value events") {
@@ -181,6 +189,7 @@ func testRepoCommandContract() {
             "onboarding_first_dictation_saved",
             "meeting_transcript_saved",
             "onboarding_agent_cta_clicked",
+            "activation_first_artifact_saved",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
@@ -192,6 +201,7 @@ func testRepoCommandContract() {
             )
         }
         for event in [
+            "activation_first_artifact_saved",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
@@ -209,6 +219,10 @@ func testRepoCommandContract() {
         assertFalse(
             firstValueEvents.contains("meeting_file_imported"),
             "imported audio should count as activity but not as first value"
+        )
+        assertFalse(
+            firstValueEvents.contains("workflow_abandoned"),
+            "abandonment exits should count as activity but not as first value"
         )
     }
 
@@ -264,6 +278,12 @@ func testRepoCommandContract() {
         assertTrue(
             buildDepsScript.contains("newest_dependency_input") && buildDepsScript.contains("deps_are_ready"),
             "build-deps.sh should rebuild stale TranscriptedCore artifacts instead of printing a false ready message"
+        )
+        assertTrue(
+            buildDepsScript.contains("dependency_input_digest")
+                && buildDepsScript.contains("dependency_inputs_sha256")
+                && buildDepsScript.contains("Dependency input digest changed."),
+            "build-deps.sh should stamp dependency inputs by content digest, not only by filesystem mtime"
         )
         // The dual-archive invariant — Core lives in libDraftDeps.a (app path) and is absent
         // from libExternalDeps.a (SPM path) — must stay verified at build time, not just trusted.
@@ -389,12 +409,14 @@ func testRepoCommandContract() {
         let expectedChecks = [
             "bash -n scripts/entrypoints/build-deps.sh",
             "bash build-deps.sh --force",
+            "python3 scripts/dev/check-build-source-lists.py",
             "bash -n scripts/entrypoints/build.sh",
             "bash -n scripts/entrypoints/run-tests.sh",
             "bash -n scripts/entrypoints/run-integration-smoke.sh",
             "bash -n scripts/ops/daily-audio-reliability-check.sh",
             "bash -n scripts/ops/health-probe.sh",
             "bash -n scripts/dev/onboarding.sh",
+            "python3 -m py_compile scripts/dev/check-build-source-lists.py",
             "bash -n scripts/dev/benchmark-home-recent-captures.sh",
             "python3 -m py_compile scripts/ops/generate-nightly-digest.py",
             "python3 scripts/ops/generate-nightly-digest.py --self-test",
@@ -503,8 +525,10 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("newest_dependency_input")
                 && contents.contains("deps_build_stamp_info")
+                && contents.contains("dependency_input_digest")
+                && contents.contains("Dependency input digest changed.")
                 && contents.contains("Dependencies are stale for TranscriptedCore."),
-            "integration smoke should refuse stale TranscriptedCore dependency artifacts"
+            "integration smoke should refuse stale TranscriptedCore dependency artifacts by mtime or digest"
         )
     }
 
@@ -544,6 +568,45 @@ func testRepoCommandContract() {
         assertTrue(
             contents.contains("RecordingValidator.validateRecordingConditions(paths: paths)"),
             "Audio.start should validate the same CoreStoragePaths that the embedder injected"
+        )
+    }
+
+    runSuite("Repo command contract - TranscriptedCore stays free of app UI frameworks") {
+        let disallowedImports = [
+            "import AppKit",
+            "import SwiftUI",
+            "import Cocoa",
+            "import UIKit"
+        ]
+        let matches = repoTextFiles(relativeTo: repoRootURL())
+            .filter { $0.hasPrefix("Sources/TranscriptedCore/") && $0.hasSuffix(".swift") }
+            .flatMap { file -> [String] in
+                let contents = readRepoTextFile(file)
+                return contents
+                    .split(separator: "\n", omittingEmptySubsequences: false)
+                    .enumerated()
+                    .compactMap { index, line in
+                        let trimmed = line.trimmingCharacters(in: .whitespaces)
+                        return disallowedImports.contains(trimmed) ? "\(file):\(index + 1)" : nil
+                    }
+            }
+
+        assertEqual(matches, [], "TranscriptedCore should not import app UI frameworks")
+
+        let packageManifest = readRepoTextFile("Package.swift")
+        assertFalse(
+            packageManifest.contains(".linkedFramework(\"AppKit\")"),
+            "TranscriptedCore package should not link AppKit"
+        )
+    }
+
+    runSuite("Repo command contract - app bridge injects workspace sleep wake notifications") {
+        let bridge = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
+        assertTrue(
+            bridge.contains("center: NSWorkspace.shared.notificationCenter")
+                && bridge.contains("willSleepName: Notification.Name(\"NSWorkspaceWillSleepNotification\")")
+                && bridge.contains("didWakeName: Notification.Name(\"NSWorkspaceDidWakeNotification\")"),
+            "app-side meeting bridge should keep NSWorkspace notification center ownership out of TranscriptedCore"
         )
     }
 
@@ -1189,6 +1252,11 @@ func testRepoCommandContract() {
             "local builds should not clobber exported Sentry runtime overrides before launch smoke"
         )
         assertTrue(
+            localBuildScript.contains("TranscriptedBuildChannel local")
+                && localBuildScript.contains("TranscriptedBuildRevision"),
+            "local builds should stamp analytics metadata so same-version main builds do not look shipped"
+        )
+        assertTrue(
             betaBuildScript.contains("sentry-release-metadata.py --format shell Info.plist")
                 && betaBuildScript.contains("REGISTER_SENTRY_RELEASE")
                 && betaBuildScript.contains("APP_DSYM")
@@ -1201,6 +1269,11 @@ func testRepoCommandContract() {
                 && betaBuildScript.contains("SENTRY_REQUIRE_DEBUG_FILES")
                 && betaBuildScript.contains("register-sentry-release.sh \"$APP_VERSION\""),
             "distribution builds should surface the Sentry release/dist, generate dSYMs, and support explicit registration"
+        )
+        assertTrue(
+            betaBuildScript.contains("TranscriptedBuildChannel release")
+                && betaBuildScript.contains("TranscriptedBuildRevision"),
+            "distribution builds should stamp release-channel analytics metadata without changing Sparkle versioning"
         )
     }
 
@@ -2218,6 +2291,40 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - failed meeting transcripts carry capture diagnostics") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let failureBlock = sourceSlice(
+            controllerContents,
+            from: "case .failed(let message):",
+            to: "case .gettingReady:"
+        )
+
+        assertTrue(
+            controllerContents.contains("activeTranscriptionCaptureDiagnostics = job.captureDiagnostics"),
+            "failed meeting transcript diagnostics should use the capture health context stored with the active queued job"
+        )
+        assertTrue(
+            failureBlock.contains("let failureTelemetryContext = meetingFailureTelemetryContext("),
+            "failed meeting transcript diagnostics should compose shared failure telemetry through the stable helper"
+        )
+        assertFalse(
+            failureBlock.contains("capture.pipelineDiagnosticsSnapshot()"),
+            "failed meeting transcript diagnostics should not sample the live capture singleton after transcription fails"
+        )
+        assertTrue(
+            failureBlock.contains("\"queue_depth_bucket\": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)"),
+            "failed meeting transcript diagnostics should include bucketed queue depth"
+        )
+        assertTrue(
+            failureBlock.contains("context: baseDiagnosticsContext(extra: failureDiagnosticsContext)"),
+            "failed meeting transcript Sentry context should use the enriched diagnostics context"
+        )
+        assertTrue(
+            failureBlock.contains("properties: failureTelemetryContext"),
+            "analytics and diagnostics should share the same privacy-safe failure telemetry context"
+        )
+    }
+
     runSuite("Repo command contract - shutdown preservation clears live sidecar waits") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let terminationBlock = sourceSlice(
@@ -2948,8 +3055,14 @@ func testRepoCommandContract() {
         assertTrue(
             deleteBlock.contains("Task.detached(priority: .userInitiated)") &&
                 deleteBlock.contains("try HomeMeetingDeletion.delete(plan)") &&
-                deleteBlock.contains("_ = try await deletionTask.value"),
+                deleteBlock.contains("try await deletionTask.value"),
             "Home delete should run filesystem cleanup away from the main Settings UI path"
+        )
+        assertTrue(
+            deleteBlock.contains("result.removedTranscriptURLs.isEmpty")
+                && deleteBlock.contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
+                && deleteBlock.contains("presentHomeActionFailure("),
+            "a confirmed Home delete that removes nothing while the file is still on disk (stale path) should surface a failure instead of silently re-showing the row"
         )
         assertTrue(
             homeContents.contains("func removeVisibleMeeting(id: String)")

@@ -24,6 +24,7 @@ final class MeetingPromptDetector {
     }
 
     var onPromptRequest: ((Candidate) -> Bool)?
+    var onPromptSuppressed: ((MeetingPromptSuppression) -> Void)?
     var shouldSkipPromptEvaluation: (() -> Bool)?
 
     /// Returns true while Transcripted itself holds the mic (meeting recording or
@@ -31,6 +32,8 @@ final class MeetingPromptDetector {
     /// own capture — belt-and-suspenders with `MicActivityMonitor`'s own-bundle
     /// filter. Wired in `TranscriptedApp`.
     var isOwnCaptureActive: (() -> Bool)?
+    /// Optional richer shape for the same gate, used only for coarse analytics.
+    var ownCaptureActivity: (() -> MeetingPromptOwnCaptureActivity)?
     /// Returns false when the Settings toggle is off. This keeps late monitor
     /// callbacks quiet after the user disables auto call detection.
     var isMicInputPromptEnabled: (() -> Bool)?
@@ -49,11 +52,15 @@ final class MeetingPromptDetector {
     private var pendingUntil: [String: Date] = [:]
     private var recentNativeActivity: [MeetingPromptProvider: Date] = [:]
     private var runtimeSuppressedUntil: [MeetingPromptProvider: Date] = [:]
+    private var cooldownReasons: [String: String] = [:]
+    private var runtimeSuppressionReasons: [MeetingPromptProvider: String] = [:]
+    private var suppressionTelemetryUntil: [String: Date] = [:]
     // Bundle IDs currently holding the mic input, pushed by MicActivityMonitor.
     private var micActiveBundleIDs: Set<String> = []
 
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
+    private let suppressionTelemetryCooldown: TimeInterval = 90
     private let pollIntervalNanoseconds: UInt64 = 20_000_000_000
     // Single fetch window covering both the near-term prompt window and the
     // farthest lookahead used for runtime-dismiss resume dates.
@@ -108,9 +115,10 @@ final class MeetingPromptDetector {
             kind: MeetingPromptHeuristics.remindSoonBackoffKind(for: candidate.source),
             until: until
         )
-        suppressRuntimePrompts(for: candidate.provider, until: until)
+        suppressRuntimePrompts(for: candidate.provider, until: until, reason: decision.kind.rawValue)
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
+        cooldownReasons[candidate.id] = decision.kind.rawValue
         return decision
     }
 
@@ -142,7 +150,7 @@ final class MeetingPromptDetector {
                 kind: MeetingPromptHeuristics.backoffKind(for: candidate.provider, source: .calendarEvent),
                 until: until
             )
-            suppressRuntimePrompts(for: candidate.provider, until: until)
+            suppressRuntimePrompts(for: candidate.provider, until: until, reason: decision.kind.rawValue)
         case .runtimeApp:
             if let resumeDate = nextRuntimePromptResumeDate(for: candidate.provider, now: now) {
                 until = resumeDate
@@ -161,10 +169,11 @@ final class MeetingPromptDetector {
                     until: until
                 )
             }
-            suppressRuntimePrompts(for: candidate.provider, until: until)
+            suppressRuntimePrompts(for: candidate.provider, until: until, reason: decision.kind.rawValue)
         }
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
+        cooldownReasons[candidate.id] = decision.kind.rawValue
         return decision
     }
 
@@ -177,14 +186,15 @@ final class MeetingPromptDetector {
                 now.addingTimeInterval(defaultSnoozeInterval),
                 candidate.endDate.addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
             )
-            suppressRuntimePrompts(for: candidate.provider, until: until)
+            suppressRuntimePrompts(for: candidate.provider, until: until, reason: "record_selected")
         case .runtimeApp:
             until = runtimeSuppressionEndDate(for: candidate.provider, now: now)
                 ?? now.addingTimeInterval(defaultSnoozeInterval)
-            suppressRuntimePrompts(for: candidate.provider, until: until)
+            suppressRuntimePrompts(for: candidate.provider, until: until, reason: "record_selected")
         }
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
+        cooldownReasons[candidate.id] = "record_selected"
     }
 
     func currentSuggestedTranscriptTitle(now: Date = Date()) -> String? {
@@ -210,8 +220,6 @@ final class MeetingPromptDetector {
         pruneExpiredEntries(now: now)
         seedNativeActivityIfNeeded(frontmostBundleID: frontmostBundleID, now: now)
 
-        guard shouldSkipPromptEvaluation?() != true else { return }
-
         var candidates: [ScoredCandidate] = []
         if calendarAccessGranted() {
             candidates.append(contentsOf: upcomingCalendarCandidates(
@@ -230,10 +238,44 @@ final class MeetingPromptDetector {
         let sortedCandidates = candidates.sorted(by: sortCandidates)
         guard let match = preferredCandidate(from: sortedCandidates) else { return }
 
-        guard snoozedUntil[match.candidate.id] == nil, pendingUntil[match.candidate.id] == nil else { return }
+        if shouldSkipPromptEvaluation?() == true {
+            recordSuppression(
+                candidate: match.candidate,
+                reason: .presentationBlocked,
+                now: now
+            )
+            return
+        }
+
+        if let until = snoozedUntil[match.candidate.id], until > now {
+            recordSuppression(
+                candidate: match.candidate,
+                reason: .snoozedCandidate,
+                now: now,
+                cooldownReason: cooldownReasons[match.candidate.id]
+            )
+            return
+        }
+
+        if let until = pendingUntil[match.candidate.id], until > now {
+            recordSuppression(
+                candidate: match.candidate,
+                reason: .pendingCandidate,
+                now: now,
+                cooldownReason: cooldownReasons[match.candidate.id] ?? "prompt_pending"
+            )
+            return
+        }
 
         if onPromptRequest?(match.candidate) == true {
             pendingUntil[match.candidate.id] = now.addingTimeInterval(pendingCooldown)
+            cooldownReasons[match.candidate.id] = "prompt_pending"
+        } else {
+            recordSuppression(
+                candidate: match.candidate,
+                reason: .presentationBlocked,
+                now: now
+            )
         }
     }
 
@@ -303,6 +345,12 @@ final class MeetingPromptDetector {
             guard provider.supportsRuntimeOnlyPrompt else { return nil }
             guard provider.activeBundleIdentifiers.contains(where: runningBundleIDs.contains) else { return nil }
             if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now {
+                recordSuppression(
+                    candidate: runtimeCandidate(for: provider, now: now),
+                    reason: .runtimeSuppressed,
+                    now: now,
+                    cooldownReason: runtimeSuppressionReasons[provider]
+                )
                 return nil
             }
 
@@ -315,17 +363,11 @@ final class MeetingPromptDetector {
             ) else { return nil }
 
             return ScoredCandidate(
-                candidate: Candidate(
-                    id: "runtime:\(provider.rawValue)",
+                candidate: runtimeCandidate(
+                    for: provider,
+                    now: now,
                     title: presentation.title,
-                    detail: presentation.detail,
-                    provider: provider,
-                    reason: MeetingPromptHeuristics.reason(for: .runtimeApp, hasRuntimeContext: false),
-                    source: .runtimeApp,
-                    startDate: now,
-                    endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
-                    meetingURL: nil,
-                    suggestedTranscriptTitle: nil
+                    detail: presentation.detail
                 ),
                 score: presentation.score
             )
@@ -346,45 +388,101 @@ final class MeetingPromptDetector {
     }
 
     private func micInputCandidates(now: Date) -> [ScoredCandidate] {
-        guard isMicInputPromptEnabled?() != false else { return [] }
         guard !micActiveBundleIDs.isEmpty else { return [] }
+        let providers = micInputProviders()
+        guard !providers.isEmpty else { return [] }
+        guard isMicInputPromptEnabled?() != false else {
+            providers.forEach {
+                recordSuppression(
+                    candidate: micInputCandidate(for: $0, now: now).candidate,
+                    reason: .micInputDisabled,
+                    now: now
+                )
+            }
+            return []
+        }
         // Never prompt to record a call while we already hold the mic ourselves.
-        guard isOwnCaptureActive?() != true else { return [] }
+        let captureActivity = currentOwnCaptureActivity()
+        guard captureActivity == .none else {
+            providers.forEach {
+                recordSuppression(
+                    candidate: micInputCandidate(for: $0, now: now).candidate,
+                    reason: .ownCaptureActive,
+                    now: now,
+                    captureActivity: captureActivity
+                )
+            }
+            return []
+        }
 
         var seenProviders: Set<MeetingPromptProvider> = []
         var candidates: [ScoredCandidate] = []
-        for bundleID in micActiveBundleIDs.sorted() {
-            guard let provider = MeetingPromptProvider.micInputProvider(forBundleID: bundleID) else { continue }
+        for provider in providers {
             guard seenProviders.insert(provider).inserted else { continue }
-            if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now { continue }
-
-            // Browser calls map to .googleMeet generically (could be Meet/Zoom-web/
-            // Teams-web), so keep their title neutral instead of mislabeling them.
-            let isBrowserCall = provider == .googleMeet
-            let title = isBrowserCall
-                ? "Call detected in your browser"
-                : "\(provider.displayName) call detected"
-            let presentation = MeetingPromptHeuristics.micInputPresentation(title: title)
-
-            candidates.append(
-                ScoredCandidate(
-                    candidate: Candidate(
-                        id: micCandidateID(for: provider),
-                        title: presentation.title,
-                        detail: presentation.detail,
-                        provider: provider,
-                        reason: .micInput,
-                        source: .runtimeApp,
-                        startDate: now,
-                        endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
-                        meetingURL: nil,
-                        suggestedTranscriptTitle: nil
-                    ),
-                    score: presentation.score
+            if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now {
+                recordSuppression(
+                    candidate: micInputCandidate(for: provider, now: now).candidate,
+                    reason: .runtimeSuppressed,
+                    now: now,
+                    cooldownReason: runtimeSuppressionReasons[provider]
                 )
-            )
+                continue
+            }
+
+            candidates.append(micInputCandidate(for: provider, now: now))
         }
         return candidates
+    }
+
+    private func micInputProviders() -> [MeetingPromptProvider] {
+        Set(micActiveBundleIDs.compactMap(MeetingPromptProvider.micInputProvider(forBundleID:)))
+            .sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private func runtimeCandidate(
+        for provider: MeetingPromptProvider,
+        now: Date,
+        title: String? = nil,
+        detail: String? = nil
+    ) -> Candidate {
+        Candidate(
+            id: "runtime:\(provider.rawValue)",
+            title: title ?? "\(provider.displayName) is active",
+            detail: detail ?? "If this is a meeting, start recording now or press Option-M anytime.",
+            provider: provider,
+            reason: MeetingPromptHeuristics.reason(for: .runtimeApp, hasRuntimeContext: false),
+            source: .runtimeApp,
+            startDate: now,
+            endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
+            meetingURL: nil,
+            suggestedTranscriptTitle: nil
+        )
+    }
+
+    private func micInputCandidate(for provider: MeetingPromptProvider, now: Date) -> ScoredCandidate {
+        // Browser calls map to .googleMeet generically (could be Meet/Zoom-web/
+        // Teams-web), so keep their title neutral instead of mislabeling them.
+        let isBrowserCall = provider == .googleMeet
+        let title = isBrowserCall
+            ? "Call detected in your browser"
+            : "\(provider.displayName) call detected"
+        let presentation = MeetingPromptHeuristics.micInputPresentation(title: title)
+
+        return ScoredCandidate(
+            candidate: Candidate(
+                id: micCandidateID(for: provider),
+                title: presentation.title,
+                detail: presentation.detail,
+                provider: provider,
+                reason: .micInput,
+                source: .runtimeApp,
+                startDate: now,
+                endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
+                meetingURL: nil,
+                suggestedTranscriptTitle: nil
+            ),
+            score: presentation.score
+        )
     }
 
     private func micCandidateID(for provider: MeetingPromptProvider) -> String {
@@ -440,8 +538,15 @@ final class MeetingPromptDetector {
     }
 
     private func suppressRuntimePrompts(for provider: MeetingPromptProvider, until: Date) {
+        suppressRuntimePrompts(for: provider, until: until, reason: nil)
+    }
+
+    private func suppressRuntimePrompts(for provider: MeetingPromptProvider, until: Date, reason: String?) {
         let existing = runtimeSuppressedUntil[provider] ?? .distantPast
         runtimeSuppressedUntil[provider] = max(existing, until)
+        if let reason {
+            runtimeSuppressionReasons[provider] = reason
+        }
     }
 
     private func nextRuntimePromptResumeDate(for provider: MeetingPromptProvider, now: Date) -> Date? {
@@ -487,9 +592,48 @@ final class MeetingPromptDetector {
         snoozedUntil = snoozedUntil.filter { $0.value > now }
         pendingUntil = pendingUntil.filter { $0.value > now }
         runtimeSuppressedUntil = runtimeSuppressedUntil.filter { $0.value > now }
+        cooldownReasons = cooldownReasons.filter { entry in
+            (snoozedUntil[entry.key] ?? pendingUntil[entry.key]) != nil
+        }
+        runtimeSuppressionReasons = runtimeSuppressionReasons.filter { entry in
+            runtimeSuppressedUntil[entry.key] != nil
+        }
+        suppressionTelemetryUntil = suppressionTelemetryUntil.filter { $0.value > now }
         recentNativeActivity = recentNativeActivity.filter {
             now.timeIntervalSince($0.value) <= MeetingPromptHeuristics.runtimeActivityFreshness
         }
+    }
+
+    private func currentOwnCaptureActivity() -> MeetingPromptOwnCaptureActivity {
+        if let activity = ownCaptureActivity?(), activity != .none {
+            return activity
+        }
+        return isOwnCaptureActive?() == true ? .unknown : .none
+    }
+
+    private func recordSuppression(
+        candidate: Candidate,
+        reason: MeetingPromptSuppressionReason,
+        now: Date,
+        cooldownReason: String? = nil,
+        captureActivity: MeetingPromptOwnCaptureActivity? = nil
+    ) {
+        let dedupeKey = [
+            reason.rawValue,
+            candidate.id,
+            cooldownReason ?? "",
+            captureActivity?.rawValue ?? ""
+        ].joined(separator: "|")
+        guard (suppressionTelemetryUntil[dedupeKey] ?? .distantPast) <= now else { return }
+        suppressionTelemetryUntil[dedupeKey] = now.addingTimeInterval(suppressionTelemetryCooldown)
+        onPromptSuppressed?(
+            MeetingPromptSuppression(
+                candidate: candidate,
+                reason: reason,
+                cooldownReason: cooldownReason,
+                captureActivity: captureActivity
+            )
+        )
     }
 }
 

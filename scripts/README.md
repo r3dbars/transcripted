@@ -35,9 +35,15 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 ## Active helper scripts
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
+- `scripts/dev/check-build-source-lists.py` — fast raw-`swiftc` guardrail for app, fast-test, and smoke source-list drift
 - `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark
+- `scripts/download_ami.sh` — fetch the gitignored AMI ES2002 audio/RTTM subset used by `Tools/SpeakerEvalHarness`
+- `scripts/run_speaker_eval.sh` — build and run the AMI speaker-naming sweep, writing local reports under `data/eval/`
+- `scripts/score_speaker_eval.py` — score speaker-eval hypotheses against AMI RTTM labels without printing private transcript text
+- `scripts/aggregate_sweep.py` — aggregate speaker-eval sweep scores and highlight closest-to-target threshold combinations
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
+- `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
@@ -51,6 +57,25 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
 - `scripts/ops/release-health-card.py` — print a compact release-health card for one app version by combining local release metadata, GitHub downloads, live public release surfaces, and PostHog update/workflow counts when credentials are present
   - Usage: `python3 scripts/ops/release-health-card.py --version 1.1.47`
+- `scripts/ops/retention-cohort-report.py` — print a privacy-safe PostHog retention cohort report for active days, repeat dictation/meeting use, version adoption, first-artifact return, and first-run drop-off
+  - Usage: `python3 scripts/ops/retention-cohort-report.py`
+  - Offline self-test: `python3 scripts/ops/retention-cohort-report.py --self-test`
+- `scripts/ops/posthog-activation-funnel.py` — build a privacy-safe PostHog activation funnel report for launch, onboarding, permission readiness, saved Markdown, artifact actions, agent setup proxies, and return proxies
+  - Usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30`
+  - Release-scoped usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30 --app-version 1.1.48`
+  - Writes local Markdown and JSON under `/tmp/transcripted-posthog-activation-funnel/<run-id>/`
+  - Self-test: `python3 scripts/ops/posthog-activation-funnel.py --self-test`
+- `scripts/ops/posthog-dashboard-queries.py` — reusable PostHog aggregate query catalog for the 100 WAU, activation, reliability, feature-adoption, and release-health dashboard families
+  - Dry-run specs: `python3 scripts/ops/posthog-dashboard-queries.py --dry-run`
+  - One family: `python3 scripts/ops/posthog-dashboard-queries.py --family activation --dry-run`
+  - Live aggregate query: `python3 scripts/ops/posthog-dashboard-queries.py --family 100_wau --days 30`
+  - CI/offline proof: `python3 scripts/ops/posthog-dashboard-queries.py --self-test`
+  - Machine output for health agents: `python3 scripts/ops/posthog-dashboard-queries.py --family all --json-only`
+- `scripts/ops/posthog-product-dashboard-summary.py` — turn the five PostHog product-learning dashboard families into ranked product tasks
+  - Usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --days 30`
+  - Fixture usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json`
+  - Writes local Markdown and JSON under `/tmp/transcripted-posthog-product-tasks/<run-id>/`
+  - Self-test: `python3 scripts/ops/posthog-product-dashboard-summary.py --self-test`
 - `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
   - Usage: `bash run-daily-audio-reliability.sh`
   - Synthetic-only usage: `bash run-daily-audio-reliability.sh --synthetic`
@@ -71,6 +96,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Writes local Markdown and JSON under `/tmp/transcripted-release-gate/<run-id>/`
   - Exits `0` for GREEN, `3` for YELLOW/unknown, and `1` for RED
   - Missing Sentry/PostHog credentials or manual proof are reported as yellow/unknown, not green
+  - Its first screen separates deterministic proof, mocked/proxy proof, telemetry proof, release-surface proof, timestamped current-run local log proof, and manual/hardware UNKNOWN
 - `scripts/ops/privacy-leak-sweep.py` — synthetic-only privacy sweep for logs/events/reliability JSONL, Sentry/PostHog payloads, QA/local reports, PR/release text, and scanner handoff summaries
   - Usage: `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json`
 - `scripts/ops/performance-budget.rb` — fail a built app that exceeds bundle/resource budgets, ships the wrong Parakeet model set, includes old icon assets, or regresses optional runtime latency budgets
@@ -111,6 +137,10 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Corpus compare usage: `bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare --corpus-ids meeting-0024,meeting-0025`
   - Live usage: `bash scripts/ops/transcripted-qa-bench.sh --mode live`
   - Writes local evidence under `/tmp/transcripted-qa-bench/<run-id>/`
+- `scripts/ops/speaker-naming-simulator.py` — deterministic synthetic speaker-review simulator for tuning `EmbeddingClusterer` same-voice consolidation without audio or private transcripts
+  - Usage: `scripts/ops/speaker-naming-simulator.py`
+  - Sweep usage: `scripts/ops/speaker-naming-simulator.py --sweep`
+  - JSON usage: `scripts/ops/speaker-naming-simulator.py --json`
 - `scripts/ops/validate-meeting-corpus.py` — local-only validator for the private meeting corpus in `~/Downloads/meeting-corpus`; parses metadata, audio presence/duration, and Zoom caption structure without printing transcript text
 - `scripts/ops/compare-meeting-corpus.py` — local-only comparator for Transcripted Markdown against private Zoom caption truth; reports redacted recall and speaker-label scores without printing transcript text or speaker names
 - `scripts/ops/nightly-transcripted-archive-miner.sh` — thin nightly wrapper that runs `build-codex-memory-index.py` with `--since-hours 24 --nightly-report`

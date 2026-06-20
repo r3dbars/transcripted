@@ -265,6 +265,92 @@ func testLocalMeetingSummarizer() async {
         try? FileManager.default.removeItem(at: root)
     }
 
+    runSuite("LocalMeetingSummaryStore removes inline generated summary state") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryInlineRemovalTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = root.appendingPathComponent("Call.md")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try """
+            ---
+            capture_type: meeting
+            title: "Call"
+            local_summary_version: "1"
+            local_summary_source_transcript: "Call.md"
+            local_summary_title: "Generated Call"
+            local_summary: "Old generated summary."
+            ---
+
+            # Call
+
+            ## Transcript
+
+            **00:01** [Mic/You]
+            Keep the real transcript.
+
+            \(LocalMeetingSummaryMarkdownUpdater.startMarker)
+            ## Local Gemma Summary
+
+            Source transcript: `Call.md`
+
+            ### Summary
+            Old generated summary.
+            \(LocalMeetingSummaryMarkdownUpdater.endMarker)
+            """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            assertTrue(
+                try LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL),
+                "inline generated summary metadata should count as removed summary state"
+            )
+
+            let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+            assertTrue(updated.contains("## Transcript"), "canonical transcript should stay")
+            assertTrue(updated.contains("Keep the real transcript."), "transcript text should stay")
+            assertFalse(updated.contains("local_summary_version"), "inline summary metadata should be removed")
+            assertFalse(updated.contains("local_summary_source_transcript"), "inline source backlink should be removed")
+            assertFalse(updated.contains(LocalMeetingSummaryMarkdownUpdater.startMarker), "managed summary block should be removed")
+            assertFalse(updated.contains("Old generated summary."), "generated summary body should be removed")
+        } catch {
+            assertionFailure("inline summary removal fixture should not throw: \(error)")
+        }
+    }
+
+    runSuite("LocalMeetingSummaryStore leaves unsummarized meetings untouched") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummaryNoopRemovalTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = root.appendingPathComponent("Call.md")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            let original = """
+            ---
+            capture_type: meeting
+            title: "Call"
+            ---
+
+            # Call
+
+            ## Transcript
+
+            **00:01** [Mic/You]
+            Keep the real transcript.
+            """
+            try original.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            assertFalse(
+                try LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL),
+                "unsummarized meeting transcripts should not be rewritten"
+            )
+            let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+            assertEqual(updated, original, "no-op cleanup should preserve exact transcript contents")
+        } catch {
+            assertionFailure("no-op summary removal fixture should not throw: \(error)")
+        }
+    }
+
     runSuite("LocalMeetingSummaryNormalizer restores missing sections") {
         let normalized = LocalMeetingSummaryNormalizer.normalized("# Summary\nUseful brief.")
         for heading in [
@@ -492,6 +578,50 @@ func testLocalMeetingSummarizer() async {
         assertTrue(updated.contains("### Next Steps"), "managed block should expose next steps for agents")
         assertTrue(updated.contains("### Participants\n- Justin\n- Maya"), "managed block should expose participants for agents")
         assertTrue(updated.contains("## Transcript"), "original transcript body should remain in the same file")
+    }
+
+    runSuite("LocalMeetingSummaryMarkdownUpdater refreshes only managed source links") {
+        let markdown = """
+        ---
+        capture_type: meeting
+        title: "Quick notes"
+        local_summary_source_transcript: "Quick notes.md"
+        ---
+
+        # Quick notes
+
+        ## Transcript
+
+        **00:01** [Mic/Justin]
+        The note said Source transcript: `Quick notes.md` before we renamed it.
+
+        \(LocalMeetingSummaryMarkdownUpdater.startMarker)
+        ## Local Gemma Summary
+
+        Source transcript: `Quick notes.md`
+
+        ### Summary
+        Useful summary.
+        \(LocalMeetingSummaryMarkdownUpdater.endMarker)
+        """
+        let updated = LocalMeetingSummaryMarkdownUpdater.updatingSourceTranscriptFilename(
+            in: markdown,
+            from: "Quick notes.md",
+            to: "2026-06-05 Launch planning.md"
+        ) ?? markdown
+
+        assertTrue(
+            updated.contains("local_summary_source_transcript: \"2026-06-05 Launch planning.md\""),
+            "managed source frontmatter should refresh"
+        )
+        assertTrue(
+            updated.contains("Source transcript: `2026-06-05 Launch planning.md`"),
+            "managed summary block should refresh"
+        )
+        assertTrue(
+            updated.contains("The note said Source transcript: `Quick notes.md` before we renamed it."),
+            "ordinary transcript text should not be rewritten"
+        )
     }
 
     runSuite("LocalMeetingSummaryMarkdownUpdater records Apple provider metadata") {

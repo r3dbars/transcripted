@@ -67,6 +67,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     @Published var searchText: String = ""
     @Published private(set) var reviewQueueItems: [SpeakerPendingReviewItem] = []
     @Published private(set) var hasLoadedProfiles = false
+    /// Bumped to ask the "Search speakers" field to take focus (⌘F).
+    @Published private(set) var searchFocusRequestToken = 0
 
     private let speakerDatabase: SpeakerDatabase
     private let preferredClipsDirectory: URL
@@ -118,6 +120,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             return profile.id.uuidString.lowercased().contains(query)
         }
         return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(matches, duplicateIds: duplicateIds)
+    }
+
+    /// Asks the "Search speakers" field to take keyboard focus. Drives the ⌘F
+    /// "Find Speaker" menu command.
+    func requestSearchFocus() {
+        searchFocusRequestToken += 1
     }
 
     func refresh() {
@@ -289,7 +297,14 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
     }
 
-    func delete(profile: SpeakerProfile) {
+    /// Deletes the voice behind a pending review group. Thin wrapper over
+    /// `delete(profile:)` so the "voices to name" overflow menu shares the same
+    /// real deletion path as the all-speakers list.
+    func deleteVoice(_ group: SpeakerPendingVoiceGroup, completion: ((Bool) -> Void)? = nil) {
+        delete(profile: group.representative.profile, completion: completion)
+    }
+
+    func delete(profile: SpeakerProfile, completion: ((Bool) -> Void)? = nil) {
         let profileId = profile.id
         let speakerDatabase = self.speakerDatabase
         let preferredClipsDirectory = self.preferredClipsDirectory
@@ -302,6 +317,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
             )
+            // Confirm the row is actually gone before reporting success so a
+            // failed delete surfaces an error instead of silently no-opping.
+            let didDelete = speakerDatabase.getSpeaker(id: profileId) == nil
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
                 preferredClipsDirectory: preferredClipsDirectory,
@@ -309,6 +327,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             )
             DispatchQueue.main.async {
                 self?.applySnapshot(snapshot)
+                completion?(didDelete)
             }
         }
     }
@@ -733,13 +752,24 @@ private struct SpeakerVoiceToNameRow: View {
     @State private var nameDraft = ""
     @State private var isSaving = false
     @State private var saveErrorMessage: String?
+    @State private var showDeleteConfirmation = false
+    @State private var isDeleting = false
+    @State private var deleteErrorMessage: String?
+
+    private var isPlaying: Bool {
+        model.isPlayingSample(for: group.representative)
+    }
+
+    private var hasClip: Bool {
+        group.representative.clipURL != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 SpeakerPlayClipButton(
-                    hasClip: group.representative.clipURL != nil,
-                    isPlaying: model.isPlayingSample(for: group.representative),
+                    hasClip: hasClip,
+                    isPlaying: isPlaying,
                     action: { model.playSample(for: group.representative) }
                 )
 
@@ -776,8 +806,25 @@ private struct SpeakerVoiceToNameRow: View {
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            if let deleteErrorMessage {
+                Text(deleteErrorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.vertical, 4)
+        .padding(.horizontal, isActiveHighlight ? 8 : 0)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.accentColor.opacity(isActiveHighlight ? 0.08 : 0))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.accentColor.opacity(isActiveHighlight ? 0.35 : 0), lineWidth: 1)
+        )
+        .animation(.easeInOut(duration: 0.15), value: isActiveHighlight)
         .onAppear {
             if nameDraft.isEmpty {
                 nameDraft = group.representative.profile.displayName ?? ""
@@ -786,13 +833,39 @@ private struct SpeakerVoiceToNameRow: View {
         .onChange(of: nameDraft) { _, _ in
             saveErrorMessage = nil
         }
+        .alert(
+            SpeakerVoiceRowMenuPolicy.deleteConfirmationTitle,
+            isPresented: $showDeleteConfirmation
+        ) {
+            Button("Delete", role: .destructive) {
+                deleteVoice()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(SpeakerVoiceRowMenuPolicy.deleteConfirmationMessage)
+        }
+    }
+
+    private var isActiveHighlight: Bool {
+        SpeakerClipPlaybackPresentation.isActiveHighlight(hasClip: hasClip, isPlaying: isPlaying)
+    }
+
+    private var nameSuggestions: [SpeakerIdentityOption] {
+        SpeakerNameSuggestionSource.options(
+            from: model.profiles,
+            excluding: group.representative.speakerId
+        )
     }
 
     private var nameField: some View {
-        TextField("Who is this?", text: $nameDraft)
-            .textFieldStyle(.roundedBorder)
-            .frame(minWidth: 200)
-            .onSubmit(saveName)
+        SpeakerNameAutocompleteField(
+            text: $nameDraft,
+            placeholder: "Who is this?",
+            options: nameSuggestions,
+            accessibilityIdentifier: "transcripted.speakers.voice-to-name.name",
+            onSubmit: saveName
+        )
+        .frame(minWidth: 200)
     }
 
     private var actionButtons: some View {
@@ -802,21 +875,38 @@ private struct SpeakerVoiceToNameRow: View {
             }
             .disabled(!canSave || isSaving)
 
-            Button {
-                model.openTranscript(for: group.representative)
-            } label: {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 12, weight: .semibold))
-                    .padding(7)
-            }
-            .buttonStyle(SettingsHoverButtonStyle(
-                cornerRadius: 8,
-                normalFill: Color.primary.opacity(0.025),
-                normalStroke: Color.primary.opacity(0.06)
-            ))
-            .help("Open the meeting this voice was heard in")
-            .accessibilityLabel("Open meeting transcript")
+            overflowMenu
         }
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            Button(SpeakerVoiceRowMenuAction.showTranscript.title) {
+                model.openTranscript(for: group.representative)
+            }
+
+            Divider()
+
+            Button(SpeakerVoiceRowMenuAction.deleteVoice.title, role: .destructive) {
+                showDeleteConfirmation = true
+            }
+            .disabled(isDeleting)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(8)
+        }
+        .buttonStyle(SettingsHoverButtonStyle(
+            cornerRadius: 8,
+            normalFill: Color.primary.opacity(0.025),
+            normalStroke: Color.primary.opacity(0.06)
+        ))
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Show transcript or delete this voice")
+        .accessibilityLabel("Voice actions")
+        .accessibilityIdentifier("transcripted.speakers.voice-to-name.menu")
     }
 
     private var quoteLine: String {
@@ -858,6 +948,19 @@ private struct SpeakerVoiceToNameRow: View {
         }
     }
 
+    private func deleteVoice() {
+        guard !isDeleting else { return }
+        isDeleting = true
+        deleteErrorMessage = nil
+        model.deleteVoice(group) { didDelete in
+            isDeleting = false
+            // On success the row's voice group drops out of the refreshed
+            // snapshot, so this view disappears. Only a failed delete keeps the
+            // row around to show the surfaced error.
+            deleteErrorMessage = SpeakerVoiceRowMenuPolicy.deleteErrorMessage(didDelete: didDelete)
+        }
+    }
+
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -873,21 +976,25 @@ private struct SpeakerPlayClipButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+            Image(systemName: SpeakerClipPlaybackPresentation.symbolName(isPlaying: isPlaying))
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(hasClip ? Color.white : Color.secondary)
                 .frame(width: 36, height: 36)
                 .background(Circle().fill(hasClip ? Color.accentColor : Color.primary.opacity(0.06)))
+                .overlay(
+                    Circle()
+                        .stroke(Color.accentColor.opacity(isActive ? 0.9 : 0), lineWidth: 2)
+                        .padding(-2)
+                )
         }
         .buttonStyle(.plain)
         .disabled(!hasClip)
-        .help(helpText)
-        .accessibilityLabel(isPlaying ? "Pause voice sample" : "Play voice sample")
+        .help(SpeakerClipPlaybackPresentation.helpText(hasClip: hasClip, isPlaying: isPlaying))
+        .accessibilityLabel(SpeakerClipPlaybackPresentation.accessibilityLabel(isPlaying: isPlaying))
     }
 
-    private var helpText: String {
-        guard hasClip else { return "No voice clip was saved for this speaker" }
-        return isPlaying ? "Pause this voice sample" : "Play a short clip of this voice"
+    private var isActive: Bool {
+        SpeakerClipPlaybackPresentation.isActiveHighlight(hasClip: hasClip, isPlaying: isPlaying)
     }
 }
 
@@ -1006,11 +1113,20 @@ private struct SpeakerDuplicateNameChip: View {
 
 private struct SpeakerSearchRow: View {
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             TextField("Search speakers", text: $model.searchText)
                 .textFieldStyle(.roundedBorder)
+                .focused($isSearchFocused)
+                // Fires on first appearance and whenever ⌘F bumps the token,
+                // so "Find Speaker" focuses the field whether or not the
+                // Speakers page was already open.
+                .task(id: model.searchFocusRequestToken) {
+                    guard model.searchFocusRequestToken > 0 else { return }
+                    isSearchFocused = true
+                }
 
             Button {
                 model.refresh()

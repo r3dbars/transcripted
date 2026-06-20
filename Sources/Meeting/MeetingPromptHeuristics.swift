@@ -175,6 +175,22 @@ enum MeetingPromptBackoffKind: String, Equatable {
     case runtimeShortReminder = "runtime_short_reminder"
 }
 
+enum MeetingPromptSuppressionReason: String, Equatable {
+    case ownCaptureActive = "own_capture_active"
+    case micInputDisabled = "mic_input_disabled"
+    case runtimeSuppressed = "runtime_suppressed"
+    case snoozedCandidate = "snoozed_candidate"
+    case pendingCandidate = "pending_candidate"
+    case presentationBlocked = "presentation_blocked"
+}
+
+enum MeetingPromptOwnCaptureActivity: String, Equatable {
+    case none
+    case meetingRecording = "meeting_recording"
+    case dictation
+    case unknown
+}
+
 struct MeetingPromptBackoffDecision: Equatable {
     let kind: MeetingPromptBackoffKind
     let until: Date
@@ -379,6 +395,27 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
     let frontmostBundleID: String?
     let recentNativeActivity: [MeetingPromptProvider: Date]
     let runtimeSuppressedUntil: [MeetingPromptProvider: Date]
+    let micActiveBundleIDs: Set<String>
+    let isOwnCaptureActive: Bool
+    let isMicInputPromptEnabled: Bool
+
+    init(
+        runningBundleIDs: Set<String>,
+        frontmostBundleID: String?,
+        recentNativeActivity: [MeetingPromptProvider: Date],
+        runtimeSuppressedUntil: [MeetingPromptProvider: Date],
+        micActiveBundleIDs: Set<String> = [],
+        isOwnCaptureActive: Bool = false,
+        isMicInputPromptEnabled: Bool = true
+    ) {
+        self.runningBundleIDs = runningBundleIDs
+        self.frontmostBundleID = frontmostBundleID
+        self.recentNativeActivity = recentNativeActivity
+        self.runtimeSuppressedUntil = runtimeSuppressedUntil
+        self.micActiveBundleIDs = micActiveBundleIDs
+        self.isOwnCaptureActive = isOwnCaptureActive
+        self.isMicInputPromptEnabled = isMicInputPromptEnabled
+    }
 
     static let browserBundleIdentifiers: Set<String> = [
         "com.apple.Safari",
@@ -395,6 +432,52 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
 struct MeetingPromptScoredCandidate {
     let candidate: MeetingPromptDetector.Candidate
     let score: Int
+}
+
+@available(macOS 14.0, *)
+struct MeetingPromptSuppression: Equatable {
+    let candidate: MeetingPromptDetector.Candidate
+    let reason: MeetingPromptSuppressionReason
+    let cooldownReason: String?
+    let captureActivity: MeetingPromptOwnCaptureActivity?
+}
+
+@available(macOS 14.0, *)
+extension MeetingPromptDetector.Candidate {
+    var analyticsCalendarConfidence: String {
+        switch reason {
+        case .calendarPlusRuntimeMatch:
+            return "linked_event_runtime_match"
+        case .calendarNearby:
+            return "linked_event"
+        case .micInput, .runtimeOnly:
+            return "none"
+        }
+    }
+
+    var analyticsCallState: String {
+        switch reason {
+        case .micInput:
+            return "mic_active"
+        case .calendarPlusRuntimeMatch, .runtimeOnly:
+            return "app_active"
+        case .calendarNearby:
+            return "scheduled"
+        }
+    }
+
+    var analyticsAppSignal: String {
+        switch reason {
+        case .micInput:
+            return provider == .googleMeet ? "browser_mic" : "native_mic"
+        case .runtimeOnly:
+            return "native_runtime"
+        case .calendarPlusRuntimeMatch:
+            return provider.browserHosted ? "browser_runtime" : "native_runtime"
+        case .calendarNearby:
+            return "none"
+        }
+    }
 }
 
 enum MeetingPromptSessionPromptState: Equatable {
@@ -452,6 +535,9 @@ enum MeetingPromptSyntheticSuppressionReason: String, Equatable {
     case snoozedCandidate = "snoozed_candidate"
     case pendingCandidate = "pending_candidate"
     case presentationBlocked = "presentation_blocked"
+    case ownCaptureActive = "own_capture_active"
+    case micInputDisabled = "mic_input_disabled"
+    case runtimeSuppressed = "runtime_suppressed"
 }
 
 @available(macOS 14.0, *)
@@ -493,9 +579,20 @@ enum MeetingPromptSyntheticEvaluator {
             ))
         }
         candidates.append(contentsOf: runtimeCandidates(from: runtimeSnapshot, now: now))
+        let micSuppression = micInputSuppression(from: runtimeSnapshot, now: now)
+        candidates.append(contentsOf: micInputCandidates(from: runtimeSnapshot, now: now))
 
-        guard let match = candidates.sorted(by: sortCandidates).first else {
-            return MeetingPromptSyntheticEvaluation(candidate: nil, suppressionReason: .noCandidate)
+        let sortedCandidates = candidates.sorted(by: sortCandidates)
+        guard let match = preferredCandidate(
+            from: sortedCandidates,
+            snoozedUntil: snoozedUntil,
+            pendingUntil: pendingUntil,
+            now: now
+        ) else {
+            return MeetingPromptSyntheticEvaluation(
+                candidate: nil,
+                suppressionReason: micSuppression ?? .noCandidate
+            )
         }
 
         if let until = snoozedUntil[match.candidate.id], until > now {
@@ -507,6 +604,121 @@ enum MeetingPromptSyntheticEvaluator {
         }
 
         return MeetingPromptSyntheticEvaluation(candidate: match.candidate, suppressionReason: nil)
+    }
+
+    static func micInputCandidates(
+        from snapshot: MeetingPromptRuntimeSnapshot,
+        now: Date
+    ) -> [MeetingPromptScoredCandidate] {
+        guard micInputSuppression(from: snapshot, now: now) == nil else { return [] }
+
+        var seenProviders: Set<MeetingPromptProvider> = []
+        return micInputProviders(from: snapshot).compactMap { provider in
+            guard seenProviders.insert(provider).inserted else { return nil }
+            if let suppressedUntil = snapshot.runtimeSuppressedUntil[provider], suppressedUntil > now {
+                return nil
+            }
+            return micInputCandidate(for: provider, now: now)
+        }
+    }
+
+    private static func micInputProviders(
+        from snapshot: MeetingPromptRuntimeSnapshot
+    ) -> [MeetingPromptProvider] {
+        Set(snapshot.micActiveBundleIDs.compactMap(MeetingPromptProvider.micInputProvider(forBundleID:)))
+            .sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private static func micInputSuppression(
+        from snapshot: MeetingPromptRuntimeSnapshot,
+        now: Date
+    ) -> MeetingPromptSyntheticSuppressionReason? {
+        let providers = micInputProviders(from: snapshot)
+        guard !providers.isEmpty else { return nil }
+
+        if !snapshot.isMicInputPromptEnabled {
+            return .micInputDisabled
+        }
+        if snapshot.isOwnCaptureActive {
+            return .ownCaptureActive
+        }
+        if providers.allSatisfy({ provider in
+            (snapshot.runtimeSuppressedUntil[provider] ?? .distantPast) > now
+        }) {
+            return .runtimeSuppressed
+        }
+
+        return nil
+    }
+
+    private static func micInputCandidate(
+        for provider: MeetingPromptProvider,
+        now: Date
+    ) -> MeetingPromptScoredCandidate {
+        let title = provider == .googleMeet
+            ? "Call detected in your browser"
+            : "\(provider.displayName) call detected"
+        let presentation = MeetingPromptHeuristics.micInputPresentation(title: title)
+
+        return MeetingPromptScoredCandidate(
+            candidate: MeetingPromptDetector.Candidate(
+                id: "mic:\(provider.rawValue)",
+                title: presentation.title,
+                detail: presentation.detail,
+                provider: provider,
+                reason: .micInput,
+                source: .runtimeApp,
+                startDate: now,
+                endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
+                meetingURL: nil,
+                suggestedTranscriptTitle: nil
+            ),
+            score: presentation.score
+        )
+    }
+
+    private static func preferredCandidate(
+        from sortedCandidates: [MeetingPromptScoredCandidate],
+        snoozedUntil: [String: Date],
+        pendingUntil: [String: Date],
+        now: Date
+    ) -> MeetingPromptScoredCandidate? {
+        guard let first = sortedCandidates.first else { return nil }
+        guard first.candidate.reason == .micInput else { return first }
+
+        let calendarCandidate = sortedCandidates.first {
+            $0.candidate.source == .calendarEvent &&
+                $0.candidate.provider == first.candidate.provider
+        }
+        guard first.candidate.provider == .googleMeet else {
+            return calendarCandidate ?? first
+        }
+
+        return sortedCandidates.first {
+            $0.candidate.source == .calendarEvent &&
+                $0.candidate.provider == first.candidate.provider &&
+                hasActiveCooldown(
+                    for: $0.candidate.id,
+                    snoozedUntil: snoozedUntil,
+                    pendingUntil: pendingUntil,
+                    now: now
+                )
+        } ?? first
+    }
+
+    private static func hasActiveCooldown(
+        for candidateID: String,
+        snoozedUntil: [String: Date],
+        pendingUntil: [String: Date],
+        now: Date
+    ) -> Bool {
+        if let until = pendingUntil[candidateID], until > now {
+            return true
+        }
+        if let until = snoozedUntil[candidateID], until > now {
+            return true
+        }
+        return false
     }
 
     static func runtimeCandidates(
