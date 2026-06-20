@@ -209,6 +209,30 @@ struct AnalyticsEventPolicy: Equatable {
         "source",
     ]
 
+    private static let localMeetingSummaryStartedProperties: Set<String> = [
+        "provider",
+        "queue_depth_bucket",
+        "runtime",
+        "setup_ready",
+        "summary_action",
+    ]
+
+    private static let localMeetingSummaryCompletedProperties: Set<String> = [
+        "chunk_count_bucket",
+        "duration_bucket",
+        "provider",
+        "runtime",
+        "summary_action",
+    ]
+
+    private static let localMeetingSummaryFailedProperties: Set<String> = [
+        "duration_bucket",
+        "failure_kind",
+        "provider",
+        "stage",
+        "summary_action",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -718,6 +742,18 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
                 "word_count_bucket",
             ]
+        ),
+        "local_meeting_summary_started": .init(
+            name: "local_meeting_summary_started",
+            allowedProperties: localMeetingSummaryStartedProperties
+        ),
+        "local_meeting_summary_completed": .init(
+            name: "local_meeting_summary_completed",
+            allowedProperties: localMeetingSummaryCompletedProperties
+        ),
+        "local_meeting_summary_failed": .init(
+            name: "local_meeting_summary_failed",
+            allowedProperties: localMeetingSummaryFailedProperties
         ),
         "meeting_transcript_failed": .init(
             name: "meeting_transcript_failed",

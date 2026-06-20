@@ -173,6 +173,7 @@ func testAnalyticsEventPolicy() {
             "result",
             "route_ready",
             "route_shape",
+            "runtime",
             "sample_flow_started",
             "save_outcome",
             "selected_input_class",
@@ -184,6 +185,7 @@ func testAnalyticsEventPolicy() {
             "session_stage",
             "setting_id",
             "setup_kind",
+            "setup_ready",
             "source",
             "stall_kind",
             "stall_stage",
@@ -194,6 +196,7 @@ func testAnalyticsEventPolicy() {
             "stop_timed_out",
             "suppression_reason",
             "surface",
+            "summary_action",
             "system_backend",
             "system_channels",
             "system_failed",
@@ -531,6 +534,66 @@ func testAnalyticsEventPolicy() {
         )
         assertTrue(enabledResult, "first artifact after analytics opt-in should be treated as the first observable artifact")
         assertEqual(defaults.string(forKey: ActivationTelemetry.firstArtifactKindKey), "meeting", "only opted-in artifact kind should be retained")
+    }
+
+    runSuite("AnalyticsEventPolicy allows local meeting summary funnel events") {
+        let started = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_started")
+        let completed = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_completed")
+        let failed = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_failed")
+
+        assertEqual(
+            started?.allowedProperties ?? Set<String>(),
+            ["provider", "queue_depth_bucket", "runtime", "setup_ready", "summary_action"],
+            "local summary starts should include only provider/setup/action and queue shape"
+        )
+        assertEqual(
+            completed?.allowedProperties ?? Set<String>(),
+            ["chunk_count_bucket", "duration_bucket", "provider", "runtime", "summary_action"],
+            "local summary completions should include only provider/runtime/action and coarse result buckets"
+        )
+        assertEqual(
+            failed?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "failure_kind", "provider", "stage", "summary_action"],
+            "local summary failures should include only provider/action/stage and coarse failure shape"
+        )
+
+        let allowed = (started?.allowedProperties ?? [])
+            .union(completed?.allowedProperties ?? [])
+            .union(failed?.allowedProperties ?? [])
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "provider": "gemmaMLX",
+                "summary_action": "generate",
+                "setup_ready": "true",
+                "runtime": "m1-low-memory",
+                "queue_depth_bucket": "1",
+                "chunk_count_bucket": "2_3",
+                "duration_bucket": "2_9m",
+                "failure_kind": "timeout",
+                "stage": "generate",
+                "transcriptURL": "/Users/redbars/private.md",
+                "title": "Customer call",
+                "summary_text": "private generated summary",
+                "filename": "Customer call.md",
+                "error": "Failed at /Users/redbars/private.md",
+            ],
+            allowedKeys: allowed.union(["transcriptURL", "title", "summary_text", "filename", "error"])
+        )
+
+        assertEqual(sanitized["provider"], "gemmaMLX", "provider enum should survive")
+        assertEqual(sanitized["summary_action"], "generate", "summary action enum should survive")
+        assertEqual(sanitized["setup_ready"], "true", "setup readiness should survive as a boolean string")
+        assertEqual(sanitized["runtime"], "m1-low-memory", "reviewed runtime enum should survive")
+        assertEqual(sanitized["queue_depth_bucket"], "1", "queue depth bucket should survive")
+        assertEqual(sanitized["chunk_count_bucket"], "2_3", "chunk count bucket should survive")
+        assertEqual(sanitized["duration_bucket"], "2_9m", "duration bucket should survive")
+        assertEqual(sanitized["failure_kind"], "timeout", "normalized failure kind should survive")
+        assertEqual(sanitized["stage"], "generate", "failure stage should survive")
+        assertNil(sanitized["transcriptURL"], "transcript URLs must not be sent")
+        assertNil(sanitized["title"], "meeting titles must not be sent")
+        assertNil(sanitized["summary_text"], "summary text must not be sent")
+        assertNil(sanitized["filename"], "filenames must not be sent")
+        assertNil(sanitized["error"], "raw error strings must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy allows workflow abandonment taxonomy") {

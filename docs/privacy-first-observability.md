@@ -147,6 +147,9 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_file_imported`
 - `meeting_file_import_failed`
 - `meeting_transcript_saved`
+- `local_meeting_summary_started`
+- `local_meeting_summary_completed`
+- `local_meeting_summary_failed`
 - `meeting_transcript_failed`
 - `meeting_speaker_finalization_failed`
 - `meeting_transcript_skipped`
@@ -164,6 +167,9 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
   `capture_library`, `permissions`, `speaker_review`, and `update_settings`
 - product friction fields limited to `surface`, `stage`, `result`,
   `failure_kind`, `elapsed_bucket`, `route_shape`, and `model_state`
+- local meeting summary analytics limited to `provider`, `summary_action`,
+  `setup_ready`, `runtime`, `queue_depth_bucket`, `chunk_count_bucket`,
+  `duration_bucket`, `failure_kind`, and `stage`
 
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
