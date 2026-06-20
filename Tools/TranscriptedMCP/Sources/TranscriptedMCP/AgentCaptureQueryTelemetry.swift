@@ -112,6 +112,9 @@ struct AgentCaptureQueryObservation: Equatable {
 
 enum AgentCaptureQueryTelemetryPolicy {
     static let eventName = "agent_capture_query_observed"
+    // This standalone MCP package cannot import the app target, so this
+    // mirrors AnalyticsEventPolicy.agentCaptureQueryProperties. Keep the root
+    // AnalyticsEventPolicy parity test green when changing either side.
     static let allowedProperties: Set<String> = [
         "agent_target",
         "artifact_kind",
@@ -179,6 +182,8 @@ struct AgentCaptureQueryTelemetryConfiguration {
 
     static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
     static let hostInfoKey = "TranscriptedPostHogHost"
+    static let appDefaultsSuiteName = "com.justinbetker.draft"
+    static let mcpObservabilityFileName = "mcp-observability.plist"
     private static let localOverridesFileName = "observability-overrides.plist"
     private static let analyticsEnabledKey = "observability-anonymous-analytics-enabled"
     private static let distinctIDKey = "observability-anonymous-analytics-id"
@@ -186,10 +191,11 @@ struct AgentCaptureQueryTelemetryConfiguration {
     static func resolve(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         userDefaults: UserDefaults = .standard,
+        appUserDefaults: UserDefaults? = UserDefaults(suiteName: appDefaultsSuiteName),
         appSupportDirectory: URL? = nil,
         bundleInfo: [String: Any]? = Bundle.main.infoDictionary
     ) -> AgentCaptureQueryTelemetryConfiguration? {
-        guard analyticsEnabled(userDefaults: userDefaults),
+        guard analyticsEnabled(userDefaults: userDefaults, appUserDefaults: appUserDefaults),
               let apiKey = firstNonEmpty(
                 environment["POSTHOG_API_KEY"],
                 localOverrideValue(forKey: apiKeyInfoKey, appSupportDirectory: appSupportDirectory),
@@ -205,21 +211,31 @@ struct AgentCaptureQueryTelemetryConfiguration {
             return nil
         }
 
-        let distinctID: String
-        if let existing = userDefaults.string(forKey: distinctIDKey), !existing.isEmpty {
-            distinctID = existing
-        } else {
-            let newValue = UUID().uuidString
-            userDefaults.set(newValue, forKey: distinctIDKey)
-            distinctID = newValue
-        }
+        let distinctID = resolveDistinctID(userDefaults: userDefaults, appUserDefaults: appUserDefaults)
 
         return AgentCaptureQueryTelemetryConfiguration(apiKey: apiKey, host: host, distinctID: distinctID)
     }
 
-    private static func analyticsEnabled(userDefaults: UserDefaults) -> Bool {
+    private static func analyticsEnabled(userDefaults: UserDefaults, appUserDefaults: UserDefaults?) -> Bool {
+        if let appUserDefaults,
+           appUserDefaults.object(forKey: analyticsEnabledKey) != nil {
+            return appUserDefaults.bool(forKey: analyticsEnabledKey)
+        }
         guard userDefaults.object(forKey: analyticsEnabledKey) != nil else { return true }
         return userDefaults.bool(forKey: analyticsEnabledKey)
+    }
+
+    private static func resolveDistinctID(userDefaults: UserDefaults, appUserDefaults: UserDefaults?) -> String {
+        if let existing = appUserDefaults?.string(forKey: distinctIDKey), !existing.isEmpty {
+            return existing
+        }
+        if let existing = userDefaults.string(forKey: distinctIDKey), !existing.isEmpty {
+            return existing
+        }
+
+        let newValue = UUID().uuidString
+        (appUserDefaults ?? userDefaults).set(newValue, forKey: distinctIDKey)
+        return newValue
     }
 
     private static func localOverrideValue(forKey key: String, appSupportDirectory: URL?) -> String? {
@@ -233,6 +249,9 @@ struct AgentCaptureQueryTelemetryConfiguration {
             appSupport
                 .appendingPathComponent("Draft", isDirectory: true)
                 .appendingPathComponent(localOverridesFileName),
+            appSupport
+                .appendingPathComponent("Transcripted", isDirectory: true)
+                .appendingPathComponent(mcpObservabilityFileName),
         ] {
             guard let data = try? Data(contentsOf: url),
                   let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
@@ -257,17 +276,24 @@ final class AgentCaptureQueryTelemetry {
     static let shared = AgentCaptureQueryTelemetry()
     private static let isoDateFormatter = ISO8601DateFormatter()
     private let session: URLSession
-    private let configuration: AgentCaptureQueryTelemetryConfiguration?
+    private let configurationProvider: () -> AgentCaptureQueryTelemetryConfiguration?
 
     init(
-        configuration: AgentCaptureQueryTelemetryConfiguration? = AgentCaptureQueryTelemetryConfiguration.resolve(),
+        configuration: AgentCaptureQueryTelemetryConfiguration? = nil,
+        configurationProvider: (() -> AgentCaptureQueryTelemetryConfiguration?)? = nil,
         session: URLSession = {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 5
             return URLSession(configuration: config)
         }()
     ) {
-        self.configuration = configuration
+        if let configurationProvider {
+            self.configurationProvider = configurationProvider
+        } else if let configuration {
+            self.configurationProvider = { configuration }
+        } else {
+            self.configurationProvider = { AgentCaptureQueryTelemetryConfiguration.resolve() }
+        }
         self.session = session
     }
 
@@ -277,7 +303,7 @@ final class AgentCaptureQueryTelemetry {
     }
 
     func makeRequest(for observation: AgentCaptureQueryObservation, now: Date = Date()) -> URLRequest? {
-        guard let configuration else { return nil }
+        guard let configuration = configurationProvider() else { return nil }
 
         let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize(observation.properties)
         guard sanitized.count == AgentCaptureQueryTelemetryPolicy.allowedProperties.count else {
@@ -321,15 +347,21 @@ func trackAgentCaptureQueryObserved(
 func parseCaptureDate(_ raw: String?) -> Date? {
     guard let raw, !raw.isEmpty else { return nil }
 
-    let iso = ISO8601DateFormatter()
-    iso.formatOptions = [.withInternetDateTime]
-    if let date = iso.date(from: raw) {
-        return date
+    for options in [
+        ISO8601DateFormatter.Options.withInternetDateTime,
+        [.withInternetDateTime, .withFractionalSeconds],
+    ] {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = options
+        if let date = iso.date(from: raw) {
+            return date
+        }
     }
 
     let formats = [
         "yyyy-MM-dd'T'HH:mm:ssZ",
         "yyyy-MM-dd'T'HH:mm:ssZZZZZ",
+        "yyyy-MM-dd'T'HH:mm:ss",
         "yyyy-MM-dd HH:mm:ss",
         "yyyy-MM-dd",
     ]
