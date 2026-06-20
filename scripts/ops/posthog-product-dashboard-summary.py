@@ -431,18 +431,21 @@ def build_reliability_leak(data: dict[str, Any]) -> Finding:
             events.get("dictation_start_failed", 0),
             max(events.get("dictation_started", 0) + events.get("dictation_start_failed", 0), 1),
             "Add a clearer retry/recovery path for dictation start failures.",
+            ("dictation_start_failed",),
         ),
         (
             "Dictation no-speech",
             events.get("dictation_no_speech", 0),
             max(events.get("dictation_started", 0), 1),
             "Tune no-speech guidance and route-readiness recovery.",
+            ("dictation_no_speech",),
         ),
         (
             "Meeting start failure",
             events.get("meeting_recording_start_failed", 0),
             max(events.get("meeting_recording_started", 0) + events.get("meeting_recording_start_failed", 0), 1),
             "Tighten meeting permission/route preflight before start.",
+            ("meeting_recording_start_failed",),
         ),
         (
             "Meeting transcript failure",
@@ -454,13 +457,15 @@ def build_reliability_leak(data: dict[str, Any]) -> Finding:
                 1,
             ),
             "Improve failed/queued meeting transcript recovery and retained-audio retry.",
+            ("meeting_transcript_failed", "meeting_transcript_skipped"),
         ),
     ]
-    title, count, base, recommendation = max(candidates, key=lambda item: (item[1] / item[2], item[1], item[0]))
+    title, count, base, recommendation, matching_events = max(candidates, key=lambda item: (item[1] / item[2], item[1], item[0]))
     breakdown = data["results"].get("reliability_breakdown", [])
+    matching_breakdown = [row for row in breakdown if row.get("event") in matching_events]
     top_kind = ""
-    if breakdown:
-        top = max(breakdown, key=lambda row: as_int(row.get("events")))
+    if matching_breakdown:
+        top = max(matching_breakdown, key=lambda row: as_int(row.get("events")))
         failure_kind = top.get("failure_kind") or "unknown"
         trigger = top.get("trigger") or "any trigger"
         top_kind = f" Top breakdown: {top.get('event')} / {failure_kind} / {trigger}."
@@ -711,6 +716,15 @@ def run_self_test() -> int:
         return 1
     if len(summary["top_recommended_tasks"]) != 3:
         print("self-test failed: expected exactly three top task candidates", file=sys.stderr)
+        return 1
+    mismatch_data = json.loads(json.dumps(data))
+    mismatch_data["results"]["reliability_breakdown"] = [
+        {"event": "dictation_no_speech", "events": 99, "failure_kind": "quiet_input", "trigger": "hotkey"},
+        {"event": "meeting_transcript_failed", "events": 5, "failure_kind": "decoder_start", "trigger": "menu"},
+    ]
+    mismatch_metric = build_reliability_leak(mismatch_data).metric
+    if "Meeting transcript failure" not in mismatch_metric or "meeting_transcript_failed" not in mismatch_metric or "dictation_no_speech" in mismatch_metric:
+        print("self-test failed: reliability breakdown did not stay tied to selected leak", file=sys.stderr)
         return 1
     for query in (
         event_counts_query(30, None),
