@@ -461,6 +461,11 @@ fi
 
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
+/usr/libexec/PlistBuddy -c "Set :TranscriptedBuildChannel local" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :TranscriptedBuildChannel string local" "$APP_BUNDLE/Contents/Info.plist"
+BUILD_REVISION="$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
+/usr/libexec/PlistBuddy -c "Set :TranscriptedBuildRevision $BUILD_REVISION" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :TranscriptedBuildRevision string $BUILD_REVISION" "$APP_BUNDLE/Contents/Info.plist"
 
 # Copy bundled app resources (custom sounds, etc.) when present
 if [ -d "Resources" ]; then

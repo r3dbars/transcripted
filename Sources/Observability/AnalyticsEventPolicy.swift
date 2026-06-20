@@ -95,6 +95,8 @@ struct AnalyticsEventPolicy: Equatable {
 
     private static let runtimeDiagnosticProperties: Set<String> = [
         "app_version",
+        "build_channel",
+        "build_revision",
         "build_version",
         "duration_bucket",
         "format_ready",

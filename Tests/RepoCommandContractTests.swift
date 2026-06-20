@@ -1252,6 +1252,11 @@ func testRepoCommandContract() {
             "local builds should not clobber exported Sentry runtime overrides before launch smoke"
         )
         assertTrue(
+            localBuildScript.contains("TranscriptedBuildChannel local")
+                && localBuildScript.contains("TranscriptedBuildRevision"),
+            "local builds should stamp analytics metadata so same-version main builds do not look shipped"
+        )
+        assertTrue(
             betaBuildScript.contains("sentry-release-metadata.py --format shell Info.plist")
                 && betaBuildScript.contains("REGISTER_SENTRY_RELEASE")
                 && betaBuildScript.contains("APP_DSYM")
@@ -1264,6 +1269,11 @@ func testRepoCommandContract() {
                 && betaBuildScript.contains("SENTRY_REQUIRE_DEBUG_FILES")
                 && betaBuildScript.contains("register-sentry-release.sh \"$APP_VERSION\""),
             "distribution builds should surface the Sentry release/dist, generate dSYMs, and support explicit registration"
+        )
+        assertTrue(
+            betaBuildScript.contains("TranscriptedBuildChannel release")
+                && betaBuildScript.contains("TranscriptedBuildRevision"),
+            "distribution builds should stamp release-channel analytics metadata without changing Sparkle versioning"
         )
     }
 
