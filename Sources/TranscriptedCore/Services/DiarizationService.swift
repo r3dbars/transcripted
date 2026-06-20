@@ -74,6 +74,14 @@ public class DiarizationService: ObservableObject {
         self.segmentEmbedder = segmentEmbedder
     }
 
+    /// Cosine thresholds for the active embedding model: the injected embedder's
+    /// calibrated set, or the WeSpeaker defaults when the diarizer's native
+    /// embedding is in use. `nonisolated` so the off-main-actor pipeline reads it
+    /// without an actor hop.
+    public nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds {
+        segmentEmbedder?.thresholds ?? .weSpeaker
+    }
+
     public var isReady: Bool { modelState == .ready && offlineDiarizerManager != nil }
 
     // MARK: - Model Initialization

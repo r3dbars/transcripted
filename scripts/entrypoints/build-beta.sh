@@ -439,18 +439,20 @@ else
     fi
 fi
 
-# Bundle the ERes2Net speaker-embedding CoreML model (optional). When absent, the
-# app falls back to the diarizer's built-in WeSpeaker embedding, so this never
-# fails the build. Selected at runtime via SpeakerEmbedderPreferences.
+# Bundle the ERes2Net speaker-embedding CoreML model — OFF by default for
+# DISTRIBUTION builds. The weights derive from VoxCeleb2 (research-only license),
+# so a shipped/notarized build must NOT redistribute them. The app resolves the
+# model from the FluidAudio Models cache at runtime for local testing. Only set
+# TRANSCRIPTED_BUNDLE_ERES2NET=1 for a private local build you do not distribute.
 ERES2NET_SRC="$HOME/Library/Application Support/FluidAudio/Models/eres2net-embedding"
 ERES2NET_DEST="$APP_BUNDLE/Contents/Resources/eres2net-embedding"
-if [ -d "$ERES2NET_SRC/Model.mlmodelc" ]; then
-    echo "Bundling ERes2Net speaker-embedding model..."
+if [ "${TRANSCRIPTED_BUNDLE_ERES2NET:-0}" = "1" ] && [ -d "$ERES2NET_SRC/Model.mlmodelc" ]; then
+    echo "⚠️  Bundling ERes2Net model into a distribution build (TRANSCRIPTED_BUNDLE_ERES2NET=1) — do not redistribute VoxCeleb2-derived weights."
     mkdir -p "$ERES2NET_DEST"
     rm -rf "$ERES2NET_DEST/Model.mlmodelc"
     ditto "$ERES2NET_SRC/Model.mlmodelc" "$ERES2NET_DEST/Model.mlmodelc"
 else
-    echo "ℹ️  ERes2Net speaker-embedding model not bundled — speaker ID will use built-in WeSpeaker"
+    echo "ℹ️  ERes2Net model not bundled (default; VoxCeleb2 research-only license)."
 fi
 
 # Copy Info.plist

@@ -29,4 +29,8 @@ public protocol SpeakerSegmentEmbedder: Sendable {
     /// Returns nil when the segment is unusable or inference fails — callers
     /// should fall back to the diarizer's native embedding in that case.
     func embed(samples: [Float], sampleRate: Int) -> [Float]?
+
+    /// Cosine thresholds calibrated for this model's geometry, consumed by the
+    /// speaker identity stack (cross-call matching + within-meeting clustering).
+    var thresholds: SpeakerEmbeddingThresholds { get }
 }

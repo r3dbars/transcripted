@@ -105,15 +105,36 @@ cp -R scripts/out/eres2net_fused.mlmodelc \
   diarizer + re-embed path on a wav and asserts all embeddings are 192-d. Gated on
   `TRANSCRIPTED_E2E_WAV=/path/to/16k.wav` (skips in CI).
 
+## Calibration
+
+ERes2Net's matcher/clusterer thresholds are calibrated on **AMI ground truth (RTTM)**,
+not borrowed from WeSpeaker. For each WeSpeaker operating point we measured its true
+false-accept rate and chose the ERes2Net threshold with the **same FAR**. ERes2Net
+separates speakers far better cross-call (EER 0% vs WeSpeaker 5.2%; different-speaker
+p95 cosine 0.40 vs 0.62), so its thresholds are lower while *reducing* false merges
+and false rejects. Per-model values live in `SpeakerEmbeddingThresholds` (selected via
+`DiarizationEngine.activeSpeakerThresholds`); method in
+`scripts/recalibrate_eres2net_groundtruth.py`. WeSpeaker's values are unchanged.
+
+## Distribution & licensing
+
+The ERes2Net weights derive from **VoxCeleb2, whose license is research-only**, so a
+distribution build must **not redistribute them**:
+
+- `build.sh` / `build-beta.sh` bundle the model **only** when
+  `TRANSCRIPTED_BUNDLE_ERES2NET=1` (off by default). Notarized/distribution builds
+  ship without the weights.
+- Local testing works regardless: the runtime resolver falls back to the FluidAudio
+  Models cache, so a developer who staged the model gets it without bundling.
+- Shipping ERes2Net to end users needs a **license-clean source** (download from the
+  original distributor, not self-hosting the weights), wired through a download path
+  like the diarizer models. Until then the feature stays opt-in + local.
+
 ## Known limitations / follow-ups
 
-- **Matcher thresholds are still WeSpeaker-tuned.** The embedding-quality win is
-  threshold-independent (separability improves regardless of operating point), but
-  the consolidation/match thresholds should be recalibrated for ERes2Net's cosine
-  geometry on labeled cross-call audio. Tooling:
-  `scripts/calibrate_eres2net_thresholds.py`, `scripts/run_zoom_eval.sh`.
-- **Distribution.** The model is staged/bundled locally. Shipping to users needs a
-  download path (HF mirror) like the diarizer models, or committing the artifact.
-- Switching models in Settings requires an app restart (the embedder + DB path are
-  bound when `MeetingSessionController` is constructed).
+- Switching models in Settings currently requires an app restart (the embedder + DB
+  path are bound when `MeetingSessionController` is constructed). A quiescence-gated
+  live rebuild is the planned follow-up.
+- The default stays WeSpeaker for everyone; only consider defaulting ERes2Net for new
+  installs after a license-clean weight source + verified download path exist.
 ```
