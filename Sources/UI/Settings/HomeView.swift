@@ -1754,6 +1754,51 @@ struct HomeDayGroupedList<Item, Row: View>: View {
 
 // MARK: - Capture list
 
+/// Filter box over the Home meetings list. Matches the user's query against
+/// already-loaded meeting metadata (title, summary, date) via
+/// `HomeMeetingListFilter`; it never reads transcript bodies, so it stays cheap
+/// even for large libraries. Filtering applies to the meetings currently loaded
+/// into the dashboard slice — "Show more" pages in older meetings to search.
+struct HomeMeetingSearchField: View {
+    @Binding var query: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            TextField("Filter meetings by title, summary, or date", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .accessibilityIdentifier("transcripted.home.meeting-search.field")
+
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear filter")
+                .accessibilityLabel("Clear meeting filter")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
 struct HomeCaptureListSection<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
@@ -1959,6 +2004,28 @@ struct HomeMeetingPreviewSheet: View {
     @State private var isEditingTitle = false
     @State private var draftTitle = ""
     @FocusState private var isTitleFieldFocused: Bool
+    @State private var findQuery = ""
+    @State private var currentMatchIndex = 0
+    @FocusState private var isFindFieldFocused: Bool
+
+    /// Lines the in-transcript find searches: the parsed transcript lines, or
+    /// the raw fallback text when no structured lines were parsed.
+    private var searchableLines: [String] {
+        readableContent.transcriptLines.isEmpty
+            ? [readableContent.fallbackText]
+            : readableContent.transcriptLines.map(\.text)
+    }
+
+    private var findMatches: [TranscriptFindMatch] {
+        TranscriptFinder.matches(in: searchableLines, query: findQuery)
+    }
+
+    /// The match the user is currently parked on, clamped into range.
+    private var activeMatch: TranscriptFindMatch? {
+        let matches = findMatches
+        guard !matches.isEmpty else { return nil }
+        return matches[min(currentMatchIndex, matches.count - 1)]
+    }
 
     init(
         preview: HomeMeetingPreview,
@@ -1978,7 +2045,14 @@ struct HomeMeetingPreviewSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        // Compute matches once per render and thread them down so per-line
+        // highlighting stays O(lines) instead of re-scanning for every line.
+        let matches = findMatches
+        let active: TranscriptFindMatch? = matches.isEmpty
+            ? nil
+            : matches[min(currentMatchIndex, matches.count - 1)]
+
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
                     titleView
@@ -2007,6 +2081,17 @@ struct HomeMeetingPreviewSheet: View {
                     )
             }
 
+            if preview.readError == nil {
+                HomeTranscriptFindBar(
+                    query: $findQuery,
+                    isFocused: $isFindFieldFocused,
+                    matchCount: matches.count,
+                    currentIndex: currentMatchIndex,
+                    onNext: { advanceMatch(by: 1) },
+                    onPrevious: { advanceMatch(by: -1) }
+                )
+            }
+
             Group {
                 if let readError = preview.readError {
                     VStack(alignment: .leading, spacing: 8) {
@@ -2017,6 +2102,7 @@ struct HomeMeetingPreviewSheet: View {
                     }
                     .frame(maxWidth: .infinity, minHeight: 280, alignment: .topLeading)
                 } else {
+                    ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
                             if let summary = preview.summary {
@@ -2063,15 +2149,25 @@ struct HomeMeetingPreviewSheet: View {
                                 .tracking(0.6)
 
                             if readableContent.transcriptLines.isEmpty {
-                                Text(readableContent.fallbackText)
+                                Text(TranscriptFindHighlight.attributedText(
+                                    for: readableContent.fallbackText,
+                                    query: findQuery,
+                                    activeRange: Self.activeRange(forLine: 0, active: active)
+                                ))
                                     .font(.system(size: 13))
                                     .foregroundStyle(Color.primary)
                                     .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                                    .id(Self.transcriptLineID(0))
                             } else {
                                 LazyVStack(alignment: .leading, spacing: 10) {
-                                    ForEach(Array(readableContent.transcriptLines.enumerated()), id: \.offset) { _, line in
-                                        HomeMeetingTranscriptLineView(line: line)
+                                    ForEach(Array(readableContent.transcriptLines.enumerated()), id: \.offset) { offset, line in
+                                        HomeMeetingTranscriptLineView(
+                                            line: line,
+                                            highlightQuery: findQuery,
+                                            activeRange: Self.activeRange(forLine: offset, active: active)
+                                        )
+                                        .id(Self.transcriptLineID(offset))
                                     }
                                 }
                                 .textSelection(.enabled)
@@ -2088,6 +2184,14 @@ struct HomeMeetingPreviewSheet: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                     )
+                    .onChange(of: currentMatchIndex) { _, _ in
+                        scrollToActiveMatch(using: proxy)
+                    }
+                    .onChange(of: findQuery) { _, _ in
+                        currentMatchIndex = 0
+                        scrollToActiveMatch(using: proxy)
+                    }
+                    }
                 }
             }
 
@@ -2142,6 +2246,31 @@ struct HomeMeetingPreviewSheet: View {
                 .onTapGesture(count: 2) { beginTitleEdit() }
                 .help("Double-click to rename")
                 .accessibilityIdentifier("transcripted.home.meeting-preview.title")
+        }
+    }
+
+    // MARK: - In-transcript find
+
+    static func transcriptLineID(_ offset: Int) -> String {
+        "transcript-line-\(offset)"
+    }
+
+    /// The active match's range when it falls inside the given line; nil otherwise.
+    private static func activeRange(forLine offset: Int, active: TranscriptFindMatch?) -> Range<Int>? {
+        guard let active, active.lineIndex == offset else { return nil }
+        return active.range
+    }
+
+    private func advanceMatch(by delta: Int) {
+        let count = findMatches.count
+        guard count > 0 else { return }
+        currentMatchIndex = ((currentMatchIndex + delta) % count + count) % count
+    }
+
+    private func scrollToActiveMatch(using proxy: ScrollViewProxy) {
+        guard let match = activeMatch else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            proxy.scrollTo(Self.transcriptLineID(match.lineIndex), anchor: .center)
         }
     }
 
@@ -2321,8 +2450,129 @@ private struct HomePodcastPlayerButton: View {
     }
 }
 
+/// Find-within-transcript bar shown above the meeting preview transcript.
+/// Drives `TranscriptFinder` matching in the parent sheet: a query field, a
+/// match counter, and previous/next steppers that move the active highlight.
+private struct HomeTranscriptFindBar: View {
+    @Binding var query: String
+    var isFocused: FocusState<Bool>.Binding
+    let matchCount: Int
+    let currentIndex: Int
+    let onNext: () -> Void
+    let onPrevious: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.magnifyingglass")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            TextField("Find in transcript", text: $query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .focused(isFocused)
+                .onSubmit(onNext)
+                .accessibilityIdentifier("transcripted.home.meeting-preview.find-field")
+
+            if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(matchCountLabel)
+                    .font(.system(size: 11, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("transcripted.home.meeting-preview.find-count")
+
+                HStack(spacing: 2) {
+                    stepButton(symbol: "chevron.up", help: "Previous match", action: onPrevious)
+                    stepButton(symbol: "chevron.down", help: "Next match", action: onNext)
+                }
+                .disabled(matchCount == 0)
+                .opacity(matchCount == 0 ? 0.4 : 1)
+
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear find")
+                .accessibilityLabel("Clear find")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var matchCountLabel: String {
+        guard matchCount > 0 else { return "No matches" }
+        return "\(min(currentIndex, matchCount - 1) + 1) of \(matchCount)"
+    }
+
+    private func stepButton(symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 20)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// Builds the highlighted `AttributedString` for one transcript line: every
+/// occurrence of the find query is tinted, and the active match (the one the
+/// next/prev steppers are parked on) gets a stronger tint.
+enum TranscriptFindHighlight {
+    static func attributedText(
+        for text: String,
+        query: String,
+        activeRange: Range<Int>?
+    ) -> AttributedString {
+        var attributed = AttributedString(text)
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return attributed }
+
+        for match in TranscriptFinder.matches(in: [text], query: trimmed) {
+            guard let range = attributedRange(match.range, in: text, attributed: attributed) else { continue }
+            let isActive = (match.range == activeRange)
+            attributed[range].backgroundColor = isActive
+                ? Color.orange.opacity(0.85)
+                : Color.yellow.opacity(0.45)
+            // Force dark text so the tint stays legible in light and dark mode.
+            attributed[range].foregroundColor = Color.black
+        }
+        return attributed
+    }
+
+    private static func attributedRange(
+        _ utf16Range: Range<Int>,
+        in text: String,
+        attributed: AttributedString
+    ) -> Range<AttributedString.Index>? {
+        let nsRange = NSRange(location: utf16Range.lowerBound, length: utf16Range.count)
+        guard let stringRange = Range(nsRange, in: text) else { return nil }
+        let lower = text.distance(from: text.startIndex, to: stringRange.lowerBound)
+        let length = text.distance(from: stringRange.lowerBound, to: stringRange.upperBound)
+        let start = attributed.index(attributed.startIndex, offsetByCharacters: lower)
+        let end = attributed.index(start, offsetByCharacters: length)
+        return start..<end
+    }
+}
+
 private struct HomeMeetingTranscriptLineView: View {
     let line: HomeMeetingTranscriptLine
+    var highlightQuery: String = ""
+    var activeRange: Range<Int>? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -2334,7 +2584,11 @@ private struct HomeMeetingTranscriptLineView: View {
 
             HomeMeetingSpeakerPill(speaker: line.speaker)
 
-            Text(line.text)
+            Text(TranscriptFindHighlight.attributedText(
+                for: line.text,
+                query: highlightQuery,
+                activeRange: activeRange
+            ))
                 .font(.system(size: 13))
                 .foregroundStyle(Color.primary)
                 .lineSpacing(3)

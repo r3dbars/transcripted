@@ -2,10 +2,14 @@ import Foundation
 
 enum ActivationTelemetry {
     static let firstArtifactSavedTrackedKey = "activationFirstArtifactSavedTracked"
+    static let secondArtifactSavedTrackedKey = "activationSecondArtifactSavedTracked"
+    static let firstArtifactKindKey = "activationFirstArtifactKind"
+    static let firstArtifactSavedAtKey = "activationFirstArtifactSavedAt"
 
     enum ArtifactKind: String {
         case dictation
         case meeting
+        case unknown
     }
 
     enum ArtifactActionKind: String {
@@ -25,6 +29,29 @@ enum ActivationTelemetry {
         case meetingOverlay = "meeting_overlay"
         case dictationSave = "dictation_save"
         case meetingSave = "meeting_save"
+    }
+
+    enum WorkflowKind: String {
+        case onboarding
+        case betaModelPrep = "beta_model_prep"
+        case localSummary = "local_summary"
+        case speakerReview = "speaker_review"
+        case agentSetup = "agent_setup"
+        case meetingPrompt = "meeting_prompt"
+        case failedMeetingRetry = "failed_meeting_retry"
+        case artifactHandoff = "artifact_handoff"
+    }
+
+    enum WorkflowAbandonmentReasonKind: String {
+        case blocked
+        case cancelled
+        case deleted
+        case dismissed
+        case failed
+        case remindedLater = "reminded_later"
+        case suppressed
+        case unavailable
+        case windowClosed = "window_closed"
     }
 
     enum AgentPromptKind: String {
@@ -112,6 +139,32 @@ enum ActivationTelemetry {
         return true
     }
 
+    static func recordArtifactSave(
+        artifactKind: ArtifactKind,
+        savedAt: Date = Date(),
+        userDefaults: UserDefaults = .standard
+    ) -> (firstArtifact: Bool, secondArtifact: (firstKind: ArtifactKind, daysSinceFirstBucket: String)?) {
+        if !userDefaults.bool(forKey: firstArtifactSavedTrackedKey) {
+            userDefaults.set(artifactKind.rawValue, forKey: firstArtifactKindKey)
+            userDefaults.set(savedAt, forKey: firstArtifactSavedAtKey)
+            userDefaults.set(true, forKey: firstArtifactSavedTrackedKey)
+            return (true, nil)
+        }
+
+        guard !userDefaults.bool(forKey: secondArtifactSavedTrackedKey) else {
+            return (false, nil)
+        }
+
+        let rawFirstKind = userDefaults.string(forKey: firstArtifactKindKey)
+        let firstKind = rawFirstKind.flatMap(ArtifactKind.init(rawValue:)) ?? .unknown
+        let firstSavedAt = userDefaults.object(forKey: firstArtifactSavedAtKey) as? Date
+        userDefaults.set(true, forKey: secondArtifactSavedTrackedKey)
+        return (
+            false,
+            (firstKind, daysSinceFirstBucket(since: firstSavedAt, now: savedAt))
+        )
+    }
+
     @discardableResult
     static func trackFirstArtifactSavedIfNeeded(
         artifactKind: ArtifactKind,
@@ -119,26 +172,50 @@ enum ActivationTelemetry {
         trigger: String,
         wordCountBucket: String? = nil,
         durationBucket: String? = nil,
+        savedAt: Date = Date(),
         userDefaults: UserDefaults = .standard
     ) -> Bool {
-        guard markFirstArtifactSavedTrackedIfNeeded(userDefaults: userDefaults) else {
+        guard AnalyticsPreferences.isEnabled(userDefaults: userDefaults) else {
             return false
         }
 
-        var properties = [
-            "artifact_kind": artifactKind.rawValue,
-            "surface": surface.rawValue,
-            "trigger": trigger,
-        ]
-        if let wordCountBucket {
-            properties["word_count_bucket"] = wordCountBucket
-        }
-        if let durationBucket {
-            properties["duration_bucket"] = durationBucket
+        let saveState = recordArtifactSave(
+            artifactKind: artifactKind,
+            savedAt: savedAt,
+            userDefaults: userDefaults
+        )
+
+        if saveState.firstArtifact {
+            var properties = [
+                "artifact_kind": artifactKind.rawValue,
+                "surface": surface.rawValue,
+                "trigger": trigger,
+            ]
+            if let wordCountBucket {
+                properties["word_count_bucket"] = wordCountBucket
+            }
+            if let durationBucket {
+                properties["duration_bucket"] = durationBucket
+            }
+
+            AnalyticsReporter.track("activation_first_artifact_saved", properties: properties)
+            return true
         }
 
-        AnalyticsReporter.track("activation_first_artifact_saved", properties: properties)
-        return true
+        if let secondArtifact = saveState.secondArtifact {
+            AnalyticsReporter.track(
+                "activation_second_artifact_saved",
+                properties: [
+                    "days_since_first_bucket": secondArtifact.daysSinceFirstBucket,
+                    "first_artifact_kind": secondArtifact.firstKind.rawValue,
+                    "second_artifact_kind": artifactKind.rawValue,
+                    "surface": surface.rawValue,
+                    "trigger": trigger,
+                ]
+            )
+        }
+
+        return false
     }
 
     static func dictationArtifactSavedProperties(
@@ -199,6 +276,16 @@ enum ActivationTelemetry {
         }
 
         AnalyticsReporter.track("activation_agent_prompt_action_clicked", properties: properties)
+
+        if result == .failed {
+            trackWorkflowAbandoned(
+                workflowKind: .artifactHandoff,
+                stage: promptKind.rawValue,
+                reasonKind: .failed,
+                surface: surface,
+                priorReadyState: agentTarget.rawValue
+            )
+        }
     }
 
     static func trackAgentSetupCTA(
@@ -218,6 +305,38 @@ enum ActivationTelemetry {
                 "surface": surface.rawValue,
             ]
         )
+
+        if result == .failed {
+            trackWorkflowAbandoned(
+                workflowKind: .agentSetup,
+                stage: setupKind.rawValue,
+                reasonKind: .failed,
+                surface: surface,
+                priorReadyState: priorStatus.rawValue
+            )
+        }
+    }
+
+    static func trackWorkflowAbandoned(
+        workflowKind: WorkflowKind,
+        stage: String,
+        reasonKind: WorkflowAbandonmentReasonKind,
+        surface: Surface,
+        elapsedBucket: String? = nil,
+        priorReadyState: String? = nil
+    ) {
+        var properties = [
+            "elapsed_bucket": elapsedBucket ?? "unknown",
+            "reason_kind": reasonKind.rawValue,
+            "stage": stage,
+            "surface": surface.rawValue,
+            "workflow_kind": workflowKind.rawValue,
+        ]
+        if let priorReadyState {
+            properties["prior_ready_state"] = priorReadyState
+        }
+
+        AnalyticsReporter.track("workflow_abandoned", properties: properties)
     }
 
     @discardableResult
@@ -276,5 +395,77 @@ enum ActivationTelemetry {
         default:
             return "older"
         }
+    }
+
+    static func daysSinceFirstBucket(since date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "unknown" }
+        let days = max(0, now.timeIntervalSince(date)) / 86_400
+
+        switch days {
+        case ..<1:
+            return "same_day"
+        case ..<2:
+            return "1d"
+        case ..<8:
+            return "2_7d"
+        case ..<31:
+            return "8_30d"
+        default:
+            return "older"
+        }
+    }
+}
+
+enum ProductFrictionTelemetry {
+    enum Surface: String {
+        case dictation
+        case meeting
+        case update
+    }
+
+    enum Result: String {
+        case blocked
+        case cancelled
+        case completed
+        case failed
+        case fallback
+        case giveUp = "give_up"
+        case started
+    }
+
+    static func track(
+        surface: Surface,
+        stage: String,
+        result: Result,
+        failureKind: String? = nil,
+        elapsedBucket: String? = nil,
+        routeShape: String? = nil,
+        modelState: String? = nil
+    ) {
+        var properties = [
+            "result": result.rawValue,
+            "stage": stage,
+            "surface": surface.rawValue,
+        ]
+
+        if let failureKind {
+            properties["failure_kind"] = failureKind
+        }
+        if let elapsedBucket {
+            properties["elapsed_bucket"] = elapsedBucket
+        }
+        if let routeShape {
+            properties["route_shape"] = routeShape
+        }
+        if let modelState {
+            properties["model_state"] = modelState
+        }
+
+        AnalyticsReporter.track("product_friction_observed", properties: properties)
+    }
+
+    static func modelState(isReady: Bool?) -> String {
+        guard let isReady else { return "unknown" }
+        return isReady ? "ready" : "not_ready"
     }
 }

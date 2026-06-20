@@ -72,6 +72,7 @@ struct TranscriptedSettingsView: View {
     @State private var homeFeedbackTarget: HomeFeedbackTarget?
     @State private var homeShowsAllFailedMeetings = false
     @State private var homeShowsStatsDetails = false
+    @State private var homeMeetingSearchQuery = ""
     @State private var homeMeetingPreview: HomeMeetingPreview?
     @State private var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State private var homeLocalSummaryJobIDs: Set<String> = []
@@ -264,7 +265,11 @@ struct TranscriptedSettingsView: View {
         .task(id: navigation.presentationID) {
             refreshState()
             expandGeneralDisclosureForPresentedPage()
-            trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
+            trackSettingsPageViewed(
+                navigation.selectedPage,
+                source: navigation.presentationSource,
+                discoveredPage: navigation.presentedPage
+            )
         }
         .onChange(of: navigation.selectedPage) { oldPage, page in
             if oldPage == .people && page != .people {
@@ -277,7 +282,12 @@ struct TranscriptedSettingsView: View {
             if pageShowsAutoEnterSettings(page) {
                 refreshAutoEnterPreferences(includeCandidates: true)
             }
-            trackSettingsPageViewed(page, source: "navigation")
+            let isPresentationSelectionChange = page == navigation.presentedPage.consolidatedDestination
+            trackSettingsPageViewed(
+                page,
+                source: "navigation",
+                trackFeatureDiscovery: !isPresentationSelectionChange
+            )
         }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, newURL in
             refreshRecentCaptures(force: true)
@@ -326,8 +336,7 @@ struct TranscriptedSettingsView: View {
             homeDashboardRefreshInFlight = false
             homeMeetingPreviewLoadTask?.cancel()
             homeMeetingPreviewLoadTask = nil
-            localSummaryModelPreparationTask?.cancel()
-            localSummaryModelPreparationTask = nil
+            cancelLocalSummaryModelPreparation()
             homeViewModel.cancel()
         }
     }
@@ -555,10 +564,23 @@ struct TranscriptedSettingsView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            if homeMeetingSearchIsAvailable {
+                HomeMeetingSearchField(query: $homeMeetingSearchQuery)
+                    .padding(.top, 6)
+            }
+
             homeMeetingsListSection
-                .padding(.top, 6)
+                .padding(.top, homeMeetingSearchIsAvailable ? 0 : 6)
         }
         .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
+    }
+
+    /// Show the meetings filter once there is at least one loaded meeting to
+    /// filter, or while a query is active so the user can always clear it.
+    private var homeMeetingSearchIsAvailable: Bool {
+        !homeMeetingSearchQuery.isEmpty
+            || !homeViewModel.meetingDaySections.isEmpty
+            || !meetingSession.failedMeetings.isEmpty
     }
 
     @ViewBuilder
@@ -605,10 +627,11 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homeMeetingsListSection: some View {
-        HomeCaptureListSection(
+        let isSearchingMeetings = !homeMeetingSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HomeCaptureListSection(
             sections: homeMeetingDaySections,
-            emptyMessage: HomeCaptureListCopy.emptyMeetings,
-            emptyState: HomeListEmptyState(
+            emptyMessage: isSearchingMeetings ? HomeCaptureListCopy.noMeetingMatches : HomeCaptureListCopy.emptyMeetings,
+            emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
                 symbolName: "waveform",
                 title: "No meetings yet",
                 message: "Record a meeting and Transcripted transcribes it, labels each speaker, and saves the transcript here. You can also transcribe an existing audio file from General.",
@@ -942,6 +965,7 @@ struct TranscriptedSettingsView: View {
         let summaryID = transcriptURL.path
         guard homeLocalSummaryTasks[summaryID] == nil else { return }
         if let unavailableReason = localMeetingSummaryUnavailableReason {
+            trackLocalSummaryAbandoned(reason: .blocked, stage: "start", priorReadyState: "not_ready")
             homeDeleteFailure = HomeDeleteFailure(
                 title: "Could not summarize meeting",
                 message: unavailableReason
@@ -1009,6 +1033,9 @@ struct TranscriptedSettingsView: View {
                 )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
+                if homeLocalSummaryTaskTokens[summaryID] == taskToken {
+                    trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
+                }
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_cancelled",
                     message: "\(provider.title) meeting summary cancelled",
@@ -1019,6 +1046,7 @@ struct TranscriptedSettingsView: View {
                 return
             } catch {
                 guard localMeetingSummariesEnabled else { return }
+                trackLocalSummaryAbandoned(reason: .failed, stage: "generate", priorReadyState: "ready")
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_failed",
@@ -1520,6 +1548,14 @@ struct TranscriptedSettingsView: View {
                 title: failureTitle,
                 message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again."
             )
+        } else {
+            ActivationTelemetry.trackWorkflowAbandoned(
+                workflowKind: .failedMeetingRetry,
+                stage: "retry_available",
+                reasonKind: item.audioURLs.isEmpty ? .dismissed : .deleted,
+                surface: .home,
+                priorReadyState: canRetryFailedMeetings ? "retry_ready" : "retry_blocked"
+            )
         }
     }
 
@@ -1736,14 +1772,40 @@ struct TranscriptedSettingsView: View {
     }
 
     private var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
-        let savedMeetings = homeViewModel.meetingDaySections.flatMap { section in
-            section.items.map(HomeMeetingListItem.saved)
-        }
-        let failedMeetings = meetingSession.failedMeetings.map(HomeMeetingListItem.failed)
+        let query = homeMeetingSearchQuery
+        let savedMeetings = homeViewModel.meetingDaySections
+            .flatMap { $0.items }
+            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+            .map(HomeMeetingListItem.saved)
+        let failedMeetings = meetingSession.failedMeetings
+            .filter { HomeMeetingListFilter.matches(query: query, in: Self.searchFields(for: $0)) }
+            .map(HomeMeetingListItem.failed)
         let items = (savedMeetings + failedMeetings)
             .sorted { $0.date > $1.date }
 
         return HomeViewModel.groupByDay(items, dateForItem: \.date)
+    }
+
+    /// Already-loaded text fields the meetings filter matches against. Kept to
+    /// metadata (title, generated title, summary, date) so filtering never
+    /// touches transcript bodies on disk.
+    private static func searchFields(for meeting: RecentMeetingItem) -> [String] {
+        var fields = [meeting.displayTitle, meeting.title]
+        if let summary = meeting.summaryPreview {
+            fields.append(summary.summary)
+            fields.append(contentsOf: summary.sections.flatMap { [$0.title, $0.text] })
+        }
+        fields.append(HomeMeetingListFilter.dateSearchText(for: meeting.date))
+        return fields
+    }
+
+    private static func searchFields(for meeting: MeetingSessionController.FailedMeetingItem) -> [String] {
+        [
+            meeting.title,
+            meeting.detail,
+            meeting.meta,
+            HomeMeetingListFilter.dateSearchText(for: meeting.timestamp)
+        ]
     }
 
     private var canRetryFailedMeetings: Bool {
@@ -3218,16 +3280,19 @@ struct TranscriptedSettingsView: View {
         switch provider {
         case .gemmaMLX:
             guard localSummarySetupStatus.hasEnoughMemory else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "memory_check")
                 localSummaryModelPreparationStatus = "Gemma needs more memory than this Mac reports."
                 return
             }
 
             guard localSummarySetupStatus.hasRuntime else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "runtime_check")
                 localSummaryModelPreparationStatus = "Install uv first, then Transcripted can download Gemma here."
                 return
             }
         case .appleFoundation:
             guard appleSummarySetupStatus.isReady else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "system_check")
                 localSummaryModelPreparationStatus = appleSummarySetupStatus.unavailableReason
                     ?? "Apple on-device summaries are unavailable on this Mac right now."
                 return
@@ -3280,6 +3345,7 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationTask = nil
                 localSummaryModelPreparationToken = nil
                 localSummaryModelPreparationStatus = nil
+                trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_model_prepare_cancelled",
                     message: "\(provider.title) summary model preparation cancelled",
@@ -3294,6 +3360,7 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationToken = nil
                 refreshLocalSummarySetupStatus()
                 localSummaryModelPreparationStatus = "\(provider.title) setup failed: \(error.localizedDescription)"
+                trackBetaModelPrepAbandoned(reason: .failed, stage: "prepare_model")
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_model_prepare_failed",
@@ -3308,6 +3375,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func cancelLocalSummaryModelPreparation() {
+        if localSummaryModelPreparationTask != nil {
+            trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
+        }
         localSummaryModelPreparationTask?.cancel()
         localSummaryModelPreparationTask = nil
         localSummaryModelPreparationToken = nil
@@ -3334,6 +3404,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func cancelLocalSummaryJobs() {
+        if !homeLocalSummaryTasks.isEmpty {
+            trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
+        }
         for task in homeLocalSummaryTasks.values {
             task.cancel()
         }
@@ -3395,6 +3468,33 @@ struct TranscriptedSettingsView: View {
             event: event,
             message: message,
             context: context
+        )
+    }
+
+    private func trackLocalSummaryAbandoned(
+        reason: ActivationTelemetry.WorkflowAbandonmentReasonKind,
+        stage: String,
+        priorReadyState: String
+    ) {
+        ActivationTelemetry.trackWorkflowAbandoned(
+            workflowKind: .localSummary,
+            stage: stage,
+            reasonKind: reason,
+            surface: .home,
+            priorReadyState: priorReadyState
+        )
+    }
+
+    private func trackBetaModelPrepAbandoned(
+        reason: ActivationTelemetry.WorkflowAbandonmentReasonKind,
+        stage: String
+    ) {
+        ActivationTelemetry.trackWorkflowAbandoned(
+            workflowKind: .betaModelPrep,
+            stage: stage,
+            reasonKind: reason,
+            surface: .home,
+            priorReadyState: selectedLocalSummaryProviderIsReady ? "ready" : "not_ready"
         )
     }
 
@@ -3780,206 +3880,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private struct SupportActionCard: View {
-        enum Tone {
-            case primary
-            case secondary
-        }
-
-        let symbolName: String
-        let title: String
-        let detail: String
-        let buttonTitle: String
-        let buttonSymbolName: String
-        let tone: Tone
-        let status: String?
-        let isEnabled: Bool
-        let action: () -> Void
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: symbolName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(iconForeground)
-                        .frame(width: 34, height: 34)
-                        .background(iconBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(title)
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(Color.primary)
-
-                        Text(detail)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
-                }
-
-                Button(action: action) {
-                    Label(buttonTitle, systemImage: buttonSymbolName)
-                        .font(.callout.weight(.semibold))
-                        .labelStyle(.titleAndIcon)
-                        .lineLimit(1)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .foregroundStyle(buttonForeground)
-                }
-                .buttonStyle(SettingsHoverButtonStyle(
-                    tone: buttonInteractionTone,
-                    cornerRadius: 8,
-                    normalFill: buttonBackground,
-                    normalStroke: buttonStroke,
-                    hoverFill: buttonHoverBackground,
-                    pressedFill: buttonPressedBackground,
-                    hoverStroke: buttonHoverStroke
-                ))
-                .disabled(!isEnabled)
-
-                if let status, !status.isEmpty {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Color(nsColor: .systemGreen))
-
-                        Text(status)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(cardStroke, lineWidth: 1)
-            )
-        }
-
-        private var iconForeground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen)
-            case .secondary:
-                return Color.accentColor
-            }
-        }
-
-        private var iconBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.16)
-            case .secondary:
-                return Color.accentColor.opacity(0.14)
-            }
-        }
-
-        private var cardBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .controlBackgroundColor).opacity(0.9)
-            case .secondary:
-                return Color(nsColor: .controlBackgroundColor).opacity(0.72)
-            }
-        }
-
-        private var cardStroke: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.25)
-            case .secondary:
-                return Color.primary.opacity(0.08)
-            }
-        }
-
-        private var buttonBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen)
-            case .secondary:
-                return Color.secondary.opacity(0.16)
-            }
-        }
-
-        private var buttonInteractionTone: SettingsInteractionTone {
-            switch tone {
-            case .primary:
-                return .accent
-            case .secondary:
-                return .neutral
-            }
-        }
-
-        private var buttonHoverBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.86)
-            case .secondary:
-                return SettingsInteractionPalette.hoverFill(for: .neutral)
-            }
-        }
-
-        private var buttonPressedBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.76)
-            case .secondary:
-                return SettingsInteractionPalette.pressedFill(for: .neutral)
-            }
-        }
-
-        private var buttonStroke: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.24)
-            case .secondary:
-                return Color.primary.opacity(0.08)
-            }
-        }
-
-        private var buttonHoverStroke: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.34)
-            case .secondary:
-                return SettingsInteractionPalette.hoverStroke(for: .neutral)
-            }
-        }
-
-        private var buttonForeground: Color {
-            switch tone {
-            case .primary:
-                return .white
-            case .secondary:
-                return .primary
-            }
-        }
-    }
-
-    private struct SupportPrivacyNote: View {
-        var body: some View {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-
-                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.top, 2)
-        }
-    }
-
     private var settingsFooterShowsUpdateBadge: Bool {
         sparkleUpdater.updateStatus.readyToInstallVersion != nil
     }
@@ -4202,7 +4102,12 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func trackSettingsPageViewed(_ page: TranscriptedSettingsPage, source: String) {
+    private func trackSettingsPageViewed(
+        _ page: TranscriptedSettingsPage,
+        source: String,
+        discoveredPage: TranscriptedSettingsPage? = nil,
+        trackFeatureDiscovery: Bool = true
+    ) {
         AnalyticsReporter.track(
             "settings_page_viewed",
             properties: [
@@ -4210,6 +4115,8 @@ struct TranscriptedSettingsView: View {
                 "source": source,
             ]
         )
+        guard trackFeatureDiscovery else { return }
+        trackSettingsFeatureDiscovery(for: discoveredPage ?? page, source: source)
     }
 
     private func trackSettingsAction(_ actionID: String, page: TranscriptedSettingsPage? = nil) {
@@ -4242,6 +4149,39 @@ struct TranscriptedSettingsView: View {
                 "prior_status": permissionStates[kind] == true ? "ready" : "pending",
             ]
         )
+    }
+
+    private func trackSettingsFeatureDiscovery(for page: TranscriptedSettingsPage, source: String) {
+        guard let featureArea = settingsDiscoveryFeatureArea(for: page) else { return }
+
+        FeatureDiscoveryTelemetry.trackIfNeeded(
+            featureArea: featureArea,
+            pageID: page.analyticsValue,
+            source: source
+        )
+    }
+
+    private func settingsDiscoveryFeatureArea(for page: TranscriptedSettingsPage) -> FeatureDiscoveryTelemetry.FeatureArea? {
+        switch page {
+        case .home, .dictations:
+            return .localArtifactActions
+        case .people:
+            return .speakerReview
+        case .storage:
+            return .captureLibrary
+        case .connectAgent:
+            return .agentSetup
+        case .beta:
+            return .betaSummaries
+        case .privacy:
+            return .permissions
+        case .support:
+            return .support
+        case .about:
+            return .updateSettings
+        case .general, .models, .shortcuts:
+            return nil
+        }
     }
 
     private func refreshPermissions() {

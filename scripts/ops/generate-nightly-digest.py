@@ -67,10 +67,13 @@ POSTHOG_ACTIVE_EVENTS = (
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
+    "agent_capture_query_observed",
     "activation_return_proxy_observed",
+    "workflow_abandoned",
 )
 POSTHOG_FIRST_VALUE_EVENTS = (
     "dictation_artifact_saved",
@@ -79,9 +82,11 @@ POSTHOG_FIRST_VALUE_EVENTS = (
     "meeting_transcript_saved",
     "onboarding_agent_cta_clicked",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
+    "agent_capture_query_observed",
     "activation_return_proxy_observed",
 )
 TRUSTED_POSTHOG_HOSTS = {
@@ -2423,18 +2428,23 @@ def run_self_test() -> None:
             "meeting_transcript_failed",
             "meeting_transcript_skipped",
             "activation_first_artifact_saved",
+            "activation_second_artifact_saved",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
+            "agent_capture_query_observed",
             "activation_return_proxy_observed",
+            "workflow_abandoned",
         }
         assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
         assert {
             "dictation_artifact_saved",
             "activation_first_artifact_saved",
+            "activation_second_artifact_saved",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
+            "agent_capture_query_observed",
             "activation_return_proxy_observed",
         }.issubset(set(POSTHOG_FIRST_VALUE_EVENTS))
         paths = write_reports(payload, output_dir)

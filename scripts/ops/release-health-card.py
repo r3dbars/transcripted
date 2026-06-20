@@ -19,13 +19,21 @@ from typing import Any
 REPO = "r3dbars/transcripted"
 POSTHOG_ACTIVE_EVENTS = (
     "app_launched",
+    "app_unclean_shutdown_detected",
+    "app_session_stall_detected",
     "dictation_started",
+    "dictation_start_failed",
     "dictation_completed",
     "dictation_artifact_saved",
+    "dictation_no_speech",
+    "dictation_audio_route_recovery_timeout",
     "meeting_recording_started",
+    "meeting_recording_start_failed",
     "meeting_transcript_saved",
     "meeting_transcript_failed",
+    "activation_first_artifact_saved",
     "update_check_finished",
+    "update_action_clicked",
     "update_download_started",
     "update_download_finished",
     "update_ready_to_install",
@@ -33,12 +41,22 @@ POSTHOG_ACTIVE_EVENTS = (
     "update_installed",
 )
 POSTHOG_UPDATE_TARGET_EVENTS = (
+    "update_action_clicked",
     "update_check_finished",
     "update_download_started",
     "update_download_finished",
     "update_ready_to_install",
     "update_relaunching",
     "update_installed",
+)
+POSTHOG_FAILURE_EVENTS = (
+    "app_unclean_shutdown_detected",
+    "app_session_stall_detected",
+    "dictation_start_failed",
+    "dictation_no_speech",
+    "dictation_audio_route_recovery_timeout",
+    "meeting_recording_start_failed",
+    "meeting_transcript_failed",
 )
 HTTP_HEADERS = {
     "User-Agent": "TranscriptedReleaseHealth/1.0",
@@ -245,6 +263,116 @@ def posthog_release_health(version: str, hours: int) -> dict[str, Any]:
     }
 
 
+def posthog_version_health(hours: int, limit: int) -> dict[str, Any]:
+    token = os.environ.get("POSTHOG_PERSONAL_API_KEY")
+    project_id = os.environ.get("POSTHOG_PROJECT_ID")
+    if not token or not project_id:
+        return {"available": False, "error": "missing PostHog credentials"}
+
+    host = normalize_posthog_host(os.environ.get("POSTHOG_APP_HOST") or os.environ.get("POSTHOG_HOST") or "https://us.posthog.com")
+    if not host.startswith("https://") or (
+        host not in TRUSTED_POSTHOG_HOSTS and os.environ.get("POSTHOG_ALLOW_UNTRUSTED_HOST") != "1"
+    ):
+        return {"available": False, "error": f"untrusted PostHog host: {host}"}
+
+    events = ", ".join(sql_quote(event) for event in POSTHOG_ACTIVE_EVENTS)
+    failures = ", ".join(sql_quote(event) for event in POSTHOG_FAILURE_EVENTS)
+    query = (
+        "SELECT "
+        "properties['app_version'] AS app_version, "
+        "properties['build_version'] AS build_version, "
+        "countIf(event = 'app_launched') AS launches, "
+        "uniqIf(distinct_id, event = 'app_launched') AS launch_devices, "
+        "countIf(event = 'activation_first_artifact_saved') AS first_artifacts, "
+        "uniqIf(distinct_id, event = 'activation_first_artifact_saved') AS first_artifact_devices, "
+        "countIf(event = 'dictation_completed') AS dictation_completions, "
+        "uniqIf(distinct_id, event = 'dictation_completed') AS dictation_devices, "
+        "countIf(event = 'meeting_transcript_saved') AS meeting_saves, "
+        "uniqIf(distinct_id, event = 'meeting_transcript_saved') AS meeting_devices, "
+        f"countIf(event IN ({failures})) AS failures, "
+        f"uniqIf(distinct_id, event IN ({failures})) AS failure_devices, "
+        "countIf(event = 'update_check_finished') AS update_checks, "
+        "countIf(event = 'update_check_finished' AND properties['result'] = 'available') AS update_available, "
+        "countIf(event = 'update_check_finished' AND properties['result'] = 'up_to_date') AS update_up_to_date, "
+        "countIf(event = 'update_check_finished' AND properties['result'] = 'failed') AS update_check_failures, "
+        "countIf(event = 'update_download_started') AS update_download_started, "
+        "countIf(event = 'update_download_finished' AND isNull(properties['failure_kind'])) AS update_download_finished, "
+        "countIf(event = 'update_download_finished' AND NOT isNull(properties['failure_kind'])) AS update_download_failed, "
+        "countIf(event = 'update_ready_to_install') AS update_ready_to_install, "
+        "countIf(event = 'update_relaunching') AS update_relaunching, "
+        "countIf(event = 'update_installed') AS update_installed, "
+        "max(timestamp) AS last_seen "
+        "FROM events "
+        f"WHERE timestamp >= now() - INTERVAL {int(hours)} HOUR "
+        f"AND event IN ({events}) "
+        "GROUP BY app_version, build_version "
+        "ORDER BY launch_devices DESC, launches DESC "
+        f"LIMIT {int(limit)}"
+    )
+    payload = {
+        "query": {"kind": "HogQLQuery", "query": query},
+        "refresh": "blocking",
+    }
+    request = urllib.request.Request(
+        f"{host}/api/projects/{project_id}/query/",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return {"available": False, "error": f"PostHog query failed: {exc}"}
+
+    rows = result.get("results") or result.get("data") or []
+    return {
+        "available": True,
+        "rows": [
+            version_health_row(row)
+            for row in rows
+            if isinstance(row, list) and len(row) >= 22
+        ],
+    }
+
+
+def version_health_row(row: list[Any]) -> dict[str, Any]:
+    fields = (
+        "app_version",
+        "build_version",
+        "launches",
+        "launch_devices",
+        "first_artifacts",
+        "first_artifact_devices",
+        "dictation_completions",
+        "dictation_devices",
+        "meeting_saves",
+        "meeting_devices",
+        "failures",
+        "failure_devices",
+        "update_checks",
+        "update_available",
+        "update_up_to_date",
+        "update_check_failures",
+        "update_download_started",
+        "update_download_finished",
+        "update_download_failed",
+        "update_ready_to_install",
+        "update_relaunching",
+        "update_installed",
+        "last_seen",
+    )
+    item = dict(zip(fields, row))
+    item["app_version"] = str(item.get("app_version") or "unknown")
+    item["build_version"] = str(item.get("build_version") or "unknown")
+    for field in fields[2:-1]:
+        item[field] = int(item.get(field) or 0)
+    return item
+
+
 def event_line(posthog: dict[str, Any], event: str) -> str:
     item = (posthog.get("events") or {}).get(event)
     if not item:
@@ -252,11 +380,98 @@ def event_line(posthog: dict[str, Any], event: str) -> str:
     return f"{event}: {item['events']} / {item['devices']} devices"
 
 
+def pct(numerator: int, denominator: int) -> str:
+    if denominator <= 0:
+        return "n/a"
+    return f"{(numerator / denominator) * 100:.1f}%"
+
+
+def shipped_scope_label(app_version: str, target_version: str, gh_release: dict[str, Any], surfaces: dict[str, Any]) -> str:
+    if app_version == target_version:
+        if gh_release.get("available") and surfaces.get("appcast_matches") and surfaces.get("download_matches"):
+            return "shipped/live target"
+        if gh_release.get("available"):
+            return "GitHub release target"
+        return "source/local target"
+    if app_version in {"dev", "unknown"}:
+        return "local/dev unknown"
+    return "other installed version"
+
+
+def version_health_line(row: dict[str, Any], target_version: str, gh_release: dict[str, Any], surfaces: dict[str, Any]) -> str:
+    launches = int(row["launches"])
+    failures = int(row["failures"])
+    scope = shipped_scope_label(str(row["app_version"]), target_version, gh_release, surfaces)
+    updates = (
+        f"checks {row['update_checks']}, available {row['update_available']}, "
+        f"ready {row['update_ready_to_install']}, installed {row['update_installed']}, failed {row['update_check_failures'] + row['update_download_failed']}"
+    )
+    return (
+        f"{row['app_version']} ({row['build_version']}, {scope}): "
+        f"launches {launches} / {row['launch_devices']} devices; "
+        f"first_artifact {row['first_artifacts']}; "
+        f"dictations {row['dictation_completions']}; "
+        f"meeting_saves {row['meeting_saves']}; "
+        f"failures {failures} ({pct(failures, launches)} of launches); "
+        f"updates {updates}"
+    )
+
+
+def run_self_test() -> int:
+    sample = version_health_row([
+        "1.2.3",
+        "456",
+        10,
+        4,
+        3,
+        2,
+        8,
+        3,
+        1,
+        1,
+        2,
+        1,
+        5,
+        1,
+        3,
+        1,
+        1,
+        1,
+        0,
+        1,
+        1,
+        1,
+        "2026-06-19T00:00:00",
+    ])
+    line = version_health_line(
+        sample,
+        "1.2.3",
+        {"available": True},
+        {"appcast_matches": True, "download_matches": True},
+    )
+    if "shipped/live target" not in line:
+        print("self-test failed: missing shipped/live target classification", file=sys.stderr)
+        return 1
+    if "failures 2 (20.0% of launches)" not in line:
+        print("self-test failed: missing failure rate", file=sys.stderr)
+        return 1
+    query_guard = posthog_version_health.__code__.co_consts
+    if any(isinstance(value, str) and "SELECT *" in value.upper() for value in query_guard):
+        print("self-test failed: query uses SELECT *", file=sys.stderr)
+        return 1
+    print("self-test passed")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", default=None, help="Release version, e.g. 1.1.47. Defaults to Info.plist.")
     parser.add_argument("--hours", type=int, default=24, help="PostHog lookback window.")
+    parser.add_argument("--version-limit", type=int, default=12, help="Maximum installed app_version/build_version rows to show.")
+    parser.add_argument("--self-test", action="store_true", help="Run offline formatting checks without network access.")
     args = parser.parse_args()
+    if args.self_test:
+        return run_self_test()
 
     root = Path.cwd()
     load_env()
@@ -264,6 +479,7 @@ def main() -> int:
     gh_release = github_release(version)
     surfaces = live_surfaces(version)
     posthog = posthog_release_health(version, args.hours)
+    version_health = posthog_version_health(args.hours, args.version_limit)
 
     print(f"Transcripted {version} release health")
     print("")
@@ -282,6 +498,7 @@ def main() -> int:
     else:
         for event in (
             "app_launched",
+            "activation_first_artifact_saved",
             "update_check_finished",
             "update_download_finished",
             "update_ready_to_install",
@@ -293,6 +510,16 @@ def main() -> int:
             "meeting_transcript_failed",
         ):
             print(f"- {event_line(posthog, event)}")
+    print("")
+    print(f"PostHog by installed app_version last {args.hours}h")
+    print("- scope note: update target `version` is separate from installed `app_version`; rows below group by installed app_version/build_version.")
+    if not version_health.get("available"):
+        print(f"- unavailable: {version_health.get('error')}")
+    elif not version_health.get("rows"):
+        print("- no aggregate rows in this window")
+    else:
+        for row in version_health["rows"]:
+            print(f"- {version_health_line(row, version, gh_release, surfaces)}")
     return 0
 
 

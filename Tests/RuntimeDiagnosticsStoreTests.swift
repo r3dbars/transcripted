@@ -6,6 +6,8 @@ func testRuntimeDiagnosticsStore() {
             launchID: "launch-1",
             appVersion: "1.2.3",
             buildVersion: "456",
+            buildChannel: "local",
+            buildRevision: "abc123def456",
             osMajor: 26,
             cleanShutdown: false,
             startedAt: Date(timeIntervalSince1970: 1_000),
@@ -23,6 +25,8 @@ func testRuntimeDiagnosticsStore() {
 
         assertEqual(context["app_version"], "1.2.3", "context should keep app version")
         assertEqual(context["build_version"], "456", "context should keep build version")
+        assertEqual(context["build_channel"], "local", "context should keep build channel")
+        assertEqual(context["build_revision"], "abc123def456", "context should keep build revision")
         assertEqual(context["heartbeat_age_bucket"], "1_4m", "context should bucket heartbeat age")
         assertEqual(context["last_event"], "dictation_recording", "context should keep last runtime event")
         assertEqual(context["session_active"], "true", "context should keep whether a session was active")
@@ -33,6 +37,8 @@ func testRuntimeDiagnosticsStore() {
             Set(context.keys),
             [
                 "app_version",
+                "build_channel",
+                "build_revision",
                 "build_version",
                 "heartbeat_age_bucket",
                 "last_event",
@@ -55,6 +61,8 @@ func testRuntimeDiagnosticsStore() {
             launchID: "launch-2",
             appVersion: "1.2.4",
             buildVersion: "457",
+            buildChannel: "release",
+            buildRevision: "def456abc123",
             osMajor: 26,
             cleanShutdown: false,
             startedAt: Date(timeIntervalSince1970: 2_000),
@@ -72,6 +80,8 @@ func testRuntimeDiagnosticsStore() {
 
         assertEqual(context["app_version"], "1.2.4", "context should keep app version")
         assertEqual(context["build_version"], "457", "context should keep build version")
+        assertEqual(context["build_channel"], "release", "context should keep build channel")
+        assertEqual(context["build_revision"], "def456abc123", "context should keep build revision")
         assertEqual(context["heartbeat_age_bucket"], "15_59s", "context should bucket heartbeat age")
         assertEqual(context["last_event"], "meeting_transcribing", "context should keep last runtime event")
         assertEqual(context["previous_clean_shutdown"], "false", "context should keep current marker clean flag")
@@ -86,6 +96,8 @@ func testRuntimeDiagnosticsStore() {
             launchID: "launch-secret",
             appVersion: "1.2.5",
             buildVersion: "458",
+            buildChannel: "release",
+            buildRevision: "abc123def456",
             osMajor: 26,
             cleanShutdown: true,
             startedAt: Date(timeIntervalSince1970: 3_000),
@@ -105,6 +117,8 @@ func testRuntimeDiagnosticsStore() {
             Set(context.keys),
             [
                 "app_version",
+                "build_channel",
+                "build_revision",
                 "build_version",
                 "heartbeat_age_bucket",
                 "last_event",

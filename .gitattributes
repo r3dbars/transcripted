@@ -11,3 +11,22 @@
 
 # Large binaries - mark for tracking awareness
 fluidaudio-libs/** binary
+
+# --- Append-only analytics taxonomy docs (union merge) ---
+# Every privacy-reviewed telemetry PR appends an event to the same anchor in a
+# set of lockstep files, so any single merge dirties every other open PR. Union
+# merge is applied ONLY to the line-oriented markdown registries below, where
+# each event is a self-contained single line (`- \`event_name\``) and the union
+# of two inserts is always a valid superset.
+#
+# It is deliberately NOT applied to Sources/Observability/AnalyticsEventPolicy.swift
+# or Tests/AnalyticsEventPolicyTests.swift: those entries are multi-line, brace-
+# balanced blocks whose trailing `]`/`)` aligns as shared context, so a union
+# merge SILENTLY produces unbalanced, non-compiling Swift (git reports a clean
+# auto-merge; only Swift CI catches the breakage). Those files still need a
+# taxonomy-aware merge driver or the single-source refactor described in
+# docs/analytics-taxonomy-merge.md.
+docs/privacy-first-observability.md merge=union
+docs/posthog-product-learning-plan.md merge=union
+docs/install-attribution-map.md merge=union
+docs/activation-lane.md merge=union

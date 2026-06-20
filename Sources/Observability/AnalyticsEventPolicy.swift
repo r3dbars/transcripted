@@ -95,6 +95,8 @@ struct AnalyticsEventPolicy: Equatable {
 
     private static let runtimeDiagnosticProperties: Set<String> = [
         "app_version",
+        "build_channel",
+        "build_revision",
         "build_version",
         "duration_bucket",
         "format_ready",
@@ -128,6 +130,14 @@ struct AnalyticsEventPolicy: Equatable {
         "word_count_bucket",
     ]
 
+    private static let activationSecondArtifactProperties: Set<String> = [
+        "days_since_first_bucket",
+        "first_artifact_kind",
+        "second_artifact_kind",
+        "surface",
+        "trigger",
+    ]
+
     private static let activationAgentPromptActionProperties: Set<String> = [
         "action_kind",
         "agent_target",
@@ -149,6 +159,41 @@ struct AnalyticsEventPolicy: Equatable {
         "prior_artifact_kind",
         "proxy_kind",
         "return_window_bucket",
+        "surface",
+    ]
+
+    private static let agentCaptureQueryObservedProperties: Set<String> = [
+        "agent_target",
+        "artifact_kind",
+        "capture_age_bucket",
+        "query_kind",
+        "result",
+        "return_window_bucket",
+        "surface",
+    ]
+
+    private static let settingsFeatureDiscoveryProperties: Set<String> = [
+        "feature_area",
+        "page_id",
+        "source",
+    ]
+
+    private static let workflowAbandonedProperties: Set<String> = [
+        "elapsed_bucket",
+        "prior_ready_state",
+        "reason_kind",
+        "stage",
+        "surface",
+        "workflow_kind",
+    ]
+
+    private static let productFrictionProperties: Set<String> = [
+        "elapsed_bucket",
+        "failure_kind",
+        "model_state",
+        "result",
+        "route_shape",
+        "stage",
         "surface",
     ]
 
@@ -327,6 +372,10 @@ struct AnalyticsEventPolicy: Equatable {
             name: "activation_first_artifact_saved",
             allowedProperties: activationFirstArtifactProperties
         ),
+        "activation_second_artifact_saved": .init(
+            name: "activation_second_artifact_saved",
+            allowedProperties: activationSecondArtifactProperties
+        ),
         "activation_agent_prompt_action_clicked": .init(
             name: "activation_agent_prompt_action_clicked",
             allowedProperties: activationAgentPromptActionProperties
@@ -338,6 +387,18 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "agent_capture_query_observed": .init(
+            name: "agent_capture_query_observed",
+            allowedProperties: agentCaptureQueryObservedProperties
+        ),
+        "workflow_abandoned": .init(
+            name: "workflow_abandoned",
+            allowedProperties: workflowAbandonedProperties
+        ),
+        "product_friction_observed": .init(
+            name: "product_friction_observed",
+            allowedProperties: productFrictionProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",
@@ -439,6 +500,10 @@ struct AnalyticsEventPolicy: Equatable {
                 "page_id",
                 "source",
             ]
+        ),
+        "settings_feature_discovered": .init(
+            name: "settings_feature_discovered",
+            allowedProperties: settingsFeatureDiscoveryProperties
         ),
         "settings_action_clicked": .init(
             name: "settings_action_clicked",
