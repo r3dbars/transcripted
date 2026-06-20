@@ -102,6 +102,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_second_artifact_saved`
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
+- `agent_capture_query_observed`
 - `activation_return_proxy_observed`
 - `workflow_abandoned`
 - `product_friction_observed`

@@ -7,6 +7,7 @@ import Foundation
 enum HomeCaptureListCopy {
     static let emptyMeetings = "No recent meetings. Record one or transcribe an audio file from General."
     static let emptyDictations = "No recent dictations."
+    static let noMeetingMatches = "No meetings match your search. Older meetings load with Show more."
 }
 
 // MARK: - Day section labels

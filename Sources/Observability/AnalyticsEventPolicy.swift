@@ -162,6 +162,16 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let agentCaptureQueryObservedProperties: Set<String> = [
+        "agent_target",
+        "artifact_kind",
+        "capture_age_bucket",
+        "query_kind",
+        "result",
+        "return_window_bucket",
+        "surface",
+    ]
+
     private static let settingsFeatureDiscoveryProperties: Set<String> = [
         "feature_area",
         "page_id",
@@ -377,6 +387,10 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "agent_capture_query_observed": .init(
+            name: "agent_capture_query_observed",
+            allowedProperties: agentCaptureQueryObservedProperties
         ),
         "workflow_abandoned": .init(
             name: "workflow_abandoned",
