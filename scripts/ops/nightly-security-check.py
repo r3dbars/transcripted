@@ -873,6 +873,20 @@ def check_observability_payload_keys(root: Path, manifest: dict) -> list[dict]:
 
 
 def source_analytics_policy_events(root: Path, manifest: dict) -> set[str]:
+    # The allowlist is single-sourced from the union-mergeable `.psv` registry
+    # (event_name|prop,prop per line); AnalyticsEventPolicy compiles it at
+    # runtime. Read events from there. Fall back to parsing the Swift policy for
+    # older trees that still inline the dictionary.
+    registry_path = manifest["paths"].get("analytics_event_registry")
+    if registry_path:
+        events: set[str] = set()
+        for line in read_text(root / registry_path).splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "|" not in line:
+                continue
+            events.add(line.split("|", 1)[0].strip())
+        if events:
+            return events
     text = read_text(root / manifest["paths"]["analytics_event_policy"])
     return set(re.findall(r'(?m)^\s*"([a-z0-9_]+)":\s*\.init\(', text))
 

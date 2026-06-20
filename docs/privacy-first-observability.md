@@ -75,7 +75,10 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 
 ## Allowlisted analytics events
 
-This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
+This list should match the registry in `Resources/analytics-events.psv` (which
+`Sources/Observability/AnalyticsEventPolicy.swift` compiles at runtime). Both this
+list and the `.psv` are `merge=union`, so adding an event is an independent
+one-line append in each. A fast test keeps them in lockstep.
 
 - `app_launched`
 - `app_unclean_shutdown_detected`

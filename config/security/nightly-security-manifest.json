@@ -14,6 +14,7 @@
     "sentry_sanitizer_tests": "Tests/SentryPayloadSanitizerTests.swift",
     "analytics_sanitizer_tests": "Tests/AnalyticsPayloadSanitizerTests.swift",
     "analytics_event_policy": "Sources/Observability/AnalyticsEventPolicy.swift",
+    "analytics_event_registry": "Resources/analytics-events.psv",
     "observability_policy_sources": [
       "Sources/Observability/AnalyticsEventPolicy.swift",
       "Sources/Observability/SentryEventPolicy.swift"
