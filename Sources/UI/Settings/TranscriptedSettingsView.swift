@@ -63,6 +63,8 @@ struct TranscriptedSettingsView: View {
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
+    @State private var calendarPreArmEnabled = CalendarPreArmPreferences.isEnabled()
+    @State private var showRealMeetingTitles = MeetingTitlePrivacyPreferences.showRealTitles()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
@@ -316,6 +318,14 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .autoCallDetectionPrefsDidChange)) { _ in
             autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .calendarPreArmPrefsDidChange)) { _ in
+            // Onboarding's "Meeting reminders" toggle writes the same pref;
+            // keep an open Settings window in sync.
+            calendarPreArmEnabled = CalendarPreArmPreferences.isEnabled()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .meetingTitlePrivacyPrefsDidChange)) { _ in
+            showRealMeetingTitles = MeetingTitlePrivacyPreferences.showRealTitles()
         }
         .onReceive(NotificationCenter.default.publisher(for: .microphoneProcessingPrefsDidChange)) { _ in
             // Accepting the mid-meeting mic-boost prompt flips this preference
@@ -2145,6 +2155,46 @@ struct TranscriptedSettingsView: View {
                         message: "When this is on, Transcripted notices when an app or browser starts using your microphone — like a spontaneous Google Meet — and offers to record it. It only checks which app holds the mic on your Mac; nothing about the audio ever leaves your device."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
+                )
+
+                GeneralToggleRow(
+                    title: "Pre-arm from calendar",
+                    isOn: Binding(
+                        get: { calendarPreArmEnabled },
+                        set: { newValue in
+                            calendarPreArmEnabled = newValue
+                            trackSettingsToggle("calendar_prearm", enabled: newValue, page: .general)
+                            CalendarPreArmPreferences.setEnabled(newValue)
+                        }
+                    ),
+                    help: calendarPreArmEnabled
+                        ? "Offer a one-tap Record prompt as a scheduled meeting starts."
+                        : "Don't read your calendar for meeting prompts.",
+                    info: GeneralInfo(
+                        title: "Pre-arm from calendar",
+                        message: "When this is on, Transcripted reads your upcoming calendar events with a Zoom, Meet, Teams, or Webex link and offers a one-tap Record prompt right as the meeting starts. It never records on its own — recording only ever begins when you tap Record. Needs read-only Calendar access; turn it off to stop calendar prompts entirely."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.calendar-prearm"
+                )
+
+                GeneralToggleRow(
+                    title: "Show real meeting titles",
+                    isOn: Binding(
+                        get: { showRealMeetingTitles },
+                        set: { newValue in
+                            showRealMeetingTitles = newValue
+                            trackSettingsToggle("meeting_title_privacy", enabled: newValue, page: .general)
+                            MeetingTitlePrivacyPreferences.setShowRealTitles(newValue)
+                        }
+                    ),
+                    help: showRealMeetingTitles
+                        ? "Meeting prompts show the event title."
+                        : "Meeting prompts show a generic \u{201C}Meeting\u{201D} label.",
+                    info: GeneralInfo(
+                        title: "Show real meeting titles",
+                        message: "The meeting prompt floats on screen and can be visible while you share your screen. Turn this off to show a generic \u{201C}Meeting\u{201D} label instead of the calendar event title. Titles always stay on your Mac."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.meeting-title-privacy"
                 )
             }
 

@@ -495,6 +495,152 @@ func testMeetingPromptDetector() async {
         assertEqual(box.candidate?.source, .calendarEvent, "the visible scheduled prompt should keep its calendar context")
         assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "the scheduled prompt should keep the meeting title hint")
     }
+
+    await runSuite("MeetingPromptDetector — calendar pre-arm ON surfaces the scheduled meeting prompt") {
+        let now = Date()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            isCalendarPreArmEnabled: { true },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(
+                    id: "scheduled-zoom",
+                    provider: .zoom,
+                    startsIn: 30,
+                    now: now
+                )
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.start()
+        await waitForPromptEvaluation()
+        detector.stop()
+
+        assertEqual(box.promptCount, 1, "an in-window scheduled meeting should pre-arm a single one-tap prompt")
+        assertEqual(box.candidate?.source, .calendarEvent, "the pre-arm prompt should carry calendar context")
+        assertEqual(box.candidate?.id, "calendar:scheduled-zoom", "the candidate id should key off the calendar event")
+        assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "the pre-arm prompt should carry the event title")
+    }
+
+    await runSuite("MeetingPromptDetector — calendar pre-arm OFF degrades instead of prompting") {
+        let now = Date()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            isCalendarPreArmEnabled: { false },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(
+                    id: "scheduled-zoom",
+                    provider: .zoom,
+                    startsIn: 30,
+                    now: now
+                )
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.start()
+        await waitForPromptEvaluation()
+        detector.stop()
+
+        assertNil(box.candidate, "the kill switch should stop calendar prompts even with access granted")
+        assertEqual(box.promptCount, 0, "pre-arm OFF should never ask the overlay to present a calendar prompt")
+    }
+
+    await runSuite("MeetingPromptDetector — no calendar access falls back to the ad-hoc detector") {
+        let now = Date()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { false },
+            isCalendarPreArmEnabled: { true },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(
+                    id: "scheduled-zoom",
+                    provider: .zoom,
+                    startsIn: 30,
+                    now: now
+                )
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.start()
+        await waitForPromptEvaluation()
+        assertNil(box.candidate, "without calendar access there is no calendar prompt to show")
+
+        // The feature must degrade, not die: the ad-hoc mic/process fallback
+        // still surfaces a prompt when a call starts.
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        detector.stop()
+
+        assertEqual(box.promptCount, 1, "the ad-hoc fallback should still prompt when calendar access is denied")
+        assertEqual(box.candidate?.source, .runtimeApp, "the fallback prompt should come from the ad-hoc detector, not calendar")
+    }
+
+    await runSuite("MeetingPromptDetector — pre-arm only requests a prompt; it never auto-records") {
+        let now = Date()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            isCalendarPreArmEnabled: { true },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(
+                    id: "scheduled-zoom",
+                    provider: .zoom,
+                    startsIn: 30,
+                    now: now
+                )
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+            box.suppressionCount += 1
+        }
+
+        detector.start()
+        await waitForPromptEvaluation()
+        // Force a second evaluation with no competing candidate.
+        detector.updateMicInputUsers(["com.example.not-a-call"])
+        await waitForPromptEvaluation()
+        detector.stop()
+
+        // The load-bearing invariant at this boundary: detection asks once and
+        // then waits. The candidate sits in the pending cooldown ("awaiting the
+        // user"), NOT marked accepted/"record_selected" — nothing is recorded
+        // without the explicit Record tap, which lives only in
+        // MeetingOverlayController.onPromptRecord, not in the detector.
+        assertEqual(box.promptCount, 1, "pre-arm should request the prompt exactly once, never silently re-fire")
+        assertEqual(box.suppression?.reason, .pendingCandidate, "a presented pre-arm prompt should stay a pending suggestion")
+        assertEqual(
+            box.suppression?.cooldownReason,
+            "prompt_pending",
+            "an un-tapped pre-arm prompt must remain prompt_pending, never escalate to record_selected"
+        )
+    }
 }
 
 @available(macOS 14.0, *)

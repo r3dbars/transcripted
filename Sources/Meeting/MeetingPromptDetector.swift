@@ -40,6 +40,12 @@ final class MeetingPromptDetector {
 
     private let calendarReader = MeetingPromptCalendarReader()
     private let calendarAccessGranted: () -> Bool
+    /// Returns false when the user turns off calendar pre-arm in Settings or
+    /// onboarding. Gates the calendar-prompt path on top of the permission
+    /// check so the feature is an explicit, revocable opt-in (the kill switch
+    /// from docs/MEETING_CAPTURE_PROMPTING.md §5). When false the detector
+    /// degrades to the runtime/mic ad-hoc fallback instead of going dark.
+    private let isCalendarPreArmEnabled: () -> Bool
     private let refreshesCalendarEventSnapshots: Bool
     // Cache of upcoming meeting-link events refreshed off-main by each poll cycle.
     // Dismiss/markAccepted/title paths must stay synchronous (overlay callbacks and
@@ -68,12 +74,21 @@ final class MeetingPromptDetector {
 
     init(
         calendarAccessGranted: @escaping () -> Bool = { TranscriptedPermissionAccess.calendarAccessGranted() },
+        isCalendarPreArmEnabled: @escaping () -> Bool = { CalendarPreArmPreferences.isEnabled() },
         calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = [],
         refreshesCalendarEventSnapshots: Bool = true
     ) {
         self.calendarAccessGranted = calendarAccessGranted
+        self.isCalendarPreArmEnabled = isCalendarPreArmEnabled
         self.calendarEventSnapshots = calendarEventSnapshots
         self.refreshesCalendarEventSnapshots = refreshesCalendarEventSnapshots
+    }
+
+    /// Calendar prompting is live only when access is granted AND the user has
+    /// kept the pre-arm opt-in on. Both must hold; either being false drops the
+    /// calendar path and leaves the runtime/mic fallback running.
+    private func calendarPreArmActive() -> Bool {
+        calendarAccessGranted() && isCalendarPreArmEnabled()
     }
 
     func start() {
@@ -198,7 +213,7 @@ final class MeetingPromptDetector {
     }
 
     func currentSuggestedTranscriptTitle(now: Date = Date()) -> String? {
-        guard calendarAccessGranted() else { return nil }
+        guard calendarPreArmActive() else { return nil }
         return upcomingCalendarCandidates(
             now: now,
             runningBundleIDs: [],
@@ -221,7 +236,7 @@ final class MeetingPromptDetector {
         seedNativeActivityIfNeeded(frontmostBundleID: frontmostBundleID, now: now)
 
         var candidates: [ScoredCandidate] = []
-        if calendarAccessGranted() {
+        if calendarPreArmActive() {
             candidates.append(contentsOf: upcomingCalendarCandidates(
                 now: now,
                 runningBundleIDs: runningBundleIDs,

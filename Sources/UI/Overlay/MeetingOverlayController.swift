@@ -1490,6 +1490,7 @@ final class MeetingOverlayController: NSObject {
         state = .prompt
         showPanel()
         pushToView()
+        maybeFireArmedStartChime(for: candidate)
         schedulePromptCountdown()
         return true
     }
@@ -2392,7 +2393,27 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func detectedMeetingPromptDisplay(countdownSeconds: Int) -> PromptDisplay {
-        PromptDisplay(
+        // Calendar-backed prompts render as the gentle "armed" card from
+        // docs/MEETING_CAPTURE_PROMPTING.md §3.3: the privacy-resolved meeting
+        // title with a "Starts in N min" / "Starting now — tap to record"
+        // subtext, and no auto-dismiss countdown number. Runtime / mic ad-hoc
+        // prompts keep their existing copy.
+        if let candidate = promptCandidate, candidate.source == .calendarEvent {
+            let copy = armedCalendarCopy(for: candidate)
+            return PromptDisplay(
+                title: copy.title,
+                detail: copy.subtext,
+                countdownText: "",
+                secondaryTitle: "Not now",
+                secondaryAccessibilityLabel: "Dismiss meeting prompt",
+                remindTitle: "Remind me soon",
+                remindAccessibilityLabel: "Remind me soon",
+                primaryTitle: "Record",
+                primaryAccessibilityLabel: "Start meeting recording"
+            )
+        }
+
+        return PromptDisplay(
             title: promptCandidate?.title ?? "Meeting detected",
             detail: promptCandidate?.detail ?? "Record this meeting?",
             countdownText: "\(countdownSeconds)s",
@@ -2403,6 +2424,31 @@ final class MeetingOverlayController: NSObject {
             primaryTitle: "Record",
             primaryAccessibilityLabel: "Start meeting recording"
         )
+    }
+
+    private func armedCalendarCopy(for candidate: MeetingPromptDetector.Candidate) -> MeetingArmedPromptCopy {
+        MeetingArmedPromptCopyPolicy.make(
+            eventTitle: candidate.suggestedTranscriptTitle,
+            startDate: candidate.startDate,
+            now: Date(),
+            showRealTitles: MeetingTitlePrivacyPreferences.showRealTitles(),
+            // TODO(prearm): wire automatic screen-share / system-audio-capture
+            // detection so the title falls back to generic during a share even
+            // when the user keeps real titles on (spec §4.2 B5). Until then the
+            // Settings "Show real meeting titles" toggle is the control.
+            isScreenShareLikely: false
+        )
+    }
+
+    /// Plays one soft chime when a calendar prompt is presented at the meeting's
+    /// start time — the single gentle T−0 nudge from §3.3. Fires once per
+    /// presentation (not on the per-second countdown ticks) and respects the UI
+    /// sound preference. It never starts a recording: the chime only accompanies
+    /// the card; recording still waits for the explicit Record tap.
+    private func maybeFireArmedStartChime(for candidate: MeetingPromptDetector.Candidate) {
+        guard candidate.source == .calendarEvent else { return }
+        guard armedCalendarCopy(for: candidate).shouldChimeOnStartNudge else { return }
+        AppSoundPlayer.shared.play(.dictationStart)
     }
 
     private func audioInactivityPromptDisplay(

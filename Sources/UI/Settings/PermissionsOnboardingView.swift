@@ -38,7 +38,7 @@ struct PermissionsOnboardingView: View {
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
     @State private var calendarGranted = false
-    @State private var meetingPromptsEnabled = true
+    @State private var meetingPromptsEnabled = CalendarPreArmPreferences.isEnabled()
     @State private var selectedUseCase: OnboardingUseCase = .meetings
     @State private var leaveDictationShortcutsOff = true
     @State private var diagnosticsEnabled = CrashReportingPreferences.isEnabled() && AnalyticsPreferences.isEnabled()
@@ -299,6 +299,10 @@ struct PermissionsOnboardingView: View {
                 .frame(maxWidth: 440)
                 .padding(.top, 4)
                 .onChange(of: meetingPromptsEnabled) { _, newValue in
+                    // Persist the gentle calendar pre-arm opt-in so the choice
+                    // made here matches the Settings toggle and gates the
+                    // detector's calendar path (CalendarPreArmPreferences).
+                    CalendarPreArmPreferences.setEnabled(newValue)
                     if !newValue {
                         calendarGranted = false
                     }
