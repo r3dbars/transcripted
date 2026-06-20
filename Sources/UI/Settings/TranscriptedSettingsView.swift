@@ -264,7 +264,11 @@ struct TranscriptedSettingsView: View {
         .task(id: navigation.presentationID) {
             refreshState()
             expandGeneralDisclosureForPresentedPage()
-            trackSettingsPageViewed(navigation.selectedPage, source: "presentation")
+            trackSettingsPageViewed(
+                navigation.selectedPage,
+                source: navigation.presentationSource,
+                discoveredPage: navigation.presentedPage
+            )
         }
         .onChange(of: navigation.selectedPage) { oldPage, page in
             if oldPage == .people && page != .people {
@@ -277,7 +281,12 @@ struct TranscriptedSettingsView: View {
             if pageShowsAutoEnterSettings(page) {
                 refreshAutoEnterPreferences(includeCandidates: true)
             }
-            trackSettingsPageViewed(page, source: "navigation")
+            let isPresentationSelectionChange = page == navigation.presentedPage.consolidatedDestination
+            trackSettingsPageViewed(
+                page,
+                source: "navigation",
+                trackFeatureDiscovery: !isPresentationSelectionChange
+            )
         }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, newURL in
             refreshRecentCaptures(force: true)
@@ -4052,7 +4061,12 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func trackSettingsPageViewed(_ page: TranscriptedSettingsPage, source: String) {
+    private func trackSettingsPageViewed(
+        _ page: TranscriptedSettingsPage,
+        source: String,
+        discoveredPage: TranscriptedSettingsPage? = nil,
+        trackFeatureDiscovery: Bool = true
+    ) {
         AnalyticsReporter.track(
             "settings_page_viewed",
             properties: [
@@ -4060,6 +4074,8 @@ struct TranscriptedSettingsView: View {
                 "source": source,
             ]
         )
+        guard trackFeatureDiscovery else { return }
+        trackSettingsFeatureDiscovery(for: discoveredPage ?? page, source: source)
     }
 
     private func trackSettingsAction(_ actionID: String, page: TranscriptedSettingsPage? = nil) {
@@ -4092,6 +4108,39 @@ struct TranscriptedSettingsView: View {
                 "prior_status": permissionStates[kind] == true ? "ready" : "pending",
             ]
         )
+    }
+
+    private func trackSettingsFeatureDiscovery(for page: TranscriptedSettingsPage, source: String) {
+        guard let featureArea = settingsDiscoveryFeatureArea(for: page) else { return }
+
+        FeatureDiscoveryTelemetry.trackIfNeeded(
+            featureArea: featureArea,
+            pageID: page.analyticsValue,
+            source: source
+        )
+    }
+
+    private func settingsDiscoveryFeatureArea(for page: TranscriptedSettingsPage) -> FeatureDiscoveryTelemetry.FeatureArea? {
+        switch page {
+        case .home, .dictations:
+            return .localArtifactActions
+        case .people:
+            return .speakerReview
+        case .storage:
+            return .captureLibrary
+        case .connectAgent:
+            return .agentSetup
+        case .beta:
+            return .betaSummaries
+        case .privacy:
+            return .permissions
+        case .support:
+            return .support
+        case .about:
+            return .updateSettings
+        case .general, .models, .shortcuts:
+            return nil
+        }
     }
 
     private func refreshPermissions() {
