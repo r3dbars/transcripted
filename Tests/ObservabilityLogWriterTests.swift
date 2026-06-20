@@ -33,11 +33,20 @@ func testObservabilityLogWriter() {
 
     runSuite("EventReporter exposes shutdown flushing for buffered info events") {
         let reporterSource = readObservabilityTestRepoTextFile("Sources/Observability/EventReporter.swift")
+        let reliabilityRecorderSource = readObservabilityTestRepoTextFile("Sources/Observability/ReliabilityPacketRecorder.swift")
         let appSource = readObservabilityTestRepoTextFile("Sources/TranscriptedApp.swift")
 
         assertTrue(
             reporterSource.contains("func flushLocalEventsForShutdown() async"),
             "buffered local info events should have an explicit shutdown flush path"
+        )
+        assertTrue(
+            reliabilityRecorderSource.contains("static func flushForShutdown() async"),
+            "reliability packet writes should also have an explicit shutdown flush path"
+        )
+        assertTrue(
+            reporterSource.contains("await ReliabilityPacketRecorder.flushForShutdown()"),
+            "the shared local-event shutdown flush should drain reliability packet writes too"
         )
         assertTrue(
             appSource.contains("await EventReporter.shared.flushLocalEventsForShutdown()"),

@@ -40,11 +40,17 @@ private actor ReliabilityPacketFileWriter {
             approximateSize += UInt64(lineData.count)
             if approximateSize > TranscriptedConstants.jsonlLogRotationThreshold {
                 // Close so the next append re-prepares, which rotates the file.
+                handle.synchronizeFile()
                 try? handle.close()
                 self.handle = nil
                 isPrepared = false
             }
         }
+    }
+
+    func flushForShutdown() {
+        guard isPrepared, let handle else { return }
+        handle.synchronizeFile()
     }
 
     private func prepareIfNeeded() -> Bool {
@@ -71,16 +77,42 @@ enum ReliabilityPacketRecorder {
 
     private static let writer = ReliabilityPacketFileWriter()
     private static let decoder = JSONDecoder()
+    @MainActor private static var pendingRecordTasks: [Int: Task<Void, Never>] = [:]
+    @MainActor private static var nextRecordTaskID = 0
 
     static func defaultFileURL() -> URL {
         FileManager.default.transcriptedLogsDirURL.appendingPathComponent(fileName)
     }
 
+    @MainActor
     static func record(event: ObservabilityEvent) {
         guard let packet = packet(from: event) else { return }
-        Task.detached(priority: .utility) {
+        let recordTaskID = nextRecordTaskID
+        nextRecordTaskID += 1
+        let recordTask = Task.detached(priority: .utility) {
             await writer.append(packet)
+            await MainActor.run {
+                ReliabilityPacketRecorder.markRecordTaskFinished(recordTaskID)
+            }
         }
+        pendingRecordTasks[recordTaskID] = recordTask
+    }
+
+    @MainActor
+    static func flushForShutdown() async {
+        while !pendingRecordTasks.isEmpty {
+            let tasks = Array(pendingRecordTasks.values)
+            pendingRecordTasks.removeAll(keepingCapacity: true)
+            for task in tasks {
+                await task.value
+            }
+        }
+        await writer.flushForShutdown()
+    }
+
+    @MainActor
+    private static func markRecordTaskFinished(_ id: Int) {
+        pendingRecordTasks[id] = nil
     }
 
     // MARK: - Shared append primitives

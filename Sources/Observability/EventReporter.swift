@@ -254,6 +254,7 @@ final class EventReporter {
             }
         }
         await writer.flushForShutdown()
+        await ReliabilityPacketRecorder.flushForShutdown()
     }
 
     private func markAppendTaskFinished(_ id: Int) {
