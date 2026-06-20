@@ -75,6 +75,43 @@ func testNightlySecurityContract() {
         )
     }
 
+    runSuite("Nightly security manifest forbids broad OS entitlements") {
+        let manifest = loadJSONFixture("config/security/nightly-security-manifest.json", as: [String: AnyDecodable].self)
+        let forbidden = Set(manifest["forbidden_entitlements"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+        let localEntitlements = Set(loadPlistDictionary("config/entitlements/local.plist").keys)
+        let betaEntitlements = Set(loadPlistDictionary("config/entitlements/beta.plist").keys)
+        let checker = (try? String(contentsOf: repoFixtureURL("scripts/ops/nightly-security-check.py"), encoding: .utf8)) ?? ""
+
+        assertTrue(
+            forbidden.contains("com.apple.security.files.user-selected.read-write"),
+            "privacy contract should explicitly forbid broad user-selected file write access"
+        )
+        assertTrue(
+            forbidden.contains("com.apple.security.automation.apple-events"),
+            "privacy contract should explicitly forbid broad Apple Events automation"
+        )
+        assertTrue(
+            forbidden.contains("com.apple.security.network.server"),
+            "privacy contract should explicitly forbid listening network-server entitlement"
+        )
+        assertTrue(
+            localEntitlements.isDisjoint(with: forbidden),
+            "local entitlements should not include forbidden broad OS permissions"
+        )
+        assertTrue(
+            betaEntitlements.isDisjoint(with: forbidden),
+            "beta entitlements should not include forbidden broad OS permissions"
+        )
+        assertTrue(
+            checker.contains("forbidden_entitlements"),
+            "nightly checker should enforce the forbidden-entitlements contract"
+        )
+        assertTrue(
+            checker.contains("built-forbidden-entitlements"),
+            "built app verification should reject forbidden entitlements too"
+        )
+    }
+
     runSuite("Nightly security sanitizer corpus stays shared and non-empty") {
         let corpus = loadJSONFixture("Tests/Fixtures/ObservabilitySanitizerCorpus.json", as: ObservabilitySanitizerCorpus.self)
         let ids = corpus.cases.map(\.id)

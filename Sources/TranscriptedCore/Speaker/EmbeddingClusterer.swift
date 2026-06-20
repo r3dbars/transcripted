@@ -26,13 +26,15 @@ import Accelerate
 
 public enum EmbeddingClusterer {
 
-    /// Cosine-similarity bar for the same-voice consolidation pass. Must equal
-    /// `SpeakerNamingPolicy.autoAcceptSimilarityThreshold` (0.88): consolidation
-    /// should only collapse two clusters into one person when they are at least as
-    /// similar as we'd demand to silently auto-accept them as the same known person.
-    /// `EmbeddingClustererTests.testConsolidationThresholdMatchesAutoAcceptBar`
-    /// asserts the two stay equal, so changing one without the other fails CI
-    /// instead of silently drifting.
+    /// Cosine-similarity bar for the same-voice consolidation pass (within a single meeting).
+    /// Kept at 0.88 even though `SpeakerNamingPolicy.autoAcceptSimilarityThreshold` was raised
+    /// to 0.92: within-meeting consolidation has temporal/contextual evidence that two clusters
+    /// are one speaker, so it may legitimately merge at a *lower* bar than the stricter
+    /// cross-meeting silent-naming decision. The guarded invariant is therefore
+    /// `sameVoiceConsolidationThreshold <= autoAcceptSimilarityThreshold`
+    /// (`EmbeddingClustererTests.testConsolidationThresholdNotAboveAutoAcceptBar`), so the merge
+    /// bar can never exceed — i.e. consolidation never merges two clusters we would NOT also
+    /// auto-accept as one another.
     public static let sameVoiceConsolidationThreshold: Float = 0.88
 
     /// Lower bar used only to detect "these centroids may belong to different

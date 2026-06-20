@@ -1280,6 +1280,7 @@ def check_entitlements(root: Path, manifest: dict) -> list[dict]:
         "local": manifest["paths"]["local_entitlements"],
         "beta": manifest["paths"]["beta_entitlements"],
     }
+    forbidden_entitlements = set(manifest.get("forbidden_entitlements", []))
 
     for label, relative_path in path_map.items():
         actual = load_plist(root / relative_path)
@@ -1292,6 +1293,18 @@ def check_entitlements(root: Path, manifest: dict) -> list[dict]:
                     f"{label}-entitlements-drift",
                     f"{label.capitalize()} entitlements drifted from the nightly manifest.",
                     f"Expected {expected!r}, got {actual!r}.",
+                    relative_path,
+                )
+            )
+        forbidden_present = sorted(forbidden_entitlements.intersection(actual.keys()))
+        if forbidden_present:
+            findings.append(
+                make_finding(
+                    "entitlements_and_signing",
+                    "high",
+                    f"{label}-forbidden-entitlements",
+                    f"{label.capitalize()} entitlements include broad OS permissions forbidden by the privacy contract.",
+                    f"Forbidden entitlement(s): {', '.join(forbidden_present)}.",
                     relative_path,
                 )
             )
@@ -1411,6 +1424,20 @@ def check_built_app(root: Path, manifest: dict, app_bundle_argument: str | None)
                 "built-entitlements-drift",
                 "Built app entitlements drifted from the expected local contract.",
                 f"Expected {expected_local!r}, got {entitlements!r}.",
+                app_bundle_argument,
+            )
+        )
+
+    forbidden_entitlements = set(manifest.get("forbidden_entitlements", []))
+    forbidden_present = sorted(forbidden_entitlements.intersection(entitlements.keys()))
+    if forbidden_present:
+        findings.append(
+            make_finding(
+                "entitlements_and_signing",
+                "high",
+                "built-forbidden-entitlements",
+                "Built app entitlements include broad OS permissions forbidden by the privacy contract.",
+                f"Forbidden entitlement(s): {', '.join(forbidden_present)}.",
                 app_bundle_argument,
             )
         )
