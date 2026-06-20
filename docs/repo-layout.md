@@ -114,6 +114,7 @@ Use these docs for these jobs:
 - `docs/install-attribution-map.md` — anonymous website/download/install to first-value signal map
 - `docs/live-meeting-codex-sidecar.md` — opt-in live meeting sidecar and agent workspace notes
 - `docs/ops-credentials.md` — Sentry, PostHog, GitHub, and Cloudflare credential lanes
+- `docs/retention-cohort-analytics.md` — privacy-safe PostHog retention cohort report for active days, repeat use, version adoption, first-artifact return, and first-run drop-off
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
 - `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, corpus, corpus-compare, live, artifact, and synthetic audio passes

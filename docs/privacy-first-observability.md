@@ -102,6 +102,8 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `activation_return_proxy_observed`
+- `workflow_abandoned`
+- `product_friction_observed`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
@@ -154,6 +156,8 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - retry attempt buckets like `start_attempt_bucket`, not raw retry counts
 - normalized failure kinds like `system_audio`, `recording_too_short`, `other`
 - normalized failure-code buckets like `url_-1009`, `sparkle_2003`, `other_42`
+- product friction fields limited to `surface`, `stage`, `result`,
+  `failure_kind`, `elapsed_bucket`, `route_shape`, and `model_state`
 
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
@@ -161,6 +165,40 @@ without joining against any sensitive context.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
+
+## Analytics taxonomy review checklist
+
+Every analytics change should update `AnalyticsEventPolicy.swift` and this doc
+in the same PR. `Tests/AnalyticsEventPolicyTests.swift` machine-checks the
+event-name list above and the compiled property taxonomy.
+
+For each new or changed event:
+
+- document the event name in "Allowlisted analytics events"
+- keep event names stable once released; add a new event instead of changing the
+  meaning of an old one
+- use enum, bucket, boolean, or count-bucket properties whenever possible
+- use raw numeric diagnostics only for reviewed audio-health shape, such as
+  sample rate, channel count, scalar volume, or peak buckets needed to debug
+  capture reliability
+- route activation and return-loop events through `ActivationTelemetry` when
+  possible so saved-artifact and agent-payoff signals stay coarse
+- verify `bash run-tests.sh --filter AnalyticsEventPolicy` and
+  `bash run-tests.sh --filter AnalyticsPayloadSanitizer`
+
+Never add analytics properties for:
+
+- transcript text or prompt text
+- audio data, audio paths, or audio references
+- meeting titles
+- speaker names or invitee names
+- absolute file paths or filenames derived from user content
+- source app names or bundle IDs
+- emails, tokens, authorization values, or credentials
+- raw URLs or referrers
+- raw device IDs, advertising IDs, person IDs, user IDs, distinct IDs, or
+  identity-stitching fields
+- free-form error strings or free-form context blobs
 
 ## Nightly guardrail sweep
 

@@ -711,9 +711,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     init(
         paths: CoreStoragePaths = .default,
-        systemAudioCaptureForTesting systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?
+        systemAudioCaptureForTesting systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?,
+        sleepWakeNotifications: AudioSleepWakeNotifications = .macOSWorkspace
     ) {
         self.paths = paths
+        self.sleepWakeNotifications = sleepWakeNotifications
         self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
         self.systemAudioCapture = systemAudioCapture
         if let systemAudioCapture {

@@ -9,6 +9,10 @@ extension Transcription {
     struct SnapshotMatchResult {
         let profileId: UUID
         let similarity: Double
+        /// Similarity of the next-closest non-disputed profile that cleared the floor, or -1
+        /// if there was no runner-up. Used by `SpeakerNamingPolicy.shouldAutoAccept` as the
+        /// "clear winner" margin guard.
+        let secondBestSimilarity: Double
     }
 
     // MARK: - Embedding Utilities
@@ -108,7 +112,8 @@ extension Transcription {
             return nil
         }
 
-        return SnapshotMatchResult(profileId: matched.id, similarity: bestSimilarity)
+        return SnapshotMatchResult(profileId: matched.id, similarity: bestSimilarity,
+                                   secondBestSimilarity: secondBestSimilarity)
     }
 
     /// Compute L2-normalized weighted mean of multiple embeddings.

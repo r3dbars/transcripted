@@ -17,7 +17,8 @@ func testSpeakerNamingPolicy() {
         let mapping = SpeakerNamingPolicy.initialMapping(
             speakerId: "0",
             profile: profile,
-            similarity: 0.97
+            similarity: 0.97,
+            secondBestSimilarity: -1
         )
 
         assertNil(mapping.identifiedName, "tentative matches should stay generic until the user confirms them")
@@ -40,12 +41,61 @@ func testSpeakerNamingPolicy() {
         let mapping = SpeakerNamingPolicy.initialMapping(
             speakerId: "0",
             profile: profile,
-            similarity: 0.91
+            similarity: 0.95,            // above the raised 0.92 auto-accept bar
+            secondBestSimilarity: -1     // no confusable runner-up -> margin satisfied
         )
 
         assertEqual(mapping.identifiedName, "Alex", "strong repeated matches should still auto-apply")
         assertEqual(mapping.displayName, "Alex", "auto-applied names should render without a tentative suffix")
         assertEqual(mapping.confidence, .high, "strong repeated matches should be marked high confidence")
+    }
+
+    runSuite("SpeakerNamingPolicy.initialMapping confirms (does not auto-apply) when a runner-up is close") {
+        let profile = SpeakerProfile(
+            id: UUID(),
+            displayName: "Alex",
+            nameSource: NameSource.userManual,
+            embedding: [0.1, 0.2, 0.3],
+            firstSeen: Date(),
+            lastSeen: Date(),
+            callCount: 8,
+            confidence: 0.9,
+            disputeCount: 0
+        )
+
+        // sim 0.94 clears the 0.92 bar, but the runner-up at 0.90 is only 0.04 away
+        // (< 0.12 margin) — ambiguous, so route to confirm rather than silently name.
+        let ambiguous = SpeakerNamingPolicy.initialMapping(
+            speakerId: "0", profile: profile, similarity: 0.94, secondBestSimilarity: 0.90
+        )
+        assertNil(ambiguous.identifiedName, "a close runner-up should block silent auto-naming (confirm instead)")
+
+        // same match with a clear gap (runner-up 0.78) auto-applies.
+        let clear = SpeakerNamingPolicy.initialMapping(
+            speakerId: "0", profile: profile, similarity: 0.94, secondBestSimilarity: 0.78
+        )
+        assertEqual(clear.identifiedName, "Alex", "a clear-winner match should still auto-apply")
+    }
+
+    runSuite("SpeakerNamingPolicy.initialMapping no longer auto-applies between 0.88 and 0.92") {
+        let profile = SpeakerProfile(
+            id: UUID(),
+            displayName: "Alex",
+            nameSource: NameSource.userManual,
+            embedding: [0.1, 0.2, 0.3],
+            firstSeen: Date(),
+            lastSeen: Date(),
+            callCount: 8,
+            confidence: 0.9,
+            disputeCount: 0
+        )
+
+        // 0.90 would have auto-applied under the old 0.88 bar; with the raised 0.92 bar it
+        // must drop to a confirm.
+        let mapping = SpeakerNamingPolicy.initialMapping(
+            speakerId: "0", profile: profile, similarity: 0.90, secondBestSimilarity: -1
+        )
+        assertNil(mapping.identifiedName, "matches between the old and new bar should confirm, not auto-apply")
     }
 
     runSuite("SpeakerNamingPolicy.initialMapping keeps disputed profiles generic") {
@@ -64,7 +114,8 @@ func testSpeakerNamingPolicy() {
         let mapping = SpeakerNamingPolicy.initialMapping(
             speakerId: "0",
             profile: profile,
-            similarity: 0.95
+            similarity: 0.95,
+            secondBestSimilarity: -1
         )
 
         assertNil(mapping.identifiedName, "disputed profiles should not auto-apply")

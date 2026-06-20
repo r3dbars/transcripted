@@ -352,15 +352,15 @@ FROM (
     AND event = 'activation_return_proxy_observed'
     {app_version_filter(app_version)}
   UNION ALL
-  SELECT 'multi_artifact_proxy' AS signal, sum(artifact_events) AS events, count() AS devices
+  SELECT 'multi_artifact_proxy' AS signal, sum(saved_output_events) AS events, count() AS devices
   FROM (
-    SELECT distinct_id, count() AS artifact_events
+    SELECT distinct_id, count() AS saved_output_events
     FROM events
     WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-      AND event IN ('activation_first_artifact_saved', 'meeting_transcript_saved', 'dictation_completed')
+      AND event IN ('meeting_transcript_saved', 'dictation_completed')
       {app_version_filter(app_version)}
     GROUP BY distinct_id
-    HAVING artifact_events >= 2
+    HAVING saved_output_events >= 2
   )
 )
 ORDER BY devices DESC, events DESC
@@ -849,6 +849,10 @@ def run_self_test() -> int:
         return 1
     if "properties['reason']" in reliability_query(30, None):
         print("self-test failed: reliability query should not export free-form reason values", file=sys.stderr)
+        return 1
+    repeat_query = repeat_breakdown_query(30, None)
+    if "event IN ('activation_first_artifact_saved', 'meeting_transcript_saved', 'dictation_completed')" in repeat_query:
+        print("self-test failed: repeat proxy must not double-count first-artifact telemetry", file=sys.stderr)
         return 1
     zero_repeat_data = json.loads(json.dumps(data))
     zero_repeat_data["results"]["repeat_breakdown"] = [

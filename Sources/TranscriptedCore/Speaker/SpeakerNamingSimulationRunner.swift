@@ -626,7 +626,8 @@ public final class SpeakerNamingSimulationRunner {
                     persistentSpeakerId: match.profileId,
                     sessionEmbedding: meanEmbedding,
                     matchedProfileSnapshot: snapshot,
-                    matchSimilarity: match.similarity
+                    matchSimilarity: match.similarity,
+                    matchSecondSimilarity: match.secondBestSimilarity
                 )
             } else {
                 let profile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
@@ -759,12 +760,14 @@ public final class SpeakerNamingSimulationRunner {
                let similarity = context.matchSimilarity {
                 let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                     profile: snapshot,
-                    similarity: similarity
+                    similarity: similarity,
+                    secondBestSimilarity: context.matchSecondSimilarity
                 )
                 speakerMappings[key] = SpeakerNamingPolicy.initialMapping(
                     speakerId: speakerId,
                     profile: snapshot,
-                    similarity: similarity
+                    similarity: similarity,
+                    secondBestSimilarity: context.matchSecondSimilarity
                 )
                 speakerSources[key] = canAutoAccept ? "db" : "db_pending"
             } else {

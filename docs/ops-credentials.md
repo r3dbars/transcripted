@@ -38,12 +38,22 @@ Only report aggregate counts, status codes, deployment IDs, and issue titles. Fo
 
 ### PostHog Probe Shape
 
-The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, and first-value events. It also prints a 7-day daily active-device trend so operators can see whether DAU is rising, flat, or missing without inspecting user-level data. First-value events are limited to `dictation_completed`, `onboarding_first_dictation_saved`, `meeting_transcript_saved`, `onboarding_agent_cta_clicked`, `activation_first_artifact_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, and `activation_return_proxy_observed`, so the health lane can see whether users reached successful dictation, a saved Markdown artifact, or agent payoff without exposing transcript text, file paths, titles, or user identifiers.
+The PostHog probe reports aggregate 7-day counts for active devices, workflow events, onboarding events, abandonment exits, and first-value events. It also prints a 7-day daily active-device trend so operators can see whether DAU is rising, flat, or missing without inspecting user-level data. First-value events are limited to `dictation_completed`, `onboarding_first_dictation_saved`, `meeting_transcript_saved`, `onboarding_agent_cta_clicked`, `activation_first_artifact_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, and `activation_return_proxy_observed`, so the health lane can see whether users reached successful dictation, a saved Markdown artifact, or agent payoff without exposing transcript text, file paths, titles, or user identifiers. `workflow_abandoned` is an exit taxonomy, not a first-value event; query it by coarse workflow/stage/reason buckets only.
 
 For the full anonymous website-to-first-value attribution contract, see
 [`install-attribution-map.md`](./install-attribution-map.md).
 
 If `POSTHOG_HOST` points at the app ingest host, such as `https://us.i.posthog.com`, the probe normalizes it to the matching PostHog API host before running HogQL. The probe only sends `POSTHOG_PERSONAL_API_KEY` to HTTPS PostHog API hosts by default. Set `POSTHOG_ALLOW_UNTRUSTED_HOST=1` only when using a trusted self-hosted PostHog endpoint.
+
+For retention and habit checks, use:
+
+```bash
+python3 scripts/ops/retention-cohort-report.py
+```
+
+That report stays aggregate-only and covers active days, repeat dictation,
+repeat meeting use, version adoption, return after first artifact, and drop-off
+after first run. See `docs/retention-cohort-analytics.md`.
 
 For a deeper activation decision read, run:
 
@@ -75,6 +85,22 @@ next PRs. If PostHog read credentials are missing, it still emits a pack with
 explicit `UNKNOWN` states unless `--strict` is passed. Use this in health or
 nightly reports when an agent needs decision context instead of a dashboard
 dump.
+
+For the normal health lane's product-task loop, run:
+
+```bash
+python3 scripts/ops/posthog-product-dashboard-summary.py --days 30
+```
+
+`health-probe.sh posthog` runs this helper automatically when credentials are
+present. The report summarizes the five product-learning dashboard families
+and returns ranked product tasks from aggregate counts only. For CI or dry-run
+use:
+
+```bash
+python3 scripts/ops/posthog-product-dashboard-summary.py --self-test
+python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json
+```
 
 ### Cloudflare Read vs Deploy
 

@@ -27,6 +27,29 @@ enum ActivationTelemetry {
         case meetingSave = "meeting_save"
     }
 
+    enum WorkflowKind: String {
+        case onboarding
+        case betaModelPrep = "beta_model_prep"
+        case localSummary = "local_summary"
+        case speakerReview = "speaker_review"
+        case agentSetup = "agent_setup"
+        case meetingPrompt = "meeting_prompt"
+        case failedMeetingRetry = "failed_meeting_retry"
+        case artifactHandoff = "artifact_handoff"
+    }
+
+    enum WorkflowAbandonmentReasonKind: String {
+        case blocked
+        case cancelled
+        case deleted
+        case dismissed
+        case failed
+        case remindedLater = "reminded_later"
+        case suppressed
+        case unavailable
+        case windowClosed = "window_closed"
+    }
+
     enum AgentPromptKind: String {
         case localAgentPrompt = "local_agent_prompt"
         case claudeDesktopSetup = "claude_desktop_setup"
@@ -161,6 +184,16 @@ enum ActivationTelemetry {
         }
 
         AnalyticsReporter.track("activation_agent_prompt_action_clicked", properties: properties)
+
+        if result == .failed {
+            trackWorkflowAbandoned(
+                workflowKind: .artifactHandoff,
+                stage: promptKind.rawValue,
+                reasonKind: .failed,
+                surface: surface,
+                priorReadyState: agentTarget.rawValue
+            )
+        }
     }
 
     static func trackAgentSetupCTA(
@@ -180,6 +213,38 @@ enum ActivationTelemetry {
                 "surface": surface.rawValue,
             ]
         )
+
+        if result == .failed {
+            trackWorkflowAbandoned(
+                workflowKind: .agentSetup,
+                stage: setupKind.rawValue,
+                reasonKind: .failed,
+                surface: surface,
+                priorReadyState: priorStatus.rawValue
+            )
+        }
+    }
+
+    static func trackWorkflowAbandoned(
+        workflowKind: WorkflowKind,
+        stage: String,
+        reasonKind: WorkflowAbandonmentReasonKind,
+        surface: Surface,
+        elapsedBucket: String? = nil,
+        priorReadyState: String? = nil
+    ) {
+        var properties = [
+            "elapsed_bucket": elapsedBucket ?? "unknown",
+            "reason_kind": reasonKind.rawValue,
+            "stage": stage,
+            "surface": surface.rawValue,
+            "workflow_kind": workflowKind.rawValue,
+        ]
+        if let priorReadyState {
+            properties["prior_ready_state"] = priorReadyState
+        }
+
+        AnalyticsReporter.track("workflow_abandoned", properties: properties)
     }
 
     @discardableResult
@@ -238,5 +303,59 @@ enum ActivationTelemetry {
         default:
             return "older"
         }
+    }
+}
+
+enum ProductFrictionTelemetry {
+    enum Surface: String {
+        case dictation
+        case meeting
+        case update
+    }
+
+    enum Result: String {
+        case blocked
+        case cancelled
+        case completed
+        case failed
+        case fallback
+        case giveUp = "give_up"
+        case started
+    }
+
+    static func track(
+        surface: Surface,
+        stage: String,
+        result: Result,
+        failureKind: String? = nil,
+        elapsedBucket: String? = nil,
+        routeShape: String? = nil,
+        modelState: String? = nil
+    ) {
+        var properties = [
+            "result": result.rawValue,
+            "stage": stage,
+            "surface": surface.rawValue,
+        ]
+
+        if let failureKind {
+            properties["failure_kind"] = failureKind
+        }
+        if let elapsedBucket {
+            properties["elapsed_bucket"] = elapsedBucket
+        }
+        if let routeShape {
+            properties["route_shape"] = routeShape
+        }
+        if let modelState {
+            properties["model_state"] = modelState
+        }
+
+        AnalyticsReporter.track("product_friction_observed", properties: properties)
+    }
+
+    static func modelState(isReady: Bool?) -> String {
+        guard let isReady else { return "unknown" }
+        return isReady ? "ready" : "not_ready"
     }
 }

@@ -98,6 +98,15 @@ rules:
       - "bash -n scripts/ops/health-probe.sh"
 
   - paths:
+      - "scripts/ops/posthog-product-dashboard-summary.py"
+      - "Tests/Fixtures/posthog-product-dashboard-summary.json"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-product-dashboard-summary.py"
+      - "python3 scripts/ops/posthog-product-dashboard-summary.py --self-test"
+      - "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only"
+
+  - paths:
       - "scripts/dev/onboarding.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
@@ -135,6 +144,15 @@ rules:
       - "python3 scripts/ops/posthog-product-context-pack.py --fixture Tests/Fixtures/posthog-product-context-pack-fixture.json --write-dir build/posthog-product-context-sample"
 
   - paths:
+      - "scripts/ops/posthog-dashboard-queries.py"
+      - "Tests/Fixtures/posthog-dashboard-query-results.json"
+      - "docs/posthog-dashboard-query-helpers.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-dashboard-queries.py"
+      - "python3 scripts/ops/posthog-dashboard-queries.py --self-test"
+
+  - paths:
       - "scripts/ops/nightly-security-check.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
@@ -147,6 +165,13 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/release-gate-report.py"
       - "python3 scripts/ops/release-gate-report.py --self-test"
+
+  - paths:
+      - "scripts/ops/release-health-card.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/release-health-card.py"
+      - "python3 scripts/ops/release-health-card.py --self-test"
 
   - paths:
       - "scripts/release/post-dmg-release-audit.py"
