@@ -960,37 +960,41 @@ class DictationSessionController: ObservableObject {
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
             let pasteOutcome = self.pasteWithClipboardRestore(text)
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
-            let autoSendOutcome: DictationAutoSendOutcome
-            let saveFailureMessage: String?
-            switch DictationStopFinalizationPolicy.order {
-            case .saveAfterAutoEnter:
-                stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
-                autoSendOutcome = await self.performAutoEnterIfNeeded(
-                    text: text,
-                    delivery: pasteOutcome.delivery
-                )
-                stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
-                stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
-                saveFailureMessage = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
-                stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
-            case .saveBeforeAutoEnter:
-                stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
-                let saveTask = self.startPersistingDictationTranscript(
-                    text: text,
-                    delivery: pasteOutcome.delivery
-                )
-                stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
-                autoSendOutcome = await self.performAutoEnterIfNeeded(
-                    text: text,
-                    delivery: pasteOutcome.delivery
-                )
-                stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
-                saveFailureMessage = await self.finishPersistingDictationTranscript(
-                    saveTask,
-                    delivery: pasteOutcome.delivery
-                )
-                stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
-            }
+            let finalization = await DictationStopFinalizer.finalize(
+                order: DictationStopFinalizationPolicy.order,
+                startSaving: {
+                    stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
+                    return self.startPersistingDictationTranscript(
+                        text: text,
+                        delivery: pasteOutcome.delivery
+                    )
+                },
+                finishSaving: { saveTask in
+                    let failure = await self.finishPersistingDictationTranscript(
+                        saveTask,
+                        delivery: pasteOutcome.delivery
+                    )
+                    stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
+                    return failure
+                },
+                saveSynchronously: {
+                    stopTiming.saveStartedAt = CFAbsoluteTimeGetCurrent()
+                    let failure = self.persistDictationTranscript(text: text, delivery: pasteOutcome.delivery)
+                    stopTiming.savedAt = CFAbsoluteTimeGetCurrent()
+                    return failure
+                },
+                performAutoEnter: {
+                    stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
+                    let outcome = await self.performAutoEnterIfNeeded(
+                        text: text,
+                        delivery: pasteOutcome.delivery
+                    )
+                    stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
+                    return outcome
+                }
+            )
+            let autoSendOutcome = finalization.autoEnterOutcome
+            let saveFailureMessage = finalization.saveFailure
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             stopTiming.completedAt = CFAbsoluteTimeGetCurrent()
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
