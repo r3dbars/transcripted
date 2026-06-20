@@ -71,6 +71,8 @@ func testAnalyticsEventPolicy() {
             "automatic_downloads_enabled",
             "available",
             "backoff_kind",
+            "build_channel",
+            "build_revision",
             "build_version",
             "calendar_confidence",
             "calendar_status",
