@@ -426,6 +426,24 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
             properties["failure_kind"] = failureKind
         }
         AnalyticsReporter.track(event, properties: properties)
+
+        switch event {
+        case "update_download_started":
+            ProductFrictionTelemetry.track(
+                surface: .update,
+                stage: "update_download",
+                result: .started
+            )
+        case "update_download_finished":
+            ProductFrictionTelemetry.track(
+                surface: .update,
+                stage: "update_download",
+                result: failureKind == nil ? .completed : .failed,
+                failureKind: failureKind
+            )
+        default:
+            break
+        }
     }
 
     private func currentAppVersion() -> String {

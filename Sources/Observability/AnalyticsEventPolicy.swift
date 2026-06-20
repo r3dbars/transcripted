@@ -95,6 +95,8 @@ struct AnalyticsEventPolicy: Equatable {
 
     private static let runtimeDiagnosticProperties: Set<String> = [
         "app_version",
+        "build_channel",
+        "build_revision",
         "build_version",
         "duration_bucket",
         "format_ready",
@@ -157,6 +159,31 @@ struct AnalyticsEventPolicy: Equatable {
         "prior_artifact_kind",
         "proxy_kind",
         "return_window_bucket",
+        "surface",
+    ]
+
+    private static let settingsFeatureDiscoveryProperties: Set<String> = [
+        "feature_area",
+        "page_id",
+        "source",
+    ]
+
+    private static let workflowAbandonedProperties: Set<String> = [
+        "elapsed_bucket",
+        "prior_ready_state",
+        "reason_kind",
+        "stage",
+        "surface",
+        "workflow_kind",
+    ]
+
+    private static let productFrictionProperties: Set<String> = [
+        "elapsed_bucket",
+        "failure_kind",
+        "model_state",
+        "result",
+        "route_shape",
+        "stage",
         "surface",
     ]
 
@@ -351,6 +378,14 @@ struct AnalyticsEventPolicy: Equatable {
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
         ),
+        "workflow_abandoned": .init(
+            name: "workflow_abandoned",
+            allowedProperties: workflowAbandonedProperties
+        ),
+        "product_friction_observed": .init(
+            name: "product_friction_observed",
+            allowedProperties: productFrictionProperties
+        ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",
             allowedProperties: [
@@ -451,6 +486,10 @@ struct AnalyticsEventPolicy: Equatable {
                 "page_id",
                 "source",
             ]
+        ),
+        "settings_feature_discovered": .init(
+            name: "settings_feature_discovered",
+            allowedProperties: settingsFeatureDiscoveryProperties
         ),
         "settings_action_clicked": .init(
             name: "settings_action_clicked",

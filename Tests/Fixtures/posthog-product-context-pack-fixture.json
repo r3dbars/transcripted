@@ -1,0 +1,160 @@
+{
+  "generated_at": "2026-06-19T12:00:00+00:00",
+  "window_days": 30,
+  "app_version": null,
+  "source": {
+    "kind": "fixture_aggregate",
+    "privacy": "aggregate counts and enum breakdowns only"
+  },
+  "results": {
+    "overview": [
+      {
+        "launch_devices": 214,
+        "first_artifact_devices": 37,
+        "agent_prompt_devices": 28,
+        "agent_setup_devices": 32,
+        "true_agent_query_devices": 0,
+        "return_proxy_devices": 17,
+        "dictation_completed_devices": 43,
+        "meeting_saved_devices": 12,
+        "workflow_devices": 193
+      }
+    ],
+    "event_counts": [
+      {
+        "event": "app_launched",
+        "events": 612,
+        "devices": 214
+      },
+      {
+        "event": "activation_first_artifact_saved",
+        "events": 51,
+        "devices": 37
+      },
+      {
+        "event": "activation_agent_prompt_action_clicked",
+        "events": 43,
+        "devices": 28
+      },
+      {
+        "event": "activation_agent_setup_cta_clicked",
+        "events": 49,
+        "devices": 32
+      },
+      {
+        "event": "activation_return_proxy_observed",
+        "events": 31,
+        "devices": 17
+      },
+      {
+        "event": "agent_capture_query_observed",
+        "events": 0,
+        "devices": 0
+      },
+      {
+        "event": "dictation_completed",
+        "events": 401,
+        "devices": 43
+      },
+      {
+        "event": "meeting_transcript_saved",
+        "events": 32,
+        "devices": 12
+      }
+    ],
+    "reliability_breakdown": [
+      {
+        "event": "dictation_audio_route_recovery_timeout",
+        "failure_kind": "route_settle_timeout",
+        "capture_quality": null,
+        "result": null,
+        "events": 21,
+        "devices": 9
+      },
+      {
+        "event": "dictation_no_speech",
+        "failure_kind": "no_speech",
+        "capture_quality": null,
+        "result": null,
+        "events": 15,
+        "devices": 7
+      },
+      {
+        "event": "meeting_transcript_failed",
+        "failure_kind": "speaker_finalization_failed",
+        "capture_quality": "degraded",
+        "result": null,
+        "events": 5,
+        "devices": 3
+      }
+    ],
+    "release_versions": [
+      {
+        "app_version": "1.1.48",
+        "active_devices": 181,
+        "workflow_events": 2050,
+        "first_artifact_devices": 35,
+        "success_devices": 49,
+        "failure_devices": 11,
+        "failure_events": 32
+      },
+      {
+        "app_version": "1.1.47",
+        "active_devices": 29,
+        "workflow_events": 218,
+        "first_artifact_devices": 2,
+        "success_devices": 6,
+        "failure_devices": 1,
+        "failure_events": 1
+      },
+      {
+        "app_version": "unknown",
+        "active_devices": 7,
+        "workflow_events": 25,
+        "first_artifact_devices": 0,
+        "success_devices": 0,
+        "failure_devices": 0,
+        "failure_events": 0
+      }
+    ],
+    "feature_breakdown": [
+      {
+        "feature": "dictation",
+        "events": 401,
+        "devices": 43
+      },
+      {
+        "feature": "agent_bridge",
+        "events": 92,
+        "devices": 38
+      },
+      {
+        "feature": "artifact_actions",
+        "events": 67,
+        "devices": 31
+      },
+      {
+        "feature": "meetings",
+        "events": 32,
+        "devices": 12
+      },
+      {
+        "feature": "updates",
+        "events": 18,
+        "devices": 16
+      }
+    ],
+    "repeat_breakdown": [
+      {
+        "signal": "activation_return_proxy_observed",
+        "events": 31,
+        "devices": 17
+      },
+      {
+        "signal": "multi_artifact_proxy",
+        "events": 12,
+        "devices": 8
+      }
+    ]
+  }
+}

@@ -243,7 +243,7 @@ extension Transcription {
 
             // Match each speaker's mean embedding against the DB once
             // (existingProfiles was already snapshotted above for post-processing)
-            var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double)] = [:]
+            var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double, secondSimilarity: Double)] = [:]
             var speakerNewProfiles: [Int: UUID] = [:]
             var speakerIdRemap: [Int: Int] = [:]
 
@@ -305,7 +305,7 @@ extension Transcription {
 
                 // Match only against profiles that existed BEFORE this recording
                 if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold) {
-                    speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity)
+                    speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity)
                     _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: matchResult.profileId)
                     let matchedProfile = existingProfiles.first(where: { $0.id == matchResult.profileId })
                     AppLogger.transcription.info("Speaker matched DB profile", [
@@ -374,7 +374,8 @@ extension Transcription {
                     persistentSpeakerId: persistentId,
                     sessionEmbedding: sessionEmbedding,
                     matchedProfileSnapshot: matchedProfileSnapshot,
-                    matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity
+                    matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity,
+                    matchSecondSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondSimilarity
                 )
             }
 
@@ -689,7 +690,7 @@ extension Transcription {
             }
         }
 
-        var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double)] = [:]
+        var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double, secondSimilarity: Double)] = [:]
         var speakerNewProfiles: [Int: UUID] = [:]
         var speakerIdRemap: [Int: Int] = [:]
         var newlyCreatedProfileIds: Set<UUID> = []
@@ -726,7 +727,7 @@ extension Transcription {
             }
 
             if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold) {
-                speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity)
+                speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity)
                 _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: matchResult.profileId)
             } else {
                 let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
@@ -766,7 +767,8 @@ extension Transcription {
                 persistentSpeakerId: persistentId,
                 sessionEmbedding: sessionEmbedding,
                 matchedProfileSnapshot: matchedProfileSnapshot,
-                matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity
+                matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity,
+                matchSecondSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondSimilarity
             )
         }
 

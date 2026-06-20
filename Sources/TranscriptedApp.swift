@@ -165,6 +165,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         backoffKind: backoffDecision.kind
                     )
                 )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "prompt_shown",
+                    reasonKind: .dismissed,
+                    surface: .meetingOverlay,
+                    priorReadyState: self.meetingPromptReadyState()
+                )
             }
             meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
                 guard let self else { return }
@@ -176,12 +183,26 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         backoffKind: backoffDecision.kind
                     )
                 )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "prompt_shown",
+                    reasonKind: .remindedLater,
+                    surface: .meetingOverlay,
+                    priorReadyState: self.meetingPromptReadyState()
+                )
             }
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
                 AnalyticsReporter.track(
                     "meeting_prompt_suppressed",
                     properties: self.analyticsProperties(for: suppression)
+                )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "pre_prompt",
+                    reasonKind: .suppressed,
+                    surface: .meetingOverlay,
+                    priorReadyState: self.meetingPromptReadyState()
                 )
             }
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
@@ -682,6 +703,20 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "pasteback_status": TranscriptedPermissionAccess.isGranted(.accessibility) ? "granted" : "not_granted",
             ]
         )
+    }
+
+    private func meetingPromptReadyState() -> String {
+        if appState.meetingSession.isRecording {
+            return "recording_active"
+        }
+        if appState.sttRouter.isRecording {
+            return "dictation_active"
+        }
+        if TranscriptedPermissionAccess.isGranted(.microphone),
+           TranscriptedPermissionAccess.isGranted(.systemAudioRecording) {
+            return "ready"
+        }
+        return "not_ready"
     }
 
     private func modelStateAnalyticsName(_ state: ParakeetModelState) -> String {

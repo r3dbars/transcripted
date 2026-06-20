@@ -71,6 +71,8 @@ func testAnalyticsEventPolicy() {
             "automatic_downloads_enabled",
             "available",
             "backoff_kind",
+            "build_channel",
+            "build_revision",
             "build_version",
             "calendar_confidence",
             "calendar_status",
@@ -109,10 +111,12 @@ func testAnalyticsEventPolicy() {
             "default_system_output_volume_during",
             "delivery",
             "dictation_ready",
+            "elapsed_bucket",
             "enabled",
             "entrypoint",
             "failure_code",
             "failure_kind",
+            "feature_area",
             "first_artifact_kind",
             "first_dictation_saved",
             "format_ready",
@@ -150,6 +154,7 @@ func testAnalyticsEventPolicy() {
             "previous_clean_shutdown",
             "previous_version",
             "prior_artifact_kind",
+            "prior_ready_state",
             "prior_status",
             "prompt_kind",
             "prompt_reason",
@@ -163,6 +168,7 @@ func testAnalyticsEventPolicy() {
             "recovering",
             "reporting_kind",
             "required",
+            "reason_kind",
             "result",
             "route_ready",
             "route_shape",
@@ -180,6 +186,7 @@ func testAnalyticsEventPolicy() {
             "source",
             "stall_kind",
             "stall_stage",
+            "stage",
             "state",
             "step_id",
             "step_index",
@@ -202,6 +209,7 @@ func testAnalyticsEventPolicy() {
             "voice_processing",
             "voice_processing_active",
             "was_recording",
+            "workflow_kind",
         ]
         let properties = allAllowedAnalyticsPropertyNames()
 
@@ -483,11 +491,96 @@ func testAnalyticsEventPolicy() {
         assertEqual(defaults.string(forKey: ActivationTelemetry.firstArtifactKindKey), "meeting", "only opted-in artifact kind should be retained")
     }
 
+    runSuite("AnalyticsEventPolicy allows workflow abandonment taxonomy") {
+        let abandoned = AnalyticsEventPolicy.policy(forEvent: "workflow_abandoned")
+        assertEqual(
+            abandoned?.allowedProperties ?? Set<String>(),
+            ["elapsed_bucket", "prior_ready_state", "reason_kind", "stage", "surface", "workflow_kind"],
+            "workflow abandonment should stay coarse and enum-only"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "failed_meeting_retry",
+                "stage": "retry_available",
+                "reason_kind": "dismissed",
+                "elapsed_bucket": "unknown",
+                "surface": "home",
+                "prior_ready_state": "retry_ready",
+                "meeting_title": "Customer call",
+                "file_path": "/Users/redbars/private.md",
+                "raw_duration": "472.221",
+                "raw_error": "private stack",
+                "source_app": "Zoom",
+                "url": "https://example.com/meeting",
+            ],
+            allowedKeys: abandoned?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["workflow_kind"], "failed_meeting_retry", "workflow kind should survive")
+        assertEqual(sanitized["stage"], "retry_available", "stage should survive")
+        assertEqual(sanitized["reason_kind"], "dismissed", "reason kind should survive")
+        assertEqual(sanitized["elapsed_bucket"], "unknown", "elapsed bucket should survive")
+        assertEqual(sanitized["surface"], "home", "surface should survive")
+        assertEqual(sanitized["prior_ready_state"], "retry_ready", "prior ready state should survive")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["raw_duration"], "raw durations must not be sent")
+        assertNil(sanitized["raw_error"], "raw errors must not be sent")
+        assertNil(sanitized["source_app"], "source apps must not be sent")
+        assertNil(sanitized["url"], "raw URLs must not be sent")
+    }
+
+    runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {
+        let friction = AnalyticsEventPolicy.policy(forEvent: "product_friction_observed")
+        assertEqual(
+            friction?.allowedProperties ?? Set<String>(),
+            ["elapsed_bucket", "failure_kind", "model_state", "result", "route_shape", "stage", "surface"],
+            "product friction should stay narrowly scoped"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "elapsed_bucket": "10_29s",
+                "failure_kind": "pasteback_failed",
+                "model_state": "ready",
+                "result": "failed",
+                "route_shape": "built_in_input_to_bluetooth_output",
+                "stage": "pasteback",
+                "surface": "dictation",
+                "error_message": "private raw error",
+                "audio_path": "/Users/jane/private.wav",
+                "file_path": "/Users/jane/private.md",
+                "meeting_title": "Customer roadmap",
+                "source_app_bundle": "com.example.Private",
+                "transcript_text": "private transcript",
+                "retry_count": "7",
+            ],
+            allowedKeys: friction?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["elapsed_bucket"], "10_29s", "elapsed time should survive only as a bucket")
+        assertEqual(sanitized["failure_kind"], "pasteback_failed", "failure kind should survive as a normalized enum")
+        assertEqual(sanitized["model_state"], "ready", "model state should survive as a coarse enum")
+        assertEqual(sanitized["result"], "failed", "result should survive as a coarse enum")
+        assertEqual(sanitized["route_shape"], "built_in_input_to_bluetooth_output", "route shape should survive as a coarse enum")
+        assertEqual(sanitized["stage"], "pasteback", "stage should survive as a coarse enum")
+        assertEqual(sanitized["surface"], "dictation", "surface should survive as a coarse enum")
+        assertNil(sanitized["error_message"], "raw error strings should stay out of friction analytics")
+        assertNil(sanitized["audio_path"], "audio paths should stay out of friction analytics")
+        assertNil(sanitized["file_path"], "file paths should stay out of friction analytics")
+        assertNil(sanitized["meeting_title"], "meeting titles should stay out of friction analytics")
+        assertNil(sanitized["source_app_bundle"], "source app bundle IDs should stay out of friction analytics")
+        assertNil(sanitized["transcript_text"], "transcript text should stay out of friction analytics")
+        assertNil(sanitized["retry_count"], "raw retry counts should stay out of friction analytics")
+    }
+
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
         let menuOpened = AnalyticsEventPolicy.policy(forEvent: "menu_bar_opened")
         let menuAction = AnalyticsEventPolicy.policy(forEvent: "menu_bar_action_clicked")
         let settingsOpened = AnalyticsEventPolicy.policy(forEvent: "settings_opened")
         let settingsPage = AnalyticsEventPolicy.policy(forEvent: "settings_page_viewed")
+        let settingsFeature = AnalyticsEventPolicy.policy(forEvent: "settings_feature_discovered")
         let settingsAction = AnalyticsEventPolicy.policy(forEvent: "settings_action_clicked")
         let settingsToggle = AnalyticsEventPolicy.policy(forEvent: "settings_toggle_changed")
         let settingsPermission = AnalyticsEventPolicy.policy(forEvent: "settings_permission_cta_clicked")
@@ -500,6 +593,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(menuAction?.allowedProperties.contains("action_id"), true, "menu clicks should preserve the clicked action")
         assertEqual(settingsOpened?.allowedProperties.contains("source"), true, "settings opens should preserve entry source")
         assertEqual(settingsPage?.allowedProperties.contains("page_id"), true, "settings page views should preserve page id")
+        assertEqual(settingsFeature?.allowedProperties ?? Set<String>(), ["feature_area", "page_id", "source"], "feature discovery should preserve only the area, page, and source")
         assertEqual(settingsAction?.allowedProperties.contains("action_id"), true, "settings actions should preserve action id")
         assertEqual(settingsToggle?.allowedProperties.contains("setting_id"), true, "settings toggles should preserve setting id")
         assertEqual(settingsPermission?.allowedProperties.contains("permission_kind"), true, "settings permission CTAs should preserve permission kind")
@@ -517,23 +611,44 @@ func testAnalyticsEventPolicy() {
                 "automatic_downloads_enabled": "true",
                 "failure_code": "sparkle_2003",
                 "failure_kind": "feed_unreachable",
+                "feature_area": "agent_setup",
                 "page_id": "home",
                 "setting_id": "menu_bar_start_dictation",
                 "source": "menu_bar",
                 "state": "ready_to_install",
                 "surface": "settings_about",
             ],
-            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_code", "failure_kind", "page_id", "setting_id", "source", "state", "surface"]
+            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_code", "failure_kind", "feature_area", "page_id", "setting_id", "source", "state", "surface"]
         )
         assertEqual(sanitized["action_id"], "start_dictation", "action ids should survive sanitization")
         assertEqual(sanitized["automatic_downloads_enabled"], "true", "automatic update download state should survive sanitization")
         assertEqual(sanitized["failure_code"], "sparkle_2003", "coarse update failure codes should survive sanitization")
         assertEqual(sanitized["failure_kind"], "feed_unreachable", "update failure kind should survive sanitization")
+        assertEqual(sanitized["feature_area"], "agent_setup", "feature-area enums should survive sanitization")
         assertEqual(sanitized["page_id"], "home", "page ids should survive sanitization")
         assertEqual(sanitized["setting_id"], "menu_bar_start_dictation", "setting ids should survive sanitization")
         assertEqual(sanitized["source"], "menu_bar", "source enums should survive sanitization")
         assertEqual(sanitized["state"], "ready_to_install", "update state should survive sanitization")
         assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
+    }
+
+    runSuite("FeatureDiscoveryTelemetry tracks each high-leverage feature once") {
+        let suiteName = "FeatureDiscoveryTelemetryTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertTrue(
+            FeatureDiscoveryTelemetry.markDiscoveredIfNeeded(featureArea: .agentSetup, userDefaults: defaults),
+            "first discovery should be recorded"
+        )
+        assertFalse(
+            FeatureDiscoveryTelemetry.markDiscoveredIfNeeded(featureArea: .agentSetup, userDefaults: defaults),
+            "same feature discovery should not be recorded twice"
+        )
+        assertTrue(
+            FeatureDiscoveryTelemetry.markDiscoveredIfNeeded(featureArea: .captureLibrary, userDefaults: defaults),
+            "a different feature area should still be recorded"
+        )
     }
 
     runSuite("AnalyticsEventPolicy allows update download lifecycle attribution") {

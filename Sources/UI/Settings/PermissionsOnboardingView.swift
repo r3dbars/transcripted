@@ -50,6 +50,7 @@ struct PermissionsOnboardingView: View {
     @State private var flowStartedAt: CFAbsoluteTime?
     @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
+    @State private var didTrackAbandonment = false
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
     @FocusState private var demoEditorFocused: Bool
 
@@ -118,6 +119,7 @@ struct PermissionsOnboardingView: View {
         }
         .onDisappear {
             stopPolling()
+            trackAbandonmentIfNeeded(reason: .windowClosed)
             copiedResetTask?.cancel()
         }
     }
@@ -611,6 +613,20 @@ struct PermissionsOnboardingView: View {
                 crashReportingEnabled: CrashReportingPreferences.isEnabled(),
                 elapsedSeconds: flowStartedAt.map { CFAbsoluteTimeGetCurrent() - $0 }
             )
+        )
+    }
+
+    private func trackAbandonmentIfNeeded(reason: ActivationTelemetry.WorkflowAbandonmentReasonKind) {
+        guard !didTrackCompletion, !didTrackAbandonment, flowStartedAt != nil else { return }
+        didTrackAbandonment = true
+        let now = CFAbsoluteTimeGetCurrent()
+        ActivationTelemetry.trackWorkflowAbandoned(
+            workflowKind: .onboarding,
+            stage: currentStep.kind.analyticsID,
+            reasonKind: reason,
+            surface: .onboarding,
+            elapsedBucket: flowElapsedBucket(now: now),
+            priorReadyState: hasRequiredPermissions ? "ready" : "not_ready"
         )
     }
 
