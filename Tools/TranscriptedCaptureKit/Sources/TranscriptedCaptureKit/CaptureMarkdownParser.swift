@@ -2,6 +2,7 @@ import Foundation
 
 /// YAML frontmatter values plus the Markdown body that follows it.
 public struct ParsedCaptureDocument {
+    public let frontmatter: String
     public let values: [String: String]
     public let body: String
 }
@@ -91,19 +92,75 @@ public enum CaptureMarkdownParser {
 
         let frontmatterText = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
         var values: [String: String] = [:]
+        var currentListKey: String?
+        var currentListItems: [String] = []
+
+        func resetList() {
+            currentListKey = nil
+            currentListItems = []
+        }
+
+        func flushList() {
+            guard let currentListKey, !currentListItems.isEmpty else { return }
+            values[currentListKey] = currentListItems.joined(separator: ", ")
+            resetList()
+        }
 
         for line in frontmatterText.components(separatedBy: "\n") {
+            let isIndented = line.first?.isWhitespace == true
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.hasPrefix("- "),
-                  let separator = trimmed.firstIndex(of: ":") else { continue }
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+
+            if trimmed.hasPrefix("- ") {
+                guard currentListKey != nil else { continue }
+                currentListItems.append(
+                    String(trimmed.dropFirst(2))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                )
+                continue
+            }
+
+            guard !isIndented else { continue }
+
+            flushList()
+
+            guard let separator = trimmed.firstIndex(of: ":") else {
+                continue
+            }
+
             let key = String(trimmed[..<separator]).trimmingCharacters(in: .whitespaces)
             let value = String(trimmed[trimmed.index(after: separator)...])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            values[key] = value
-        }
 
-        return ParsedCaptureDocument(values: values, body: String(content[endRange.upperBound...]))
+            if value.isEmpty {
+                currentListKey = key
+                currentListItems = []
+                continue
+            }
+
+            if value.hasPrefix("["), value.hasSuffix("]") {
+                let inner = String(value.dropFirst().dropLast())
+                values[key] = inner
+                    .components(separatedBy: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: ", ")
+                resetList()
+                continue
+            }
+
+            values[key] = value
+            resetList()
+        }
+        flushList()
+
+        return ParsedCaptureDocument(
+            frontmatter: frontmatterText,
+            values: values,
+            body: String(content[endRange.upperBound...])
+        )
     }
 
     // MARK: - Meetings

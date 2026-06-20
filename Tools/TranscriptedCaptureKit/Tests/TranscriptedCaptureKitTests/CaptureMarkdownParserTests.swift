@@ -2,6 +2,54 @@ import XCTest
 @testable import TranscriptedCaptureKit
 
 final class CaptureMarkdownParserTests: XCTestCase {
+    func testParseFrontmatterNormalizesInlineAndBlockLists() throws {
+        let markdown = """
+        ---
+        title: "Release QA"
+        transcription_engine: parakeet_local
+        sources:
+          - mic
+          - system_audio
+        tags: [release, qa]
+        ---
+        ## Transcript
+        Body
+        """
+
+        let document = try XCTUnwrap(CaptureMarkdownParser.parseFrontmatter(from: markdown))
+
+        XCTAssertEqual(document.values["title"], "Release QA")
+        XCTAssertEqual(document.values["sources"], "mic, system_audio")
+        XCTAssertEqual(document.values["tags"], "release, qa")
+        XCTAssertTrue(document.frontmatter.contains("transcription_engine: parakeet_local"))
+        XCTAssertTrue(document.body.contains("## Transcript"))
+    }
+
+    func testParseFrontmatterIgnoresNestedObjectFields() throws {
+        let markdown = """
+        ---
+        capture_type: meeting
+        speakers:
+          - id: "0"
+            channel: system
+            name: "Alex"
+            confidence: high
+        tags:
+          - transcripted
+        ---
+        ## Transcript
+        Body
+        """
+
+        let document = try XCTUnwrap(CaptureMarkdownParser.parseFrontmatter(from: markdown))
+
+        XCTAssertEqual(document.values["capture_type"], "meeting")
+        XCTAssertEqual(document.values["tags"], "transcripted")
+        XCTAssertNil(document.values["channel"])
+        XCTAssertNil(document.values["name"])
+        XCTAssertNil(document.values["confidence"])
+    }
+
     // Frontmatter mirrors what TranscriptFormatter.formatTranscriptMarkdown
     // actually writes: recording-health keys and gap_events before speakers,
     // channel-qualified speaker entries, and Obsidian tags/aliases after.
