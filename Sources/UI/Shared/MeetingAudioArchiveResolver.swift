@@ -201,10 +201,7 @@ enum MeetingAudioArchiveResolver {
     }
 
     static func archiveDirectory(forTranscript transcriptURL: URL) -> URL {
-        transcriptURL
-            .deletingLastPathComponent()
-            .appendingPathComponent("audio", isDirectory: true)
-            .appendingPathComponent("\(transcriptURL.deletingPathExtension().lastPathComponent)_audio", isDirectory: true)
+        MeetingArtifactRenamer.audioDirectoryURL(for: transcriptURL)
     }
 
     private static func firstAudioFile(named stem: String, in urls: [URL]) -> URL? {

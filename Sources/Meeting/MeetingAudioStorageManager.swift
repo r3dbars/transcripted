@@ -907,10 +907,7 @@ enum MeetingAudioStorageManager {
     }
 
     private static func audioDirectoryURL(forTranscript transcriptURL: URL) -> URL {
-        transcriptURL
-            .deletingLastPathComponent()
-            .appendingPathComponent("audio", isDirectory: true)
-            .appendingPathComponent("\(transcriptURL.deletingPathExtension().lastPathComponent)_audio", isDirectory: true)
+        MeetingArtifactRenamer.audioDirectoryURL(for: transcriptURL)
     }
 
     private static func isAudioArchiveDirectory(_ url: URL, fileManager: FileManager) -> Bool {
