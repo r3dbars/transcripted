@@ -28,7 +28,7 @@
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
-- `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between default software AGC and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
+- `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
 - `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls
 - `OnboardingDictationShortcutPolicy.swift` — first-run shortcut policy that keeps dictation setup copy aligned with trigger preferences
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
