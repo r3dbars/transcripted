@@ -26,6 +26,10 @@ class FloatingOverlayPanel: NSPanel {
         self.titleVisibility = .hidden
         self.isMovableByWindowBackground = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // Exclude the dictation overlay from screen capture / screen sharing.
+        // Panels default to `.readOnly`, which ScreenCaptureKit captures — so a
+        // user sharing their screen would broadcast their own dictation back.
+        self.sharingType = .none
     }
 
     override var canBecomeKey: Bool { false }
