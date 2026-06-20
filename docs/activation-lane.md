@@ -81,6 +81,19 @@ adoption signal, under-discovered feature, release regression watch, and top
 three PR/task candidates. It has fixture and self-test modes so CI can check
 the ranking logic without PostHog credentials.
 
+## PostHog Product Context Pack
+
+Use this when an agent needs the short decision context, not the full funnel:
+
+```bash
+python3 scripts/ops/posthog-product-context-pack.py --days 30
+```
+
+The script writes `product-context-pack.json` and `product-context-pack.md`
+under `/tmp/transcripted-posthog-product-context/<run-id>/`. It stays
+aggregate-only and returns explicit `UNKNOWN` states when credentials, events,
+or denominators are missing.
+
 ## Guardrails
 
 - Do not add transcript text, meeting titles, speaker names, file paths, source

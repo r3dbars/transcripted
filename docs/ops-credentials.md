@@ -71,6 +71,21 @@ proxies only; they are not proof that an agent answered from a saved artifact.
 The desired true-use event is `agent_capture_query_observed`, which should stay
 zero/unknown until that privacy-safe instrumentation exists.
 
+For an AI-agent-ready product context pack, run:
+
+```bash
+python3 scripts/ops/posthog-product-context-pack.py --days 30
+```
+
+The context pack writes compact JSON and Markdown under
+`/tmp/transcripted-posthog-product-context/<run-id>/`. It summarizes the current
+activation bottleneck, strongest repeat-use signal, highest reliability pain,
+release-version anomaly, feature adoption signal, and top three recommended
+next PRs. If PostHog read credentials are missing, it still emits a pack with
+explicit `UNKNOWN` states unless `--strict` is passed. Use this in health or
+nightly reports when an agent needs decision context instead of a dashboard
+dump.
+
 For the normal health lane's product-task loop, run:
 
 ```bash

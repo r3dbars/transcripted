@@ -65,6 +65,12 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Release-scoped usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30 --app-version 1.1.48`
   - Writes local Markdown and JSON under `/tmp/transcripted-posthog-activation-funnel/<run-id>/`
   - Self-test: `python3 scripts/ops/posthog-activation-funnel.py --self-test`
+- `scripts/ops/posthog-product-context-pack.py` — build a compact JSON + Markdown product-context pack for Codex/agents from aggregate PostHog data
+  - Usage: `python3 scripts/ops/posthog-product-context-pack.py --days 30`
+  - Fixture/sample usage: `python3 scripts/ops/posthog-product-context-pack.py --fixture Tests/Fixtures/posthog-product-context-pack-fixture.json --write-dir build/posthog-product-context-sample`
+  - Writes local Markdown and JSON under `/tmp/transcripted-posthog-product-context/<run-id>/`
+  - Missing PostHog credentials produce explicit `UNKNOWN` states unless `--strict` is passed
+  - Self-test: `python3 scripts/ops/posthog-product-context-pack.py --self-test`
 - `scripts/ops/posthog-dashboard-queries.py` — reusable PostHog aggregate query catalog for the 100 WAU, activation, reliability, feature-adoption, and release-health dashboard families
   - Dry-run specs: `python3 scripts/ops/posthog-dashboard-queries.py --dry-run`
   - One family: `python3 scripts/ops/posthog-dashboard-queries.py --family activation --dry-run`
