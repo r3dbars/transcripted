@@ -189,6 +189,8 @@ enum AgentMCPConnector {
     static func ensureHelperInstalled(
         bundledBinaryURL: URL? = ClaudeDesktopIntegrationInstaller.bundledMCPBinaryURL(),
         installedBinaryURL: URL = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL,
+        observabilityConfigURL: URL = ClaudeDesktopIntegrationInstaller.mcpObservabilityConfigURL,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
         fileManager: FileManager = .default
     ) throws -> URL {
         guard let bundledBinaryURL,
@@ -205,6 +207,11 @@ enum AgentMCPConnector {
                 fileManager: fileManager
             )
         }
+        try ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
+            configURL: observabilityConfigURL,
+            infoDictionary: infoDictionary,
+            fileManager: fileManager
+        )
         return installedBinaryURL
     }
 

@@ -70,8 +70,8 @@ launch -> onboarding -> permission ready -> first dictation -> saved Markdown
 export distinct IDs, person rows, transcript text, file paths, meeting titles,
 raw URLs, or raw payload rows. Treat the agent setup and prompt-copy rows as
 proxies only; they are not proof that an agent answered from a saved artifact.
-The desired true-use event is `agent_capture_query_observed`, which should stay
-zero/unknown until that privacy-safe instrumentation exists.
+The true-use event is `agent_capture_query_observed`, emitted by successful MCP
+reads/searches with enum and bucket properties only.
 
 For an AI-agent-ready product context pack, run:
 

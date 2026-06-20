@@ -303,26 +303,36 @@ func testAnalyticsEventPolicy() {
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
-        assertEqual(agentQuery?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "surface"], "agent query observation should stay enum-only")
+        assertEqual(agentQuery?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "source_count_bucket", "surface"], "agent query observation should stay enum and bucket only")
+        assertEqual(
+            agentQuery?.allowedProperties ?? Set<String>(),
+            mcpAgentCaptureQueryAllowedProperties(),
+            "MCP agent capture telemetry must mirror the app analytics allowlist"
+        )
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
             .union(firstArtifact?.allowedProperties ?? Set<String>())
             .union(dictationArtifact?.allowedProperties ?? Set<String>())
             .union(secondArtifact?.allowedProperties ?? Set<String>())
+            .union(agentQuery?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",
-                "agent_target": "codex",
+                "agent_target": "mcp_client",
                 "artifact_age_bucket": "24_48h",
                 "artifact_kind": "meeting",
+                "capture_age_bucket": "2_7d",
                 "days_since_first_bucket": "2_7d",
                 "duration_bucket": "10_29m",
                 "first_artifact_kind": "dictation",
                 "prompt_kind": "meeting_bundle",
+                "query_kind": "search",
                 "result": "success",
+                "return_window_bucket": "3_7d",
                 "save_outcome": "success",
                 "second_artifact_kind": "meeting",
+                "source_count_bucket": "2_3",
                 "surface": "home_preview",
                 "trigger": "detected_prompt",
                 "word_count_bucket": "300_plus",
@@ -334,22 +344,29 @@ func testAnalyticsEventPolicy() {
                 "file_path": "/Users/redbars/private.md",
                 "meeting_url": "https://example.com/private",
                 "prompt_text": "Read my transcript",
+                "query_text": "customer roadmap objection",
+                "raw_capture_id": "cap_private",
+                "source_app_name": "Slack",
                 "word_count": "4217",
             ],
             allowedKeys: activationAllowedProperties
         )
 
         assertEqual(sanitized["action_kind"], "open_markdown", "action kind should survive")
-        assertEqual(sanitized["agent_target"], "codex", "agent target should survive")
+        assertEqual(sanitized["agent_target"], "mcp_client", "agent target should survive")
         assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
         assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["capture_age_bucket"], "2_7d", "capture age bucket should survive")
         assertEqual(sanitized["days_since_first_bucket"], "2_7d", "days since first bucket should survive")
         assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
         assertEqual(sanitized["first_artifact_kind"], "dictation", "first artifact kind should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
+        assertEqual(sanitized["query_kind"], "search", "query kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
+        assertEqual(sanitized["return_window_bucket"], "3_7d", "return window bucket should survive")
         assertEqual(sanitized["save_outcome"], "success", "coarse save result should survive")
         assertEqual(sanitized["second_artifact_kind"], "meeting", "second artifact kind should survive")
+        assertEqual(sanitized["source_count_bucket"], "2_3", "source count bucket should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
         assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
@@ -361,6 +378,9 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["file_path"], "file paths must not be sent")
         assertNil(sanitized["meeting_url"], "meeting URLs must not be sent")
         assertNil(sanitized["prompt_text"], "raw prompt text must not be sent")
+        assertNil(sanitized["query_text"], "raw query text must not be sent")
+        assertNil(sanitized["raw_capture_id"], "raw capture IDs must not be sent")
+        assertNil(sanitized["source_app_name"], "source app names must not be sent")
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 
@@ -1461,4 +1481,27 @@ private func loadRepoText(_ relativePath: String, file: String = #file, line: In
         print("  FAIL [\(loc)] could not load \(relativePath): \(error)")
         return ""
     }
+}
+
+private func mcpAgentCaptureQueryAllowedProperties() -> Set<String> {
+    let source = loadRepoText("Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift")
+    guard let declaration = source.range(of: "static let allowedProperties: Set<String> = [") else {
+        return []
+    }
+
+    let afterDeclaration = String(source[declaration.upperBound...])
+    guard let closingBracket = afterDeclaration.range(of: "]") else {
+        return []
+    }
+
+    let literalBody = String(afterDeclaration[..<closingBracket.lowerBound])
+    return Set(
+        literalBody
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .compactMap { line -> String? in
+                let trimmed = line.trimmingCharacters(in: CharacterSet(charactersIn: "\","))
+                return trimmed.isEmpty ? nil : trimmed
+            }
+    )
 }

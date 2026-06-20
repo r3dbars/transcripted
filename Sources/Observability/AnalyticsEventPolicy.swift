@@ -169,6 +169,7 @@ struct AnalyticsEventPolicy: Equatable {
         "query_kind",
         "result",
         "return_window_bucket",
+        "source_count_bucket",
         "surface",
     ]
 
