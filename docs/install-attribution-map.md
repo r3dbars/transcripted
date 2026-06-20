@@ -31,6 +31,8 @@ through `AnalyticsEventPolicy` and `AnalyticsPayloadSanitizer`.
 | Saved-artifact continuity | `dictation_artifact_saved`, `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Strict dictation-save proof plus legacy/proxy rows for older builds and useful-dictation volume. Do not use `dictation_completed` as strict saved-artifact proof when saved-artifact events are available. |
 | Second value moment | `activation_second_artifact_saved` | PostHog | Shows a second durable saved artifact on the same anonymous device, with only kind and day-bucket fields. |
 | Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
+| First useful artifact | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Shows local Markdown value without inspecting content. |
+| Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `agent_capture_query_observed`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, successful MCP capture queries, and later return via Home. |
 | Reliability filter | Release-scoped issues and allowed non-fatal events | Sentry | Use to avoid mistaking broken first-run paths for weak demand. |
 
 ## Standard Read-Only Checks
@@ -82,6 +84,11 @@ For the attribution story, report:
   agent answer quality.
 - Artifact events do not prove agent answer quality. The closest safe proxy is
   `activation_agent_prompt_action_clicked` plus `activation_return_proxy_observed`.
+  `dictation_completed`, `onboarding_first_dictation_saved`, and
+  `meeting_transcript_saved` for value.
+- Artifact and prompt events do not prove agent answer quality. Use
+  `agent_capture_query_observed` for successful saved-capture MCP reads/searches,
+  then pair it with `activation_return_proxy_observed` for return behavior.
 
 If the story is still fuzzy after these checks, prefer adding a coarse
 allowlisted event or aggregate script output over adding tracking IDs.

@@ -320,6 +320,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// into UserDefaults.
     public var enableVoiceProcessing: Bool = false
 
+    /// Whether Transcripted should run its software gain control on the copied
+    /// mic buffer when Apple voice processing is not active. Default on for the
+    /// existing quiet-WebRTC recovery path; users with tuned hardware mics can
+    /// turn it off so saved mic audio stays raw.
+    public var enableSoftwareAGC: Bool = true
+
     /// Real-time gain control for the mic tap callback. Used when VPIO is
     /// disabled (the default) to recover attenuated streams (e.g. Safari/
     /// Firefox WebRTC contention from issue #500) without engaging Apple's
@@ -836,6 +842,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
             return inputNode.outputFormat(forBus: 0)
         }
         return inputNode.inputFormat(forBus: 1)
+    }
+
+    func refreshRealtimeAGCForCurrentProcessingMode(resetExisting: Bool = false) {
+        if voiceProcessingEnabled || !enableSoftwareAGC {
+            realtimeAGC = nil
+        } else if let existing = realtimeAGC {
+            if resetExisting {
+                existing.reset()
+            }
+        } else {
+            realtimeAGC = RealtimeAGC()
+        }
     }
 
     /// Enable AUVoiceProcessingIO on the meeting input node so Transcripted

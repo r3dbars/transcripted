@@ -696,6 +696,7 @@ func testClaudeDesktopIntegrationInstaller() {
         let bundledBinaryURL = tempRoot
             .appendingPathComponent("bundle", isDirectory: true)
             .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let helperConfigURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
         try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -707,7 +708,12 @@ func testClaudeDesktopIntegrationInstaller() {
 
         let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
             bundledBinaryURL: bundledBinaryURL,
-            installedBinaryURL: installedBinaryURL
+            installedBinaryURL: installedBinaryURL,
+            observabilityConfigURL: helperConfigURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
+                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+            ]
         )
 
         assertEqual(refreshed, true, "stale installed helper should be refreshed at launch")
@@ -720,6 +726,10 @@ func testClaudeDesktopIntegrationInstaller() {
             FileManager.default.isExecutableFile(atPath: installedBinaryURL.path),
             "refreshed helper should stay executable"
         )
+        assertTrue(
+            FileManager.default.fileExists(atPath: helperConfigURL.path),
+            "refresh should keep installed-helper analytics config in sync"
+        )
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — leaves a current helper untouched") {
@@ -731,6 +741,7 @@ func testClaudeDesktopIntegrationInstaller() {
         let bundledBinaryURL = tempRoot
             .appendingPathComponent("bundle", isDirectory: true)
             .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let configURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
         try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -742,10 +753,76 @@ func testClaudeDesktopIntegrationInstaller() {
 
         let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
             bundledBinaryURL: bundledBinaryURL,
-            installedBinaryURL: installedBinaryURL
+            installedBinaryURL: installedBinaryURL,
+            observabilityConfigURL: configURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
+                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+            ]
         )
 
         assertEqual(refreshed, false, "matching helper should not be rewritten on every launch")
+        assertTrue(
+            FileManager.default.fileExists(atPath: configURL.path),
+            "current installed helper should still refresh analytics config"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable — removes stale invalid config") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperObservabilityTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        let stale = [
+            AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_old",
+            AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+        ]
+        let staleData = try? PropertyListSerialization.data(fromPropertyList: stale, format: .xml, options: 0)
+        try? staleData?.write(to: configURL)
+
+        try? ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
+            configURL: configURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_new",
+                AnalyticsRuntimeConfiguration.hostInfoKey: "http://not-allowed.example",
+            ]
+        )
+
+        assertFalse(
+            FileManager.default.fileExists(atPath: configURL.path),
+            "invalid current app config should remove stale standalone helper analytics config"
+        )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable — removes config when analytics is disabled") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperObservabilityOptOutTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        let stale = [
+            AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_old",
+            AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+        ]
+        let staleData = try? PropertyListSerialization.data(fromPropertyList: stale, format: .xml, options: 0)
+        try? staleData?.write(to: configURL)
+
+        try? ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
+            configURL: configURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
+                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+            ],
+            analyticsEnabled: false
+        )
+
+        assertFalse(
+            FileManager.default.fileExists(atPath: configURL.path),
+            "analytics opt-out should remove stale standalone helper analytics config"
+        )
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — never installs fresh") {
@@ -757,6 +834,7 @@ func testClaudeDesktopIntegrationInstaller() {
         let bundledBinaryURL = tempRoot
             .appendingPathComponent("bundle", isDirectory: true)
             .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let configURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
         try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -765,13 +843,22 @@ func testClaudeDesktopIntegrationInstaller() {
 
         let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
             bundledBinaryURL: bundledBinaryURL,
-            installedBinaryURL: installedBinaryURL
+            installedBinaryURL: installedBinaryURL,
+            observabilityConfigURL: configURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
+                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+            ]
         )
 
         assertEqual(refreshed, false, "refresh should not install a helper the user never set up")
         assertFalse(
             FileManager.default.fileExists(atPath: installedBinaryURL.path),
             "refresh must not create a new install without user consent"
+        )
+        assertFalse(
+            FileManager.default.fileExists(atPath: configURL.path),
+            "refresh must not create helper telemetry config before agent setup opt-in"
         )
     }
 

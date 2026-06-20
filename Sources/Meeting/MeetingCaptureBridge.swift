@@ -79,12 +79,12 @@ final class MeetingCaptureBridge: ObservableObject {
         errorMessage = nil
         micAttenuationCueObserved = false
 
-        // Apply the user's microphone-processing choice before each
-        // recording. VPIO defaults off (no Zoom ducking); enable only when
-        // the user has explicitly opted in for Safari/Firefox WebRTC
-        // calls. Read once at start; mid-session changes don't take effect
-        // until the next recording.
-        audio.enableVoiceProcessing = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+        // Apply the user's microphone-processing choice before each recording.
+        // Read once at start; mid-session changes don't take effect until the
+        // next recording except the explicit Boost Mic consent path below.
+        let micProcessingMode = MicrophoneProcessingPreferences.mode()
+        audio.enableVoiceProcessing = micProcessingMode.usesAppleVoiceProcessing
+        audio.enableSoftwareAGC = micProcessingMode.allowsSoftwareAutogainFallback
 
         return await withCheckedContinuation { continuation in
             startAttempt.reset()?.resume(returning: false)
