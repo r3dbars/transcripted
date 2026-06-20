@@ -2,22 +2,16 @@
 // Orchestrates the active capture flows: meeting hotkey + dictation tap handling.
 
 import AppKit
-import Carbon
 import CoreGraphics
 
-// MARK: - Carbon Hotkey Handler (C-level callback)
+// MARK: - Shared Hotkey Routing
 
-// Global reference so the C callback can reach the dictation controller
+// Global reference so physical shortcut callbacks can reach the dictation controller.
 private weak var _sharedSessionController: DictationSessionController?
 
-// Global callback for meeting hotkey (id 3). Separate from the session
-// controller so meeting UI can be wired independently of draft/dictation.
-// Stored on the MainActor and invoked from the Carbon callback via Task.
-private var _sharedMeetingToggle: (() -> Void)?
-
-// Carbon hotkeys can fire back-to-back before Transcripted finishes updating its
-// session state. Ignore rapid repeats so start/stop/cancel transitions stay
-// single-shot and predictable.
+// Global shortcut events can fire back-to-back before Transcripted finishes
+// updating its session state. Ignore rapid repeats so start/stop/cancel
+// transitions stay single-shot and predictable.
 // Use systemUptime (monotonic) instead of CFAbsoluteTimeGetCurrent (wall clock)
 // so NTP adjustments, manual time changes, or DST transitions can't make a
 // backward clock jump silently drop all subsequent hotkey presses.
@@ -76,51 +70,9 @@ private func overlayStateName(_ state: FloatingOverlayController.OverlayState?) 
     }
 }
 
-private func hotkeyHandler(
-    nextHandler: EventHandlerCallRef?,
-    event: EventRef?,
-    userData: UnsafeMutableRawPointer?
-)-> OSStatus {
-    // Extract which hotkey fired.
-    guard let event = event else { return noErr }
-    var hotkeyID = EventHotKeyID()
-    let status = GetEventParameter(
-        event,
-        EventParamName(kEventParamDirectObject),
-        EventParamType(typeEventHotKeyID),
-        nil,
-        MemoryLayout<EventHotKeyID>.size,
-        nil,
-        &hotkeyID
-    )
-    guard status == noErr else { return noErr }
-
-    guard shouldAcceptHotkeyAction("carbon_meeting_toggle") else {
-        Task { @MainActor in
-            EventReporter.shared.capture(
-                level: .info,
-                engine: "capture",
-                event: "hotkey_repeat_ignored",
-                message: "Ignored rapid repeat hotkey press",
-                context: ["hotkey_id": "\(hotkeyID.id)"]
-            )
-        }
-        return noErr
-    }
-
-    if hotkeyID.id == 3 {
-        // ⌥M — Meeting mode: toggle meeting recording.
-        // No screenshot, no cross-mode switching with draft/dictation.
-        Task { @MainActor in
-            _sharedMeetingToggle?()
-        }
-    }
-    return noErr
-}
-
 // PhysicalShortcutAction and PhysicalShortcutBinding live in
 // PhysicalShortcutMatcher.swift so the pure chord-resolution precedence can be
-// fast-tested independently of this Carbon/CGEventTap engine.
+// fast-tested independently of this CGEventTap engine.
 
 private enum PhysicalShortcutPhase {
     case press
@@ -406,11 +358,8 @@ private final class PhysicalShortcutDetector {
 
 @MainActor
 class ContextCaptureEngine: ObservableObject {
-    private var meetingHotkeyRef: EventHotKeyRef?
-    private var eventHandlerRef: EventHandlerRef?
     private var hotkeyChangeObserver: NSObjectProtocol?
     private let physicalShortcutDetector = PhysicalShortcutDetector()
-    private var carbonHotkeyError: String?
     private var physicalTriggerError: String?
 
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
@@ -429,14 +378,10 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
-    /// Closure invoked when ⌥M (hotkey id 3) fires. Wired by TranscriptedAppDelegate
+    /// Closure invoked when the meeting physical trigger fires. Wired by TranscriptedAppDelegate
     /// to `MeetingSessionController.toggleMeeting()` (or equivalent). Nil when
     /// the meeting subsystem is unavailable — the hotkey simply does nothing.
-    var onMeetingToggle: (() -> Void)? {
-        didSet {
-            _sharedMeetingToggle = onMeetingToggle
-        }
-    }
+    var onMeetingToggle: (() -> Void)?
 
     var onPasteLastDictation: (() -> Void)?
 
@@ -447,10 +392,9 @@ class ContextCaptureEngine: ObservableObject {
             return
         }
 
-        // Restore C-callback routing after temporary unregister/re-register cycles
+        // Restore dictation routing after temporary unregister/re-register cycles
         // such as wake recovery.
         _sharedSessionController = sessionController
-        _sharedMeetingToggle = onMeetingToggle
 
         refreshShortcutDisplays()
         configurePhysicalShortcutDetector()
@@ -476,7 +420,6 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func refreshShortcutDisplays() {
-        carbonHotkeyError = nil
         dictationShortcutDisplay = Self.currentDictationShortcutDisplay()
         meetingShortcutDisplay = PhysicalDictationTriggerPreferences.displayString(
             for: PhysicalDictationTriggerPreferences.meetingBinding()
@@ -571,7 +514,6 @@ class ContextCaptureEngine: ObservableObject {
 
     private func updateHotkeyError() {
         let errors = [
-            carbonHotkeyError,
             physicalTriggerError,
             HotkeyPreferences.dictationShortcutsEnabled()
                 ? PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
@@ -710,8 +652,6 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     deinit {
-        if let ref = meetingHotkeyRef { UnregisterEventHotKey(ref) }
-        if let ref = eventHandlerRef { RemoveEventHandler(ref) }
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -719,20 +659,11 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     func unregisterHotkey() {
-        if let ref = meetingHotkeyRef {
-            UnregisterEventHotKey(ref)
-            meetingHotkeyRef = nil
-        }
-        if let ref = eventHandlerRef {
-            RemoveEventHandler(ref)
-            eventHandlerRef = nil
-        }
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
             hotkeyChangeObserver = nil
         }
         physicalShortcutDetector.remove()
         _sharedSessionController = nil
-        _sharedMeetingToggle = nil
     }
 }

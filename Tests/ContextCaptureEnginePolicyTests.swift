@@ -4,7 +4,7 @@
 // the default binding set that feeds bindingProvider, and the conflict-warning
 // text that flows into the engine's hotkeyError pipeline.
 //
-// NOTE: ContextCaptureEngine itself is @MainActor and wired to AppKit, Carbon,
+// NOTE: ContextCaptureEngine itself is @MainActor and wired to AppKit,
 // NSWorkspace, DictationSessionController, FloatingOverlayController,
 // EventReporter, and DiagnosticsTrail. Its remaining internal seams
 // (shouldAcceptHotkeyAction, routeDictationToggle, PhysicalShortcutDetector)
@@ -189,9 +189,9 @@ func testContextCaptureEnginePolicy() {
     }
 
     // MARK: - hotkeyError pipeline inputs
-    // ContextCaptureEngine.updateHotkeyError() joins carbonHotkeyError,
-    // physicalTriggerError, and (when dictation shortcuts are enabled) the
-    // function-key conflict warning. Pin the conflict-warning text since it
+    // ContextCaptureEngine.updateHotkeyError() joins physicalTriggerError and
+    // (when dictation shortcuts are enabled) the function-key conflict warning.
+    // Pin the conflict-warning text since it
     // surfaces verbatim in the MenuBarPanel banner.
 
     runSuite("PhysicalDictationTriggerPreferences.functionKeyConflictWarning — silent when binding isn't bare Fn") {
