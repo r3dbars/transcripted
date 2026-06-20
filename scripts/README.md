@@ -35,6 +35,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 ## Active helper scripts
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
+- `scripts/dev/check-build-source-lists.py` — fast raw-`swiftc` guardrail for app, fast-test, and smoke source-list drift
 - `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark
 - `scripts/download_ami.sh` — fetch the gitignored AMI ES2002 audio/RTTM subset used by `Tools/SpeakerEvalHarness`
 - `scripts/run_speaker_eval.sh` — build and run the AMI speaker-naming sweep, writing local reports under `data/eval/`
@@ -42,6 +43,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/aggregate_sweep.py` — aggregate speaker-eval sweep scores and highlight closest-to-target threshold combinations
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast from an updates folder and copy it into `docs/appcast.xml`
+- `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
@@ -60,6 +62,11 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Release-scoped usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30 --app-version 1.1.48`
   - Writes local Markdown and JSON under `/tmp/transcripted-posthog-activation-funnel/<run-id>/`
   - Self-test: `python3 scripts/ops/posthog-activation-funnel.py --self-test`
+- `scripts/ops/posthog-product-dashboard-summary.py` — turn the five PostHog product-learning dashboard families into ranked product tasks
+  - Usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --days 30`
+  - Fixture usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json`
+  - Writes local Markdown and JSON under `/tmp/transcripted-posthog-product-tasks/<run-id>/`
+  - Self-test: `python3 scripts/ops/posthog-product-dashboard-summary.py --self-test`
 - `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
   - Usage: `bash run-daily-audio-reliability.sh`
   - Synthetic-only usage: `bash run-daily-audio-reliability.sh --synthetic`

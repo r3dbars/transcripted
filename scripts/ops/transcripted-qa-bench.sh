@@ -794,6 +794,10 @@ run_full_tail() {
     "scripts/ops/nightly-security-check.py" \
     "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.48.json --write-report $(shell_quote "${RAW_DIR}/release-health.json")"
 
+  run_step_when_present "62-posthog-product-tasks" "PostHog product task fixture gate" "yes" \
+    "scripts/ops/posthog-product-dashboard-summary.py" \
+    "python3 scripts/ops/posthog-product-dashboard-summary.py --self-test && python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only > $(shell_quote "${RAW_DIR}/posthog-product-tasks.json")"
+
   run_gemma_summary_plan
 }
 

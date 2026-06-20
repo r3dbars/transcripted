@@ -54,15 +54,26 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-dependency_input_listing() {
+dependency_input_paths() {
     {
         printf '%s\n' "Package.swift"
         printf '%s\n' "scripts/entrypoints/build-deps.sh"
         find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md"
-    } | while IFS= read -r path; do
+    } | sort
+}
+
+dependency_input_listing() {
+    dependency_input_paths | while IFS= read -r path; do
         [ -e "$path" ] || continue
         printf '%s\t%s\n' "$(stat -f '%m' "$path")" "$path"
     done
+}
+
+dependency_input_digest() {
+    dependency_input_paths | while IFS= read -r path; do
+        [ -f "$path" ] || continue
+        shasum -a 256 "$path"
+    done | shasum -a 256 | awk '{print $1}'
 }
 
 newest_dependency_input() {
@@ -72,6 +83,12 @@ newest_dependency_input() {
 deps_build_stamp_info() {
     if [ -f "$DEPS_BUILD_STAMP" ]; then
         printf '%s\t%s\n' "$(stat -f '%m' "$DEPS_BUILD_STAMP")" "$DEPS_BUILD_STAMP"
+    fi
+}
+
+deps_build_stamp_digest() {
+    if [ -f "$DEPS_BUILD_STAMP" ]; then
+        awk -F= '$1 == "dependency_inputs_sha256" { print $2; exit }' "$DEPS_BUILD_STAMP"
     fi
 }
 
@@ -89,6 +106,8 @@ ensure_deps_ready() {
     local newest_input_path
     local build_stamp_mtime
     local build_stamp_path
+    local current_digest
+    local stamp_digest
 
     if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
         newest_input="$(newest_dependency_input)"
@@ -103,6 +122,18 @@ ensure_deps_ready() {
             echo "  $newest_input_path"
             echo "Built deps stamp:"
             echo "  $build_stamp_path"
+            echo ""
+            echo "Run: bash build-deps.sh --force"
+            exit 1
+        fi
+
+        current_digest="$(dependency_input_digest)"
+        stamp_digest="$(deps_build_stamp_digest)"
+        if [ -z "$stamp_digest" ] || [ "$current_digest" != "$stamp_digest" ]; then
+            echo "Dependencies are stale for TranscriptedCore."
+            echo "Dependency input digest changed."
+            echo "  current: ${current_digest:-missing}"
+            echo "  stamp:   ${stamp_digest:-missing}"
             echo ""
             echo "Run: bash build-deps.sh --force"
             exit 1
