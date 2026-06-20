@@ -28,6 +28,13 @@ The markdown registries list one event per self-contained line
 superset, and the docs↔source parity test sorts before comparing, so order is
 irrelevant. `.gitattributes` therefore sets `merge=union` on those docs only.
 
+## Status: the durable fix has landed
+
+The registry is now single-sourced from union-mergeable `.psv` data files, so the
+Swift policy is no longer a hand-merge point. Jump to **Durable fix (implemented)**
+below for the current layout. The two sections that follow explain why the naive
+shortcut (union-merging the `.swift` directly) was rejected.
+
 ## What does NOT work: union merge on the Swift policy (verified trap)
 
 It is tempting to also `merge=union` `AnalyticsEventPolicy.swift`. **Do not.**
@@ -55,23 +62,42 @@ file's `runSuite { … }` blocks.
 So the Swift policy + its test are intentionally left to normal (conflicting)
 merges until the durable fix below lands.
 
-## Durable fix (recommended — needs a scope decision)
+## Durable fix (implemented)
 
-Single-source the taxonomy so the brace-balanced Swift is **generated**, never
-hand-merged:
+The taxonomy is single-sourced from line-oriented data, so the brace-balanced
+Swift is no longer hand-merged:
 
-1. Move the allowlist to one line-oriented data file — e.g.
-   `analytics-events.psv`: `event_name|prop_a,prop_b,…`, one event per line.
-   This file is safely `merge=union` (each line independent) + a trivial
-   normalizer (`sort -u`) keeps it canonical and dedups.
-2. Generate (or load at runtime) `AnalyticsEventPolicy`, the doc list, and the
-   ops-script event tuples from that single source. The duplicate-event guard
-   stays in `Tests/AnalyticsEventPolicyTests.swift`.
-3. Make `scripts/ops/health-probe.sh` read the same file instead of hard-coding
-   a single-line copy (its current shape can't be union-merged at all).
+1. **`Resources/analytics-events.psv`** is the registry — one
+   `event_name|prop_a,prop_b,…` line per event (empty allow-list = `event|`).
+   Each line is independent, so it is safe to `merge=union` (`*.psv` in
+   `.gitattributes`). `scripts/ops/normalize-analytics-taxonomy.py` re-sorts and
+   dedupes after a union merge; `--check` is the hygiene gate.
+2. **`AnalyticsEventPolicy` loads and compiles that file at runtime** (bundle in
+   a shipped app, repo checkout under test/CI). Loading fails closed: an
+   unreadable registry yields an empty allowlist and `AnalyticsReporter` drops
+   every event rather than leaking an unreviewed payload. The public API
+   (`policy(forEvent:)`, `allEventNames`, `allPolicies`) is unchanged.
+3. **The privacy guardrail moved too**:
+   `Resources/analytics-reviewed-properties.psv` (also `merge=union`) holds the
+   reviewed non-bucket property allowlist that the tests enforce, so reviewing a
+   new property is a one-line append instead of an edit to a shared Swift set.
+4. The docs↔source parity, forbidden-fragment, reviewed-non-bucket, and a new
+   **duplicate-event guard** all live in `Tests/AnalyticsEventPolicyTests.swift`
+   and read the same data files, so the guardrails are preserved.
 
-That removes every hand-merge point and makes the taxonomy single-sourced.
+A new telemetry event is now: append one line to `analytics-events.psv`, append
+any new reviewed property to `analytics-reviewed-properties.psv`, and append the
+event to the `## Allowlisted analytics events` doc list — all three are
+`merge=union`, so two telemetry PRs adding different events never conflict.
 
-Until then: rebasing a telemetry PR needs only a trivial keep-both resolution of
-the Swift policy/test conflict (add the missing closing `]`/`)` so both events
-remain). The doc/script conflicts auto-resolve via the union attribute above.
+### Still hand-merged (follow-ups, out of scope for the registry fix)
+
+These mirror the event list but are not the registry and were left as-is:
+
+- `scripts/ops/health-probe.sh` carries the workflow-event list as a single
+  string literal that cannot be union-merged. Pointing it at the `.psv` is the
+  obvious next step.
+- `scripts/ops/posthog-activation-funnel.py` /
+  `scripts/ops/generate-nightly-digest.py` keep per-line event tuples.
+- Per-event `runSuite(…)` blocks in the test are bespoke assertions, not a
+  registry; they remain ordinary, optional test code.

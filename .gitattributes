@@ -20,12 +20,17 @@ fluidaudio-libs/** binary
 # of two inserts is always a valid superset.
 #
 # It is deliberately NOT applied to Sources/Observability/AnalyticsEventPolicy.swift
-# or Tests/AnalyticsEventPolicyTests.swift: those entries are multi-line, brace-
+# or Tests/AnalyticsEventPolicyTests.swift: those entries were multi-line, brace-
 # balanced blocks whose trailing `]`/`)` aligns as shared context, so a union
 # merge SILENTLY produces unbalanced, non-compiling Swift (git reports a clean
-# auto-merge; only Swift CI catches the breakage). Those files still need a
-# taxonomy-aware merge driver or the single-source refactor described in
-# docs/analytics-taxonomy-merge.md.
+# auto-merge; only Swift CI catches the breakage).
+#
+# The durable fix landed: the registry itself is now the single-line `.psv`
+# taxonomy below (event/property data extracted out of the Swift), which IS safe
+# to union-merge. AnalyticsEventPolicy compiles it at runtime and the test
+# guardrails read it, so two telemetry PRs that each add a new event append
+# independent lines and never conflict. See docs/analytics-taxonomy-merge.md.
+*.psv merge=union
 docs/privacy-first-observability.md merge=union
 docs/posthog-product-learning-plan.md merge=union
 docs/install-attribution-map.md merge=union

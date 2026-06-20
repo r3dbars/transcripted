@@ -22,7 +22,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `UnrecognizedSelectorReason.swift` — parses Objective-C unrecognized-selector exception reasons into safe receiver/selector tags while dropping instance pointers and trailing free text
 - `AnalyticsReporter.swift` — privacy-first anonymous usage analytics to PostHog
 - `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference
-- `AnalyticsEventPolicy.swift` — explicit allowlist of PostHog events + properties
+- `AnalyticsEventPolicy.swift` — compiles the explicit PostHog event/property allowlist from `Resources/analytics-events.psv` at runtime (fails closed if the file is unreadable)
 - `ActivationTelemetry.swift` — centralized activation analytics helpers for artifact actions, agent prompt/setup CTAs, and saved-recent artifact return-proxy buckets
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
 - `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
@@ -46,6 +46,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `SentryRuntimeConfiguration` rejects non-HTTPS DSNs, so insecure local overrides fail closed instead of downgrading crash transport
 - Shipped builds should report releases as `transcripted@<CFBundleShortVersionString>` and dist as `CFBundleVersion`; release packaging registers that Sentry release explicitly through `scripts/release/register-sentry-release.sh`
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
+- The analytics allowlist is single-sourced from `Resources/analytics-events.psv` (`event_name|prop,prop`, one event per line) with the reviewed non-bucket property list in `Resources/analytics-reviewed-properties.psv`. Both are `merge=union` so concurrent telemetry PRs that each add an event never conflict. Add a new event by appending a line to the `.psv` (do not hand-edit a Swift dictionary), append it to the `## Allowlisted analytics events` list in `docs/privacy-first-observability.md`, and run `python3 scripts/ops/normalize-analytics-taxonomy.py`. See `docs/analytics-taxonomy-merge.md`.
 - Activation analytics should route through `ActivationTelemetry` so artifact action, agent prompt/setup, and saved-recent artifact return-proxy events keep stable names, targets, result enums, and coarse age/window buckets.
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 - `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.

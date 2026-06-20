@@ -14,6 +14,23 @@ func testAnalyticsEventPolicy() {
         )
     }
 
+    runSuite("AnalyticsEventPolicy taxonomy file stays union-merge clean") {
+        let fileEvents = taxonomyFileEventNames()
+        let uniqueFileEvents = Set(fileEvents)
+
+        assertFalse(fileEvents.isEmpty, "Resources/analytics-events.psv should list analytics events")
+        assertEqual(
+            fileEvents.count,
+            uniqueFileEvents.count,
+            "Resources/analytics-events.psv must keep one line per event — run scripts/ops/normalize-analytics-taxonomy.py after a union merge to drop duplicate lines"
+        )
+        assertEqual(
+            uniqueFileEvents.sorted(),
+            AnalyticsEventPolicy.allEventNames.sorted(),
+            "the compiled allowlist should reflect exactly the events in Resources/analytics-events.psv"
+        )
+    }
+
     runSuite("AnalyticsEventPolicy taxonomy blocks sensitive property names") {
         let forbiddenFragments = [
             "audio_path",
@@ -55,163 +72,7 @@ func testAnalyticsEventPolicy() {
     }
 
     runSuite("AnalyticsEventPolicy taxonomy requires reviewed non-bucket property shapes") {
-        let reviewedNonBucketProperties: Set<String> = [
-            "action",
-            "action_id",
-            "action_kind",
-            "agent_cta",
-            "agent_target",
-            "analytics_available",
-            "anonymous_usage_enabled",
-            "app_signal",
-            "app_version",
-            "artifact_kind",
-            "attenuation_kind",
-            "auto_send",
-            "automatic_downloads_enabled",
-            "available",
-            "backoff_kind",
-            "build_channel",
-            "build_revision",
-            "build_version",
-            "calendar_confidence",
-            "calendar_status",
-            "call_state",
-            "capture_activity",
-            "capture_quality",
-            "captured_input_volume_before",
-            "captured_input_volume_changed",
-            "captured_input_volume_dropped",
-            "captured_input_volume_during",
-            "cleanup_changed",
-            "cleanup_enabled",
-            "completion_flow",
-            "cooldown_reason",
-            "copy_reason",
-            "crash_reporting_available",
-            "crash_reporting_enabled",
-            "cta",
-            "cta_type",
-            "default_input_class",
-            "default_input_volume_after",
-            "default_input_volume_before",
-            "default_input_volume_changed",
-            "default_input_volume_dropped",
-            "default_input_volume_during",
-            "default_output_class",
-            "default_output_volume_after",
-            "default_output_volume_before",
-            "default_output_volume_changed",
-            "default_output_volume_dropped",
-            "default_output_volume_during",
-            "default_system_output_volume_after",
-            "default_system_output_volume_before",
-            "default_system_output_volume_changed",
-            "default_system_output_volume_dropped",
-            "default_system_output_volume_during",
-            "delivery",
-            "dictation_ready",
-            "elapsed_bucket",
-            "enabled",
-            "entrypoint",
-            "failure_code",
-            "failure_kind",
-            "feature_area",
-            "first_artifact_kind",
-            "first_dictation_saved",
-            "format_ready",
-            "from_status",
-            "has_target",
-            "hfp_suspected",
-            "import_stage",
-            "input_channels",
-            "input_device_class",
-            "input_rate_hz",
-            "input_volume_scalar_available",
-            "last_event",
-            "location_type",
-            "meeting_dry_run_completed",
-            "meeting_recording_ready",
-            "mic_boost_prompt",
-            "mic_processed_peak",
-            "mic_processing",
-            "mic_raw_peak",
-            "mic_recovering",
-            "mic_status",
-            "mic_stream_present",
-            "missing_permission",
-            "model_state",
-            "os_major",
-            "outcome",
-            "output_channels",
-            "output_device_class",
-            "output_ducking_detected",
-            "output_rate_hz",
-            "page_id",
-            "paste_available",
-            "pasteback_status",
-            "permission_kind",
-            "previous_clean_shutdown",
-            "previous_version",
-            "prior_artifact_kind",
-            "prior_ready_state",
-            "prior_status",
-            "prompt_kind",
-            "prompt_reason",
-            "provider",
-            "proxy_kind",
-            "query_kind",
-            "quiet_mic_recovered",
-            "quiet_mic_unrecovered",
-            "realtime_agc",
-            "reason",
-            "recent_meetings_available",
-            "recovering",
-            "reporting_kind",
-            "required",
-            "reason_kind",
-            "result",
-            "route_ready",
-            "route_shape",
-            "sample_flow_started",
-            "save_outcome",
-            "selected_input_class",
-            "selection_overrode_default",
-            "selection_reason",
-            "second_artifact_kind",
-            "session_active",
-            "session_kind",
-            "session_stage",
-            "setting_id",
-            "setup_kind",
-            "source",
-            "stall_kind",
-            "stall_stage",
-            "stage",
-            "state",
-            "step_id",
-            "step_index",
-            "stop_timed_out",
-            "suppression_reason",
-            "surface",
-            "system_backend",
-            "system_channels",
-            "system_failed",
-            "system_output_device_class",
-            "system_output_rate_hz",
-            "system_peak",
-            "system_rate_hz",
-            "system_status",
-            "system_stream_present",
-            "to_status",
-            "trigger",
-            "update_state",
-            "version",
-            "voice_processing",
-            "voice_processing_active",
-            "was_recording",
-            "workflow_kind",
-        ]
+        let reviewedNonBucketProperties = reviewedNonBucketAnalyticsProperties()
         let properties = allAllowedAnalyticsPropertyNames()
 
         for property in properties where !property.hasSuffix("_bucket") {
@@ -1413,6 +1274,34 @@ private func documentedAnalyticsEvents() -> [String] {
 
 private func allAllowedAnalyticsPropertyNames() -> [String] {
     Set(AnalyticsEventPolicy.allPolicies.flatMap { $0.allowedProperties }).sorted()
+}
+
+/// Reviewed non-bucket properties live in `Resources/analytics-reviewed-properties.psv`
+/// (one per line, `merge=union`) instead of a Swift literal so two telemetry PRs
+/// that each review a new property append independent lines without colliding.
+private func reviewedNonBucketAnalyticsProperties() -> Set<String> {
+    let text = loadRepoText("Resources/analytics-reviewed-properties.psv")
+    return Set(
+        text.split(separator: "\n").compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return nil }
+            return trimmed
+        }
+    )
+}
+
+/// Raw event names as they appear in the taxonomy file (before the compiled
+/// allowlist dedupes them), so the duplicate-event guard can catch a union
+/// merge that accidentally kept two lines for the same event.
+private func taxonomyFileEventNames() -> [String] {
+    let text = loadRepoText("Resources/analytics-events.psv")
+    return text.split(separator: "\n").compactMap { line -> String? in
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#"), let pipe = trimmed.firstIndex(of: "|") else {
+            return nil
+        }
+        return String(trimmed[..<pipe]).trimmingCharacters(in: .whitespaces)
+    }
 }
 
 private func markdownSection(named heading: String, in text: String) -> String {
