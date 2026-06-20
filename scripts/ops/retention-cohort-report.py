@@ -260,7 +260,8 @@ WITH first_artifacts AS (
   SELECT
     distinct_id,
     min(timestamp) AS first_artifact_at,
-    argMin(event, timestamp) AS first_artifact_event
+    argMin(event, timestamp) AS first_artifact_event,
+    argMin(toString(properties['artifact_kind']), timestamp) AS first_artifact_kind
   FROM events
   WHERE timestamp >= now() - INTERVAL {first_seen_lookback_days} DAY
     AND event IN ({artifact_events})
@@ -273,6 +274,7 @@ post_artifact AS (
     fa.distinct_id AS distinct_id,
     fa.first_artifact_at AS first_artifact_at,
     fa.first_artifact_event AS first_artifact_event,
+    fa.first_artifact_kind AS first_artifact_kind,
     countIf(e.timestamp > fa.first_artifact_at + INTERVAL 18 HOUR
       AND e.timestamp <= fa.first_artifact_at + INTERVAL 36 HOUR) AS post_18h_36h_events,
     countIf(e.timestamp > fa.first_artifact_at + INTERVAL 18 HOUR) AS post_18h_7d_events,
@@ -286,11 +288,11 @@ post_artifact AS (
     AND e.timestamp > fa.first_artifact_at
     AND e.timestamp <= fa.first_artifact_at + INTERVAL 7 DAY
     AND e.event IN ({retention_events})
-  GROUP BY fa.distinct_id, fa.first_artifact_at, fa.first_artifact_event
+  GROUP BY fa.distinct_id, fa.first_artifact_at, fa.first_artifact_event, fa.first_artifact_kind
 )
 SELECT
   count() AS first_artifact_devices,
-  countIf(first_artifact_event = 'dictation_completed') AS first_dictation_devices,
+  countIf(first_artifact_event = 'activation_first_artifact_saved' AND first_artifact_kind = 'dictation') AS first_dictation_devices,
   countIf(first_artifact_event = 'meeting_transcript_saved') AS first_meeting_devices,
   countIf(first_artifact_at <= now() - INTERVAL 18 HOUR) AS mature_18h_devices,
   countIf(first_artifact_at <= now() - INTERVAL 36 HOUR) AS mature_36h_devices,
@@ -604,6 +606,8 @@ def write_outputs(report: dict[str, Any], markdown: str, write_dir: Path) -> tup
 def run_self_test() -> None:
     queries = build_queries(days=30, first_seen_lookback_days=180)
     assert set(queries) == {"summary", "latest_versions", "first_artifact", "first_run"}
+    assert "first_artifact_kind = 'dictation'" in queries["first_artifact"]
+    assert "first_artifact_event = 'dictation_completed'" not in queries["first_artifact"]
     for name, query in queries.items():
         assert "LIMIT 100" in query, f"{name} query must keep PostHog result bounded"
         assert "SELECT properties" not in query, f"{name} query must not select full properties"

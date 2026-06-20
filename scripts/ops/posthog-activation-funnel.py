@@ -119,16 +119,16 @@ REACH_STEPS = (
     StepDefinition(
         "strict_saved_markdown_devices",
         "Strict saved Markdown",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved')",
+        "event = 'activation_first_artifact_saved'",
         "observed",
-        "Saved onboarding dictation Markdown or saved meeting Markdown. General saved dictation lacks a dedicated remote event.",
+        "First saved dictation or meeting Markdown artifact, emitted once per install from the successful save path.",
     ),
     StepDefinition(
         "saved_markdown_plus_dictation_proxy_devices",
         "Saved Markdown plus dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
         "proxy",
-        "Adds dictation completion as a product-success proxy because general dictation save is only local diagnostics today.",
+        "Adds legacy saved-artifact events and dictation completion as product-success proxies around the strict first-artifact event.",
     ),
     StepDefinition(
         "artifact_action_devices",
@@ -181,7 +181,7 @@ SEQUENCE_STEPS = (
     ("Dictation started", "event IN ('onboarding_first_dictation_started', 'dictation_started')"),
     (
         "Saved Markdown or dictation proxy",
-        "event IN ('onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
+        "event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
     ),
     (
         "Artifact opened or prompt copied",
@@ -583,8 +583,8 @@ def render_report(data: dict[str, Any]) -> str:
 
     limitations = [
         "`permission ready` uses `onboarding_completed` as a proxy. The app guards completion on required dictation permissions, but this does not count users who became ready outside onboarding.",
-        "`strict saved Markdown` counts onboarding first-dictation saves and meeting transcript saves. General dictation save currently has local diagnostics but no dedicated remote saved-artifact event.",
-        "`dictation_completed` is included only in the proxy saved-Markdown row. It can prove useful dictation volume, but not every general saved Markdown write.",
+        "`strict saved Markdown` counts `activation_first_artifact_saved`, emitted once per install from successful dictation and meeting Markdown save paths.",
+        "`dictation_completed`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are included only in the proxy saved-Markdown row for legacy continuity.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
         "`workflow_abandoned` is a conservative exit map. It should not be read as every possible drop-off or every click.",
@@ -597,7 +597,7 @@ def render_report(data: dict[str, Any]) -> str:
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Abandonment exits: workflow kind, stage, reason kind, surface, and prior-ready state.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
-        "Data quality: missing true-agent-use event and general dictation saved-artifact gap.",
+        "Data quality: missing true-agent-use event and first-artifact adoption by app version.",
     ]
 
     lines = [
@@ -678,7 +678,7 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         "## Next Best Action",
         "",
-        "Add one privacy-safe first-use event for `activation_first_artifact_saved` and one for `agent_capture_query_observed`, then make the dashboard's primary KPI the share of launch devices that reach true sourced-agent-use within 7 days.",
+        "Verify `activation_first_artifact_saved` reaches live PostHog for current builds, add `agent_capture_query_observed`, then make the dashboard's primary KPI the share of launch devices that reach true sourced-agent-use within 7 days.",
         "",
     ]
     return "\n".join(lines)
@@ -744,14 +744,22 @@ def run_self_test() -> int:
     if "True agent-query proof: **0 devices**" not in report:
         print("self-test failed: missing true agent-query proof limitation", file=sys.stderr)
         return 1
+    reach = reach_query(30, None)
+    sequence = sequence_query(30, None)
+    if "activation_first_artifact_saved') AS strict_saved_markdown_devices" not in reach:
+        print("self-test failed: strict saved-Markdown reach must use activation_first_artifact_saved", file=sys.stderr)
+        return 1
+    if "activation_first_artifact_saved" not in sequence:
+        print("self-test failed: ordered saved-Markdown step must include activation_first_artifact_saved", file=sys.stderr)
+        return 1
     if "Workflow abandonment exits: **1 devices**" not in report:
         print("self-test failed: missing workflow abandonment reach", file=sys.stderr)
         return 1
     for query in (
-        reach_query(30, None),
+        reach,
         event_counts_query(30, None),
         daily_active_query(30, None),
-        sequence_query(30, None),
+        sequence,
         onboarding_completion_query(30, None),
         artifact_actions_query(30, None),
         agent_signals_query(30, None),

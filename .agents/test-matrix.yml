@@ -135,6 +135,15 @@ rules:
       - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
+      - "scripts/ops/posthog-dashboard-queries.py"
+      - "Tests/Fixtures/posthog-dashboard-query-results.json"
+      - "docs/posthog-dashboard-query-helpers.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-dashboard-queries.py"
+      - "python3 scripts/ops/posthog-dashboard-queries.py --self-test"
+
+  - paths:
       - "scripts/ops/nightly-security-check.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
@@ -147,6 +156,13 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/release-gate-report.py"
       - "python3 scripts/ops/release-gate-report.py --self-test"
+
+  - paths:
+      - "scripts/ops/release-health-card.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/release-health-card.py"
+      - "python3 scripts/ops/release-health-card.py --self-test"
 
   - paths:
       - "scripts/release/post-dmg-release-audit.py"

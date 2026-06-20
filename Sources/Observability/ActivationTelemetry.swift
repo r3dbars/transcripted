@@ -305,3 +305,57 @@ enum ActivationTelemetry {
         }
     }
 }
+
+enum ProductFrictionTelemetry {
+    enum Surface: String {
+        case dictation
+        case meeting
+        case update
+    }
+
+    enum Result: String {
+        case blocked
+        case cancelled
+        case completed
+        case failed
+        case fallback
+        case giveUp = "give_up"
+        case started
+    }
+
+    static func track(
+        surface: Surface,
+        stage: String,
+        result: Result,
+        failureKind: String? = nil,
+        elapsedBucket: String? = nil,
+        routeShape: String? = nil,
+        modelState: String? = nil
+    ) {
+        var properties = [
+            "result": result.rawValue,
+            "stage": stage,
+            "surface": surface.rawValue,
+        ]
+
+        if let failureKind {
+            properties["failure_kind"] = failureKind
+        }
+        if let elapsedBucket {
+            properties["elapsed_bucket"] = elapsedBucket
+        }
+        if let routeShape {
+            properties["route_shape"] = routeShape
+        }
+        if let modelState {
+            properties["model_state"] = modelState
+        }
+
+        AnalyticsReporter.track("product_friction_observed", properties: properties)
+    }
+
+    static func modelState(isReady: Bool?) -> String {
+        guard let isReady else { return "unknown" }
+        return isReady ? "ready" : "not_ready"
+    }
+}

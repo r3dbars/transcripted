@@ -55,8 +55,18 @@ The script writes a Markdown report and JSON data under
 aggregate-only and separates strict saved-Markdown proof from proxy rows like
 `dictation_completed`, agent setup clicks, and copied starter prompts.
 
+For the broader 100 WAU dashboard, reliability funnels, local summary beta
+funnel, agent/Markdown value loop, and release-health view, use
+`docs/posthog-100-wau-dashboard.md`.
+
 For the full product-learning telemetry map, current event taxonomy, blind
 spots, and dashboard plan, see `docs/posthog-product-learning-plan.md`.
+For reusable 100 WAU, activation, reliability, feature-adoption, and
+release-health query specs, use:
+
+```bash
+python3 scripts/ops/posthog-dashboard-queries.py --family activation --dry-run
+```
 
 For the dashboard-to-product-task loop, use:
 

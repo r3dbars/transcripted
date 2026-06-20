@@ -4,6 +4,8 @@ struct RuntimeDiagnosticsMarker: Codable, Equatable {
     var launchID: String
     var appVersion: String
     var buildVersion: String
+    var buildChannel: String?
+    var buildRevision: String?
     var osMajor: Int
     var cleanShutdown: Bool
     var startedAt: Date
@@ -26,6 +28,8 @@ enum RuntimeDiagnosticsStore {
         launchID: String = UUID().uuidString,
         appVersion: String,
         buildVersion: String,
+        buildChannel: String? = nil,
+        buildRevision: String? = nil,
         osMajor: Int,
         now: Date = Date()
     ) -> RuntimeDiagnosticsMarker {
@@ -33,6 +37,8 @@ enum RuntimeDiagnosticsStore {
             launchID: launchID,
             appVersion: appVersion,
             buildVersion: buildVersion,
+            buildChannel: buildChannel,
+            buildRevision: buildRevision,
             osMajor: osMajor,
             cleanShutdown: false,
             startedAt: now,
@@ -118,7 +124,7 @@ enum RuntimeDiagnosticsStore {
         for marker: RuntimeDiagnosticsMarker,
         now: Date
     ) -> [String: String] {
-        [
+        var context = [
             "app_version": marker.appVersion,
             "build_version": marker.buildVersion,
             "heartbeat_age_bucket": heartbeatAgeBucket(previousUpdate: marker.updatedAt, now: now),
@@ -129,6 +135,15 @@ enum RuntimeDiagnosticsStore {
             "session_kind": marker.sessionKind,
             "session_stage": marker.sessionStage,
         ]
+
+        if let buildChannel = marker.buildChannel, !buildChannel.isEmpty {
+            context["build_channel"] = buildChannel
+        }
+        if let buildRevision = marker.buildRevision, !buildRevision.isEmpty {
+            context["build_revision"] = buildRevision
+        }
+
+        return context
     }
 
     static func shouldReportUncleanShutdown(

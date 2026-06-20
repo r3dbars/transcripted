@@ -104,6 +104,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `agent_capture_query_observed`
 - `activation_return_proxy_observed`
 - `workflow_abandoned`
+- `product_friction_observed`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
@@ -156,6 +157,8 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - retry attempt buckets like `start_attempt_bucket`, not raw retry counts
 - normalized failure kinds like `system_audio`, `recording_too_short`, `other`
 - normalized failure-code buckets like `url_-1009`, `sparkle_2003`, `other_42`
+- product friction fields limited to `surface`, `stage`, `result`,
+  `failure_kind`, `elapsed_bucket`, `route_shape`, and `model_state`
 
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
