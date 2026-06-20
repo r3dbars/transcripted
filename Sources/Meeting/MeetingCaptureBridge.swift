@@ -184,6 +184,7 @@ final class MeetingCaptureBridge: ObservableObject {
         switch AudioCaptureStartState.meetingCaptureOutcome(
             isRecording: audio.isRecording,
             systemAudioFileURL: audio.systemAudioFileURL,
+            systemAudioStreaming: audio.systemAudioStreaming,
             errorMessage: errorMessage
         ) {
         case .waiting:
@@ -280,6 +281,11 @@ final class MeetingCaptureBridge: ObservableObject {
 
         sinkStartAttemptTriggers(from: audio.$isRecording)
         sinkStartAttemptTriggers(from: audio.$systemAudioFileURL)
+        // A tap can install (file URL assigned, isRecording true) yet never
+        // stream. Re-evaluate readiness when the first system buffer arrives so
+        // a silent-death tap stays `.waiting` and fails the start deadline
+        // instead of being reported as recording.
+        sinkStartAttemptTriggers(from: audio.$systemAudioStreaming)
     }
 
     private func currentStopResult(didTimeOut: Bool = false) -> CaptureStopResult {
