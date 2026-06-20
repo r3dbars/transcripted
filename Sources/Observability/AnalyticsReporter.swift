@@ -16,6 +16,146 @@ private struct AnalyticsCaptureRequest: Encodable {
     }
 }
 
+struct PendingAnalyticsCapture: Codable, Equatable {
+    let id: String
+    let event: String
+    let distinctID: String
+    let timestamp: String
+    let enqueuedAt: TimeInterval
+    var attemptCount: Int
+    var nextRetryAt: TimeInterval?
+    let properties: [String: String]
+}
+
+struct AnalyticsDeliveryBufferStore {
+    private struct BufferFile: Codable {
+        let version: Int
+        let records: [PendingAnalyticsCapture]
+    }
+
+    static let fileName = "analytics-delivery-buffer.json"
+    static let defaultMaxRecordCount = 100
+    static let defaultMaxFileBytes = 64 * 1024
+    static let defaultTTL: TimeInterval = 24 * 60 * 60
+
+    let fileURL: URL
+    let fileManager: FileManager
+    let maxRecordCount: Int
+    let maxFileBytes: Int
+    let ttl: TimeInterval
+
+    init(
+        fileURL: URL,
+        fileManager: FileManager = .default,
+        maxRecordCount: Int = Self.defaultMaxRecordCount,
+        maxFileBytes: Int = Self.defaultMaxFileBytes,
+        ttl: TimeInterval = Self.defaultTTL
+    ) {
+        self.fileURL = fileURL
+        self.fileManager = fileManager
+        self.maxRecordCount = maxRecordCount
+        self.maxFileBytes = maxFileBytes
+        self.ttl = ttl
+    }
+
+    static func defaultFileURL(fileManager: FileManager = .default) -> URL {
+        fileManager.transcriptedStateDir.appendingPathComponent(fileName, isDirectory: false)
+    }
+
+    func load(now: Date = Date()) -> [PendingAnalyticsCapture] {
+        guard let data = try? Data(contentsOf: fileURL) else { return [] }
+
+        do {
+            let file = try JSONDecoder().decode(BufferFile.self, from: data)
+            return cappedRecords(file.records, now: now)
+        } catch {
+            remove()
+            return []
+        }
+    }
+
+    func save(_ records: [PendingAnalyticsCapture], now: Date = Date()) {
+        let capped = cappedRecords(records, now: now)
+        guard !capped.isEmpty else {
+            remove()
+            return
+        }
+
+        do {
+            try fileManager.createPrivateDirectory(at: fileURL.deletingLastPathComponent())
+            let data = try JSONEncoder().encode(BufferFile(version: 1, records: capped))
+            try data.write(to: fileURL, options: [.atomic])
+            fileManager.restrictFileToOwnerOnly(at: fileURL)
+        } catch {
+            return
+        }
+    }
+
+    func remove() {
+        try? fileManager.removeItem(at: fileURL)
+    }
+
+    func cappedRecords(_ records: [PendingAnalyticsCapture], now: Date = Date()) -> [PendingAnalyticsCapture] {
+        let cutoff = now.timeIntervalSince1970 - ttl
+        var capped = records
+            .filter { $0.enqueuedAt >= cutoff }
+            .sorted { lhs, rhs in
+                if lhs.enqueuedAt == rhs.enqueuedAt {
+                    return lhs.id < rhs.id
+                }
+                return lhs.enqueuedAt < rhs.enqueuedAt
+            }
+
+        if capped.count > maxRecordCount {
+            capped = Array(capped.suffix(maxRecordCount))
+        }
+
+        while !capped.isEmpty && encodedByteCount(capped) > maxFileBytes {
+            capped.removeFirst()
+        }
+
+        return capped
+    }
+
+    private func encodedByteCount(_ records: [PendingAnalyticsCapture]) -> Int {
+        (try? JSONEncoder().encode(BufferFile(version: 1, records: records)).count) ?? Int.max
+    }
+}
+
+private enum AnalyticsDeliveryResult {
+    case delivered
+    case retry
+    case drop
+}
+
+enum AnalyticsDeliveryPolicy {
+    fileprivate static func result(response: URLResponse?, error: Error?) -> AnalyticsDeliveryResult {
+        if error != nil {
+            return .retry
+        }
+
+        guard let response = response as? HTTPURLResponse else {
+            return .retry
+        }
+
+        switch response.statusCode {
+        case 200..<300:
+            return .delivered
+        case 429, 500..<600:
+            return .retry
+        case 400..<500:
+            return .drop
+        default:
+            return .retry
+        }
+    }
+
+    static func retryDelay(afterAttempt attempt: Int) -> TimeInterval {
+        let exponent = min(max(attempt - 1, 0), 5)
+        return min(pow(2.0, Double(exponent)), 60)
+    }
+}
+
 enum AnalyticsRuntimeConfiguration {
     static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
     static let hostInfoKey = "TranscriptedPostHogHost"
@@ -253,34 +393,104 @@ final class AnalyticsReporter {
         return eventProperties
     }
 
-    private init() {}
+    private convenience init() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 5
+        self.init(
+            apiKey: AnalyticsRuntimeConfiguration.apiKey(),
+            captureHost: AnalyticsRuntimeConfiguration.host(),
+            session: URLSession(configuration: configuration),
+            bufferStore: AnalyticsDeliveryBufferStore(
+                fileURL: AnalyticsDeliveryBufferStore.defaultFileURL()
+            ),
+            userDefaults: .standard,
+            observePreferenceChanges: true
+        )
+    }
+
+    init(
+        apiKey: String?,
+        captureHost: String?,
+        session: URLSession,
+        bufferStore: AnalyticsDeliveryBufferStore,
+        userDefaults: UserDefaults = .standard,
+        currentDate: @escaping () -> Date = Date.init,
+        retryDelay: @escaping (Int) -> TimeInterval = AnalyticsDeliveryPolicy.retryDelay(afterAttempt:),
+        analyticsEnabled: (() -> Bool)? = nil,
+        observePreferenceChanges: Bool = false
+    ) {
+        self.apiKey = apiKey
+        self.captureHost = captureHost
+        self.session = session
+        self.bufferStore = bufferStore
+        self.userDefaults = userDefaults
+        self.currentDate = currentDate
+        self.retryDelay = retryDelay
+        self.analyticsEnabled = analyticsEnabled ?? { AnalyticsPreferences.isEnabled(userDefaults: userDefaults) }
+        deliveryQueue.setSpecific(key: Self.deliveryQueueSpecificKey, value: true)
+
+        if observePreferenceChanges {
+            preferenceObserver = NotificationCenter.default.addObserver(
+                forName: UserDefaults.didChangeNotification,
+                object: userDefaults,
+                queue: nil
+            ) { [weak self] _ in
+                guard let self else { return }
+                if !self.analyticsEnabled() {
+                    self.clearPendingCaptures()
+                }
+            }
+        }
+
+        if self.analyticsEnabled() {
+            flushPendingCaptures()
+        } else {
+            clearPendingCaptures()
+        }
+    }
+
+    deinit {
+        if let preferenceObserver {
+            NotificationCenter.default.removeObserver(preferenceObserver)
+        }
+    }
 
     // Config is read once from env/plist/overrides file and cached for the app lifetime.
-    private let apiKey: String? = AnalyticsRuntimeConfiguration.apiKey()
-    private let captureHost: String? = AnalyticsRuntimeConfiguration.host()
+    private let apiKey: String?
+    private let captureHost: String?
     private static let isoDateFormatter = ISO8601DateFormatter()
     private let storageKey = "observability-anonymous-analytics-id"
     private let sessionID = UUID().uuidString
-    private let session: URLSession = {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 5
-        return URLSession(configuration: configuration)
-    }()
+    private let session: URLSession
+    private let bufferStore: AnalyticsDeliveryBufferStore
+    private let userDefaults: UserDefaults
+    private let currentDate: () -> Date
+    private let retryDelay: (Int) -> TimeInterval
+    private let analyticsEnabled: () -> Bool
+    private static let deliveryQueueSpecificKey = DispatchSpecificKey<Bool>()
+    private let deliveryQueue = DispatchQueue(label: "com.transcripted.analytics.delivery-buffer")
+    private var inFlightCaptureIDs: Set<String> = []
+    private var preferenceObserver: NSObjectProtocol?
 
     private lazy var distinctID: String = {
-        if let existing = UserDefaults.standard.string(forKey: storageKey) {
+        if let existing = userDefaults.string(forKey: storageKey) {
             return existing
         }
 
         let newValue = UUID().uuidString
-        UserDefaults.standard.set(newValue, forKey: storageKey)
+        userDefaults.set(newValue, forKey: storageKey)
         return newValue
     }()
 
-    private func trackEvent(_ event: String, properties: [String: String]) {
-        guard AnalyticsPreferences.isEnabled() else { return }
-        guard let apiKey,
+    func trackEvent(_ event: String, properties: [String: String] = [:]) {
+        guard analyticsEnabled() else {
+            clearPendingCaptures()
+            return
+        }
+
+        guard apiKey != nil,
               let captureHost,
+              normalizedCaptureURL(from: captureHost) != nil,
               let policy = AnalyticsEventPolicy.policy(forEvent: event) else {
             return
         }
@@ -296,17 +506,99 @@ final class AnalyticsReporter {
             sessionID: sessionID
         )
 
-        let payload = AnalyticsCaptureRequest(
-            apiKey: apiKey,
+        let now = currentDate()
+        let capture = PendingAnalyticsCapture(
+            id: UUID().uuidString,
             event: policy.name,
             distinctID: distinctID,
-            timestamp: Self.isoDateFormatter.string(from: Date()),
+            timestamp: Self.isoDateFormatter.string(from: now),
+            enqueuedAt: now.timeIntervalSince1970,
+            attemptCount: 0,
+            nextRetryAt: nil,
             properties: eventProperties
         )
 
-        guard let data = try? JSONEncoder().encode(payload),
+        enqueue(capture)
+    }
+
+    func flushPendingCapturesForTesting() {
+        flushPendingCaptures()
+    }
+
+    private func enqueue(_ capture: PendingAnalyticsCapture) {
+        syncOnDeliveryQueue {
+            guard self.analyticsEnabled() else {
+                self.bufferStore.remove()
+                return
+            }
+
+            let now = self.currentDate()
+            var records = self.bufferStore.load(now: now)
+            records.append(capture)
+            self.bufferStore.save(records, now: now)
+            self.flushPendingCapturesLocked()
+        }
+    }
+
+    private func flushPendingCaptures() {
+        deliveryQueue.async {
+            self.flushPendingCapturesLocked()
+        }
+    }
+
+    private func clearPendingCaptures() {
+        syncOnDeliveryQueue {
+            self.inFlightCaptureIDs.removeAll()
+            self.bufferStore.remove()
+        }
+    }
+
+    private func syncOnDeliveryQueue(_ work: () -> Void) {
+        if DispatchQueue.getSpecific(key: Self.deliveryQueueSpecificKey) == true {
+            work()
+        } else {
+            deliveryQueue.sync(execute: work)
+        }
+    }
+
+    private func flushPendingCapturesLocked() {
+        guard analyticsEnabled() else {
+            inFlightCaptureIDs.removeAll()
+            bufferStore.remove()
+            return
+        }
+
+        guard let apiKey,
+              let captureHost,
               let urlString = normalizedCaptureURL(from: captureHost),
               let url = URL(string: urlString) else {
+            return
+        }
+
+        let now = currentDate()
+        let records = bufferStore.load(now: now)
+        bufferStore.save(records, now: now)
+
+        for capture in records {
+            guard capture.nextRetryAt.map({ $0 <= now.timeIntervalSince1970 }) ?? true else { continue }
+            guard !inFlightCaptureIDs.contains(capture.id) else { continue }
+
+            inFlightCaptureIDs.insert(capture.id)
+            send(capture, apiKey: apiKey, url: url)
+        }
+    }
+
+    private func send(_ capture: PendingAnalyticsCapture, apiKey: String, url: URL) {
+        let payload = AnalyticsCaptureRequest(
+            apiKey: apiKey,
+            event: capture.event,
+            distinctID: capture.distinctID,
+            timestamp: capture.timestamp,
+            properties: capture.properties
+        )
+
+        guard let data = try? JSONEncoder().encode(payload) else {
+            completeDelivery(for: capture, result: .drop)
             return
         }
 
@@ -315,7 +607,44 @@ final class AnalyticsReporter {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = data
 
-        session.dataTask(with: request).resume()
+        session.dataTask(with: request) { [weak self] _, response, error in
+            let result = AnalyticsDeliveryPolicy.result(response: response, error: error)
+            self?.deliveryQueue.async {
+                self?.completeDeliveryLocked(for: capture, result: result)
+            }
+        }.resume()
+    }
+
+    private func completeDelivery(for capture: PendingAnalyticsCapture, result: AnalyticsDeliveryResult) {
+        deliveryQueue.async {
+            self.completeDeliveryLocked(for: capture, result: result)
+        }
+    }
+
+    private func completeDeliveryLocked(for capture: PendingAnalyticsCapture, result: AnalyticsDeliveryResult) {
+        defer { inFlightCaptureIDs.remove(capture.id) }
+
+        guard analyticsEnabled() else {
+            inFlightCaptureIDs.removeAll()
+            bufferStore.remove()
+            return
+        }
+
+        let now = currentDate()
+        var records = bufferStore.load(now: now)
+        guard let index = records.firstIndex(where: { $0.id == capture.id }) else { return }
+
+        switch result {
+        case .delivered, .drop:
+            records.remove(at: index)
+        case .retry:
+            var retryCapture = records[index]
+            retryCapture.attemptCount += 1
+            retryCapture.nextRetryAt = now.addingTimeInterval(retryDelay(retryCapture.attemptCount)).timeIntervalSince1970
+            records[index] = retryCapture
+        }
+
+        bufferStore.save(records, now: now)
     }
 
     private func normalizedCaptureURL(from host: String) -> String? {
