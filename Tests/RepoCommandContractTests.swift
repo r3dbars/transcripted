@@ -3021,7 +3021,7 @@ func testRepoCommandContract() {
         assertTrue(
             appContents.contains("\"entrypoint\": entrypoint")
                 && appContents.contains("\"has_target\": lastExternalApplication == nil ? \"false\" : \"true\"")
-                && appContents.contains("\"model_state\": modelStateAnalyticsName(appState.sttRouter.modelDownloadState)")
+                && appContents.contains("\"model_state\": appState.sttRouter.modelDownloadState.diagnosticName")
                 && appContents.contains("\"pasteback_status\": TranscriptedPermissionAccess.isGranted(.accessibility) ? \"granted\" : \"not_granted\""),
             "onboarding_shown should stay limited to coarse setup state"
         )

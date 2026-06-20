@@ -53,6 +53,19 @@ enum ParakeetModelState {
     case failed(String)
 }
 
+extension ParakeetModelState {
+    var diagnosticName: String {
+        switch self {
+        case .notLoaded: return "not_loaded"
+        case .downloading: return "downloading"
+        case .cached: return "cached"
+        case .loading: return "loading"
+        case .ready: return "ready"
+        case .failed: return "failed"
+        }
+    }
+}
+
 struct RecordedSpeechSamples {
     let nativeSampleCount: Int
     let samples16k: [Float]
