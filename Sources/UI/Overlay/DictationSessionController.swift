@@ -180,6 +180,11 @@ class DictationSessionController: ObservableObject {
                 ]
             )
         )
+        WorkflowTelemetry.trackStarted(
+            workflowKind: .dictation,
+            entrypoint: trigger.rawValue,
+            trigger: trigger.rawValue
+        )
     }
 
     private func trackDictationStartFailed(
@@ -202,6 +207,13 @@ class DictationSessionController: ObservableObject {
             failureKind: failureKind,
             routeShape: analyticsProperties["route_shape"],
             modelState: ProductFrictionTelemetry.modelState(isReady: appState?.sttRouter.isModelLoaded)
+        )
+        WorkflowTelemetry.trackFinished(
+            workflowKind: .dictation,
+            result: .failed,
+            stage: "start",
+            trigger: currentDictationTrigger.rawValue,
+            failureKind: failureKind
         )
     }
 
@@ -937,6 +949,11 @@ class DictationSessionController: ObservableObject {
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
             let pasteOutcome = self.pasteWithClipboardRestore(text)
             stopTiming.pastedAt = CFAbsoluteTimeGetCurrent()
+            self.trackPastebackRecoveryIfNeeded(
+                pasteOutcome,
+                elapsedSeconds: (stopTiming.pastedAt ?? CFAbsoluteTimeGetCurrent())
+                    - (stopTiming.pasteStartedAt ?? CFAbsoluteTimeGetCurrent())
+            )
             let autoSendOutcome: DictationAutoSendOutcome
             let saveFailureMessage: String?
             switch DictationStopFinalizationPolicy.order {
@@ -1042,7 +1059,35 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
+            let workflowResult: WorkflowTelemetry.Result = saveFailureMessage == nil && pasteOutcome.delivery != .failed
+                ? .success
+                : .partialSuccess
+            let workflowFailureKind: String? = saveFailureMessage != nil
+                ? "markdown_save_failed"
+                : (pasteOutcome.delivery == .failed ? "delivery_failed" : nil)
+            WorkflowTelemetry.trackFinished(
+                workflowKind: .dictation,
+                result: workflowResult,
+                stage: "delivery",
+                trigger: currentDictationTrigger.rawValue,
+                failureKind: workflowFailureKind,
+                durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)
+            )
             if saveFailureMessage == nil {
+                ActivationTelemetry.trackArtifactCreated(
+                    artifactKind: .dictation,
+                    surface: .dictationSave,
+                    trigger: currentDictationTrigger.rawValue,
+                    wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount),
+                    durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime)
+                )
+                ActivationTelemetry.trackDictationArtifactSaved(
+                    delivery: pasteOutcome.delivery.rawValue,
+                    durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
+                    trigger: currentDictationTrigger.rawValue,
+                    wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)
+                )
                 ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
                     artifactKind: .dictation,
                     surface: .dictationSave,
@@ -1709,6 +1754,41 @@ class DictationSessionController: ObservableObject {
         AnalyticsReporter.track(
             "dictation_stop_latency_measured",
             properties: analyticsProperties
+        )
+    }
+
+    private func trackPastebackRecoveryIfNeeded(
+        _ pasteOutcome: DictationPasteOutcome,
+        elapsedSeconds: TimeInterval
+    ) {
+        let failureKind: String
+        let result: String
+        switch pasteOutcome {
+        case .pasted:
+            return
+        case .copied(_, reason: let reason):
+            failureKind = reason.diagnosticName
+            result = "success"
+        case .failed:
+            failureKind = "pasteback_unavailable"
+            result = "gave_up"
+        }
+
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "pasteback",
+            failureKind: failureKind,
+            retrySource: "clipboard_fallback",
+            surface: "dictation",
+            artifactRetained: true
+        )
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "pasteback",
+            failureKind: failureKind,
+            retrySource: "clipboard_fallback",
+            result: result,
+            elapsedSeconds: elapsedSeconds,
+            surface: "dictation",
+            artifactRetained: true
         )
     }
 

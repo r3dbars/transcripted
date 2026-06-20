@@ -504,6 +504,7 @@ def main() -> int:
             "update_relaunching",
             "update_installed",
             "dictation_completed",
+            "dictation_artifact_saved",
             "meeting_transcript_saved",
             "meeting_transcript_failed",
         ):

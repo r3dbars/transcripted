@@ -93,6 +93,13 @@ struct TranscriptedSettingsView: View {
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var speakerInboxScrollRequest = 0
     @State private var speakerInboxScrollAwaitingQueue = false
+    @State private var settingsPageVisitCounts: [TranscriptedSettingsPage: Int] = [:]
+    @State private var trackedSettingsVisitBuckets: Set<String> = []
+    @State private var emptyHomeSectionsSeen: Set<String> = []
+    @State private var emptyHomeSectionsResolvedByAction: Set<String> = []
+    @State private var failedMeetingDetailSignalsTracked: Set<UUID> = []
+    @State private var homeCaptureRefreshStarted = false
+    @State private var homeCaptureRefreshCompleted = false
 
     init(
         appState: TranscriptedAppState,
@@ -207,7 +214,14 @@ struct TranscriptedSettingsView: View {
                     openOwnFile(
                         candidateURLs: [preview.transcriptURL],
                         failureTitle: "Could not open transcript",
-                        failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                        failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app.",
+                        onOpened: {
+                            ActivationTelemetry.trackArtifactOpened(
+                                artifactKind: .meeting,
+                                surface: .homePreview,
+                                artifactDate: preview.date
+                            )
+                        }
                     )
                 },
                 onCopyForAgent: {
@@ -279,6 +293,11 @@ struct TranscriptedSettingsView: View {
             }
             trackSettingsPageViewed(page, source: "navigation")
         }
+        .onChange(of: homeViewModel.isLoading) { wasLoading, isLoading in
+            guard homeCaptureRefreshStarted, wasLoading, !isLoading else { return }
+            homeCaptureRefreshCompleted = true
+            markVisibleEmptyHomeSectionsIfNeeded()
+        }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, newURL in
             refreshRecentCaptures(force: true)
             if SettingsSpeakerQueueRefreshPolicy.shouldRefreshAfterMeetingTranscriptSave(newURL) {
@@ -321,6 +340,7 @@ struct TranscriptedSettingsView: View {
             refreshShortcutState()
         }
         .onDisappear {
+            trackEmptyHomeExitIfNeeded()
             homeDashboardRefreshTask?.cancel()
             homeDashboardRefreshTask = nil
             homeDashboardRefreshInFlight = false
@@ -514,7 +534,13 @@ struct TranscriptedSettingsView: View {
                             openOwnFile(
                                 candidateURLs: [transcriptURL],
                                 failureTitle: "Could not open transcript",
-                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment."
+                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment.",
+                                onOpened: {
+                                    ActivationTelemetry.trackArtifactOpened(
+                                        artifactKind: .meeting,
+                                        surface: .homeCurrentActivity
+                                    )
+                                }
                             )
                         }
                     }
@@ -586,6 +612,9 @@ struct TranscriptedSettingsView: View {
                 },
                 onShowAll: {
                     trackSettingsAction("home_show_all_failed_meetings", page: .home)
+                    for item in allFailedMeetings {
+                        trackFailedMeetingDetailsOpened(item)
+                    }
                     homeShowsAllFailedMeetings = true
                 }
             )
@@ -615,6 +644,8 @@ struct TranscriptedSettingsView: View {
                 automationIdentifier: "transcripted.home.meetings.empty.start",
                 action: {
                     trackSettingsAction("empty_start_meeting", page: .home)
+                    emptyHomeSectionsSeen.remove("meetings")
+                    emptyHomeSectionsResolvedByAction.insert("meetings")
                     actions.startMeeting()
                 }
             ),
@@ -628,6 +659,9 @@ struct TranscriptedSettingsView: View {
             }
         ) { item in
             homeMeetingListRow(item)
+        }
+        .onAppear {
+            markVisibleEmptyHomeSectionsIfNeeded()
         }
     }
 
@@ -682,6 +716,8 @@ struct TranscriptedSettingsView: View {
                 automationIdentifier: "transcripted.home.dictations.empty.start",
                 action: {
                     trackSettingsAction("empty_start_dictation", page: .dictations)
+                    emptyHomeSectionsSeen.remove("dictations")
+                    emptyHomeSectionsResolvedByAction.insert("dictations")
                     actions.startDictation()
                 }
             ),
@@ -708,7 +744,14 @@ struct TranscriptedSettingsView: View {
                     openOwnFile(
                         candidateURLs: [entry.url],
                         failureTitle: "Could not open dictation",
-                        failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                        failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app.",
+                        onOpened: {
+                            ActivationTelemetry.trackArtifactOpened(
+                                artifactKind: .dictation,
+                                surface: .homeRow,
+                                artifactDate: entry.createdAt
+                            )
+                        }
                     )
                 },
                 onCopy: { handleCopyDictation(entry) },
@@ -718,6 +761,9 @@ struct TranscriptedSettingsView: View {
                 },
                 menuItems: dictationRowMenuItems(for: entry)
             )
+        }
+        .onAppear {
+            markVisibleEmptyHomeSectionsIfNeeded()
         }
     }
 
@@ -743,6 +789,9 @@ struct TranscriptedSettingsView: View {
         switch issue.destination {
         case .failedMeetings:
             trackSettingsAction("open_needs_attention_failed_meetings", page: .home)
+            for item in meetingSession.failedMeetings {
+                trackFailedMeetingDetailsOpened(item)
+            }
             navigation.selectedPage = .home
             homeShowsAllFailedMeetings = true
         case .speakers:
@@ -787,6 +836,11 @@ struct TranscriptedSettingsView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(entry.text, forType: .string)
+        ActivationTelemetry.trackArtifactCopied(
+            artifactKind: .dictation,
+            surface: .homeRow,
+            artifactDate: entry.createdAt
+        )
         flashCopied(rowID: entry.id)
     }
 
@@ -826,6 +880,11 @@ struct TranscriptedSettingsView: View {
             )
             return
         }
+        ActivationTelemetry.trackArtifactCopied(
+            artifactKind: .meeting,
+            surface: .homeRow,
+            artifactDate: item.date
+        )
         flashCopied(rowID: item.id)
     }
 
@@ -853,6 +912,11 @@ struct TranscriptedSettingsView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        ActivationTelemetry.trackArtifactCopied(
+            artifactKind: .meeting,
+            surface: .homePreview,
+            artifactDate: preview.date
+        )
         ActivationTelemetry.trackAgentPromptAction(
             promptKind: bundle == nil ? .meetingMarkdown : .meetingBundle,
             actionKind: .copied,
@@ -928,6 +992,8 @@ struct TranscriptedSettingsView: View {
         generateLocalSummary(
             transcriptURL: item.transcriptURL,
             title: item.title,
+            recordingDate: item.startDate ?? item.date,
+            durationSeconds: meetingDurationSeconds(for: item),
             hasExistingSummary: item.summaryPreview != nil
         )
     }
@@ -935,6 +1001,8 @@ struct TranscriptedSettingsView: View {
     private func generateLocalSummary(
         transcriptURL: URL,
         title: String,
+        recordingDate: Date? = nil,
+        durationSeconds: TimeInterval? = nil,
         hasExistingSummary: Bool
     ) {
         guard localMeetingSummariesEnabled else { return }
@@ -950,15 +1018,32 @@ struct TranscriptedSettingsView: View {
         }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         let provider = localMeetingSummaryProvider
+        WorkflowTelemetry.trackStarted(
+            workflowKind: .localSummary,
+            entrypoint: hasExistingSummary ? "regenerate" : "generate",
+            trigger: "home"
+        )
+        let startedAt = Date()
         recordLocalSummaryEvent(
-            event: "local_meeting_summary_started",
+            event: "meeting_summary_requested",
             message: "\(provider.title) meeting summary started",
             context: [
+                "artifact_age_bucket": localSummaryArtifactAgeBucket(since: recordingDate, now: startedAt),
+                "duration_bucket": localSummaryDurationBucket(durationSeconds),
+                "model_family": localSummaryModelFamily(provider),
+                "model_state": localSummaryModelState(for: provider),
                 "provider": provider.rawValue,
-                "has_existing_summary": hasExistingSummary ? "true" : "false",
-                "setup_ready": selectedLocalSummaryProviderIsReady ? "true" : "false",
-                "setup_profile": selectedLocalSummaryProviderProfileName,
+                "result": hasExistingSummary ? "regenerate" : "new",
+                "surface": "home",
             ]
+        )
+        let localSummaryStartedAt = CFAbsoluteTimeGetCurrent()
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "local_summary",
+            failureKind: hasExistingSummary ? "regenerate_requested" : "summary_missing",
+            retrySource: "home_summary_action",
+            surface: "home",
+            artifactRetained: true
         )
         clearHomeLocalSummaryNotice()
         homeLocalSummaryJobIDs.insert(summaryID)
@@ -999,13 +1084,33 @@ struct TranscriptedSettingsView: View {
                     chunkCount: result.chunkCount
                 ))
                 recordLocalSummaryEvent(
-                    event: "local_meeting_summary_completed",
+                    event: "meeting_summary_finished",
                     message: "\(result.provider.title) meeting summary saved",
                     context: [
+                        "artifact_age_bucket": localSummaryArtifactAgeBucket(since: recordingDate, now: Date()),
+                        "duration_bucket": localSummaryDurationBucket(durationSeconds),
+                        "latency_bucket": localSummaryLatencyBucket(since: startedAt),
+                        "model_family": localSummaryModelFamily(result.provider),
+                        "model_state": "ready",
                         "provider": result.provider.rawValue,
-                        "chunk_count": "\(result.chunkCount)",
-                        "profile": result.profileName,
+                        "result": "success",
+                        "surface": "home",
                     ]
+                )
+                WorkflowTelemetry.trackFinished(
+                    workflowKind: .localSummary,
+                    result: .success,
+                    stage: "summary_save",
+                    trigger: "home"
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "local_summary",
+                    failureKind: hasExistingSummary ? "regenerate_requested" : "summary_missing",
+                    retrySource: "home_summary_action",
+                    result: "success",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - localSummaryStartedAt,
+                    surface: "home",
+                    artifactRetained: true
                 )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
@@ -1013,24 +1118,72 @@ struct TranscriptedSettingsView: View {
                     trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
                 }
                 recordLocalSummaryEvent(
-                    event: "local_meeting_summary_cancelled",
+                    event: "meeting_summary_finished",
                     message: "\(provider.title) meeting summary cancelled",
                     context: [
+                        "artifact_age_bucket": localSummaryArtifactAgeBucket(since: recordingDate, now: Date()),
+                        "duration_bucket": localSummaryDurationBucket(durationSeconds),
+                        "failure_kind": "cancelled",
+                        "latency_bucket": localSummaryLatencyBucket(since: startedAt),
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": localSummaryModelState(for: provider),
                         "provider": provider.rawValue,
+                        "result": "cancelled",
+                        "surface": "home",
                     ]
+                )
+                WorkflowTelemetry.trackFinished(
+                    workflowKind: .localSummary,
+                    result: .abandoned,
+                    stage: "generation",
+                    trigger: "home",
+                    failureKind: "cancelled"
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "local_summary",
+                    failureKind: hasExistingSummary ? "regenerate_requested" : "summary_missing",
+                    retrySource: "home_summary_action",
+                    result: "gave_up",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - localSummaryStartedAt,
+                    surface: "home",
+                    artifactRetained: true
                 )
                 return
             } catch {
                 guard localMeetingSummariesEnabled else { return }
+                let failureKind = localSummaryFailureKind(error)
                 trackLocalSummaryAbandoned(reason: .failed, stage: "generate", priorReadyState: "ready")
                 recordLocalSummaryEvent(
                     level: .error,
-                    event: "local_meeting_summary_failed",
+                    event: "meeting_summary_finished",
                     message: "\(provider.title) meeting summary failed",
                     context: [
+                        "artifact_age_bucket": localSummaryArtifactAgeBucket(since: recordingDate, now: Date()),
+                        "duration_bucket": localSummaryDurationBucket(durationSeconds),
+                        "failure_kind": failureKind,
+                        "latency_bucket": localSummaryLatencyBucket(since: startedAt),
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": localSummaryModelState(for: provider),
                         "provider": provider.rawValue,
-                        "error": error.localizedDescription,
+                        "result": "failed",
+                        "surface": "home",
                     ]
+                )
+                WorkflowTelemetry.trackFinished(
+                    workflowKind: .localSummary,
+                    result: .failed,
+                    stage: "generation",
+                    trigger: "home",
+                    failureKind: failureKind
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "local_summary",
+                    failureKind: failureKind,
+                    retrySource: "home_summary_action",
+                    result: "failed",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - localSummaryStartedAt,
+                    surface: "home",
+                    artifactRetained: true
                 )
                 NSSound.beep()
                 presentHomeLocalSummaryNotice(
@@ -1150,7 +1303,14 @@ struct TranscriptedSettingsView: View {
                 openOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not open dictation",
-                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app.",
+                    onOpened: {
+                        ActivationTelemetry.trackArtifactOpened(
+                            artifactKind: .dictation,
+                            surface: .homeMenu,
+                            artifactDate: entry.createdAt
+                        )
+                    }
                 )
             },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
@@ -1168,7 +1328,14 @@ struct TranscriptedSettingsView: View {
                 revealOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not show dictation",
-                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app.",
+                    onRevealed: {
+                        ActivationTelemetry.trackArtifactRevealed(
+                            artifactKind: .dictation,
+                            surface: .homeMenu,
+                            artifactDate: entry.createdAt
+                        )
+                    }
                 )
             },
             HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
@@ -1238,7 +1405,14 @@ struct TranscriptedSettingsView: View {
                 revealOwnFile(
                     candidateURLs: HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
                     failureTitle: "Could not show transcript",
-                    failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app.",
+                    onRevealed: {
+                        ActivationTelemetry.trackArtifactRevealed(
+                            artifactKind: .meeting,
+                            surface: .homeMenu,
+                            artifactDate: item.date
+                        )
+                    }
                 )
             }
         ])
@@ -1542,11 +1716,13 @@ struct TranscriptedSettingsView: View {
     private func revealOwnFile(
         candidateURLs: [URL],
         failureTitle: String,
-        failureMessage: String
+        failureMessage: String,
+        onRevealed: (() -> Void)? = nil
     ) {
         switch OwnFileResolver.resolveForReveal(candidateURLs: candidateURLs) {
         case .reveal(let urls):
             NSWorkspace.shared.activateFileViewerSelecting(urls)
+            onRevealed?()
         case .unavailable:
             presentHomeActionFailure(title: failureTitle, message: failureMessage)
         }
@@ -1560,13 +1736,15 @@ struct TranscriptedSettingsView: View {
     private func openOwnFile(
         candidateURLs: [URL],
         failureTitle: String,
-        failureMessage: String
+        failureMessage: String,
+        onOpened: (() -> Void)? = nil
     ) -> Bool {
         guard let url = OwnFileResolver.resolveExistingFile(candidateURLs: candidateURLs) else {
             presentHomeActionFailure(title: failureTitle, message: failureMessage)
             return false
         }
         NSWorkspace.shared.open(url)
+        onOpened?()
         return true
     }
 
@@ -1587,6 +1765,15 @@ struct TranscriptedSettingsView: View {
 
     private func retryFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
         let didStart = meetingSession.retryFailedMeeting(id: item.id)
+        UXConfusionTelemetry.trackRecovery(
+            .retryFromFailure,
+            surface: .home,
+            pageID: navigation.selectedPage.analyticsValue,
+            actionID: "home_retry_failed_meeting",
+            failureKind: item.failureKind.rawValue,
+            result: didStart ? .started : .blocked,
+            retryability: item.isRetryable ? "retryable" : "not_retryable"
+        )
         if !didStart {
             presentHomeActionFailure(
                 title: "Could not retry meeting",
@@ -3255,9 +3442,19 @@ struct TranscriptedSettingsView: View {
             event: "local_meeting_summary_model_prepare_started",
             message: "\(provider.title) summary model preparation started",
             context: [
+                "model_family": localSummaryModelFamily(provider),
+                "model_state": localSummaryModelState(for: provider),
                 "provider": provider.rawValue,
-                "setup_profile": selectedLocalSummaryProviderProfileName,
+                "surface": "beta",
             ]
+        )
+        let modelPreparationStartedAt = CFAbsoluteTimeGetCurrent()
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "model_preparation",
+            failureKind: "summary_model_not_ready",
+            retrySource: "summary_model_prepare",
+            surface: "settings",
+            artifactRetained: false
         )
 
         let taskToken = UUID()
@@ -3274,7 +3471,7 @@ struct TranscriptedSettingsView: View {
 
         Task { @MainActor in
             do {
-                let profile = try await task.value
+                _ = try await task.value
                 guard !Task.isCancelled, localSummaryModelPreparationToken == taskToken else { return }
                 isLocalSummaryModelPreparing = false
                 localSummaryModelPreparationTask = nil
@@ -3285,9 +3482,21 @@ struct TranscriptedSettingsView: View {
                     event: "local_meeting_summary_model_prepare_completed",
                     message: "\(provider.title) summary model preparation completed",
                     context: [
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": "ready",
                         "provider": provider.rawValue,
-                        "profile": profile,
+                        "result": "success",
+                        "surface": "beta",
                     ]
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "model_preparation",
+                    failureKind: "summary_model_not_ready",
+                    retrySource: "summary_model_prepare",
+                    result: "success",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelPreparationStartedAt,
+                    surface: "settings",
+                    artifactRetained: false
                 )
             } catch is CancellationError {
                 guard localSummaryModelPreparationToken == taskToken else { return }
@@ -3300,8 +3509,22 @@ struct TranscriptedSettingsView: View {
                     event: "local_meeting_summary_model_prepare_cancelled",
                     message: "\(provider.title) summary model preparation cancelled",
                     context: [
+                        "failure_kind": "cancelled",
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": localSummaryModelState(for: provider),
                         "provider": provider.rawValue,
+                        "result": "cancelled",
+                        "surface": "beta",
                     ]
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "model_preparation",
+                    failureKind: "summary_model_not_ready",
+                    retrySource: "summary_model_prepare",
+                    result: "gave_up",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelPreparationStartedAt,
+                    surface: "settings",
+                    artifactRetained: false
                 )
             } catch {
                 guard localSummaryModelPreparationToken == taskToken else { return }
@@ -3316,9 +3539,22 @@ struct TranscriptedSettingsView: View {
                     event: "local_meeting_summary_model_prepare_failed",
                     message: "\(provider.title) summary model preparation failed",
                     context: [
+                        "failure_kind": localSummaryFailureKind(error),
+                        "model_family": localSummaryModelFamily(provider),
+                        "model_state": localSummaryModelState(for: provider),
                         "provider": provider.rawValue,
-                        "error": error.localizedDescription,
+                        "result": "failed",
+                        "surface": "beta",
                     ]
+                )
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "model_preparation",
+                    failureKind: localSummaryFailureKind(error),
+                    retrySource: "summary_model_prepare",
+                    result: "failed",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelPreparationStartedAt,
+                    surface: "settings",
+                    artifactRetained: false
                 )
             }
         }
@@ -3419,6 +3655,97 @@ struct TranscriptedSettingsView: View {
             message: message,
             context: context
         )
+        AnalyticsReporter.track(event, properties: context)
+    }
+
+    private func meetingDurationSeconds(for item: RecentMeetingItem) -> TimeInterval? {
+        guard let start = item.startDate,
+              let end = item.endDate,
+              end > start else {
+            return nil
+        }
+        return end.timeIntervalSince(start)
+    }
+
+    private func localSummaryArtifactAgeBucket(since date: Date?, now: Date = Date()) -> String {
+        guard let date else {
+            return "unknown"
+        }
+        let ageSeconds = max(0, now.timeIntervalSince(date))
+        if ageSeconds < 3_600 {
+            return "lt_1h"
+        }
+        if ageSeconds < 12 * 3_600 {
+            return "1_12h"
+        }
+        if ageSeconds < 24 * 3_600 {
+            return "12_24h"
+        }
+        if ageSeconds < 48 * 3_600 {
+            return "24_48h"
+        }
+        if ageSeconds < 7 * 24 * 3_600 {
+            return "2_7d"
+        }
+        return "7d_plus"
+    }
+
+    private func localSummaryDurationBucket(_ seconds: TimeInterval?) -> String {
+        guard let seconds, seconds.isFinite, seconds >= 0 else {
+            return "unknown"
+        }
+        return AnalyticsReporter.durationBucket(seconds: seconds)
+    }
+
+    private func localSummaryLatencyBucket(since start: Date, now: Date = Date()) -> String {
+        let milliseconds = max(0, Int(now.timeIntervalSince(start) * 1000))
+        return AnalyticsReporter.latencyBucket(milliseconds: milliseconds)
+    }
+
+    private func localSummaryModelState(for provider: LocalMeetingSummaryProvider) -> String {
+        switch provider {
+        case .gemmaMLX:
+            if isLocalSummaryModelPreparing { return "preparing" }
+            return localSummarySetupStatus.isReady ? "ready" : "not_ready"
+        case .appleFoundation:
+            return appleSummarySetupStatus.isReady ? "ready" : "not_ready"
+        }
+    }
+
+    private func localSummaryModelFamily(_ provider: LocalMeetingSummaryProvider) -> String {
+        switch provider {
+        case .gemmaMLX:
+            return "gemma_mlx"
+        case .appleFoundation:
+            return "apple_foundation"
+        }
+    }
+
+    private func localSummaryFailureKind(_ error: Error) -> String {
+        if error is CancellationError { return "cancelled" }
+        guard let summaryError = error as? LocalMeetingSummaryError else {
+            return "other"
+        }
+        switch summaryError {
+        case .emptyTranscript:
+            return "empty_transcript"
+        case .insufficientMemory:
+            return "insufficient_memory"
+        case .runtimeUnavailable:
+            return "runtime_unavailable"
+        case .appleFoundationUnavailable:
+            return "provider_unavailable"
+        case .missingBundledRunner:
+            return "runner_missing"
+        case .transcriptChanged:
+            return "transcript_changed"
+        case .processTimedOut:
+            return "timeout"
+        case .processFailed:
+            return "process_failed"
+        case .outputMissing:
+            return "output_missing"
+        }
     }
 
     private func trackLocalSummaryAbandoned(
@@ -4060,6 +4387,7 @@ struct TranscriptedSettingsView: View {
                 "source": source,
             ]
         )
+        trackRepeatedSettingsVisit(page)
     }
 
     private func trackSettingsAction(_ actionID: String, page: TranscriptedSettingsPage? = nil) {
@@ -4080,6 +4408,70 @@ struct TranscriptedSettingsView: View {
                 "page_id": (page ?? navigation.selectedPage).analyticsValue,
                 "setting_id": settingID,
             ]
+        )
+    }
+
+    private func trackRepeatedSettingsVisit(_ page: TranscriptedSettingsPage) {
+        let count = (settingsPageVisitCounts[page] ?? 0) + 1
+        settingsPageVisitCounts[page] = count
+        guard let bucket = UXConfusionTelemetry.visitCountBucket(count) else { return }
+        let key = "\(page.analyticsValue):\(bucket)"
+        guard !trackedSettingsVisitBuckets.contains(key) else { return }
+        trackedSettingsVisitBuckets.insert(key)
+        UXConfusionTelemetry.trackSignal(
+            .repeatedSettingsVisit,
+            surface: .settings,
+            pageID: page.analyticsValue,
+            visitCountBucket: bucket
+        )
+    }
+
+    private func trackEmptyHomeExitIfNeeded() {
+        for section in emptyHomeSectionsSeen.sorted() {
+            guard !emptyHomeSectionsResolvedByAction.contains(section) else { continue }
+            guard homeSectionIsStillEmpty(section) else { continue }
+            UXConfusionTelemetry.trackSignal(
+                .emptyStateExited,
+                surface: .home,
+                pageID: section == "meetings" ? "home" : "dictations",
+                reasonKind: section
+            )
+        }
+        emptyHomeSectionsSeen.removeAll()
+        emptyHomeSectionsResolvedByAction.removeAll()
+    }
+
+    private func markVisibleEmptyHomeSectionsIfNeeded() {
+        guard homeCaptureRefreshCompleted, !homeViewModel.isLoading else { return }
+        switch navigation.selectedPage {
+        case .home where homeMeetingDaySections.isEmpty:
+            emptyHomeSectionsSeen.insert("meetings")
+        case .dictations where homeViewModel.dictationDaySections.isEmpty:
+            emptyHomeSectionsSeen.insert("dictations")
+        default:
+            break
+        }
+    }
+
+    private func homeSectionIsStillEmpty(_ section: String) -> Bool {
+        switch section {
+        case "meetings":
+            return homeMeetingDaySections.isEmpty
+        case "dictations":
+            return homeViewModel.dictationDaySections.isEmpty
+        default:
+            return false
+        }
+    }
+
+    private func trackFailedMeetingDetailsOpened(_ item: MeetingSessionController.FailedMeetingItem) {
+        guard failedMeetingDetailSignalsTracked.insert(item.id).inserted else { return }
+        UXConfusionTelemetry.trackSignal(
+            .failedMeetingDetailsOpened,
+            surface: .homeRow,
+            pageID: navigation.selectedPage.analyticsValue,
+            failureKind: item.failureKind.rawValue,
+            retryability: item.isRetryable ? "retryable" : "not_retryable"
         )
     }
 
@@ -4255,6 +4647,8 @@ struct TranscriptedSettingsView: View {
         let generation = homeDashboardRefreshGeneration
         lastHomeDashboardRefreshStartedAt = now
         homeDashboardRefreshInFlight = true
+        homeCaptureRefreshStarted = true
+        homeCaptureRefreshCompleted = false
         homeViewModel.refresh()
 
         homeDashboardRefreshTask = Task { @MainActor in
@@ -4409,20 +4803,64 @@ struct TranscriptedSettingsView: View {
 
     private func sendDiagnosticEvent() {
         guard CrashReporter.isAvailable else {
+            UXConfusionTelemetry.trackSignal(
+                .disabledActionAttempted,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                reasonKind: "crash_reporting_unavailable"
+            )
+            UXConfusionTelemetry.trackRecovery(
+                .supportDiagnostics,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                reasonKind: "crash_reporting_unavailable",
+                result: .blocked
+            )
             diagnosticsActionStatus = "Sentry is not configured in this build yet."
             return
         }
 
         guard crashReportingEnabled else {
+            UXConfusionTelemetry.trackSignal(
+                .disabledActionAttempted,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                reasonKind: "crash_reporting_disabled"
+            )
+            UXConfusionTelemetry.trackRecovery(
+                .supportDiagnostics,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                reasonKind: "crash_reporting_disabled",
+                result: .blocked
+            )
             diagnosticsActionStatus = "Turn on crash and error reports first."
             return
         }
 
         guard let eventID = actions.sendDiagnosticEvent() else {
+            UXConfusionTelemetry.trackRecovery(
+                .supportDiagnostics,
+                surface: .support,
+                pageID: navigation.selectedPage.analyticsValue,
+                actionID: "send_diagnostic_event",
+                result: .failed
+            )
             diagnosticsActionStatus = "Diagnostic event could not be queued."
             return
         }
 
+        UXConfusionTelemetry.trackRecovery(
+            .supportDiagnostics,
+            surface: .support,
+            pageID: navigation.selectedPage.analyticsValue,
+            actionID: "send_diagnostic_event",
+            result: .queued
+        )
         diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
     }
 

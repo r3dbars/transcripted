@@ -29,7 +29,14 @@ through `AnalyticsEventPolicy` and `AnalyticsPayloadSanitizer`.
 | First launch | `app_launched` with `app_version` and `build_version` default properties | PostHog | Anonymous device/session signal only. |
 | First useful artifact | `activation_first_artifact_saved` | PostHog | Strict first saved dictation or meeting Markdown artifact, emitted once per install without inspecting content. |
 | Saved-artifact continuity | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Legacy/proxy row for older builds and useful-dictation volume. Do not use it as strict first-artifact proof when `activation_first_artifact_saved` is available. |
+| First useful artifact | `dictation_artifact_saved`, `onboarding_first_dictation_saved`, `meeting_transcript_saved` | PostHog | Shows local Markdown value without inspecting content. `dictation_completed` remains useful dictation-volume context, not strict saved-artifact proof. |
+| First useful artifact | `activation_first_artifact_saved`, `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Shows local Markdown value without inspecting content. |
+| Second value moment | `activation_second_artifact_saved` | PostHog | Shows a second durable saved artifact on the same anonymous device, with only kind and day-bucket fields. |
 | Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
+| First useful artifact | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved`, `artifact_created` | PostHog | Shows local Markdown value without inspecting content. |
+| Agent payoff | `artifact_opened`, `artifact_revealed`, `artifact_copied`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening/revealing/copying artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
+| First useful artifact | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Shows local Markdown value without inspecting content. |
+| Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `agent_capture_query_observed`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, successful MCP capture queries, and later return via Home. |
 | Reliability filter | Release-scoped issues and allowed non-fatal events | Sentry | Use to avoid mistaking broken first-run paths for weak demand. |
 
 ## Standard Read-Only Checks
@@ -75,8 +82,20 @@ For the attribution story, report:
   `activation_first_artifact_saved` for strict first saved-Markdown proof.
   Keep `dictation_completed`, `onboarding_first_dictation_saved`, and
   `meeting_transcript_saved` as continuity/proxy signals for older builds.
+  `dictation_artifact_saved`, `onboarding_first_dictation_saved`, and
+  `meeting_transcript_saved` for strict saved-Markdown value. Use
+  `dictation_completed` as completion-volume context only.
+  `activation_first_artifact_saved`, `dictation_completed`,
+  `onboarding_first_dictation_saved`, and `meeting_transcript_saved` for value.
+- `activation_second_artifact_saved` proves repeat saved-artifact value, not
+  agent answer quality.
 - Artifact events do not prove agent answer quality. The closest safe proxy is
   `activation_agent_prompt_action_clicked` plus `activation_return_proxy_observed`.
+  `dictation_completed`, `onboarding_first_dictation_saved`, and
+  `meeting_transcript_saved` for value.
+- Artifact and prompt events do not prove agent answer quality. Use
+  `agent_capture_query_observed` for successful saved-capture MCP reads/searches,
+  then pair it with `activation_return_proxy_observed` for return behavior.
 
 If the story is still fuzzy after these checks, prefer adding a coarse
 allowlisted event or aggregate script output over adding tracking IDs.

@@ -680,6 +680,7 @@ func testAgentMCPConnector() {
         defer { try? FileManager.default.removeItem(at: tempRoot) }
         let bundledBinaryURL = tempRoot.appendingPathComponent("bundle/transcripted-mcp", isDirectory: false)
         let installedBinaryURL = tempRoot.appendingPathComponent("mcp/transcripted-mcp", isDirectory: false)
+        let observabilityConfigURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
 
         try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? "#!/bin/sh\necho v2\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
@@ -687,7 +688,12 @@ func testAgentMCPConnector() {
 
         let installed = try? AgentMCPConnector.ensureHelperInstalled(
             bundledBinaryURL: bundledBinaryURL,
-            installedBinaryURL: installedBinaryURL
+            installedBinaryURL: installedBinaryURL,
+            observabilityConfigURL: observabilityConfigURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: " phc_test ",
+                AnalyticsRuntimeConfiguration.hostInfoKey: " https://us.i.posthog.com ",
+            ]
         )
 
         assertEqual(installed?.path, installedBinaryURL.path, "ensure should return the stable installed path")
@@ -696,11 +702,27 @@ func testAgentMCPConnector() {
             "#!/bin/sh\necho v2\n",
             "ensure should install the bundled helper when missing"
         )
+        assertEqual(
+            mcpObservabilityConfig(at: observabilityConfigURL)?[AnalyticsRuntimeConfiguration.apiKeyInfoKey],
+            "phc_test",
+            "ensure should write the PostHog key for the installed standalone helper"
+        )
+        assertEqual(
+            mcpObservabilityConfig(at: observabilityConfigURL)?[AnalyticsRuntimeConfiguration.hostInfoKey],
+            "https://us.i.posthog.com",
+            "ensure should write the PostHog host for the installed standalone helper"
+        )
+        assertEqual(filePermissions(at: observabilityConfigURL), NSNumber(value: 0o600), "helper observability config should be owner-only")
 
         try? "#!/bin/sh\necho v1\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
         _ = try? AgentMCPConnector.ensureHelperInstalled(
             bundledBinaryURL: bundledBinaryURL,
-            installedBinaryURL: installedBinaryURL
+            installedBinaryURL: installedBinaryURL,
+            observabilityConfigURL: observabilityConfigURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_test",
+                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+            ]
         )
         assertEqual(
             (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? "",
@@ -713,4 +735,12 @@ func testAgentMCPConnector() {
 private func filePermissions(at url: URL) -> NSNumber? {
     let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
     return attributes?[.posixPermissions] as? NSNumber
+}
+
+private func mcpObservabilityConfig(at url: URL) -> [String: String]? {
+    guard let data = try? Data(contentsOf: url),
+          let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: String] else {
+        return nil
+    }
+    return plist
 }

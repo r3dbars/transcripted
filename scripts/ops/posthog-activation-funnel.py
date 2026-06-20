@@ -39,25 +39,42 @@ RELEVANT_EVENTS = (
     "onboarding_first_dictation_started",
     "dictation_started",
     "onboarding_first_dictation_saved",
+    "dictation_artifact_saved",
     "dictation_completed",
     "meeting_transcript_saved",
+    "artifact_created",
+    "artifact_opened",
+    "artifact_revealed",
+    "artifact_copied",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "agent_capture_query_observed",
     "workflow_abandoned",
+)
+
+SPEAKER_REVIEW_EVENTS = (
+    "meeting_speaker_review_prompted",
+    "meeting_speaker_review_actioned",
+    "meeting_speaker_review_completed",
 )
 
 WORKFLOW_EVENTS = (
     "app_launched",
     "onboarding_completed",
     "dictation_started",
+    "dictation_artifact_saved",
     "dictation_completed",
     "meeting_recording_started",
     "meeting_transcript_saved",
+    "artifact_created",
+    "artifact_opened",
+    "artifact_revealed",
+    "artifact_copied",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
@@ -133,9 +150,30 @@ REACH_STEPS = (
     StepDefinition(
         "artifact_action_devices",
         "Artifact opened or revealed",
-        "event = 'activation_artifact_action_clicked'",
+        "event IN ('artifact_opened', 'artifact_revealed', 'artifact_copied', 'activation_artifact_action_clicked')",
         "observed",
-        "Home/onboarding artifact actions such as open Markdown, preview, and reveal folder.",
+        "Home artifact lifecycle actions such as open Markdown, reveal folder, copy, and legacy activation action clicks.",
+    ),
+    StepDefinition(
+        "second_artifact_devices",
+        "Second saved artifact",
+        "event = 'activation_second_artifact_saved'",
+        "observed",
+        "Devices that reached a second durable saved Markdown artifact, bucketed from first save.",
+    ),
+    StepDefinition(
+        "summary_requested_devices",
+        "Summary requested",
+        "event = 'meeting_summary_requested'",
+        "observed",
+        "Devices that asked for a local meeting summary from a saved transcript.",
+    ),
+    StepDefinition(
+        "summary_finished_devices",
+        "Summary finished",
+        "event = 'meeting_summary_finished'",
+        "observed",
+        "Devices with a local summary success, failure, or cancellation outcome.",
     ),
     StepDefinition(
         "agent_prompt_devices",
@@ -183,9 +221,10 @@ SEQUENCE_STEPS = (
         "Saved Markdown or dictation proxy",
         "event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')",
     ),
+    ("Second saved artifact", "event = 'activation_second_artifact_saved'"),
     (
         "Artifact opened or prompt copied",
-        "event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked')",
+        "event IN ('artifact_opened', 'artifact_revealed', 'artifact_copied', 'activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked')",
     ),
     (
         "Agent setup/prompt signal",
@@ -383,18 +422,56 @@ LIMIT 20
 def artifact_actions_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT
+  event,
   properties['artifact_kind'] AS artifact_kind,
-  properties['action_kind'] AS action_kind,
+  coalesce(properties['action_kind'], replaceRegexpOne(event, '^artifact_', '')) AS action_kind,
   properties['surface'] AS surface,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event = 'activation_artifact_action_clicked'
+  AND event IN ('artifact_opened', 'artifact_revealed', 'artifact_copied', 'activation_artifact_action_clicked')
   {app_version_filter(app_version)}
-GROUP BY artifact_kind, action_kind, surface
+GROUP BY event, artifact_kind, action_kind, surface
 ORDER BY events DESC
 LIMIT 40
+"""
+
+
+def second_artifacts_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  properties['first_artifact_kind'] AS first_artifact_kind,
+  properties['second_artifact_kind'] AS second_artifact_kind,
+  properties['days_since_first_bucket'] AS days_since_first_bucket,
+  properties['surface'] AS surface,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event = 'activation_second_artifact_saved'
+  {app_version_filter(app_version)}
+GROUP BY first_artifact_kind, second_artifact_kind, days_since_first_bucket, surface
+ORDER BY events DESC
+LIMIT 40
+"""
+
+
+def weekly_artifact_streak_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  count() AS devices
+FROM (
+  SELECT
+    distinct_id,
+    uniq(toStartOfWeek(timestamp)) AS artifact_weeks
+  FROM events
+  WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+    AND event = 'artifact_created'
+    {app_version_filter(app_version)}
+  GROUP BY distinct_id
+  HAVING artifact_weeks >= 2
+)
 """
 
 
@@ -450,6 +527,8 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "sequence": sequence_query(days, app_version),
         "onboarding_completion": onboarding_completion_query(days, app_version),
         "artifact_actions": artifact_actions_query(days, app_version),
+        "second_artifacts": second_artifacts_query(days, app_version),
+        "weekly_artifact_streak": weekly_artifact_streak_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
         "workflow_abandonment": workflow_abandonment_query(days, app_version),
     }
@@ -575,10 +654,14 @@ def render_report(data: dict[str, Any]) -> str:
     launch = as_int(reach.get("launch_devices"))
     strict_saved = as_int(reach.get("strict_saved_markdown_devices"))
     saved_proxy = as_int(reach.get("saved_markdown_plus_dictation_proxy_devices"))
+    second_artifact = as_int(reach.get("second_artifact_devices"))
     agent_signal = as_int(reach.get("agent_setup_devices"))
+    summary_requested = as_int(reach.get("summary_requested_devices"))
+    summary_finished = as_int(reach.get("summary_finished_devices"))
     true_agent_query = as_int(reach.get("true_agent_query_devices"))
     return_proxy = as_int(reach.get("return_proxy_devices"))
     workflow_abandonment = as_int(reach.get("workflow_abandonment_devices"))
+    weekly_streak = as_int((data["results"].get("weekly_artifact_streak") or [{}])[0].get("devices"))
     app_version = data.get("app_version") or "all app versions"
 
     limitations = [
@@ -586,6 +669,7 @@ def render_report(data: dict[str, Any]) -> str:
         "`strict saved Markdown` counts `activation_first_artifact_saved`, emitted once per install from successful dictation and meeting Markdown save paths.",
         "`dictation_completed`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are included only in the proxy saved-Markdown row for legacy continuity.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
+        "`activation_second_artifact_saved` proves a second durable artifact save on the same anonymous device, but does not inspect artifact content or join identity.",
         "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
         "`workflow_abandoned` is a conservative exit map. It should not be read as every possible drop-off or every click.",
     ]
@@ -593,7 +677,8 @@ def render_report(data: dict[str, Any]) -> str:
     recommended_tiles = [
         "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
         "Saved artifact quality: strict saved Markdown vs dictation-completed proxy, split by artifact kind.",
-        "Artifact actions: open Markdown, preview, reveal folder, and copy-for-agent surfaces.",
+        "Artifact lifecycle: `artifact_created`, `artifact_opened`, `artifact_revealed`, `artifact_copied`, plus legacy activation action clicks.",
+        "Repeat value: weekly artifact streak devices from aggregate `artifact_created` weeks.",
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Abandonment exits: workflow kind, stage, reason kind, surface, and prior-ready state.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
@@ -612,8 +697,9 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         f"- Launch reach in-window: **{launch} anonymous devices**.",
         f"- Strict saved Markdown reach: **{strict_saved} devices** ({pct(strict_saved, launch)} of launch).",
-        f"- Saved Markdown plus dictation proxy reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
+        f"- Saved Markdown plus completion-signal reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
+        f"- Weekly artifact streak: **{weekly_streak} devices** created artifacts in at least 2 calendar weeks in-window.",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
         f"- Workflow abandonment exits: **{workflow_abandonment} devices** ({pct(workflow_abandonment, launch)} of launch).",
         f"- True agent-query proof: **{true_agent_query} devices**. Treat this as unknown, not green, until instrumentation exists.",
@@ -656,7 +742,12 @@ def render_report(data: dict[str, Any]) -> str:
         render_top_rows(
             "Artifact Actions",
             data["results"].get("artifact_actions", []),
-            ["artifact_kind", "action_kind", "surface", "events", "devices"],
+            ["event", "artifact_kind", "action_kind", "surface", "events", "devices"],
+        ),
+        render_top_rows(
+            "Second Saved Artifacts",
+            data["results"].get("second_artifacts", []),
+            ["first_artifact_kind", "second_artifact_kind", "days_since_first_bucket", "surface", "events", "devices"],
         ),
         render_top_rows(
             "Agent Signals",
@@ -711,6 +802,7 @@ def run_self_test() -> int:
                 "strict_saved_markdown_devices": 2,
                 "saved_markdown_plus_dictation_proxy_devices": 3,
                 "artifact_action_devices": 2,
+                "second_artifact_devices": 1,
                 "agent_prompt_devices": 1,
                 "agent_setup_devices": 1,
                 "workflow_abandonment_devices": 1,
@@ -722,6 +814,7 @@ def run_self_test() -> int:
             "daily_active": [{"day": "2026-06-19", "active_devices": 3}],
             "onboarding_completion": [],
             "artifact_actions": [],
+            "second_artifacts": [],
             "agent_signals": [],
             "workflow_abandonment": [{
                 "workflow_kind": "onboarding",

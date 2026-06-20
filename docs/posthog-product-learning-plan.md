@@ -86,10 +86,25 @@ Operational scripts query aggregate counts only:
 | --- | --- |
 | `activation_artifact_action_clicked` | `action_kind`, `artifact_age_bucket`, `artifact_kind`, `surface` |
 | `activation_first_artifact_saved` | `artifact_kind`, `duration_bucket`, `surface`, `trigger`, `word_count_bucket` |
+| `artifact_created` | `artifact_kind`, `duration_bucket`, `surface`, `trigger`, `word_count_bucket` |
+| `artifact_opened` | `artifact_age_bucket`, `artifact_kind`, `surface` |
+| `artifact_revealed` | `artifact_age_bucket`, `artifact_kind`, `surface` |
+| `artifact_copied` | `artifact_age_bucket`, `artifact_kind`, `surface` |
+| `dictation_artifact_saved` | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
+| `activation_second_artifact_saved` | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
 | `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
+| `meeting_summary_requested` | `artifact_age_bucket`, `duration_bucket`, `model_family`, `model_state`, `provider`, `result`, `surface` |
+| `meeting_summary_finished` | `artifact_age_bucket`, `duration_bucket`, `failure_kind`, `latency_bucket`, `model_family`, `model_state`, `provider`, `result`, `surface` |
+| `local_meeting_summary_model_prepare_started` | `model_family`, `model_state`, `provider`, `surface` |
+| `local_meeting_summary_model_prepare_completed` | `model_family`, `model_state`, `provider`, `result`, `surface` |
+| `local_meeting_summary_model_prepare_cancelled` | `failure_kind`, `model_family`, `model_state`, `provider`, `result`, `surface` |
+| `local_meeting_summary_model_prepare_failed` | `failure_kind`, `model_family`, `model_state`, `provider`, `result`, `surface` |
+| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
+| `ux_confusion_signal_observed` | `action_id`, `elapsed_bucket`, `failure_kind`, `page_id`, `reason_kind`, `retryability`, `signal_kind`, `step_id`, `step_index`, `surface`, `visit_count_bucket` |
+| `ux_recovery_action_taken` | `action_id`, `failure_kind`, `page_id`, `reason_kind`, `recovery_kind`, `result`, `retryability`, `surface` |
 
 ### Menu, Settings, Updates
 
@@ -127,6 +142,7 @@ Dictation events also allow coarse route fields: `default_input_class`,
 | `dictation_started` | `trigger` |
 | `dictation_start_failed` | `failure_kind`, `start_attempt_bucket`, `trigger` |
 | `dictation_completed` | `auto_send`, `delivery`, `duration_bucket`, `trigger`, `word_count_bucket` |
+| `dictation_artifact_saved` | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_stop_latency_measured` | `auto_enter_bucket`, `auto_send`, `cleanup_bucket`, `cleanup_changed`, `cleanup_enabled`, `copy_reason`, `decode_bucket`, `delivery`, `mic_stop_bucket`, `model_wait_bucket`, `outcome`, `paste_bucket`, `save_bucket`, `save_outcome`, `stop_to_done_bucket`, `stop_to_paste_bucket`, `trigger`, `word_count_bucket` |
 | `dictation_cancelled` | `duration_bucket`, `trigger` |
 | `dictation_no_speech` | `duration_bucket`, `trigger` |
@@ -181,24 +197,30 @@ aggregate reliability sizing and should not be expanded to raw device names.
 - Confident workflow abandonment for onboarding close, meeting-prompt dismissal
   or suppression, local-summary/model-prep block/cancel/fail, failed agent setup
   or artifact handoff, and failed-meeting retry dismissal/delete.
+- Local meeting summary request/finish outcomes, model readiness, provider
+  family, artifact age, meeting-duration bucket, and summary latency bucket.
+- UX/CX confusion and recovery signals: onboarding exit/abandonment, repeated
+  Settings page visits, support diagnostics attempts, failed-meeting detail
+  opens, retry attempts, and empty Home exits.
 - Return proxy when Home observes an older saved artifact.
 - Release health by app version and update lifecycle.
 
 ## Biggest Blind Spots
 
-- `agent_capture_query_observed` does not exist yet, so PostHog cannot prove
-  that an agent actually answered from a saved Transcripted artifact.
-- General dictation saved-Markdown writes still rely on `dictation_completed`
-  as a proxy, while onboarding dictation and meeting saves have stricter events.
+- General dictation saved-Markdown writes now have `dictation_artifact_saved`;
+  keep `dictation_completed` as completion-volume context, not strict saved-artifact proof.
+- `agent_capture_query_observed` proves successful saved-capture reads/searches
+  through MCP, but it still cannot judge answer quality or whether the answer
+  was useful.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
-- Local summary beta behavior now has abandonment shape, but not a full success
-  funnel. Summary attempts, generated results, failure kind, model readiness,
-  and latency buckets should be captured when the summary flow is product-ready
-  enough to learn from.
+- Speaker review now has a clean prompted/actioned/completed funnel. Use it to
+  see whether review work is surfaced, accepted, skipped, or dismissed without
+  exposing speaker names or transcript content.
+- Local summary beta behavior now has a request/finish funnel, but it still
+  does not measure whether the generated summary drove a later agent answer.
 - Speaker review is visible mainly through meeting outcome and failure events.
-  `workflow_abandoned` reserves `speaker_review`, but there is no clean
-  accepted/dismissed/completed review funnel yet.
+  There is no clean accepted/dismissed/completed review funnel yet.
 - Retention is a return proxy, not a real habit model. It needs day/week active
   cohorts and first-artifact-to-second-artifact conversion in PostHog dashboards.
 
@@ -208,20 +230,21 @@ Prefer a small number of lifecycle events over broad click tracking.
 
 | Event | When to fire | Properties |
 | --- | --- | --- |
-| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
-| `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
-| `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
-| `meeting_speaker_review_prompted` | A saved meeting has review work surfaced | `participant_count_bucket`, `review_reason`, `surface` |
-| `meeting_speaker_review_completed` | User completes or dismisses speaker review | `participant_count_bucket`, `result`, `surface` |
-| `meeting_summary_requested` | User asks for a local summary | `artifact_age_bucket`, `model_state`, `surface` |
-| `meeting_summary_finished` | Summary succeeds or fails | `duration_bucket`, `failure_kind`, `latency_bucket`, `model_state`, `result`, `surface` |
 | `settings_feature_discovered` | A high-leverage feature panel is first viewed | `feature_area`, `page_id`, `source` |
-| `workflow_abandoned` | App can confidently infer abandonment without content | `workflow_kind`, `stage`, `reason_kind`, `elapsed_bucket`, `surface`, optional `prior_ready_state` |
+
+Note: do not use a `speaker_count_bucket` property even though the value would
+be coarse. The analytics sanitizer intentionally drops property keys containing
+`speaker` or `name`, so the funnel uses `participant_count_bucket` and
+`unresolved_count_bucket` instead.
 
 Do not add generic "button clicked" for every control. Track buttons only when
 they answer a product question: did the user start capture, grant permission,
 save/open a useful artifact, connect an agent, recover from failure, or return?
+
+The current implementation covers the first confusion slice through
+`ux_confusion_signal_observed` and `ux_recovery_action_taken`. Keep using those
+for high-signal confusion and recovery moments instead of raw click tracking.
 
 ## Dashboards And Funnels
 
@@ -251,7 +274,10 @@ ranking logic without credentials.
 
 `app_launched` -> `onboarding_shown` / `onboarding_step_viewed` ->
 permission ready -> `dictation_started` / `meeting_recording_started` ->
-`activation_first_artifact_saved` -> `activation_artifact_action_clicked` ->
+`activation_first_artifact_saved` / `artifact_created` ->
+`artifact_opened` / `artifact_revealed` / `artifact_copied` ->
+`activation_first_artifact_saved` -> `activation_second_artifact_saved` ->
+`activation_artifact_action_clicked` ->
 `activation_agent_prompt_action_clicked` / `activation_agent_setup_cta_clicked`
 -> `agent_capture_query_observed` -> `activation_return_proxy_observed`.
 
@@ -286,9 +312,9 @@ state, latency bucket, result, and failure kind only.
 
 ### Agent And Markdown Value Loop
 
-`activation_first_artifact_saved` -> open/reveal/preview ->
-agent prompt/setup -> `agent_capture_query_observed` -> next-day return ->
-second artifact saved.
+`activation_first_artifact_saved` / `artifact_created` ->
+open/reveal/copy -> agent prompt/setup -> `agent_capture_query_observed` ->
+next-day return -> second artifact saved.
 
 This is the north-star dashboard. Treat prompt-copy and setup clicks as intent,
 not proof.
@@ -296,9 +322,14 @@ not proof.
 ### Release Health By App Version
 
 - active devices by `app_version`
-- first successful `dictation_completed`
+- first successful `dictation_artifact_saved`
+- useful dictation completion volume via `dictation_completed`
 - first successful `meeting_transcript_saved`
 - `activation_first_artifact_saved`
+- `artifact_created`
+- `artifact_opened`
+- `artifact_revealed`
+- `artifact_copied`
 - update lifecycle events
 - Sentry release health next to PostHog usage, without joining personal data
 
@@ -310,14 +341,17 @@ The 2026-06-19 aggregate probes showed:
   850 first-value events.
 - Last 30 days: 214 launch devices, 37 strict saved-Markdown devices, 43
   saved-Markdown-plus-dictation-proxy devices, 32 agent setup/proxy devices,
-  17 return-proxy devices, 0 true agent-query devices.
+  17 return-proxy devices, and true agent-query devices from `agent_capture_query_observed`.
 
 Interpretation: product usage is real, but the current analytics still cannot
 prove the full saved-artifact -> sourced-agent-answer -> return loop.
 
 ## Smallest Next Implementation
 
-Add `agent_capture_query_observed` from the read-only MCP/agent surface when an
-opted-in device observes a query against saved captures. Keep it enum-only and
-bucketed. That is higher leverage than broad click tracking because it closes
-the biggest product-learning gap without inspecting content.
+Land #1199's `agent_capture_query_observed` from the read-only MCP/agent
+surface when an opted-in device observes a query against saved captures. Keep it
+enum-only and bucketed. That closes the biggest product-learning gap without
+inspecting content.
+Keep `agent_capture_query_observed` narrow in the read-only MCP/agent surface:
+only successful saved-capture reads/searches, enum values, and coarse buckets.
+That closes the biggest product-learning gap without inspecting content.

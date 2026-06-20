@@ -22,6 +22,12 @@ enum TranscriptedSupportActions {
         let copied = pasteboard.setString(text, forType: .string)
         if copied {
             AnalyticsReporter.track("support_diagnostics_copied")
+            UXConfusionTelemetry.trackRecovery(
+                .supportDiagnostics,
+                surface: .support,
+                actionID: "copy_diagnostics",
+                result: .copied
+            )
         }
         return copied
     }

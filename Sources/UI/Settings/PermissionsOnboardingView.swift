@@ -121,6 +121,7 @@ struct PermissionsOnboardingView: View {
             stopPolling()
             trackAbandonmentIfNeeded(reason: .windowClosed)
             copiedResetTask?.cancel()
+            trackOnboardingExitIfNeeded()
         }
     }
 
@@ -628,6 +629,30 @@ struct PermissionsOnboardingView: View {
             elapsedBucket: flowElapsedBucket(now: now),
             priorReadyState: hasRequiredPermissions ? "ready" : "not_ready"
         )
+    }
+
+    private func trackOnboardingExitIfNeeded() {
+        guard !didTrackCompletion else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        let reasonKind = hasRequiredPermissions ? "window_closed" : "missing_required_permission"
+        UXConfusionTelemetry.trackSignal(
+            .onboardingExited,
+            surface: .onboarding,
+            stepID: currentStep.kind.analyticsID,
+            stepIndex: currentStepIndex,
+            reasonKind: reasonKind,
+            elapsedBucket: flowElapsedBucket(now: now)
+        )
+        if !hasRequiredPermissions {
+            UXConfusionTelemetry.trackSignal(
+                .setupAbandoned,
+                surface: .onboarding,
+                stepID: currentStep.kind.analyticsID,
+                stepIndex: currentStepIndex,
+                reasonKind: reasonKind,
+                elapsedBucket: flowElapsedBucket(now: now)
+            )
+        }
     }
 
     private func requestPermission(_ kind: TranscriptedPermissionKind, required: Bool) {

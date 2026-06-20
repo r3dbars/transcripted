@@ -54,6 +54,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "dictation_started",
     "dictation_start_failed",
     "dictation_completed",
+    "dictation_artifact_saved",
     "dictation_cancelled",
     "dictation_no_speech",
     "dictation_audio_route_recovery_timeout",
@@ -65,7 +66,13 @@ POSTHOG_ACTIVE_EVENTS = (
     "meeting_transcript_saved",
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
+    "meeting_summary_requested",
+    "meeting_summary_finished",
     "activation_first_artifact_saved",
+    "artifact_created",
+    "artifact_opened",
+    "artifact_revealed",
+    "artifact_copied",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
@@ -73,15 +80,21 @@ POSTHOG_ACTIVE_EVENTS = (
     "workflow_abandoned",
 )
 POSTHOG_FIRST_VALUE_EVENTS = (
+    "dictation_artifact_saved",
     "dictation_completed",
     "onboarding_first_dictation_saved",
     "meeting_transcript_saved",
     "onboarding_agent_cta_clicked",
     "activation_first_artifact_saved",
+    "artifact_created",
+    "artifact_opened",
+    "artifact_revealed",
+    "artifact_copied",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "agent_capture_query_observed",
 )
 TRUSTED_POSTHOG_HOSTS = {
     "https://app.posthog.com",
@@ -2409,6 +2422,7 @@ def run_self_test() -> None:
             "dictation_started",
             "dictation_start_failed",
             "dictation_completed",
+            "dictation_artifact_saved",
             "dictation_cancelled",
             "dictation_no_speech",
             "dictation_audio_route_recovery_timeout",
@@ -2420,7 +2434,13 @@ def run_self_test() -> None:
             "meeting_transcript_saved",
             "meeting_transcript_failed",
             "meeting_transcript_skipped",
+            "meeting_summary_requested",
+            "meeting_summary_finished",
             "activation_first_artifact_saved",
+            "artifact_created",
+            "artifact_opened",
+            "artifact_revealed",
+            "artifact_copied",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
@@ -2429,11 +2449,17 @@ def run_self_test() -> None:
         }
         assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
         assert {
+            "dictation_artifact_saved",
             "activation_first_artifact_saved",
+            "artifact_created",
+            "artifact_opened",
+            "artifact_revealed",
+            "artifact_copied",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
             "activation_return_proxy_observed",
+            "agent_capture_query_observed",
         }.issubset(set(POSTHOG_FIRST_VALUE_EVENTS))
         paths = write_reports(payload, output_dir)
         assert Path(paths["latest_html"]).exists()

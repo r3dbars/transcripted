@@ -65,6 +65,7 @@ func testAnalyticsEventPolicy() {
             "anonymous_usage_enabled",
             "app_signal",
             "app_version",
+            "artifact_retained",
             "artifact_kind",
             "attenuation_kind",
             "auto_send",
@@ -116,6 +117,7 @@ func testAnalyticsEventPolicy() {
             "entrypoint",
             "failure_code",
             "failure_kind",
+            "first_artifact_kind",
             "first_dictation_saved",
             "format_ready",
             "from_status",
@@ -138,6 +140,7 @@ func testAnalyticsEventPolicy() {
             "mic_status",
             "mic_stream_present",
             "missing_permission",
+            "model_family",
             "model_state",
             "os_major",
             "outcome",
@@ -158,9 +161,11 @@ func testAnalyticsEventPolicy() {
             "prompt_reason",
             "provider",
             "proxy_kind",
+            "query_kind",
             "quiet_mic_recovered",
             "quiet_mic_unrecovered",
             "realtime_agc",
+            "recovery_kind",
             "reason",
             "recent_meetings_available",
             "recovering",
@@ -168,6 +173,9 @@ func testAnalyticsEventPolicy() {
             "required",
             "reason_kind",
             "result",
+            "retry_source",
+            "retryability",
+            "review_reason",
             "route_ready",
             "route_shape",
             "sample_flow_started",
@@ -175,11 +183,13 @@ func testAnalyticsEventPolicy() {
             "selected_input_class",
             "selection_overrode_default",
             "selection_reason",
+            "second_artifact_kind",
             "session_active",
             "session_kind",
             "session_stage",
             "setting_id",
             "setup_kind",
+            "signal_kind",
             "source",
             "stall_kind",
             "stall_stage",
@@ -282,34 +292,124 @@ func testAnalyticsEventPolicy() {
         }
     }
 
+    runSuite("AnalyticsEventPolicy allows privacy-safe speaker review funnel events") {
+        let prompted = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_prompted")
+        let actioned = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_actioned")
+        let completed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_completed")
+
+        let expectedPromptProperties: Set<String> = [
+            "action",
+            "meeting_age_bucket",
+            "participant_count_bucket",
+            "result",
+            "review_reason",
+            "surface",
+            "unresolved_count_bucket",
+        ]
+        let expectedCompletionProperties: Set<String> = [
+            "meeting_age_bucket",
+            "participant_count_bucket",
+            "result",
+            "review_reason",
+            "surface",
+            "unresolved_count_bucket",
+            "update_count_bucket",
+        ]
+
+        assertEqual(prompted?.allowedProperties, expectedPromptProperties, "speaker review prompts should stay bucketed and enum-only")
+        assertEqual(actioned?.allowedProperties, expectedCompletionProperties.union(["action"]), "speaker review actions should include only the action enum plus coarse buckets")
+        assertEqual(completed?.allowedProperties, expectedCompletionProperties, "speaker review completion should not include raw names or transcript context")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "participant_count_bucket": "2_3",
+                "unresolved_count_bucket": "1",
+                "meeting_age_bucket": "lt_10s",
+                "review_reason": "needs_names",
+                "surface": "speaker_review_sheet",
+                "action": "save",
+                "result": "names_submitted",
+                "update_count_bucket": "2_3",
+                "speaker_count_bucket": "2_3",
+                "speaker_name": "Alex",
+                "transcript_title": "Private customer call",
+            ],
+            allowedKeys: expectedCompletionProperties.union(["action", "speaker_count_bucket", "speaker_name", "transcript_title"])
+        )
+
+        assertEqual(sanitized["participant_count_bucket"], "2_3", "participant bucket should survive")
+        assertEqual(sanitized["unresolved_count_bucket"], "1", "unresolved bucket should survive")
+        assertEqual(sanitized["meeting_age_bucket"], "lt_10s", "meeting-age bucket should survive")
+        assertEqual(sanitized["review_reason"], "needs_names", "review reason enum should survive")
+        assertEqual(sanitized["surface"], "speaker_review_sheet", "surface enum should survive")
+        assertEqual(sanitized["action"], "save", "action enum should survive")
+        assertEqual(sanitized["result"], "names_submitted", "result enum should survive")
+        assertEqual(sanitized["update_count_bucket"], "2_3", "update bucket should survive")
+        assertNil(sanitized["speaker_count_bucket"], "speaker property names should still fail closed")
+        assertNil(sanitized["speaker_name"], "speaker names must never survive")
+        assertNil(sanitized["transcript_title"], "meeting titles must never survive")
+    }
+
     runSuite("AnalyticsEventPolicy allows post-artifact activation events") {
         let artifact = AnalyticsEventPolicy.policy(forEvent: "activation_artifact_action_clicked")
         let firstArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_first_artifact_saved")
+        let artifactCreated = AnalyticsEventPolicy.policy(forEvent: "artifact_created")
+        let artifactOpened = AnalyticsEventPolicy.policy(forEvent: "artifact_opened")
+        let artifactRevealed = AnalyticsEventPolicy.policy(forEvent: "artifact_revealed")
+        let artifactCopied = AnalyticsEventPolicy.policy(forEvent: "artifact_copied")
+        let secondArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_second_artifact_saved")
+        let dictationArtifact = AnalyticsEventPolicy.policy(forEvent: "dictation_artifact_saved")
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
+        let query = AnalyticsEventPolicy.policy(forEvent: "agent_capture_query_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
         assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
+        assertEqual(artifactCreated?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "artifact creation should stay bucketed")
+        assertEqual(artifactOpened?.allowedProperties ?? Set<String>(), ["artifact_age_bucket", "artifact_kind", "surface"], "artifact open events should stay bucketed")
+        assertEqual(artifactRevealed?.allowedProperties ?? Set<String>(), ["artifact_age_bucket", "artifact_kind", "surface"], "artifact reveal events should stay bucketed")
+        assertEqual(artifactCopied?.allowedProperties ?? Set<String>(), ["artifact_age_bucket", "artifact_kind", "surface"], "artifact copy events should stay bucketed")
+        assertEqual(secondArtifact?.allowedProperties ?? Set<String>(), ["days_since_first_bucket", "first_artifact_kind", "second_artifact_kind", "surface", "trigger"], "second artifact saves should stay bucketed")
+        assertEqual(dictationArtifact?.allowedProperties ?? Set<String>(), ["delivery", "duration_bucket", "save_outcome", "surface", "trigger", "word_count_bucket"], "dictation saved artifacts should keep save outcome coarse")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
+        assertEqual(query?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "source_count_bucket", "surface"], "agent capture query proof should stay enum and bucket only")
+        assertEqual(
+            query?.allowedProperties ?? Set<String>(),
+            mcpAgentCaptureQueryAllowedProperties(),
+            "MCP agent capture telemetry must mirror the app analytics allowlist"
+        )
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
             .union(firstArtifact?.allowedProperties ?? Set<String>())
+            .union(artifactCreated?.allowedProperties ?? Set<String>())
+            .union(artifactOpened?.allowedProperties ?? Set<String>())
+            .union(artifactRevealed?.allowedProperties ?? Set<String>())
+            .union(artifactCopied?.allowedProperties ?? Set<String>())
+            .union(secondArtifact?.allowedProperties ?? Set<String>())
+            .union(dictationArtifact?.allowedProperties ?? Set<String>())
+            .union(returnProxy?.allowedProperties ?? Set<String>())
+            .union(query?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",
-                "agent_target": "codex",
+                "agent_target": "mcp_client",
                 "artifact_age_bucket": "24_48h",
                 "artifact_kind": "meeting",
+                "days_since_first_bucket": "2_7d",
                 "duration_bucket": "10_29m",
+                "first_artifact_kind": "dictation",
                 "prompt_kind": "meeting_bundle",
+                "query_kind": "search",
                 "result": "success",
+                "save_outcome": "success",
                 "surface": "home_preview",
                 "trigger": "detected_prompt",
                 "word_count_bucket": "300_plus",
+                "first_artifact_saved_at": "2026-06-19T12:00:00Z",
                 "transcript": "private words",
                 "meeting_title": "Customer call",
                 "speaker_name": "Alice",
@@ -317,21 +417,29 @@ func testAnalyticsEventPolicy() {
                 "file_path": "/Users/redbars/private.md",
                 "meeting_url": "https://example.com/private",
                 "prompt_text": "Read my transcript",
+                "query_text": "customer roadmap objection",
+                "raw_capture_id": "cap_private",
+                "source_app_name": "Slack",
                 "word_count": "4217",
             ],
             allowedKeys: activationAllowedProperties
         )
 
         assertEqual(sanitized["action_kind"], "open_markdown", "action kind should survive")
-        assertEqual(sanitized["agent_target"], "codex", "agent target should survive")
+        assertEqual(sanitized["agent_target"], "mcp_client", "agent target should survive")
         assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age bucket should survive")
         assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["days_since_first_bucket"], "2_7d", "days since first bucket should survive")
         assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
+        assertEqual(sanitized["first_artifact_kind"], "dictation", "first artifact kind should survive")
         assertEqual(sanitized["prompt_kind"], "meeting_bundle", "prompt kind should survive")
+        assertEqual(sanitized["query_kind"], "search", "query kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
+        assertEqual(sanitized["save_outcome"], "success", "coarse save result should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
         assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
+        assertNil(sanitized["first_artifact_saved_at"], "raw first-save timestamps must not be sent")
         assertNil(sanitized["transcript"], "raw transcript text must not be sent")
         assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
         assertNil(sanitized["speaker_name"], "speaker names must not be sent")
@@ -339,7 +447,64 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["file_path"], "file paths must not be sent")
         assertNil(sanitized["meeting_url"], "meeting URLs must not be sent")
         assertNil(sanitized["prompt_text"], "raw prompt text must not be sent")
+        assertNil(sanitized["query_text"], "raw query text must not be sent")
+        assertNil(sanitized["raw_capture_id"], "raw capture IDs must not be sent")
+        assertNil(sanitized["source_app_name"], "source app names must not be sent")
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
+    }
+
+    runSuite("AnalyticsEventPolicy allows coarse workflow lifecycle events") {
+        let started = AnalyticsEventPolicy.policy(forEvent: "workflow_started")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "workflow_finished")
+
+        assertEqual(
+            started?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "entrypoint", "failure_kind", "result", "stage", "trigger", "word_count_bucket", "workflow_kind"],
+            "workflow starts should share the narrow lifecycle property set"
+        )
+        assertEqual(
+            finished?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "entrypoint", "failure_kind", "result", "stage", "trigger", "word_count_bucket", "workflow_kind"],
+            "workflow finishes should share the narrow lifecycle property set"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "meeting",
+                "entrypoint": "hotkey",
+                "trigger": "hotkey",
+                "stage": "transcript_save",
+                "result": "success",
+                "failure_kind": "no_speech",
+                "duration_bucket": "10_29m",
+                "word_count_bucket": "300_plus",
+                "transcript": "private words",
+                "meeting_title": "Customer call",
+                "speaker_name": "Alice",
+                "audio_path": "/Users/redbars/private.wav",
+                "file_path": "/Users/redbars/private.md",
+                "source_app_name": "Zoom",
+                "raw_duration_seconds": "1234",
+            ],
+            allowedKeys: (started?.allowedProperties ?? [])
+                .union(finished?.allowedProperties ?? [])
+        )
+
+        assertEqual(sanitized["workflow_kind"], "meeting", "workflow kind should survive")
+        assertEqual(sanitized["entrypoint"], "hotkey", "entrypoint enum should survive")
+        assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive")
+        assertEqual(sanitized["stage"], "transcript_save", "stage enum should survive")
+        assertEqual(sanitized["result"], "success", "result enum should survive")
+        assertEqual(sanitized["failure_kind"], "no_speech", "normalized failure kind should survive")
+        assertEqual(sanitized["duration_bucket"], "10_29m", "duration bucket should survive")
+        assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
+        assertNil(sanitized["transcript"], "raw transcript text must not be sent")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["source_app_name"], "source app names must not be sent")
+        assertNil(sanitized["raw_duration_seconds"], "raw timings should stay out of workflow analytics")
     }
 
     runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, and next-day return proxy") {
@@ -380,6 +545,20 @@ func testAnalyticsEventPolicy() {
             ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
             "first saved artifact should not be marked twice"
         )
+        let dictationProperties = ActivationTelemetry.dictationArtifactSavedProperties(
+            delivery: "pasted",
+            durationBucket: "30_119s",
+            saveOutcome: "success",
+            surface: .dictationSave,
+            trigger: "hotkey",
+            wordCountBucket: "10_49"
+        )
+        assertEqual(
+            Set(dictationProperties.keys),
+            ["delivery", "duration_bucket", "save_outcome", "surface", "trigger", "word_count_bucket"],
+            "dictation artifact save telemetry should not include raw text, paths, filenames, app names, titles, or counts"
+        )
+        assertEqual(dictationProperties["surface"], "dictation_save", "saved dictation surface should stay coarse")
     }
 
     runSuite("AnalyticsEventPolicy allows workflow abandonment taxonomy") {
@@ -466,6 +645,101 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["retry_count"], "raw retry counts should stay out of friction analytics")
     }
 
+    runSuite("ActivationTelemetry tracks first and second artifact saves once per install") {
+        let now = Date(timeIntervalSinceReferenceDate: 2_000_000)
+        let suiteName = "ActivationTelemetryTests.second-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .dictation,
+            savedAt: now,
+            userDefaults: defaults
+        )
+        assertTrue(first.firstArtifact, "first durable artifact should be recognized")
+        assertNil(first.secondArtifact, "first durable artifact should not also be second")
+
+        let second = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .meeting,
+            savedAt: now.addingTimeInterval(3 * 86_400),
+            userDefaults: defaults
+        )
+        assertFalse(second.firstArtifact, "second durable artifact should not retrigger first")
+        assertEqual(second.secondArtifact?.firstKind.rawValue, "dictation", "second event should preserve the first artifact kind enum")
+        assertEqual(second.secondArtifact?.daysSinceFirstBucket, "2_7d", "second event should bucket days since first")
+
+        let third = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .meeting,
+            savedAt: now.addingTimeInterval(4 * 86_400),
+            userDefaults: defaults
+        )
+        assertFalse(third.firstArtifact, "later durable artifacts should not retrigger first")
+        assertNil(third.secondArtifact, "second durable artifact should only be tracked once")
+
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: now.addingTimeInterval(-6 * 3_600), now: now),
+            "same_day",
+            "same-day second artifacts should stay coarse"
+        )
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: now.addingTimeInterval(-20 * 86_400), now: now),
+            "8_30d",
+            "longer second-artifact gaps should stay bucketed"
+        )
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: nil, now: now),
+            "unknown",
+            "legacy installs without first-save date should not invent a raw timestamp"
+        )
+    }
+
+    runSuite("ActivationTelemetry emits second artifact for legacy first-artifact installs") {
+        let suiteName = "ActivationTelemetryTests.legacy-second-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(true, forKey: ActivationTelemetry.firstArtifactSavedTrackedKey)
+
+        let legacySecond = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .meeting,
+            savedAt: Date(timeIntervalSinceReferenceDate: 3_000_000),
+            userDefaults: defaults
+        )
+        assertFalse(legacySecond.firstArtifact, "legacy installs should not retrigger first artifact")
+        assertEqual(legacySecond.secondArtifact?.firstKind.rawValue, "unknown", "legacy second-artifact event should avoid inventing first kind")
+        assertEqual(legacySecond.secondArtifact?.daysSinceFirstBucket, "unknown", "legacy second-artifact event should avoid inventing first date")
+    }
+
+    runSuite("ActivationTelemetry does not retain opted-out first artifact metadata") {
+        let suiteName = "ActivationTelemetryTests.opt-out-first-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        AnalyticsPreferences.setEnabled(false, userDefaults: defaults)
+        let disabledResult = ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+            artifactKind: .dictation,
+            surface: .dictationSave,
+            trigger: "hotkey",
+            savedAt: Date(timeIntervalSinceReferenceDate: 4_000_000),
+            userDefaults: defaults
+        )
+        assertFalse(disabledResult, "opted-out first artifact should not report")
+        assertFalse(defaults.bool(forKey: ActivationTelemetry.firstArtifactSavedTrackedKey), "opted-out first artifact should not mark first-save telemetry state")
+        assertNil(defaults.string(forKey: ActivationTelemetry.firstArtifactKindKey), "opted-out first artifact should not store kind for later reporting")
+        assertNil(defaults.object(forKey: ActivationTelemetry.firstArtifactSavedAtKey), "opted-out first artifact should not store date for later reporting")
+
+        AnalyticsPreferences.setEnabled(true, userDefaults: defaults)
+        let enabledResult = ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+            artifactKind: .meeting,
+            surface: .meetingSave,
+            trigger: "manual",
+            savedAt: Date(timeIntervalSinceReferenceDate: 4_100_000),
+            userDefaults: defaults
+        )
+        assertTrue(enabledResult, "first artifact after analytics opt-in should be treated as the first observable artifact")
+        assertEqual(defaults.string(forKey: ActivationTelemetry.firstArtifactKindKey), "meeting", "only opted-in artifact kind should be retained")
+    }
+
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
         let menuOpened = AnalyticsEventPolicy.policy(forEvent: "menu_bar_opened")
         let menuAction = AnalyticsEventPolicy.policy(forEvent: "menu_bar_action_clicked")
@@ -517,6 +791,87 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["source"], "menu_bar", "source enums should survive sanitization")
         assertEqual(sanitized["state"], "ready_to_install", "update state should survive sanitization")
         assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy allows UX confusion and recovery signals") {
+        let confusion = AnalyticsEventPolicy.policy(forEvent: "ux_confusion_signal_observed")
+        let recovery = AnalyticsEventPolicy.policy(forEvent: "ux_recovery_action_taken")
+
+        assertEqual(
+            confusion?.allowedProperties ?? Set<String>(),
+            [
+                "action_id",
+                "elapsed_bucket",
+                "failure_kind",
+                "page_id",
+                "reason_kind",
+                "retryability",
+                "signal_kind",
+                "step_id",
+                "step_index",
+                "surface",
+                "visit_count_bucket",
+            ],
+            "confusion signals should stay coarse and enum-shaped"
+        )
+        assertEqual(
+            recovery?.allowedProperties ?? Set<String>(),
+            [
+                "action_id",
+                "failure_kind",
+                "page_id",
+                "reason_kind",
+                "recovery_kind",
+                "result",
+                "retryability",
+                "surface",
+            ],
+            "recovery actions should not include private artifacts"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "action_id": "send_diagnostic_event",
+                "elapsed_bucket": "30_119s",
+                "failure_kind": "transcription_inference_failed",
+                "page_id": "support",
+                "reason_kind": "crash_reporting_disabled",
+                "recovery_kind": "support_diagnostics",
+                "result": "blocked",
+                "retryability": "retryable",
+                "signal_kind": "disabled_action_attempted",
+                "step_id": "permissions",
+                "step_index": "3",
+                "surface": "settings",
+                "visit_count_bucket": "3_4",
+                "meeting_title": "Customer call",
+                "audio_path": "/Users/redbars/private.wav",
+                "prompt_text": "read this transcript",
+            ],
+            allowedKeys: (confusion?.allowedProperties ?? []).union(recovery?.allowedProperties ?? [])
+        )
+
+        assertEqual(sanitized["action_id"], "send_diagnostic_event", "action id should survive")
+        assertEqual(sanitized["elapsed_bucket"], "30_119s", "elapsed bucket should survive")
+        assertEqual(sanitized["failure_kind"], "transcription_inference_failed", "normalized failure kind should survive")
+        assertEqual(sanitized["page_id"], "support", "page id should survive")
+        assertEqual(sanitized["reason_kind"], "crash_reporting_disabled", "reason kind should survive")
+        assertEqual(sanitized["recovery_kind"], "support_diagnostics", "recovery kind should survive")
+        assertEqual(sanitized["result"], "blocked", "coarse result should survive")
+        assertEqual(sanitized["retryability"], "retryable", "retryability enum should survive")
+        assertEqual(sanitized["signal_kind"], "disabled_action_attempted", "signal kind should survive")
+        assertEqual(sanitized["step_id"], "permissions", "step id should survive")
+        assertEqual(sanitized["step_index"], "3", "step index should survive")
+        assertEqual(sanitized["surface"], "settings", "surface should survive")
+        assertEqual(sanitized["visit_count_bucket"], "3_4", "visit count bucket should survive")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["prompt_text"], "prompt text must not be sent")
+
+        assertNil(UXConfusionTelemetry.visitCountBucket(2), "first two visits should not count as repeat confusion")
+        assertEqual(UXConfusionTelemetry.visitCountBucket(3), "3_4", "third visit should start repeat bucket")
+        assertEqual(UXConfusionTelemetry.visitCountBucket(7), "5_9", "mid repeat visits should stay bucketed")
+        assertEqual(UXConfusionTelemetry.visitCountBucket(10), "10_plus", "high repeat visits should stay bucketed")
     }
 
     runSuite("AnalyticsEventPolicy allows update download lifecycle attribution") {
@@ -842,9 +1197,64 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["was_recording"], "true", "recording interruption state should survive sanitization")
     }
 
+    runSuite("AnalyticsEventPolicy allows workflow recovery lifecycle events") {
+        let attempted = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_attempted")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_finished")
+
+        assertEqual(
+            attempted?.allowedProperties ?? Set<String>(),
+            [
+                "artifact_retained",
+                "attempt_bucket",
+                "failure_kind",
+                "retry_source",
+                "surface",
+                "workflow_kind",
+            ],
+            "recovery attempts should carry only coarse workflow shape"
+        )
+        assertEqual(
+            finished?.allowedProperties ?? Set<String>(),
+            [
+                "artifact_retained",
+                "attempt_bucket",
+                "elapsed_bucket",
+                "failure_kind",
+                "result",
+                "retry_source",
+                "surface",
+                "workflow_kind",
+            ],
+            "recovery finishes should add result and elapsed bucket only"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "meeting_transcription",
+                "failure_kind": "models_not_ready",
+                "retry_source": "queued_transcription",
+                "attempt_bucket": "1",
+                "result": "success",
+                "elapsed_bucket": "10_29s",
+                "surface": "meeting",
+                "artifact_retained": "true",
+                "error": "raw error",
+                "transcript_path": "/private/tmp/meeting.md",
+            ],
+            allowedKeys: finished?.allowedProperties ?? Set<String>()
+        )
+        assertEqual(sanitized["workflow_kind"], "meeting_transcription", "workflow kind should survive")
+        assertEqual(sanitized["failure_kind"], "models_not_ready", "failure kind should survive")
+        assertEqual(sanitized["retry_source"], "queued_transcription", "retry source should survive")
+        assertEqual(sanitized["result"], "success", "result should survive")
+        assertNil(sanitized["error"], "raw errors must not be sent")
+        assertNil(sanitized["transcript_path"], "transcript paths must not be sent")
+    }
+
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
+        let dictationArtifactSaved = AnalyticsEventPolicy.policy(forEvent: "dictation_artifact_saved")
         let dictationStopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
@@ -854,6 +1264,7 @@ func testAnalyticsEventPolicy() {
 
         assertEqual(dictationStartFailed?.allowedProperties.contains("failure_kind"), true, "dictation start failures should allow normalized failure kinds")
         assertEqual(dictationCompleted?.allowedProperties.contains("word_count_bucket"), true, "dictation completion should allow bucketed word counts")
+        assertEqual(dictationArtifactSaved?.allowedProperties.contains("save_outcome"), true, "strict dictation saved-artifact proof should allow only a reviewed save outcome enum")
         assertEqual(dictationStopLatency?.allowedProperties.contains("stop_to_paste_bucket"), true, "dictation stop latency should allow only bucketed stop-to-paste timing")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")
@@ -1305,4 +1716,27 @@ private func loadRepoText(_ relativePath: String, file: String = #file, line: In
         print("  FAIL [\(loc)] could not load \(relativePath): \(error)")
         return ""
     }
+}
+
+private func mcpAgentCaptureQueryAllowedProperties() -> Set<String> {
+    let source = loadRepoText("Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift")
+    guard let declaration = source.range(of: "static let allowedProperties: Set<String> = [") else {
+        return []
+    }
+
+    let afterDeclaration = String(source[declaration.upperBound...])
+    guard let closingBracket = afterDeclaration.range(of: "]") else {
+        return []
+    }
+
+    let literalBody = String(afterDeclaration[..<closingBracket.lowerBound])
+    return Set(
+        literalBody
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .compactMap { line -> String? in
+                let trimmed = line.trimmingCharacters(in: CharacterSet(charactersIn: "\","))
+                return trimmed.isEmpty ? nil : trimmed
+            }
+    )
 }

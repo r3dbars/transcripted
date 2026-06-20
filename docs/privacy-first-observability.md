@@ -99,11 +99,29 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `onboarding_dismissed`
 - `activation_artifact_action_clicked`
 - `activation_first_artifact_saved`
+- `artifact_created`
+- `artifact_opened`
+- `artifact_revealed`
+- `artifact_copied`
+- `activation_second_artifact_saved`
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `activation_return_proxy_observed`
 - `workflow_abandoned`
 - `product_friction_observed`
+- `workflow_started`
+- `workflow_finished`
+- `workflow_recovery_attempted`
+- `workflow_recovery_finished`
+- `meeting_summary_requested`
+- `meeting_summary_finished`
+- `local_meeting_summary_model_prepare_started`
+- `local_meeting_summary_model_prepare_completed`
+- `local_meeting_summary_model_prepare_cancelled`
+- `local_meeting_summary_model_prepare_failed`
+- `agent_capture_query_observed`
+- `ux_confusion_signal_observed`
+- `ux_recovery_action_taken`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
@@ -123,6 +141,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `dictation_started`
 - `dictation_start_failed`
 - `dictation_completed`
+- `dictation_artifact_saved`
 - `dictation_stop_latency_measured`
 - `dictation_cancelled`
 - `dictation_no_speech`
@@ -145,6 +164,9 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_transcript_saved`
 - `meeting_transcript_failed`
 - `meeting_speaker_finalization_failed`
+- `meeting_speaker_review_prompted`
+- `meeting_speaker_review_actioned`
+- `meeting_speaker_review_completed`
 - `meeting_transcript_skipped`
 - `meeting_saved_audio_retranscription_requested`
 
@@ -162,6 +184,20 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
+
+Generic workflow lifecycle events are the cross-product envelope for dictation,
+meetings, local summaries, and agent setup. They should only carry
+`workflow_kind`, `entrypoint`, `trigger`, `stage`, `result`,
+`failure_kind`, `recovery_kind`, and coarse duration/word-count buckets. Do not
+add transcript text, titles, source apps, raw paths, speaker names, audio
+references, or raw counts to these events.
+Speaker review analytics should stay limited to the user-facing review funnel:
+prompted, actioned, completed. Properties must remain coarse buckets and enums
+such as `participant_count_bucket`, `unresolved_count_bucket`, `review_reason`,
+`surface`, `action`, `result`, `meeting_age_bucket`, and
+`update_count_bucket`. Do not send speaker names, labels, transcript text,
+meeting titles, paths, raw counts, or audio references. Avoid property names
+containing `speaker`; the analytics sanitizer drops them by design.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.

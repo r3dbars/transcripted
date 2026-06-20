@@ -130,6 +130,20 @@ struct AnalyticsEventPolicy: Equatable {
         "word_count_bucket",
     ]
 
+    private static let activationSecondArtifactProperties: Set<String> = [
+        "days_since_first_bucket",
+        "first_artifact_kind",
+        "second_artifact_kind",
+        "surface",
+        "trigger",
+    ]
+
+    private static let artifactValueActionProperties: Set<String> = [
+        "artifact_age_bucket",
+        "artifact_kind",
+        "surface",
+    ]
+
     private static let activationAgentPromptActionProperties: Set<String> = [
         "action_kind",
         "agent_target",
@@ -163,6 +177,54 @@ struct AnalyticsEventPolicy: Equatable {
         "workflow_kind",
     ]
 
+    private static let workflowLifecycleProperties: Set<String> = [
+        "duration_bucket",
+        "entrypoint",
+        "failure_kind",
+        "result",
+        "stage",
+        "trigger",
+        "word_count_bucket",
+        "workflow_kind",
+    ]
+
+    private static let summaryProperties: Set<String> = [
+        "artifact_age_bucket",
+        "duration_bucket",
+        "failure_kind",
+        "latency_bucket",
+        "model_family",
+        "model_state",
+        "provider",
+        "result",
+        "surface",
+    ]
+
+    private static let uxConfusionProperties: Set<String> = [
+        "action_id",
+        "elapsed_bucket",
+        "failure_kind",
+        "page_id",
+        "reason_kind",
+        "retryability",
+        "signal_kind",
+        "step_id",
+        "step_index",
+        "surface",
+        "visit_count_bucket",
+    ]
+
+    private static let uxRecoveryProperties: Set<String> = [
+        "action_id",
+        "failure_kind",
+        "page_id",
+        "reason_kind",
+        "recovery_kind",
+        "result",
+        "retryability",
+        "surface",
+    ]
+
     private static let productFrictionProperties: Set<String> = [
         "elapsed_bucket",
         "failure_kind",
@@ -182,6 +244,17 @@ struct AnalyticsEventPolicy: Equatable {
         "provider",
         "route_ready",
         "source",
+    ]
+
+    private static let workflowRecoveryProperties: Set<String> = [
+        "artifact_retained",
+        "attempt_bucket",
+        "elapsed_bucket",
+        "failure_kind",
+        "result",
+        "retry_source",
+        "surface",
+        "workflow_kind",
     ]
 
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
@@ -348,6 +421,26 @@ struct AnalyticsEventPolicy: Equatable {
             name: "activation_first_artifact_saved",
             allowedProperties: activationFirstArtifactProperties
         ),
+        "activation_second_artifact_saved": .init(
+            name: "activation_second_artifact_saved",
+            allowedProperties: activationSecondArtifactProperties
+        ),
+        "artifact_created": .init(
+            name: "artifact_created",
+            allowedProperties: activationFirstArtifactProperties
+        ),
+        "artifact_opened": .init(
+            name: "artifact_opened",
+            allowedProperties: artifactValueActionProperties
+        ),
+        "artifact_revealed": .init(
+            name: "artifact_revealed",
+            allowedProperties: artifactValueActionProperties
+        ),
+        "artifact_copied": .init(
+            name: "artifact_copied",
+            allowedProperties: artifactValueActionProperties
+        ),
         "activation_agent_prompt_action_clicked": .init(
             name: "activation_agent_prompt_action_clicked",
             allowedProperties: activationAgentPromptActionProperties
@@ -360,13 +453,50 @@ struct AnalyticsEventPolicy: Equatable {
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
         ),
+        "agent_capture_query_observed": .init(
+            name: "agent_capture_query_observed",
+            allowedProperties: [
+                "agent_target",
+                "artifact_kind",
+                "capture_age_bucket",
+                "query_kind",
+                "result",
+                "return_window_bucket",
+                "source_count_bucket",
+                "surface",
+            ]
+        ),
         "workflow_abandoned": .init(
             name: "workflow_abandoned",
             allowedProperties: workflowAbandonedProperties
         ),
+        "workflow_started": .init(
+            name: "workflow_started",
+            allowedProperties: workflowLifecycleProperties
+        ),
+        "workflow_finished": .init(
+            name: "workflow_finished",
+            allowedProperties: workflowLifecycleProperties
+        ),
+        "workflow_recovery_attempted": .init(
+            name: "workflow_recovery_attempted",
+            allowedProperties: workflowRecoveryProperties.subtracting(["elapsed_bucket", "result"])
+        ),
+        "workflow_recovery_finished": .init(
+            name: "workflow_recovery_finished",
+            allowedProperties: workflowRecoveryProperties
+        ),
         "product_friction_observed": .init(
             name: "product_friction_observed",
             allowedProperties: productFrictionProperties
+        ),
+        "ux_confusion_signal_observed": .init(
+            name: "ux_confusion_signal_observed",
+            allowedProperties: uxConfusionProperties
+        ),
+        "ux_recovery_action_taken": .init(
+            name: "ux_recovery_action_taken",
+            allowedProperties: uxRecoveryProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",
@@ -523,6 +653,17 @@ struct AnalyticsEventPolicy: Equatable {
                 "word_count_bucket",
             ]))
         ),
+        "dictation_artifact_saved": .init(
+            name: "dictation_artifact_saved",
+            allowedProperties: [
+                "delivery",
+                "duration_bucket",
+                "save_outcome",
+                "surface",
+                "trigger",
+                "word_count_bucket",
+            ]
+        ),
         "dictation_stop_latency_measured": .init(
             name: "dictation_stop_latency_measured",
             allowedProperties: dictationRouteDiagnosticProperties.union(Set([
@@ -671,6 +812,55 @@ struct AnalyticsEventPolicy: Equatable {
                 "word_count_bucket",
             ]
         ),
+        "meeting_summary_requested": .init(
+            name: "meeting_summary_requested",
+            allowedProperties: summaryProperties
+        ),
+        "meeting_summary_finished": .init(
+            name: "meeting_summary_finished",
+            allowedProperties: summaryProperties
+        ),
+        "local_meeting_summary_model_prepare_started": .init(
+            name: "local_meeting_summary_model_prepare_started",
+            allowedProperties: [
+                "model_family",
+                "model_state",
+                "provider",
+                "surface",
+            ]
+        ),
+        "local_meeting_summary_model_prepare_completed": .init(
+            name: "local_meeting_summary_model_prepare_completed",
+            allowedProperties: [
+                "model_family",
+                "model_state",
+                "provider",
+                "result",
+                "surface",
+            ]
+        ),
+        "local_meeting_summary_model_prepare_cancelled": .init(
+            name: "local_meeting_summary_model_prepare_cancelled",
+            allowedProperties: [
+                "failure_kind",
+                "model_family",
+                "model_state",
+                "provider",
+                "result",
+                "surface",
+            ]
+        ),
+        "local_meeting_summary_model_prepare_failed": .init(
+            name: "local_meeting_summary_model_prepare_failed",
+            allowedProperties: [
+                "failure_kind",
+                "model_family",
+                "model_state",
+                "provider",
+                "result",
+                "surface",
+            ]
+        ),
         "meeting_transcript_failed": .init(
             name: "meeting_transcript_failed",
             allowedProperties: meetingCaptureDiagnosticProperties.union(Set([
@@ -686,6 +876,43 @@ struct AnalyticsEventPolicy: Equatable {
                 "queue_depth_bucket",
                 "session_stage",
                 "trigger",
+            ]
+        ),
+        "meeting_speaker_review_prompted": .init(
+            name: "meeting_speaker_review_prompted",
+            allowedProperties: [
+                "action",
+                "meeting_age_bucket",
+                "participant_count_bucket",
+                "result",
+                "review_reason",
+                "surface",
+                "unresolved_count_bucket",
+            ]
+        ),
+        "meeting_speaker_review_actioned": .init(
+            name: "meeting_speaker_review_actioned",
+            allowedProperties: [
+                "action",
+                "meeting_age_bucket",
+                "participant_count_bucket",
+                "result",
+                "review_reason",
+                "surface",
+                "unresolved_count_bucket",
+                "update_count_bucket",
+            ]
+        ),
+        "meeting_speaker_review_completed": .init(
+            name: "meeting_speaker_review_completed",
+            allowedProperties: [
+                "meeting_age_bucket",
+                "participant_count_bucket",
+                "result",
+                "review_reason",
+                "surface",
+                "unresolved_count_bucket",
+                "update_count_bucket",
             ]
         ),
         "meeting_transcript_skipped": .init(

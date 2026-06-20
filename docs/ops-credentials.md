@@ -64,12 +64,21 @@ python3 scripts/ops/posthog-activation-funnel.py --days 30
 That report writes aggregate Markdown and JSON under
 `/tmp/transcripted-posthog-activation-funnel/<run-id>/`. It models the funnel as
 launch -> onboarding -> permission ready -> first dictation -> saved Markdown
--> artifact action -> agent setup/prompt signal -> return proxy. It does not
+-> artifact created/opened/revealed/copied -> agent setup/prompt signal -> return proxy. It does not
 export distinct IDs, person rows, transcript text, file paths, meeting titles,
 raw URLs, or raw payload rows. Treat the agent setup and prompt-copy rows as
 proxies only; they are not proof that an agent answered from a saved artifact.
-The desired true-use event is `agent_capture_query_observed`, which should stay
-zero/unknown until that privacy-safe instrumentation exists.
+The health probe's first-value set is `dictation_completed`,
+`dictation_artifact_saved`, `onboarding_first_dictation_saved`,
+`meeting_transcript_saved`, `onboarding_agent_cta_clicked`,
+`activation_first_artifact_saved`, `artifact_created`, `artifact_opened`,
+`artifact_revealed`, `artifact_copied`,
+`activation_artifact_action_clicked`,
+`activation_agent_prompt_action_clicked`,
+`activation_agent_setup_cta_clicked`, `activation_return_proxy_observed`, and
+`agent_capture_query_observed`.
+The true-use event is `agent_capture_query_observed`, emitted by successful
+MCP reads/searches with enum and bucket properties only.
 
 For the normal health lane's product-task loop, run:
 

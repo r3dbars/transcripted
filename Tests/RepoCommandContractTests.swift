@@ -186,14 +186,20 @@ func testRepoCommandContract() {
 
         for event in [
             "dictation_completed",
+            "dictation_artifact_saved",
             "onboarding_first_dictation_saved",
             "meeting_transcript_saved",
             "onboarding_agent_cta_clicked",
             "activation_first_artifact_saved",
+            "artifact_created",
+            "artifact_opened",
+            "artifact_revealed",
+            "artifact_copied",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
-            "activation_return_proxy_observed"
+            "activation_return_proxy_observed",
+            "agent_capture_query_observed"
         ] {
             assertTrue(
                 firstValueEvents.contains(event) && docs.contains(event),
@@ -202,10 +208,15 @@ func testRepoCommandContract() {
         }
         for event in [
             "activation_first_artifact_saved",
+            "artifact_created",
+            "artifact_opened",
+            "artifact_revealed",
+            "artifact_copied",
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
-            "activation_return_proxy_observed"
+            "activation_return_proxy_observed",
+            "agent_capture_query_observed"
         ] {
             assertTrue(
                 digest.contains(event),

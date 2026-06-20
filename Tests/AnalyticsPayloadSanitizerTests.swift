@@ -20,6 +20,55 @@ func testAnalyticsPayloadSanitizer() {
         assertNil(sanitized["title"], "non-allowlisted properties should be dropped")
     }
 
+    runSuite("AnalyticsPayloadSanitizer keeps artifact value events bucketed") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "artifact_age_bucket": "24_48h",
+                "artifact_kind": "meeting",
+                "duration_bucket": "10_29m",
+                "surface": "home_preview",
+                "trigger": "detected_prompt",
+                "word_count_bucket": "300_plus",
+                "transcript_text": "private words",
+                "meeting_title": "Customer call",
+                "speaker_name": "Alice",
+                "audio_path": "/Users/redbars/private.wav",
+                "file_path": "/Users/redbars/private.md",
+                "raw_url": "https://example.com/private",
+                "source_app_name": "Private app",
+            ],
+            allowedKeys: [
+                "artifact_age_bucket",
+                "artifact_kind",
+                "duration_bucket",
+                "surface",
+                "trigger",
+                "word_count_bucket",
+                "transcript_text",
+                "meeting_title",
+                "speaker_name",
+                "audio_path",
+                "file_path",
+                "raw_url",
+                "source_app_name",
+            ]
+        )
+
+        assertEqual(sanitized["artifact_age_bucket"], "24_48h", "artifact age buckets should survive")
+        assertEqual(sanitized["artifact_kind"], "meeting", "artifact kind should survive")
+        assertEqual(sanitized["duration_bucket"], "10_29m", "duration buckets should survive")
+        assertEqual(sanitized["surface"], "home_preview", "surfaces should survive")
+        assertEqual(sanitized["trigger"], "detected_prompt", "trigger enums should survive")
+        assertEqual(sanitized["word_count_bucket"], "300_plus", "word count buckets should survive")
+        assertNil(sanitized["transcript_text"], "transcript text must not be sent")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["raw_url"], "raw URLs must not be sent")
+        assertNil(sanitized["source_app_name"], "source app names must not be sent")
+    }
+
     runSuite("AnalyticsPayloadSanitizer redacts file paths and emails from values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
