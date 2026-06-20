@@ -69,6 +69,13 @@ Mac local models and the Windows worker are cheap first-pass lanes for summaries
 clustering, log triage, and draft work. If a lane is skipped, say why in the
 closeout.
 
+For non-Codex lanes, use `~/.codex/bin/maestro-delegate` whenever possible, for
+example `maestro-delegate local --label pr-dedupe -- "..."`,
+`maestro-delegate windows --label review -- "..."`, or
+`maestro-delegate claude --label risk-review -- "..."`. A lane only counts as
+used if the closeout includes a real `MAESTRO_PROOF` path, output path, or pasted
+command output.
+
 Use `docs/agent-closeout.md` for the status meanings and GitHub cleanup
 boundaries.
 
