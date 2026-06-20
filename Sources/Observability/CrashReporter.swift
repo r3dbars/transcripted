@@ -332,11 +332,12 @@ final class CrashReporter {
 /// stack-frame symbols) and then forwards to the previously-installed handler.
 private func transcriptedUnrecognizedSelectorHandler(_ exception: NSException) {
     if let parsed = UnrecognizedSelectorReason.parse(exception.reason) {
+        let tags = SentryPayloadSanitizer.sanitizeTags([
+            "unrecognized_selector": parsed.selector,
+            "unrecognized_selector_class": parsed.receiver,
+        ])
         SentrySDK.configureScope { scope in
-            scope.setTags([
-                "unrecognized_selector": parsed.selector,
-                "unrecognized_selector_class": parsed.receiver,
-            ])
+            scope.setTags(tags)
         }
     }
     CrashReporter.forwardUncaughtException(exception)

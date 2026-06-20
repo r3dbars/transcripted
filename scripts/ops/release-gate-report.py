@@ -12,7 +12,7 @@ import subprocess
 import sys
 from collections import Counter, deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,17 @@ LOG_PATHS = (
     "events.jsonl",
     "reliability.jsonl",
     "app.jsonl",
+)
+LOG_TIMESTAMP_KEYS = ("timestamp", "time", "t", "created_at", "date")
+ISO_TIMESTAMP_PATTERN = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:?\d{2})?"
+)
+DEBUG_CLOCK_PATTERN = re.compile(r"^\[(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?\]")
+QA_STEP_STATUS_MAP = {"PASS": "green", "WARN": "yellow", "SKIP": "yellow", "FAIL": "red"}
+MOCKED_PROXY_QA_STEPS = (
+    ("04-slow-pasteback-smoke", "pasteback"),
+    ("30-audio-synthetic", "route/Bluetooth"),
+    ("61-gemma-summary-plan", "Gemma dry-run"),
 )
 RED_LOG_PATTERNS = {
     "crash_or_panic": re.compile(r"\b(crash|panic|fatal)\b", re.IGNORECASE),
@@ -72,6 +83,10 @@ def repo_root() -> Path:
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def utc_stamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def shell_command(command: list[str]) -> str:
@@ -212,6 +227,37 @@ def qa_short_answer(report_path: Path) -> str:
         if line.startswith(("PASS:", "FAIL:", "INCOMPLETE:")):
             return line
     return "QA report was not readable."
+
+
+def qa_step_statuses(commands: list[CommandRecord]) -> dict[str, str]:
+    for record in commands:
+        if record.title != "QA bench" or not record.report_path:
+            continue
+        results_path = Path(record.report_path).with_name("results.tsv")
+        if not results_path.exists():
+            continue
+        statuses: dict[str, str] = {}
+        for line in read_text_if_present(results_path).splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 3:
+                statuses[parts[0]] = parts[2]
+        return statuses
+    return {}
+
+
+def qa_step_group_status(steps: dict[str, str], group: tuple[tuple[str, str], ...]) -> str:
+    statuses = []
+    for step_id, _ in group:
+        raw_status = steps.get(step_id)
+        statuses.append(QA_STEP_STATUS_MAP.get(raw_status or "SKIP", "yellow"))
+    return max(statuses, key=lambda status: STATUS_ORDER[status])
+
+
+def qa_step_group_detail(steps: dict[str, str], group: tuple[tuple[str, str], ...]) -> str:
+    parts = []
+    for step_id, label in group:
+        parts.append(f"{label}={steps.get(step_id, 'NOT RUN')}")
+    return ", ".join(parts)
 
 
 def run_qa_bench(args: argparse.Namespace, root: Path, out_dir: Path, commands: list[CommandRecord]) -> ReportItem:
@@ -521,7 +567,7 @@ def tail_lines(path: Path, max_lines: int) -> list[str]:
         return []
 
 
-def sweep_local_logs(args: argparse.Namespace) -> list[ReportItem]:
+def sweep_local_logs(args: argparse.Namespace, since: datetime | None) -> list[ReportItem]:
     log_root = Path.home() / "Library" / "Application Support" / "Transcripted" / "logs"
     items: list[ReportItem] = []
     for name in LOG_PATHS:
@@ -529,27 +575,16 @@ def sweep_local_logs(args: argparse.Namespace) -> list[ReportItem]:
         if not path.exists():
             items.append(
                 ReportItem(
-                    f"{name} missing",
-                    "yellow",
-                    "Local log file was not found. This lane is unknown.",
+                    f"{name} unavailable",
+                    "green",
+                    "No local log file was found. This optional local-noise lane is not counted as release proof.",
                     display_path(path),
                 )
             )
             continue
 
         lines = tail_lines(path, args.log_lines)
-        red_counts = count_matches(lines, RED_LOG_PATTERNS)
-        yellow_counts = count_matches(lines, YELLOW_LOG_PATTERNS)
-        red_total = sum(red_counts.values())
-        yellow_total = sum(yellow_counts.values())
-        if red_total:
-            detail = f"{red_total} crash/panic/fatal-ish matches in last {len(lines)} lines; raw lines not copied."
-            items.append(ReportItem(f"{name} urgent log warnings", "red", detail, display_path(path)))
-        elif yellow_total:
-            detail = summarize_counts(yellow_counts, f"{yellow_total} warning/error-ish matches in last {len(lines)} lines")
-            items.append(ReportItem(f"{name} log warnings", "yellow", f"{detail}; raw lines not copied.", display_path(path)))
-        else:
-            items.append(ReportItem(f"{name} log tail", "green", f"No warning/error patterns in last {len(lines)} lines.", display_path(path)))
+        items.append(classify_log_tail(name, path, lines, since))
     return items
 
 
@@ -565,6 +600,142 @@ def count_matches(lines: list[str], patterns: dict[str, re.Pattern[str]]) -> Cou
 def summarize_counts(counts: Counter[str], prefix: str) -> str:
     parts = ", ".join(f"{key}={value}" for key, value in sorted(counts.items()) if value)
     return f"{prefix} ({parts})" if parts else prefix
+
+
+def parse_datetime_value(value: Any) -> datetime | None:
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp = timestamp / 1000
+        try:
+            return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        except (OSError, OverflowError, ValueError):
+            return None
+
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    if re.search(r"[+-]\d{4}$", text):
+        text = f"{text[:-5]}{text[-5:-2]}:{text[-2:]}"
+
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def log_line_timestamp(line: str) -> datetime | None:
+    stripped = line.strip()
+    if not stripped:
+        return None
+
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        payload = None
+
+    if isinstance(payload, dict):
+        for key in LOG_TIMESTAMP_KEYS:
+            parsed = parse_datetime_value(payload.get(key))
+            if parsed is not None:
+                return parsed
+
+    match = ISO_TIMESTAMP_PATTERN.search(stripped)
+    if match:
+        return parse_datetime_value(match.group(0))
+    return None
+
+
+def log_line_clock_timestamp(
+    line: str,
+    since: datetime | None,
+    context_timestamp: datetime | None,
+) -> datetime | None:
+    if since is None:
+        return None
+    match = DEBUG_CLOCK_PATTERN.match(line.strip())
+    if not match:
+        return None
+
+    local_context = (context_timestamp or since).astimezone()
+    fraction = (match.group(4) or "0").ljust(6, "0")[:6]
+    clock = datetime_time(
+        hour=int(match.group(1)),
+        minute=int(match.group(2)),
+        second=int(match.group(3)),
+        microsecond=int(fraction),
+        tzinfo=local_context.tzinfo,
+    )
+    candidate = datetime.combine(local_context.date(), clock)
+    if candidate - local_context > timedelta(hours=12):
+        candidate -= timedelta(days=1)
+    elif local_context - candidate > timedelta(hours=12):
+        candidate += timedelta(days=1)
+    return candidate.astimezone(timezone.utc)
+
+
+def classify_log_tail(name: str, path: Path, lines: list[str], since: datetime | None) -> ReportItem:
+    if not lines:
+        return ReportItem(
+            f"{name} log tail",
+            "green",
+            "Log exists, but there were no lines to inspect.",
+            display_path(path),
+        )
+
+    current_or_unknown: list[str] = []
+    stale: list[str] = []
+    undated: list[str] = []
+    context_timestamp: datetime | None = None
+    for line in lines:
+        timestamp = log_line_timestamp(line)
+        if timestamp is None:
+            timestamp = log_line_clock_timestamp(line, since, context_timestamp)
+        if timestamp is not None:
+            context_timestamp = timestamp
+        if since is not None and timestamp is not None and timestamp < since:
+            stale.append(line)
+        elif since is not None and timestamp is None:
+            undated.append(line)
+        else:
+            current_or_unknown.append(line)
+
+    red_counts = count_matches(current_or_unknown, RED_LOG_PATTERNS)
+    yellow_counts = count_matches(current_or_unknown, YELLOW_LOG_PATTERNS)
+    stale_red_counts = count_matches(stale, RED_LOG_PATTERNS)
+    stale_yellow_counts = count_matches(stale, YELLOW_LOG_PATTERNS)
+    undated_red_counts = count_matches(undated, RED_LOG_PATTERNS)
+    undated_yellow_counts = count_matches(undated, YELLOW_LOG_PATTERNS)
+    red_total = sum(red_counts.values())
+    yellow_total = sum(yellow_counts.values())
+    stale_total = sum(stale_red_counts.values()) + sum(stale_yellow_counts.values())
+    undated_total = sum(undated_red_counts.values()) + sum(undated_yellow_counts.values())
+    scope = f"since gate start {utc_stamp(since)}" if since is not None else f"in last {len(lines)} lines"
+    stale_note = f"; ignored {stale_total} stale pre-run matches in the tailed window" if stale_total else ""
+    undated_note = f"; ignored {undated_total} un-timestamped matches because freshness could not be proven" if undated_total else ""
+
+    if red_total:
+        detail = summarize_counts(red_counts, f"{red_total} crash/panic/fatal-ish matches {scope}")
+        return ReportItem(f"{name} urgent log warnings", "red", f"{detail}{stale_note}{undated_note}; raw lines not copied.", display_path(path))
+    if yellow_total:
+        detail = summarize_counts(yellow_counts, f"{yellow_total} warning/error-ish matches {scope}")
+        return ReportItem(f"{name} log warnings", "yellow", f"{detail}{stale_note}{undated_note}; raw lines not copied.", display_path(path))
+
+    detail = f"No warning/error patterns {scope}"
+    if stale_total:
+        detail += f"; ignored {stale_total} stale pre-run matches"
+    if undated_total:
+        detail += f"; ignored {undated_total} un-timestamped matches because freshness could not be proven"
+    return ReportItem(f"{name} log tail", "green", f"{detail}.", display_path(path))
 
 
 def evidence_list(paths: list[Path]) -> str:
@@ -634,6 +805,16 @@ def render_items(items: list[ReportItem], empty: str) -> list[str]:
     return rendered
 
 
+def first_action(regressions: list[ReportItem], needs_human: list[ReportItem]) -> str:
+    if regressions:
+        item = regressions[0]
+        return f"Fix RED - {item.title}: {item.detail}"
+    if needs_human:
+        item = needs_human[0]
+        return f"Resolve YELLOW/UNKNOWN - {item.title}: {item.detail}"
+    return "No release-gate action remains from this report."
+
+
 def render_report(
     *,
     root: Path,
@@ -657,6 +838,13 @@ def render_report(
     working = [item for item in all_items if item.status == "green"]
     process_status = worst_status(process_items)
     manual_status = worst_status(manual)
+    automated_status = worst_status(automated)
+    telemetry_status = worst_status(telemetry)
+    release_surface_status = worst_status(release_surfaces)
+    local_log_status = worst_status(local_logs)
+    qa_steps = qa_step_statuses(commands)
+    mocked_proxy_status = qa_step_group_status(qa_steps, MOCKED_PROXY_QA_STEPS)
+    mocked_proxy_detail = qa_step_group_detail(qa_steps, MOCKED_PROXY_QA_STEPS)
     overall = worst_status(all_items)
     release_status = "GO" if overall == "green" else "HOLD"
     release_reason = (
@@ -664,6 +852,15 @@ def render_report(
         if release_status == "GO"
         else "manual proof or automated release evidence is still incomplete"
     )
+    proof_lanes = {
+        "deterministic": automated_status,
+        "mocked_proxy": mocked_proxy_status,
+        "telemetry": telemetry_status,
+        "release_surfaces": release_surface_status,
+        "local_logs": local_log_status,
+        "manual_hardware": manual_status,
+    }
+    first_action_text = first_action(regressions, needs_human)
 
     lines: list[str] = [
         "# Transcripted Release Gate Report",
@@ -681,6 +878,19 @@ def render_report(
         f"- Commit: `{commit}`",
         f"- App version: `{app_version}`",
         f"- Artifacts: `{out_dir}`",
+        "",
+        "## Proof Lanes",
+        "",
+        f"- {status_label(automated_status)} - Deterministic proof: QA bench build, fast tests, smoke checks, artifact fixtures, and packaged smoke when requested.",
+        f"- {status_label(mocked_proxy_status)} - Mocked/proxy proof: synthetic pasteback, route, Bluetooth/AirPods, and Gemma dry-run checks are automation proof only. Lanes: {mocked_proxy_detail}.",
+        f"- {status_label(telemetry_status)} - Telemetry proof: Sentry and PostHog aggregate probes. Missing optional credentials stay yellow/unknown.",
+        f"- {status_label(release_surface_status)} - Release-surface proof: appcast, download, GitHub, cask, and Sentry release metadata checks.",
+        f"- {status_label(local_log_status)} - Local log proof: only timestamped warnings at or after gate start affect the color; stale or un-timestamped local residue is reported but does not hold the gate.",
+        f"- {status_label(manual_status)} - Manual/hardware UNKNOWN: live audio/TCC, real meeting apps, Bluetooth/AirPods hardware, sleep/wake, pasteback feel, speaker review feel, and install/update proof.",
+        "",
+        "## First Action",
+        "",
+        first_action_text,
         "",
         "## Privacy Boundary",
         "",
@@ -741,6 +951,8 @@ def render_report(
         "release_status": release_status,
         "exit_code": EXIT_CODES[overall],
         "manual_status": manual_status,
+        "proof_lanes": proof_lanes,
+        "first_action": first_action_text,
         "working_count": len(working),
         "regression_count": len(regressions),
         "needs_human_check_count": len(needs_human),
@@ -837,6 +1049,8 @@ def self_test() -> int:
         commands=[release_record],
     )
     required = [
+        "Proof Lanes",
+        "First Action",
         "Automated Proof",
         "Regressions",
         "Telemetry",
@@ -849,6 +1063,38 @@ def self_test() -> int:
     blocking_watch_ok = release_watch_status({"check_id": "appcast-release-candidate"}) == "red"
     release_command_ok = release_record.status == "red"
     telemetry_command_ok = telemetry_record.status == "yellow"
+    stale_log_item = classify_log_tail(
+        "events.jsonl",
+        Path("/tmp/events.jsonl"),
+        ['{"timestamp":"2026-06-06T23:59:59Z","level":"warn","message":"timeout before gate"}'],
+        datetime(2026, 6, 7, tzinfo=timezone.utc),
+    )
+    current_log_item = classify_log_tail(
+        "events.jsonl",
+        Path("/tmp/events.jsonl"),
+        ['{"timestamp":"2026-06-07T00:00:01Z","level":"warn","message":"timeout during gate"}'],
+        datetime(2026, 6, 7, tzinfo=timezone.utc),
+    )
+    undated_log_item = classify_log_tail(
+        "debug.log",
+        Path("/tmp/debug.log"),
+        ["[11:59:59.000] warning before gate but no date"],
+        datetime(2026, 6, 7, tzinfo=timezone.utc),
+    )
+    debug_since = datetime(2026, 6, 7, 12, 0, tzinfo=timezone.utc)
+    local_debug_time = (debug_since + timedelta(seconds=1)).astimezone()
+    current_debug_log_item = classify_log_tail(
+        "debug.log",
+        Path("/tmp/debug.log"),
+        [f"[{local_debug_time:%H:%M:%S}.000] warning during gate"],
+        debug_since,
+    )
+    log_staleness_ok = (
+        stale_log_item.status == "green"
+        and current_log_item.status == "yellow"
+        and undated_log_item.status == "green"
+        and current_debug_log_item.status == "yellow"
+    )
 
     _, manual_payload = render_report(
         root=root,
@@ -869,7 +1115,25 @@ def self_test() -> int:
         manual_payload["status"] == "yellow"
         and manual_payload["process_status"] == "green"
         and manual_payload["exit_code"] == EXIT_CODES["yellow"]
+        and manual_payload["proof_lanes"]["manual_hardware"] == "yellow"
     )
+    mocked_proxy_missing_ok = qa_step_group_status({}, MOCKED_PROXY_QA_STEPS) == "yellow"
+    mocked_proxy_pass_ok = qa_step_group_status(
+        {
+            "04-slow-pasteback-smoke": "PASS",
+            "30-audio-synthetic": "PASS",
+            "61-gemma-summary-plan": "PASS",
+        },
+        MOCKED_PROXY_QA_STEPS,
+    ) == "green"
+    mocked_proxy_fail_ok = qa_step_group_status(
+        {
+            "04-slow-pasteback-smoke": "PASS",
+            "30-audio-synthetic": "FAIL",
+            "61-gemma-summary-plan": "PASS",
+        },
+        MOCKED_PROXY_QA_STEPS,
+    ) == "red"
     skipped_title_ok = "GitHub" not in successful_release_surface_title(
         argparse.Namespace(skip_live_release_surfaces=True, github_release_json=None)
     )
@@ -882,7 +1146,11 @@ def self_test() -> int:
         or not blocking_watch_ok
         or not release_command_ok
         or not telemetry_command_ok
+        or not log_staleness_ok
         or not manual_boundary_ok
+        or not mocked_proxy_missing_ok
+        or not mocked_proxy_pass_ok
+        or not mocked_proxy_fail_ok
         or not skipped_title_ok
         or not fixture_title_ok
     ):
@@ -890,7 +1158,10 @@ def self_test() -> int:
             f"release-gate-report self-test failed: missing={missing}, "
             f"status={payload['status']}, blocking_watch_ok={blocking_watch_ok}, "
             f"release_command_ok={release_command_ok}, telemetry_command_ok={telemetry_command_ok}, "
+            f"log_staleness_ok={log_staleness_ok}, "
             f"manual_boundary_ok={manual_boundary_ok}, "
+            f"mocked_proxy_missing_ok={mocked_proxy_missing_ok}, "
+            f"mocked_proxy_pass_ok={mocked_proxy_pass_ok}, mocked_proxy_fail_ok={mocked_proxy_fail_ok}, "
             f"skipped_title_ok={skipped_title_ok}, fixture_title_ok={fixture_title_ok}",
             file=sys.stderr,
         )
@@ -904,6 +1175,7 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
+    started_at = datetime.now(timezone.utc)
     root = repo_root()
     out_root = Path(args.out_root)
     if not out_root.is_absolute():
@@ -919,7 +1191,7 @@ def main() -> int:
         automated.append(packaged_smoke)
     release_surfaces = run_release_surfaces(args, root, out_dir, commands)
     telemetry = run_telemetry(args, root, out_dir, commands)
-    local_logs = sweep_local_logs(args)
+    local_logs = sweep_local_logs(args, started_at)
     manual = manual_items(args, root, out_dir)
 
     generated_at = utc_now()

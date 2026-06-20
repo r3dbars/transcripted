@@ -126,6 +126,7 @@ func testFirstRunExperience() {
             systemAudioGranted: true,
             calendarGranted: false,
             meetingPromptsEnabled: true,
+            firstDictationSaved: true,
             anonymousUsageEnabled: true,
             crashReportingEnabled: false,
             elapsedSeconds: 75
@@ -136,6 +137,7 @@ func testFirstRunExperience() {
         assertEqual(properties["calendar_status"], "not_granted", "calendar status should avoid raw event details")
         assertEqual(properties["anonymous_usage_enabled"], "true", "completion should preserve analytics preference state")
         assertEqual(properties["crash_reporting_enabled"], "false", "completion should preserve crash preference state")
+        assertEqual(properties["first_dictation_saved"], "true", "completion should preserve whether the first dictation save happened")
         assertEqual(properties["flow_elapsed_bucket"], "30_119s", "completion should bucket elapsed time")
         assertEqual(properties["step_id"], "done", "completion should anchor to the final onboarding step")
         assertNil(properties["transcript"], "completion analytics should not include spoken content")
@@ -155,6 +157,7 @@ func testFirstRunExperience() {
             systemAudioGranted: false,
             calendarGranted: true,
             meetingPromptsEnabled: false,
+            firstDictationSaved: false,
             anonymousUsageEnabled: false,
             crashReportingEnabled: true,
             elapsedSeconds: nil
@@ -162,6 +165,7 @@ func testFirstRunExperience() {
 
         assertEqual(properties["completion_flow"], "dictation", "dictation-only completion should stay distinct")
         assertEqual(properties["meeting_recording_ready"], "false", "missing system audio should be preserved")
+        assertEqual(properties["first_dictation_saved"], "false", "completion should not invent a first dictation save")
         assertEqual(properties["calendar_status"], "disabled", "disabled meeting prompts should not report calendar as granted")
         assertNil(properties["flow_elapsed_bucket"], "missing elapsed time should not invent a duration bucket")
     }

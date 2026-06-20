@@ -75,6 +75,13 @@ WhisperKit, CoreML model bundles) currently ships dylibs that do not all carry
 the same team-id signing as the app, so strict library validation refuses to
 load them. We treat that as a known cost of running ML locally on macOS today.
 
+The entitlement contract is intentionally narrow even while the app is not
+sandboxed. `config/security/nightly-security-manifest.json` forbids broad OS
+entitlements such as user-selected file read/write access, Apple Events
+automation, camera, location, contacts, photos, media-library, and network
+server access; `scripts/ops/nightly-security-check.py` fails if those appear in
+the local, beta, or built-app entitlement set.
+
 Practical implications for users:
 
 - install Transcripted from a trusted source (the signed DMG from GitHub

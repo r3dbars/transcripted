@@ -44,6 +44,7 @@ final class SpeakerNamingSimulationRunnerTests: XCTestCase {
                 channelCollisionMeeting(),
                 repeatedTextMeeting(),
                 sameReviewCoalescedNameMeeting(),
+                duplicateReviewRowsSameNameMeeting(),
                 deferredReviewMeeting(),
                 renamePropagationMeeting(),
                 cancellationRollbackMeeting(),
@@ -63,6 +64,9 @@ final class SpeakerNamingSimulationRunnerTests: XCTestCase {
         XCTAssertTrue(report.confusionPairs.isEmpty, report.markdown)
         XCTAssertTrue(report.falseMergeIndicators.isEmpty, report.markdown)
         XCTAssertTrue(report.falseSplitIndicators.isEmpty, report.markdown)
+        XCTAssertTrue(report.duplicateIdentityIndicators.isEmpty, report.markdown)
+        XCTAssertEqual(report.identityStabilitySuccesses, report.identityStabilityChecks, report.markdown)
+        XCTAssertGreaterThanOrEqual(report.identityStabilityChecks, 4, report.markdown)
         XCTAssertEqual(report.renamedPropagationSuccesses, report.renamedPropagationChecks, report.markdown)
         XCTAssertGreaterThanOrEqual(report.renamedPropagationChecks, 2, report.markdown)
         XCTAssertEqual(report.rollbackSuccesses, report.rollbackChecks, report.markdown)
@@ -201,6 +205,9 @@ final class SpeakerNamingSimulationRunnerTests: XCTestCase {
             ],
             falseMergeIndicators: [],
             falseSplitIndicators: [],
+            duplicateIdentityIndicators: [],
+            identityStabilityChecks: 0,
+            identityStabilitySuccesses: 0,
             renamedPropagationChecks: 0,
             renamedPropagationSuccesses: 0,
             rollbackChecks: 0,
@@ -212,6 +219,47 @@ final class SpeakerNamingSimulationRunnerTests: XCTestCase {
         XCTAssertTrue(report.passed, report.markdown)
         XCTAssertFalse(report.confusionPairs.isEmpty)
         XCTAssertTrue(report.markdown.contains("Confusion Pairs"))
+    }
+
+    func testSimulationReportFailsWhenDuplicateIdentityIndicatorsExist() {
+        let report = SpeakerNamingSimulationReport(
+            suiteName: "duplicate-identity-report-gate",
+            minimumExactLabelAccuracy: 1.0,
+            caseReports: [],
+            totalEvaluatedUtterances: 2,
+            exactMatches: 2,
+            confusionPairs: [],
+            falseMergeIndicators: [],
+            falseSplitIndicators: [],
+            duplicateIdentityIndicators: [
+                SpeakerNamingSimulationDuplicateIdentityIndicator(
+                    truthSpeakerId: "jamie",
+                    actualLabel: "Jamie Park",
+                    speakerIds: [
+                        "00000000-0000-0000-0000-000000000001",
+                        "00000000-0000-0000-0000-000000000002",
+                    ],
+                    caseIds: ["same-name-duplicate-identities"]
+                )
+            ],
+            identityStabilityChecks: 1,
+            identityStabilitySuccesses: 0,
+            renamedPropagationChecks: 0,
+            renamedPropagationSuccesses: 0,
+            rollbackChecks: 0,
+            rollbackSuccesses: 0,
+            replacementChecks: 0,
+            replacementSuccesses: 0
+        )
+
+        XCTAssertFalse(report.passed, report.markdown)
+        XCTAssertTrue(report.confusionPairs.isEmpty, report.markdown)
+        XCTAssertTrue(report.falseMergeIndicators.isEmpty, report.markdown)
+        XCTAssertTrue(report.falseSplitIndicators.isEmpty, report.markdown)
+        XCTAssertEqual(report.identityStabilityChecks, 1, report.markdown)
+        XCTAssertEqual(report.identityStabilitySuccesses, 0, report.markdown)
+        XCTAssertEqual(report.duplicateIdentityIndicators.count, 1, report.markdown)
+        XCTAssertTrue(report.markdown.contains("Duplicate Identity Indicators"))
     }
 
     private func stableTwoSpeakerMeeting() -> SpeakerNamingSimulationMeeting {
@@ -325,6 +373,23 @@ final class SpeakerNamingSimulationRunnerTests: XCTestCase {
             ],
             postActions: [
                 .renameProfile(channel: .system, diarizerSpeakerId: 41, to: "Samuel Lee")
+            ]
+        )
+    }
+
+    private func duplicateReviewRowsSameNameMeeting() -> SpeakerNamingSimulationMeeting {
+        SpeakerNamingSimulationMeeting(
+            id: "duplicate-review-rows-same-name",
+            title: "Duplicate Review Rows Same Name",
+            segments: [
+                segment(.system, 51, truth: "lee", expected: "Lee Morgan", text: "lee first duplicated review row", start: 0, embedding: vector3D(degrees: 0)),
+                segment(.system, 52, truth: "lee", expected: "Lee Morgan", text: "lee second duplicated review row", start: 4, embedding: vector3D(degrees: 35)),
+                segment(.system, 53, truth: "rory", expected: "Rory Kim", text: "rory stays a separate speaker", start: 8, embedding: vector3D(degrees: 120))
+            ],
+            actions: [
+                .name(channel: .system, diarizerSpeakerId: 51, as: "Lee Morgan"),
+                .name(channel: .system, diarizerSpeakerId: 52, as: "Lee Morgan"),
+                .name(channel: .system, diarizerSpeakerId: 53, as: "Rory Kim")
             ]
         )
     }
@@ -536,6 +601,11 @@ final class SpeakerNamingSimulationRunnerTests: XCTestCase {
     private func vector(degrees: Float) -> [Float] {
         let radians = degrees * .pi / 180
         return [cos(radians), sin(radians)]
+    }
+
+    private func vector3D(degrees: Float) -> [Float] {
+        let radians = degrees * .pi / 180
+        return [cos(radians), sin(radians), 0]
     }
 
     private func near(_ base: [Float], degrees: Float) -> [Float] {

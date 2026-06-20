@@ -6,6 +6,7 @@ import argparse, json
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scores", required=True, help="comma-separated score JSON paths")
+    ap.add_argument("--corpus", default="AMI", help="corpus name for the report title")
     ap.add_argument("--out-md")
     args = ap.parse_args()
 
@@ -34,9 +35,10 @@ def main():
     n_true = rows[0]["n_true"] if rows else 0
 
     out = []
-    out.append("# Speaker-naming threshold sweep — AMI ES2002 (a–d), one recurring 4-person series\n")
-    out.append(f"True speakers in series: **{n_true}**. Ideal profiles_end = {n_true}. "
-               "Ideal fragmentation = 1.0/person. Ideal false-merge = 0. Ideal re-ID = 1.0.\n")
+    out.append(f"# Speaker-naming threshold sweep — {args.corpus}\n")
+    out.append(f"Distinct true speakers across the replay: **{n_true}**. Ideal profiles_end = "
+               f"{n_true} (one profile per real person). Ideal fragmentation = 1.0/person. "
+               "Ideal false-merge = 0 (the near-zero-false-positive bar). Ideal re-ID = 1.0.\n")
     out.append("| consolidation | match | mean DER | frag mean | frag max | false-merge | re-ID #2+ | profiles_end |")
     out.append("|---|---|---|---|---|---|---|---|")
     for r in rows:

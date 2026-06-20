@@ -173,33 +173,44 @@ final class TranscriptionPipelineStateTests: XCTestCase {
 
     func testNamingPolicyAutoAcceptsHighConfidenceMatureNamedProfile() {
         let profile = speakerProfile(displayName: "Nate", callCount: 6, disputeCount: 0)
-        XCTAssertTrue(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.92))
+        XCTAssertTrue(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.95, secondBestSimilarity: -1))
     }
 
     func testNamingPolicyRejectsUnnamedProfileEvenWhenMature() {
         let profile = speakerProfile(displayName: nil, callCount: 20, disputeCount: 0)
-        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.99))
+        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.99, secondBestSimilarity: -1))
     }
 
     func testNamingPolicyRejectsDisputedProfile() {
         let profile = speakerProfile(displayName: "Travis", callCount: 10, disputeCount: 1)
-        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.92))
+        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.95, secondBestSimilarity: -1))
     }
 
     func testNamingPolicyRejectsLowSimilarityAtBoundary() {
-        // Threshold is strictly > 0.88.
+        // Auto-accept bar is strictly > 0.92 (raised from 0.88).
         let profile = speakerProfile(displayName: "Sara", callCount: 6, disputeCount: 0)
-        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.88))
-        XCTAssertTrue(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.881))
+        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.92, secondBestSimilarity: -1))
+        XCTAssertTrue(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.921, secondBestSimilarity: -1))
+        // Old bar (0.90) no longer auto-accepts.
+        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.90, secondBestSimilarity: -1))
+    }
+
+    func testNamingPolicyRejectsAmbiguousMatchBelowMargin() {
+        // Clears the 0.92 bar but the runner-up is within the 0.12 margin -> not auto-accepted.
+        let profile = speakerProfile(displayName: "Sara", callCount: 6, disputeCount: 0)
+        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.95, secondBestSimilarity: 0.90))
+        XCTAssertTrue(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.95, secondBestSimilarity: 0.80))
+        // Unknown runner-up (nil) is treated conservatively -> confirm, not auto.
+        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile, similarity: 0.95, secondBestSimilarity: nil))
     }
 
     func testNamingPolicyRejectsImmatureProfileAtBoundary() {
         // callCount must be strictly > 4.
         let profile4 = speakerProfile(displayName: "Sara", callCount: 4, disputeCount: 0)
-        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile4, similarity: 0.95))
+        XCTAssertFalse(SpeakerNamingPolicy.shouldAutoAccept(profile: profile4, similarity: 0.95, secondBestSimilarity: -1))
 
         let profile5 = speakerProfile(displayName: "Sara", callCount: 5, disputeCount: 0)
-        XCTAssertTrue(SpeakerNamingPolicy.shouldAutoAccept(profile: profile5, similarity: 0.95))
+        XCTAssertTrue(SpeakerNamingPolicy.shouldAutoAccept(profile: profile5, similarity: 0.95, secondBestSimilarity: -1))
     }
 
     func testSpeakerClassificationUsesPreMeetingSnapshotForAutoAcceptMaturity() throws {
@@ -249,7 +260,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertFalse(
             SpeakerNamingPolicy.shouldAutoAccept(
                 profile: knowledge[0].profile,
-                similarity: knowledge[0].similarity
+                similarity: knowledge[0].similarity,
+                secondBestSimilarity: knowledge[0].secondSimilarity
             ),
             "A profile that only became mature during this meeting should still require speaker review."
         )
@@ -326,7 +338,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         let mapping = SpeakerNamingPolicy.initialMapping(
             speakerId: "7",
             profile: profile,
-            similarity: 0.99
+            similarity: 0.99,
+            secondBestSimilarity: -1
         )
 
         XCTAssertEqual(mapping.speakerId, "7")
@@ -340,7 +353,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         let mapping = SpeakerNamingPolicy.initialMapping(
             speakerId: "2",
             profile: profile,
-            similarity: 0.95
+            similarity: 0.95,
+            secondBestSimilarity: -1
         )
 
         XCTAssertEqual(mapping.identifiedName, "Maya")
@@ -356,7 +370,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         let mapping = SpeakerNamingPolicy.initialMapping(
             speakerId: "3",
             profile: profile,
-            similarity: 0.95
+            similarity: 0.95,
+            secondBestSimilarity: -1
         )
 
         XCTAssertNil(mapping.identifiedName)

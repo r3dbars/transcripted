@@ -235,6 +235,48 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.pendingSpeakerNamingRequests.map(\.transcriptId), [secondId])
     }
 
+    func testDuplicateSpeakerNamingRequestsAreIgnoredForActiveAndQueuedTranscripts() {
+        let manager = makeManager()
+        let firstId = UUID()
+        let secondId = UUID()
+
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("first.md"),
+            transcriptId: firstId,
+            systemAudioURL: tempDirectory.appendingPathComponent("first-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("first-duplicate.md"),
+            transcriptId: firstId,
+            systemAudioURL: tempDirectory.appendingPathComponent("first-duplicate-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("second.md"),
+            transcriptId: secondId,
+            systemAudioURL: tempDirectory.appendingPathComponent("second-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+        manager.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: tempDirectory.appendingPathComponent("second-duplicate.md"),
+            transcriptId: secondId,
+            systemAudioURL: tempDirectory.appendingPathComponent("second-duplicate-system.wav"),
+            micAudioURL: nil,
+            onComplete: { _ in }
+        ))
+
+        XCTAssertEqual(manager.speakerNamingRequest?.transcriptId, firstId)
+        XCTAssertEqual(manager.pendingSpeakerNamingRequests.map(\.transcriptId), [secondId])
+    }
+
     func testClearCompletedSpeakerNamingRequestClearsActiveReviewAndPromotesNext() {
         let manager = makeManager()
         let firstId = UUID()

@@ -59,29 +59,41 @@ swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke
 This checks the built app's Sparkle feed URL, public key, automatic update
 flags, dSYM, DMG, optional menu bar launch, and local log privacy without
 uploading or modifying `docs/appcast.xml`.
-3. Put the release archive in a local updates folder.
-4. Run:
+3. Run the read-only post-DMG audit so the expected GitHub asset URL, appcast,
+   Homebrew cask, website/download routes, and release-health follow-ups are
+   visible before anything is published:
+
+```bash
+python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact build/Transcripted-<version>.dmg
+```
+
+Pre-publish GitHub, appcast, Homebrew, Sentry, and website rows may be
+`PENDING`. That is the point: they stay explicit until the release surface is
+actually live.
+4. Put the release archive in a local updates folder.
+5. Run:
 
 ```bash
 bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
 ```
 
-5. The script keeps the current feed history, takes the newest generated item,
+6. The script keeps the current feed history, takes the newest generated item,
    rewrites its enclosure URL to the matching GitHub release asset, aligns the
    minimum macOS version with `Info.plist`, and then writes the merged result
    back to `docs/appcast.xml`.
-6. Upload the release archive to GitHub Releases.
-7. Verify the published update path:
+7. Upload the release archive to GitHub Releases.
+8. Verify the published update path:
 
 ```bash
 bash scripts/release/verify-sparkle-release.sh <version>
 ```
 
-8. Commit and push the updated `docs/appcast.xml`.
-9. After the final appcast push and any expected Homebrew/Sentry release
+9. Commit and push the updated `docs/appcast.xml`.
+10. After the final appcast push and any expected Homebrew/Sentry release
    surfaces are live, run the strict live-surface gate:
 
 ```bash
+python3 scripts/release/post-dmg-release-audit.py --version <version>
 python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
 ```
 

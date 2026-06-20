@@ -59,6 +59,103 @@ func testUIAutomationSurfaceContract() {
 
     }
 
+    runSuite("UI automation surface contract - app commands expose capture shortcuts") {
+        let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
+
+        for requiredCommandHook in [
+            "CommandMenu(\"Capture\")",
+            "Button(\"Start Dictation\")",
+            "appDelegate.menuStartDictation()",
+            ".keyboardShortcut(\"d\", modifiers: .command)",
+            "Button(\"Start / Stop Meeting Recording\")",
+            "appDelegate.menuToggleMeetingRecording()",
+            ".keyboardShortcut(\"r\", modifiers: .command)",
+            "Button(\"Transcribe Audio File",
+            "appDelegate.menuImportAudio()",
+            ".keyboardShortcut(\"o\", modifiers: .command)",
+        ] {
+            assertTrue(commandsSource.contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the app command menu")
+        }
+    }
+
+    runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
+        let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
+        let pagesSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsPage.swift")
+
+        for requiredCommandHook in [
+            "CommandMenu(\"Go\")",
+            "Button(\"Home\")",
+            "appDelegate.menuOpenPage(.home)",
+            ".keyboardShortcut(\"1\", modifiers: .command)",
+            "Button(\"Dictations\")",
+            "appDelegate.menuOpenPage(.dictations)",
+            ".keyboardShortcut(\"2\", modifiers: .command)",
+            "Button(\"Speakers\")",
+            "appDelegate.menuOpenPage(.people)",
+            ".keyboardShortcut(\"3\", modifiers: .command)",
+            "Button(\"Agent\")",
+            "appDelegate.menuOpenPage(.connectAgent)",
+            ".keyboardShortcut(\"4\", modifiers: .command)",
+            "Button(\"Find Speaker",
+            "appDelegate.menuFindSpeaker()",
+            ".keyboardShortcut(\"f\", modifiers: .command)",
+        ] {
+            assertTrue(commandsSource.contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the Go command menu")
+        }
+
+        for requiredPageHook in [
+            "case .home: return \"1\"",
+            "case .dictations: return \"2\"",
+            "case .people: return \"3\"",
+            "case .connectAgent: return \"4\"",
+            "return \"\\(title)  ⌘\\(key)\"",
+        ] {
+            assertTrue(pagesSource.contains(requiredPageHook), "\(requiredPageHook) should keep sidebar help aligned with Go shortcuts")
+        }
+    }
+
+    runSuite("UI automation surface contract - app commands route through existing delegate entry points") {
+        let appSource = readUIAutomationContractFile("Sources/TranscriptedApp.swift")
+
+        for requiredAppHook in [
+            "TranscriptedMenuCommands(appDelegate: appDelegate)",
+            "func menuStartDictation()",
+            "startDictationFromSettings()",
+            "func menuToggleMeetingRecording()",
+            "meetingOverlayController.toggleFromHotkey()",
+            "func menuImportAudio()",
+            "importAudioFileFromSettings()",
+            "func menuOpenPage(_ page: TranscriptedSettingsPage)",
+            "showSettingsWindow(page: page, source: \"menu_command\")",
+            "func menuFindSpeaker()",
+            "settingsWindowController.focusSpeakerSearch(source: \"menu_command\")",
+        ] {
+            assertTrue(appSource.contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
+        }
+    }
+
+    runSuite("UI automation surface contract - app commands do not remap global trigger preferences") {
+        let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
+
+        for forbiddenTriggerHook in [
+            "PhysicalDictationTriggerPreferences",
+            "HotkeyPreferences",
+            "RegisterEventHotKey",
+            "pushToTalk",
+            "handsFree",
+            ".keyboardShortcut(\"m\"",
+            "modifiers: .option",
+            "modifiers: [.option",
+            "modifiers: .control",
+            "modifiers: [.control",
+        ] {
+            assertFalse(
+                commandsSource.contains(forbiddenTriggerHook),
+                "app-active commands must not remap or shadow global recordable trigger preferences (\(forbiddenTriggerHook))"
+            )
+        }
+    }
+
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
         let pagesSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsPage.swift")
         let settingsSidebarSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")

@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (79 Swift files)
+## Files (80 Swift files)
 
 ### Overlay/
 
@@ -108,6 +108,7 @@ onboarding connect stage. Both keep one mental model:
 ### Shared/
 
 - `Shared/AgentConnectionGuide.swift` — shared starter prompt, folder paths, Codex inbox, live-sidecar, and portable meeting bundle copy for the agent-connect flow
+- `Shared/AccessibilityDisplayPolicy.swift` — shared AppKit policy for honoring Reduce Motion and Reduce Transparency on overlay and Settings surfaces
 - `Shared/AppSoundPlayer.swift` — UI sound preferences and playback helpers
 - `Shared/FeedbackIssueBuilder.swift` — builds sanitized support email payloads and links from current app state
 - `Shared/FirstRunExperience.swift` — shared first-run menu and onboarding state helpers for permission, local-model, dictation, and meeting CTA copy

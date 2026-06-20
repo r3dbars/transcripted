@@ -66,7 +66,6 @@ let package = Package(
                 .linkedFramework("CoreML"),
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AVFoundation"),
-                .linkedFramework("AppKit"),
                 .linkedFramework("Network"),
                 .linkedFramework("ScreenCaptureKit"),
             ]
@@ -105,7 +104,6 @@ let package = Package(
                 .linkedFramework("CoreML"),
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AVFoundation"),
-                .linkedFramework("AppKit"),
                 .linkedFramework("Network"),
                 .linkedFramework("ScreenCaptureKit"),
             ]

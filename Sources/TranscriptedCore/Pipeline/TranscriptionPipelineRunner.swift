@@ -9,6 +9,9 @@ extension TranscriptionTaskManager {
         let speakerId: String
         let profile: SpeakerProfile
         let similarity: Double
+        /// Runner-up similarity for the auto-accept margin guard; nil when unknown (the
+        /// utterance fallback path), which `shouldAutoAccept` treats as "confirm, don't auto".
+        let secondSimilarity: Double?
     }
 
     nonisolated static func speakerClassificationKnowledge(
@@ -27,7 +30,8 @@ extension TranscriptionTaskManager {
                 knowledge.append(SpeakerClassificationKnowledge(
                     speakerId: sid,
                     profile: snapshot,
-                    similarity: similarity
+                    similarity: similarity,
+                    secondSimilarity: context.matchSecondSimilarity
                 ))
                 continue
             }
@@ -39,7 +43,8 @@ extension TranscriptionTaskManager {
                 knowledge.append(SpeakerClassificationKnowledge(
                     speakerId: sid,
                     profile: profile,
-                    similarity: similarity
+                    similarity: similarity,
+                    secondSimilarity: nil   // runner-up not carried on the utterance fallback
                 ))
             }
         }
@@ -186,7 +191,8 @@ extension TranscriptionTaskManager {
             if let entry = dbKnowledge.first(where: { $0.speakerId == sid }) {
                 let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                     profile: entry.profile,
-                    similarity: entry.similarity
+                    similarity: entry.similarity,
+                    secondBestSimilarity: entry.secondSimilarity
                 )
                 if canAutoAccept {
                     autoAcceptedIds.insert(sid)
@@ -211,7 +217,8 @@ extension TranscriptionTaskManager {
             let mapping = SpeakerNamingPolicy.initialMapping(
                 speakerId: entry.speakerId,
                 profile: entry.profile,
-                similarity: entry.similarity
+                similarity: entry.similarity,
+                secondBestSimilarity: entry.secondSimilarity
             )
             speakerMappings[key] = mapping
             speakerSources[key] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
@@ -254,7 +261,8 @@ extension TranscriptionTaskManager {
                 if let entry = micDbKnowledge.first(where: { $0.speakerId == sid }) {
                     let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                         profile: entry.profile,
-                        similarity: entry.similarity
+                        similarity: entry.similarity,
+                        secondBestSimilarity: entry.secondSimilarity
                     )
                     if canAutoAccept {
                         micAutoAcceptedIds.insert(sid)
@@ -276,7 +284,8 @@ extension TranscriptionTaskManager {
                 let mapping = SpeakerNamingPolicy.initialMapping(
                     speakerId: entry.speakerId,
                     profile: entry.profile,
-                    similarity: entry.similarity
+                    similarity: entry.similarity,
+                    secondBestSimilarity: entry.secondSimilarity
                 )
                 speakerMappings[key] = mapping
                 speakerSources["mic_\(entry.speakerId)"] = micAutoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"

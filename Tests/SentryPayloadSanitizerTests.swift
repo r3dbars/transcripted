@@ -150,6 +150,22 @@ func testSentryPayloadSanitizer() {
         assertEqual(Set(sanitized.keys), ["last_event"], "crash runtime tags should stay limited to one reviewed workflow dimension")
     }
 
+    runSuite("SentryPayloadSanitizer.sanitizeTags still scrubs selector-enrichment values") {
+        let sanitized = SentryPayloadSanitizer.sanitizeTags([
+            "unrecognized_selector": "openURL:https://example.com/private?token=abc123",
+            "unrecognized_selector_class": "/Users/redbars/PrivateWidget",
+        ])
+
+        assertFalse(
+            sanitized["unrecognized_selector"]?.contains("https://example.com") ?? true,
+            "selector crash tags should not retain raw URLs"
+        )
+        assertFalse(
+            sanitized["unrecognized_selector_class"]?.contains("/Users/redbars") ?? true,
+            "selector class crash tags should not retain absolute paths"
+        )
+    }
+
     runSuite("SentryPayloadSanitizer.sanitizeText redacts emails hostnames and non-home paths") {
         let input = "Contact me at person@example.com from Redbarss-MacBook-Pro.local and inspect /private/var/folders/demo/file.txt"
         let sanitized = SentryPayloadSanitizer.sanitizeText(input)

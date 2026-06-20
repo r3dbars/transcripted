@@ -111,6 +111,13 @@ enum MeetingArtifactRenamer {
             fileManager: fileManager,
             logFailure: logFailure
         )
+        updateInlineSummarySourceIfNeeded(
+            at: targetURL,
+            from: url.lastPathComponent,
+            to: targetURL.lastPathComponent,
+            fileManager: fileManager,
+            logFailure: logFailure
+        )
         return targetURL
     }
 
@@ -219,6 +226,38 @@ enum MeetingArtifactRenamer {
                 [
                     "sourceExists": "\(fileManager.fileExists(atPath: sourceSummaryURL.path))",
                     "targetExists": "\(fileManager.fileExists(atPath: targetSummaryURL.path))",
+                    "errorType": "\(type(of: error))"
+                ]
+            )
+        }
+    }
+
+    private static func updateInlineSummarySourceIfNeeded(
+        at transcriptURL: URL,
+        from oldName: String,
+        to newName: String,
+        fileManager: FileManager,
+        logFailure: (_ event: String, _ context: [String: String]) -> Void
+    ) {
+        guard oldName != newName,
+              fileManager.fileExists(atPath: transcriptURL.path),
+              let raw = try? String(contentsOf: transcriptURL, encoding: .utf8),
+              let updated = LocalMeetingSummaryMarkdownUpdater.updatingSourceTranscriptFilename(
+                in: raw,
+                from: oldName,
+                to: newName
+              ) else {
+            return
+        }
+
+        do {
+            try updated.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            fileManager.restrictFileToOwnerOnly(at: transcriptURL)
+        } catch {
+            logFailure(
+                "meeting_inline_summary_source_rename_failed",
+                [
+                    "transcriptExists": "\(fileManager.fileExists(atPath: transcriptURL.path))",
                     "errorType": "\(type(of: error))"
                 ]
             )

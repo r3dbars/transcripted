@@ -2614,11 +2614,22 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func beginASRInference() async {
-        if !asrInferenceActivity.isActive {
+        if asrInferenceActivity.canStartImmediately(reservedHandoffCount: asrInferenceHandoffCount) {
             asrInferenceActivity.begin()
             return
         }
 
+        EventReporter.shared.capture(
+            level: .warning,
+            engine: "parakeet",
+            event: "asr_inference_deferred",
+            message: "ASR inference request queued behind active decoder work",
+            context: [
+                "active_count": "\(asrInferenceActivity.activeCount)",
+                "handoff_count": "\(asrInferenceHandoffCount)",
+                "waiter_count": "\(asrInferenceWaiters.count)"
+            ]
+        )
         await withCheckedContinuation { continuation in
             asrInferenceWaiters.append(continuation)
         }

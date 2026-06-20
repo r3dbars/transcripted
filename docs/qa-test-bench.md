@@ -100,6 +100,12 @@ may not have saved meetings yet. To make it strict:
 bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts
 ```
 
+In non-strict `deep`, `full`, and `live` modes, local artifact warnings are
+shown in the report as warnings-only local state, but they do not hold the
+bench exit code. Command/tool failures that do not produce a structured
+validation report still fail. Use `--strict-artifacts` when local saved-artifact
+drift should block the gate.
+
 ## Full Run
 
 ```bash
@@ -252,6 +258,15 @@ python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts
 Missing Sentry or PostHog credentials are `YELLOW` / unknown. They are not
 treated as green proof. Actual release-surface drift or required release-health
 failures are `RED`.
+
+The report starts with one skimmable proof-lane summary:
+
+- deterministic proof: build, fast tests, smoke checks, artifact fixtures, and packaged smoke when requested
+- mocked/proxy proof: synthetic pasteback, route, Bluetooth/AirPods, and Gemma dry-run checks, never hardware proof
+- telemetry proof: Sentry and PostHog aggregate probes
+- release-surface proof: appcast, download, GitHub, cask, and Sentry release metadata
+- local log proof: only timestamped warnings at or after the gate starts affect the color; stale or un-timestamped local residue is noted without holding the gate
+- manual/hardware UNKNOWN: live audio/TCC, real meeting apps, Bluetooth/AirPods hardware, sleep/wake, pasteback feel, speaker review feel, and install/update proof
 
 ## Short Output
 

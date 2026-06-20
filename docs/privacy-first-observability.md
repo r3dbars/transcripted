@@ -98,9 +98,11 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `onboarding_completed`
 - `onboarding_dismissed`
 - `activation_artifact_action_clicked`
+- `activation_first_artifact_saved`
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `activation_return_proxy_observed`
+- `workflow_abandoned`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
 - `update_action_clicked`
@@ -131,6 +133,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_prompt_shown`
 - `meeting_prompt_dismissed`
 - `meeting_prompt_record_selected`
+- `meeting_prompt_suppressed`
 - `meeting_mic_boost_prompt_shown`
 - `meeting_mic_boost_prompt_actioned`
 - `meeting_recording_stopped`
@@ -159,6 +162,40 @@ without joining against any sensitive context.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
+
+## Analytics taxonomy review checklist
+
+Every analytics change should update `AnalyticsEventPolicy.swift` and this doc
+in the same PR. `Tests/AnalyticsEventPolicyTests.swift` machine-checks the
+event-name list above and the compiled property taxonomy.
+
+For each new or changed event:
+
+- document the event name in "Allowlisted analytics events"
+- keep event names stable once released; add a new event instead of changing the
+  meaning of an old one
+- use enum, bucket, boolean, or count-bucket properties whenever possible
+- use raw numeric diagnostics only for reviewed audio-health shape, such as
+  sample rate, channel count, scalar volume, or peak buckets needed to debug
+  capture reliability
+- route activation and return-loop events through `ActivationTelemetry` when
+  possible so saved-artifact and agent-payoff signals stay coarse
+- verify `bash run-tests.sh --filter AnalyticsEventPolicy` and
+  `bash run-tests.sh --filter AnalyticsPayloadSanitizer`
+
+Never add analytics properties for:
+
+- transcript text or prompt text
+- audio data, audio paths, or audio references
+- meeting titles
+- speaker names or invitee names
+- absolute file paths or filenames derived from user content
+- source app names or bundle IDs
+- emails, tokens, authorization values, or credentials
+- raw URLs or referrers
+- raw device IDs, advertising IDs, person IDs, user IDs, distinct IDs, or
+  identity-stitching fields
+- free-form error strings or free-form context blobs
 
 ## Nightly guardrail sweep
 

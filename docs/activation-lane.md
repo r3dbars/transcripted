@@ -42,6 +42,35 @@ Good activation work should improve at least one of these moments:
 | Zoom, Meet, Teams, or meeting prompt trust | `Sources/Meeting/CLAUDE.md`, `Sources/UI/Overlay/MeetingOverlayController.swift`, `docs/qa-issue-500-meeting-audio.md` |
 | activation analytics or health probes | `Sources/Observability/ActivationTelemetry.swift`, `Sources/Observability/AnalyticsEventPolicy.swift`, `docs/privacy-first-observability.md`, `docs/ops-credentials.md` |
 
+## PostHog Funnel Report
+
+Use this for the aggregate product decision layer:
+
+```bash
+python3 scripts/ops/posthog-activation-funnel.py --days 30
+```
+
+The script writes a Markdown report and JSON data under
+`/tmp/transcripted-posthog-activation-funnel/<run-id>/`. It keeps output
+aggregate-only and separates strict saved-Markdown proof from proxy rows like
+`dictation_completed`, agent setup clicks, and copied starter prompts.
+
+For the full product-learning telemetry map, current event taxonomy, blind
+spots, and dashboard plan, see `docs/posthog-product-learning-plan.md`.
+
+For the dashboard-to-product-task loop, use:
+
+```bash
+python3 scripts/ops/posthog-product-dashboard-summary.py --days 30
+```
+
+That script reads the five dashboard families (`100 WAU Operating`,
+`Activation`, `Reliability`, `Feature Adoption`, and `Release Health`) and
+outputs the biggest activation leak, biggest reliability leak, strongest
+adoption signal, under-discovered feature, release regression watch, and top
+three PR/task candidates. It has fixture and self-test modes so CI can check
+the ranking logic without PostHog credentials.
+
 ## Guardrails
 
 - Do not add transcript text, meeting titles, speaker names, file paths, source
