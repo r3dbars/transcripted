@@ -168,6 +168,23 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let agentCaptureQueryObservedProperties: Set<String> = [
+        "agent_target",
+        "artifact_kind",
+        "capture_age_bucket",
+        "query_kind",
+        "result",
+        "return_window_bucket",
+        "source_count_bucket",
+        "surface",
+    ]
+
+    private static let settingsFeatureDiscoveryProperties: Set<String> = [
+        "feature_area",
+        "page_id",
+        "source",
+    ]
+
     private static let workflowAbandonedProperties: Set<String> = [
         "elapsed_bucket",
         "prior_ready_state",
@@ -455,16 +472,7 @@ struct AnalyticsEventPolicy: Equatable {
         ),
         "agent_capture_query_observed": .init(
             name: "agent_capture_query_observed",
-            allowedProperties: [
-                "agent_target",
-                "artifact_kind",
-                "capture_age_bucket",
-                "query_kind",
-                "result",
-                "return_window_bucket",
-                "source_count_bucket",
-                "surface",
-            ]
+            allowedProperties: agentCaptureQueryObservedProperties
         ),
         "workflow_abandoned": .init(
             name: "workflow_abandoned",
@@ -598,6 +606,10 @@ struct AnalyticsEventPolicy: Equatable {
                 "page_id",
                 "source",
             ]
+        ),
+        "settings_feature_discovered": .init(
+            name: "settings_feature_discovered",
+            allowedProperties: settingsFeatureDiscoveryProperties
         ),
         "settings_action_clicked": .init(
             name: "settings_action_clicked",

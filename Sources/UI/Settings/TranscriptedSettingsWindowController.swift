@@ -52,6 +52,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         speakerPeopleModel.refresh()
         navigationModel.presentedPage = page
         navigationModel.selectedPage = presentedPage
+        navigationModel.presentationSource = source
         navigationModel.presentationID = UUID()
         AnalyticsReporter.track(
             "settings_opened",

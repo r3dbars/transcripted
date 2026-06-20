@@ -43,6 +43,8 @@ Operational scripts query aggregate counts only:
 - `scripts/ops/health-probe.sh posthog`
 - `scripts/ops/posthog-dashboard-queries.py`
 - `scripts/ops/posthog-activation-funnel.py`
+- `scripts/ops/retention-cohort-report.py`
+- `scripts/ops/posthog-product-context-pack.py`
 - `scripts/ops/posthog-product-dashboard-summary.py`
 - `scripts/ops/release-health-card.py`
 - `scripts/ops/generate-nightly-digest.py`
@@ -94,6 +96,7 @@ Operational scripts query aggregate counts only:
 | `activation_second_artifact_saved` | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
+| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
 | `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
 | `meeting_summary_requested` | `artifact_age_bucket`, `duration_bucket`, `model_family`, `model_state`, `provider`, `result`, `surface` |
@@ -230,6 +233,8 @@ Prefer a small number of lifecycle events over broad click tracking.
 
 | Event | When to fire | Properties |
 | --- | --- | --- |
+| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
+| `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
 | `settings_feature_discovered` | A high-leverage feature panel is first viewed | `feature_area`, `page_id`, `source` |
 
@@ -318,6 +323,27 @@ next-day return -> second artifact saved.
 
 This is the north-star dashboard. Treat prompt-copy and setup clicks as intent,
 not proof.
+
+### Agent Product Context Pack
+
+When Codex or another agent needs product context for prioritization, run:
+
+```bash
+python3 scripts/ops/posthog-product-context-pack.py --days 30
+```
+
+This produces a compact JSON and Markdown pack with:
+
+- current activation bottleneck
+- strongest repeat-use signal
+- highest reliability pain
+- release-version anomaly
+- strongest feature adoption signal
+- top three recommended next PRs
+
+Use the pack in Transcripted health/nightly reports when the goal is an
+agent-readable decision artifact. Keep the activation funnel report for deeper
+diagnosis.
 
 ### Release Health By App Version
 

@@ -69,6 +69,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "meeting_summary_requested",
     "meeting_summary_finished",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "artifact_created",
     "artifact_opened",
     "artifact_revealed",
@@ -76,6 +77,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
+    "agent_capture_query_observed",
     "activation_return_proxy_observed",
     "workflow_abandoned",
 )
@@ -86,6 +88,7 @@ POSTHOG_FIRST_VALUE_EVENTS = (
     "meeting_transcript_saved",
     "onboarding_agent_cta_clicked",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "artifact_created",
     "artifact_opened",
     "artifact_revealed",
@@ -93,6 +96,7 @@ POSTHOG_FIRST_VALUE_EVENTS = (
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
+    "agent_capture_query_observed",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
 )
@@ -2437,6 +2441,7 @@ def run_self_test() -> None:
             "meeting_summary_requested",
             "meeting_summary_finished",
             "activation_first_artifact_saved",
+            "activation_second_artifact_saved",
             "artifact_created",
             "artifact_opened",
             "artifact_revealed",
@@ -2444,6 +2449,7 @@ def run_self_test() -> None:
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
+            "agent_capture_query_observed",
             "activation_return_proxy_observed",
             "workflow_abandoned",
         }
@@ -2451,6 +2457,7 @@ def run_self_test() -> None:
         assert {
             "dictation_artifact_saved",
             "activation_first_artifact_saved",
+            "activation_second_artifact_saved",
             "artifact_created",
             "artifact_opened",
             "artifact_revealed",
@@ -2458,6 +2465,7 @@ def run_self_test() -> None:
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
+            "agent_capture_query_observed",
             "activation_return_proxy_observed",
             "agent_capture_query_observed",
         }.issubset(set(POSTHOG_FIRST_VALUE_EVENTS))

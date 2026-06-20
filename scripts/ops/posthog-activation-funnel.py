@@ -79,6 +79,7 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "activation_second_artifact_saved",
     "workflow_abandoned",
 )
 
@@ -452,7 +453,7 @@ WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event = 'activation_second_artifact_saved'
   {app_version_filter(app_version)}
 GROUP BY first_artifact_kind, second_artifact_kind, days_since_first_bucket, surface
-ORDER BY events DESC
+ORDER BY devices DESC, events DESC
 LIMIT 40
 """
 
@@ -678,6 +679,7 @@ def render_report(data: dict[str, Any]) -> str:
         "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
         "Saved artifact quality: strict saved Markdown vs dictation-completed proxy, split by artifact kind.",
         "Artifact lifecycle: `artifact_created`, `artifact_opened`, `artifact_revealed`, `artifact_copied`, plus legacy activation action clicks.",
+        "Second value moment: `activation_second_artifact_saved` by first/second artifact kind and days-since-first bucket.",
         "Repeat value: weekly artifact streak devices from aggregate `artifact_created` weeks.",
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Abandonment exits: workflow kind, stage, reason kind, surface, and prior-ready state.",
@@ -698,6 +700,7 @@ def render_report(data: dict[str, Any]) -> str:
         f"- Launch reach in-window: **{launch} anonymous devices**.",
         f"- Strict saved Markdown reach: **{strict_saved} devices** ({pct(strict_saved, launch)} of launch).",
         f"- Saved Markdown plus completion-signal reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
+        f"- Second saved artifact reach: **{second_artifact} devices** ({pct(second_artifact, launch)} of launch).",
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
         f"- Weekly artifact streak: **{weekly_streak} devices** created artifacts in at least 2 calendar weeks in-window.",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
@@ -769,7 +772,7 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         "## Next Best Action",
         "",
-        "Verify `activation_first_artifact_saved` reaches live PostHog for current builds, add `agent_capture_query_observed`, then make the dashboard's primary KPI the share of launch devices that reach true sourced-agent-use within 7 days.",
+        "Verify `activation_first_artifact_saved` and `activation_second_artifact_saved` reach live PostHog for current builds, then add `agent_capture_query_observed` so the dashboard can separate repeated saved-artifact value from true sourced-agent-use.",
         "",
     ]
     return "\n".join(lines)
@@ -845,6 +848,10 @@ def run_self_test() -> int:
     if "activation_first_artifact_saved" not in sequence:
         print("self-test failed: ordered saved-Markdown step must include activation_first_artifact_saved", file=sys.stderr)
         return 1
+    step_keys = [step.key for step in REACH_STEPS]
+    if len(step_keys) != len(set(step_keys)):
+        print("self-test failed: reach step keys must be unique", file=sys.stderr)
+        return 1
     if "Workflow abandonment exits: **1 devices**" not in report:
         print("self-test failed: missing workflow abandonment reach", file=sys.stderr)
         return 1
@@ -855,6 +862,7 @@ def run_self_test() -> int:
         sequence,
         onboarding_completion_query(30, None),
         artifact_actions_query(30, None),
+        second_artifacts_query(30, None),
         agent_signals_query(30, None),
         workflow_abandonment_query(30, None),
     ):

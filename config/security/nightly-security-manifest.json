@@ -49,6 +49,7 @@
     "meeting_transcript_saved",
     "onboarding_agent_cta_clicked",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "artifact_created",
     "artifact_opened",
     "artifact_revealed",

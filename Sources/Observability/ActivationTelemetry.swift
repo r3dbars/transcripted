@@ -493,7 +493,6 @@ enum ActivationTelemetry {
             return "older"
         }
     }
-
     private static func trackArtifactValueAction(
         _ eventName: String,
         artifactKind: ArtifactKind,

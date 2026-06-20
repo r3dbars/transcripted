@@ -57,14 +57,21 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
 - `scripts/ops/release-health-card.py` — print a compact release-health card for one app version by combining local release metadata, GitHub downloads, live public release surfaces, and PostHog update/workflow counts when credentials are present
   - Usage: `python3 scripts/ops/release-health-card.py --version 1.1.47`
-- `scripts/ops/retention-cohort-report.py` — print a privacy-safe PostHog retention cohort report for active days, repeat dictation/meeting use, version adoption, first-artifact return, and first-run drop-off
+- `scripts/ops/retention-cohort-report.py` — print a privacy-safe PostHog retention cohort report for first/second artifact, next-day and 7-day return, repeat dictation/meeting/agent/summary use, 3-days-this-week, version adoption, and first-run drop-off
   - Usage: `python3 scripts/ops/retention-cohort-report.py`
+  - Health output: `python3 scripts/ops/retention-cohort-report.py --write-dir /tmp/transcripted-retention-health`
   - Offline self-test: `python3 scripts/ops/retention-cohort-report.py --self-test`
 - `scripts/ops/posthog-activation-funnel.py` — build a privacy-safe PostHog activation funnel report for launch, onboarding, permission readiness, saved Markdown, artifact actions, agent setup proxies, and return proxies
   - Usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30`
   - Release-scoped usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30 --app-version 1.1.48`
   - Writes local Markdown and JSON under `/tmp/transcripted-posthog-activation-funnel/<run-id>/`
   - Self-test: `python3 scripts/ops/posthog-activation-funnel.py --self-test`
+- `scripts/ops/posthog-product-context-pack.py` — build a compact JSON + Markdown product-context pack for Codex/agents from aggregate PostHog data
+  - Usage: `python3 scripts/ops/posthog-product-context-pack.py --days 30`
+  - Fixture/sample usage: `python3 scripts/ops/posthog-product-context-pack.py --fixture Tests/Fixtures/posthog-product-context-pack-fixture.json --write-dir build/posthog-product-context-sample`
+  - Writes local Markdown and JSON under `/tmp/transcripted-posthog-product-context/<run-id>/`
+  - Missing PostHog credentials produce explicit `UNKNOWN` states unless `--strict` is passed
+  - Self-test: `python3 scripts/ops/posthog-product-context-pack.py --self-test`
 - `scripts/ops/posthog-dashboard-queries.py` — reusable PostHog aggregate query catalog for the 100 WAU, activation, reliability, feature-adoption, and release-health dashboard families
   - Dry-run specs: `python3 scripts/ops/posthog-dashboard-queries.py --dry-run`
   - One family: `python3 scripts/ops/posthog-dashboard-queries.py --family activation --dry-run`

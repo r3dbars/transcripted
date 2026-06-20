@@ -326,6 +326,7 @@ APP_SOURCES=(
     "Sources/Observability/ActivationTelemetry.swift"
     "Sources/Observability/WorkflowRecoveryTelemetry.swift"
     "Sources/Observability/UXConfusionTelemetry.swift"
+    "Sources/Observability/FeatureDiscoveryTelemetry.swift"
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/JSONLWriter.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
@@ -395,6 +396,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingStartFailureClassifier.swift"
     "Sources/Meeting/MeetingSystemAudioStatusCopy.swift"
     "Sources/UI/Settings/HomePresentation.swift"
+    "Sources/UI/Settings/HomeSearchMatching.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
 )
 

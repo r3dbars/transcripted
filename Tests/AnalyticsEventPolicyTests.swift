@@ -117,6 +117,7 @@ func testAnalyticsEventPolicy() {
             "entrypoint",
             "failure_code",
             "failure_kind",
+            "feature_area",
             "first_artifact_kind",
             "first_dictation_saved",
             "format_ready",
@@ -406,6 +407,7 @@ func testAnalyticsEventPolicy() {
                 "query_kind": "search",
                 "result": "success",
                 "save_outcome": "success",
+                "second_artifact_kind": "meeting",
                 "surface": "home_preview",
                 "trigger": "detected_prompt",
                 "word_count_bucket": "300_plus",
@@ -436,6 +438,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["query_kind"], "search", "query kind should survive")
         assertEqual(sanitized["result"], "success", "coarse action result should survive")
         assertEqual(sanitized["save_outcome"], "success", "coarse save result should survive")
+        assertEqual(sanitized["second_artifact_kind"], "meeting", "second artifact kind should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
         assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
@@ -559,6 +562,101 @@ func testAnalyticsEventPolicy() {
             "dictation artifact save telemetry should not include raw text, paths, filenames, app names, titles, or counts"
         )
         assertEqual(dictationProperties["surface"], "dictation_save", "saved dictation surface should stay coarse")
+    }
+
+    runSuite("ActivationTelemetry tracks first and second artifact saves once per install") {
+        let now = Date(timeIntervalSinceReferenceDate: 2_000_000)
+        let suiteName = "ActivationTelemetryTests.second-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .dictation,
+            savedAt: now,
+            userDefaults: defaults
+        )
+        assertTrue(first.firstArtifact, "first durable artifact should be recognized")
+        assertNil(first.secondArtifact, "first durable artifact should not also be second")
+
+        let second = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .meeting,
+            savedAt: now.addingTimeInterval(3 * 86_400),
+            userDefaults: defaults
+        )
+        assertFalse(second.firstArtifact, "second durable artifact should not retrigger first")
+        assertEqual(second.secondArtifact?.firstKind.rawValue, "dictation", "second event should preserve the first artifact kind enum")
+        assertEqual(second.secondArtifact?.daysSinceFirstBucket, "2_7d", "second event should bucket days since first")
+
+        let third = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .meeting,
+            savedAt: now.addingTimeInterval(4 * 86_400),
+            userDefaults: defaults
+        )
+        assertFalse(third.firstArtifact, "later durable artifacts should not retrigger first")
+        assertNil(third.secondArtifact, "second durable artifact should only be tracked once")
+
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: now.addingTimeInterval(-6 * 3_600), now: now),
+            "same_day",
+            "same-day second artifacts should stay coarse"
+        )
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: now.addingTimeInterval(-20 * 86_400), now: now),
+            "8_30d",
+            "longer second-artifact gaps should stay bucketed"
+        )
+        assertEqual(
+            ActivationTelemetry.daysSinceFirstBucket(since: nil, now: now),
+            "unknown",
+            "legacy installs without first-save date should not invent a raw timestamp"
+        )
+    }
+
+    runSuite("ActivationTelemetry emits second artifact for legacy first-artifact installs") {
+        let suiteName = "ActivationTelemetryTests.legacy-second-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(true, forKey: ActivationTelemetry.firstArtifactSavedTrackedKey)
+
+        let legacySecond = ActivationTelemetry.recordArtifactSave(
+            artifactKind: .meeting,
+            savedAt: Date(timeIntervalSinceReferenceDate: 3_000_000),
+            userDefaults: defaults
+        )
+        assertFalse(legacySecond.firstArtifact, "legacy installs should not retrigger first artifact")
+        assertEqual(legacySecond.secondArtifact?.firstKind.rawValue, "unknown", "legacy second-artifact event should avoid inventing first kind")
+        assertEqual(legacySecond.secondArtifact?.daysSinceFirstBucket, "unknown", "legacy second-artifact event should avoid inventing first date")
+    }
+
+    runSuite("ActivationTelemetry does not retain opted-out first artifact metadata") {
+        let suiteName = "ActivationTelemetryTests.opt-out-first-artifact.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        AnalyticsPreferences.setEnabled(false, userDefaults: defaults)
+        let disabledResult = ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+            artifactKind: .dictation,
+            surface: .dictationSave,
+            trigger: "hotkey",
+            savedAt: Date(timeIntervalSinceReferenceDate: 4_000_000),
+            userDefaults: defaults
+        )
+        assertFalse(disabledResult, "opted-out first artifact should not report")
+        assertFalse(defaults.bool(forKey: ActivationTelemetry.firstArtifactSavedTrackedKey), "opted-out first artifact should not mark first-save telemetry state")
+        assertNil(defaults.string(forKey: ActivationTelemetry.firstArtifactKindKey), "opted-out first artifact should not store kind for later reporting")
+        assertNil(defaults.object(forKey: ActivationTelemetry.firstArtifactSavedAtKey), "opted-out first artifact should not store date for later reporting")
+
+        AnalyticsPreferences.setEnabled(true, userDefaults: defaults)
+        let enabledResult = ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+            artifactKind: .meeting,
+            surface: .meetingSave,
+            trigger: "manual",
+            savedAt: Date(timeIntervalSinceReferenceDate: 4_100_000),
+            userDefaults: defaults
+        )
+        assertTrue(enabledResult, "first artifact after analytics opt-in should be treated as the first observable artifact")
+        assertEqual(defaults.string(forKey: ActivationTelemetry.firstArtifactKindKey), "meeting", "only opted-in artifact kind should be retained")
     }
 
     runSuite("AnalyticsEventPolicy allows workflow abandonment taxonomy") {
@@ -745,6 +843,7 @@ func testAnalyticsEventPolicy() {
         let menuAction = AnalyticsEventPolicy.policy(forEvent: "menu_bar_action_clicked")
         let settingsOpened = AnalyticsEventPolicy.policy(forEvent: "settings_opened")
         let settingsPage = AnalyticsEventPolicy.policy(forEvent: "settings_page_viewed")
+        let settingsFeature = AnalyticsEventPolicy.policy(forEvent: "settings_feature_discovered")
         let settingsAction = AnalyticsEventPolicy.policy(forEvent: "settings_action_clicked")
         let settingsToggle = AnalyticsEventPolicy.policy(forEvent: "settings_toggle_changed")
         let settingsPermission = AnalyticsEventPolicy.policy(forEvent: "settings_permission_cta_clicked")
@@ -757,6 +856,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(menuAction?.allowedProperties.contains("action_id"), true, "menu clicks should preserve the clicked action")
         assertEqual(settingsOpened?.allowedProperties.contains("source"), true, "settings opens should preserve entry source")
         assertEqual(settingsPage?.allowedProperties.contains("page_id"), true, "settings page views should preserve page id")
+        assertEqual(settingsFeature?.allowedProperties ?? Set<String>(), ["feature_area", "page_id", "source"], "feature discovery should preserve only the area, page, and source")
         assertEqual(settingsAction?.allowedProperties.contains("action_id"), true, "settings actions should preserve action id")
         assertEqual(settingsToggle?.allowedProperties.contains("setting_id"), true, "settings toggles should preserve setting id")
         assertEqual(settingsPermission?.allowedProperties.contains("permission_kind"), true, "settings permission CTAs should preserve permission kind")
@@ -774,18 +874,20 @@ func testAnalyticsEventPolicy() {
                 "automatic_downloads_enabled": "true",
                 "failure_code": "sparkle_2003",
                 "failure_kind": "feed_unreachable",
+                "feature_area": "agent_setup",
                 "page_id": "home",
                 "setting_id": "menu_bar_start_dictation",
                 "source": "menu_bar",
                 "state": "ready_to_install",
                 "surface": "settings_about",
             ],
-            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_code", "failure_kind", "page_id", "setting_id", "source", "state", "surface"]
+            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_code", "failure_kind", "feature_area", "page_id", "setting_id", "source", "state", "surface"]
         )
         assertEqual(sanitized["action_id"], "start_dictation", "action ids should survive sanitization")
         assertEqual(sanitized["automatic_downloads_enabled"], "true", "automatic update download state should survive sanitization")
         assertEqual(sanitized["failure_code"], "sparkle_2003", "coarse update failure codes should survive sanitization")
         assertEqual(sanitized["failure_kind"], "feed_unreachable", "update failure kind should survive sanitization")
+        assertEqual(sanitized["feature_area"], "agent_setup", "feature-area enums should survive sanitization")
         assertEqual(sanitized["page_id"], "home", "page ids should survive sanitization")
         assertEqual(sanitized["setting_id"], "menu_bar_start_dictation", "setting ids should survive sanitization")
         assertEqual(sanitized["source"], "menu_bar", "source enums should survive sanitization")
@@ -872,6 +974,66 @@ func testAnalyticsEventPolicy() {
         assertEqual(UXConfusionTelemetry.visitCountBucket(3), "3_4", "third visit should start repeat bucket")
         assertEqual(UXConfusionTelemetry.visitCountBucket(7), "5_9", "mid repeat visits should stay bucketed")
         assertEqual(UXConfusionTelemetry.visitCountBucket(10), "10_plus", "high repeat visits should stay bucketed")
+    }
+
+    runSuite("FeatureDiscoveryTelemetry tracks each high-leverage feature once") {
+        let suiteName = "FeatureDiscoveryTelemetryTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertTrue(
+            FeatureDiscoveryTelemetry.markDiscoveredIfNeeded(featureArea: .agentSetup, userDefaults: defaults),
+            "first discovery should be recorded"
+        )
+        assertFalse(
+            FeatureDiscoveryTelemetry.markDiscoveredIfNeeded(featureArea: .agentSetup, userDefaults: defaults),
+            "same feature discovery should not be recorded twice"
+        )
+        assertTrue(
+            FeatureDiscoveryTelemetry.markDiscoveredIfNeeded(featureArea: .captureLibrary, userDefaults: defaults),
+            "a different feature area should still be recorded"
+        )
+    }
+
+    runSuite("FeatureDiscoveryTelemetry does not burn discovery while analytics is disabled") {
+        let suiteName = "FeatureDiscoveryTelemetryOptOutTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        AnalyticsPreferences.setEnabled(false, userDefaults: defaults)
+        assertFalse(
+            FeatureDiscoveryTelemetry.trackIfNeeded(
+                featureArea: .agentSetup,
+                pageID: "agents",
+                source: "settings",
+                userDefaults: defaults
+            ),
+            "disabled analytics should not mark a feature as discovered"
+        )
+        assertFalse(
+            defaults.bool(forKey: FeatureDiscoveryTelemetry.trackedKeyPrefix + FeatureDiscoveryTelemetry.FeatureArea.agentSetup.rawValue),
+            "disabled analytics must not persist the one-shot discovery key"
+        )
+
+        AnalyticsPreferences.setEnabled(true, userDefaults: defaults)
+        assertTrue(
+            FeatureDiscoveryTelemetry.trackIfNeeded(
+                featureArea: .agentSetup,
+                pageID: "agents",
+                source: "settings",
+                userDefaults: defaults
+            ),
+            "first discovery after opt-in should still be tracked"
+        )
+        assertFalse(
+            FeatureDiscoveryTelemetry.trackIfNeeded(
+                featureArea: .agentSetup,
+                pageID: "agents",
+                source: "settings",
+                userDefaults: defaults
+            ),
+            "same feature discovery should still only be tracked once after opt-in"
+        )
     }
 
     runSuite("AnalyticsEventPolicy allows update download lifecycle attribution") {

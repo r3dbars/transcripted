@@ -106,6 +106,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_second_artifact_saved`
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
+- `agent_capture_query_observed`
 - `activation_return_proxy_observed`
 - `workflow_abandoned`
 - `product_friction_observed`
@@ -119,7 +120,6 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `local_meeting_summary_model_prepare_completed`
 - `local_meeting_summary_model_prepare_cancelled`
 - `local_meeting_summary_model_prepare_failed`
-- `agent_capture_query_observed`
 - `ux_confusion_signal_observed`
 - `ux_recovery_action_taken`
 - `menu_bar_opened`
@@ -134,6 +134,7 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `update_installed`
 - `settings_opened`
 - `settings_page_viewed`
+- `settings_feature_discovered`
 - `settings_action_clicked`
 - `settings_toggle_changed`
 - `settings_permission_cta_clicked`
@@ -178,6 +179,8 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - retry attempt buckets like `start_attempt_bucket`, not raw retry counts
 - normalized failure kinds like `system_audio`, `recording_too_short`, `other`
 - normalized failure-code buckets like `url_-1009`, `sparkle_2003`, `other_42`
+- feature discovery enums like `agent_setup`, `beta_summaries`,
+  `capture_library`, `permissions`, `speaker_review`, and `update_settings`
 - product friction fields limited to `surface`, `stage`, `result`,
   `failure_kind`, `elapsed_bucket`, `route_shape`, and `model_state`
 

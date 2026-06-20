@@ -191,6 +191,7 @@ func testRepoCommandContract() {
             "meeting_transcript_saved",
             "onboarding_agent_cta_clicked",
             "activation_first_artifact_saved",
+            "activation_second_artifact_saved",
             "artifact_created",
             "artifact_opened",
             "artifact_revealed",
@@ -198,8 +199,8 @@ func testRepoCommandContract() {
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
+            "agent_capture_query_observed",
             "activation_return_proxy_observed",
-            "agent_capture_query_observed"
         ] {
             assertTrue(
                 firstValueEvents.contains(event) && docs.contains(event),
@@ -208,6 +209,7 @@ func testRepoCommandContract() {
         }
         for event in [
             "activation_first_artifact_saved",
+            "activation_second_artifact_saved",
             "artifact_created",
             "artifact_opened",
             "artifact_revealed",
