@@ -2,10 +2,14 @@ import Foundation
 
 enum ActivationTelemetry {
     static let firstArtifactSavedTrackedKey = "activationFirstArtifactSavedTracked"
+    static let secondArtifactSavedTrackedKey = "activationSecondArtifactSavedTracked"
+    static let firstArtifactKindKey = "activationFirstArtifactKind"
+    static let firstArtifactSavedAtKey = "activationFirstArtifactSavedAt"
 
     enum ArtifactKind: String {
         case dictation
         case meeting
+        case unknown
     }
 
     enum ArtifactActionKind: String {
@@ -135,6 +139,32 @@ enum ActivationTelemetry {
         return true
     }
 
+    static func recordArtifactSave(
+        artifactKind: ArtifactKind,
+        savedAt: Date = Date(),
+        userDefaults: UserDefaults = .standard
+    ) -> (firstArtifact: Bool, secondArtifact: (firstKind: ArtifactKind, daysSinceFirstBucket: String)?) {
+        if !userDefaults.bool(forKey: firstArtifactSavedTrackedKey) {
+            userDefaults.set(artifactKind.rawValue, forKey: firstArtifactKindKey)
+            userDefaults.set(savedAt, forKey: firstArtifactSavedAtKey)
+            userDefaults.set(true, forKey: firstArtifactSavedTrackedKey)
+            return (true, nil)
+        }
+
+        guard !userDefaults.bool(forKey: secondArtifactSavedTrackedKey) else {
+            return (false, nil)
+        }
+
+        let rawFirstKind = userDefaults.string(forKey: firstArtifactKindKey)
+        let firstKind = rawFirstKind.flatMap(ArtifactKind.init(rawValue:)) ?? .unknown
+        let firstSavedAt = userDefaults.object(forKey: firstArtifactSavedAtKey) as? Date
+        userDefaults.set(true, forKey: secondArtifactSavedTrackedKey)
+        return (
+            false,
+            (firstKind, daysSinceFirstBucket(since: firstSavedAt, now: savedAt))
+        )
+    }
+
     @discardableResult
     static func trackFirstArtifactSavedIfNeeded(
         artifactKind: ArtifactKind,
@@ -142,26 +172,50 @@ enum ActivationTelemetry {
         trigger: String,
         wordCountBucket: String? = nil,
         durationBucket: String? = nil,
+        savedAt: Date = Date(),
         userDefaults: UserDefaults = .standard
     ) -> Bool {
-        guard markFirstArtifactSavedTrackedIfNeeded(userDefaults: userDefaults) else {
+        guard AnalyticsPreferences.isEnabled(userDefaults: userDefaults) else {
             return false
         }
 
-        var properties = [
-            "artifact_kind": artifactKind.rawValue,
-            "surface": surface.rawValue,
-            "trigger": trigger,
-        ]
-        if let wordCountBucket {
-            properties["word_count_bucket"] = wordCountBucket
-        }
-        if let durationBucket {
-            properties["duration_bucket"] = durationBucket
+        let saveState = recordArtifactSave(
+            artifactKind: artifactKind,
+            savedAt: savedAt,
+            userDefaults: userDefaults
+        )
+
+        if saveState.firstArtifact {
+            var properties = [
+                "artifact_kind": artifactKind.rawValue,
+                "surface": surface.rawValue,
+                "trigger": trigger,
+            ]
+            if let wordCountBucket {
+                properties["word_count_bucket"] = wordCountBucket
+            }
+            if let durationBucket {
+                properties["duration_bucket"] = durationBucket
+            }
+
+            AnalyticsReporter.track("activation_first_artifact_saved", properties: properties)
+            return true
         }
 
-        AnalyticsReporter.track("activation_first_artifact_saved", properties: properties)
-        return true
+        if let secondArtifact = saveState.secondArtifact {
+            AnalyticsReporter.track(
+                "activation_second_artifact_saved",
+                properties: [
+                    "days_since_first_bucket": secondArtifact.daysSinceFirstBucket,
+                    "first_artifact_kind": secondArtifact.firstKind.rawValue,
+                    "second_artifact_kind": artifactKind.rawValue,
+                    "surface": surface.rawValue,
+                    "trigger": trigger,
+                ]
+            )
+        }
+
+        return false
     }
 
     static func trackAgentPromptAction(
@@ -300,6 +354,24 @@ enum ActivationTelemetry {
             return "36_72h"
         case ..<168:
             return "3_7d"
+        default:
+            return "older"
+        }
+    }
+
+    static func daysSinceFirstBucket(since date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "unknown" }
+        let days = max(0, now.timeIntervalSince(date)) / 86_400
+
+        switch days {
+        case ..<1:
+            return "same_day"
+        case ..<2:
+            return "1d"
+        case ..<8:
+            return "2_7d"
+        case ..<31:
+            return "8_30d"
         default:
             return "older"
         }

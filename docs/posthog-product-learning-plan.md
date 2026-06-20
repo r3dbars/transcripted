@@ -88,6 +88,7 @@ Operational scripts query aggregate counts only:
 | --- | --- |
 | `activation_artifact_action_clicked` | `action_kind`, `artifact_age_bucket`, `artifact_kind`, `surface` |
 | `activation_first_artifact_saved` | `artifact_kind`, `duration_bucket`, `surface`, `trigger`, `word_count_bucket` |
+| `activation_second_artifact_saved` | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
 | `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
@@ -212,7 +213,6 @@ Prefer a small number of lifecycle events over broad click tracking.
 | Event | When to fire | Properties |
 | --- | --- | --- |
 | `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
-| `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
 | `meeting_speaker_review_prompted` | A saved meeting has review work surfaced | `participant_count_bucket`, `review_reason`, `surface` |
@@ -254,7 +254,8 @@ ranking logic without credentials.
 
 `app_launched` -> `onboarding_shown` / `onboarding_step_viewed` ->
 permission ready -> `dictation_started` / `meeting_recording_started` ->
-`activation_first_artifact_saved` -> `activation_artifact_action_clicked` ->
+`activation_first_artifact_saved` -> `activation_second_artifact_saved` ->
+`activation_artifact_action_clicked` ->
 `activation_agent_prompt_action_clicked` / `activation_agent_setup_cta_clicked`
 -> `agent_capture_query_observed` -> `activation_return_proxy_observed`.
 

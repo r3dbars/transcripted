@@ -29,6 +29,7 @@ through `AnalyticsEventPolicy` and `AnalyticsPayloadSanitizer`.
 | First launch | `app_launched` with `app_version` and `build_version` default properties | PostHog | Anonymous device/session signal only. |
 | First useful artifact | `activation_first_artifact_saved` | PostHog | Strict first saved dictation or meeting Markdown artifact, emitted once per install without inspecting content. |
 | Saved-artifact continuity | `onboarding_first_dictation_saved`, `dictation_completed`, `meeting_transcript_saved` | PostHog | Legacy/proxy row for older builds and useful-dictation volume. Do not use it as strict first-artifact proof when `activation_first_artifact_saved` is available. |
+| Second value moment | `activation_second_artifact_saved` | PostHog | Shows a second durable saved artifact on the same anonymous device, with only kind and day-bucket fields. |
 | Agent payoff | `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `activation_return_proxy_observed` | PostHog | Coarse proof of opening artifacts, copying/using agent prompts, setup CTAs, and later return via Home. |
 | Reliability filter | Release-scoped issues and allowed non-fatal events | Sentry | Use to avoid mistaking broken first-run paths for weak demand. |
 
@@ -75,6 +76,8 @@ For the attribution story, report:
   `activation_first_artifact_saved` for strict first saved-Markdown proof.
   Keep `dictation_completed`, `onboarding_first_dictation_saved`, and
   `meeting_transcript_saved` as continuity/proxy signals for older builds.
+- `activation_second_artifact_saved` proves repeat saved-artifact value, not
+  agent answer quality.
 - Artifact events do not prove agent answer quality. The closest safe proxy is
   `activation_agent_prompt_action_clicked` plus `activation_return_proxy_observed`.
 
