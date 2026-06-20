@@ -91,6 +91,7 @@ echo "==> build harness"
 
 echo "==> dump-diarize sessions (cached)"
 INPUTS=""
+dump_failures=()
 for m in "${usable_meetings[@]}"; do
   dump="$DUMPS/$m.json"
   audio="$ROOT/$AUDIO_DIR/$m$SUFFIX"
@@ -101,8 +102,20 @@ for m in "${usable_meetings[@]}"; do
   else
     echo "    cached $m"
   fi
-  [ -s "$dump" ] && INPUTS="${INPUTS:+$INPUTS,}$dump"
+  if [ -s "$dump" ]; then
+    INPUTS="${INPUTS:+$INPUTS,}$dump"
+  else
+    dump_failures+=("dump failed or produced empty output for $m")
+  fi
 done
+if [ "${#dump_failures[@]}" -gt 0 ]; then
+  printf '    !! %s\n' "${dump_failures[@]}" >&2
+  if [ "$ALLOW_PARTIAL_CORPUS" != "1" ]; then
+    echo "Partial corpus refused after dump failures. Fix the dump errors or rerun with ALLOW_PARTIAL_CORPUS=1 for local iteration only." >&2
+    exit 1
+  fi
+  echo "    !! continuing after dump failures because ALLOW_PARTIAL_CORPUS=1" >&2
+fi
 [ -n "$INPUTS" ] || { echo "no dumps produced — check audio files"; exit 1; }
 
 echo "==> threshold sweep (consolidation × match)"

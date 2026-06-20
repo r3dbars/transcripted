@@ -479,10 +479,12 @@ func testRepoCommandContract() {
         assertTrue(
             runner.contains("ALLOW_PARTIAL_CORPUS")
                 && runner.contains("Partial corpus refused")
+                && runner.contains("Partial corpus refused after dump failures")
                 && runner.contains("missing_inputs+=")
+                && runner.contains("dump_failures+=")
                 && runner.contains("[ ! -s \"$audio\" ]")
                 && runner.contains("[ ! -s \"$rttm\" ]"),
-            "speaker eval should fail closed when audio or RTTM inputs are missing, with an explicit local-only partial-corpus override"
+            "speaker eval should fail closed when audio, RTTM, or dump outputs are missing, with an explicit local-only partial-corpus override"
         )
         assertFalse(
             runner.contains("missing audio $audio — skipping $m"),
