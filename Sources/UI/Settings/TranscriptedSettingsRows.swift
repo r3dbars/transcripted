@@ -284,17 +284,10 @@ struct SettingsFailedMeetingRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            if item.failureKind == .recordingTooShort {
-                Image(systemName: "timer")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24)
-            } else {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.orange)
-                    .frame(width: 24)
-            }
+            Image(systemName: presentation.iconSystemName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(iconColor)
+                .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
@@ -366,52 +359,41 @@ struct SettingsFailedMeetingRow: View {
                     normalFill: Color.accentColor.opacity(0.08),
                     normalStroke: Color.accentColor.opacity(0.16)
                 ))
-                .disabled(retryDisabled)
-                .help(retryHelp)
+                .disabled(presentation.retryDisabled)
+                .help(presentation.retryHelp)
             }
 
-            Button(role: hasRetainedAudioFiles ? .destructive : nil) {
+            Button(role: presentation.clearIsDestructive ? .destructive : nil) {
                 secondaryAction()
             } label: {
-                Label(hasRetainedAudioFiles ? "Delete" : "Dismiss", systemImage: hasRetainedAudioFiles ? "trash" : "xmark")
+                Label(presentation.clearTitle, systemImage: presentation.clearSymbolName)
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
             }
             .buttonStyle(SettingsHoverButtonStyle(
-                tone: hasRetainedAudioFiles ? .destructive : .neutral,
+                tone: presentation.clearIsDestructive ? .destructive : .neutral,
                 cornerRadius: 8,
-                normalFill: hasRetainedAudioFiles ? Color.red.opacity(0.06) : Color.primary.opacity(0.025),
-                normalStroke: hasRetainedAudioFiles ? Color.red.opacity(0.14) : Color.primary.opacity(0.06)
+                normalFill: presentation.clearIsDestructive ? Color.red.opacity(0.06) : Color.primary.opacity(0.025),
+                normalStroke: presentation.clearIsDestructive ? Color.red.opacity(0.14) : Color.primary.opacity(0.06)
             ))
         }
     }
 
-    private var retryDisabled: Bool {
-        !canRetry || !item.isRetryable || !item.hasAudioFiles || item.isRetrying
+    private var presentation: FailedMeetingRecoveryPresentation {
+        FailedMeetingRecoveryPresentation.make(
+            failureKind: item.failureKind,
+            canRetry: canRetry,
+            retryUnavailableReason: retryUnavailableReason,
+            isRetryable: item.isRetryable,
+            isRetrying: item.isRetrying,
+            hasAudioFiles: item.hasAudioFiles,
+            hasRetainedAudioFiles: !item.audioURLs.isEmpty
+        )
     }
 
-    private var retryHelp: String {
-        if item.isRetrying {
-            return "Retry is already running."
-        }
-        if !item.hasAudioFiles {
-            return "This meeting does not have enough saved audio to retry."
-        }
-        if !item.isRetryable {
-            return "This meeting does not have enough saved audio to retry."
-        }
-        if let retryUnavailableReason {
-            return retryUnavailableReason
-        }
-        if !canRetry {
-            return "Wait for the current meeting work to finish before retrying."
-        }
-        return "Transcribe this saved audio again."
-    }
-
-    private var hasRetainedAudioFiles: Bool {
-        !item.audioURLs.isEmpty
+    private var iconColor: Color {
+        presentation.iconTone == .warning ? .orange : .secondary
     }
 
     private func selectedPlaybackChoice(for audio: MeetingAudioAttachment) -> MeetingAudioPlaybackChoice? {

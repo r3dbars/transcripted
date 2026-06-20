@@ -167,6 +167,7 @@ func testUIAutomationSurfaceContract() {
         let speakerReviewSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerNamingSheet.swift")
         let agentSettingsSource = readUIAutomationContractFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
         let deletePolicySource = readUIAutomationContractFile("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift")
+        let failedMeetingRecoverySource = readUIAutomationContractFile("Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift")
 
         for pageCase in [
             "case home",
@@ -217,9 +218,9 @@ func testUIAutomationSurfaceContract() {
         )
 
         for requiredHomeRendererHook in [
-            "title: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
+            "title: presentation.clearTitle",
             "SettingsInlineActionButton(",
-            "tone: hasRetainedAudioFiles ? .destructive : .neutral",
+            "tone: presentation.clearIsDestructive ? .destructive : .neutral",
             "HomeRowMoreMenuButton(items:",
             "retainedActionTarget = context.coordinator",
             "final class ClosureMenuItem: NSMenuItem",
@@ -227,6 +228,14 @@ func testUIAutomationSurfaceContract() {
             "title: \"Copy for agent\"",
         ] {
             assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
+        }
+        for requiredFailedMeetingPolicyHook in [
+            "clearTitle: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
+            "clearSymbolName: hasRetainedAudioFiles ? \"trash\" : \"xmark\"",
+            "clearIsDestructive: hasRetainedAudioFiles",
+            "return \"This meeting does not have enough saved audio to retry.\"",
+        ] {
+            assertTrue(failedMeetingRecoverySource.contains(requiredFailedMeetingPolicyHook), "\(requiredFailedMeetingPolicyHook) should keep failed-meeting action policy visible")
         }
         assertFalse(
             homeSource.contains("representedObject = item.id"),

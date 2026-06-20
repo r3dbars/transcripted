@@ -373,6 +373,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/HomeMeetingSummaryBetaPresentationPolicy.swift"
     "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift"
     "Sources/UI/Settings/HomeFailedMeetingInlinePresentation.swift"
+    "Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/UI/Overlay/DictationMeterPolicy.swift"
     "Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift"
