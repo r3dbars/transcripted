@@ -61,6 +61,12 @@ funnel, agent/Markdown value loop, and release-health view, use
 
 For the full product-learning telemetry map, current event taxonomy, blind
 spots, and dashboard plan, see `docs/posthog-product-learning-plan.md`.
+For reusable 100 WAU, activation, reliability, feature-adoption, and
+release-health query specs, use:
+
+```bash
+python3 scripts/ops/posthog-dashboard-queries.py --family activation --dry-run
+```
 
 For the dashboard-to-product-task loop, use:
 

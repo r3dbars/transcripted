@@ -135,6 +135,15 @@ rules:
       - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
+      - "scripts/ops/posthog-dashboard-queries.py"
+      - "Tests/Fixtures/posthog-dashboard-query-results.json"
+      - "docs/posthog-dashboard-query-helpers.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-dashboard-queries.py"
+      - "python3 scripts/ops/posthog-dashboard-queries.py --self-test"
+
+  - paths:
       - "scripts/ops/nightly-security-check.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
