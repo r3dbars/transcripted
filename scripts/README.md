@@ -57,6 +57,9 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
 - `scripts/ops/release-health-card.py` — print a compact release-health card for one app version by combining local release metadata, GitHub downloads, live public release surfaces, and PostHog update/workflow counts when credentials are present
   - Usage: `python3 scripts/ops/release-health-card.py --version 1.1.47`
+- `scripts/ops/retention-cohort-report.py` — print a privacy-safe PostHog retention cohort report for active days, repeat dictation/meeting use, version adoption, first-artifact return, and first-run drop-off
+  - Usage: `python3 scripts/ops/retention-cohort-report.py`
+  - Offline self-test: `python3 scripts/ops/retention-cohort-report.py --self-test`
 - `scripts/ops/posthog-activation-funnel.py` — build a privacy-safe PostHog activation funnel report for launch, onboarding, permission readiness, saved Markdown, artifact actions, agent setup proxies, and return proxies
   - Usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30`
   - Release-scoped usage: `python3 scripts/ops/posthog-activation-funnel.py --days 30 --app-version 1.1.48`
