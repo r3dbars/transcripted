@@ -5,30 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
-TRUSTED_POSTHOG_HOSTS = {
-    "https://app.posthog.com",
-    "https://eu.posthog.com",
-    "https://posthog.com",
-    "https://us.posthog.com",
-}
-
-ENV_PATHS = (
-    Path.cwd() / ".env.local",
-    Path.cwd() / ".env",
-    Path.home() / ".transcripted-ops.env",
-    Path.home() / ".hermes" / ".env",
-    Path.home() / ".hermes" / "profiles" / "ops" / ".env",
-)
+import posthog_common as posthog
 
 FAMILIES = (
     "100_wau",
@@ -159,79 +142,16 @@ class PostHogDashboardError(RuntimeError):
     pass
 
 
-def load_env() -> None:
-    for path in ENV_PATHS:
-        if not path.is_file():
-            continue
-        for raw_line in path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip().removeprefix("export ").strip()
-            value = value.strip().strip('"').strip("'")
-            if key and value and key not in os.environ:
-                os.environ[key] = value
-
-
-def normalize_posthog_host(raw: str) -> str:
-    host = raw.strip().rstrip("/")
-    if host == "https://us.i.posthog.com":
-        return "https://us.posthog.com"
-    if host == "https://eu.i.posthog.com":
-        return "https://eu.posthog.com"
-    return host
+load_env = posthog.load_env
+sql_quote = posthog.sql_quote
+sql_list = posthog.sql_list
+event_filter = posthog.event_filter
+app_version_filter = posthog.app_version_filter
+version_or_app_version_filter = posthog.version_or_app_version_filter
 
 
 def posthog_config() -> tuple[str, str, str]:
-    token = os.environ.get("POSTHOG_PERSONAL_API_KEY")
-    project_id = os.environ.get("POSTHOG_PROJECT_ID")
-    host = normalize_posthog_host(
-        os.environ.get("POSTHOG_APP_HOST")
-        or os.environ.get("POSTHOG_HOST")
-        or "https://us.posthog.com"
-    )
-
-    missing = []
-    if not token:
-        missing.append("POSTHOG_PERSONAL_API_KEY")
-    if not project_id:
-        missing.append("POSTHOG_PROJECT_ID")
-    if missing:
-        raise PostHogDashboardError("missing " + ", ".join(missing))
-
-    if not host.startswith("https://"):
-        raise PostHogDashboardError(f"refusing non-HTTPS PostHog host: {host}")
-    if host not in TRUSTED_POSTHOG_HOSTS and os.environ.get("POSTHOG_ALLOW_UNTRUSTED_HOST") != "1":
-        raise PostHogDashboardError(
-            f"refusing untrusted PostHog host: {host}; set POSTHOG_ALLOW_UNTRUSTED_HOST=1 only for trusted self-hosted PostHog"
-        )
-    return host, project_id, token
-
-
-def sql_quote(value: str) -> str:
-    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
-
-
-def sql_list(values: tuple[str, ...]) -> str:
-    return ", ".join(sql_quote(value) for value in values)
-
-
-def event_filter(events: tuple[str, ...]) -> str:
-    return f"event IN ({sql_list(events)})"
-
-
-def app_version_filter(app_version: str | None) -> str:
-    if not app_version:
-        return ""
-    return f"AND properties['app_version'] = {sql_quote(app_version)}"
-
-
-def version_or_app_version_filter(app_version: str | None) -> str:
-    if not app_version:
-        return ""
-    quoted = sql_quote(app_version)
-    return f"AND (properties['app_version'] = {quoted} OR properties['version'] = {quoted})"
+    return posthog.posthog_config(PostHogDashboardError)
 
 
 def query_specs(days: int, app_version: str | None) -> list[QuerySpec]:
@@ -598,39 +518,23 @@ def selected_specs(family: str, days: int, app_version: str | None) -> list[Quer
 
 
 def run_hogql(host: str, project_id: str, token: str, query: str) -> dict[str, Any]:
-    payload = {
-        "query": {"kind": "HogQLQuery", "query": query},
-        "refresh": "blocking",
-    }
-    request = urllib.request.Request(
-        f"{host}/api/projects/{project_id}/query/",
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise PostHogDashboardError(f"PostHog query failed with HTTP {exc.code}: {body}") from exc
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise PostHogDashboardError(f"PostHog query failed: {exc}") from exc
+    return posthog.run_hogql(host, project_id, token, query, PostHogDashboardError)
 
 
 def rows_as_dicts(response: dict[str, Any], spec: QuerySpec) -> list[dict[str, Any]]:
-    columns = [str(column) for column in (response.get("columns") or spec.columns)]
-    unsafe = unsafe_columns(columns)
-    if unsafe:
-        raise PostHogDashboardError(f"{spec.id} attempted to expose unsafe output columns: {', '.join(unsafe)}")
-    rows = response.get("results") or response.get("data") or []
-    return [
-        {column: row[index] if index < len(row) else None for index, column in enumerate(columns)}
-        for row in rows
-    ]
+    try:
+        return posthog.rows_as_dicts(
+            response,
+            DISALLOWED_OUTPUT_FRAGMENTS,
+            PostHogDashboardError,
+            declared_columns=spec.columns,
+        )
+    except PostHogDashboardError as exc:
+        message = str(exc)
+        prefix = "query attempted to expose unsafe output columns: "
+        if message.startswith(prefix):
+            raise PostHogDashboardError(f"{spec.id} attempted to expose unsafe output columns: {message.removeprefix(prefix)}") from exc
+        raise
 
 
 def unsafe_columns(columns: list[str] | tuple[str, ...]) -> list[str]:
@@ -840,6 +744,14 @@ def run_self_test() -> int:
     except PostHogDashboardError as exc:
         errors.append(str(exc))
         payload = {"queries": []}
+    fallback_rows = posthog.rows_as_dicts(
+        {"results": [["2026-06-18", 24]]},
+        DISALLOWED_OUTPUT_FRAGMENTS,
+        PostHogDashboardError,
+        declared_columns=("day", "active_devices"),
+    )
+    if fallback_rows != [{"day": "2026-06-18", "active_devices": 24}]:
+        errors.append("column-less response fallback did not use declared columns")
     rendered = render_markdown(payload)
     required = (
         "wau.active_devices_by_week",
