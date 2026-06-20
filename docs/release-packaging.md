@@ -107,18 +107,11 @@ For a thin packaging smoke that also skips notarization, keep every opt-out visi
 SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>
 ```
 
-After `build-beta.sh` succeeds, run the packaged-app smoke before publishing
-anything:
-
-```bash
-python3 scripts/ops/packaged-app-smoke.py
-```
-
-That smoke checks the packaged `build/Transcripted.app`, the versioned DMG,
-Sparkle feed URL and public key, appcast coherence, signing and entitlements,
-dSYM UUID evidence, an isolated launch/menu report, and generated launch-log
-privacy. For a stricter release-candidate report after packaging, compose it
-with:
+After `build-beta.sh` succeeds, run the packaged app smoke described below
+before publishing anything. It checks the existing `build/Transcripted.app` and
+versioned DMG for Sparkle config, signing, dSYM UUID evidence, optional UI
+smoke, and local log privacy. For a stricter release-candidate report after
+packaging, compose it with:
 
 ```bash
 python3 scripts/ops/release-gate-report.py --qa-mode deep --strict-artifacts --include-packaged-app-smoke --require-release-debug-files
@@ -129,6 +122,28 @@ not yet been updated for a new version. Red means the package itself is broken.
 When an agent runs this inside Codex's filesystem sandbox, `codesign`,
 `hdiutil`, and packaged-app launch checks may need an approved unsandboxed rerun
 before calling a package red.
+
+Before publishing the DMG, run the read-only post-DMG audit:
+
+```bash
+python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact build/Transcripted-<version>.dmg
+```
+
+This does not create a GitHub release, update Sparkle, rewrite the Homebrew
+cask, register Sentry, or deploy the website. It compares the intended release
+against the exact GitHub asset URL, committed appcast, Homebrew cask, live
+download routes, live appcast, crawler-facing text, and optional local DMG
+evidence. Missing post-publish surfaces are `PENDING` or `UNKNOWN`, not green.
+Use it again after publishing, appcast/cask updates, and website deployment to
+catch any surface that still points at the older release.
+
+Rollback planning should use the same surfaces. Before changing release
+metadata, note the previously live GitHub release tag, `docs/appcast.xml`
+latest item, `Casks/transcripted.rb` version/sha, website `/download` target,
+and live appcast target. A rollback is not just deleting a bad artifact; it
+means restoring and pushing the appcast/cask/download surfaces, redeploying the
+website when needed, then rerunning the post-DMG audit and strict live-surface
+gate against the restored version.
 
 ## Release Flow
 
@@ -150,6 +165,7 @@ Before you publish a user-facing release note, sanity-check the release state:
 Use the strict release-health gate when validating release surfaces:
 
 ```bash
+python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact build/Transcripted-<version>.dmg
 python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
 python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health
 ```

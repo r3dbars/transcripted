@@ -30,8 +30,9 @@ As of 2026-06-06, the repo has these automated layers:
   warns when duplicate or wrong running Transcripted app instances make UI
   targeting ambiguous.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
-  reports for `quick`, `deep`, `full`, `ui`, `artifact`, `audio-synthetic`,
-  `corpus`, `corpus-compare`, and `live`.
+  reports for `quick`, `deep`, `full`, `ui`, `packaged`, `artifact`,
+  `audio-synthetic`, `pasteback-synthetic`, `corpus`, `corpus-compare`,
+  `scorecard`, and `live`.
 - `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene that runs
   preflight plus shell, Ruby, and Python syntax checks.
 - BET-88 GitHub workflows: historical label-gated fixtures for the closed QA

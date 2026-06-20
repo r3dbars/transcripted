@@ -48,6 +48,7 @@ RELEVANT_EVENTS = (
     "activation_return_proxy_observed",
     "activation_first_artifact_saved",
     "agent_capture_query_observed",
+    "workflow_abandoned",
 )
 
 WORKFLOW_EVENTS = (
@@ -61,6 +62,7 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "workflow_abandoned",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {
@@ -162,6 +164,13 @@ REACH_STEPS = (
         "event = 'agent_capture_query_observed'",
         "missing",
         "Desired future privacy-safe event for the first sourced agent query/answer loop.",
+    ),
+    StepDefinition(
+        "workflow_abandonment_devices",
+        "Workflow abandonment",
+        "event = 'workflow_abandoned'",
+        "observed",
+        "Devices with a confident privacy-safe abandonment event, bucketed by workflow, stage, and reason.",
     ),
 )
 
@@ -410,6 +419,26 @@ LIMIT 60
 """
 
 
+def workflow_abandonment_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  properties['workflow_kind'] AS workflow_kind,
+  properties['stage'] AS stage,
+  properties['reason_kind'] AS reason_kind,
+  properties['surface'] AS surface,
+  properties['prior_ready_state'] AS prior_ready_state,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event = 'workflow_abandoned'
+  {app_version_filter(app_version)}
+GROUP BY workflow_kind, stage, reason_kind, surface, prior_ready_state
+ORDER BY events DESC
+LIMIT 80
+"""
+
+
 def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
     load_env()
     host, project_id, token = posthog_config()
@@ -422,6 +451,7 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "onboarding_completion": onboarding_completion_query(days, app_version),
         "artifact_actions": artifact_actions_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
+        "workflow_abandonment": workflow_abandonment_query(days, app_version),
     }
 
     results = {
@@ -548,6 +578,7 @@ def render_report(data: dict[str, Any]) -> str:
     agent_signal = as_int(reach.get("agent_setup_devices"))
     true_agent_query = as_int(reach.get("true_agent_query_devices"))
     return_proxy = as_int(reach.get("return_proxy_devices"))
+    workflow_abandonment = as_int(reach.get("workflow_abandonment_devices"))
     app_version = data.get("app_version") or "all app versions"
 
     limitations = [
@@ -556,6 +587,7 @@ def render_report(data: dict[str, Any]) -> str:
         "`dictation_completed`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are included only in the proxy saved-Markdown row for legacy continuity.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
+        "`workflow_abandoned` is a conservative exit map. It should not be read as every possible drop-off or every click.",
     ]
 
     recommended_tiles = [
@@ -563,6 +595,7 @@ def render_report(data: dict[str, Any]) -> str:
         "Saved artifact quality: strict saved Markdown vs dictation-completed proxy, split by artifact kind.",
         "Artifact actions: open Markdown, preview, reveal folder, and copy-for-agent surfaces.",
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
+        "Abandonment exits: workflow kind, stage, reason kind, surface, and prior-ready state.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
         "Data quality: missing true-agent-use event and first-artifact adoption by app version.",
     ]
@@ -582,6 +615,7 @@ def render_report(data: dict[str, Any]) -> str:
         f"- Saved Markdown plus dictation proxy reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
+        f"- Workflow abandonment exits: **{workflow_abandonment} devices** ({pct(workflow_abandonment, launch)} of launch).",
         f"- True agent-query proof: **{true_agent_query} devices**. Treat this as unknown, not green, until instrumentation exists.",
         "",
         "## Funnel Reach",
@@ -629,6 +663,11 @@ def render_report(data: dict[str, Any]) -> str:
             data["results"].get("agent_signals", []),
             ["event", "prompt_kind", "setup_kind", "agent_target", "result", "surface", "events", "devices"],
         ),
+        render_top_rows(
+            "Workflow Abandonment Exits",
+            data["results"].get("workflow_abandonment", []),
+            ["workflow_kind", "stage", "reason_kind", "surface", "prior_ready_state", "events", "devices"],
+        ),
         "## Data Limitations",
         "",
         "\n".join(f"- {item}" for item in limitations),
@@ -674,6 +713,7 @@ def run_self_test() -> int:
                 "artifact_action_devices": 2,
                 "agent_prompt_devices": 1,
                 "agent_setup_devices": 1,
+                "workflow_abandonment_devices": 1,
                 "return_proxy_devices": 1,
                 "true_agent_query_devices": 0,
             }],
@@ -683,6 +723,15 @@ def run_self_test() -> int:
             "onboarding_completion": [],
             "artifact_actions": [],
             "agent_signals": [],
+            "workflow_abandonment": [{
+                "workflow_kind": "onboarding",
+                "stage": "permissions",
+                "reason_kind": "window_closed",
+                "surface": "onboarding",
+                "prior_ready_state": "not_ready",
+                "events": 1,
+                "devices": 1,
+            }],
         },
     }
     report = render_report(sample)
@@ -696,20 +745,25 @@ def run_self_test() -> int:
         print("self-test failed: missing true agent-query proof limitation", file=sys.stderr)
         return 1
     reach = reach_query(30, None)
+    sequence = sequence_query(30, None)
     if "activation_first_artifact_saved') AS strict_saved_markdown_devices" not in reach:
         print("self-test failed: strict saved-Markdown reach must use activation_first_artifact_saved", file=sys.stderr)
         return 1
-    if "activation_first_artifact_saved" not in sequence_query(30, None):
+    if "activation_first_artifact_saved" not in sequence:
         print("self-test failed: ordered saved-Markdown step must include activation_first_artifact_saved", file=sys.stderr)
+        return 1
+    if "Workflow abandonment exits: **1 devices**" not in report:
+        print("self-test failed: missing workflow abandonment reach", file=sys.stderr)
         return 1
     for query in (
         reach,
         event_counts_query(30, None),
         daily_active_query(30, None),
-        sequence_query(30, None),
+        sequence,
         onboarding_completion_query(30, None),
         artifact_actions_query(30, None),
         agent_signals_query(30, None),
+        workflow_abandonment_query(30, None),
     ):
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)

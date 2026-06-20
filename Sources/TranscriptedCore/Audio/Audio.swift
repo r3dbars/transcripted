@@ -1,7 +1,6 @@
 import Foundation
 import QuartzCore
 @preconcurrency import AVFoundation
-import AppKit
 import CoreAudio
 import Combine
 
@@ -129,6 +128,31 @@ public enum AudioInputTapTeardownPolicy {
             ? [.stopEngine, .waitForStoppedInputCallbacks, .removeInputTap]
             : [.removeInputTap]
     }
+}
+
+/// Host-provided sleep/wake notifications for recording gap tracking.
+///
+/// The default uses macOS workspace notification names without importing
+/// AppKit, so `TranscriptedCore` stays a reusable library boundary.
+public struct AudioSleepWakeNotifications: Sendable {
+    public let center: NotificationCenter
+    public let willSleepName: Notification.Name
+    public let didWakeName: Notification.Name
+
+    public init(
+        center: NotificationCenter = .default,
+        willSleepName: Notification.Name,
+        didWakeName: Notification.Name
+    ) {
+        self.center = center
+        self.willSleepName = willSleepName
+        self.didWakeName = didWakeName
+    }
+
+    public static let macOSWorkspace = AudioSleepWakeNotifications(
+        willSleepName: Notification.Name("NSWorkspaceWillSleepNotification"),
+        didWakeName: Notification.Name("NSWorkspaceDidWakeNotification")
+    )
 }
 
 /// Main audio recording class that captures microphone and system audio
@@ -669,15 +693,34 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Filesystem layout used for writing raw mic/system WAV captures.
     /// Embedders can redirect captures by passing a custom `CoreStoragePaths` at init.
     let paths: CoreStoragePaths
+    private let sleepWakeNotifications: AudioSleepWakeNotifications
 
     /// Durable record of the in-flight recording for crash recovery. Lives
     /// next to the scratch audio; cleared once the meeting reaches a durable
     /// state (transcript saved or failed-queue entry persisted).
     let recordingJournal: MeetingRecordingJournalStore
 
-    public init(paths: CoreStoragePaths = .default) {
+    public init(
+        paths: CoreStoragePaths = .default,
+        sleepWakeNotifications: AudioSleepWakeNotifications = .macOSWorkspace
+    ) {
         self.paths = paths
+        self.sleepWakeNotifications = sleepWakeNotifications
         self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+    }
+
+    init(
+        paths: CoreStoragePaths = .default,
+        systemAudioCaptureForTesting systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?,
+        sleepWakeNotifications: AudioSleepWakeNotifications = .macOSWorkspace
+    ) {
+        self.paths = paths
+        self.sleepWakeNotifications = sleepWakeNotifications
+        self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        self.systemAudioCapture = systemAudioCapture
+        if let systemAudioCapture {
+            wireSystemAudioStatusPublisher(from: systemAudioCapture)
+        }
     }
 
     func ensureCaptureInfrastructureConfigured() {
@@ -689,17 +732,24 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // Screen Recording flows.
         let capture = SCKAudioCapture()
         systemAudioCapture = capture
+        wireSystemAudioStatusPublisher(from: capture)
+        installWorkspaceSleepWakeObservers()
+    }
+
+    private func wireSystemAudioStatusPublisher(from capture: any SystemAudioCaptureEngine) {
         systemAudioCancellable = capture.errorMessagePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] errorMessage in
                 self?.updateSystemAudioStatus(fromError: errorMessage)
             }
+    }
 
+    func installWorkspaceSleepWakeObservers() {
         // MARK: - Sleep/Wake Observers (Phase 1: Invisible Reliability)
         // Handle macOS sleep/wake to prevent AVAudioEngine crashes and log gaps
 
-        sleepObserver = NotificationCenter.default.addObserver(
-            forName: NSWorkspace.willSleepNotification,
+        sleepObserver = sleepWakeNotifications.center.addObserver(
+            forName: sleepWakeNotifications.willSleepName,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -708,8 +758,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
             self.sleepTimestamp = Date()
         }
 
-        wakeObserver = NotificationCenter.default.addObserver(
-            forName: NSWorkspace.didWakeNotification,
+        wakeObserver = sleepWakeNotifications.center.addObserver(
+            forName: sleepWakeNotifications.didWakeName,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -1339,10 +1389,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     deinit {
         // Remove sleep/wake observers to prevent leaks
         if let observer = sleepObserver {
-            NotificationCenter.default.removeObserver(observer)
+            sleepWakeNotifications.center.removeObserver(observer)
         }
         if let observer = wakeObserver {
-            NotificationCenter.default.removeObserver(observer)
+            sleepWakeNotifications.center.removeObserver(observer)
         }
         timer?.invalidate()
         watchdogTimer?.invalidate()
