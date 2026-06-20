@@ -14,6 +14,209 @@ func testAnalyticsEventPolicy() {
         )
     }
 
+    runSuite("AnalyticsEventPolicy taxonomy blocks sensitive property names") {
+        let forbiddenFragments = [
+            "audio_path",
+            "audio_ref",
+            "authorization",
+            "bundle",
+            "credential",
+            "device_id",
+            "distinct_id",
+            "email",
+            "file",
+            "filename",
+            "identity",
+            "invitee",
+            "meeting_title",
+            "person_id",
+            "raw_url",
+            "referrer",
+            "speaker",
+            "source_app",
+            "text",
+            "title",
+            "token",
+            "transcript",
+            "url",
+            "user_id",
+        ]
+        let properties = allAllowedAnalyticsPropertyNames()
+
+        for property in properties {
+            let normalized = property.lowercased()
+            for fragment in forbiddenFragments {
+                assertFalse(
+                    normalized.contains(fragment),
+                    "\(property) should not include forbidden analytics fragment \(fragment)"
+                )
+            }
+        }
+    }
+
+    runSuite("AnalyticsEventPolicy taxonomy requires reviewed non-bucket property shapes") {
+        let reviewedNonBucketProperties: Set<String> = [
+            "action",
+            "action_id",
+            "action_kind",
+            "agent_cta",
+            "agent_target",
+            "analytics_available",
+            "anonymous_usage_enabled",
+            "app_signal",
+            "app_version",
+            "artifact_kind",
+            "attenuation_kind",
+            "auto_send",
+            "automatic_downloads_enabled",
+            "available",
+            "backoff_kind",
+            "build_version",
+            "calendar_confidence",
+            "calendar_status",
+            "call_state",
+            "capture_activity",
+            "capture_quality",
+            "captured_input_volume_before",
+            "captured_input_volume_changed",
+            "captured_input_volume_dropped",
+            "captured_input_volume_during",
+            "cleanup_changed",
+            "cleanup_enabled",
+            "completion_flow",
+            "cooldown_reason",
+            "copy_reason",
+            "crash_reporting_available",
+            "crash_reporting_enabled",
+            "cta",
+            "cta_type",
+            "default_input_class",
+            "default_input_volume_after",
+            "default_input_volume_before",
+            "default_input_volume_changed",
+            "default_input_volume_dropped",
+            "default_input_volume_during",
+            "default_output_class",
+            "default_output_volume_after",
+            "default_output_volume_before",
+            "default_output_volume_changed",
+            "default_output_volume_dropped",
+            "default_output_volume_during",
+            "default_system_output_volume_after",
+            "default_system_output_volume_before",
+            "default_system_output_volume_changed",
+            "default_system_output_volume_dropped",
+            "default_system_output_volume_during",
+            "delivery",
+            "dictation_ready",
+            "elapsed_bucket",
+            "enabled",
+            "entrypoint",
+            "failure_code",
+            "failure_kind",
+            "first_dictation_saved",
+            "format_ready",
+            "from_status",
+            "has_target",
+            "hfp_suspected",
+            "import_stage",
+            "input_channels",
+            "input_device_class",
+            "input_rate_hz",
+            "input_volume_scalar_available",
+            "last_event",
+            "location_type",
+            "meeting_dry_run_completed",
+            "meeting_recording_ready",
+            "mic_boost_prompt",
+            "mic_processed_peak",
+            "mic_processing",
+            "mic_raw_peak",
+            "mic_recovering",
+            "mic_status",
+            "mic_stream_present",
+            "missing_permission",
+            "model_state",
+            "os_major",
+            "outcome",
+            "output_channels",
+            "output_device_class",
+            "output_ducking_detected",
+            "output_rate_hz",
+            "page_id",
+            "paste_available",
+            "pasteback_status",
+            "permission_kind",
+            "previous_clean_shutdown",
+            "previous_version",
+            "prior_artifact_kind",
+            "prior_ready_state",
+            "prior_status",
+            "prompt_kind",
+            "prompt_reason",
+            "provider",
+            "proxy_kind",
+            "query_kind",
+            "quiet_mic_recovered",
+            "quiet_mic_unrecovered",
+            "realtime_agc",
+            "reason",
+            "recent_meetings_available",
+            "recovering",
+            "reporting_kind",
+            "required",
+            "reason_kind",
+            "result",
+            "route_ready",
+            "route_shape",
+            "sample_flow_started",
+            "save_outcome",
+            "selected_input_class",
+            "selection_overrode_default",
+            "selection_reason",
+            "session_active",
+            "session_kind",
+            "session_stage",
+            "setting_id",
+            "setup_kind",
+            "source",
+            "stall_kind",
+            "stall_stage",
+            "stage",
+            "state",
+            "step_id",
+            "step_index",
+            "stop_timed_out",
+            "suppression_reason",
+            "surface",
+            "system_backend",
+            "system_channels",
+            "system_failed",
+            "system_output_device_class",
+            "system_output_rate_hz",
+            "system_peak",
+            "system_rate_hz",
+            "system_status",
+            "system_stream_present",
+            "to_status",
+            "trigger",
+            "update_state",
+            "version",
+            "voice_processing",
+            "voice_processing_active",
+            "was_recording",
+            "workflow_kind",
+        ]
+        let properties = allAllowedAnalyticsPropertyNames()
+
+        for property in properties where !property.hasSuffix("_bucket") {
+            assertTrue(
+                reviewedNonBucketProperties.contains(property),
+                "\(property) must be explicitly reviewed as an enum, boolean, public version, count, or coarse numeric diagnostic"
+            )
+        }
+    }
+
     runSuite("AnalyticsEventPolicy allows explicit onboarding funnel events") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "onboarding_shown")
         let stepViewed = AnalyticsEventPolicy.policy(forEvent: "onboarding_step_viewed")
@@ -84,12 +287,14 @@ func testAnalyticsEventPolicy() {
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
+        let agentQuery = AnalyticsEventPolicy.policy(forEvent: "agent_capture_query_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
         assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
+        assertEqual(agentQuery?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "surface"], "agent query observation should stay enum-only")
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
@@ -176,6 +381,46 @@ func testAnalyticsEventPolicy() {
             ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
             "first saved artifact should not be marked twice"
         )
+    }
+
+    runSuite("AnalyticsEventPolicy allows workflow abandonment taxonomy") {
+        let abandoned = AnalyticsEventPolicy.policy(forEvent: "workflow_abandoned")
+        assertEqual(
+            abandoned?.allowedProperties ?? Set<String>(),
+            ["elapsed_bucket", "prior_ready_state", "reason_kind", "stage", "surface", "workflow_kind"],
+            "workflow abandonment should stay coarse and enum-only"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "failed_meeting_retry",
+                "stage": "retry_available",
+                "reason_kind": "dismissed",
+                "elapsed_bucket": "unknown",
+                "surface": "home",
+                "prior_ready_state": "retry_ready",
+                "meeting_title": "Customer call",
+                "file_path": "/Users/redbars/private.md",
+                "raw_duration": "472.221",
+                "raw_error": "private stack",
+                "source_app": "Zoom",
+                "url": "https://example.com/meeting",
+            ],
+            allowedKeys: abandoned?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["workflow_kind"], "failed_meeting_retry", "workflow kind should survive")
+        assertEqual(sanitized["stage"], "retry_available", "stage should survive")
+        assertEqual(sanitized["reason_kind"], "dismissed", "reason kind should survive")
+        assertEqual(sanitized["elapsed_bucket"], "unknown", "elapsed bucket should survive")
+        assertEqual(sanitized["surface"], "home", "surface should survive")
+        assertEqual(sanitized["prior_ready_state"], "retry_ready", "prior ready state should survive")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["raw_duration"], "raw durations must not be sent")
+        assertNil(sanitized["raw_error"], "raw errors must not be sent")
+        assertNil(sanitized["source_app"], "source apps must not be sent")
+        assertNil(sanitized["url"], "raw URLs must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
@@ -986,6 +1231,10 @@ private func documentedAnalyticsEvents() -> [String] {
 
         return String(trimmed.dropFirst(3).dropLast())
     }
+}
+
+private func allAllowedAnalyticsPropertyNames() -> [String] {
+    Set(AnalyticsEventPolicy.allPolicies.flatMap { $0.allowedProperties }).sorted()
 }
 
 private func markdownSection(named heading: String, in text: String) -> String {

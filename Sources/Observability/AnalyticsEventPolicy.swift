@@ -14,6 +14,12 @@ struct AnalyticsEventPolicy: Equatable {
         allowedPolicies.keys.sorted()
     }
 
+    /// All allowlisted analytics policies, sorted by event name. Tests use this
+    /// to keep the public taxonomy doc in lockstep with the compiled allowlist.
+    static var allPolicies: [AnalyticsEventPolicy] {
+        allowedPolicies.keys.sorted().compactMap { allowedPolicies[$0] }
+    }
+
     private static let meetingCaptureDiagnosticProperties: Set<String> = [
         "attenuation_kind",
         "buffer_success_bucket",
@@ -144,6 +150,25 @@ struct AnalyticsEventPolicy: Equatable {
         "proxy_kind",
         "return_window_bucket",
         "surface",
+    ]
+
+    private static let agentCaptureQueryObservedProperties: Set<String> = [
+        "agent_target",
+        "artifact_kind",
+        "capture_age_bucket",
+        "query_kind",
+        "result",
+        "return_window_bucket",
+        "surface",
+    ]
+
+    private static let workflowAbandonedProperties: Set<String> = [
+        "elapsed_bucket",
+        "prior_ready_state",
+        "reason_kind",
+        "stage",
+        "surface",
+        "workflow_kind",
     ]
 
     private static let meetingPromptProperties: Set<String> = [
@@ -332,6 +357,14 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "agent_capture_query_observed": .init(
+            name: "agent_capture_query_observed",
+            allowedProperties: agentCaptureQueryObservedProperties
+        ),
+        "workflow_abandoned": .init(
+            name: "workflow_abandoned",
+            allowedProperties: workflowAbandonedProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",

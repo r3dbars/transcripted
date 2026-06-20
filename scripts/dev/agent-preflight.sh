@@ -148,6 +148,13 @@ if [ -n "$changed_paths" ]; then
             add_command "bash -n scripts/ops/health-probe.sh"
         fi
 
+        if matches_any "$path" "scripts/ops/posthog-product-dashboard-summary.py" "Tests/Fixtures/posthog-product-dashboard-summary.json"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/ops/posthog-product-dashboard-summary.py"
+            add_command "python3 scripts/ops/posthog-product-dashboard-summary.py --self-test"
+            add_command "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only"
+        fi
+
         if matches_any "$path" "scripts/dev/onboarding.sh"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n scripts/dev/onboarding.sh"

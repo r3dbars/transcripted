@@ -66,6 +66,11 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Usage: `python3 scripts/ops/retention-cohort-report.py`
   - Health output: `python3 scripts/ops/retention-cohort-report.py --write-dir /tmp/transcripted-retention-health`
   - Offline self-test: `python3 scripts/ops/retention-cohort-report.py --self-test`
+- `scripts/ops/posthog-product-dashboard-summary.py` — turn the five PostHog product-learning dashboard families into ranked product tasks
+  - Usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --days 30`
+  - Fixture usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json`
+  - Writes local Markdown and JSON under `/tmp/transcripted-posthog-product-tasks/<run-id>/`
+  - Self-test: `python3 scripts/ops/posthog-product-dashboard-summary.py --self-test`
 - `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
   - Usage: `bash run-daily-audio-reliability.sh`
   - Synthetic-only usage: `bash run-daily-audio-reliability.sh --synthetic`

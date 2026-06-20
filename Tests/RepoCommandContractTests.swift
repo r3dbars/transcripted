@@ -164,6 +164,14 @@ func testRepoCommandContract() {
             workflowEvents.contains("meeting_file_imported") && digest.contains("\"meeting_file_imported\""),
             "aggregate active-device workflow sets should count imported audio activity"
         )
+        assertTrue(
+            workflowEvents.contains("workflow_abandoned") && digest.contains("\"workflow_abandoned\""),
+            "aggregate active-device workflow sets should count abandonment exits"
+        )
+        assertTrue(
+            contents.contains("abandonment_events_7d") && contents.contains("abandonment_events=$abandonment"),
+            "PostHog probe should keep a separate aggregate abandonment count"
+        )
     }
 
     runSuite("Repo command contract - PostHog health probe counts emitted first-value events") {
@@ -212,6 +220,10 @@ func testRepoCommandContract() {
         assertFalse(
             firstValueEvents.contains("meeting_file_imported"),
             "imported audio should count as activity but not as first value"
+        )
+        assertFalse(
+            firstValueEvents.contains("workflow_abandoned"),
+            "abandonment exits should count as activity but not as first value"
         )
     }
 

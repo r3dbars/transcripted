@@ -71,6 +71,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "agent_capture_query_observed",
     "activation_return_proxy_observed",
+    "workflow_abandoned",
 )
 POSTHOG_FIRST_VALUE_EVENTS = (
     "dictation_completed",
@@ -2427,6 +2428,7 @@ def run_self_test() -> None:
             "activation_agent_setup_cta_clicked",
             "agent_capture_query_observed",
             "activation_return_proxy_observed",
+            "workflow_abandoned",
         }
         assert health_probe_workflow_events.issubset(set(POSTHOG_ACTIVE_EVENTS))
         assert {
