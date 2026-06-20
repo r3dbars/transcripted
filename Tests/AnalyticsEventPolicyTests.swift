@@ -116,6 +116,7 @@ func testAnalyticsEventPolicy() {
             "entrypoint",
             "failure_code",
             "failure_kind",
+            "feature_area",
             "first_dictation_saved",
             "format_ready",
             "from_status",
@@ -474,6 +475,7 @@ func testAnalyticsEventPolicy() {
         let menuAction = AnalyticsEventPolicy.policy(forEvent: "menu_bar_action_clicked")
         let settingsOpened = AnalyticsEventPolicy.policy(forEvent: "settings_opened")
         let settingsPage = AnalyticsEventPolicy.policy(forEvent: "settings_page_viewed")
+        let settingsFeature = AnalyticsEventPolicy.policy(forEvent: "settings_feature_discovered")
         let settingsAction = AnalyticsEventPolicy.policy(forEvent: "settings_action_clicked")
         let settingsToggle = AnalyticsEventPolicy.policy(forEvent: "settings_toggle_changed")
         let settingsPermission = AnalyticsEventPolicy.policy(forEvent: "settings_permission_cta_clicked")
@@ -486,6 +488,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(menuAction?.allowedProperties.contains("action_id"), true, "menu clicks should preserve the clicked action")
         assertEqual(settingsOpened?.allowedProperties.contains("source"), true, "settings opens should preserve entry source")
         assertEqual(settingsPage?.allowedProperties.contains("page_id"), true, "settings page views should preserve page id")
+        assertEqual(settingsFeature?.allowedProperties ?? Set<String>(), ["feature_area", "page_id", "source"], "feature discovery should preserve only the area, page, and source")
         assertEqual(settingsAction?.allowedProperties.contains("action_id"), true, "settings actions should preserve action id")
         assertEqual(settingsToggle?.allowedProperties.contains("setting_id"), true, "settings toggles should preserve setting id")
         assertEqual(settingsPermission?.allowedProperties.contains("permission_kind"), true, "settings permission CTAs should preserve permission kind")
@@ -503,23 +506,44 @@ func testAnalyticsEventPolicy() {
                 "automatic_downloads_enabled": "true",
                 "failure_code": "sparkle_2003",
                 "failure_kind": "feed_unreachable",
+                "feature_area": "agent_setup",
                 "page_id": "home",
                 "setting_id": "menu_bar_start_dictation",
                 "source": "menu_bar",
                 "state": "ready_to_install",
                 "surface": "settings_about",
             ],
-            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_code", "failure_kind", "page_id", "setting_id", "source", "state", "surface"]
+            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_code", "failure_kind", "feature_area", "page_id", "setting_id", "source", "state", "surface"]
         )
         assertEqual(sanitized["action_id"], "start_dictation", "action ids should survive sanitization")
         assertEqual(sanitized["automatic_downloads_enabled"], "true", "automatic update download state should survive sanitization")
         assertEqual(sanitized["failure_code"], "sparkle_2003", "coarse update failure codes should survive sanitization")
         assertEqual(sanitized["failure_kind"], "feed_unreachable", "update failure kind should survive sanitization")
+        assertEqual(sanitized["feature_area"], "agent_setup", "feature-area enums should survive sanitization")
         assertEqual(sanitized["page_id"], "home", "page ids should survive sanitization")
         assertEqual(sanitized["setting_id"], "menu_bar_start_dictation", "setting ids should survive sanitization")
         assertEqual(sanitized["source"], "menu_bar", "source enums should survive sanitization")
         assertEqual(sanitized["state"], "ready_to_install", "update state should survive sanitization")
         assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
+    }
+
+    runSuite("FeatureDiscoveryTelemetry tracks each high-leverage feature once") {
+        let suiteName = "FeatureDiscoveryTelemetryTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertTrue(
+            FeatureDiscoveryTelemetry.markDiscoveredIfNeeded(featureArea: .agentSetup, userDefaults: defaults),
+            "first discovery should be recorded"
+        )
+        assertFalse(
+            FeatureDiscoveryTelemetry.markDiscoveredIfNeeded(featureArea: .agentSetup, userDefaults: defaults),
+            "same feature discovery should not be recorded twice"
+        )
+        assertTrue(
+            FeatureDiscoveryTelemetry.markDiscoveredIfNeeded(featureArea: .captureLibrary, userDefaults: defaults),
+            "a different feature area should still be recorded"
+        )
     }
 
     runSuite("AnalyticsEventPolicy allows update download lifecycle attribution") {

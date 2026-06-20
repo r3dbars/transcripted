@@ -135,6 +135,15 @@ rules:
       - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
+      - "scripts/ops/posthog-product-context-pack.py"
+      - "Tests/Fixtures/posthog-product-context-pack-fixture.json"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-product-context-pack.py"
+      - "python3 scripts/ops/posthog-product-context-pack.py --self-test"
+      - "python3 scripts/ops/posthog-product-context-pack.py --fixture Tests/Fixtures/posthog-product-context-pack-fixture.json --write-dir build/posthog-product-context-sample"
+
+  - paths:
       - "scripts/ops/posthog-dashboard-queries.py"
       - "Tests/Fixtures/posthog-dashboard-query-results.json"
       - "docs/posthog-dashboard-query-helpers.md"

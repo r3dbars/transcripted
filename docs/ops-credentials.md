@@ -51,9 +51,11 @@ For retention and habit checks, use:
 python3 scripts/ops/retention-cohort-report.py
 ```
 
-That report stays aggregate-only and covers active days, repeat dictation,
-repeat meeting use, version adoption, return after first artifact, and drop-off
-after first run. See `docs/retention-cohort-analytics.md`.
+That report stays aggregate-only and covers first artifact, second artifact,
+next-day return, 7-day return, repeat dictation, repeat meeting, repeat
+agent-use, summary repeat, 3-days-this-week, version adoption, and drop-off
+after first run. Use `--write-dir` when a health skill needs
+`retention-health-summary.json`. See `docs/retention-cohort-analytics.md`.
 
 For a deeper activation decision read, run:
 
@@ -71,17 +73,20 @@ proxies only; they are not proof that an agent answered from a saved artifact.
 The desired true-use event is `agent_capture_query_observed`, which should stay
 zero/unknown until that privacy-safe instrumentation exists.
 
-For retention and habit checks, use:
+For an AI-agent-ready product context pack, run:
 
 ```bash
-python3 scripts/ops/retention-cohort-report.py
+python3 scripts/ops/posthog-product-context-pack.py --days 30
 ```
 
-That report stays aggregate-only and covers first artifact, second artifact,
-next-day return, 7-day return, repeat dictation, repeat meeting, repeat
-agent-use, summary repeat, 3-days-this-week, version adoption, and drop-off
-after first run. Use `--write-dir` when a health skill needs
-`retention-health-summary.json`. See `docs/retention-cohort-analytics.md`.
+The context pack writes compact JSON and Markdown under
+`/tmp/transcripted-posthog-product-context/<run-id>/`. It summarizes the current
+activation bottleneck, strongest repeat-use signal, highest reliability pain,
+release-version anomaly, feature adoption signal, and top three recommended
+next PRs. If PostHog read credentials are missing, it still emits a pack with
+explicit `UNKNOWN` states unless `--strict` is passed. Use this in health or
+nightly reports when an agent needs decision context instead of a dashboard
+dump.
 
 For the normal health lane's product-task loop, run:
 

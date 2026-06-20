@@ -164,6 +164,12 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let settingsFeatureDiscoveryProperties: Set<String> = [
+        "feature_area",
+        "page_id",
+        "source",
+    ]
+
     private static let workflowAbandonedProperties: Set<String> = [
         "elapsed_bucket",
         "prior_ready_state",
@@ -482,6 +488,10 @@ struct AnalyticsEventPolicy: Equatable {
                 "page_id",
                 "source",
             ]
+        ),
+        "settings_feature_discovered": .init(
+            name: "settings_feature_discovered",
+            allowedProperties: settingsFeatureDiscoveryProperties
         ),
         "settings_action_clicked": .init(
             name: "settings_action_clicked",
