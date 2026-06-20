@@ -237,6 +237,24 @@ ORDER BY event ASC
 """
 
 
+def version_event_counts_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  properties['app_version'] AS app_version,
+  properties['build_version'] AS build_version,
+  properties['build_revision'] AS build_revision,
+  event,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ({sql_list(RELEVANT_EVENTS)})
+  {app_version_filter(app_version)}
+GROUP BY app_version, build_version, build_revision, event
+ORDER BY devices DESC, events DESC, app_version ASC, build_version ASC, event ASC
+"""
+
+
 def daily_active_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT toDate(timestamp) AS day, uniq(distinct_id) AS active_devices
@@ -372,6 +390,7 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
     queries = {
         "reach": reach_query(days, app_version),
         "event_counts": event_counts_query(days, app_version),
+        "version_event_counts": version_event_counts_query(days, app_version),
         "daily_active": daily_active_query(days, app_version),
         "sequence": sequence_query(days, app_version),
         "onboarding_completion": onboarding_completion_query(days, app_version),
@@ -497,6 +516,19 @@ def render_top_rows(title: str, rows: list[dict[str, Any]], columns: list[str], 
     return f"### {title}\n\n" + md_table(columns, [[row.get(column) for column in columns] for row in rows[:limit]]) + "\n"
 
 
+def strict_saved_markdown_guard(strict_saved: int, saved_proxy: int, app_version: str) -> str | None:
+    if strict_saved > 0 or saved_proxy <= 0:
+        return None
+
+    scope = f"for {app_version}" if app_version != "all app versions" else "in this window"
+    return (
+        f"Strict saved-Markdown guard: **YELLOW** - `activation_first_artifact_saved` is 0 {scope} "
+        f"while broader saved-artifact proxy signals are present ({saved_proxy} devices). Treat this as "
+        "not-shipped-yet or telemetry delivery/config proof gap until the version/build table shows a "
+        "build revision that contains the strict event; do not read it as zero saved artifacts."
+    )
+
+
 def render_report(data: dict[str, Any]) -> str:
     reach = (data["results"].get("reach") or [{}])[0]
     launch = as_int(reach.get("launch_devices"))
@@ -508,6 +540,7 @@ def render_report(data: dict[str, Any]) -> str:
     return_proxy = as_int(reach.get("return_proxy_devices"))
     workflow_abandonment = as_int(reach.get("workflow_abandonment_devices"))
     app_version = data.get("app_version") or "all app versions"
+    strict_guard = strict_saved_markdown_guard(strict_saved, saved_proxy, app_version)
 
     limitations = [
         "`permission ready` uses `onboarding_completed` as a proxy. The app guards completion on required dictation permissions, but this does not count users who became ready outside onboarding.",
@@ -518,6 +551,10 @@ def render_report(data: dict[str, Any]) -> str:
         "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
         "`workflow_abandoned` is a conservative exit map. It should not be read as every possible drop-off or every click.",
     ]
+    if strict_guard:
+        limitations.append(
+            "When strict saved Markdown is zero but proxy save signals are present, check the version/build/revision breakdown before deciding whether the event was not shipped yet or telemetry delivery is broken."
+        )
 
     recommended_tiles = [
         "Ordered funnel: launch -> onboarding -> permission ready -> dictation -> saved Markdown/proxy -> artifact/prompt -> agent setup signal.",
@@ -543,6 +580,7 @@ def render_report(data: dict[str, Any]) -> str:
         f"- Launch reach in-window: **{launch} anonymous devices**.",
         f"- Strict saved Markdown reach: **{strict_saved} devices** ({pct(strict_saved, launch)} of launch).",
         f"- Saved Markdown plus dictation proxy reach: **{saved_proxy} devices** ({pct(saved_proxy, launch)} of launch).",
+        *([f"- {strict_guard}"] if strict_guard else []),
         f"- Second saved artifact reach: **{second_artifact} devices** ({pct(second_artifact, launch)} of launch).",
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
@@ -564,6 +602,23 @@ def render_report(data: dict[str, Any]) -> str:
             [
                 [row.get("event"), row.get("events"), row.get("devices")]
                 for row in data["results"].get("event_counts", [])
+            ],
+        ),
+        "",
+        "## Version / Build Event Counts",
+        "",
+        md_table(
+            ["App version", "Build version", "Build revision", "Event", "Events", "Devices"],
+            [
+                [
+                    row.get("app_version"),
+                    row.get("build_version"),
+                    row.get("build_revision"),
+                    row.get("event"),
+                    row.get("events"),
+                    row.get("devices"),
+                ]
+                for row in data["results"].get("version_event_counts", [])
             ],
         ),
         "",
@@ -656,6 +711,14 @@ def run_self_test() -> int:
             }],
             "sequence": [{"deepest_step": 1, "devices": 2}, {"deepest_step": 7, "devices": 1}],
             "event_counts": [{"event": "app_launched", "events": 20, "devices": 10}],
+            "version_event_counts": [{
+                "app_version": "1.1.49",
+                "build_version": "1.1.49",
+                "build_revision": "main123",
+                "event": "activation_first_artifact_saved",
+                "events": 2,
+                "devices": 2,
+            }],
             "daily_active": [{"day": "2026-06-19", "active_devices": 3}],
             "onboarding_completion": [],
             "artifact_actions": [],
@@ -682,13 +745,40 @@ def run_self_test() -> int:
     if "True agent-query proof: **0 devices**" not in report:
         print("self-test failed: missing true agent-query proof limitation", file=sys.stderr)
         return 1
+    if "Version / Build Event Counts" not in report or "build_revision" not in version_event_counts_query(30, None):
+        print("self-test failed: missing version/build/revision activation breakdown", file=sys.stderr)
+        return 1
+    guard_sample = json.loads(json.dumps(sample))
+    guard_sample["app_version"] = "1.1.48"
+    guard_reach = guard_sample["results"]["reach"][0]
+    guard_reach["strict_saved_markdown_devices"] = 0
+    guard_reach["saved_markdown_plus_dictation_proxy_devices"] = 3
+    guard_sample["results"]["version_event_counts"] = [{
+        "app_version": "1.1.48",
+        "build_version": "1.1.48",
+        "build_revision": "release123",
+        "event": "meeting_transcript_saved",
+        "events": 4,
+        "devices": 3,
+    }]
+    guard_report = render_report(guard_sample)
+    if "Strict saved-Markdown guard: **YELLOW**" not in guard_report or "not-shipped-yet or telemetry delivery/config proof gap" not in guard_report:
+        print("self-test failed: missing strict saved-Markdown zero/proxy guard", file=sys.stderr)
+        return 1
     reach = reach_query(30, None)
     sequence = sequence_query(30, None)
+    version_counts = version_event_counts_query(30, None)
     if "activation_first_artifact_saved') AS strict_saved_markdown_devices" not in reach:
         print("self-test failed: strict saved-Markdown reach must use activation_first_artifact_saved", file=sys.stderr)
         return 1
     if "activation_first_artifact_saved" not in sequence:
         print("self-test failed: ordered saved-Markdown step must include activation_first_artifact_saved", file=sys.stderr)
+        return 1
+    if "GROUP BY app_version, build_version, build_revision, event" not in version_counts:
+        print("self-test failed: version event counts must group by app/build/revision", file=sys.stderr)
+        return 1
+    if "LIMIT" in version_counts.upper():
+        print("self-test failed: version/build event counts must not silently truncate rows", file=sys.stderr)
         return 1
     if "Workflow abandonment exits: **1 devices**" not in report:
         print("self-test failed: missing workflow abandonment reach", file=sys.stderr)
@@ -696,6 +786,7 @@ def run_self_test() -> int:
     for query in (
         reach,
         event_counts_query(30, None),
+        version_counts,
         daily_active_query(30, None),
         sequence,
         onboarding_completion_query(30, None),
