@@ -118,6 +118,60 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertNil(properties["source_app_name"])
     }
 
+    func testReporterRechecksConfigurationBeforeEachRequest() throws {
+        let configuration = AgentCaptureQueryTelemetryConfiguration(
+            apiKey: "phc_test",
+            host: URL(string: "https://us.i.posthog.com")!,
+            distinctID: "anonymous-device"
+        )
+        var enabled = true
+        let reporter = AgentCaptureQueryTelemetry(configurationProvider: {
+            enabled ? configuration : nil
+        })
+        let observation = AgentCaptureQueryObservation(
+            queryKind: "read",
+            artifactKind: "meeting",
+            captureDate: nil,
+            sourceCount: 1
+        )
+
+        XCTAssertNotNil(reporter.makeRequest(for: observation))
+
+        enabled = false
+        XCTAssertNil(
+            reporter.makeRequest(for: observation),
+            "long-running MCP servers must honor analytics opt-out changes before sending the next event"
+        )
+    }
+
+    func testParseCaptureDateAcceptsMeetingDateTimeWithoutZone() throws {
+        let date = try XCTUnwrap(parseCaptureDate("2026-04-18T09:15:00"))
+        let observation = AgentCaptureQueryObservation(
+            queryKind: "read",
+            artifactKind: "meeting",
+            captureDate: date,
+            sourceCount: 1,
+            now: Date(timeIntervalSince1970: 1_766_102_400)
+        )
+
+        XCTAssertNotEqual(observation.properties["capture_age_bucket"], "unknown")
+        XCTAssertNotEqual(observation.properties["return_window_bucket"], "unknown")
+    }
+
+    func testParseCaptureDateAcceptsDictationFractionalISO() throws {
+        let date = try XCTUnwrap(parseCaptureDate("2026-04-18T09:15:00.123Z"))
+        let observation = AgentCaptureQueryObservation(
+            queryKind: "search",
+            artifactKind: "dictation",
+            captureDate: date,
+            sourceCount: 1,
+            now: Date(timeIntervalSince1970: 1_766_102_400)
+        )
+
+        XCTAssertNotEqual(observation.properties["capture_age_bucket"], "unknown")
+        XCTAssertNotEqual(observation.properties["return_window_bucket"], "unknown")
+    }
+
     func testConfigurationUsesOverridesAndHonorsAnalyticsOptOut() throws {
         let appSupport = makeTempDir()
         defer { removeTempDir(appSupport) }
@@ -137,6 +191,7 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         let enabled = AgentCaptureQueryTelemetryConfiguration.resolve(
             environment: [:],
             userDefaults: defaults,
+            appUserDefaults: nil,
             appSupportDirectory: appSupport,
             bundleInfo: [:]
         )
@@ -147,9 +202,102 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         let disabled = AgentCaptureQueryTelemetryConfiguration.resolve(
             environment: [:],
             userDefaults: defaults,
+            appUserDefaults: nil,
             appSupportDirectory: appSupport,
             bundleInfo: [:]
         )
         XCTAssertNil(disabled)
+    }
+
+    func testConfigurationUsesInstalledHelperObservabilityConfig() throws {
+        let appSupport = makeTempDir()
+        defer { removeTempDir(appSupport) }
+        let transcriptedSupport = appSupport.appendingPathComponent("Transcripted", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptedSupport, withIntermediateDirectories: true)
+        let helperConfig = [
+            AgentCaptureQueryTelemetryConfiguration.apiKeyInfoKey: "phc_helper",
+            AgentCaptureQueryTelemetryConfiguration.hostInfoKey: "https://us.i.posthog.com",
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: helperConfig, format: .xml, options: 0)
+        try data.write(to: transcriptedSupport.appendingPathComponent(AgentCaptureQueryTelemetryConfiguration.mcpObservabilityFileName))
+
+        let suiteName = "AgentCaptureQueryTelemetryTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let configuration = AgentCaptureQueryTelemetryConfiguration.resolve(
+            environment: [:],
+            userDefaults: defaults,
+            appUserDefaults: nil,
+            appSupportDirectory: appSupport,
+            bundleInfo: [:]
+        )
+
+        XCTAssertEqual(configuration?.apiKey, "phc_helper")
+        XCTAssertEqual(configuration?.host.absoluteString, "https://us.i.posthog.com")
+    }
+
+    func testConfigurationHonorsAppDefaultsOptOutBeforeHelperDefaults() throws {
+        let appSupport = makeTempDir()
+        defer { removeTempDir(appSupport) }
+
+        let helperSuiteName = "AgentCaptureQueryTelemetryTests.helper.\(UUID().uuidString)"
+        let appSuiteName = "AgentCaptureQueryTelemetryTests.app.\(UUID().uuidString)"
+        let helperDefaults = try XCTUnwrap(UserDefaults(suiteName: helperSuiteName))
+        let appDefaults = try XCTUnwrap(UserDefaults(suiteName: appSuiteName))
+        defer {
+            helperDefaults.removePersistentDomain(forName: helperSuiteName)
+            appDefaults.removePersistentDomain(forName: appSuiteName)
+        }
+
+        helperDefaults.set(true, forKey: "observability-anonymous-analytics-enabled")
+        appDefaults.set(false, forKey: "observability-anonymous-analytics-enabled")
+        helperDefaults.set("helper-device", forKey: "observability-anonymous-analytics-id")
+        appDefaults.set("app-device", forKey: "observability-anonymous-analytics-id")
+
+        let disabled = AgentCaptureQueryTelemetryConfiguration.resolve(
+            environment: [
+                "POSTHOG_API_KEY": "phc_env",
+                "POSTHOG_HOST": "https://us.i.posthog.com",
+            ],
+            userDefaults: helperDefaults,
+            appUserDefaults: appDefaults,
+            appSupportDirectory: appSupport,
+            bundleInfo: [:]
+        )
+
+        XCTAssertNil(disabled)
+    }
+
+    func testConfigurationUsesAppDefaultsDistinctIDWhenEnabled() throws {
+        let appSupport = makeTempDir()
+        defer { removeTempDir(appSupport) }
+
+        let helperSuiteName = "AgentCaptureQueryTelemetryTests.helper.\(UUID().uuidString)"
+        let appSuiteName = "AgentCaptureQueryTelemetryTests.app.\(UUID().uuidString)"
+        let helperDefaults = try XCTUnwrap(UserDefaults(suiteName: helperSuiteName))
+        let appDefaults = try XCTUnwrap(UserDefaults(suiteName: appSuiteName))
+        defer {
+            helperDefaults.removePersistentDomain(forName: helperSuiteName)
+            appDefaults.removePersistentDomain(forName: appSuiteName)
+        }
+
+        helperDefaults.set(false, forKey: "observability-anonymous-analytics-enabled")
+        appDefaults.set(true, forKey: "observability-anonymous-analytics-enabled")
+        helperDefaults.set("helper-device", forKey: "observability-anonymous-analytics-id")
+        appDefaults.set("app-device", forKey: "observability-anonymous-analytics-id")
+
+        let configuration = AgentCaptureQueryTelemetryConfiguration.resolve(
+            environment: [
+                "POSTHOG_API_KEY": "phc_env",
+                "POSTHOG_HOST": "https://us.i.posthog.com",
+            ],
+            userDefaults: helperDefaults,
+            appUserDefaults: appDefaults,
+            appSupportDirectory: appSupport,
+            bundleInfo: [:]
+        )
+
+        XCTAssertEqual(configuration?.distinctID, "app-device")
     }
 }

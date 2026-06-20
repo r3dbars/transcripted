@@ -290,6 +290,11 @@ func testAnalyticsEventPolicy() {
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
         assertEqual(query?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "source_count_bucket", "surface"], "agent capture query proof should stay enum and bucket only")
+        assertEqual(
+            query?.allowedProperties ?? Set<String>(),
+            mcpAgentCaptureQueryAllowedProperties(),
+            "MCP agent capture telemetry must mirror the app analytics allowlist"
+        )
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
@@ -1232,4 +1237,27 @@ private func loadRepoText(_ relativePath: String, file: String = #file, line: In
         print("  FAIL [\(loc)] could not load \(relativePath): \(error)")
         return ""
     }
+}
+
+private func mcpAgentCaptureQueryAllowedProperties() -> Set<String> {
+    let source = loadRepoText("Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift")
+    guard let declaration = source.range(of: "static let allowedProperties: Set<String> = [") else {
+        return []
+    }
+
+    let afterDeclaration = String(source[declaration.upperBound...])
+    guard let closingBracket = afterDeclaration.range(of: "]") else {
+        return []
+    }
+
+    let literalBody = String(afterDeclaration[..<closingBracket.lowerBound])
+    return Set(
+        literalBody
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .compactMap { line -> String? in
+                let trimmed = line.trimmingCharacters(in: CharacterSet(charactersIn: "\","))
+                return trimmed.isEmpty ? nil : trimmed
+            }
+    )
 }
