@@ -209,6 +209,32 @@ struct AnalyticsEventPolicy: Equatable {
         "source",
     ]
 
+    private static let speakerReviewLifecycleProperties: Set<String> = [
+        "collapsed_local_to_you",
+        "confirmed_count_bucket",
+        "discarded_count_bucket",
+        "has_local",
+        "has_remote",
+        "has_suggestions",
+        "local_count_bucket",
+        "participant_count_bucket",
+        "remote_count_bucket",
+        "result",
+        "review_reason",
+        "suggestion_count_bucket",
+        "surface",
+        "typed_count_bucket",
+        "unknown_count_bucket",
+    ]
+
+    private static let speakerReviewSettingsActionProperties: Set<String> = [
+        "action",
+        "pending_count_bucket",
+        "result",
+        "review_reason",
+        "surface",
+    ]
+
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
         "app_launched": .init(
             name: "app_launched",
@@ -735,6 +761,22 @@ struct AnalyticsEventPolicy: Equatable {
                 "session_stage",
                 "trigger",
             ]
+        ),
+        "speaker_review_presented": .init(
+            name: "speaker_review_presented",
+            allowedProperties: speakerReviewLifecycleProperties
+        ),
+        "speaker_review_completed": .init(
+            name: "speaker_review_completed",
+            allowedProperties: speakerReviewLifecycleProperties
+        ),
+        "speaker_review_dismissed": .init(
+            name: "speaker_review_dismissed",
+            allowedProperties: speakerReviewLifecycleProperties
+        ),
+        "speaker_review_settings_action": .init(
+            name: "speaker_review_settings_action",
+            allowedProperties: speakerReviewSettingsActionProperties
         ),
         "meeting_transcript_skipped": .init(
             name: "meeting_transcript_skipped",

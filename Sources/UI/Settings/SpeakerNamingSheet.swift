@@ -51,6 +51,7 @@ final class SpeakerNamingSheet {
         controller.showWindow(nil)
         controller.window?.center()
         controller.window?.makeKeyAndOrderFront(nil)
+        SpeakerReviewAnalytics.trackPresented(request: request)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -96,7 +97,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
             self?.finish(with: updates)
         }
         contentView.onCancel = { [weak self] in
-            self?.finish(with: [])
+            self?.dismiss(result: .reviewLater)
         }
     }
 
@@ -105,6 +106,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         if !didComplete {
+            SpeakerReviewAnalytics.trackDismissed(request: request, result: .windowClosed)
             request.onComplete([])
             didComplete = true
         }
@@ -120,7 +122,16 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
     private func finish(with updates: [SpeakerNameUpdate]) {
         guard !didComplete else { return }
         didComplete = true
+        SpeakerReviewAnalytics.trackCompleted(request: request, updates: updates)
         request.onComplete(updates)
+        close()
+    }
+
+    private func dismiss(result: SpeakerReviewAnalytics.Result) {
+        guard !didComplete else { return }
+        didComplete = true
+        SpeakerReviewAnalytics.trackDismissed(request: request, result: result)
+        request.onComplete([])
         close()
     }
 }

@@ -787,10 +787,28 @@ struct TranscriptedSettingsView: View {
 
     private func openHomeSpeakerReview(actionName: String) {
         trackSettingsAction(actionName, page: navigation.selectedPage)
+        SpeakerReviewAnalytics.trackSettingsAction(
+            action: speakerReviewSettingsAction(for: actionName),
+            surface: .home,
+            pendingCount: speakerPeopleModel.pendingVoiceGroups.count
+        )
         speakerPeopleModel.refresh()
         speakerPeopleModel.searchText = ""
         navigation.selectedPage = .people
         requestSpeakerInboxFocus()
+    }
+
+    private func speakerReviewSettingsAction(for actionName: String) -> SpeakerReviewAnalytics.SettingsAction {
+        switch actionName {
+        case "open_needs_attention_speakers":
+            return .needsAttention
+        case "open_speaker_review_before_retranscribe":
+            return .retranscribeBlocked
+        case "review_meeting_speakers_row":
+            return .rowMenu
+        default:
+            return .unknown
+        }
     }
 
     private func requestSpeakerInboxFocus() {

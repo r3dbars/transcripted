@@ -121,6 +121,10 @@ func testAnalyticsEventPolicy() {
             "first_dictation_saved",
             "format_ready",
             "from_status",
+            "collapsed_local_to_you",
+            "has_local",
+            "has_remote",
+            "has_suggestions",
             "has_target",
             "hfp_suspected",
             "import_stage",
@@ -171,6 +175,7 @@ func testAnalyticsEventPolicy() {
             "required",
             "reason_kind",
             "result",
+            "review_reason",
             "route_ready",
             "route_shape",
             "sample_flow_started",
@@ -1037,6 +1042,75 @@ func testAnalyticsEventPolicy() {
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("failure_kind"), true, "speaker finalization failures should allow normalized failure kinds")
         assertEqual(meetingSkipped?.allowedProperties.contains("failure_kind"), true, "skipped meeting transcripts should allow normalized reasons")
         assertNil(unknown, "unreviewed analytics events should not be allowed")
+    }
+
+    runSuite("AnalyticsEventPolicy keeps speaker review analytics private and bucketed") {
+        let presented = AnalyticsEventPolicy.policy(forEvent: "speaker_review_presented")
+        let completed = AnalyticsEventPolicy.policy(forEvent: "speaker_review_completed")
+        let dismissed = AnalyticsEventPolicy.policy(forEvent: "speaker_review_dismissed")
+        let settingsAction = AnalyticsEventPolicy.policy(forEvent: "speaker_review_settings_action")
+
+        let lifecycleProperties: Set<String> = [
+            "collapsed_local_to_you",
+            "confirmed_count_bucket",
+            "discarded_count_bucket",
+            "has_local",
+            "has_remote",
+            "has_suggestions",
+            "local_count_bucket",
+            "participant_count_bucket",
+            "remote_count_bucket",
+            "result",
+            "review_reason",
+            "suggestion_count_bucket",
+            "surface",
+            "typed_count_bucket",
+            "unknown_count_bucket",
+        ]
+        assertEqual(presented?.allowedProperties ?? Set<String>(), lifecycleProperties, "presented review events should carry only coarse review shape")
+        assertEqual(completed?.allowedProperties ?? Set<String>(), lifecycleProperties, "completed review events should keep the same coarse shape")
+        assertEqual(dismissed?.allowedProperties ?? Set<String>(), lifecycleProperties, "dismissed review events should keep the same coarse shape")
+        assertEqual(
+            settingsAction?.allowedProperties ?? Set<String>(),
+            ["action", "pending_count_bucket", "result", "review_reason", "surface"],
+            "settings review actions should not include private labels or file context"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "collapsed_local_to_you": "true",
+                "confirmed_count_bucket": "1",
+                "discarded_count_bucket": "0",
+                "has_local": "true",
+                "has_remote": "true",
+                "has_suggestions": "true",
+                "local_count_bucket": "1",
+                "participant_count_bucket": "2_3",
+                "remote_count_bucket": "1",
+                "result": "saved",
+                "review_reason": "mixed",
+                "suggestion_count_bucket": "1",
+                "surface": "review_sheet",
+                "typed_count_bucket": "2_3",
+                "unknown_count_bucket": "1",
+                "audio_path": "/Users/redbars/private.wav",
+                "meeting_title": "Customer call",
+                "speaker_name": "Alice",
+                "transcript_text": "private words",
+            ],
+            allowedKeys: completed?.allowedProperties ?? Set<String>()
+        )
+        assertEqual(sanitized["collapsed_local_to_you"], "true", "collapsed local state should survive as a boolean")
+        assertEqual(sanitized["confirmed_count_bucket"], "1", "confirmed counts should stay bucketed")
+        assertEqual(sanitized["local_count_bucket"], "1", "local counts should stay bucketed")
+        assertEqual(sanitized["participant_count_bucket"], "2_3", "participant counts should stay bucketed")
+        assertEqual(sanitized["review_reason"], "mixed", "review reason should be a stable enum")
+        assertEqual(sanitized["surface"], "review_sheet", "surface enum should survive")
+        assertEqual(sanitized["typed_count_bucket"], "2_3", "typed counts should stay bucketed")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["transcript_text"], "transcript text must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy meeting_recording_stopped system_stream_present key is not silently filtered") {

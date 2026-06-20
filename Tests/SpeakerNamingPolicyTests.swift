@@ -193,6 +193,97 @@ func testSpeakerNamingPolicy() {
             assertTrue(false, "changing a suggested match should emit .corrected")
         }
     }
+
+    runSuite("SpeakerReviewAnalytics derives only privacy-safe review lifecycle properties") {
+        let localEntry = makeSpeakerNamingPolicyEntry(
+            channel: .mic,
+            currentName: nil,
+            needsNaming: true
+        )
+        let remoteEntry = makeSpeakerNamingPolicyEntry(
+            channel: .system,
+            currentName: "Alex",
+            needsConfirmation: true
+        )
+        let request = SpeakerNamingRequest(
+            speakers: [localEntry, remoteEntry],
+            transcriptURL: URL(fileURLWithPath: "/tmp/private-meeting.md"),
+            transcriptId: UUID(),
+            systemAudioURL: URL(fileURLWithPath: "/tmp/system.wav"),
+            micAudioURL: URL(fileURLWithPath: "/tmp/mic.wav"),
+            onComplete: { _ in }
+        )
+        let updates = [
+            SpeakerNameUpdate(
+                persistentSpeakerId: localEntry.id,
+                diarizerSpeakerId: localEntry.diarizerSpeakerId,
+                channel: .mic,
+                newName: "You",
+                previousName: localEntry.currentName,
+                action: .collapsedToMe
+            ),
+            SpeakerNameUpdate(
+                persistentSpeakerId: remoteEntry.id,
+                diarizerSpeakerId: remoteEntry.diarizerSpeakerId,
+                channel: .system,
+                newName: "Alex",
+                previousName: remoteEntry.currentName,
+                action: .confirmed
+            ),
+            SpeakerNameUpdate(
+                persistentSpeakerId: UUID(),
+                diarizerSpeakerId: "discarded",
+                channel: .system,
+                newName: "",
+                previousName: nil,
+                action: .discardedFromDatabase
+            ),
+        ]
+
+        let properties = SpeakerReviewAnalytics.lifecycleProperties(
+            request: request,
+            surface: .sheet,
+            result: .saved,
+            updates: updates
+        )
+
+        assertEqual(properties["participant_count_bucket"], "2_3", "review lifecycle should bucket total participants")
+        assertEqual(properties["local_count_bucket"], "1", "review lifecycle should bucket local voices")
+        assertEqual(properties["remote_count_bucket"], "1", "review lifecycle should bucket remote voices")
+        assertEqual(properties["suggestion_count_bucket"], "1", "review lifecycle should bucket suggestions")
+        assertEqual(properties["unknown_count_bucket"], "1", "review lifecycle should bucket unknown labels")
+        assertEqual(properties["has_local"], "true", "local inventory should be boolean")
+        assertEqual(properties["has_remote"], "true", "remote inventory should be boolean")
+        assertEqual(properties["has_suggestions"], "true", "suggestion inventory should be boolean")
+        assertEqual(properties["collapsed_local_to_you"], "true", "local collapse should be boolean")
+        assertEqual(properties["confirmed_count_bucket"], "1", "confirmed rows should be bucketed")
+        assertEqual(properties["discarded_count_bucket"], "1", "discarded rows should be bucketed")
+        assertEqual(properties["typed_count_bucket"], "0", "typed rows should be bucketed")
+        assertEqual(properties["review_reason"], "mixed", "mixed review work should stay enum-only")
+        assertEqual(properties["result"], "saved", "review outcome should stay enum-only")
+        assertEqual(properties["surface"], "review_sheet", "review surface should stay enum-only")
+        assertFalse(properties.keys.contains { $0.contains("speaker") }, "property keys should avoid sanitizer-drop speaker fragments")
+        assertFalse(properties.keys.contains { $0.contains("name") }, "property keys should avoid sanitizer-drop name fragments")
+        assertFalse(properties.keys.contains { $0.contains("title") }, "property keys should avoid sanitizer-drop title fragments")
+        assertFalse(properties.keys.contains { $0.contains("transcript") }, "property keys should avoid sanitizer-drop transcript fragments")
+        assertFalse(properties.keys.contains { $0.contains("path") }, "property keys should avoid sanitizer-drop path fragments")
+    }
+
+    runSuite("SpeakerReviewAnalytics keeps settings actions separate from review lifecycle") {
+        let properties = SpeakerReviewAnalytics.settingsActionProperties(
+            action: .rowMenu,
+            surface: .home,
+            pendingCount: 4
+        )
+
+        assertEqual(properties["action"], "row_menu", "settings action should stay enum-only")
+        assertEqual(properties["pending_count_bucket"], "4_9", "pending count should be bucketed")
+        assertEqual(properties["result"], "opened", "settings action result should stay enum-only")
+        assertEqual(properties["review_reason"], "settings_queue", "settings action reason should stay enum-only")
+        assertEqual(properties["surface"], "home", "settings action surface should stay enum-only")
+        assertFalse(properties.keys.contains { $0.contains("speaker") }, "settings action keys should avoid sanitizer-drop speaker fragments")
+        assertFalse(properties.keys.contains { $0.contains("name") }, "settings action keys should avoid sanitizer-drop name fragments")
+    }
 }
 
 private func makeSpeakerNamingPolicyEntry(
