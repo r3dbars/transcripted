@@ -42,6 +42,7 @@ Operational scripts query aggregate counts only:
 
 - `scripts/ops/health-probe.sh posthog`
 - `scripts/ops/posthog-activation-funnel.py`
+- `scripts/ops/posthog-product-dashboard-summary.py`
 - `scripts/ops/release-health-card.py`
 - `scripts/ops/generate-nightly-digest.py`
 - `scripts/ops/nightly-security-check.py`
@@ -231,6 +232,15 @@ save/open a useful artifact, connect an agent, recover from failure, or return?
 - dictation completed devices and meeting transcript saved devices.
 - failure-rate tiles for dictation start, dictation no-speech, meeting start,
   meeting transcript failure, update failure.
+
+`scripts/ops/posthog-product-dashboard-summary.py` is the deterministic
+dashboard-to-product-task loop. It reads aggregate PostHog signal for this
+dashboard plus Activation, Reliability, Feature Adoption, and Release Health,
+then outputs the biggest activation leak, biggest reliability leak, strongest
+adoption signal, under-discovered feature, release regression watch, and top
+three PR/task candidates. Fixture mode uses
+`Tests/Fixtures/posthog-product-dashboard-summary.json` so CI can verify the
+ranking logic without credentials.
 
 ### Activation Funnel
 

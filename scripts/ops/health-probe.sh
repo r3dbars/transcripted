@@ -173,6 +173,13 @@ probe_posthog() {
   fi
   echo "PostHog (last 7d): devices=$devices, workflow_events=$events, onboarding_events=$onboarding, abandonment_events=$abandonment, first_value_events=$first_value"
   echo "PostHog daily active devices: $daily_devices"
+
+  if [[ -e "$REPO_ROOT/scripts/ops/posthog-product-dashboard-summary.py" ]]; then
+    echo "PostHog product task recommendations:"
+    if ! python3 "$REPO_ROOT/scripts/ops/posthog-product-dashboard-summary.py" --days 7 --summary-only; then
+      echo "PostHog product task recommendations: unavailable; core aggregate health probe succeeded"
+    fi
+  fi
 }
 
 probe_cloudflare() {
