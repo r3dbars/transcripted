@@ -193,6 +193,7 @@ func testRepoCommandContract() {
             "activation_artifact_action_clicked",
             "activation_agent_prompt_action_clicked",
             "activation_agent_setup_cta_clicked",
+            "agent_capture_query_observed",
             "activation_return_proxy_observed"
         ] {
             assertTrue(

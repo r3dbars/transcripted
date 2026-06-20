@@ -43,6 +43,7 @@ Operational scripts query aggregate counts only:
 - `scripts/ops/health-probe.sh posthog`
 - `scripts/ops/posthog-dashboard-queries.py`
 - `scripts/ops/posthog-activation-funnel.py`
+- `scripts/ops/retention-cohort-report.py`
 - `scripts/ops/posthog-product-context-pack.py`
 - `scripts/ops/posthog-product-dashboard-summary.py`
 - `scripts/ops/release-health-card.py`
@@ -89,6 +90,7 @@ Operational scripts query aggregate counts only:
 | `activation_first_artifact_saved` | `artifact_kind`, `duration_bucket`, `surface`, `trigger`, `word_count_bucket` |
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
+| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
 | `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
 

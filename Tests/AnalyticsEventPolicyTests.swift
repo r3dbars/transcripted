@@ -159,6 +159,7 @@ func testAnalyticsEventPolicy() {
             "prompt_reason",
             "provider",
             "proxy_kind",
+            "query_kind",
             "quiet_mic_recovered",
             "quiet_mic_unrecovered",
             "realtime_agc",
@@ -288,6 +289,7 @@ func testAnalyticsEventPolicy() {
         let firstArtifact = AnalyticsEventPolicy.policy(forEvent: "activation_first_artifact_saved")
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
+        let agentQuery = AnalyticsEventPolicy.policy(forEvent: "agent_capture_query_observed")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
@@ -295,6 +297,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
+        assertEqual(agentQuery?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "surface"], "agent query observation should stay enum-only")
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
             .union(artifact?.allowedProperties ?? Set<String>())
