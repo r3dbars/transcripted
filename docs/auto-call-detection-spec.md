@@ -1,6 +1,6 @@
 # Spec: ad-hoc call detection via mic activity
 
-- **Status:** Phase 1 complete + live-verified on branch `feat/auto-call-detection` (Phase 2 deferred). See "Phase 1 — results" below.
+- **Status:** Phase 1 complete + live-verified (Phase 2 UDP hardening deferred). Phase 3 (aggressiveness + camera-on detection, 2026-06-20) on branch `feat/adhoc-call-aggressive-and-camera` — see "Phase 3" at the end.
 - **Created:** 2026-06-13
 - **Product decisions (2026-06-14):** auto-detection ships **default ON** behind a Settings
   toggle; trigger scope is **browsers + known conferencing apps only** (unknown mic users map
@@ -336,3 +336,90 @@ strings -n 6 "/Applications/Notion.app/Contents/Resources/app.asar.unpacked/node
 # Neither hardcodes a meeting host (detection is host-agnostic): both return 0
 strings -n 5 /Applications/Notion.app/Contents/Resources/app.asar | grep -icE 'meet\.google\.com|zoom\.us'
 ```
+
+## Phase 3 — "spontaneous calls feel invisible" diagnosis + aggressiveness + camera (2026-06-20)
+
+Justin's lived experience: spontaneous browser calls (a Meet in a tab) rarely
+surface a prompt, even though Phase 1 was live-verified. A deep trace settled the
+question with evidence.
+
+### Diagnosis (what was actually wrong)
+
+The wiring and the detector policy are **correct and tested** — ruled out, with
+evidence: the monitor is constructed and `start()`ed (default ON) with `onChange`
+assigned before `start()` (`TranscriptedApp.swift`); the browser provider is
+eligible (`micInputCandidates` does **not** gate on `supportsRuntimeOnlyPrompt`,
+and `com.google.Chrome.helper` → `.googleMeet`); own-capture / enabled gates are
+false when idle. The path was live-verified firing on 2026-06-14.
+
+The real culprits, ranked:
+
+1. **Untested CoreAudio delivery layer (primary).** The only low-latency trigger
+   was a single `kAudioDevicePropertyDeviceIsRunningSomewhere` listener on the
+   **default input device**. That edge fires only on a 0→1 transition of the
+   device's *aggregate* running state, so a call that starts while the device is
+   already running (another app held the mic, our own warmup touched it) or on a
+   **non-default** device never trips it — and detection collapses onto the **60s
+   backstop poll**, which a short spontaneous call slips through entirely. Nothing
+   in CI exercised `start()→edge→emit`, so this stayed invisible to the gate.
+2. **Discoverability (secondary).** Onboarding's calendar stage framed detection
+   as calendar-only ("Want meeting reminders?", "look at your calendar"); nothing
+   told users spontaneous browser calls are auto-detected. The only place that
+   said so was a default-on Settings toggle users never visit. A real-but-
+   occasionally-late prompt that users don't expect reads as "the feature doesn't
+   exist."
+3. **No "is this really a call?" confirmation.** Phase 2 (UDP hardening) was
+   deferred, so the path had no min-duration gate and had to stay conservative to
+   avoid false prompts on brief browser mic use.
+
+### What changed (more aggressive, without prompting on every blip)
+
+- **Backstop poll 60s → ~5s** (`MicActivityMonitor.pollInterval`). The poll reads
+  process objects directly (device-agnostic), so it catches the already-running /
+  non-default-device cases the edge misses, within seconds instead of a minute.
+  The reads are cheap, so this is the high-value, low-risk reliability fix.
+- **Sustain gate** (`SustainedActivityConfirmer`, shared with the camera monitor):
+  a bundle must hold the mic continuously for `sustainInterval` (~3s) before it is
+  emitted, with a scheduled re-scan at the confirmation deadline so a genuine call
+  still surfaces within a couple of seconds. This filters momentary mic access
+  (voice search, permission probes) — the lightweight on-device alternative to the
+  deferred UDP layer — and is what lets us poll aggressively safely.
+- **Discoverability:** onboarding's calendar stage now adds one additive line that
+  spontaneous calls are detected automatically (kept minimal to avoid colliding
+  with the in-flight calendar pre-arm work, which is doc-only today); the Settings
+  "Auto-detect calls" info copy now mentions the camera signal too.
+
+### Camera-on detection (net-new complementary signal)
+
+**API (researched, not guessed):** CoreMediaIO exposes **no** public per-process
+camera API (no CMIO analog of `kAudioHardwarePropertyProcessObjectList`). The one
+public, on-device, metadata-only, **TCC-free** signal is
+`kCMIODevicePropertyDeviceIsRunningSomewhere` ('gone') per CMIO device — the exact
+camera analog of the mic device boolean. Reading `kCMIOHardwarePropertyDevices` +
+that boolean enumerates and watches cameras **without opening a stream**, so it
+needs **no camera permission and no `NSCameraUsageDescription` /
+`com.apple.security.device.camera` entitlement** (verified: the built app's
+entitlements gained nothing; confirmed against OverSight/Guard, which detect
+camera-on exactly this way and read no frames). **Needs-extra-permission: NO.**
+
+`CameraActivityMonitor` mirrors `MicActivityMonitor` (one serial CMIO queue,
+debounce, ~5s poll, sustain) and emits a single boolean. Because the boolean has
+no attribution, the detector attributes it via
+`MeetingPromptProvider.cameraCallProvider(forFrontmostBundleID:)` — a frontmost
+browser → `.googleMeet`, a frontmost native conferencing app → that provider,
+anything else (Photo Booth, QuickTime) → no prompt. That frontmost-call-app
+requirement *is* the non-call sanity check. The camera-only case (camera on, mic
+muted — a camera-first Meet join) uses the `.cameraInput` reason.
+
+**De-dupe:** mic and camera signals merge in `callSignals` keyed by provider and
+produce candidate id `mic:<provider>`, so a normal video call (mic **and** camera)
+raises exactly one prompt, with the mic signal winning the reason. The camera path
+reuses the `.runtimeApp` source and is gated by the same `isOwnCaptureActive` /
+`AutoCallDetectionPreferences` gates as the mic path.
+
+**Coverage:** `SustainedActivityConfirmerTests`, `CameraActivityMonitorTests`, and
+new `MeetingPromptHeuristicsTests` / `SyntheticMeetingPromptTests` /
+`MeetingPromptDetectorTests` cases (camera attribution, Photo-Booth quiet,
+mic+camera one-prompt de-dupe, own-capture/disabled gates). Verified green:
+`build-deps.sh --force` + `build.sh --no-open` + `run-tests.sh` (10,200) +
+`run-integration-smoke.sh`.

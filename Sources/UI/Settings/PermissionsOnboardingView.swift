@@ -289,7 +289,7 @@ struct PermissionsOnboardingView: View {
             SplitStage {
                 Kicker("Calendar")
                 Headline(primary: "Want meeting\nreminders?", size: 42, alignment: .leading)
-                BodyCopy("Transcripted can look at your calendar and offer a quiet prompt when a call is about to start.")
+                BodyCopy("Transcripted can look at your calendar and offer a quiet prompt when a call is about to start. Spontaneous calls — like a Google Meet with no invite — are detected automatically too, and you can turn that off anytime in Settings.")
                 ToggleCard(
                     title: "Meeting reminders",
                     detail: "Use read-only calendar access to notice upcoming calls.",

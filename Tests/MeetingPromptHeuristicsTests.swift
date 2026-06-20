@@ -375,4 +375,32 @@ func testMeetingPromptHeuristics() {
             "a mic-in-use candidate should outrank a frontmost-app candidate"
         )
     }
+
+    runSuite("MeetingPromptProvider.cameraCallProvider — attributes a camera-on signal via the frontmost call app") {
+        assertEqual(
+            MeetingPromptProvider.cameraCallProvider(forFrontmostBundleID: "com.google.Chrome"),
+            .googleMeet,
+            "a frontmost browser with the camera on maps to the generic browser call"
+        )
+        assertEqual(
+            MeetingPromptProvider.cameraCallProvider(forFrontmostBundleID: "us.zoom.xos"),
+            .zoom,
+            "a frontmost native conferencing app maps to its own provider"
+        )
+        assertNil(
+            MeetingPromptProvider.cameraCallProvider(forFrontmostBundleID: "com.apple.PhotoBooth"),
+            "the camera on while Photo Booth is frontmost is a selfie, not a call — no provider, no prompt"
+        )
+        assertNil(
+            MeetingPromptProvider.cameraCallProvider(forFrontmostBundleID: nil),
+            "the camera on with no frontmost app cannot be attributed, so it stays quiet"
+        )
+    }
+
+    runSuite("MeetingPromptReason.isAdHocCallSignal — mic and camera are ad-hoc signals; calendar/runtime are not") {
+        assertTrue(MeetingPromptReason.micInput.isAdHocCallSignal, "mic input is an ad-hoc call signal")
+        assertTrue(MeetingPromptReason.cameraInput.isAdHocCallSignal, "camera input is an ad-hoc call signal")
+        assertFalse(MeetingPromptReason.runtimeOnly.isAdHocCallSignal, "runtime-app is not an ad-hoc mic/camera signal")
+        assertFalse(MeetingPromptReason.calendarNearby.isAdHocCallSignal, "calendar is not an ad-hoc mic/camera signal")
+    }
 }

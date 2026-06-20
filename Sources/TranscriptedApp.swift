@@ -85,6 +85,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     lazy var meetingPromptDetector = MeetingPromptDetector()
     @available(macOS 14.0, *)
     lazy var micActivityMonitor = MicActivityMonitor()
+    @available(macOS 14.0, *)
+    lazy var cameraActivityMonitor = CameraActivityMonitor()
     private var workspaceObservers: [NSObjectProtocol] = []
     private var micPreferenceObserver: NSObjectProtocol?
     private var terminationCleanupStarted = false
@@ -240,6 +242,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             micActivityMonitor.onChange = { [weak self] micUsers in
                 self?.meetingPromptDetector.updateMicInputUsers(micUsers)
             }
+            // Camera-on is a second, complementary call sensor (e.g. a camera-on,
+            // mic-muted Meet join). It feeds the same prompt; the detector de-dupes
+            // it against the mic signal so a normal video call prompts once.
+            cameraActivityMonitor.onChange = { [weak self] cameraInUse in
+                self?.meetingPromptDetector.updateCameraInUse(cameraInUse)
+            }
             meetingPromptDetector.start()
             applyAutoCallDetectionPreference()
             observeAutoCallDetectionPreference()
@@ -329,6 +337,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if #available(macOS 14.0, *) {
             meetingPromptDetector.stop()
             micActivityMonitor.stop()
+            cameraActivityMonitor.stop()
         }
         appState.shutdown()
         singleInstanceGuard.release()
@@ -852,10 +861,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private func applyAutoCallDetectionPreference() {
         if AutoCallDetectionPreferences.isEnabled() {
             micActivityMonitor.start()
+            cameraActivityMonitor.start()
         } else {
             micActivityMonitor.stop()
-            // Drop any in-flight mic candidates so a stale call can't prompt.
+            cameraActivityMonitor.stop()
+            // Drop any in-flight mic/camera candidates so a stale call can't prompt.
             meetingPromptDetector.updateMicInputUsers([])
+            meetingPromptDetector.updateCameraInUse(false)
         }
     }
 
