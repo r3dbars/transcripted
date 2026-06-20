@@ -694,7 +694,7 @@ struct HomeArtifactStatus: Equatable {
 
     static func dictation(_ entry: SavedDictationEntry) -> HomeArtifactStatus? {
         switch entry.delivery {
-        case .pasted, .copied:
+        case .pasted, .copied, .savedWithoutPaste:
             return HomeArtifactStatus(text: "Saved to Markdown", tone: .ready)
         case .failed:
             return HomeArtifactStatus(text: "Saved to Markdown only", tone: .warning)

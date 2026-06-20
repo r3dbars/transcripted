@@ -13,12 +13,16 @@ enum DictationDelivery: String, Sendable {
     case pasted
     case copied
     case failed
+    /// The session was finalized and saved without pasting into the focused app
+    /// — used when the 5-minute session cap recovers a walked-away dictation.
+    case savedWithoutPaste = "saved_without_paste"
 
     var summaryText: String {
         switch self {
         case .pasted: return "Pasted"
         case .copied: return "Copied to clipboard"
         case .failed: return "Saved only"
+        case .savedWithoutPaste: return "Saved only"
         }
     }
 }

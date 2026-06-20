@@ -14,6 +14,7 @@ class DictationSessionController: ObservableObject {
         case overlayButton = "overlay_button"
         case menu = "menu"
         case onboarding = "onboarding"
+        case sessionCap = "session_cap"
         case unknown = "unknown"
     }
 
@@ -710,8 +711,14 @@ class DictationSessionController: ObservableObject {
         isDictating = false
     }
 
-    /// Stop dictation and paste — selected local STT batch transcription
-    func stopDictationAndPaste(trigger: DictationTrigger = .unknown) {
+    /// Stop dictation and paste — selected local STT batch transcription.
+    ///
+    /// When `autoPaste` is `false` the transcript is still transcribed and saved
+    /// to the daily Markdown file, but it is not pasted into the focused app and
+    /// auto-send is suppressed. The 5-minute session cap uses this to recover a
+    /// walked-away dictation instead of discarding it, without injecting text
+    /// into whatever app now happens to hold focus.
+    func stopDictationAndPaste(trigger: DictationTrigger = .unknown, autoPaste: Bool = true) {
         guard let (appState, overlayController) = readyState() else { return }
         let stopRequestedAt = CFAbsoluteTimeGetCurrent()
         DiagnosticsTrail.record(
@@ -932,6 +939,22 @@ class DictationSessionController: ObservableObject {
             if (cleanupResult?.removedCount ?? 0) > 0 {
                 appState.logger.log("DICTATION | filler cleanup removed \(cleanupResult?.removedCount ?? 0) items")
             }
+
+            if !autoPaste {
+                // Session cap reached (the user walked away mid-dictation).
+                // Recover the transcript by saving it to the daily Markdown file,
+                // but do NOT paste it into whatever app now holds focus and do
+                // NOT auto-send — the cap exists to rescue abandoned sessions,
+                // not to inject text into an unattended app.
+                self.finalizeWithoutPaste(
+                    text: text,
+                    appState: appState,
+                    overlayController: overlayController,
+                    sessionID: taskSessionID
+                )
+                return
+            }
+
             appState.logger.log("DICTATION | pasting \(text.count) chars")
             lastCompletedText = text
             stopTiming.pasteStartedAt = CFAbsoluteTimeGetCurrent()
@@ -1063,6 +1086,76 @@ class DictationSessionController: ObservableObject {
             }
             appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "completed")
         }
+    }
+
+    /// Finalize a dictation by saving it to the daily Markdown file without
+    /// pasting into the focused app or auto-sending. Used by the 5-minute
+    /// session cap so a walked-away session is recovered instead of discarded.
+    private func finalizeWithoutPaste(
+        text: String,
+        appState: TranscriptedAppState,
+        overlayController: FloatingOverlayController,
+        sessionID: UUID
+    ) {
+        lastCompletedText = text
+        let saveFailureMessage = persistDictationTranscript(text: text, delivery: .savedWithoutPaste)
+        let wordCount = text.split(whereSeparator: \.isWhitespace).count
+        let durationSeconds = CFAbsoluteTimeGetCurrent() - sessionStartTime
+        appState.logger.log("DICTATION | session cap reached, saved \(text.count) chars without pasting")
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: saveFailureMessage == nil ? .info : .warning,
+            engine: "dictation",
+            event: "dictation_session_cap_saved",
+            message: saveFailureMessage == nil
+                ? "Dictation auto-saved at session cap without pasting"
+                : "Dictation session cap save failed",
+            context: dictationContext(
+                extra: [
+                    "dictation_session_id": sessionID.uuidString,
+                    "trigger": currentDictationTrigger.rawValue,
+                    "chars": "\(text.count)",
+                    "words": "\(wordCount)",
+                    "duration_ms": "\(Int(durationSeconds * 1000))",
+                    "save_failed": "\(saveFailureMessage != nil)"
+                ]
+            )
+        )
+        AnalyticsReporter.track(
+            "dictation_completed",
+            properties: dictationAnalyticsProperties(
+                extra: [
+                    "delivery": DictationDelivery.savedWithoutPaste.rawValue,
+                    "auto_send": "disabled",
+                    "duration_bucket": AnalyticsReporter.durationBucket(seconds: durationSeconds),
+                    "trigger": currentDictationTrigger.rawValue,
+                    "word_count_bucket": AnalyticsReporter.wordCountBucket(wordCount),
+                ]
+            )
+        )
+        if let saveFailureMessage {
+            overlayController.showError(saveFailureMessage)
+        } else {
+            overlayController.showSuccessAndDismiss()
+            ActivationTelemetry.trackDictationArtifactSaved(
+                delivery: DictationDelivery.savedWithoutPaste.rawValue,
+                durationBucket: AnalyticsReporter.durationBucket(seconds: durationSeconds),
+                trigger: currentDictationTrigger.rawValue,
+                wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)
+            )
+            ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
+                artifactKind: .dictation,
+                surface: .dictationSave,
+                trigger: currentDictationTrigger.rawValue,
+                wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount),
+                durationBucket: AnalyticsReporter.durationBucket(seconds: durationSeconds)
+            )
+        }
+        isDictating = false
+        appState.runtimeDiagnostics.clearSession(
+            kind: "dictation",
+            outcome: saveFailureMessage == nil ? "session_cap_saved" : "session_cap_save_failed"
+        )
     }
 
     /// Cancel dictation without pasting
@@ -1339,10 +1432,13 @@ class DictationSessionController: ObservableObject {
             }
             guard !Task.isCancelled, let self = self else { return }
             if self.isDictating {
-                self.appState?.logger.log("DICTATION | auto-cancelled after timeout")
-                EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_timeout",
-                    message: "Dictation auto-cancelled after 5 minutes")
-                self.cancelDictation()
+                self.appState?.logger.log("DICTATION | session cap reached, finalizing without paste")
+                EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_timeout",
+                    message: "Dictation reached the 5-minute cap; saving without paste")
+                // Recover the work instead of discarding it: finalize and save,
+                // but suppress auto-paste because the cap fires on walked-away
+                // sessions where the focused app may have changed.
+                self.stopDictationAndPaste(trigger: .sessionCap, autoPaste: false)
             }
         }
     }
