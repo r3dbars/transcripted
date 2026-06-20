@@ -43,6 +43,18 @@ Transcripted copies the bundled `transcripted-mcp` helper into:
 ~/Library/Application Support/Transcripted/mcp/transcripted-mcp
 ```
 
+When anonymous usage statistics are enabled and the app has a valid PostHog
+host/key, Transcripted also writes the helper's local observability config:
+
+```text
+~/Library/Application Support/Transcripted/mcp-observability.plist
+```
+
+If anonymous usage statistics are turned off, or the app has no valid HTTPS
+PostHog config, that helper config is removed and the MCP helper sends no
+analytics. The helper re-checks config before each event, so opt-out takes
+effect without reinstalling the agent connection.
+
 Then it safely merges this entry into Claude Desktop's config:
 
 ```text
@@ -73,6 +85,11 @@ Current `transcripted-mcp` capabilities:
 
 These tools are read-only, but they are not redacted. `read_meeting` and
 `read_dictation` can return local transcript text to the agent you connected.
+Successful MCP list, recent, read, search, speaker lookup, and recap calls emit
+only the coarse `agent_capture_query_observed` event when anonymous usage
+statistics are enabled. Direct Markdown folder reads by agents that skip MCP are
+not observable from Transcripted without risky file/prompt monitoring, so
+analytics dashboards should label those as unknown, not zero.
 
 ## Local Coding Agents
 
@@ -99,6 +116,11 @@ connected, otherwise read the saved Markdown folders:
 ~/Library/Application Support/Transcripted/captures/meetings
 ~/Library/Application Support/Transcripted/captures/dictations
 ```
+
+The fallback saved-folder path is intentionally untracked beyond setup and
+prompt-copy intent. A safe future proof event should come from an explicit local
+tool or user action with enum/bucket fields only; do not infer direct file reads
+by watching transcript files, prompts, titles, paths, or agent output.
 
 ## Live Meeting Sidecar
 

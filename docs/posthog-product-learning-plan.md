@@ -1,6 +1,6 @@
 # Transcripted PostHog Product-Learning Plan
 
-Last audited: 2026-06-19 against `origin/main` at `4ad53b9b`.
+Last audited: 2026-06-20 against `origin/main` at `e8a30e99`.
 
 This is the product-learning map for opt-in PostHog analytics. It is meant to
 answer one question: are users reaching the loop that matters?
@@ -92,10 +92,9 @@ Operational scripts query aggregate counts only:
 | `activation_second_artifact_saved` | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
-| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
+| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
 | `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
-| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 
 ### Menu, Settings, Updates
 
@@ -185,20 +184,34 @@ aggregate reliability sizing and should not be expanded to raw device names.
 - First saved artifact across dictation and meeting with coarse artifact kind,
   trigger, duration bucket, and word-count bucket.
 - Artifact open/reveal/preview actions and agent setup or prompt-copy intent.
+- Successful MCP list, recent, read, search, speaker lookup, and recap calls
+  through `agent_capture_query_observed`, when the installed helper has local
+  PostHog config and anonymous usage statistics are enabled.
 - Confident workflow abandonment for onboarding close, meeting-prompt dismissal
   or suppression, local-summary/model-prep block/cancel/fail, failed agent setup
   or artifact handoff, and failed-meeting retry dismissal/delete.
 - Return proxy when Home observes an older saved artifact.
 - Release health by app version and update lifecycle.
 
-## Biggest Blind Spots
+## Biggest Blind Spots And Runbook
 
-- `agent_capture_query_observed` does not exist yet, so PostHog cannot prove
-  that an agent actually answered from a saved Transcripted artifact.
 - General dictation saved-Markdown writes now have `dictation_artifact_saved`;
   keep `dictation_completed` as completion-volume context, not strict saved-artifact proof.
-- `agent_capture_query_observed` proves successful saved-capture reads/searches
-  through MCP, but it still cannot judge answer quality.
+- `agent_capture_query_observed` proves successful saved-capture queries through
+  MCP, but it still cannot judge answer quality or whether the answer was useful.
+- Direct saved-folder reads by Claude Code, Codex, Cursor, Obsidian, or another
+  agent are not safely observable from Transcripted. Do not watch files, prompts,
+  titles, paths, or agent output to infer those reads. Dashboard copy should say
+  "direct folder reads unknown" rather than treating zero MCP events as zero
+  agent use.
+- If live PostHog shows zero true agent-query devices, first verify the install
+  path before changing privacy posture:
+  1. The app installed `~/Library/Application Support/Transcripted/mcp/transcripted-mcp`.
+  2. The connected agent config points at that installed helper, not a source-build helper.
+  3. Anonymous usage statistics are enabled.
+  4. `~/Library/Application Support/Transcripted/mcp-observability.plist` exists
+     with `TranscriptedPostHogAPIKey` and an HTTPS `TranscriptedPostHogHost`.
+  5. The helper can resolve saved captures with `transcripted-mcp --self-test`.
 - General dictation saved-Markdown writes still rely on `dictation_completed`
   as a proxy, while onboarding dictation and meeting saves have stricter events.
 - Settings/action tracking is broad enough to show discovery, but it does not
@@ -219,8 +232,6 @@ Prefer a small number of lifecycle events over broad click tracking.
 
 | Event | When to fire | Properties |
 | --- | --- | --- |
-| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
-| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 | `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
@@ -304,7 +315,8 @@ agent prompt/setup -> `agent_capture_query_observed` -> next-day return ->
 second artifact saved.
 
 This is the north-star dashboard. Treat prompt-copy and setup clicks as intent,
-not proof.
+not proof. Treat `agent_capture_query_observed` as true MCP query proof only,
+not proof of direct Markdown folder reads or answer quality.
 
 ### Agent Product Context Pack
 
@@ -353,5 +365,7 @@ prove the full saved-artifact -> sourced-agent-answer -> return loop.
 ## Smallest Next Implementation
 
 Keep `agent_capture_query_observed` narrow in the read-only MCP/agent surface:
-only successful saved-capture reads/searches, enum values, and coarse buckets.
-That closes the biggest product-learning gap without inspecting content.
+only successful saved-capture list/recent/read/search/speaker/recap calls, enum
+values, and coarse buckets. The next safe direct-agent proposal is an explicit
+local handoff/proof action with enum-only fields, not file watching or content
+inspection.

@@ -71,7 +71,9 @@ export distinct IDs, person rows, transcript text, file paths, meeting titles,
 raw URLs, or raw payload rows. Treat the agent setup and prompt-copy rows as
 proxies only; they are not proof that an agent answered from a saved artifact.
 The true-use event is `agent_capture_query_observed`, emitted by successful MCP
-reads/searches with enum and bucket properties only.
+list, recent, read, search, speaker lookup, and recap calls with enum and
+bucket properties only. Direct saved-folder reads by agents that do not use MCP
+remain unknown; count setup and prompt-copy rows as proxy intent, not proof.
 
 For an AI-agent-ready product context pack, run:
 
