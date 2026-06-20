@@ -217,29 +217,11 @@ enum DictationTranscriptWriter {
     }
 
     private static func appendSection(_ section: String, to url: URL) throws {
-        guard let handle = FileHandle(forWritingAtPath: url.path) else {
-            throw NSError(
-                domain: "DictationTranscriptWriter",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Could not open dictation transcript for appending."]
-            )
-        }
-        defer { try? handle.close() }
-
-        let separator = fileEndsWithBlankLine(url) ? "" : "\n\n"
-        guard let data = (separator + section).data(using: .utf8) else { return }
-        handle.seekToEndOfFile()
-        handle.write(data)
-    }
-
-    private static func fileEndsWithBlankLine(_ url: URL) -> Bool {
-        guard let handle = FileHandle(forReadingAtPath: url.path) else { return false }
-        defer { try? handle.close() }
-
-        let fileLength = handle.seekToEndOfFile()
-        guard fileLength >= 2 else { return false }
-        handle.seek(toFileOffset: fileLength - 2)
-        return handle.readDataToEndOfFile() == Data([0x0A, 0x0A])
+        var data = try Data(contentsOf: url)
+        let separator = data.suffix(2) == Data([0x0A, 0x0A]) ? "" : "\n\n"
+        guard let appended = (separator + section).data(using: .utf8) else { return }
+        data.append(appended)
+        try data.write(to: url, options: .atomic)
     }
 
     private static func buildTitle(from text: String, createdAt: Date) -> String {

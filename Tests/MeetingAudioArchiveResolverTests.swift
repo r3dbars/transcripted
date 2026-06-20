@@ -2,6 +2,7 @@ import Foundation
 
 func testMeetingAudioArchiveResolver() {
     runSuite("MeetingAudioArchiveResolverTests") {
+        testResolverUsesCanonicalMeetingArtifactAudioDirectory()
         testResolverKeepsLiveMeetingAudioPairButUsesSinglePlaybackSource()
         testResolverFallsBackToMicrophonePlayback()
         testAttachmentPlaybackPrefersSystemForFailedMeetingAudio()
@@ -16,6 +17,16 @@ func testMeetingAudioArchiveResolver() {
         testRetranscriptionInputMapsLiveSplitStreams()
         testRetranscriptionInputMapsSingleRecording()
     }
+}
+
+private func testResolverUsesCanonicalMeetingArtifactAudioDirectory() {
+    let transcriptURL = URL(fileURLWithPath: "/tmp/Transcripted Meeting.md", isDirectory: false)
+
+    assertEqual(
+        MeetingAudioArchiveResolver.archiveDirectory(forTranscript: transcriptURL).path,
+        MeetingArtifactRenamer.audioDirectoryURL(for: transcriptURL).path,
+        "Retained-audio playback should use the same archive path convention as meeting renames"
+    )
 }
 
 private func testResolverKeepsLiveMeetingAudioPairButUsesSinglePlaybackSource() {
