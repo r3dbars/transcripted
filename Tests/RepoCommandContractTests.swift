@@ -473,6 +473,23 @@ func testRepoCommandContract() {
         }
     }
 
+    runSuite("Repo command contract - speaker eval refuses partial corpora by default") {
+        let runner = readRepoTextFile("scripts/run_speaker_eval.sh")
+
+        assertTrue(
+            runner.contains("ALLOW_PARTIAL_CORPUS")
+                && runner.contains("Partial corpus refused")
+                && runner.contains("missing_inputs+=")
+                && runner.contains("[ ! -s \"$audio\" ]")
+                && runner.contains("[ ! -s \"$rttm\" ]"),
+            "speaker eval should fail closed when audio or RTTM inputs are missing, with an explicit local-only partial-corpus override"
+        )
+        assertFalse(
+            runner.contains("missing audio $audio — skipping $m"),
+            "speaker eval should not silently skip missing audio and then score a partial corpus"
+        )
+    }
+
     runSuite("Repo command contract - release gate report composes QA, telemetry, release, and logs") {
         let report = readRepoTextFile("scripts/ops/release-gate-report.py")
         let docs = readRepoTextFile("docs/qa-test-bench.md")
