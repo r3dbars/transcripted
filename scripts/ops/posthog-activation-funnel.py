@@ -508,6 +508,17 @@ def render_report(data: dict[str, Any]) -> str:
     return_proxy = as_int(reach.get("return_proxy_devices"))
     workflow_abandonment = as_int(reach.get("workflow_abandonment_devices"))
     app_version = data.get("app_version") or "all app versions"
+    proof_checks: list[str] = []
+    if strict_saved == 0:
+        proof_checks.append(
+            "Strict first-artifact proof is zero. `activation_first_artifact_saved` is source-implemented, so check analytics config, delivery, current-build regression, or no eligible saves before adding source work."
+        )
+    if true_agent_query == 0:
+        proof_checks.append(
+            "True agent-query proof is zero. `agent_capture_query_observed` is source-implemented in the MCP/agent surface, so check MCP telemetry config, delivery, current-build regression, or no eligible agent use before adding source work."
+        )
+    if not proof_checks:
+        proof_checks.append("Strict first-artifact and true-agent proof both have nonzero live counts in this window.")
 
     limitations = [
         "`permission ready` uses `onboarding_completed` as a proxy. The app guards completion on required dictation permissions, but this does not count users who became ready outside onboarding.",
@@ -515,7 +526,7 @@ def render_report(data: dict[str, Any]) -> str:
         "`dictation_artifact_saved`, `dictation_completed`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are included only in the broader proxy row for dictation volume and legacy continuity.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`activation_second_artifact_saved` proves a second durable artifact save on the same anonymous device, but does not inspect artifact content or join identity.",
-        "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
+        "`agent_capture_query_observed` is the true first-agent-use signal. Source support exists; zero live rows are a delivery/config/no-use/regression candidate, not missing source by default.",
         "`workflow_abandoned` is a conservative exit map. It should not be read as every possible drop-off or every click.",
     ]
 
@@ -527,7 +538,7 @@ def render_report(data: dict[str, Any]) -> str:
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Abandonment exits: workflow kind, stage, reason kind, surface, and prior-ready state.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
-        "Data quality: missing true-agent-use event and the dictation completion-vs-saved-artifact split.",
+        "Data quality: strict first-artifact zero, true-agent zero, and the dictation completion-vs-saved-artifact split.",
     ]
 
     lines = [
@@ -547,7 +558,11 @@ def render_report(data: dict[str, Any]) -> str:
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
         f"- Workflow abandonment exits: **{workflow_abandonment} devices** ({pct(workflow_abandonment, launch)} of launch).",
-        f"- True agent-query proof: **{true_agent_query} devices**. Treat this as unknown, not green, until instrumentation exists.",
+        f"- True agent-query proof: **{true_agent_query} devices**. Treat zero as source-vs-live delivery/config/regression UNKNOWN, not green.",
+        "",
+        "## Proof Quality Checks",
+        "",
+        "\n".join(f"- {item}" for item in proof_checks),
         "",
         "## Funnel Reach",
         "",
@@ -614,7 +629,7 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         "## Next Best Action",
         "",
-        "Verify `activation_first_artifact_saved` and `activation_second_artifact_saved` reach live PostHog for current builds, then add `agent_capture_query_observed` so the dashboard can separate repeated saved-artifact value from true sourced-agent-use.",
+        "If strict first-artifact or true-agent proof is zero, verify telemetry config, delivery, and current-build regression before creating new instrumentation work.",
         "",
     ]
     return "\n".join(lines)
@@ -681,6 +696,9 @@ def run_self_test() -> int:
         return 1
     if "True agent-query proof: **0 devices**" not in report:
         print("self-test failed: missing true agent-query proof limitation", file=sys.stderr)
+        return 1
+    if "True agent-query proof is zero" not in report or "source-implemented" not in report:
+        print("self-test failed: zero true-agent proof must point to source-vs-live triage", file=sys.stderr)
         return 1
     reach = reach_query(30, None)
     sequence = sequence_query(30, None)

@@ -399,8 +399,10 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
         unknowns.append(UnknownReason("activation", "PostHog overview query did not return aggregate rows."))
     if launch <= 0:
         unknowns.append(UnknownReason("activation.bottleneck", "No launch devices were available for the selected window."))
+    if launch > 0 and first_artifact == 0:
+        unknowns.append(UnknownReason("activation.first_artifact", "`activation_first_artifact_saved` is source-implemented but zero in live PostHog; check delivery, config, no eligible saves, or regression."))
     if true_agent_query == 0:
-        unknowns.append(UnknownReason("activation.true_agent_use", "`agent_capture_query_observed` is missing or zero; prompt/setup clicks are intent proxies only."))
+        unknowns.append(UnknownReason("activation.true_agent_use", "`agent_capture_query_observed` is source-implemented but zero in live PostHog; prompt/setup clicks are intent proxies only until delivery/config/no-use/regression is checked."))
 
     artifact_rate = pct(first_artifact, launch)
     prompt_rate = pct(agent_prompt, first_artifact)
@@ -408,6 +410,8 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
 
     if artifact_rate is None:
         bottleneck = "UNKNOWN: missing launch denominator."
+    elif first_artifact == 0:
+        bottleneck = "No live first saved-Markdown proof; check telemetry delivery/config or current-build save regression before adding source work."
     elif artifact_rate < 20:
         bottleneck = "Too few launch devices reach first saved Markdown."
     elif true_agent_query == 0 and agent_prompt > 0:
@@ -572,12 +576,19 @@ def build_recommendations(
             "why": "PostHog aggregate data was unavailable, so the pack is intentionally UNKNOWN instead of guessing from missing rows.",
             "suggested_pr": "Wire the health lane to surface missing PostHog credentials/query failures clearly and attach the UNKNOWN context pack for agent runs.",
         })
+    elif launch > 0 and first_artifact == 0:
+        recs.append({
+            "rank": len(recs) + 1,
+            "title": "Verify first saved-Markdown telemetry delivery",
+            "why": "`activation_first_artifact_saved` is source-implemented but zero in live PostHog, so the gap may be delivery, config, no eligible saves, or a current-build regression.",
+            "suggested_pr": "Check analytics config and delivery for first-artifact saves, then inspect current save paths before adding another source event.",
+        })
     elif true_agent_query == 0:
         recs.append({
             "rank": len(recs) + 1,
-            "title": "Add privacy-safe sourced-agent-use proof",
-            "why": "`agent_capture_query_observed` is missing or zero, so agents still cannot tell whether saved Markdown produced a sourced answer.",
-            "suggested_pr": "Emit aggregate-only `agent_capture_query_observed` from the read-only MCP/agent surface with enum result, query kind, agent target, artifact kind, and age buckets.",
+            "title": "Verify sourced-agent-use telemetry delivery",
+            "why": "`agent_capture_query_observed` is source-implemented but zero in live PostHog, so the gap may be MCP telemetry config, delivery, no eligible agent use, or a current-build regression.",
+            "suggested_pr": "Check MCP telemetry config and delivery for `agent_capture_query_observed`, then inspect current agent-query paths before adding another source event.",
         })
     elif launch > 0 and first_artifact / launch < 0.2:
         recs.append({
@@ -680,7 +691,7 @@ def render_markdown(pack: dict[str, Any]) -> str:
         f"- Launch devices: {pack['activation'].get('launch_devices')}",
         f"- First artifact devices: {pack['activation'].get('first_artifact_devices')} ({md_value(pack['activation'].get('first_artifact_rate_pct'))} of launch)",
         f"- Agent prompt devices: {pack['activation'].get('agent_prompt_devices')} ({md_value(pack['activation'].get('agent_prompt_per_first_artifact_pct'))} of first artifact)",
-        f"- True agent-query devices: {pack['activation'].get('true_agent_query_devices')} (UNKNOWN if zero because the event may not exist yet)",
+        f"- True agent-query devices: {pack['activation'].get('true_agent_query_devices')} (UNKNOWN if zero; source is implemented, so check delivery/config/no-use/regression)",
         f"- Return proxy devices: {pack['activation'].get('return_proxy_devices')} ({md_value(pack['activation'].get('return_proxy_per_first_artifact_pct'))} of first artifact)",
         "",
         "## Recommended Next PRs",
@@ -724,6 +735,11 @@ def run_self_test() -> int:
         return 1
     if not pack["recommendations"] or "sourced-agent-use" not in pack["recommendations"][0]["title"]:
         print("self-test failed: first recommendation should close agent-use proof", file=sys.stderr)
+        return 1
+    stale_fragments = ("event may not exist", "missing or zero", "emit aggregate-only `agent_capture_query_observed`")
+    stale = [fragment for fragment in stale_fragments if fragment in rendered.lower()]
+    if stale:
+        print(f"self-test failed: stale source-missing wording in rendered output: {', '.join(stale)}", file=sys.stderr)
         return 1
     unknown = unknown_data("missing POSTHOG_PERSONAL_API_KEY", 30, None)
     unknown_pack = build_context_pack(unknown)

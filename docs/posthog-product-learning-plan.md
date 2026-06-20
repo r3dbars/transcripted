@@ -92,7 +92,6 @@ Operational scripts query aggregate counts only:
 | `activation_second_artifact_saved` | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_agent_prompt_action_clicked` | `action_kind`, `agent_target`, `artifact_kind`, `prompt_kind`, `result`, `surface` |
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
-| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
 | `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
 | `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
@@ -193,14 +192,14 @@ aggregate reliability sizing and should not be expanded to raw device names.
 
 ## Biggest Blind Spots
 
-- `agent_capture_query_observed` does not exist yet, so PostHog cannot prove
-  that an agent actually answered from a saved Transcripted artifact.
+- `agent_capture_query_observed` is implemented in the read-only MCP/agent
+  surface and allowlisted for PostHog, but live PostHog may still show zero or
+  absent rows. Treat that as delivery, config, no-eligible-use, or regression
+  evidence to investigate, not as missing source.
 - General dictation saved-Markdown writes now have `dictation_artifact_saved`;
   keep `dictation_completed` as completion-volume context, not strict saved-artifact proof.
 - `agent_capture_query_observed` proves successful saved-capture reads/searches
-  through MCP, but it still cannot judge answer quality.
-- General dictation saved-Markdown writes still rely on `dictation_completed`
-  as a proxy, while onboarding dictation and meeting saves have stricter events.
+  through MCP, but it still cannot judge answer quality or usefulness.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
 - Local summary beta behavior now has abandonment shape, but not a full success
@@ -213,14 +212,15 @@ aggregate reliability sizing and should not be expanded to raw device names.
 - Retention is a return proxy, not a real habit model. It needs day/week active
   cohorts and first-artifact-to-second-artifact conversion in PostHog dashboards.
 
-## A+ Event Taxonomy To Add
+## A+ Event Taxonomy To Add Or Verify
 
-Prefer a small number of lifecycle events over broad click tracking.
+Prefer a small number of lifecycle events over broad click tracking. Some rows
+below are source-implemented and need live-delivery verification rather than new
+source work.
 
 | Event | When to fire | Properties |
 | --- | --- | --- |
-| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket` |
-| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
+| `agent_capture_query_observed` | Source-implemented; verify live delivery when the local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 | `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
@@ -354,4 +354,5 @@ prove the full saved-artifact -> sourced-agent-answer -> return loop.
 
 Keep `agent_capture_query_observed` narrow in the read-only MCP/agent surface:
 only successful saved-capture reads/searches, enum values, and coarse buckets.
-That closes the biggest product-learning gap without inspecting content.
+If live PostHog shows zero true-agent rows, verify MCP telemetry config,
+delivery, and current-build regression before adding another source event.

@@ -281,7 +281,7 @@ def build_activation_leak(data: dict[str, Any]) -> Finding:
                 devices.get("onboarding_first_dictation_saved", 0),
                 devices.get("meeting_transcript_saved", 0),
             ),
-            "Make saved Markdown visible immediately after capture.",
+            "If strict first-artifact proof is zero, verify telemetry delivery/config or current-build save regression before treating this as pure UX.",
         ),
         (
             "artifact action",
@@ -304,7 +304,7 @@ def build_activation_leak(data: dict[str, Any]) -> Finding:
         (
             "true agent query",
             devices.get("agent_capture_query_observed", 0),
-            "Instrument privacy-safe sourced-agent-use before calling the loop proven.",
+            "If true-agent proof is zero, verify MCP telemetry delivery/config, no eligible use, or current-build regression before adding source work.",
         ),
     ]
     biggest = ("unknown", 0, 0, "Add more activation instrumentation.")
@@ -484,6 +484,20 @@ def task_candidates(findings: dict[str, Finding]) -> list[Finding]:
     return sorted([*pinned, third], key=lambda item: (-task_priority_score(item), item.title))
 
 
+def proof_quality_checks(data: dict[str, Any]) -> list[str]:
+    devices = event_devices(data)
+    checks: list[str] = []
+    if devices.get("activation_first_artifact_saved", 0) == 0:
+        checks.append(
+            "Strict first-artifact proof is zero: `activation_first_artifact_saved` is source-implemented, so check delivery, config, no eligible saves, or current-build regression."
+        )
+    if devices.get("agent_capture_query_observed", 0) == 0:
+        checks.append(
+            "True agent-query proof is zero: `agent_capture_query_observed` is source-implemented, so check MCP telemetry delivery, config, no eligible use, or current-build regression."
+        )
+    return checks or ["Strict first-artifact and true-agent proof both have nonzero live counts in this window."]
+
+
 def dashboard_lines(data: dict[str, Any], findings: dict[str, Finding]) -> list[str]:
     devices = event_devices(data)
     events = event_events(data)
@@ -519,6 +533,7 @@ def render_json(data: dict[str, Any], findings: dict[str, Finding]) -> dict[str,
         "app_version": data.get("app_version"),
         "source": data.get("source", {}),
         "dashboards": dashboard_lines(data, findings),
+        "proof_quality_checks": proof_quality_checks(data),
         "findings": {
             "biggest_activation_leak": findings["activation"].__dict__,
             "biggest_reliability_leak": findings["reliability"].__dict__,
@@ -553,6 +568,10 @@ def render_markdown(data: dict[str, Any], findings: dict[str, Finding]) -> str:
         f"- Under-discovered feature: {findings['under'].metric} {findings['under'].recommendation}",
         f"- Release regression watch: {findings['release'].metric} {findings['release'].recommendation}",
         "",
+        "## Proof Quality Checks",
+        "",
+        *[f"- {line}" for line in result["proof_quality_checks"]],
+        "",
         "## Top 3 Recommended PR/Task Candidates",
         "",
     ]
@@ -563,7 +582,7 @@ def render_markdown(data: dict[str, Any], findings: dict[str, Finding]) -> str:
         "## Privacy Boundary",
         "",
         "- Aggregate only. No raw rows or user-level forensics.",
-        "- Treat agent setup, prompt copy, and return events as proxies until `agent_capture_query_observed` exists.",
+        "- Treat agent setup, prompt copy, and return events as proxies unless `agent_capture_query_observed` has live nonzero rows.",
         "",
     ])
     return "\n".join(lines)
@@ -618,6 +637,15 @@ def run_self_test() -> int:
         return 1
     if len(summary["top_recommended_tasks"]) != 3:
         print("self-test failed: expected exactly three top task candidates", file=sys.stderr)
+        return 1
+    if "True agent-query proof is zero" not in markdown:
+        print("self-test failed: zero true-agent proof should be called out as source-vs-live triage", file=sys.stderr)
+        return 1
+    if not summary.get("proof_quality_checks"):
+        print("self-test failed: JSON summary should include proof quality checks", file=sys.stderr)
+        return 1
+    if "until `agent_capture_query_observed` exists" in markdown:
+        print("self-test failed: stale source-missing wording in product task report", file=sys.stderr)
         return 1
     mismatch_data = json.loads(json.dumps(data))
     mismatch_data["results"]["reliability_breakdown"] = [

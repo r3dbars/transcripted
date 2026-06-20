@@ -20,7 +20,7 @@ proof. Treat those as point-in-time inputs, not timeless product truth.
   last 7 days: `activation_first_artifact_saved`, `dictation_completed`,
   `meeting_transcript_saved`, `activation_artifact_action_clicked`,
   `activation_agent_prompt_action_clicked`, `activation_return_proxy_observed`,
-  or future `agent_capture_query_observed`.
+  or live `agent_capture_query_observed` rows.
 - **Strict activation:** launch -> permission/onboarding ready -> first saved
   Markdown -> agent-use proof -> return.
 - **Proxy activation:** launch -> saved Markdown or dictation completion ->
@@ -32,12 +32,12 @@ Do not collapse launch, proxy activation, and strict activation into one number.
 
 | Dashboard | Product question | Existing events to use | Missing events needed |
 | --- | --- | --- | --- |
-| 100 WAU operating dashboard | Are weekly active devices growing toward 100, and are they getting value? | `app_launched`, `activation_first_artifact_saved`, `dictation_completed`, `meeting_transcript_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_return_proxy_observed`; group by default `app_version`, `build_version`, `os_major` | `agent_capture_query_observed`; optional `weekly_value_summary_observed` only if it stays aggregate and bucketed |
-| Activation funnel | Where does first value leak? | `app_launched`, `onboarding_shown`, `onboarding_step_viewed`, `onboarding_permission_status_changed`, `onboarding_completed`, `onboarding_first_dictation_started`, `onboarding_first_dictation_saved`, `activation_first_artifact_saved`, `meeting_transcript_saved`, `dictation_completed`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `onboarding_agent_cta_clicked`, `activation_return_proxy_observed` | `agent_capture_query_observed`; general dictation saved-artifact event if `dictation_completed` proves too loose |
+| 100 WAU operating dashboard | Are weekly active devices growing toward 100, and are they getting value? | `app_launched`, `activation_first_artifact_saved`, `dictation_completed`, `meeting_transcript_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_return_proxy_observed`, `agent_capture_query_observed`; group by default `app_version`, `build_version`, `os_major` | Verify live delivery/config if `agent_capture_query_observed` is zero; optional `weekly_value_summary_observed` only if it stays aggregate and bucketed |
+| Activation funnel | Where does first value leak? | `app_launched`, `onboarding_shown`, `onboarding_step_viewed`, `onboarding_permission_status_changed`, `onboarding_completed`, `onboarding_first_dictation_started`, `onboarding_first_dictation_saved`, `activation_first_artifact_saved`, `meeting_transcript_saved`, `dictation_completed`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `onboarding_agent_cta_clicked`, `activation_return_proxy_observed`, `agent_capture_query_observed` | Verify source-vs-live delivery if strict first-artifact or true-agent rows are zero; general dictation saved-artifact event if `dictation_completed` proves too loose |
 | Dictation reliability funnel | Do users who start dictation reach usable text without painful recovery? | `dictation_started`, `dictation_start_failed`, `dictation_completed`, `dictation_stop_latency_measured`, `dictation_cancelled`, `dictation_no_speech`, `dictation_audio_route_changed`, `dictation_audio_route_recovery_finished`, `dictation_audio_route_recovery_timeout` | Dedicated `dictation_saved_markdown` only if needed to separate completion from persisted artifact |
 | Meeting reliability funnel | Do meeting captures start, retain audio, transcribe, and save? | `meeting_prompt_shown`, `meeting_prompt_record_selected`, `meeting_prompt_dismissed`, `meeting_prompt_suppressed`, `meeting_recording_started`, `meeting_recording_start_failed`, `meeting_recording_stopped`, `meeting_capture_health_snapshot`, `meeting_transcript_saved`, `meeting_transcript_failed`, `meeting_transcript_skipped`, `meeting_saved_audio_retranscription_requested`, `meeting_mic_boost_prompt_shown`, `meeting_mic_boost_prompt_actioned`, `meeting_file_imported`, `meeting_file_import_failed`, `meeting_speaker_finalization_failed` | `meeting_opened_after_save` if Home/open behavior needs stricter proof than artifact-action clicks |
 | Local summary beta funnel | Are beta summaries discoverable, prepared, run, and useful? | `settings_page_viewed`, `settings_action_clicked`, `settings_toggle_changed`; filter `page_id = 'beta'` and action/setting ids such as local summary prepare actions | `local_summary_requested`, `local_summary_started`, `local_summary_completed`, `local_summary_failed`, `local_summary_opened`; keep model/provider/status/failure as enums only |
-| Agent/Markdown value loop | Does saved Markdown become a useful agent answer and later return? | `activation_first_artifact_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `onboarding_agent_cta_clicked`, `activation_return_proxy_observed`, `meeting_transcript_saved`, `dictation_completed` | `agent_capture_query_observed` as the first true sourced-agent-use proof; maybe `agent_answer_returned_observed` only if implemented through local MCP/tool invocation metadata, never content |
+| Agent/Markdown value loop | Does saved Markdown become a useful agent answer and later return? | `activation_first_artifact_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `onboarding_agent_cta_clicked`, `activation_return_proxy_observed`, `agent_capture_query_observed`, `meeting_transcript_saved`, `dictation_completed` | Maybe `agent_answer_returned_observed` only if implemented through local MCP/tool invocation metadata, never content |
 | Release health by app version | Did a release improve activation without hurting reliability? | All dashboard events grouped by default `app_version` and `build_version`; update events: `update_check_finished`, `update_download_started`, `update_download_finished`, `update_ready_to_install`, `update_relaunching`, `update_installed`; runtime events: `app_unclean_shutdown_detected`, `app_session_stall_detected` | None for the first dashboard. Add only coarse release-readiness enums if Sentry/PostHog release reviews need a stable join key later |
 
 ## PostHog Objects
@@ -55,7 +55,7 @@ Create these as saved PostHog insights, then collect them into one dashboard.
 2. **Activation funnel**
    - Funnel: `app_launched` -> onboarding touched -> `onboarding_completed` ->
      saved Markdown/proxy -> artifact action or agent prompt -> return proxy ->
-     future `agent_capture_query_observed`.
+     live `agent_capture_query_observed`.
    - Use `scripts/ops/posthog-activation-funnel.py --days 30` for the
      aggregate report and proxy-vs-proof read.
    - Show strict saved Markdown separately from dictation-completed proxy.
@@ -87,9 +87,11 @@ Create these as saved PostHog insights, then collect them into one dashboard.
 6. **Agent/Markdown value loop**
    - Trend saved artifacts, artifact actions, agent prompt/setup actions, and
      return proxies together.
-   - Primary missing proof: `agent_capture_query_observed`.
-   - Until that exists, label this dashboard as proxy evidence, not proof that
-     an agent answered from Transcripted files.
+   - Primary proof: live `agent_capture_query_observed` from the MCP/agent
+     surface.
+   - If that count is zero or absent, label this dashboard as proxy evidence and
+     check telemetry delivery/config or current-build regression before adding
+     new source events.
 
 7. **Release health by app version**
    - Compare launch WAU, value WAU, activation conversion, dictation completion,
@@ -105,7 +107,6 @@ events.
 
 | Event | Purpose | Allowed properties |
 | --- | --- | --- |
-| `agent_capture_query_observed` | Prove the first sourced agent query against saved captures. | `agent_target`, `artifact_kind`, `surface`, `result`, `query_age_bucket`, `source_count_bucket` |
 | `local_summary_requested` | Count user intent to summarize a meeting. | `surface`, `provider`, `transcript_age_bucket`, `duration_bucket`, `word_count_bucket` |
 | `local_summary_started` | Separate queued/prep friction from generation failures. | `surface`, `provider`, `runtime`, `profile`, `transcript_age_bucket`, `duration_bucket`, `word_count_bucket` |
 | `local_summary_completed` | Count successful local summary artifacts. | `surface`, `provider`, `runtime`, `profile`, `duration_bucket`, `word_count_bucket`, `summary_latency_bucket` |
@@ -127,5 +128,5 @@ events.
 ## Smallest Next Action
 
 Build the PostHog dashboard from existing events first. Then add
-`agent_capture_query_observed` as the next instrumentation slice, because that
-is the biggest gap between artifact volume and true product value.
+strict first-artifact and true-agent proof checks that flag live-zero rows as
+delivery/config/regression candidates before creating more instrumentation.

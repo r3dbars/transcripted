@@ -81,6 +81,10 @@ adoption signal, under-discovered feature, release regression watch, and top
 three PR/task candidates. It has fixture and self-test modes so CI can check
 the ranking logic without PostHog credentials.
 
+If strict first-artifact proof or live `agent_capture_query_observed` proof is
+zero, treat it as a source-vs-live delivery, config, no-eligible-use, or
+regression question before creating another instrumentation task.
+
 ## PostHog Product Context Pack
 
 Use this when an agent needs the short decision context, not the full funnel:
