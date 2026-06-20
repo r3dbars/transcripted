@@ -292,13 +292,6 @@ private func handleListMeetings(params: CallTool.Parameters, index: TranscriptIn
         return textResult("No meetings found.")
     }
 
-    trackAgentCaptureQueryObserved(
-        queryKind: "list",
-        artifactKind: "meeting",
-        captureDate: latestMeetingDate(in: results),
-        sourceCount: results.count
-    )
-
     let json = try JSONEncoder.pretty.encode(results)
     return textResult(String(data: json, encoding: .utf8) ?? "[]")
 }
@@ -314,13 +307,6 @@ private func handleListDictations(params: CallTool.Parameters, index: Transcript
     if results.isEmpty {
         return textResult("No dictations found.")
     }
-
-    trackAgentCaptureQueryObserved(
-        queryKind: "list",
-        artifactKind: "dictation",
-        captureDate: latestDictationDayDate(in: results),
-        sourceCount: results.count
-    )
 
     let json = try JSONEncoder.pretty.encode(results)
     return textResult(String(data: json, encoding: .utf8) ?? "[]")
@@ -537,13 +523,6 @@ private func handleRecentContext(params: CallTool.Parameters, index: TranscriptI
         return textResult("No recent context found.")
     }
 
-    trackAgentCaptureQueryObserved(
-        queryKind: "recent",
-        artifactKind: artifactKind(for: result.items.map(\.kind)),
-        captureDate: latestRecentContextDate(in: result.items),
-        sourceCount: result.items.count
-    )
-
     let json = try JSONEncoder.pretty.encode(result)
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
@@ -728,23 +707,11 @@ private func formatDuration(_ seconds: Int) -> String {
     return "\(m)m"
 }
 
-private func latestMeetingDate(in results: [MeetingSummary]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestDictationDayDate(in results: [DictationDaySummary]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
 private func latestMeetingSearchDate(in results: GroupedSearchResult) -> Date? {
     results.results.compactMap { parseCaptureDate($0.meetingDateTime) }.max()
 }
 
 private func latestContextSearchDate(in results: [ContextSearchGroup]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestRecentContextDate(in results: [RecentContextItem]) -> Date? {
     results.compactMap { parseCaptureDate($0.datetime) }.max()
 }
 
