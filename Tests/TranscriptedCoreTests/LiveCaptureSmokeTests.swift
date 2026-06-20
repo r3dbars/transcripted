@@ -128,6 +128,7 @@ final class LiveCaptureSmokeTests: XCTestCase {
             let outcome = AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: audio.isRecording,
                 systemAudioFileURL: audio.systemAudioFileURL,
+                systemAudioStreaming: audio.systemAudioStreaming,
                 errorMessage: audio.error
             )
 

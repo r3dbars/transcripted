@@ -34,6 +34,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             systemFailed: false,
             voiceProcessingRequested: false,
             voiceProcessingActive: false,
+            softwareAGCRequested: true,
             realtimeAGCActive: true,
             micRawPeak: "0.03000",
             micProcessedPeak: "0.36000",
@@ -108,6 +109,7 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             systemFailed: requested.systemFailed,
             voiceProcessingRequested: true,
             voiceProcessingActive: requested.voiceProcessingActive,
+            softwareAGCRequested: false,
             realtimeAGCActive: requested.realtimeAGCActive,
             micRawPeak: requested.micRawPeak,
             micProcessedPeak: requested.micProcessedPeak,
@@ -124,5 +126,42 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
 
         XCTAssertEqual(requested.privacySafeContext["mic_processing"], "apple_voice_processing")
         XCTAssertEqual(makeSnapshot().privacySafeContext["mic_processing"], "software_agc")
+
+        let off = AudioPipelineDiagnosticsSnapshot(
+            inputDeviceClass: requested.inputDeviceClass,
+            outputDeviceClass: requested.outputDeviceClass,
+            systemOutputDeviceClass: requested.systemOutputDeviceClass,
+            inputRateHz: requested.inputRateHz,
+            outputRateHz: requested.outputRateHz,
+            systemOutputRateHz: requested.systemOutputRateHz,
+            systemRateHz: requested.systemRateHz,
+            inputChannels: requested.inputChannels,
+            systemChannels: requested.systemChannels,
+            systemBackend: requested.systemBackend,
+            systemStatus: requested.systemStatus,
+            bufferSuccessBucket: requested.bufferSuccessBucket,
+            gapCount: requested.gapCount,
+            routeChangeCount: requested.routeChangeCount,
+            recoveryAttemptCount: requested.recoveryAttemptCount,
+            micRecovering: requested.micRecovering,
+            systemFailed: requested.systemFailed,
+            voiceProcessingRequested: false,
+            voiceProcessingActive: false,
+            softwareAGCRequested: false,
+            realtimeAGCActive: false,
+            micRawPeak: requested.micRawPeak,
+            micProcessedPeak: requested.micProcessedPeak,
+            systemAudioPeak: requested.systemAudioPeak,
+            defaultInputVolumeBefore: requested.defaultInputVolumeBefore,
+            defaultOutputVolumeBefore: requested.defaultOutputVolumeBefore,
+            defaultSystemOutputVolumeBefore: requested.defaultSystemOutputVolumeBefore,
+            defaultInputVolumeDuring: requested.defaultInputVolumeDuring,
+            defaultOutputVolumeDuring: requested.defaultOutputVolumeDuring,
+            defaultSystemOutputVolumeDuring: requested.defaultSystemOutputVolumeDuring,
+            capturedInputVolumeBefore: requested.capturedInputVolumeBefore,
+            capturedInputVolumeDuring: requested.capturedInputVolumeDuring
+        )
+
+        XCTAssertEqual(off.privacySafeContext["mic_processing"], "none")
     }
 }

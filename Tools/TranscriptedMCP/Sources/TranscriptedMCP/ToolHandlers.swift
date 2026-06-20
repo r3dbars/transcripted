@@ -349,6 +349,13 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) 
         return textResult("Meeting not found: \(filename). Use list_meetings to see available meetings.", isError: true)
     }
 
+    trackAgentCaptureQueryObserved(
+        queryKind: "read",
+        artifactKind: "meeting",
+        captureDate: captureDateFromMeetingMarkdown(content),
+        sourceCount: 1
+    )
+
     switch section {
     case "transcript":
         let dialogue = extractDialogueLines(from: content).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -400,6 +407,13 @@ private func handleReadDictation(params: CallTool.Parameters, dictationDirs: [UR
             return textResult("Entry not found: \(entryId). Use recent_context or search_context to inspect entry IDs.", isError: true)
         }
 
+        trackAgentCaptureQueryObserved(
+            queryKind: "read",
+            artifactKind: "dictation",
+            captureDate: parseCaptureDate(entry.createdAt),
+            sourceCount: 1
+        )
+
         let result = """
         # \(entry.title)
 
@@ -412,6 +426,13 @@ private func handleReadDictation(params: CallTool.Parameters, dictationDirs: [UR
         """
         return textResult(result)
     }
+
+    trackAgentCaptureQueryObserved(
+        queryKind: "read",
+        artifactKind: "dictation",
+        captureDate: parseCaptureDate(day.entries.last?.createdAt ?? day.date),
+        sourceCount: day.entries.count
+    )
 
     guard let content = try? String(contentsOf: markdownURL, encoding: .utf8) else {
         let json = try JSONEncoder.pretty.encode(day)
@@ -440,6 +461,13 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, m
         if let s = speaker { msg += " by \(s)" }
         return textResult(msg)
     }
+
+    trackAgentCaptureQueryObserved(
+        queryKind: "search",
+        artifactKind: "meeting",
+        captureDate: latestMeetingSearchDate(in: results),
+        sourceCount: results.results.count
+    )
 
     let json = try JSONEncoder.pretty.encode(results)
     return textResult(String(data: json, encoding: .utf8) ?? "[]")
@@ -470,6 +498,13 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     if results.results.isEmpty {
         return textResult("No context found for \"\(query)\".")
     }
+
+    trackAgentCaptureQueryObserved(
+        queryKind: "search",
+        artifactKind: artifactKind(for: results.results.map(\.kind)),
+        captureDate: latestContextSearchDate(in: results.results),
+        sourceCount: results.results.count
+    )
 
     let json = try JSONEncoder.pretty.encode(results)
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
@@ -504,6 +539,13 @@ private func handleWhoIs(params: CallTool.Parameters, index: TranscriptIndex) th
     if profile.meetingCount == 0 {
         return textResult("No meetings found for \"\(speaker)\". Try a different name or use list_meetings to see known speakers.")
     }
+
+    trackAgentCaptureQueryObserved(
+        queryKind: "speaker_lookup",
+        artifactKind: "meeting",
+        captureDate: parseCaptureDate(profile.lastSeen),
+        sourceCount: profile.meetingCount
+    )
 
     let json = try JSONEncoder.pretty.encode(profile)
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
@@ -555,6 +597,13 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
         dateRange: dateFrom == dateTo ? dateFrom : "\(dateFrom) to \(dateTo)",
         meetingCount: recapParts.count,
         meetings: recapParts
+    )
+
+    trackAgentCaptureQueryObserved(
+        queryKind: "recap",
+        artifactKind: "meeting",
+        captureDate: latestRecapDate(in: recapParts),
+        sourceCount: recapParts.count
     )
 
     let json = try JSONEncoder.pretty.encode(result)
@@ -656,6 +705,37 @@ private func formatDuration(_ seconds: Int) -> String {
     let m = (seconds % 3600) / 60
     if h > 0 { return "\(h)h \(m)m" }
     return "\(m)m"
+}
+
+private func latestMeetingSearchDate(in results: GroupedSearchResult) -> Date? {
+    results.results.compactMap { parseCaptureDate($0.meetingDateTime) }.max()
+}
+
+private func latestContextSearchDate(in results: [ContextSearchGroup]) -> Date? {
+    results.compactMap { parseCaptureDate($0.datetime) }.max()
+}
+
+private func latestRecapDate(in results: [RecapEntry]) -> Date? {
+    results.compactMap { parseCaptureDate($0.datetime) }.max()
+}
+
+private func artifactKind(for kinds: [ContextKind]) -> String {
+    let set = Set(kinds)
+    if set.contains(.meeting), set.contains(.dictation) {
+        return "mixed"
+    }
+    if set.contains(.meeting) {
+        return "meeting"
+    }
+    if set.contains(.dictation) {
+        return "dictation"
+    }
+    return "mixed"
+}
+
+private func captureDateFromMeetingMarkdown(_ content: String) -> Date? {
+    guard let parsed = CaptureMarkdownParser.parseMeeting(from: content) else { return nil }
+    return parseCaptureDate(parsed.datetime)
 }
 
 extension JSONEncoder {

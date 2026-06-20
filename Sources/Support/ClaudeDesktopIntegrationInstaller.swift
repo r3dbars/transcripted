@@ -108,11 +108,17 @@ enum ClaudeDesktopIntegrationError: LocalizedError, Equatable {
 enum ClaudeDesktopIntegrationInstaller {
     static let serverName = "transcripted"
     static let helperBinaryName = "transcripted-mcp"
+    static let mcpObservabilityConfigFileName = "mcp-observability.plist"
 
     static var installedMCPBinaryURL: URL {
         FileManager.default.transcriptedAppSupportDir
             .appendingPathComponent("mcp", isDirectory: true)
             .appendingPathComponent(helperBinaryName, isDirectory: false)
+    }
+
+    static var mcpObservabilityConfigURL: URL {
+        FileManager.default.transcriptedAppSupportDir
+            .appendingPathComponent(mcpObservabilityConfigFileName, isDirectory: false)
     }
 
     static var claudeDesktopConfigURL: URL {
@@ -200,6 +206,7 @@ enum ClaudeDesktopIntegrationInstaller {
             to: installedBinaryURL,
             fileManager: fileManager
         )
+        try writeMCPObservabilityConfigIfAvailable(fileManager: fileManager)
 
         let backupURL = try writeClaudeDesktopConfig(
             commandPath: installedBinaryURL.path,
@@ -217,27 +224,41 @@ enum ClaudeDesktopIntegrationInstaller {
     }
 
     /// Silently re-copies the bundled helper over a previously installed one
-    /// when their contents differ, e.g. after an app update. Configs are left
-    /// untouched — they already point at the stable installed path. Never
+    /// when their contents differ, e.g. after an app update. Helper analytics
+    /// config is refreshed only when an installed helper already exists. Never
     /// installs fresh: a missing installed helper means the user has not
     /// opted into agent setup yet.
     @discardableResult
     static func refreshInstalledHelperIfNeeded(
         bundledBinaryURL: URL? = bundledMCPBinaryURL(),
         installedBinaryURL: URL = installedMCPBinaryURL,
+        observabilityConfigURL: URL = mcpObservabilityConfigURL,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
         fileManager: FileManager = .default
     ) throws -> Bool {
+        guard fileManager.fileExists(atPath: installedBinaryURL.path) else {
+            return false
+        }
         guard let bundledBinaryURL,
               fileManager.isExecutableFile(atPath: bundledBinaryURL.path),
-              fileManager.fileExists(atPath: installedBinaryURL.path),
               bundledBinaryURL.standardizedFileURL.path != installedBinaryURL.standardizedFileURL.path,
               !fileManager.contentsEqual(atPath: installedBinaryURL.path, andPath: bundledBinaryURL.path) else {
+            try writeMCPObservabilityConfigIfAvailable(
+                configURL: observabilityConfigURL,
+                infoDictionary: infoDictionary,
+                fileManager: fileManager
+            )
             return false
         }
 
         try installBundledBinary(
             from: bundledBinaryURL,
             to: installedBinaryURL,
+            fileManager: fileManager
+        )
+        try writeMCPObservabilityConfigIfAvailable(
+            configURL: observabilityConfigURL,
+            infoDictionary: infoDictionary,
             fileManager: fileManager
         )
         return true
@@ -280,6 +301,49 @@ enum ClaudeDesktopIntegrationInstaller {
             [.posixPermissions: NSNumber(value: 0o755)],
             ofItemAtPath: installedBinaryURL.path
         )
+    }
+
+    static func writeMCPObservabilityConfigIfAvailable(
+        configURL: URL = mcpObservabilityConfigURL,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
+        analyticsEnabled: Bool = AnalyticsPreferences.isEnabled(),
+        fileManager: FileManager = .default
+    ) throws {
+        guard analyticsEnabled else {
+            if fileManager.fileExists(atPath: configURL.path) {
+                try fileManager.removeItem(at: configURL)
+            }
+            return
+        }
+
+        guard let apiKey = firstNonEmpty(infoDictionary?[AnalyticsRuntimeConfiguration.apiKeyInfoKey] as? String),
+              let host = firstNonEmpty(infoDictionary?[AnalyticsRuntimeConfiguration.hostInfoKey] as? String),
+              host.lowercased().hasPrefix("https://") else {
+            if fileManager.fileExists(atPath: configURL.path) {
+                try fileManager.removeItem(at: configURL)
+            }
+            return
+        }
+
+        try fileManager.createDirectory(
+            at: configURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: apiKey,
+                AnalyticsRuntimeConfiguration.hostInfoKey: host,
+            ],
+            format: .xml,
+            options: 0
+        )
+        try data.write(to: configURL, options: [.atomic])
+        fileManager.restrictFileToOwnerOnly(at: configURL)
+    }
+
+    private static func firstNonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     @discardableResult

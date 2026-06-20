@@ -169,6 +169,7 @@ struct AnalyticsEventPolicy: Equatable {
         "query_kind",
         "result",
         "return_window_bucket",
+        "source_count_bucket",
         "surface",
     ]
 
@@ -558,6 +559,17 @@ struct AnalyticsEventPolicy: Equatable {
                 "trigger",
                 "word_count_bucket",
             ]))
+        ),
+        "dictation_artifact_saved": .init(
+            name: "dictation_artifact_saved",
+            allowedProperties: [
+                "delivery",
+                "duration_bucket",
+                "save_outcome",
+                "surface",
+                "trigger",
+                "word_count_bucket",
+            ]
         ),
         "dictation_stop_latency_measured": .init(
             name: "dictation_stop_latency_measured",

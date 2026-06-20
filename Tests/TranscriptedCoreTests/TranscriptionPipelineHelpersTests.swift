@@ -20,6 +20,7 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
                 systemAudioFileURL: nil,
+                systemAudioStreaming: true,
                 errorMessage: nil
             ),
             .waiting
@@ -29,6 +30,7 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
                 systemAudioFileURL: readyURL,
+                systemAudioStreaming: true,
                 errorMessage: nil
             ),
             .ready
@@ -38,9 +40,26 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
                 systemAudioFileURL: readyURL,
+                systemAudioStreaming: true,
                 errorMessage: "System audio unavailable"
             ),
             .failed("System audio unavailable")
+        )
+    }
+
+    func testAudioCaptureStartStateWaitsWhenTapHasNotStreamedYet() {
+        // The silent-death case: the I/O proc started and a file URL was
+        // assigned, but the tap never delivered a buffer. Readiness must stay
+        // `.waiting` so the start deadline fails it instead of reporting a tap
+        // that is silently writing nothing as "recording".
+        XCTAssertEqual(
+            AudioCaptureStartState.meetingCaptureOutcome(
+                isRecording: true,
+                systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
+                systemAudioStreaming: false,
+                errorMessage: nil
+            ),
+            .waiting
         )
     }
 

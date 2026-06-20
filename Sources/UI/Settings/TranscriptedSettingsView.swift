@@ -59,7 +59,7 @@ struct TranscriptedSettingsView: View {
     @State private var showModelCacheCleanupConfirmation = false
     @State private var showWhisperCacheCleanupConfirmation = false
     @State private var showReclaimableCacheCleanupConfirmation = false
-    @State private var meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+    @State private var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
@@ -319,8 +319,8 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .microphoneProcessingPrefsDidChange)) { _ in
             // Accepting the mid-meeting mic-boost prompt flips this preference
-            // outside Settings; keep an open window's toggle in sync.
-            meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+            // outside Settings; keep an open window's picker in sync.
+            meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptedPermissionsDidChange)) { _ in
             refreshPermissions()
@@ -673,7 +673,7 @@ struct TranscriptedSettingsView: View {
                 menuItems: meetingRowMenuItems(for: meeting),
                 showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
                     audioHealth: meeting.audioHealth,
-                    voiceProcessingPreferenceEnabled: meetingVoiceProcessingEnabled
+                    voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
                 )
             )
         case .failed(let failedMeeting):
@@ -1292,13 +1292,13 @@ struct TranscriptedSettingsView: View {
 
         if RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
             audioHealth: item.audioHealth,
-            voiceProcessingPreferenceEnabled: meetingVoiceProcessingEnabled
+            voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing
         ) {
             items.append(
                 HomeRowMenuItem(title: "Use enhanced mic pickup next time", symbolName: "mic.badge.plus") {
                     trackSettingsToggle("meeting_voice_processing", enabled: true, page: .home)
                     MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)
-                    meetingVoiceProcessingEnabled = true
+                    meetingMicProcessingMode = .appleVoiceProcessing
                 }
             )
         }
@@ -2467,20 +2467,27 @@ struct TranscriptedSettingsView: View {
                 Text("Meeting audio")
                     .font(.subheadline.weight(.semibold))
 
-                SettingsToggleRow(
-                    title: "Enhanced mic pickup during calls (Apple voice processing)",
-                    detail: meetingVoiceProcessingEnabled
-                        ? "On. Fixes the quiet mic when another call app holds it in voice mode. Other apps' audio may get slightly quieter while recording."
-                        : "Off. Transcripted boosts the saved mic in software without touching other apps' audio. Turn on if your side of calls records very quiet.",
-                    isOn: Binding(
-                        get: { meetingVoiceProcessingEnabled },
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("Meeting mic processing", selection: Binding(
+                        get: { meetingMicProcessingMode },
                         set: { newValue in
-                            meetingVoiceProcessingEnabled = newValue
-                            trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .general)
-                            MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
+                            meetingMicProcessingMode = newValue
+                            trackSettingsToggle("meeting_mic_processing_\(newValue.rawValue)", enabled: true, page: .general)
+                            MicrophoneProcessingPreferences.setMode(newValue)
                         }
-                    )
-                )
+                    )) {
+                        ForEach(MicrophoneProcessingMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("transcripted.settings.meeting-mic-processing")
+
+                    Text(meetingMicProcessingMode.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 SettingsToggleRow(
                     title: "Identify multiple people on this Mac",
@@ -3670,20 +3677,27 @@ struct TranscriptedSettingsView: View {
                 title: "Meeting Audio",
                 detail: "How Transcripted handles your microphone during meetings."
             ) {
-                SettingsToggleRow(
-                    title: "Enhanced mic pickup during calls (Apple voice processing)",
-                    detail: meetingVoiceProcessingEnabled
-                        ? "On. Fixes the quiet mic when another call app holds it in voice mode. Other apps' audio may get slightly quieter while recording."
-                        : "Off. Transcripted boosts the saved mic in software without touching other apps' audio. Turn on if your side of calls records very quiet.",
-                    isOn: Binding(
-                        get: { meetingVoiceProcessingEnabled },
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("Meeting mic processing", selection: Binding(
+                        get: { meetingMicProcessingMode },
                         set: { newValue in
-                            meetingVoiceProcessingEnabled = newValue
-                            trackSettingsToggle("meeting_voice_processing", enabled: newValue, page: .privacy)
-                            MicrophoneProcessingPreferences.setVoiceProcessingEnabled(newValue)
+                            meetingMicProcessingMode = newValue
+                            trackSettingsToggle("meeting_mic_processing_\(newValue.rawValue)", enabled: true, page: .privacy)
+                            MicrophoneProcessingPreferences.setMode(newValue)
                         }
-                    )
-                )
+                    )) {
+                        ForEach(MicrophoneProcessingMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("transcripted.settings.privacy.meeting-mic-processing")
+
+                    Text(meetingMicProcessingMode.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 SettingsToggleRow(
                     title: "Identify multiple people on this Mac",
@@ -4077,7 +4091,7 @@ struct TranscriptedSettingsView: View {
         preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
         showAdvancedModelControls = preferredTranscriptionModel != TranscriptionModelPreferences.defaultModel
         uiSoundsEnabled = UISoundPreferences.isEnabled()
-        meetingVoiceProcessingEnabled = MicrophoneProcessingPreferences.isVoiceProcessingEnabled()
+        meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         refreshLocalSummarySetupStatus()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()

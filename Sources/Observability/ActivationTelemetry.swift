@@ -218,6 +218,44 @@ enum ActivationTelemetry {
         return false
     }
 
+    static func dictationArtifactSavedProperties(
+        delivery: String,
+        durationBucket: String,
+        saveOutcome: String,
+        surface: Surface,
+        trigger: String,
+        wordCountBucket: String
+    ) -> [String: String] {
+        [
+            "delivery": delivery,
+            "duration_bucket": durationBucket,
+            "save_outcome": saveOutcome,
+            "surface": surface.rawValue,
+            "trigger": trigger,
+            "word_count_bucket": wordCountBucket,
+        ]
+    }
+
+    static func trackDictationArtifactSaved(
+        delivery: String,
+        durationBucket: String,
+        surface: Surface = .dictationSave,
+        trigger: String,
+        wordCountBucket: String
+    ) {
+        AnalyticsReporter.track(
+            "dictation_artifact_saved",
+            properties: dictationArtifactSavedProperties(
+                delivery: delivery,
+                durationBucket: durationBucket,
+                saveOutcome: "success",
+                surface: surface,
+                trigger: trigger,
+                wordCountBucket: wordCountBucket
+            )
+        )
+    }
+
     static func trackAgentPromptAction(
         promptKind: AgentPromptKind,
         actionKind: AgentPromptActionKind,
