@@ -326,8 +326,7 @@ struct TranscriptedSettingsView: View {
             homeDashboardRefreshInFlight = false
             homeMeetingPreviewLoadTask?.cancel()
             homeMeetingPreviewLoadTask = nil
-            localSummaryModelPreparationTask?.cancel()
-            localSummaryModelPreparationTask = nil
+            cancelLocalSummaryModelPreparation()
             homeViewModel.cancel()
         }
     }
@@ -942,6 +941,7 @@ struct TranscriptedSettingsView: View {
         let summaryID = transcriptURL.path
         guard homeLocalSummaryTasks[summaryID] == nil else { return }
         if let unavailableReason = localMeetingSummaryUnavailableReason {
+            trackLocalSummaryAbandoned(reason: .blocked, stage: "start", priorReadyState: "not_ready")
             homeDeleteFailure = HomeDeleteFailure(
                 title: "Could not summarize meeting",
                 message: unavailableReason
@@ -1009,6 +1009,9 @@ struct TranscriptedSettingsView: View {
                 )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
+                if homeLocalSummaryTaskTokens[summaryID] == taskToken {
+                    trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
+                }
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_cancelled",
                     message: "\(provider.title) meeting summary cancelled",
@@ -1019,6 +1022,7 @@ struct TranscriptedSettingsView: View {
                 return
             } catch {
                 guard localMeetingSummariesEnabled else { return }
+                trackLocalSummaryAbandoned(reason: .failed, stage: "generate", priorReadyState: "ready")
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_failed",
@@ -1519,6 +1523,14 @@ struct TranscriptedSettingsView: View {
             presentHomeActionFailure(
                 title: failureTitle,
                 message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again."
+            )
+        } else {
+            ActivationTelemetry.trackWorkflowAbandoned(
+                workflowKind: .failedMeetingRetry,
+                stage: "retry_available",
+                reasonKind: item.audioURLs.isEmpty ? .dismissed : .deleted,
+                surface: .home,
+                priorReadyState: canRetryFailedMeetings ? "retry_ready" : "retry_blocked"
             )
         }
     }
@@ -3218,16 +3230,19 @@ struct TranscriptedSettingsView: View {
         switch provider {
         case .gemmaMLX:
             guard localSummarySetupStatus.hasEnoughMemory else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "memory_check")
                 localSummaryModelPreparationStatus = "Gemma needs more memory than this Mac reports."
                 return
             }
 
             guard localSummarySetupStatus.hasRuntime else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "runtime_check")
                 localSummaryModelPreparationStatus = "Install uv first, then Transcripted can download Gemma here."
                 return
             }
         case .appleFoundation:
             guard appleSummarySetupStatus.isReady else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "system_check")
                 localSummaryModelPreparationStatus = appleSummarySetupStatus.unavailableReason
                     ?? "Apple on-device summaries are unavailable on this Mac right now."
                 return
@@ -3280,6 +3295,7 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationTask = nil
                 localSummaryModelPreparationToken = nil
                 localSummaryModelPreparationStatus = nil
+                trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_model_prepare_cancelled",
                     message: "\(provider.title) summary model preparation cancelled",
@@ -3294,6 +3310,7 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationToken = nil
                 refreshLocalSummarySetupStatus()
                 localSummaryModelPreparationStatus = "\(provider.title) setup failed: \(error.localizedDescription)"
+                trackBetaModelPrepAbandoned(reason: .failed, stage: "prepare_model")
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_model_prepare_failed",
@@ -3308,6 +3325,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func cancelLocalSummaryModelPreparation() {
+        if localSummaryModelPreparationTask != nil {
+            trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
+        }
         localSummaryModelPreparationTask?.cancel()
         localSummaryModelPreparationTask = nil
         localSummaryModelPreparationToken = nil
@@ -3334,6 +3354,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func cancelLocalSummaryJobs() {
+        if !homeLocalSummaryTasks.isEmpty {
+            trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
+        }
         for task in homeLocalSummaryTasks.values {
             task.cancel()
         }
@@ -3395,6 +3418,33 @@ struct TranscriptedSettingsView: View {
             event: event,
             message: message,
             context: context
+        )
+    }
+
+    private func trackLocalSummaryAbandoned(
+        reason: ActivationTelemetry.WorkflowAbandonmentReasonKind,
+        stage: String,
+        priorReadyState: String
+    ) {
+        ActivationTelemetry.trackWorkflowAbandoned(
+            workflowKind: .localSummary,
+            stage: stage,
+            reasonKind: reason,
+            surface: .home,
+            priorReadyState: priorReadyState
+        )
+    }
+
+    private func trackBetaModelPrepAbandoned(
+        reason: ActivationTelemetry.WorkflowAbandonmentReasonKind,
+        stage: String
+    ) {
+        ActivationTelemetry.trackWorkflowAbandoned(
+            workflowKind: .betaModelPrep,
+            stage: stage,
+            reasonKind: reason,
+            surface: .home,
+            priorReadyState: selectedLocalSummaryProviderIsReady ? "ready" : "not_ready"
         )
     }
 

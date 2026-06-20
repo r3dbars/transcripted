@@ -152,6 +152,15 @@ struct AnalyticsEventPolicy: Equatable {
         "surface",
     ]
 
+    private static let workflowAbandonedProperties: Set<String> = [
+        "elapsed_bucket",
+        "prior_ready_state",
+        "reason_kind",
+        "stage",
+        "surface",
+        "workflow_kind",
+    ]
+
     private static let meetingPromptProperties: Set<String> = [
         "app_signal",
         "calendar_confidence",
@@ -338,6 +347,10 @@ struct AnalyticsEventPolicy: Equatable {
         "activation_return_proxy_observed": .init(
             name: "activation_return_proxy_observed",
             allowedProperties: activationReturnProxyProperties
+        ),
+        "workflow_abandoned": .init(
+            name: "workflow_abandoned",
+            allowedProperties: workflowAbandonedProperties
         ),
         "menu_bar_opened": .init(
             name: "menu_bar_opened",

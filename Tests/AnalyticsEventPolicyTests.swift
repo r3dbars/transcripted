@@ -109,6 +109,7 @@ func testAnalyticsEventPolicy() {
             "default_system_output_volume_during",
             "delivery",
             "dictation_ready",
+            "elapsed_bucket",
             "enabled",
             "entrypoint",
             "failure_code",
@@ -149,6 +150,7 @@ func testAnalyticsEventPolicy() {
             "previous_clean_shutdown",
             "previous_version",
             "prior_artifact_kind",
+            "prior_ready_state",
             "prior_status",
             "prompt_kind",
             "prompt_reason",
@@ -162,6 +164,7 @@ func testAnalyticsEventPolicy() {
             "recovering",
             "reporting_kind",
             "required",
+            "reason_kind",
             "result",
             "route_ready",
             "route_shape",
@@ -178,6 +181,7 @@ func testAnalyticsEventPolicy() {
             "source",
             "stall_kind",
             "stall_stage",
+            "stage",
             "state",
             "step_id",
             "step_index",
@@ -200,6 +204,7 @@ func testAnalyticsEventPolicy() {
             "voice_processing",
             "voice_processing_active",
             "was_recording",
+            "workflow_kind",
         ]
         let properties = allAllowedAnalyticsPropertyNames()
 
@@ -373,6 +378,46 @@ func testAnalyticsEventPolicy() {
             ActivationTelemetry.markFirstArtifactSavedTrackedIfNeeded(userDefaults: defaults),
             "first saved artifact should not be marked twice"
         )
+    }
+
+    runSuite("AnalyticsEventPolicy allows workflow abandonment taxonomy") {
+        let abandoned = AnalyticsEventPolicy.policy(forEvent: "workflow_abandoned")
+        assertEqual(
+            abandoned?.allowedProperties ?? Set<String>(),
+            ["elapsed_bucket", "prior_ready_state", "reason_kind", "stage", "surface", "workflow_kind"],
+            "workflow abandonment should stay coarse and enum-only"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "failed_meeting_retry",
+                "stage": "retry_available",
+                "reason_kind": "dismissed",
+                "elapsed_bucket": "unknown",
+                "surface": "home",
+                "prior_ready_state": "retry_ready",
+                "meeting_title": "Customer call",
+                "file_path": "/Users/redbars/private.md",
+                "raw_duration": "472.221",
+                "raw_error": "private stack",
+                "source_app": "Zoom",
+                "url": "https://example.com/meeting",
+            ],
+            allowedKeys: abandoned?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["workflow_kind"], "failed_meeting_retry", "workflow kind should survive")
+        assertEqual(sanitized["stage"], "retry_available", "stage should survive")
+        assertEqual(sanitized["reason_kind"], "dismissed", "reason kind should survive")
+        assertEqual(sanitized["elapsed_bucket"], "unknown", "elapsed bucket should survive")
+        assertEqual(sanitized["surface"], "home", "surface should survive")
+        assertEqual(sanitized["prior_ready_state"], "retry_ready", "prior ready state should survive")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["raw_duration"], "raw durations must not be sent")
+        assertNil(sanitized["raw_error"], "raw errors must not be sent")
+        assertNil(sanitized["source_app"], "source apps must not be sent")
+        assertNil(sanitized["url"], "raw URLs must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {
