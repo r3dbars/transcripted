@@ -21,6 +21,10 @@ func testCIWorkflowContract() {
     }
 
     runSuite("CI workflow contract - swift-ci runs the full suite") {
+        assertTrue(
+            swiftCI.contains("python3 scripts/dev/check-build-source-lists.py"),
+            "swift-ci should validate raw swiftc source lists before the expensive build"
+        )
         assertTrue(swiftCI.contains("bash run-tests.sh"), "swift-ci should keep running the fast tests")
         assertTrue(swiftCI.contains("swift test\n"), "swift-ci should keep running the Core package tests")
         assertTrue(swiftCI.contains("run-integration-smoke.sh"), "swift-ci should run the integration smoke")

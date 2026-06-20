@@ -36,6 +36,8 @@ final class RuntimeDiagnostics {
         marker = RuntimeDiagnosticsStore.makeLaunchMarker(
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
             buildVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+            buildChannel: AnalyticsRuntimeConfiguration.buildChannel(),
+            buildRevision: AnalyticsRuntimeConfiguration.buildRevision(),
             osMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion
         )
         persist(event: "app_launched")

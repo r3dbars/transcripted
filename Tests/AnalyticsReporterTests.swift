@@ -64,6 +64,8 @@ func testAnalyticsReporter() {
             infoDictionary: [
                 "CFBundleShortVersionString": "1.2.3",
                 "CFBundleVersion": "456",
+                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "local",
+                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc123def456",
             ],
             operatingSystemVersion: OperatingSystemVersion(majorVersion: 15, minorVersion: 4, patchVersion: 0)
         )
@@ -71,8 +73,54 @@ func testAnalyticsReporter() {
         assertEqual(properties["distinct_id"], "anonymous-device", "distinct id should be included")
         assertEqual(properties["app_version"], "1.2.3", "app version should be included")
         assertEqual(properties["build_version"], "456", "build version should be included")
+        assertEqual(properties["build_channel"], "local", "build channel should distinguish local builds from shipped builds")
+        assertEqual(properties["build_revision"], "abc123def456", "build revision should distinguish same-version main builds")
         assertEqual(properties["os_major"], "15", "OS major version should be included")
         assertEqual(properties["session_id"], "session-1", "sanitized session id should be included")
+    }
+
+    runSuite("AnalyticsRuntimeConfiguration accepts safe local build metadata overrides") {
+        let info: [String: Any] = [
+            AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
+            AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc123def456",
+        ]
+        let environment = [
+            AnalyticsRuntimeConfiguration.buildChannelEnvironmentKey: "local",
+            AnalyticsRuntimeConfiguration.buildRevisionEnvironmentKey: "main.20260619",
+        ]
+
+        assertEqual(
+            AnalyticsRuntimeConfiguration.buildChannel(environment: environment, infoDictionary: info),
+            "local",
+            "local analytics build channel override should win"
+        )
+        assertEqual(
+            AnalyticsRuntimeConfiguration.buildRevision(environment: environment, infoDictionary: info),
+            "main.20260619",
+            "local analytics build revision override should win"
+        )
+    }
+
+    runSuite("AnalyticsRuntimeConfiguration rejects unsafe build metadata") {
+        let info: [String: Any] = [
+            AnalyticsRuntimeConfiguration.buildChannelInfoKey: "/Users/jane/build",
+            AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "person@example.com",
+        ]
+        let environment = [
+            AnalyticsRuntimeConfiguration.buildChannelEnvironmentKey: "release\nbeta",
+            AnalyticsRuntimeConfiguration.buildRevisionEnvironmentKey: "sk-private",
+        ]
+
+        assertEqual(
+            AnalyticsRuntimeConfiguration.buildChannel(environment: environment, infoDictionary: info),
+            "unknown",
+            "unsafe build channels should not become analytics metadata"
+        )
+        assertEqual(
+            AnalyticsRuntimeConfiguration.buildRevision(environment: environment, infoDictionary: info),
+            "unknown",
+            "unsafe build revisions should not become analytics metadata"
+        )
     }
 
     runSuite("AnalyticsReporter keeps caller build metadata over current defaults") {
@@ -106,6 +154,8 @@ func testAnalyticsReporter() {
 
         assertEqual(properties["app_version"], "unknown", "missing app version should not remove default metadata")
         assertEqual(properties["build_version"], "unknown", "missing build version should not remove default metadata")
+        assertEqual(properties["build_channel"], "unknown", "missing build channel should not remove default metadata")
+        assertEqual(properties["build_revision"], "unknown", "missing build revision should not remove default metadata")
         assertEqual(properties["os_major"], "15", "OS major version should still be present")
     }
 

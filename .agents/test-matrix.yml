@@ -28,6 +28,7 @@ rules:
       - "run-e2e-smoke.sh"
       - "scripts/entrypoints/run-e2e-smoke.sh"
     checks:
+      - "python3 scripts/dev/check-build-source-lists.py"
       - "bash run-e2e-smoke.sh"
 
   - paths:
@@ -37,6 +38,7 @@ rules:
       - "run-slow-pasteback-smoke.sh"
       - "scripts/entrypoints/run-slow-pasteback-smoke.sh"
     checks:
+      - "python3 scripts/dev/check-build-source-lists.py"
       - "bash run-slow-pasteback-smoke.sh"
 
   - paths:
@@ -51,8 +53,10 @@ rules:
   - paths:
       - "build.sh"
       - "scripts/entrypoints/build.sh"
+      - "scripts/entrypoints/lib/swiftc-app-args.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
+      - "python3 scripts/dev/check-build-source-lists.py"
       - "bash -n build.sh"
       - "bash -n scripts/entrypoints/build.sh"
       - "bash build.sh --no-open"
@@ -63,6 +67,7 @@ rules:
       - "Tests/FastTests.manifest"
     checks:
       - "scripts/dev/agent-preflight.sh"
+      - "python3 scripts/dev/check-build-source-lists.py"
       - "bash -n run-tests.sh"
       - "bash -n scripts/entrypoints/run-tests.sh"
       - "bash run-tests.sh"
@@ -93,10 +98,26 @@ rules:
       - "bash -n scripts/ops/health-probe.sh"
 
   - paths:
+      - "scripts/ops/posthog-product-dashboard-summary.py"
+      - "Tests/Fixtures/posthog-product-dashboard-summary.json"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-product-dashboard-summary.py"
+      - "python3 scripts/ops/posthog-product-dashboard-summary.py --self-test"
+      - "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only"
+
+  - paths:
       - "scripts/dev/onboarding.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/dev/onboarding.sh"
+
+  - paths:
+      - "scripts/dev/check-build-source-lists.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/dev/check-build-source-lists.py"
+      - "python3 scripts/dev/check-build-source-lists.py"
 
   - paths:
       - "scripts/dev/benchmark-home-recent-captures.sh"
@@ -114,6 +135,15 @@ rules:
       - "python3 scripts/ops/generate-nightly-digest.py --self-test"
 
   - paths:
+      - "scripts/ops/posthog-dashboard-queries.py"
+      - "Tests/Fixtures/posthog-dashboard-query-results.json"
+      - "docs/posthog-dashboard-query-helpers.md"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/posthog-dashboard-queries.py"
+      - "python3 scripts/ops/posthog-dashboard-queries.py --self-test"
+
+  - paths:
       - "scripts/ops/nightly-security-check.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
@@ -126,6 +156,20 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/release-gate-report.py"
       - "python3 scripts/ops/release-gate-report.py --self-test"
+
+  - paths:
+      - "scripts/ops/release-health-card.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/ops/release-health-card.py"
+      - "python3 scripts/ops/release-health-card.py --self-test"
+
+  - paths:
+      - "scripts/release/post-dmg-release-audit.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/release/post-dmg-release-audit.py"
+      - "python3 scripts/release/post-dmg-release-audit.py --self-test"
 
   - paths:
       - "scripts/ops/packaged-app-smoke.py"

@@ -1,0 +1,109 @@
+{
+  "queries": [
+    {
+      "id": "wau.active_devices_by_week",
+      "rows": [
+        {"week": "2026-06-15", "active_devices": 87, "workflow_events": 420, "first_value_devices": 31, "return_proxy_devices": 12}
+      ]
+    },
+    {
+      "id": "wau.daily_active_devices",
+      "rows": [
+        {"day": "2026-06-18", "active_devices": 24, "launch_events": 28, "workflow_events": 91, "first_value_devices": 9}
+      ]
+    },
+    {
+      "id": "wau.version_mix",
+      "rows": [
+        {"app_version": "1.1.48", "active_devices": 55, "events": 230, "last_seen": "2026-06-19T12:00:00Z"}
+      ]
+    },
+    {
+      "id": "activation.reach_ladder",
+      "rows": [
+        {
+          "launch_devices": 100,
+          "onboarding_devices": 72,
+          "permission_ready_devices": 44,
+          "capture_started_devices": 38,
+          "strict_saved_markdown_devices": 23,
+          "saved_markdown_or_dictation_proxy_devices": 35,
+          "artifact_action_devices": 18,
+          "agent_proxy_devices": 9,
+          "true_agent_query_devices": 0,
+          "return_proxy_devices": 7
+        }
+      ]
+    },
+    {
+      "id": "activation.ordered_funnel",
+      "rows": [
+        {"deepest_step": 1, "devices": 12},
+        {"deepest_step": 7, "devices": 8}
+      ]
+    },
+    {
+      "id": "activation.return_windows",
+      "rows": [
+        {"return_window_bucket": "next_day", "prior_artifact_kind": "meeting", "surface": "home", "events": 14, "devices": 7}
+      ]
+    },
+    {
+      "id": "reliability.workflow_failure_rates",
+      "rows": [
+        {
+          "dictation_starts": 64,
+          "dictation_start_failures": 2,
+          "dictation_completed": 57,
+          "dictation_no_speech": 3,
+          "meeting_starts": 22,
+          "meeting_start_failures": 1,
+          "meeting_saved": 19,
+          "meeting_failed_or_skipped": 2
+        }
+      ]
+    },
+    {
+      "id": "reliability.failure_kinds",
+      "rows": [
+        {"event": "meeting_transcript_failed", "failure_kind": "model_unavailable", "events": 2, "devices": 2}
+      ]
+    },
+    {
+      "id": "reliability.latency_buckets",
+      "rows": [
+        {"stop_to_done_bucket": "under_5s", "decode_bucket": "under_2s", "save_bucket": "under_500ms", "paste_bucket": "under_500ms", "outcome": "completed", "events": 30, "devices": 18}
+      ]
+    },
+    {
+      "id": "feature_adoption.artifact_and_agent_actions",
+      "rows": [
+        {"event": "activation_agent_prompt_action_clicked", "surface": "home", "artifact_kind": "meeting", "action_kind": "copy_prompt", "agent_target": "claude", "result": "copied", "events": 11, "devices": 6}
+      ]
+    },
+    {
+      "id": "feature_adoption.meeting_prompts",
+      "rows": [
+        {"event": "meeting_prompt_record_selected", "provider": "zoom", "source": "active_call", "route_ready": true, "suppression_reason": null, "cooldown_reason": null, "events": 8, "devices": 5}
+      ]
+    },
+    {
+      "id": "feature_adoption.settings_discovery",
+      "rows": [
+        {"event": "settings_page_viewed", "page_id": "agent", "action_id": null, "setting_id": null, "enabled": null, "events": 16, "devices": 10}
+      ]
+    },
+    {
+      "id": "release_health.version_event_counts",
+      "rows": [
+        {"event": "app_launched", "events": 82, "devices": 41, "first_seen": "2026-06-18T00:10:00Z", "last_seen": "2026-06-19T12:00:00Z"}
+      ]
+    },
+    {
+      "id": "release_health.update_results",
+      "rows": [
+        {"event": "update_check_finished", "result": "no_update", "state": "idle", "failure_kind": null, "version": "1.1.48", "events": 19, "devices": 14}
+      ]
+    }
+  ]
+}

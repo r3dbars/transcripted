@@ -19,6 +19,10 @@ private struct AnalyticsCaptureRequest: Encodable {
 enum AnalyticsRuntimeConfiguration {
     static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
     static let hostInfoKey = "TranscriptedPostHogHost"
+    static let buildChannelInfoKey = "TranscriptedBuildChannel"
+    static let buildRevisionInfoKey = "TranscriptedBuildRevision"
+    static let buildChannelEnvironmentKey = "TRANSCRIPTED_ANALYTICS_BUILD_CHANNEL"
+    static let buildRevisionEnvironmentKey = "TRANSCRIPTED_ANALYTICS_BUILD_REVISION"
     private static let localOverridesFileName = "observability-overrides.plist"
 
     static func apiKey() -> String? {
@@ -35,6 +39,26 @@ enum AnalyticsRuntimeConfiguration {
             localOverrideValue(forKey: hostInfoKey),
             Bundle.main.object(forInfoDictionaryKey: hostInfoKey) as? String
         )
+    }
+
+    static func buildChannel(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary
+    ) -> String {
+        firstSafeBuildMetadata(
+            environment[buildChannelEnvironmentKey],
+            infoDictionary?[buildChannelInfoKey] as? String
+        ) ?? "unknown"
+    }
+
+    static func buildRevision(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        infoDictionary: [String: Any]? = Bundle.main.infoDictionary
+    ) -> String {
+        firstSafeBuildMetadata(
+            environment[buildRevisionEnvironmentKey],
+            infoDictionary?[buildRevisionInfoKey] as? String
+        ) ?? "unknown"
     }
 
     static func localOverrideValue(forKey key: String) -> String? {
@@ -76,6 +100,22 @@ enum AnalyticsRuntimeConfiguration {
         candidates
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
+    }
+
+    private static func firstSafeBuildMetadata(_ candidates: String?...) -> String? {
+        candidates
+            .compactMap { value -> String? in
+                guard let trimmed = firstNonEmpty(value),
+                      trimmed.count <= 80,
+                      trimmed.allSatisfy({ character in
+                          character.isLetter || character.isNumber || character == "." || character == "_" || character == "-"
+                      }),
+                      AnalyticsPayloadSanitizer.sanitizeText(trimmed) == trimmed else {
+                    return nil
+                }
+                return trimmed
+            }
+            .first
     }
 }
 
@@ -179,6 +219,8 @@ final class AnalyticsReporter {
             "distinct_id": distinctID,
             "app_version": infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
             "build_version": infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
+            "build_channel": AnalyticsRuntimeConfiguration.buildChannel(infoDictionary: infoDictionary),
+            "build_revision": AnalyticsRuntimeConfiguration.buildRevision(infoDictionary: infoDictionary),
             "os_major": "\(operatingSystemVersion.majorVersion)",
         ]
 

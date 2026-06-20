@@ -335,8 +335,7 @@ struct TranscriptedSettingsView: View {
             homeDashboardRefreshInFlight = false
             homeMeetingPreviewLoadTask?.cancel()
             homeMeetingPreviewLoadTask = nil
-            localSummaryModelPreparationTask?.cancel()
-            localSummaryModelPreparationTask = nil
+            cancelLocalSummaryModelPreparation()
             homeViewModel.cancel()
         }
     }
@@ -951,6 +950,7 @@ struct TranscriptedSettingsView: View {
         let summaryID = transcriptURL.path
         guard homeLocalSummaryTasks[summaryID] == nil else { return }
         if let unavailableReason = localMeetingSummaryUnavailableReason {
+            trackLocalSummaryAbandoned(reason: .blocked, stage: "start", priorReadyState: "not_ready")
             homeDeleteFailure = HomeDeleteFailure(
                 title: "Could not summarize meeting",
                 message: unavailableReason
@@ -1018,6 +1018,9 @@ struct TranscriptedSettingsView: View {
                 )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
+                if homeLocalSummaryTaskTokens[summaryID] == taskToken {
+                    trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
+                }
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_cancelled",
                     message: "\(provider.title) meeting summary cancelled",
@@ -1028,6 +1031,7 @@ struct TranscriptedSettingsView: View {
                 return
             } catch {
                 guard localMeetingSummariesEnabled else { return }
+                trackLocalSummaryAbandoned(reason: .failed, stage: "generate", priorReadyState: "ready")
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_failed",
@@ -1528,6 +1532,14 @@ struct TranscriptedSettingsView: View {
             presentHomeActionFailure(
                 title: failureTitle,
                 message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again."
+            )
+        } else {
+            ActivationTelemetry.trackWorkflowAbandoned(
+                workflowKind: .failedMeetingRetry,
+                stage: "retry_available",
+                reasonKind: item.audioURLs.isEmpty ? .dismissed : .deleted,
+                surface: .home,
+                priorReadyState: canRetryFailedMeetings ? "retry_ready" : "retry_blocked"
             )
         }
     }
@@ -3227,16 +3239,19 @@ struct TranscriptedSettingsView: View {
         switch provider {
         case .gemmaMLX:
             guard localSummarySetupStatus.hasEnoughMemory else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "memory_check")
                 localSummaryModelPreparationStatus = "Gemma needs more memory than this Mac reports."
                 return
             }
 
             guard localSummarySetupStatus.hasRuntime else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "runtime_check")
                 localSummaryModelPreparationStatus = "Install uv first, then Transcripted can download Gemma here."
                 return
             }
         case .appleFoundation:
             guard appleSummarySetupStatus.isReady else {
+                trackBetaModelPrepAbandoned(reason: .unavailable, stage: "system_check")
                 localSummaryModelPreparationStatus = appleSummarySetupStatus.unavailableReason
                     ?? "Apple on-device summaries are unavailable on this Mac right now."
                 return
@@ -3289,6 +3304,7 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationTask = nil
                 localSummaryModelPreparationToken = nil
                 localSummaryModelPreparationStatus = nil
+                trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_model_prepare_cancelled",
                     message: "\(provider.title) summary model preparation cancelled",
@@ -3303,6 +3319,7 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationToken = nil
                 refreshLocalSummarySetupStatus()
                 localSummaryModelPreparationStatus = "\(provider.title) setup failed: \(error.localizedDescription)"
+                trackBetaModelPrepAbandoned(reason: .failed, stage: "prepare_model")
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_model_prepare_failed",
@@ -3317,6 +3334,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func cancelLocalSummaryModelPreparation() {
+        if localSummaryModelPreparationTask != nil {
+            trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
+        }
         localSummaryModelPreparationTask?.cancel()
         localSummaryModelPreparationTask = nil
         localSummaryModelPreparationToken = nil
@@ -3343,6 +3363,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private func cancelLocalSummaryJobs() {
+        if !homeLocalSummaryTasks.isEmpty {
+            trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
+        }
         for task in homeLocalSummaryTasks.values {
             task.cancel()
         }
@@ -3404,6 +3427,33 @@ struct TranscriptedSettingsView: View {
             event: event,
             message: message,
             context: context
+        )
+    }
+
+    private func trackLocalSummaryAbandoned(
+        reason: ActivationTelemetry.WorkflowAbandonmentReasonKind,
+        stage: String,
+        priorReadyState: String
+    ) {
+        ActivationTelemetry.trackWorkflowAbandoned(
+            workflowKind: .localSummary,
+            stage: stage,
+            reasonKind: reason,
+            surface: .home,
+            priorReadyState: priorReadyState
+        )
+    }
+
+    private func trackBetaModelPrepAbandoned(
+        reason: ActivationTelemetry.WorkflowAbandonmentReasonKind,
+        stage: String
+    ) {
+        ActivationTelemetry.trackWorkflowAbandoned(
+            workflowKind: .betaModelPrep,
+            stage: stage,
+            reasonKind: reason,
+            surface: .home,
+            priorReadyState: selectedLocalSummaryProviderIsReady ? "ready" : "not_ready"
         )
     }
 
@@ -3786,206 +3836,6 @@ struct TranscriptedSettingsView: View {
             }
 
             SupportPrivacyNote()
-        }
-    }
-
-    private struct SupportActionCard: View {
-        enum Tone {
-            case primary
-            case secondary
-        }
-
-        let symbolName: String
-        let title: String
-        let detail: String
-        let buttonTitle: String
-        let buttonSymbolName: String
-        let tone: Tone
-        let status: String?
-        let isEnabled: Bool
-        let action: () -> Void
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: symbolName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(iconForeground)
-                        .frame(width: 34, height: 34)
-                        .background(iconBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(title)
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(Color.primary)
-
-                        Text(detail)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
-                }
-
-                Button(action: action) {
-                    Label(buttonTitle, systemImage: buttonSymbolName)
-                        .font(.callout.weight(.semibold))
-                        .labelStyle(.titleAndIcon)
-                        .lineLimit(1)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .foregroundStyle(buttonForeground)
-                }
-                .buttonStyle(SettingsHoverButtonStyle(
-                    tone: buttonInteractionTone,
-                    cornerRadius: 8,
-                    normalFill: buttonBackground,
-                    normalStroke: buttonStroke,
-                    hoverFill: buttonHoverBackground,
-                    pressedFill: buttonPressedBackground,
-                    hoverStroke: buttonHoverStroke
-                ))
-                .disabled(!isEnabled)
-
-                if let status, !status.isEmpty {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Color(nsColor: .systemGreen))
-
-                        Text(status)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(cardBackground)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(cardStroke, lineWidth: 1)
-            )
-        }
-
-        private var iconForeground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen)
-            case .secondary:
-                return Color.accentColor
-            }
-        }
-
-        private var iconBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.16)
-            case .secondary:
-                return Color.accentColor.opacity(0.14)
-            }
-        }
-
-        private var cardBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .controlBackgroundColor).opacity(0.9)
-            case .secondary:
-                return Color(nsColor: .controlBackgroundColor).opacity(0.72)
-            }
-        }
-
-        private var cardStroke: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.25)
-            case .secondary:
-                return Color.primary.opacity(0.08)
-            }
-        }
-
-        private var buttonBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen)
-            case .secondary:
-                return Color.secondary.opacity(0.16)
-            }
-        }
-
-        private var buttonInteractionTone: SettingsInteractionTone {
-            switch tone {
-            case .primary:
-                return .accent
-            case .secondary:
-                return .neutral
-            }
-        }
-
-        private var buttonHoverBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.86)
-            case .secondary:
-                return SettingsInteractionPalette.hoverFill(for: .neutral)
-            }
-        }
-
-        private var buttonPressedBackground: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.76)
-            case .secondary:
-                return SettingsInteractionPalette.pressedFill(for: .neutral)
-            }
-        }
-
-        private var buttonStroke: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.24)
-            case .secondary:
-                return Color.primary.opacity(0.08)
-            }
-        }
-
-        private var buttonHoverStroke: Color {
-            switch tone {
-            case .primary:
-                return Color(nsColor: .systemGreen).opacity(0.34)
-            case .secondary:
-                return SettingsInteractionPalette.hoverStroke(for: .neutral)
-            }
-        }
-
-        private var buttonForeground: Color {
-            switch tone {
-            case .primary:
-                return .white
-            case .secondary:
-                return .primary
-            }
-        }
-    }
-
-    private struct SupportPrivacyNote: View {
-        var body: some View {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-
-                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.top, 2)
         }
     }
 
