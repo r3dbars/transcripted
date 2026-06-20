@@ -393,6 +393,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingStartFailureClassifier.swift"
     "Sources/Meeting/MeetingSystemAudioStatusCopy.swift"
     "Sources/UI/Settings/HomePresentation.swift"
+    "Sources/UI/Settings/HomeSearchMatching.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
 )
 
