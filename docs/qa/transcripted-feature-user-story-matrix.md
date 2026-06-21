@@ -3,7 +3,7 @@
 Canonical source for this pass:
 
 - Local CSV: `docs/qa/transcripted-feature-user-story-matrix.csv`
-- Google Sheet: https://docs.google.com/spreadsheets/d/16HVipLzqfGkXNXlf1N-hMYbzEUoVyHUTSx26Z9sYhZc/edit
+- Google Sheet: https://docs.google.com/spreadsheets/d/1fH_gnpTEXnw0fh24K7CjhT8n_f-WdR79syYL78yd5vI/edit
 - Created from current repo docs and source on 2026-06-21
 
 Status meanings:
@@ -47,7 +47,7 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 80
-- Status counts after this pass: `PASS` 16, `UNKNOWN` 64, `FAIL` 0, `BLOCKED` 0
+- Status counts after this pass: `PASS` 17, `UNKNOWN` 63, `FAIL` 0, `BLOCKED` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -63,6 +63,9 @@ Current proof summary:
 - Live sidecar preview security retest: `PASS` in commit `5f827929`; focused
   preview-server tests, dependency rebuild, app build, full fast tests,
   integration smoke, and diff hygiene all passed.
+- Agent config merge edge cases: `PASS`; focused `AgentMCPConnector` and
+  `ClaudeDesktopIntegrationInstaller` suites passed and cover malformed config,
+  backups, stale commands/helpers, idempotent reconnects, and preserved servers.
 - Manual/hardware gaps still `UNKNOWN`: real meeting-app volume behavior,
   Bluetooth/AirPods route churn, sleep/wake during active capture, secure-field
   pasteback behavior, Transcripted-vs-corpus comparison, summary quality/feel,
