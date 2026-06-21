@@ -59,6 +59,41 @@ func testUIAutomationSurfaceContract() {
 
     }
 
+    runSuite("UI automation surface contract - menubar controls keep polished hit targets") {
+        let tokenSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuTokens.swift")
+        let actionRowSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarActionRowView.swift")
+        let iconButtonSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuIconButton.swift")
+        let outlineButtonSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuOutlineButton.swift")
+        let modelStatusSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarModelStatusView.swift")
+
+        assertTrue(
+            tokenSource.contains("minimumHitTargetSize: CGFloat = 40")
+                && actionRowSource.contains("MenuTokens.minimumHitTargetSize"),
+            "menubar rows should stay at or above the 40px minimum hit target"
+        )
+
+        for source in [iconButtonSource, outlineButtonSource] {
+            assertTrue(
+                source.contains("override func hitTest(_ point: NSPoint)")
+                    && source.contains("let localPoint = convert(point, from: superview)")
+                    && source.contains("minimumHitBounds.contains(localPoint)")
+                    && source.contains("trackPressInMinimumHitBounds()")
+                    && source.contains("NSApp.sendAction(action, to: target, from: self)")
+                    && source.contains("CATransform3DMakeScale(0.96, 0.96, 1)"),
+                "small menubar buttons should keep expanded hit testing and subtle 0.96 press feedback"
+            )
+        }
+
+        assertTrue(
+            modelStatusSource.contains("NSFont.monospacedDigitSystemFont")
+                && modelStatusSource.contains("setAccessibilityRole(.button)")
+                && modelStatusSource.contains("setAccessibilityValue(label.stringValue)")
+                && modelStatusSource.contains("override func resetCursorRects()")
+                && modelStatusSource.contains("override func accessibilityPerformPress()"),
+            "menubar model status should keep tabular progress digits and a real AX button contract"
+        )
+    }
+
     runSuite("UI automation surface contract - app commands expose capture shortcuts") {
         let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
 
