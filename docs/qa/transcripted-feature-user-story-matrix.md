@@ -47,8 +47,8 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 80
-- Status counts after this pass: `PASS` 27, `RETEST PASS` 2,
-  `UNKNOWN` 51, `FAIL` 0, `BLOCKED` 0
+- Status counts after this pass: `PASS` 27, `RETEST PASS` 3,
+  `UNKNOWN` 50, `FAIL` 0, `BLOCKED` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -86,6 +86,12 @@ Current proof summary:
   dictation start now refuses to begin while meeting recording, meeting
   processing, or speaker-review work is active. Focused policy tests, app build
   with launch smoke, full fast tests, and Codex review all passed.
+- Storage relocation edge cases: `RETEST PASS` in commit `4e57b5da`;
+  capture-library selection now prepares the chosen root, meeting folder, and
+  dictation folder before saving the preference, rejects unusable destinations,
+  preserves the current library on failed replacement, refreshes Settings state,
+  and alerts the user. Focused storage tests, app build with launch smoke, full
+  fast tests, diff hygiene, Codex review, and Local lane review all passed.
 - Manual/hardware gaps still `UNKNOWN`: real meeting-app volume behavior,
   Bluetooth/AirPods route churn, sleep/wake during active capture, secure-field
   pasteback behavior, Transcripted-vs-corpus comparison, summary quality/feel,
