@@ -77,6 +77,11 @@ Current proof summary:
 - Imported-audio bad-input handling: `PASS`; focused
   `MeetingImportedAudioPreparerTests` passed 58/58 and proves unsupported
   file/folder/date-policy handling without needing private audio content.
+- Import-audio entry/transcription proof was refreshed while staying
+  `UNKNOWN`: `UIAutomationSurfaceContractTests` passed 233/233,
+  `HomeImportAudioActionTests` passed 6/6, and
+  `MeetingImportedAudioPreparerTests` passed 58/58. Native file-picker and real
+  imported-media UX proof are still missing, so these rows did not move green.
 - Update actions during active capture: `RETEST PASS` in commit `2d622a78`;
   menu/settings update actions now stay disabled during dictation, meeting
   recording, meeting processing, or speaker-review work. Focused policy tests,
