@@ -3,7 +3,7 @@
 Canonical source for this pass:
 
 - Local CSV: `docs/qa/transcripted-feature-user-story-matrix.csv`
-- Google Sheet: https://docs.google.com/spreadsheets/d/1Mpl-TnKDFl40C5jo0wk0zHCX_k67HZN8PrMQBwnXv3c/edit
+- Google Sheet: https://docs.google.com/spreadsheets/d/1mXEEADKjbl5VBmzSui4w2lKGUNMEvYWO2X9eCVVcCFY/edit
 - Created from current repo docs and source on 2026-06-21
 
 Status meanings:
@@ -47,7 +47,7 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 80
-- Status counts after this pass: `PASS` 24, `UNKNOWN` 56, `FAIL` 0, `BLOCKED` 0
+- Status counts after this pass: `PASS` 26, `UNKNOWN` 54, `FAIL` 0, `BLOCKED` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -70,6 +70,9 @@ Current proof summary:
   saved daily Markdown, retained audio cleanup/retention boundaries, model cache
   management, and single-instance lock behavior. These remain good candidates
   for later manual UX feel checks, but their code contracts passed.
+- MCP and local diagnostics proof added: `Tools/TranscriptedMCP`,
+  `Tools/TranscriptedCaptureKit`, reliability packet, log rotation, and support
+  diagnostics focused suites passed without uploading private capture content.
 - Manual/hardware gaps still `UNKNOWN`: real meeting-app volume behavior,
   Bluetooth/AirPods route churn, sleep/wake during active capture, secure-field
   pasteback behavior, Transcripted-vs-corpus comparison, summary quality/feel,
