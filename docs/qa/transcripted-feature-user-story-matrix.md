@@ -3,7 +3,7 @@
 Canonical source for this pass:
 
 - Local CSV: `docs/qa/transcripted-feature-user-story-matrix.csv`
-- Google Sheet: https://docs.google.com/spreadsheets/d/1Ho4tFA-_aAtJ2MMXlnbvk6y8mPaSl5Nh1_Itzt7yLjs/edit
+- Google Sheet: https://docs.google.com/spreadsheets/d/18HBWGBpGvAkY1WQc_LEc2l0lnHFoPq2E7syNg8Ts03w/edit
 - Created from current repo docs and source on 2026-06-21
 
 Status meanings:
@@ -47,14 +47,18 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 79
-- Status counts after this pass: `PASS` 4, `UNKNOWN` 74, `BLOCKED` 1
+- Status counts after this pass: `PASS` 13, `UNKNOWN` 66, `FAIL` 0, `BLOCKED` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
-- UI automation: `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`
-- UI blocker: existing Transcripted process from another worktree made menu bar
-  accessibility targeting ambiguous; Apple Events automation also warned.
-- Live/hardware blocker: live-capture permission-state had the same existing
-  instance and automation warnings, so real mic, system-audio, meeting-app,
-  Bluetooth/AirPods, sleep/wake, and human-feel proof stays `UNKNOWN`.
+- UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
+  then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
+  after clearing a stale idle Transcripted instance from another worktree.
+- Live capture smoke: `PASS` via `bash run-live-capture-smoke.sh --skip-build`;
+  real mic + system-audio capture started/stopped and wrote scratch files on
+  this Mac.
+- Manual/hardware gaps still `UNKNOWN`: real meeting-app volume behavior,
+  Bluetooth/AirPods route churn, sleep/wake during active capture, secure-field
+  pasteback behavior, private corpus comparison, summary quality/feel, and
+  real Sparkle install/update behavior.
 - Initial logistics issue: first full bench failed because dependencies were
   missing/stale; `bash build-deps.sh --force` rebuilt them, and the retest
   passed.
