@@ -3,7 +3,7 @@
 Canonical source for this pass:
 
 - Local CSV: `docs/qa/transcripted-feature-user-story-matrix.csv`
-- Google Sheet: https://docs.google.com/spreadsheets/d/1MxBdB7KLem1J1jOe7LdG3Ppfzlu6fPLfXzfGkhkAs2Y/edit
+- Google Sheet: https://docs.google.com/spreadsheets/d/16HVipLzqfGkXNXlf1N-hMYbzEUoVyHUTSx26Z9sYhZc/edit
 - Created from current repo docs and source on 2026-06-21
 
 Status meanings:
@@ -47,7 +47,7 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 80
-- Status counts after this pass: `PASS` 15, `UNKNOWN` 65, `FAIL` 0, `BLOCKED` 0
+- Status counts after this pass: `PASS` 16, `UNKNOWN` 64, `FAIL` 0, `BLOCKED` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -60,6 +60,9 @@ Current proof summary:
 - Packaged no-publish smoke: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153703/qa-report.md`;
   this did not cut, tag, notarize, publish, update appcast, update Homebrew,
   deploy, or release anything.
+- Live sidecar preview security retest: `PASS` in commit `5f827929`; focused
+  preview-server tests, dependency rebuild, app build, full fast tests,
+  integration smoke, and diff hygiene all passed.
 - Manual/hardware gaps still `UNKNOWN`: real meeting-app volume behavior,
   Bluetooth/AirPods route churn, sleep/wake during active capture, secure-field
   pasteback behavior, Transcripted-vs-corpus comparison, summary quality/feel,
