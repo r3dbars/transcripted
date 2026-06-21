@@ -94,10 +94,16 @@ Current proof summary:
   or UI automation proof.
 - Discard/save race safety proof was strengthened while staying `UNKNOWN`:
   `MeetingRecordingCleanupTests` passed 5/5, `RepoCommandContractTests` passed
-  615/615 with a new single-flight stop/discard teardown contract, and
-  `swift test --filter TranscriptionTaskManagerMetadataTests` passed 57/57, and Codex review was clean.
-  Real rapid stop/discard interaction during live capture still needs manual or
-  UI automation proof.
+  615/615 with a new single-flight stop/discard teardown contract,
+  `swift test --filter TranscriptionTaskManagerMetadataTests` passed 57/57,
+  and Codex review was clean. Real rapid stop/discard interaction during live
+  capture still needs manual or UI automation proof.
+- Permission denial/revoke proof was strengthened while staying `UNKNOWN`:
+  `TranscriptedPermissionAccessTests` passed 33/33 on serial rerun,
+  `PermissionStateHarnessContractTests` passed 8/8,
+  `swift test --package-path Tools/TranscriptedQA --filter PermissionState`
+  passed 14/14, and both permission-state CLI modes reported 11 pass / 1
+  warning. Real macOS TCC deny/regrant/revoke behavior still needs manual proof.
 - Update actions during active capture: `RETEST PASS` in commit `2d622a78`;
   menu/settings update actions now stay disabled during dictation, meeting
   recording, meeting processing, or speaker-review work. Focused policy tests,
