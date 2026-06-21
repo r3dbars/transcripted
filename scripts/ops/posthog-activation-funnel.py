@@ -156,8 +156,8 @@ REACH_STEPS = (
         "true_agent_query_devices",
         "True agent-use signal",
         "event = 'agent_capture_query_observed'",
-        "missing",
-        "Desired future privacy-safe event for the first sourced agent query/answer loop.",
+        "observed",
+        "Privacy-safe saved-capture read/search signal for the first sourced agent-use loop.",
     ),
     StepDefinition(
         "workflow_abandonment_devices",
@@ -515,7 +515,7 @@ def render_report(data: dict[str, Any]) -> str:
         "`dictation_artifact_saved`, `dictation_completed`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are included only in the broader proxy row for dictation volume and legacy continuity.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`activation_second_artifact_saved` proves a second durable artifact save on the same anonymous device, but does not inspect artifact content or join identity.",
-        "`agent_capture_query_observed` is the desired true first-agent-use signal and is currently expected to be zero until instrumentation exists.",
+        "`agent_capture_query_observed` is the strongest current true-agent-use signal, but it still only proves a saved-capture read/search, not answer quality.",
         "`workflow_abandoned` is a conservative exit map. It should not be read as every possible drop-off or every click.",
     ]
 
@@ -527,7 +527,7 @@ def render_report(data: dict[str, Any]) -> str:
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Abandonment exits: workflow kind, stage, reason kind, surface, and prior-ready state.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
-        "Data quality: missing true-agent-use event and the dictation completion-vs-saved-artifact split.",
+        "Data quality: true-agent-use event volume, answer-quality UNKNOWNs, and the dictation completion-vs-saved-artifact split.",
     ]
 
     lines = [
@@ -547,7 +547,7 @@ def render_report(data: dict[str, Any]) -> str:
         f"- Agent setup/proxy reach: **{agent_signal} devices** ({pct(agent_signal, launch)} of launch).",
         f"- Return proxy reach: **{return_proxy} devices** ({pct(return_proxy, launch)} of launch).",
         f"- Workflow abandonment exits: **{workflow_abandonment} devices** ({pct(workflow_abandonment, launch)} of launch).",
-        f"- True agent-query proof: **{true_agent_query} devices**. Treat this as unknown, not green, until instrumentation exists.",
+        f"- True agent-query proof: **{true_agent_query} devices**. Treat zero as no live proof in this window, not proof the loop is broken.",
         "",
         "## Funnel Reach",
         "",
@@ -614,7 +614,7 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         "## Next Best Action",
         "",
-        "Verify `activation_first_artifact_saved` and `activation_second_artifact_saved` reach live PostHog for current builds, then add `agent_capture_query_observed` so the dashboard can separate repeated saved-artifact value from true sourced-agent-use.",
+        "Verify `activation_first_artifact_saved`, `activation_second_artifact_saved`, and `agent_capture_query_observed` reach live PostHog for current builds, then use the agent-query rows to separate repeated saved-artifact value from true sourced-agent-use.",
         "",
     ]
     return "\n".join(lines)
