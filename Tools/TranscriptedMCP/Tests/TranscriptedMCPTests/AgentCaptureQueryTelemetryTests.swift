@@ -19,6 +19,7 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertEqual(observation.properties["artifact_kind"], "mixed")
         XCTAssertEqual(observation.properties["result"], "success")
         XCTAssertEqual(observation.properties["surface"], "mcp")
+        XCTAssertEqual(observation.properties["tool_kind"], "mcp")
         XCTAssertEqual(observation.properties["return_window_bucket"], "3_7d")
         XCTAssertEqual(observation.properties["capture_age_bucket"], "2_7d")
         XCTAssertEqual(observation.properties["source_count_bucket"], "4_9")
@@ -34,6 +35,7 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
             "return_window_bucket": "18_36h",
             "source_count_bucket": "1",
             "surface": "mcp",
+            "tool_kind": "mcp",
             "query_text": "what did Alice say about the roadmap?",
             "transcript_text": "private transcript words",
             "speaker_name": "Alice",
@@ -53,6 +55,7 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertEqual(sanitized["return_window_bucket"], "18_36h")
         XCTAssertEqual(sanitized["source_count_bucket"], "1")
         XCTAssertEqual(sanitized["surface"], "mcp")
+        XCTAssertEqual(sanitized["tool_kind"], "mcp")
         XCTAssertNil(sanitized["query_text"])
         XCTAssertNil(sanitized["transcript_text"])
         XCTAssertNil(sanitized["speaker_name"])
@@ -74,10 +77,12 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
             "return_window_bucket": "18_36h",
             "source_count_bucket": "1",
             "surface": "mcp",
+            "tool_kind": "raw helper name",
         ])
 
         XCTAssertNil(sanitized["agent_target"])
         XCTAssertNil(sanitized["query_kind"])
+        XCTAssertNil(sanitized["tool_kind"])
         XCTAssertEqual(sanitized["artifact_kind"], "meeting")
     }
 
@@ -110,12 +115,59 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertEqual(properties["artifact_kind"], "dictation")
         XCTAssertEqual(properties["query_kind"], "read")
         XCTAssertEqual(properties["surface"], "mcp")
+        XCTAssertEqual(properties["tool_kind"], "mcp")
         XCTAssertEqual(properties["source_count_bucket"], "1")
         XCTAssertNil(properties["query_text"])
         XCTAssertNil(properties["transcript_text"])
         XCTAssertNil(properties["file_path"])
         XCTAssertNil(properties["meeting_title"])
         XCTAssertNil(properties["source_app_name"])
+    }
+
+    func testReporterBuildsDecisionOutcomeRequestsForAgentValue() throws {
+        let configuration = AgentCaptureQueryTelemetryConfiguration(
+            apiKey: "phc_test",
+            host: URL(string: "https://us.i.posthog.com")!,
+            distinctID: "anonymous-device"
+        )
+        let reporter = AgentCaptureQueryTelemetry(configuration: configuration)
+        let requests = reporter.makeRequests(
+            for: AgentCaptureQueryObservation(
+                queryKind: "search",
+                artifactKind: "meeting",
+                captureDate: nil,
+                sourceCount: 2
+            ),
+            now: Date(timeIntervalSince1970: 1_766_102_400)
+        )
+
+        XCTAssertEqual(requests.count, 3)
+        let payloads = try requests.map { request -> [String: Any] in
+            let body = try XCTUnwrap(request.httpBody)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        }
+        XCTAssertEqual(
+            payloads.compactMap { $0["event"] as? String },
+            [
+                "agent_capture_query_observed",
+                "agent_artifact_query_succeeded",
+                "artifact_reused_after_save",
+            ]
+        )
+
+        for payload in payloads {
+            let properties = try XCTUnwrap(payload["properties"] as? [String: String])
+            XCTAssertEqual(properties["artifact_kind"], "meeting")
+            XCTAssertEqual(properties["query_kind"], "search")
+            XCTAssertEqual(properties["result"], "success")
+            XCTAssertEqual(properties["source_count_bucket"], "2_3")
+            XCTAssertEqual(properties["tool_kind"], "mcp")
+            XCTAssertNil(properties["query_text"])
+            XCTAssertNil(properties["transcript_text"])
+            XCTAssertNil(properties["file_path"])
+            XCTAssertNil(properties["meeting_title"])
+            XCTAssertNil(properties["source_app_name"])
+        }
     }
 
     func testReporterRechecksConfigurationBeforeEachRequest() throws {

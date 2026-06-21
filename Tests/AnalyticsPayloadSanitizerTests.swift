@@ -20,6 +20,73 @@ func testAnalyticsPayloadSanitizer() {
         assertNil(sanitized["title"], "non-allowlisted properties should be dropped")
     }
 
+    runSuite("AnalyticsPayloadSanitizer keeps decision/outcome fields but drops private context") {
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "action": "accepted",
+                "capture_kind": "meeting",
+                "decision": "record_now",
+                "failure_kind": "model_not_ready",
+                "outcome": "recovered",
+                "prompt_origin": "browser",
+                "provider_family": "local",
+                "retry_action": "retry",
+                "review_reason": "suggestion_review",
+                "summary_action": "copy",
+                "tool_kind": "mcp",
+                "audio_path": "/Users/redbars/private.wav",
+                "meeting_title": "Customer call",
+                "person_id": "private-person",
+                "query_text": "what did Alice say?",
+                "raw_url": "https://example.com/private",
+                "source_app_name": "Safari",
+                "speaker_name": "Alice",
+                "transcript_text": "private transcript words",
+            ],
+            allowedKeys: [
+                "action",
+                "audio_path",
+                "capture_kind",
+                "decision",
+                "failure_kind",
+                "meeting_title",
+                "outcome",
+                "person_id",
+                "prompt_origin",
+                "provider_family",
+                "query_text",
+                "raw_url",
+                "retry_action",
+                "review_reason",
+                "source_app_name",
+                "speaker_name",
+                "summary_action",
+                "tool_kind",
+                "transcript_text",
+            ]
+        )
+
+        assertEqual(sanitized["action"], "accepted", "review action should survive")
+        assertEqual(sanitized["capture_kind"], "meeting", "capture kind should survive")
+        assertEqual(sanitized["decision"], "record_now", "decision should survive")
+        assertEqual(sanitized["failure_kind"], "model_not_ready", "failure kind should survive")
+        assertEqual(sanitized["outcome"], "recovered", "outcome should survive")
+        assertEqual(sanitized["prompt_origin"], "browser", "prompt origin should survive")
+        assertEqual(sanitized["provider_family"], "local", "provider family should survive")
+        assertEqual(sanitized["retry_action"], "retry", "retry action should survive")
+        assertEqual(sanitized["review_reason"], "suggestion_review", "review reason should survive")
+        assertEqual(sanitized["summary_action"], "copy", "summary action should survive")
+        assertEqual(sanitized["tool_kind"], "mcp", "tool kind should survive")
+        assertNil(sanitized["audio_path"], "audio paths should be dropped even if allowlisted")
+        assertNil(sanitized["meeting_title"], "meeting titles should be dropped even if allowlisted")
+        assertNil(sanitized["person_id"], "person ids should be dropped even if allowlisted")
+        assertNil(sanitized["query_text"], "query text should be dropped even if allowlisted")
+        assertNil(sanitized["raw_url"], "raw URLs should be dropped even if allowlisted")
+        assertNil(sanitized["source_app_name"], "source app names should be dropped even if allowlisted")
+        assertNil(sanitized["speaker_name"], "speaker names should be dropped even if allowlisted")
+        assertNil(sanitized["transcript_text"], "transcript text should be dropped even if allowlisted")
+    }
+
     runSuite("AnalyticsPayloadSanitizer redacts file paths and emails from values") {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [

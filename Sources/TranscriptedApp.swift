@@ -140,18 +140,28 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.setup(meetingSession: meetingSession)
             meetingOverlayController.onPromptRecord = { [weak self] candidate in
                 guard let self else { return }
+                let promptProperties = MeetingPromptTelemetry.properties(
+                    for: candidate,
+                    readiness: self.meetingPromptTelemetryReadiness()
+                )
+                ProductDecisionTelemetry.trackMeetingPromptDecision(
+                    baseProperties: promptProperties,
+                    decision: .recordNow
+                )
                 AnalyticsReporter.track(
                     "meeting_prompt_record_selected",
-                    properties: MeetingPromptTelemetry.properties(
-                        for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness()
-                    )
+                    properties: promptProperties
                 )
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     let started = await self.appState.meetingSession.startRecording(
                         trigger: .detectedPrompt,
                         suggestedTitle: candidate.suggestedTranscriptTitle
+                    )
+                    ProductDecisionTelemetry.trackMeetingPromptFollowupOutcome(
+                        baseProperties: promptProperties,
+                        decision: .recordNow,
+                        outcome: started ? .recordingStarted : .failed
                     )
                     if started {
                         self.meetingPromptDetector.markAccepted(candidate: candidate)
@@ -161,13 +171,54 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.onPromptDismiss = { [weak self] candidate in
                 guard let self else { return }
                 let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
+                let promptProperties = MeetingPromptTelemetry.properties(
+                    for: candidate,
+                    readiness: self.meetingPromptTelemetryReadiness(),
+                    backoffKind: backoffDecision.kind
+                )
+                ProductDecisionTelemetry.trackMeetingPromptDecision(
+                    baseProperties: promptProperties,
+                    decision: .notNow
+                )
+                ProductDecisionTelemetry.trackMeetingPromptFollowupOutcome(
+                    baseProperties: promptProperties,
+                    decision: .notNow,
+                    outcome: .suppressed
+                )
                 AnalyticsReporter.track(
                     "meeting_prompt_dismissed",
-                    properties: MeetingPromptTelemetry.properties(
-                        for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness(),
-                        backoffKind: backoffDecision.kind
+                    properties: promptProperties
+                )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "prompt_shown",
+                    reasonKind: .dismissed,
+                    surface: .meetingOverlay,
+                    priorReadyState: MeetingPromptTelemetry.readyState(
+                        readiness: self.meetingPromptTelemetryReadiness()
                     )
+                )
+            }
+            meetingOverlayController.onPromptIgnored = { [weak self] candidate in
+                guard let self else { return }
+                let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
+                let promptProperties = MeetingPromptTelemetry.properties(
+                    for: candidate,
+                    readiness: self.meetingPromptTelemetryReadiness(),
+                    backoffKind: backoffDecision.kind
+                )
+                ProductDecisionTelemetry.trackMeetingPromptDecision(
+                    baseProperties: promptProperties,
+                    decision: .ignore
+                )
+                ProductDecisionTelemetry.trackMeetingPromptFollowupOutcome(
+                    baseProperties: promptProperties,
+                    decision: .ignore,
+                    outcome: .noAction
+                )
+                AnalyticsReporter.track(
+                    "meeting_prompt_dismissed",
+                    properties: promptProperties
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
                     workflowKind: .meetingPrompt,
@@ -182,13 +233,23 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
                 guard let self else { return }
                 let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
+                let promptProperties = MeetingPromptTelemetry.properties(
+                    for: candidate,
+                    readiness: self.meetingPromptTelemetryReadiness(),
+                    backoffKind: backoffDecision.kind
+                )
+                ProductDecisionTelemetry.trackMeetingPromptDecision(
+                    baseProperties: promptProperties,
+                    decision: .remindLater
+                )
+                ProductDecisionTelemetry.trackMeetingPromptFollowupOutcome(
+                    baseProperties: promptProperties,
+                    decision: .remindLater,
+                    outcome: .suppressed
+                )
                 AnalyticsReporter.track(
                     "meeting_prompt_dismissed",
-                    properties: MeetingPromptTelemetry.properties(
-                        for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness(),
-                        backoffKind: backoffDecision.kind
-                    )
+                    properties: promptProperties
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
                     workflowKind: .meetingPrompt,

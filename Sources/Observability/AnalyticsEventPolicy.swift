@@ -171,6 +171,19 @@ struct AnalyticsEventPolicy: Equatable {
         "return_window_bucket",
         "source_count_bucket",
         "surface",
+        "tool_kind",
+    ]
+
+    private static let artifactReusedAfterSaveProperties: Set<String> = [
+        "action_kind",
+        "agent_target",
+        "artifact_kind",
+        "query_kind",
+        "result",
+        "return_window_bucket",
+        "source_count_bucket",
+        "surface",
+        "tool_kind",
     ]
 
     private static let settingsFeatureDiscoveryProperties: Set<String> = [
@@ -207,6 +220,36 @@ struct AnalyticsEventPolicy: Equatable {
         "provider",
         "route_ready",
         "source",
+    ]
+
+    private static let meetingPromptDecisionProperties: Set<String> = meetingPromptProperties.union(Set([
+        "decision",
+        "elapsed_bucket",
+        "outcome",
+        "prompt_origin",
+    ]))
+
+    private static let failedCaptureRetryProperties: Set<String> = [
+        "capture_kind",
+        "elapsed_bucket",
+        "failure_kind",
+        "outcome",
+        "retry_action",
+    ]
+
+    private static let localSummaryDecisionProperties: Set<String> = [
+        "chunk_count_bucket",
+        "elapsed_bucket",
+        "provider_family",
+        "result",
+        "summary_action",
+    ]
+
+    private static let speakerReviewDecisionProperties: Set<String> = [
+        "action",
+        "item_count_bucket",
+        "review_reason",
+        "suggestion_confidence_bucket",
     ]
 
     private static let allowedPolicies: [String: AnalyticsEventPolicy] = [
@@ -392,6 +435,14 @@ struct AnalyticsEventPolicy: Equatable {
         "agent_capture_query_observed": .init(
             name: "agent_capture_query_observed",
             allowedProperties: agentCaptureQueryObservedProperties
+        ),
+        "agent_artifact_query_succeeded": .init(
+            name: "agent_artifact_query_succeeded",
+            allowedProperties: agentCaptureQueryObservedProperties
+        ),
+        "artifact_reused_after_save": .init(
+            name: "artifact_reused_after_save",
+            allowedProperties: artifactReusedAfterSaveProperties
         ),
         "workflow_abandoned": .init(
             name: "workflow_abandoned",
@@ -657,6 +708,38 @@ struct AnalyticsEventPolicy: Equatable {
                 "cooldown_reason",
                 "suppression_reason",
             ]))
+        ),
+        "meeting_prompt_decision_made": .init(
+            name: "meeting_prompt_decision_made",
+            allowedProperties: meetingPromptDecisionProperties
+        ),
+        "meeting_prompt_followup_outcome": .init(
+            name: "meeting_prompt_followup_outcome",
+            allowedProperties: meetingPromptDecisionProperties
+        ),
+        "failed_capture_retry_decision": .init(
+            name: "failed_capture_retry_decision",
+            allowedProperties: failedCaptureRetryProperties
+        ),
+        "failed_capture_retry_outcome": .init(
+            name: "failed_capture_retry_outcome",
+            allowedProperties: failedCaptureRetryProperties
+        ),
+        "local_summary_feedback_given": .init(
+            name: "local_summary_feedback_given",
+            allowedProperties: localSummaryDecisionProperties
+        ),
+        "local_summary_used_after_generation": .init(
+            name: "local_summary_used_after_generation",
+            allowedProperties: localSummaryDecisionProperties
+        ),
+        "speaker_name_corrected": .init(
+            name: "speaker_name_corrected",
+            allowedProperties: speakerReviewDecisionProperties
+        ),
+        "speaker_suggestion_accepted_or_rejected": .init(
+            name: "speaker_suggestion_accepted_or_rejected",
+            allowedProperties: speakerReviewDecisionProperties
         ),
         "meeting_mic_boost_prompt_shown": .init(
             name: "meeting_mic_boost_prompt_shown",

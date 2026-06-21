@@ -199,6 +199,13 @@ struct TranscriptedSettingsView: View {
                 preview: preview,
                 onOpenMarkdown: {
                     trackSettingsAction("open_recent_meeting_markdown", page: .home)
+                    if preview.summary != nil {
+                        ProductDecisionTelemetry.trackLocalSummaryUsedAfterGeneration(
+                            action: .open,
+                            result: .success,
+                            providerFamily: localMeetingSummaryProvider.rawValue
+                        )
+                    }
                     ActivationTelemetry.trackArtifactAction(
                         artifactKind: .meeting,
                         actionKind: .openMarkdown,
@@ -598,10 +605,12 @@ struct TranscriptedSettingsView: View {
                 audioAttachment: { failedMeetingAudioAttachment(for: $0) },
                 onRetry: { item in
                     trackSettingsAction("home_retry_failed_meeting", page: .home)
+                    trackFailedMeetingRetryDecision(item, action: .retry)
                     retryFailedMeeting(item)
                 },
                 onRevealAudio: { item in
                     trackSettingsAction("home_reveal_failed_meeting_audio", page: .home)
+                    trackFailedMeetingRetryDecision(item, action: .openAudio)
                     revealFailedMeetingAudio(item)
                 },
                 onClear: { item in
@@ -683,10 +692,12 @@ struct TranscriptedSettingsView: View {
                 retryUnavailableReason: failedMeetingRetryUnavailableReason,
                 onRetry: {
                     trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
+                    trackFailedMeetingRetryDecision(failedMeeting, action: .retry)
                     retryFailedMeeting(failedMeeting)
                 },
                 onRevealAudio: {
                     trackSettingsAction("home_reveal_failed_meeting_audio", page: navigation.selectedPage)
+                    trackFailedMeetingRetryDecision(failedMeeting, action: .openAudio)
                     revealFailedMeetingAudio(failedMeeting)
                 },
                 onClear: { requestClearFailedMeeting(failedMeeting) }
@@ -855,6 +866,13 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
         trackSettingsAction("copy_meeting_preview", page: .home)
+        if preview.summary != nil {
+            ProductDecisionTelemetry.trackLocalSummaryUsedAfterGeneration(
+                action: .copy,
+                result: .success,
+                providerFamily: localMeetingSummaryProvider.rawValue
+            )
+        }
         let bundle = AgentConnectionGuide.portableMeetingBundle(
             title: preview.title,
             date: preview.date,
@@ -915,6 +933,11 @@ struct TranscriptedSettingsView: View {
         }
 
         trackSettingsAction("retranscribe_saved_meeting", page: .home)
+        ProductDecisionTelemetry.trackFailedCaptureRetryDecision(
+            captureKind: .savedAudio,
+            failureKind: item.speakerStatus.needsReview ? "speaker_review_pending" : "unknown",
+            retryAction: .retranscribe
+        )
         Task { @MainActor in
             let didStart = await meetingSession.retranscribeSavedMeeting(
                 micAudioURL: micURL,
@@ -937,6 +960,11 @@ struct TranscriptedSettingsView: View {
 
         if item.summaryPreview != nil {
             trackSettingsAction("open_local_meeting_summary", page: .home)
+            ProductDecisionTelemetry.trackLocalSummaryUsedAfterGeneration(
+                action: .open,
+                result: .success,
+                providerFamily: localMeetingSummaryProvider.rawValue
+            )
             openOwnFile(
                 candidateURLs: [item.transcriptURL],
                 failureTitle: "Could not open transcript",
@@ -974,6 +1002,13 @@ struct TranscriptedSettingsView: View {
         }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         let provider = localMeetingSummaryProvider
+        if hasExistingSummary {
+            ProductDecisionTelemetry.trackLocalSummaryFeedback(
+                action: .regenerate,
+                result: .started,
+                providerFamily: provider.rawValue
+            )
+        }
         recordLocalSummaryEvent(
             event: "local_meeting_summary_started",
             message: "\(provider.title) meeting summary started",
@@ -1031,10 +1066,25 @@ struct TranscriptedSettingsView: View {
                         "profile": result.profileName,
                     ]
                 )
+                if hasExistingSummary {
+                    ProductDecisionTelemetry.trackLocalSummaryFeedback(
+                        action: .regenerate,
+                        result: .success,
+                        providerFamily: result.provider.rawValue,
+                        chunkCount: result.chunkCount
+                    )
+                }
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
                 if homeLocalSummaryTaskTokens[summaryID] == taskToken {
                     trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
+                }
+                if hasExistingSummary {
+                    ProductDecisionTelemetry.trackLocalSummaryFeedback(
+                        action: .regenerate,
+                        result: .cancelled,
+                        providerFamily: provider.rawValue
+                    )
                 }
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_cancelled",
@@ -1047,6 +1097,13 @@ struct TranscriptedSettingsView: View {
             } catch {
                 guard localMeetingSummariesEnabled else { return }
                 trackLocalSummaryAbandoned(reason: .failed, stage: "generate", priorReadyState: "ready")
+                if hasExistingSummary {
+                    ProductDecisionTelemetry.trackLocalSummaryFeedback(
+                        action: .regenerate,
+                        result: .failed,
+                        providerFamily: provider.rawValue
+                    )
+                }
                 recordLocalSummaryEvent(
                     level: .error,
                     event: "local_meeting_summary_failed",
@@ -1536,9 +1593,11 @@ struct TranscriptedSettingsView: View {
         let didClear: Bool
         let failureTitle: String
         if !item.audioURLs.isEmpty {
+            trackFailedMeetingRetryDecision(item, action: .delete)
             didClear = meetingSession.deleteFailedMeeting(id: item.id)
             failureTitle = "Could not delete failed meeting"
         } else {
+            trackFailedMeetingRetryDecision(item, action: .none)
             didClear = meetingSession.dismissFailedMeeting(id: item.id)
             failureTitle = "Could not dismiss failed meeting"
         }
@@ -1618,6 +1677,17 @@ struct TranscriptedSettingsView: View {
                     ?? "Transcripted could not start that retry. The saved audio may already be cleared."
             )
         }
+    }
+
+    private func trackFailedMeetingRetryDecision(
+        _ item: MeetingSessionController.FailedMeetingItem,
+        action: ProductDecisionTelemetry.RetryAction
+    ) {
+        ProductDecisionTelemetry.trackFailedCaptureRetryDecision(
+            captureKind: .meeting,
+            failureKind: item.failureKind.rawValue,
+            retryAction: action
+        )
     }
 
     private var homeStatItems: [HomeStatItem] {

@@ -105,6 +105,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         if !didComplete {
+            trackSpeakerReviewSkipped()
             request.onComplete([])
             didComplete = true
         }
@@ -120,8 +121,76 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
     private func finish(with updates: [SpeakerNameUpdate]) {
         guard !didComplete else { return }
         didComplete = true
+        trackSpeakerReview(updates)
         request.onComplete(updates)
         close()
+    }
+
+    private func trackSpeakerReview(_ updates: [SpeakerNameUpdate]) {
+        guard !updates.isEmpty else {
+            trackSpeakerReviewSkipped()
+            return
+        }
+
+        for update in updates {
+            let confidenceBucket = confidenceBucket(for: update)
+            switch update.action {
+            case .corrected:
+                ProductDecisionTelemetry.trackSpeakerNameCorrected(
+                    action: .corrected,
+                    reviewReason: "post_meeting_review",
+                    itemCount: request.speakers.count,
+                    suggestionConfidenceBucket: confidenceBucket
+                )
+                ProductDecisionTelemetry.trackSpeakerSuggestionAcceptedOrRejected(
+                    action: .rejected,
+                    reviewReason: "post_meeting_review",
+                    itemCount: request.speakers.count,
+                    suggestionConfidenceBucket: confidenceBucket
+                )
+            case .confirmed, .merged:
+                ProductDecisionTelemetry.trackSpeakerSuggestionAcceptedOrRejected(
+                    action: .accepted,
+                    reviewReason: "post_meeting_review",
+                    itemCount: request.speakers.count,
+                    suggestionConfidenceBucket: confidenceBucket
+                )
+            case .discardedFromDatabase:
+                ProductDecisionTelemetry.trackSpeakerSuggestionAcceptedOrRejected(
+                    action: .rejected,
+                    reviewReason: "post_meeting_review",
+                    itemCount: request.speakers.count,
+                    suggestionConfidenceBucket: confidenceBucket
+                )
+            case .collapsedToMe:
+                ProductDecisionTelemetry.trackSpeakerSuggestionAcceptedOrRejected(
+                    action: .skipped,
+                    reviewReason: "keep_local_mic_as_you",
+                    itemCount: request.speakers.count,
+                    suggestionConfidenceBucket: confidenceBucket
+                )
+            case .named:
+                continue
+            }
+        }
+    }
+
+    private func trackSpeakerReviewSkipped() {
+        ProductDecisionTelemetry.trackSpeakerSuggestionAcceptedOrRejected(
+            action: .skipped,
+            reviewReason: "review_later",
+            itemCount: request.speakers.count,
+            suggestionConfidenceBucket: "unknown"
+        )
+    }
+
+    private func confidenceBucket(for update: SpeakerNameUpdate) -> String {
+        let entry = request.speakers.first {
+            $0.id == update.persistentSpeakerId
+                && $0.diarizerSpeakerId == update.diarizerSpeakerId
+                && $0.channel == update.channel
+        }
+        return ProductDecisionTelemetry.suggestionConfidenceBucket(similarity: entry?.matchSimilarity)
     }
 }
 

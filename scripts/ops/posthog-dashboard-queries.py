@@ -33,6 +33,9 @@ ACTIVE_WORKFLOW_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
+    "agent_artifact_query_succeeded",
+    "artifact_reused_after_save",
+    "local_summary_used_after_generation",
 )
 
 ACTIVATION_EVENTS = (
@@ -52,6 +55,8 @@ ACTIVATION_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "onboarding_agent_cta_clicked",
     "agent_capture_query_observed",
+    "agent_artifact_query_succeeded",
+    "artifact_reused_after_save",
     "activation_return_proxy_observed",
 )
 
@@ -72,6 +77,8 @@ RELIABILITY_EVENTS = (
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
     "meeting_file_import_failed",
+    "failed_capture_retry_decision",
+    "failed_capture_retry_outcome",
 )
 
 FEATURE_EVENTS = (
@@ -83,9 +90,19 @@ FEATURE_EVENTS = (
     "meeting_prompt_record_selected",
     "meeting_prompt_dismissed",
     "meeting_prompt_suppressed",
+    "meeting_prompt_decision_made",
+    "meeting_prompt_followup_outcome",
     "meeting_mic_boost_prompt_shown",
     "meeting_mic_boost_prompt_actioned",
     "meeting_saved_audio_retranscription_requested",
+    "failed_capture_retry_decision",
+    "failed_capture_retry_outcome",
+    "local_summary_feedback_given",
+    "local_summary_used_after_generation",
+    "speaker_name_corrected",
+    "speaker_suggestion_accepted_or_rejected",
+    "agent_artifact_query_succeeded",
+    "artifact_reused_after_save",
     "meeting_file_imported",
     "settings_opened",
     "settings_page_viewed",
@@ -249,14 +266,14 @@ SELECT
   uniqIf(distinct_id, event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')) AS saved_markdown_or_dictation_proxy_devices,
   uniqIf(distinct_id, event = 'activation_artifact_action_clicked') AS artifact_action_devices,
   uniqIf(distinct_id, event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')) AS agent_proxy_devices,
-  uniqIf(distinct_id, event = 'agent_capture_query_observed') AS true_agent_query_devices,
+  uniqIf(distinct_id, event IN ('agent_capture_query_observed', 'agent_artifact_query_succeeded')) AS true_agent_query_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed') AS return_proxy_devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND {event_filter(ACTIVATION_EVENTS)}
   {app_version_filter(app_version)}
 """,
-            notes=("Treat agent proxy counts as intent. They do not prove a sourced answer.",),
+            notes=("Treat agent proxy counts as intent. Agent query success is the stronger sourced-answer proof.",),
         ),
         QuerySpec(
             id="activation.ordered_funnel",
@@ -309,6 +326,34 @@ GROUP BY return_window_bucket, prior_artifact_kind, surface
 ORDER BY devices DESC
 LIMIT 40
 """,
+        ),
+        QuerySpec(
+            id="activation.agent_artifact_value",
+            family="activation",
+            title="Agent artifact value",
+            description="Shows whether saved artifacts become privacy-safe agent context.",
+            columns=("event", "artifact_kind", "agent_target", "tool_kind", "query_kind", "result", "source_count_bucket", "return_window_bucket", "events", "devices"),
+            sql=f"""
+SELECT
+  event,
+  properties['artifact_kind'] AS artifact_kind,
+  properties['agent_target'] AS agent_target,
+  properties['tool_kind'] AS tool_kind,
+  properties['query_kind'] AS query_kind,
+  properties['result'] AS result,
+  properties['source_count_bucket'] AS source_count_bucket,
+  properties['return_window_bucket'] AS return_window_bucket,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event IN ('agent_artifact_query_succeeded', 'artifact_reused_after_save')
+  {app_version_filter(app_version)}
+GROUP BY event, artifact_kind, agent_target, tool_kind, query_kind, result, source_count_bucket, return_window_bucket
+ORDER BY devices DESC, events DESC
+LIMIT 60
+""",
+            notes=("This is aggregate proof that a saved artifact became agent context; it never outputs query text, paths, titles, or file names.",),
         ),
         QuerySpec(
             id="reliability.workflow_failure_rates",
@@ -433,6 +478,35 @@ WHERE timestamp >= now() - INTERVAL {days} DAY
   {app_version_filter(app_version)}
 GROUP BY event, provider, source, route_ready, suppression_reason, cooldown_reason
 ORDER BY events DESC
+LIMIT 80
+""",
+        ),
+        QuerySpec(
+            id="feature_adoption.decision_outcomes",
+            family="feature_adoption",
+            title="Decision and outcome signals",
+            description="Breaks key choices and follow-up outcomes into coarse product-learning buckets.",
+            columns=("event", "prompt_origin", "decision", "outcome", "capture_kind", "failure_kind", "retry_action", "summary_action", "review_action", "result", "events", "devices"),
+            sql=f"""
+SELECT
+  event,
+  properties['prompt_origin'] AS prompt_origin,
+  properties['decision'] AS decision,
+  properties['outcome'] AS outcome,
+  properties['capture_kind'] AS capture_kind,
+  properties['failure_kind'] AS failure_kind,
+  properties['retry_action'] AS retry_action,
+  properties['summary_action'] AS summary_action,
+  properties['action'] AS review_action,
+  properties['result'] AS result,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event IN ('meeting_prompt_decision_made', 'meeting_prompt_followup_outcome', 'failed_capture_retry_decision', 'failed_capture_retry_outcome', 'local_summary_feedback_given', 'local_summary_used_after_generation', 'speaker_name_corrected', 'speaker_suggestion_accepted_or_rejected')
+  {app_version_filter(app_version)}
+GROUP BY event, prompt_origin, decision, outcome, capture_kind, failure_kind, retry_action, summary_action, review_action, result
+ORDER BY devices DESC, events DESC
 LIMIT 80
 """,
         ),

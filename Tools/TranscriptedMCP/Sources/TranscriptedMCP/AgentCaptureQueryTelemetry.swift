@@ -56,6 +56,7 @@ struct AgentCaptureQueryObservation: Equatable {
             "return_window_bucket": returnWindowBucket,
             "source_count_bucket": sourceCountBucket,
             "surface": surface,
+            "tool_kind": "mcp",
         ]
     }
 
@@ -112,6 +113,11 @@ struct AgentCaptureQueryObservation: Equatable {
 
 enum AgentCaptureQueryTelemetryPolicy {
     static let eventName = "agent_capture_query_observed"
+    static let eventNames = [
+        "agent_capture_query_observed",
+        "agent_artifact_query_succeeded",
+        "artifact_reused_after_save",
+    ]
     // This standalone MCP package cannot import the app target, so this
     // mirrors AnalyticsEventPolicy.agentCaptureQueryProperties. Keep the root
     // AnalyticsEventPolicy parity test green when changing either side.
@@ -124,6 +130,7 @@ enum AgentCaptureQueryTelemetryPolicy {
         "return_window_bucket",
         "source_count_bucket",
         "surface",
+        "tool_kind",
     ]
     private static let sensitiveKeyFragments = [
         "audio",
@@ -154,6 +161,7 @@ enum AgentCaptureQueryTelemetryPolicy {
         "return_window_bucket": ["same_day", "18_36h", "36_72h", "3_7d", "older", "unknown"],
         "source_count_bucket": ["0", "1", "2_3", "4_9", "10_plus", "unknown"],
         "surface": ["mcp"],
+        "tool_kind": ["mcp"],
     ]
 
     static func sanitize(_ properties: [String: String]) -> [String: String] {
@@ -298,33 +306,40 @@ final class AgentCaptureQueryTelemetry {
     }
 
     func track(_ observation: AgentCaptureQueryObservation) {
-        guard let request = makeRequest(for: observation) else { return }
-        session.dataTask(with: request).resume()
+        for request in makeRequests(for: observation) {
+            session.dataTask(with: request).resume()
+        }
     }
 
     func makeRequest(for observation: AgentCaptureQueryObservation, now: Date = Date()) -> URLRequest? {
-        guard let configuration = configurationProvider() else { return nil }
+        makeRequests(for: observation, now: now).first
+    }
+
+    func makeRequests(for observation: AgentCaptureQueryObservation, now: Date = Date()) -> [URLRequest] {
+        guard let configuration = configurationProvider() else { return [] }
 
         let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize(observation.properties)
         guard sanitized.count == AgentCaptureQueryTelemetryPolicy.allowedProperties.count else {
-            return nil
+            return []
         }
 
-        let payload = PostHogCaptureRequest(
-            apiKey: configuration.apiKey,
-            event: AgentCaptureQueryTelemetryPolicy.eventName,
-            distinctID: configuration.distinctID,
-            timestamp: Self.isoDateFormatter.string(from: now),
-            properties: sanitized.merging(["distinct_id": configuration.distinctID]) { current, _ in current }
-        )
+        return AgentCaptureQueryTelemetryPolicy.eventNames.compactMap { eventName in
+            let payload = PostHogCaptureRequest(
+                apiKey: configuration.apiKey,
+                event: eventName,
+                distinctID: configuration.distinctID,
+                timestamp: Self.isoDateFormatter.string(from: now),
+                properties: sanitized.merging(["distinct_id": configuration.distinctID]) { current, _ in current }
+            )
 
-        guard let data = try? JSONEncoder().encode(payload) else { return nil }
+            guard let data = try? JSONEncoder().encode(payload) else { return nil }
 
-        var request = URLRequest(url: configuration.host.appendingPathComponent("capture/"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = data
-        return request
+            var request = URLRequest(url: configuration.host.appendingPathComponent("capture/"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = data
+            return request
+        }
     }
 }
 

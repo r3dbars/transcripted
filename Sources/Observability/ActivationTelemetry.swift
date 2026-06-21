@@ -129,6 +129,13 @@ enum ActivationTelemetry {
                 "surface": surface.rawValue,
             ]
         )
+        ProductDecisionTelemetry.trackArtifactReusedAfterSave(
+            artifactKind: artifactKind,
+            actionKind: actionKind,
+            surface: surface,
+            artifactDate: artifactDate,
+            now: now
+        )
     }
 
     @discardableResult

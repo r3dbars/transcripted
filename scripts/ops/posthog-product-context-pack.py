@@ -35,6 +35,16 @@ SAFE_EVENTS = (
     "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
+    "agent_artifact_query_succeeded",
+    "artifact_reused_after_save",
+    "meeting_prompt_decision_made",
+    "meeting_prompt_followup_outcome",
+    "failed_capture_retry_decision",
+    "failed_capture_retry_outcome",
+    "local_summary_feedback_given",
+    "local_summary_used_after_generation",
+    "speaker_name_corrected",
+    "speaker_suggestion_accepted_or_rejected",
     "update_check_finished",
     "update_download_finished",
 )
@@ -51,6 +61,9 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "agent_artifact_query_succeeded",
+    "artifact_reused_after_save",
+    "local_summary_used_after_generation",
 )
 
 FAILURE_EVENTS = (
@@ -60,6 +73,7 @@ FAILURE_EVENTS = (
     "meeting_recording_start_failed",
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
+    "failed_capture_retry_outcome",
     "update_check_finished",
     "update_download_finished",
 )
@@ -71,6 +85,7 @@ NON_UPDATE_FAILURE_EVENTS = (
     "meeting_recording_start_failed",
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
+    "failed_capture_retry_outcome",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {
@@ -123,7 +138,7 @@ SELECT
   uniqIf(distinct_id, event = 'activation_first_artifact_saved') AS first_artifact_devices,
   uniqIf(distinct_id, event = 'activation_agent_prompt_action_clicked') AS agent_prompt_devices,
   uniqIf(distinct_id, event IN ('activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')) AS agent_setup_devices,
-  uniqIf(distinct_id, event = 'agent_capture_query_observed') AS true_agent_query_devices,
+  uniqIf(distinct_id, event IN ('agent_capture_query_observed', 'agent_artifact_query_succeeded')) AS true_agent_query_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed') AS return_proxy_devices,
   uniqIf(distinct_id, event = 'dictation_completed') AS dictation_completed_devices,
   uniqIf(distinct_id, event = 'meeting_transcript_saved') AS meeting_saved_devices,
@@ -153,7 +168,7 @@ SELECT
   event,
   coalesce(properties['failure_kind'], properties['failure_code'], 'unknown') AS failure_kind,
   coalesce(properties['capture_quality'], 'unknown') AS capture_quality,
-  coalesce(properties['result'], 'unknown') AS result,
+  coalesce(properties['outcome'], properties['result'], 'unknown') AS result,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
@@ -222,9 +237,12 @@ def feature_breakdown_query(days: int, app_version: str | None) -> str:
 SELECT
   multiIf(
     event IN ('dictation_started', 'dictation_completed'), 'dictation',
-    event IN ('meeting_recording_started', 'meeting_transcript_saved'), 'meetings',
-    event IN ('activation_artifact_action_clicked', 'activation_first_artifact_saved'), 'artifact_actions',
-    event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked'), 'agent_bridge',
+    event IN ('meeting_recording_started', 'meeting_transcript_saved', 'meeting_prompt_decision_made', 'meeting_prompt_followup_outcome'), 'meetings',
+    event IN ('activation_artifact_action_clicked', 'activation_first_artifact_saved', 'artifact_reused_after_save'), 'artifact_actions',
+    event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked', 'agent_artifact_query_succeeded'), 'agent_bridge',
+    event IN ('local_summary_feedback_given', 'local_summary_used_after_generation'), 'local_summary',
+    event IN ('speaker_name_corrected', 'speaker_suggestion_accepted_or_rejected'), 'quality_review',
+    event IN ('failed_capture_retry_decision', 'failed_capture_retry_outcome'), 'retry_recovery',
     event IN ('update_check_finished', 'update_download_finished'), 'updates',
     'other'
   ) AS feature,
@@ -265,6 +283,25 @@ ORDER BY devices DESC, events DESC
 """
 
 
+def decision_outcomes_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  event,
+  coalesce(properties['decision'], properties['retry_action'], properties['summary_action'], properties['action'], 'unknown') AS choice_kind,
+  coalesce(properties['outcome'], properties['result'], 'unknown') AS result_kind,
+  coalesce(properties['prompt_origin'], properties['capture_kind'], properties['artifact_kind'], 'unknown') AS context_kind,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ('meeting_prompt_decision_made', 'meeting_prompt_followup_outcome', 'failed_capture_retry_decision', 'failed_capture_retry_outcome', 'local_summary_feedback_given', 'local_summary_used_after_generation', 'speaker_name_corrected', 'speaker_suggestion_accepted_or_rejected', 'agent_artifact_query_succeeded', 'artifact_reused_after_save')
+  {app_version_filter(app_version)}
+GROUP BY event, choice_kind, result_kind, context_kind
+ORDER BY devices DESC, events DESC
+LIMIT 50
+"""
+
+
 def fetch_report_data(days: int, app_version: str | None, fixture_path: Path | None) -> dict[str, Any]:
     if fixture_path:
         return json.loads(fixture_path.read_text(encoding="utf-8"))
@@ -278,6 +315,7 @@ def fetch_report_data(days: int, app_version: str | None, fixture_path: Path | N
         "release_versions": release_versions_query(days, app_version),
         "feature_breakdown": feature_breakdown_query(days, app_version),
         "repeat_breakdown": repeat_breakdown_query(days, app_version),
+        "decision_outcomes": decision_outcomes_query(days, app_version),
     }
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -313,6 +351,7 @@ def unknown_data(reason: str, days: int, app_version: str | None) -> dict[str, A
             "release_versions": [],
             "feature_breakdown": [],
             "repeat_breakdown": [],
+            "decision_outcomes": [],
         },
     }
 
@@ -400,7 +439,7 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
     if launch <= 0:
         unknowns.append(UnknownReason("activation.bottleneck", "No launch devices were available for the selected window."))
     if true_agent_query == 0:
-        unknowns.append(UnknownReason("activation.true_agent_use", "`agent_capture_query_observed` is missing or zero; prompt/setup clicks are intent proxies only."))
+        unknowns.append(UnknownReason("activation.true_agent_use", "`agent_capture_query_observed` / `agent_artifact_query_succeeded` is missing or zero; prompt/setup clicks are intent proxies only."))
 
     artifact_rate = pct(first_artifact, launch)
     prompt_rate = pct(agent_prompt, first_artifact)
@@ -459,6 +498,7 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
         unknowns.append(UnknownReason("release.anomaly", "No app_version aggregate rows were returned."))
 
     feature_top = top_row(results.get("feature_breakdown", []))
+    decision_top = top_row(results.get("decision_outcomes", []))
     if feature_top:
         feature_status = "OBSERVED"
         feature_signal = f"{feature_top.get('feature')} leads adoption by active devices."
@@ -533,6 +573,11 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
             "meeting_saved_devices": meeting_saved,
             "workflow_devices": workflow_devices,
             "features": results.get("feature_breakdown", [])[:8],
+            "decision_signals": {
+                "status": "OBSERVED" if decision_top else "UNKNOWN",
+                "top_row": decision_top,
+                "rows": results.get("decision_outcomes", [])[:8],
+            },
         },
         "data_quality": {
             "source": data.get("source", {}),
@@ -576,8 +621,8 @@ def build_recommendations(
         recs.append({
             "rank": len(recs) + 1,
             "title": "Add privacy-safe sourced-agent-use proof",
-            "why": "`agent_capture_query_observed` is missing or zero, so agents still cannot tell whether saved Markdown produced a sourced answer.",
-            "suggested_pr": "Emit aggregate-only `agent_capture_query_observed` from the read-only MCP/agent surface with enum result, query kind, agent target, artifact kind, and age buckets.",
+            "why": "`agent_capture_query_observed` / `agent_artifact_query_succeeded` is missing or zero, so agents still cannot tell whether saved Markdown produced a sourced answer.",
+            "suggested_pr": "Emit aggregate-only agent artifact query success from the read-only MCP/agent surface with enum result, query kind, agent target, artifact kind, and age buckets.",
         })
     elif launch > 0 and first_artifact / launch < 0.2:
         recs.append({

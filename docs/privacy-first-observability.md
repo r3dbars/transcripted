@@ -103,6 +103,8 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `agent_capture_query_observed`
+- `agent_artifact_query_succeeded`
+- `artifact_reused_after_save`
 - `activation_return_proxy_observed`
 - `workflow_abandoned`
 - `product_friction_observed`
@@ -136,6 +138,8 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_recording_started`
 - `meeting_recording_start_failed`
 - `meeting_prompt_shown`
+- `meeting_prompt_decision_made`
+- `meeting_prompt_followup_outcome`
 - `meeting_prompt_dismissed`
 - `meeting_prompt_record_selected`
 - `meeting_prompt_suppressed`
@@ -151,6 +155,12 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `meeting_speaker_finalization_failed`
 - `meeting_transcript_skipped`
 - `meeting_saved_audio_retranscription_requested`
+- `failed_capture_retry_decision`
+- `failed_capture_retry_outcome`
+- `local_summary_feedback_given`
+- `local_summary_used_after_generation`
+- `speaker_name_corrected`
+- `speaker_suggestion_accepted_or_rejected`
 
 ## Allowed property style
 
@@ -168,6 +178,16 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
+
+## Decision/outcome taxonomy
+
+| Family | Events | Natural trigger | Safe context | Planned or blocked |
+|---|---|---|---|---|
+| Meeting prompt choice | `meeting_prompt_decision_made`, `meeting_prompt_followup_outcome` | record, remind, dismiss, timeout, or suppression from the detected-meeting prompt | `prompt_origin`, `decision`, `outcome`, existing prompt enums, elapsed bucket | no raw app names, meeting titles, invitees, calendar text, or prompt text; camera/manual origins stay `unknown` until modeled |
+| Failed capture recovery | `failed_capture_retry_decision`, `failed_capture_retry_outcome` | retry, retranscribe, reveal audio, delete, or dismiss on failed/saved meeting recovery surfaces | `capture_kind`, `failure_kind`, `retry_action`, `outcome`, elapsed bucket | dictation retry events wait for a natural failed-dictation recovery surface |
+| Local summary usefulness | `local_summary_feedback_given`, `local_summary_used_after_generation` | regenerate, open, or copy an existing local summary | `summary_action`, `result`, provider family, chunk bucket, elapsed bucket | no generated summary text, prompt text, model names, or file paths |
+| Speaker review quality | `speaker_name_corrected`, `speaker_suggestion_accepted_or_rejected` | accept, reject, correct, skip, or close the speaker naming review | `action`, `review_reason`, `item_count_bucket`, `suggestion_confidence_bucket` | no speaker names, profile IDs, person IDs, or stable speaker identifiers |
+| Agent artifact value | `agent_artifact_query_succeeded`, `artifact_reused_after_save` | read-only MCP/agent query succeeds, or a saved artifact is reused through explicit artifact actions | `artifact_kind`, `agent_target`, `tool_kind`, `query_kind`, `result`, source-count and return-window buckets | no query text, file names, paths, titles, speaker names, or source rows |
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.

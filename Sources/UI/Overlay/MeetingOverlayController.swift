@@ -1401,6 +1401,7 @@ final class MeetingOverlayController: NSObject {
     weak var meetingSession: MeetingSessionController?
     var onPromptRecord: ((MeetingPromptDetector.Candidate) -> Void)?
     var onPromptDismiss: ((MeetingPromptDetector.Candidate) -> Void)?
+    var onPromptIgnored: ((MeetingPromptDetector.Candidate) -> Void)?
     var onPromptRemindSoon: ((MeetingPromptDetector.Candidate) -> Void)?
 
     // MARK: - Setup
@@ -2387,7 +2388,14 @@ final class MeetingOverlayController: NSObject {
                 await session.endRecordingFromAudioInactivityPrompt(automatic: true)
             }
         case .detectedMeeting, .none:
-            dismissPrompt(notifyDetector: true)
+            if let candidate = promptCandidate {
+                onPromptIgnored?(candidate)
+            }
+            promptCandidate = nil
+            promptKind = nil
+            currentPrompt = nil
+            state = .idle
+            hidePanel()
         }
     }
 

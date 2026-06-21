@@ -1422,10 +1422,30 @@ final class MeetingSessionController: ObservableObject {
 
     @discardableResult
     func retryFailedMeeting(id: UUID) -> Bool {
-        guard !isRecording, !hasBackgroundTranscriptionWork, !isSpeakerReviewPending else { return false }
-        guard !retryingFailedMeetingIDs.contains(id) else { return false }
+        let failureKind = failedManager.failedTranscriptions
+            .first(where: { $0.id == id })
+            .map { MeetingFailureKind.classify(message: $0.errorMessage).rawValue }
+            ?? "unknown"
+        func trackOutcome(_ outcome: ProductDecisionTelemetry.RetryOutcome) {
+            ProductDecisionTelemetry.trackFailedCaptureRetryOutcome(
+                captureKind: .meeting,
+                failureKind: failureKind,
+                retryAction: .retry,
+                outcome: outcome
+            )
+        }
+
+        guard !isRecording, !hasBackgroundTranscriptionWork, !isSpeakerReviewPending else {
+            trackOutcome(.blocked)
+            return false
+        }
+        guard !retryingFailedMeetingIDs.contains(id) else {
+            trackOutcome(.blocked)
+            return false
+        }
         guard failedManager.failedTranscriptions.contains(where: { $0.id == id }) else {
             refreshFailedMeetings()
+            trackOutcome(.blocked)
             return false
         }
 
@@ -1447,15 +1467,27 @@ final class MeetingSessionController: ObservableObject {
                 )
                 self.retryingFailedMeetingIDs.remove(id)
                 self.refreshFailedMeetings()
+                ProductDecisionTelemetry.trackFailedCaptureRetryOutcome(
+                    captureKind: .meeting,
+                    failureKind: failureKind,
+                    retryAction: .retry,
+                    outcome: .blocked
+                )
                 return
             }
 
-            _ = await self.taskManager.retryFailedTranscription(
+            let didRetry = await self.taskManager.retryFailedTranscription(
                 failedId: id,
                 outputFolder: MeetingStoragePaths.transcriptsFolder
             )
             self.retryingFailedMeetingIDs.remove(id)
             self.refreshFailedMeetings()
+            ProductDecisionTelemetry.trackFailedCaptureRetryOutcome(
+                captureKind: .meeting,
+                failureKind: failureKind,
+                retryAction: .retry,
+                outcome: didRetry ? .recovered : .failed
+            )
         }
         return true
     }
@@ -1470,18 +1502,42 @@ final class MeetingSessionController: ObservableObject {
     ) async -> Bool {
         guard !(sttRouter.isRecording || sttRouter.isTranscribing) else {
             state = .error("Wait for the current dictation to finish before re-transcribing saved audio.")
+            ProductDecisionTelemetry.trackFailedCaptureRetryOutcome(
+                captureKind: .savedAudio,
+                failureKind: "dictation_active",
+                retryAction: .retranscribe,
+                outcome: .blocked
+            )
             return false
         }
         guard !isCaptureSessionActive else {
             state = .error("Stop the current meeting before re-transcribing saved audio.")
+            ProductDecisionTelemetry.trackFailedCaptureRetryOutcome(
+                captureKind: .savedAudio,
+                failureKind: "meeting_active",
+                retryAction: .retranscribe,
+                outcome: .blocked
+            )
             return false
         }
         guard !hasBackgroundTranscriptionWork else {
             state = .error("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.")
+            ProductDecisionTelemetry.trackFailedCaptureRetryOutcome(
+                captureKind: .savedAudio,
+                failureKind: "pipeline_busy",
+                retryAction: .retranscribe,
+                outcome: .blocked
+            )
             return false
         }
         guard !isSpeakerReviewPending else {
             state = .error("Finish the speaker review window before re-transcribing saved audio.")
+            ProductDecisionTelemetry.trackFailedCaptureRetryOutcome(
+                captureKind: .savedAudio,
+                failureKind: "speaker_review_pending",
+                retryAction: .retranscribe,
+                outcome: .blocked
+            )
             return false
         }
 
@@ -1522,6 +1578,12 @@ final class MeetingSessionController: ObservableObject {
         }
 
         guard case .ready = state else {
+            ProductDecisionTelemetry.trackFailedCaptureRetryOutcome(
+                captureKind: .savedAudio,
+                failureKind: "model_not_ready",
+                retryAction: .retranscribe,
+                outcome: .blocked
+            )
             return false
         }
 
@@ -1544,6 +1606,12 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {
+        ProductDecisionTelemetry.trackFailedCaptureRetryOutcome(
+            captureKind: .savedAudio,
+            failureKind: "unknown",
+            retryAction: .retranscribe,
+            outcome: .recovered
+        )
         clearGeneratedSummaryAfterReplacementRetranscription(for: transcriptURL)
         savedMeetingReplacementCommitCount &+= 1
     }

@@ -31,6 +31,8 @@ CORE_EVENTS = (
     "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
+    "agent_artifact_query_succeeded",
+    "artifact_reused_after_save",
     "dictation_start_failed",
     "dictation_no_speech",
     "dictation_cancelled",
@@ -46,8 +48,16 @@ CORE_EVENTS = (
     "settings_action_clicked",
     "meeting_prompt_shown",
     "meeting_prompt_record_selected",
+    "meeting_prompt_decision_made",
+    "meeting_prompt_followup_outcome",
     "meeting_file_imported",
     "meeting_saved_audio_retranscription_requested",
+    "failed_capture_retry_decision",
+    "failed_capture_retry_outcome",
+    "local_summary_feedback_given",
+    "local_summary_used_after_generation",
+    "speaker_name_corrected",
+    "speaker_suggestion_accepted_or_rejected",
 )
 
 WORKFLOW_EVENTS = (
@@ -62,6 +72,9 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "agent_artifact_query_succeeded",
+    "artifact_reused_after_save",
+    "local_summary_used_after_generation",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {
@@ -139,13 +152,14 @@ SELECT
   event,
   properties['failure_kind'] AS failure_kind,
   properties['trigger'] AS trigger,
+  properties['outcome'] AS outcome,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('dictation_start_failed', 'dictation_no_speech', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_speaker_finalization_failed')
+  AND event IN ('dictation_start_failed', 'dictation_no_speech', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_speaker_finalization_failed', 'failed_capture_retry_outcome')
   {app_version_filter(app_version)}
-GROUP BY event, failure_kind, trigger
+GROUP BY event, failure_kind, trigger, outcome
 ORDER BY events DESC
 LIMIT 30
 """
@@ -159,13 +173,19 @@ SELECT
   properties['action_kind'] AS action_kind,
   properties['agent_target'] AS agent_target,
   properties['page_id'] AS page_id,
+  properties['decision'] AS decision,
+  properties['outcome'] AS outcome,
+  properties['retry_action'] AS retry_action,
+  properties['summary_action'] AS summary_action,
+  properties['action'] AS review_action,
+  properties['query_kind'] AS query_kind,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested')
+  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'meeting_prompt_decision_made', 'meeting_prompt_followup_outcome', 'failed_capture_retry_decision', 'failed_capture_retry_outcome', 'local_summary_feedback_given', 'local_summary_used_after_generation', 'speaker_name_corrected', 'speaker_suggestion_accepted_or_rejected', 'agent_artifact_query_succeeded', 'artifact_reused_after_save')
   {app_version_filter(app_version)}
-GROUP BY event, artifact_kind, action_kind, agent_target, page_id
+GROUP BY event, artifact_kind, action_kind, agent_target, page_id, decision, outcome, retry_action, summary_action, review_action, query_kind
 ORDER BY devices DESC, events DESC
 LIMIT 50
 """
@@ -303,7 +323,7 @@ def build_activation_leak(data: dict[str, Any]) -> Finding:
             "Nudge users back to yesterday's saved artifact."),
         (
             "true agent query",
-            devices.get("agent_capture_query_observed", 0),
+            max(devices.get("agent_capture_query_observed", 0), devices.get("agent_artifact_query_succeeded", 0)),
             "Instrument privacy-safe sourced-agent-use before calling the loop proven.",
         ),
     ]
@@ -385,7 +405,19 @@ def build_adoption_signal(data: dict[str, Any]) -> Finding:
     if rows:
         top = max(rows, key=lambda row: (as_int(row.get("devices")), as_int(row.get("events"))))
         event = top.get("event") or "unknown"
-        detail = top.get("action_kind") or top.get("agent_target") or top.get("page_id") or top.get("artifact_kind") or "all"
+        detail = (
+            top.get("action_kind")
+            or top.get("decision")
+            or top.get("outcome")
+            or top.get("retry_action")
+            or top.get("summary_action")
+            or top.get("review_action")
+            or top.get("query_kind")
+            or top.get("agent_target")
+            or top.get("page_id")
+            or top.get("artifact_kind")
+            or "all"
+        )
         devices = as_int(top.get("devices"))
         return Finding(
             "Strongest adoption signal",
@@ -412,6 +444,10 @@ def build_under_discovered_feature(data: dict[str, Any]) -> Finding:
     candidates = [
         ("Agent setup", max(devices.get("activation_agent_setup_cta_clicked", 0), devices.get("onboarding_agent_cta_clicked", 0)), 5, "Surface Claude/MCP setup immediately after the first saved artifact."),
         ("Agent prompt copy", devices.get("activation_agent_prompt_action_clicked", 0), 4, "Put the first sourced question beside Open Markdown."),
+        ("Agent artifact success", devices.get("agent_artifact_query_succeeded", 0), 4, "Make saved artifacts easier to query through the read-only agent bridge."),
+        ("Artifact reuse", devices.get("artifact_reused_after_save", 0), 4, "Turn saved Markdown into an obvious next-day/open/copy/agent context habit."),
+        ("Local summary use", devices.get("local_summary_used_after_generation", 0), 3, "Make copied/opened local summaries more visible from the meeting preview."),
+        ("Retry recovery", devices.get("failed_capture_retry_outcome", 0), 3, "Make failed capture retry outcomes easier to complete and understand."),
         ("Meeting import", devices.get("meeting_file_imported", 0), 3, "Expose imported-audio transcription from Home for users who missed live capture."),
         ("Saved-audio retranscription", devices.get("meeting_saved_audio_retranscription_requested", 0), 2, "Make retry from retained meeting audio clearer after transcript failure."),
         ("Meeting prompt acceptance", devices.get("meeting_prompt_record_selected", 0), 2, "Clarify detected-meeting prompts and route readiness."),
@@ -563,7 +599,7 @@ def render_markdown(data: dict[str, Any], findings: dict[str, Finding]) -> str:
         "## Privacy Boundary",
         "",
         "- Aggregate only. No raw rows or user-level forensics.",
-        "- Treat agent setup, prompt copy, and return events as proxies until `agent_capture_query_observed` exists.",
+        "- Treat agent setup, prompt copy, and return events as proxies until `agent_artifact_query_succeeded` or `agent_capture_query_observed` exists.",
         "",
     ])
     return "\n".join(lines)

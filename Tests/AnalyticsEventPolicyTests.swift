@@ -77,6 +77,7 @@ func testAnalyticsEventPolicy() {
             "calendar_confidence",
             "calendar_status",
             "call_state",
+            "capture_kind",
             "capture_activity",
             "capture_quality",
             "captured_input_volume_before",
@@ -110,6 +111,7 @@ func testAnalyticsEventPolicy() {
             "default_system_output_volume_dropped",
             "default_system_output_volume_during",
             "delivery",
+            "decision",
             "dictation_ready",
             "elapsed_bucket",
             "enabled",
@@ -158,7 +160,9 @@ func testAnalyticsEventPolicy() {
             "prior_status",
             "prompt_kind",
             "prompt_reason",
+            "prompt_origin",
             "provider",
+            "provider_family",
             "proxy_kind",
             "query_kind",
             "quiet_mic_recovered",
@@ -171,6 +175,8 @@ func testAnalyticsEventPolicy() {
             "required",
             "reason_kind",
             "result",
+            "retry_action",
+            "review_reason",
             "route_ready",
             "route_shape",
             "sample_flow_started",
@@ -194,6 +200,7 @@ func testAnalyticsEventPolicy() {
             "stop_timed_out",
             "suppression_reason",
             "surface",
+            "summary_action",
             "system_backend",
             "system_channels",
             "system_failed",
@@ -205,6 +212,7 @@ func testAnalyticsEventPolicy() {
             "system_stream_present",
             "to_status",
             "trigger",
+            "tool_kind",
             "update_state",
             "version",
             "voice_processing",
@@ -294,6 +302,8 @@ func testAnalyticsEventPolicy() {
         let prompt = AnalyticsEventPolicy.policy(forEvent: "activation_agent_prompt_action_clicked")
         let setup = AnalyticsEventPolicy.policy(forEvent: "activation_agent_setup_cta_clicked")
         let agentQuery = AnalyticsEventPolicy.policy(forEvent: "agent_capture_query_observed")
+        let agentArtifactQuery = AnalyticsEventPolicy.policy(forEvent: "agent_artifact_query_succeeded")
+        let artifactReused = AnalyticsEventPolicy.policy(forEvent: "artifact_reused_after_save")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
         assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
@@ -303,7 +313,9 @@ func testAnalyticsEventPolicy() {
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
-        assertEqual(agentQuery?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "source_count_bucket", "surface"], "agent query observation should stay enum and bucket only")
+        assertEqual(agentQuery?.allowedProperties ?? Set<String>(), ["agent_target", "artifact_kind", "capture_age_bucket", "query_kind", "result", "return_window_bucket", "source_count_bucket", "surface", "tool_kind"], "agent query observation should stay enum and bucket only")
+        assertEqual(agentArtifactQuery?.allowedProperties ?? Set<String>(), agentQuery?.allowedProperties ?? Set<String>(), "agent artifact query success should mirror the safe MCP query payload")
+        assertEqual(artifactReused?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "query_kind", "result", "return_window_bucket", "source_count_bucket", "surface", "tool_kind"], "artifact reuse should stay enum and bucket only")
         assertEqual(
             agentQuery?.allowedProperties ?? Set<String>(),
             mcpAgentCaptureQueryAllowedProperties(),
@@ -316,6 +328,8 @@ func testAnalyticsEventPolicy() {
             .union(dictationArtifact?.allowedProperties ?? Set<String>())
             .union(secondArtifact?.allowedProperties ?? Set<String>())
             .union(agentQuery?.allowedProperties ?? Set<String>())
+            .union(agentArtifactQuery?.allowedProperties ?? Set<String>())
+            .union(artifactReused?.allowedProperties ?? Set<String>())
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_kind": "open_markdown",
@@ -334,6 +348,7 @@ func testAnalyticsEventPolicy() {
                 "second_artifact_kind": "meeting",
                 "source_count_bucket": "2_3",
                 "surface": "home_preview",
+                "tool_kind": "mcp",
                 "trigger": "detected_prompt",
                 "word_count_bucket": "300_plus",
                 "first_artifact_saved_at": "2026-06-19T12:00:00Z",
@@ -368,6 +383,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["second_artifact_kind"], "meeting", "second artifact kind should survive")
         assertEqual(sanitized["source_count_bucket"], "2_3", "source count bucket should survive")
         assertEqual(sanitized["surface"], "home_preview", "surface should survive")
+        assertEqual(sanitized["tool_kind"], "mcp", "tool kind should survive")
         assertEqual(sanitized["trigger"], "detected_prompt", "trigger should survive")
         assertEqual(sanitized["word_count_bucket"], "300_plus", "word count bucket should survive")
         assertNil(sanitized["first_artifact_saved_at"], "raw first-save timestamps must not be sent")
@@ -382,6 +398,126 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["raw_capture_id"], "raw capture IDs must not be sent")
         assertNil(sanitized["source_app_name"], "source app names must not be sent")
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
+    }
+
+    runSuite("AnalyticsEventPolicy allows decision/outcome telemetry only as safe enums and buckets") {
+        let meetingDecision = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_decision_made")
+        let meetingOutcome = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_followup_outcome")
+        let retryDecision = AnalyticsEventPolicy.policy(forEvent: "failed_capture_retry_decision")
+        let retryOutcome = AnalyticsEventPolicy.policy(forEvent: "failed_capture_retry_outcome")
+        let summaryFeedback = AnalyticsEventPolicy.policy(forEvent: "local_summary_feedback_given")
+        let summaryUsed = AnalyticsEventPolicy.policy(forEvent: "local_summary_used_after_generation")
+        let speakerCorrected = AnalyticsEventPolicy.policy(forEvent: "speaker_name_corrected")
+        let speakerSuggestion = AnalyticsEventPolicy.policy(forEvent: "speaker_suggestion_accepted_or_rejected")
+
+        let meetingProperties: Set<String> = [
+            "app_signal",
+            "calendar_confidence",
+            "call_state",
+            "decision",
+            "elapsed_bucket",
+            "missing_permission",
+            "outcome",
+            "prompt_origin",
+            "prompt_reason",
+            "provider",
+            "route_ready",
+            "source",
+        ]
+        assertEqual(meetingDecision?.allowedProperties ?? Set<String>(), meetingProperties, "meeting prompt decisions should keep existing prompt context plus safe choice fields")
+        assertEqual(meetingOutcome?.allowedProperties ?? Set<String>(), meetingProperties, "meeting prompt outcomes should mirror prompt decision context")
+        assertEqual(retryDecision?.allowedProperties ?? Set<String>(), ["capture_kind", "elapsed_bucket", "failure_kind", "outcome", "retry_action"], "retry decisions should be enum/bucket only")
+        assertEqual(retryOutcome?.allowedProperties ?? Set<String>(), ["capture_kind", "elapsed_bucket", "failure_kind", "outcome", "retry_action"], "retry outcomes should mirror retry decisions")
+        assertEqual(summaryFeedback?.allowedProperties ?? Set<String>(), ["chunk_count_bucket", "elapsed_bucket", "provider_family", "result", "summary_action"], "summary feedback should not include text or model names")
+        assertEqual(summaryUsed?.allowedProperties ?? Set<String>(), ["chunk_count_bucket", "elapsed_bucket", "provider_family", "result", "summary_action"], "summary use should mirror summary feedback")
+        assertEqual(speakerCorrected?.allowedProperties ?? Set<String>(), ["action", "item_count_bucket", "review_reason", "suggestion_confidence_bucket"], "speaker correction should not include names or person ids")
+        assertEqual(speakerSuggestion?.allowedProperties ?? Set<String>(), ["action", "item_count_bucket", "review_reason", "suggestion_confidence_bucket"], "speaker suggestion decisions should not include names or person ids")
+
+        let meetingSanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "app_signal": "browser_mic",
+                "calendar_confidence": "high",
+                "call_state": "mic_active",
+                "decision": "record_now",
+                "elapsed_bucket": "lt_10s",
+                "outcome": "recording_started",
+                "prompt_origin": "browser",
+                "prompt_reason": "browser_mic",
+                "provider": "detector",
+                "route_ready": "true",
+                "source": "detector",
+                "audio_ref": "file:///private.wav",
+                "file_path": "/Users/redbars/private.md",
+                "meeting_title": "Customer Roadmap",
+                "prompt_text": "Join private meeting",
+                "source_app_name": "Safari",
+            ],
+            allowedKeys: meetingProperties
+        )
+        assertEqual(meetingSanitized["decision"], "record_now", "prompt decision should survive")
+        assertEqual(meetingSanitized["outcome"], "recording_started", "prompt outcome should survive")
+        assertEqual(meetingSanitized["prompt_origin"], "browser", "prompt origin should survive")
+        assertNil(meetingSanitized["audio_ref"], "audio refs must not be sent")
+        assertNil(meetingSanitized["file_path"], "file paths must not be sent")
+        assertNil(meetingSanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(meetingSanitized["prompt_text"], "prompt text must not be sent")
+        assertNil(meetingSanitized["source_app_name"], "source app names must not be sent")
+
+        let retrySanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "capture_kind": "meeting",
+                "elapsed_bucket": "30_119s",
+                "failure_kind": "model_not_ready",
+                "outcome": "blocked",
+                "retry_action": "retry",
+                "audio_path": "/Users/redbars/private.wav",
+                "error_message": "private raw error",
+                "retry_count": "12",
+            ],
+            allowedKeys: retryOutcome?.allowedProperties ?? []
+        )
+        assertEqual(retrySanitized["capture_kind"], "meeting", "capture kind should survive")
+        assertEqual(retrySanitized["failure_kind"], "model_not_ready", "failure kind should survive")
+        assertEqual(retrySanitized["outcome"], "blocked", "retry outcome should survive")
+        assertEqual(retrySanitized["retry_action"], "retry", "retry action should survive")
+        assertNil(retrySanitized["audio_path"], "audio paths must not be sent")
+        assertNil(retrySanitized["error_message"], "free-form errors must not be sent")
+        assertNil(retrySanitized["retry_count"], "raw retry counts must not be sent")
+
+        let summarySanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "chunk_count_bucket": "2_3",
+                "elapsed_bucket": "10_29s",
+                "provider_family": "local",
+                "result": "success",
+                "summary_action": "copy",
+                "model_name": "private-model-build",
+                "raw_path": "/Users/redbars/summary.md",
+                "summary_text": "private summary text",
+            ],
+            allowedKeys: summaryUsed?.allowedProperties ?? []
+        )
+        assertEqual(summarySanitized["summary_action"], "copy", "summary action should survive")
+        assertEqual(summarySanitized["provider_family"], "local", "provider family should survive")
+        assertNil(summarySanitized["model_name"], "raw model names must not be sent")
+        assertNil(summarySanitized["raw_path"], "raw paths must not be sent")
+        assertNil(summarySanitized["summary_text"], "summary text must not be sent")
+
+        let speakerSanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "action": "accepted",
+                "item_count_bucket": "2_3",
+                "review_reason": "suggestion_review",
+                "suggestion_confidence_bucket": "high",
+                "person_id": "person-private",
+                "speaker_name": "Alice",
+            ],
+            allowedKeys: speakerSuggestion?.allowedProperties ?? []
+        )
+        assertEqual(speakerSanitized["action"], "accepted", "speaker review action should survive")
+        assertEqual(speakerSanitized["review_reason"], "suggestion_review", "speaker review reason should survive")
+        assertNil(speakerSanitized["person_id"], "person ids must not be sent")
+        assertNil(speakerSanitized["speaker_name"], "speaker names must not be sent")
     }
 
     runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, dictation artifacts, and next-day return proxy") {
