@@ -282,6 +282,7 @@ APP_SOURCES=(
     "Sources/Support/DictationOverlayPresentationPreferences.swift"
     "Sources/Support/DictationFillerCleanupPolicy.swift"
     "Sources/Support/ClipboardRestoringTextPaster.swift"
+    "Sources/Accessibility/AccessibilityBridge.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationStopFinalizationPolicy.swift"

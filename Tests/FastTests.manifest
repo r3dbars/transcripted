@@ -2,6 +2,7 @@
 # Format: <TestFile.swift>:<top-level entry function>
 
 ActivationPolicyControllerTests.swift:testActivationPolicyController
+AccessibilityBridgeTests.swift:testAccessibilityBridge
 AudioAutomationCoverageContractTests.swift:testAudioAutomationCoverageContract
 BluetoothRouteContractTests.swift:testBluetoothRouteContract
 AgentConnectionGuideTests.swift:testAgentConnectionGuide
