@@ -407,6 +407,7 @@ struct TranscriptedSettingsView: View {
 
     private var settingsSidebarFooter: some View {
         Button {
+            guard settingsFooterActionEnabled else { return }
             trackSettingsAction(settingsUpdateActionID, page: .about)
             sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
         } label: {
@@ -3846,6 +3847,7 @@ struct TranscriptedSettingsView: View {
                         title: aboutUpdateButtonTitle,
                         tone: .accent
                     ) {
+                        guard aboutUpdateButtonEnabled else { return }
                         trackSettingsAction(settingsUpdateActionID, page: .about)
                         sparkleUpdater.performUserUpdateAction(surface: "settings_about")
                     }
@@ -3899,12 +3901,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var settingsFooterActionEnabled: Bool {
-        switch sparkleUpdater.updateStatus.state {
-        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
-            return false
-        default:
-            return sparkleUpdater.updateStatus.canRunUserUpdateAction
-        }
+        updateActionEnabled(for: sparkleUpdater.updateStatus)
     }
 
     private var settingsFooterTitle: String {
@@ -3936,6 +3933,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private var settingsFooterHelp: String {
+        if let captureHelp = updateCaptureSafetyHelp(for: sparkleUpdater.updateStatus) {
+            return captureHelp
+        }
         if let version = sparkleUpdater.updateStatus.availableUpdateVersion {
             if case .readyToInstall = sparkleUpdater.updateStatus.state {
                 return "Restart to install update \(version)."
@@ -4699,12 +4699,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var aboutUpdateButtonEnabled: Bool {
-        switch sparkleUpdater.updateStatus.state {
-        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
-            return false
-        default:
-            return sparkleUpdater.updateStatus.canRunUserUpdateAction
-        }
+        updateActionEnabled(for: sparkleUpdater.updateStatus)
     }
 
     private var automaticUpdatesDetail: String {
@@ -4728,6 +4723,51 @@ struct TranscriptedSettingsView: View {
             return "view_update_progress"
         case .unknown, .readyToCheck, .noUpdateAvailable:
             return "check_updates"
+        }
+    }
+
+    private var isCaptureActiveForUpdateSafety: Bool {
+        sttRouter.isRecording
+            || sttRouter.isTranscribing
+            || meetingSession.isRecording
+            || meetingSession.hasRuntimeDiagnosticsWork
+            || meetingSession.isSpeakerReviewPending
+    }
+
+    private func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {
+        UpdateActionSafetyPolicy.canRunUserAction(
+            state: updateActionSafetyState(for: status.state),
+            sparkleCanRunUserAction: status.canRunUserUpdateAction,
+            automaticDownloadsEnabled: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled,
+            isCaptureActive: isCaptureActiveForUpdateSafety
+        )
+    }
+
+    private func updateCaptureSafetyHelp(for status: SparkleUpdaterController.UpdateStatus) -> String? {
+        UpdateActionSafetyPolicy.captureSafetyHelp(
+            state: updateActionSafetyState(for: status.state),
+            isCaptureActive: isCaptureActiveForUpdateSafety
+        )
+    }
+
+    private func updateActionSafetyState(
+        for state: SparkleUpdaterController.UpdateStatus.State
+    ) -> UpdateActionSafetyState {
+        switch state {
+        case .unknown:
+            return .unknown
+        case .readyToCheck:
+            return .readyToCheck
+        case .checking:
+            return .checking
+        case .noUpdateAvailable:
+            return .noUpdateAvailable
+        case .updateAvailable:
+            return .updateAvailable
+        case .downloading:
+            return .downloading
+        case .readyToInstall:
+            return .readyToInstall
         }
     }
 

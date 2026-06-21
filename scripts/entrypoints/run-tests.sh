@@ -330,6 +330,7 @@ APP_SOURCES=(
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/JSONLWriter.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
+    "Sources/Observability/UpdateActionSafetyPolicy.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
     "Sources/Observability/ObservabilityLogRotation.swift"
     "Sources/Observability/PayloadSanitizationCore.swift"

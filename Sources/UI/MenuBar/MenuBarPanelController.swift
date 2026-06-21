@@ -92,6 +92,7 @@ final class MenuBarPanelController: NSViewController {
             for: appState.sparkleUpdater.updateStatus,
             automaticDownloadsEnabled: appState.sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
         )
+        let updateActionEnabled = updateActionEnabled(for: appState.sparkleUpdater.updateStatus)
         let menuVisibility = menuVisibilityOverride ?? MenuBarVisibilityPreferences.snapshot()
 
         content.headerView.update(
@@ -119,7 +120,7 @@ final class MenuBarPanelController: NSViewController {
             trailingText: updatePresentation.trailingText,
             tone: updatePresentation.tone,
             isVisible: updatePresentation.isProminent,
-            isEnabled: appState.sparkleUpdater.updateStatus.canRunUserUpdateAction
+            isEnabled: updateActionEnabled
         )
 
         content.utilityActionsView.pasteAvailable = latestDictationLoaded ? (latestDictation != nil) : nil
@@ -128,7 +129,7 @@ final class MenuBarPanelController: NSViewController {
             updateDetail: updatePresentation.detail,
             updateVersion: updatePresentation.trailingText,
             updateTone: updatePresentation.tone,
-            updateEnabled: appState.sparkleUpdater.updateStatus.canRunUserUpdateAction,
+            updateEnabled: updateActionEnabled,
             showUpdateRow: !updatePresentation.isProminent
         )
 
@@ -290,6 +291,10 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func performUpdateActionFromMenu() {
+        guard updateActionEnabled(for: appState.sparkleUpdater.updateStatus) else {
+            NSSound.beep()
+            return
+        }
         trackMenuAction(menuUpdateActionID(for: appState.sparkleUpdater.updateStatus.state))
         dismissPopover()
         appState.sparkleUpdater.performUserUpdateAction(surface: "menu_bar")
@@ -417,6 +422,44 @@ final class MenuBarPanelController: NSViewController {
             return "view_update_progress"
         case .unknown, .readyToCheck, .noUpdateAvailable:
             return "check_updates"
+        }
+    }
+
+    private var isCaptureActiveForUpdateSafety: Bool {
+        appState.meetingSession.isRecording
+            || appState.meetingSession.hasRuntimeDiagnosticsWork
+            || appState.meetingSession.isSpeakerReviewPending
+            || appState.sttRouter.isRecording
+            || appState.sttRouter.isTranscribing
+    }
+
+    private func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {
+        UpdateActionSafetyPolicy.canRunUserAction(
+            state: updateActionSafetyState(for: status.state),
+            sparkleCanRunUserAction: status.canRunUserUpdateAction,
+            automaticDownloadsEnabled: appState.sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled,
+            isCaptureActive: isCaptureActiveForUpdateSafety
+        )
+    }
+
+    private func updateActionSafetyState(
+        for state: SparkleUpdaterController.UpdateStatus.State
+    ) -> UpdateActionSafetyState {
+        switch state {
+        case .unknown:
+            return .unknown
+        case .readyToCheck:
+            return .readyToCheck
+        case .checking:
+            return .checking
+        case .noUpdateAvailable:
+            return .noUpdateAvailable
+        case .updateAvailable:
+            return .updateAvailable
+        case .downloading:
+            return .downloading
+        case .readyToInstall:
+            return .readyToInstall
         }
     }
 
