@@ -3,7 +3,7 @@
 Canonical source for this pass:
 
 - Local CSV: `docs/qa/transcripted-feature-user-story-matrix.csv`
-- Google Sheet: https://docs.google.com/spreadsheets/d/18HBWGBpGvAkY1WQc_LEc2l0lnHFoPq2E7syNg8Ts03w/edit
+- Google Sheet: https://docs.google.com/spreadsheets/d/1MxBdB7KLem1J1jOe7LdG3Ppfzlu6fPLfXzfGkhkAs2Y/edit
 - Created from current repo docs and source on 2026-06-21
 
 Status meanings:
@@ -46,8 +46,8 @@ Current inventory summary:
 
 Current proof summary:
 
-- Stories tracked: 79
-- Status counts after this pass: `PASS` 13, `UNKNOWN` 66, `FAIL` 0, `BLOCKED` 0
+- Stories tracked: 80
+- Status counts after this pass: `PASS` 15, `UNKNOWN` 65, `FAIL` 0, `BLOCKED` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -55,10 +55,15 @@ Current proof summary:
 - Live capture smoke: `PASS` via `bash run-live-capture-smoke.sh --skip-build`;
   real mic + system-audio capture started/stopped and wrote scratch files on
   this Mac.
+- Private corpus validation: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153651/qa-report.md`;
+  reports stay local/redacted.
+- Packaged no-publish smoke: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153703/qa-report.md`;
+  this did not cut, tag, notarize, publish, update appcast, update Homebrew,
+  deploy, or release anything.
 - Manual/hardware gaps still `UNKNOWN`: real meeting-app volume behavior,
   Bluetooth/AirPods route churn, sleep/wake during active capture, secure-field
-  pasteback behavior, private corpus comparison, summary quality/feel, and
-  real Sparkle install/update behavior.
+  pasteback behavior, Transcripted-vs-corpus comparison, summary quality/feel,
+  and real Sparkle install/update behavior.
 - Initial logistics issue: first full bench failed because dependencies were
   missing/stale; `bash build-deps.sh --force` rebuilt them, and the retest
   passed.
