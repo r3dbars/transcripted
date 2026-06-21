@@ -47,7 +47,8 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 80
-- Status counts after this pass: `PASS` 26, `UNKNOWN` 54, `FAIL` 0, `BLOCKED` 0
+- Status counts after this pass: `PASS` 27, `RETEST PASS` 1,
+  `UNKNOWN` 52, `FAIL` 0, `BLOCKED` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -73,10 +74,18 @@ Current proof summary:
 - MCP and local diagnostics proof added: `Tools/TranscriptedMCP`,
   `Tools/TranscriptedCaptureKit`, reliability packet, log rotation, and support
   diagnostics focused suites passed without uploading private capture content.
+- Imported-audio bad-input handling: `PASS`; focused
+  `MeetingImportedAudioPreparerTests` passed 58/58 and proves unsupported
+  file/folder/date-policy handling without needing private audio content.
+- Update actions during active capture: `RETEST PASS` in commit `2d622a78`;
+  menu/settings update actions now stay disabled during dictation, meeting
+  recording, meeting processing, or speaker-review work. Focused policy tests,
+  app build with launch smoke, full fast tests, UI bench, and Codex review all
+  passed.
 - Manual/hardware gaps still `UNKNOWN`: real meeting-app volume behavior,
   Bluetooth/AirPods route churn, sleep/wake during active capture, secure-field
   pasteback behavior, Transcripted-vs-corpus comparison, summary quality/feel,
-  and real Sparkle install/update behavior.
+  and real Sparkle install/update prompt behavior.
 - Initial logistics issue: first full bench failed because dependencies were
   missing/stale; `bash build-deps.sh --force` rebuilt them, and the retest
   passed.
