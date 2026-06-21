@@ -4541,7 +4541,11 @@ struct TranscriptedSettingsView: View {
         panel.directoryURL = captureLibraryURL
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        TranscriptedStoragePreferences.setCaptureLibraryURL(url)
+        guard TranscriptedStoragePreferences.setCaptureLibraryURL(url) else {
+            refreshStoragePaths()
+            showCaptureLibrarySelectionError()
+            return
+        }
         refreshStoragePaths()
         AnalyticsReporter.track(
             "settings_capture_library_changed",
@@ -4550,6 +4554,15 @@ struct TranscriptedSettingsView: View {
                 "page_id": TranscriptedSettingsPage.storage.analyticsValue,
             ]
         )
+    }
+
+    private func showCaptureLibrarySelectionError() {
+        let alert = NSAlert()
+        alert.messageText = "Transcripted can't use that folder."
+        alert.informativeText = "Choose a folder where Transcripted can create meeting and dictation files, or reset to the default capture library."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private var sortedAutoEnterAllowedBundleIDs: [String] {
