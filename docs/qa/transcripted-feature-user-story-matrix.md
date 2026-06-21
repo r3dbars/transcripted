@@ -87,6 +87,11 @@ Current proof summary:
   passed 58/58, `bash build.sh --no-open` passed, the full fast suite passed
   10561/10561, and Codex review was clean. Real secure/password-field behavior
   still needs manual or UI automation proof.
+- Meeting prompt false-positive proof was strengthened while staying `UNKNOWN`:
+  `MeetingPromptDetectorTests` passed 57/57, `MeetingPromptHeuristicsTests`
+  passed 58/58, and `SyntheticMeetingPromptTests` passed 71/71. Real
+  media-playback/browser non-call/native app negative cases still need manual
+  or UI automation proof.
 - Update actions during active capture: `RETEST PASS` in commit `2d622a78`;
   menu/settings update actions now stay disabled during dictation, meeting
   recording, meeting processing, or speaker-review work. Focused policy tests,
