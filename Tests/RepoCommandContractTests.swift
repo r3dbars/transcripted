@@ -2444,6 +2444,40 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - meeting stop and discard teardown stay single-flight") {
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let stopBlock = sourceSlice(
+            controllerContents,
+            from: "func stopRecording(reason: StopReason = .unknown) async {",
+            to: "func dismissAudioInactivityWarning() {"
+        )
+        let cancelBlock = sourceSlice(
+            controllerContents,
+            from: "func cancelRecording(reason: RecordingCancelReason = .unknown) async {",
+            to: "@discardableResult\n    func importAudioFile"
+        )
+
+        for block in [stopBlock, cancelBlock] {
+            assertTrue(
+                block.contains("guard case .recording = state else { return }")
+                    && block.contains("guard !isFinishingRecording else { return }")
+                    && block.contains("isFinishingRecording = true")
+                    && block.contains("defer { isFinishingRecording = false }"),
+                "meeting stop and discard paths must remain recording-only and single-flight so a discard click cannot race the stop/save handoff"
+            )
+        }
+        assertTrue(
+            stopBlock.contains("state = .transcribing")
+                && stopBlock.contains("enqueueTranscriptionJob("),
+            "normal stop should switch to transcribing and enqueue the captured audio instead of deleting scratch files"
+        )
+        assertTrue(
+            cancelBlock.contains("capture.stopAndDiscardFiles()")
+                && cancelBlock.contains("restoreStateAfterRecordingEndedWithoutNewWork()"),
+            "explicit discard should use the discard path and restore idle/ready state without queueing transcription"
+        )
+    }
+
     runSuite("Repo command contract - transcription cancellation clears live sidecar waits") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let cancelBlock = sourceSlice(

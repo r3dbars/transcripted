@@ -92,6 +92,12 @@ Current proof summary:
   passed 58/58, and `SyntheticMeetingPromptTests` passed 71/71. Real
   media-playback/browser non-call/native app negative cases still need manual
   or UI automation proof.
+- Discard/save race safety proof was strengthened while staying `UNKNOWN`:
+  `MeetingRecordingCleanupTests` passed 5/5, `RepoCommandContractTests` passed
+  615/615 with a new single-flight stop/discard teardown contract, and
+  `swift test --filter TranscriptionTaskManagerMetadataTests` passed 57/57, and Codex review was clean.
+  Real rapid stop/discard interaction during live capture still needs manual or
+  UI automation proof.
 - Update actions during active capture: `RETEST PASS` in commit `2d622a78`;
   menu/settings update actions now stay disabled during dictation, meeting
   recording, meeting processing, or speaker-review work. Focused policy tests,
