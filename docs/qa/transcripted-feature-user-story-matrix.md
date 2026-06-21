@@ -47,8 +47,8 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 80
-- Status counts after this pass: `PASS` 27, `RETEST PASS` 1,
-  `UNKNOWN` 52, `FAIL` 0, `BLOCKED` 0
+- Status counts after this pass: `PASS` 27, `RETEST PASS` 2,
+  `UNKNOWN` 51, `FAIL` 0, `BLOCKED` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -82,6 +82,10 @@ Current proof summary:
   recording, meeting processing, or speaker-review work. Focused policy tests,
   app build with launch smoke, full fast tests, UI bench, and Codex review all
   passed.
+- Cross-feature mutual exclusion: `RETEST PASS` in commit `36fea2d0`;
+  dictation start now refuses to begin while meeting recording, meeting
+  processing, or speaker-review work is active. Focused policy tests, app build
+  with launch smoke, full fast tests, and Codex review all passed.
 - Manual/hardware gaps still `UNKNOWN`: real meeting-app volume behavior,
   Bluetooth/AirPods route churn, sleep/wake during active capture, secure-field
   pasteback behavior, Transcripted-vs-corpus comparison, summary quality/feel,
