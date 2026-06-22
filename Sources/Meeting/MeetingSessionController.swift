@@ -104,6 +104,15 @@ final class MeetingSessionController: ObservableObject {
                 return nil
             }
         }
+
+        var artifactRetained: Bool {
+            switch kind {
+            case .recorded:
+                return true
+            case .imported:
+                return false
+            }
+        }
     }
 
     private enum TerminalTranscriptionOutcome: Equatable {
@@ -352,6 +361,16 @@ final class MeetingSessionController: ObservableObject {
             return
         }
 
+        let modelPreparationStartedAt = CFAbsoluteTimeGetCurrent()
+        let retrySource = showLoadingUI ? "warmup" : "background_warmup"
+        let surface = showLoadingUI ? "meeting" : "runtime"
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "model_preparation",
+            failureKind: "models_not_ready",
+            retrySource: retrySource,
+            surface: surface,
+            artifactRetained: false
+        )
         let task = Task<Result<Void, Error>, Never> { [downloader] in
             do {
                 try await downloader.ensureModelsReady()
@@ -366,6 +385,12 @@ final class MeetingSessionController: ObservableObject {
         modelPreparationTask?.cancel()
         modelPreparationTask = nil
         applyModelPreparationResult(result, showLoadingUI: showLoadingUI)
+        trackModelPreparationRecoveryFinished(
+            result,
+            retrySource: retrySource,
+            elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelPreparationStartedAt,
+            surface: surface
+        )
     }
 
     /// Begin a new meeting recording. Safe to call from UI buttons. If a prior
@@ -1433,6 +1458,14 @@ final class MeetingSessionController: ObservableObject {
         retryingFailedMeetingIDs.insert(id)
         activeTranscriptionTrigger = .unknown
         refreshFailedMeetings()
+        let retryStartedAt = CFAbsoluteTimeGetCurrent()
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "meeting_transcription",
+            failureKind: "failed_meeting",
+            retrySource: "failed_meeting_retry",
+            surface: "home",
+            artifactRetained: true
+        )
 
         Task { [weak self] in
             guard let self else { return }
@@ -1447,15 +1480,33 @@ final class MeetingSessionController: ObservableObject {
                 )
                 self.retryingFailedMeetingIDs.remove(id)
                 self.refreshFailedMeetings()
+                WorkflowRecoveryTelemetry.finished(
+                    workflowKind: "meeting_transcription",
+                    failureKind: "failed_meeting",
+                    retrySource: "failed_meeting_retry",
+                    result: "failed",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - retryStartedAt,
+                    surface: "home",
+                    artifactRetained: true
+                )
                 return
             }
 
-            _ = await self.taskManager.retryFailedTranscription(
+            let retryPublished = await self.taskManager.retryFailedTranscription(
                 failedId: id,
                 outputFolder: MeetingStoragePaths.transcriptsFolder
             )
             self.retryingFailedMeetingIDs.remove(id)
             self.refreshFailedMeetings()
+            WorkflowRecoveryTelemetry.finished(
+                workflowKind: "meeting_transcription",
+                failureKind: "failed_meeting",
+                retrySource: "failed_meeting_retry",
+                result: retryPublished ? "success" : "failed",
+                elapsedSeconds: CFAbsoluteTimeGetCurrent() - retryStartedAt,
+                surface: "home",
+                artifactRetained: true
+            )
         }
         return true
     }
@@ -2166,6 +2217,30 @@ final class MeetingSessionController: ObservableObject {
         refreshWarmupStatus()
     }
 
+    private func trackModelPreparationRecoveryFinished(
+        _ result: Result<Void, Error>,
+        retrySource: String,
+        elapsedSeconds: TimeInterval,
+        surface: String
+    ) {
+        let recoveryResult: String
+        switch result {
+        case .success:
+            recoveryResult = "success"
+        case .failure:
+            recoveryResult = "failed"
+        }
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "model_preparation",
+            failureKind: "models_not_ready",
+            retrySource: retrySource,
+            result: recoveryResult,
+            elapsedSeconds: elapsedSeconds,
+            surface: surface,
+            artifactRetained: false
+        )
+    }
+
     private func resetPreparedSpeechModelIfNeeded() {
         let preparedEngine = sttAdapter.transcriptionEngineDescriptor.identifier
         let selectedEngine = sttRouter.selectedModel.transcriptionEngineIdentifier
@@ -2358,6 +2433,14 @@ final class MeetingSessionController: ObservableObject {
                 ]
             )
         )
+        let modelRecoveryStartedAt = CFAbsoluteTimeGetCurrent()
+        WorkflowRecoveryTelemetry.attempted(
+            workflowKind: "model_preparation",
+            failureKind: "models_not_ready",
+            retrySource: "queued_transcription",
+            surface: "meeting",
+            artifactRetained: job.artifactRetained
+        )
 
         do {
             try await downloader.ensureModelsReady(sttModel: job.sttModel)
@@ -2375,6 +2458,15 @@ final class MeetingSessionController: ObservableObject {
                         "queued_stt_model": job.sttModel.rawValue
                     ]
                 )
+            )
+            WorkflowRecoveryTelemetry.finished(
+                workflowKind: "model_preparation",
+                failureKind: "models_not_ready",
+                retrySource: "queued_transcription",
+                result: "failed",
+                elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelRecoveryStartedAt,
+                surface: "meeting",
+                artifactRetained: job.artifactRetained
             )
             return false
         }
@@ -2394,6 +2486,16 @@ final class MeetingSessionController: ObservableObject {
                 )
             )
         }
+
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "model_preparation",
+            failureKind: "models_not_ready",
+            retrySource: "queued_transcription",
+            result: ready ? "success" : "failed",
+            elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelRecoveryStartedAt,
+            surface: "meeting",
+            artifactRetained: job.artifactRetained
+        )
 
         return ready
     }
