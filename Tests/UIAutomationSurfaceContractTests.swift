@@ -281,6 +281,13 @@ func testUIAutomationSurfaceContract() {
             homeSource.contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
         )
+        assertTrue(
+            settingsComponentsSource.contains(".frame(width: 40, height: 40)")
+                && settingsComponentsSource.contains(".accessibilityIdentifier(\"transcripted.settings.activity-card.dismiss\")")
+                && settingsComponentsSource.contains(".frame(minHeight: 40)")
+                && settingsComponentsSource.contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            "activity cards should keep 40pt action and dismiss hit targets for Home progress/notice cards"
+        )
 
         // Regression guards for fix/home-delete-confirmation-menu-loop. The Home
         // recent-meeting "Delete meeting" confirmation silently no-op'd because of
