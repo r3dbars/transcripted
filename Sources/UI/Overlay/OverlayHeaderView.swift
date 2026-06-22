@@ -278,6 +278,7 @@ final class OverlayHeaderView: NSView {
         state: FloatingOverlayController.OverlayState,
         dictationShortcutHint: String,
         loadingTitle: String?,
+        successTitle: String = "Pasted",
         isError: Bool = false,
         isMiniCursorMode: Bool = false,
         meterPresentation: DictationMeterPolicy.Presentation
@@ -298,7 +299,7 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = isError ? "Dictation issue" : "Transcribing"
             modeLabel.textColor = OverlayTokens.textPrimary
         case .success:
-            modeLabel.stringValue = "Pasted"
+            modeLabel.stringValue = successTitle
             modeLabel.textColor = OverlayTokens.textPrimary
         case .loading:
             modeLabel.stringValue = loadingTitle ?? "Dictation"
@@ -308,7 +309,7 @@ final class OverlayHeaderView: NSView {
             modeLabel.textColor = OverlayTokens.textMuted
         }
         modeLabel.isHidden = miniWaveformOnly
-        updateAccessibility(for: state, usesMiniCursorLayout: usesMiniCursorLayout)
+        updateAccessibility(for: state, usesMiniCursorLayout: usesMiniCursorLayout, successTitle: successTitle)
 
         // Spinner visibility
         let showSpinner = state == .starting || (state == .drafting && !isError) || state == .loading
@@ -345,7 +346,8 @@ final class OverlayHeaderView: NSView {
 
     private func updateAccessibility(
         for state: FloatingOverlayController.OverlayState,
-        usesMiniCursorLayout: Bool
+        usesMiniCursorLayout: Bool,
+        successTitle: String
     ) {
         guard usesMiniCursorLayout else {
             setAccessibilityElement(false)
@@ -357,12 +359,15 @@ final class OverlayHeaderView: NSView {
 
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel(accessibilityLabel(for: state))
-        setAccessibilityValue(accessibilityValue(for: state))
+        setAccessibilityLabel(accessibilityLabel(for: state, successTitle: successTitle))
+        setAccessibilityValue(accessibilityValue(for: state, successTitle: successTitle))
         setAccessibilityHelp("Press Escape or your dictation shortcut to stop dictation.")
     }
 
-    private func accessibilityLabel(for state: FloatingOverlayController.OverlayState) -> String {
+    private func accessibilityLabel(
+        for state: FloatingOverlayController.OverlayState,
+        successTitle: String
+    ) -> String {
         switch state {
         case .starting:
             return "Dictation starting"
@@ -371,6 +376,9 @@ final class OverlayHeaderView: NSView {
         case .drafting:
             return "Dictation transcribing"
         case .success:
+            if successTitle == DictationDelivery.savedWithoutPaste.summaryText {
+                return "Dictation saved only"
+            }
             return "Dictation pasted"
         case .loading:
             return "Dictation loading"
@@ -379,13 +387,19 @@ final class OverlayHeaderView: NSView {
         }
     }
 
-    private func accessibilityValue(for state: FloatingOverlayController.OverlayState) -> String {
+    private func accessibilityValue(
+        for state: FloatingOverlayController.OverlayState,
+        successTitle: String
+    ) -> String {
         switch state {
         case .starting, .listening:
             return "Mini cursor waveform"
         case .drafting:
             return "Processing speech"
         case .success:
+            if successTitle == DictationDelivery.savedWithoutPaste.summaryText {
+                return "Text saved without paste"
+            }
             return "Text pasted"
         case .loading:
             return "Preparing local voice model"

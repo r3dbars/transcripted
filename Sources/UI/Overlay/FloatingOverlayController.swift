@@ -69,6 +69,7 @@ class FloatingOverlayController {
     var loadingPresentation: LoadingPresentation = .initial {
         didSet { pushStateToViews() }
     }
+    private var successTitle: String = "Pasted"
     /// Closure for Escape during active dictation overlay states.
     var onEscapeDuringSession: (() -> Void)?
     var onStopListening: (() -> Void)?
@@ -216,6 +217,7 @@ class FloatingOverlayController {
             onErrorAction: errorActionHandler,
             loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
+            successTitle: successTitle,
             isTranscribing: sttRouter?.isTranscribing ?? false,
             isRecording: sttRouter?.isRecording ?? false,
             isMiniCursorMode: isCursorMiniPanelMode,
@@ -240,6 +242,7 @@ class FloatingOverlayController {
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
         errorMessage = ""
+        successTitle = "Pasted"
 
         let shouldOpenAtCursor = isCursorMiniPanelMode
         let rawTargetRect = shouldOpenAtCursor
@@ -588,13 +591,14 @@ class FloatingOverlayController {
         }
     }
 
-    func showSuccessAndDismiss(completion: (() -> Void)? = nil) {
+    func showSuccessAndDismiss(title: String = "Pasted", completion: (() -> Void)? = nil) {
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
         successDismissTask?.cancel()
         errorMessage = ""
         errorActionTitle = nil
         errorActionHandler = nil
+        successTitle = title
         state = .success
         resizePanelToCompact()
         if !isVisible {
