@@ -1892,6 +1892,19 @@ func testRepoCommandContract() {
             "mini cursor dictation should never leak the stop button into the tiny pill"
         )
         assertTrue(
+            headerContents.contains("override func hitTest(_ point: NSPoint) -> NSView?")
+                && headerContents.contains("OverlayTokens.minimumHitTarget")
+                && headerContents.contains("convert(point, to: stopButton)")
+                && headerContents.contains("stopButton.bounds.insetBy"),
+            "dictation overlay stop control should keep a 40pt hit target without enlarging the compact header"
+        )
+        assertTrue(
+            headerContents.contains("CATransform3DMakeScale(0.97, 0.97, 1)")
+                && headerContents.contains("isHighlighted")
+                && headerContents.contains("accessibilityDisplayShouldReduceMotion"),
+            "dictation overlay stop control should keep tactile pressed feedback that respects Reduce Motion"
+        )
+        assertTrue(
             headerContents.contains("setAccessibilityLabel(accessibilityLabel(for: state))")
                 && headerContents.contains("Dictation listening")
                 && headerContents.contains("Press Escape or your dictation shortcut"),
@@ -1902,6 +1915,11 @@ func testRepoCommandContract() {
         assertTrue(
             rootContents.contains("showsQuietStartupWaveform: state == .starting && isMiniCursorMode"),
             "mini cursor dictation should show a flat quiet waveform during startup"
+        )
+        let tokensContents = readRepoTextFile("Sources/UI/Overlay/OverlayTokens.swift")
+        assertTrue(
+            tokensContents.contains("static let minimumHitTarget: CGFloat = 40"),
+            "overlay controls should keep a shared 40pt minimum hit target token"
         )
 
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
