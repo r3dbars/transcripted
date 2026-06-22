@@ -473,14 +473,37 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func handleSingleInstanceReopenRequest() {
         closePopover()
+        NSApp.activate(ignoringOtherApps: true)
 
         if !PermissionsOnboardingPreferences.hasCompleted() {
+            // Mid-onboarding there's no menu-bar home to fall back to yet, so put
+            // the user straight back where they left off.
             onboardingWindowController.present(entrypoint: "single_instance_reopen")
+            return
+        }
+
+        // A second launch of a menu-bar app is easy to misread as "nothing
+        // happened". Say plainly that it's already running and offer to open it
+        // rather than silently surfacing a Settings window.
+        presentAlreadyRunningNotice()
+    }
+
+    private func presentAlreadyRunningNotice() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = SingleInstanceGuard.HandoffNotice.alreadyRunningTitle
+        alert.informativeText = SingleInstanceGuard.HandoffNotice.alreadyRunningMessage
+        alert.addButton(withTitle: SingleInstanceGuard.HandoffNotice.openButtonTitle)
+        alert.addButton(withTitle: SingleInstanceGuard.HandoffNotice.dismissButtonTitle)
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        NSApp.activate(ignoringOtherApps: true)
+        if let button = statusItem?.button, let popover = popover {
+            showMainPopover(relativeTo: button, popover: popover, entrypoint: "single_instance_reopen")
         } else {
             showSettingsWindow(page: .home, source: "single_instance_reopen")
         }
-
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc func togglePopover() {
