@@ -2816,13 +2816,17 @@ func testRepoCommandContract() {
 
         assertTrue(
             menuContents.contains("let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)")
-                && menuContents.contains("textPaster.paste(latestText, target: pasteTarget)"),
-            "menu Paste Last Dictation should copy instead of pasting if focus moves away from the source app"
+                && menuContents.contains("let outcome = textPaster.paste(latestText, target: pasteTarget)")
+                && menuContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))")
+                && menuContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)"),
+            "menu Paste Last Dictation should copy instead of pasting if focus moves away and visibly report every outcome"
         )
         assertTrue(
             appContents.contains("let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)")
-                && appContents.contains("settingsTextPaster.paste(latestText, target: pasteTarget)"),
-            "settings Paste Last Dictation should use the same focus guard as normal dictation paste"
+                && appContents.contains("let outcome = settingsTextPaster.paste(latestText, target: pasteTarget)")
+                && appContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))")
+                && appContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)"),
+            "settings Paste Last Dictation should use the same focus guard and visible outcome feedback"
         )
         assertTrue(
             shortcutContents.contains("var onPasteLastDictation: (() -> Void)?")
