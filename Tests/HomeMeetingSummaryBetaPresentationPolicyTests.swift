@@ -105,6 +105,7 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
         )
         assertEqual(singlePass.title, "AI summary saved", "saved notices should read as complete")
         assertTrue(singlePass.shouldAutoDismiss, "saved notices should auto-dismiss")
+        assertTrue(singlePass.allowsManualDismiss, "saved notices should also be dismissible on demand")
     }
 
     runSuite("HomeLocalSummaryNoticeDismissalPolicy clears only the scheduled notice") {
@@ -177,6 +178,7 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
         assertEqual(notice.status, "Needs retry", "failure notice should not look complete")
         assertEqual(notice.actionTitle, "Retry summary", "failure notice should offer retry")
         assertFalse(notice.shouldAutoDismiss, "failure notice should persist until the user acts")
+        assertFalse(notice.allowsManualDismiss, "failure notice should not hide behind a dismiss affordance")
         assertTrue(
             notice.detail.contains("model load failed: missing model cache"),
             "failure detail should collapse noisy line breaks into readable copy"
