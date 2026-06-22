@@ -122,6 +122,7 @@ final class OverlayRootView: NSView {
         onErrorAction: (() -> Void)?,
         loadingPresentation: FloatingOverlayController.LoadingPresentation,
         loadingElapsedSeconds: Int,
+        successTitle: String,
         isTranscribing: Bool,
         isRecording: Bool,
         isMiniCursorMode: Bool,
@@ -140,6 +141,7 @@ final class OverlayRootView: NSView {
             state: state,
             dictationShortcutHint: dictationShortcutHint,
             loadingTitle: state == .loading ? "Dictation" : nil,
+            successTitle: successTitle,
             isError: showError,
             isMiniCursorMode: isMiniCursorMode,
             meterPresentation: DictationMeterPolicy.presentation(

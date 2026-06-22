@@ -1140,7 +1140,7 @@ class DictationSessionController: ObservableObject {
         if let saveFailureMessage {
             overlayController.showError(saveFailureMessage)
         } else {
-            overlayController.showSuccessAndDismiss()
+            overlayController.showSuccessAndDismiss(title: DictationDelivery.savedWithoutPaste.summaryText)
             ActivationTelemetry.trackDictationArtifactSaved(
                 delivery: DictationDelivery.savedWithoutPaste.rawValue,
                 durationBucket: AnalyticsReporter.durationBucket(seconds: durationSeconds),

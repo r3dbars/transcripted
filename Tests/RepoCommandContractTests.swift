@@ -1892,10 +1892,11 @@ func testRepoCommandContract() {
             "mini cursor dictation should never leak the stop button into the tiny pill"
         )
         assertTrue(
-            headerContents.contains("setAccessibilityLabel(accessibilityLabel(for: state))")
+            headerContents.contains("setAccessibilityLabel(accessibilityLabel(for: state, successTitle: successTitle))")
                 && headerContents.contains("Dictation listening")
+                && headerContents.contains("Dictation saved only")
                 && headerContents.contains("Press Escape or your dictation shortcut"),
-            "mini cursor waveform-only states should still expose an accessible dictation status and stop hint"
+            "mini cursor waveform-only and success states should expose accessible dictation status and stop hint"
         )
 
         let rootContents = readRepoTextFile("Sources/UI/Overlay/OverlayRootView.swift")

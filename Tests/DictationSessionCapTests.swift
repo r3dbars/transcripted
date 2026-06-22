@@ -93,6 +93,20 @@ func testDictationSessionCap() {
             "the cap finalize path should persist the transcript to the daily Markdown file"
         )
         assertTrue(
+            finalizeBody.contains("overlayController.showSuccessAndDismiss(title: DictationDelivery.savedWithoutPaste.summaryText)"),
+            "the cap confirmation should say Saved only instead of reusing the pasted success label"
+        )
+        let headerBody = try? String(
+            contentsOf: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+                .appendingPathComponent("Sources/UI/Overlay/OverlayHeaderView.swift"),
+            encoding: .utf8
+        )
+        assertTrue(
+            headerBody?.contains("return \"Dictation saved only\"") == true
+                && headerBody?.contains("return \"Text saved without paste\"") == true,
+            "the save-only confirmation should also have truthful VoiceOver copy"
+        )
+        assertTrue(
             finalizeBody.contains("ActivationTelemetry.trackDictationArtifactSaved("),
             "the cap finalize path should count successful session-cap saves as dictation artifacts"
         )
