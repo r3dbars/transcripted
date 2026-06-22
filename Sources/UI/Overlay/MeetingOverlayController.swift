@@ -582,7 +582,7 @@ final class MeetingOverlayRootView: NSView {
     private func layoutPrompt() {
         let pad: CGFloat = 12
         let dotSize = MeetingOverlayTokens.dotSize
-        let topY = bounds.height - 22
+        let topY = bounds.height - 24
 
         statusDot.frame = NSRect(x: pad, y: topY - dotSize / 2, width: dotSize, height: dotSize)
 
@@ -606,7 +606,7 @@ final class MeetingOverlayRootView: NSView {
 
         detailLabel.frame = NSRect(
             x: pad,
-            y: 34,
+            y: 55,
             width: bounds.width - pad * 2,
             height: 16
         )
@@ -615,7 +615,7 @@ final class MeetingOverlayRootView: NSView {
         let showsRemind = !remindButton.isHidden
         let remindWidth = showsRemind ? max(118, remindButton.fittingSize.width + 18) : 0
         let primaryWidth = max(74, recordButton.fittingSize.width + 18)
-        let buttonHeight: CGFloat = 24
+        let buttonHeight = MeetingOverlayTokens.promptButtonHeight
         let buttonGap: CGFloat = 8
         let visibleGapCount: CGFloat = showsRemind ? 2 : 1
         let totalButtonWidth = secondaryWidth + remindWidth + primaryWidth + buttonGap * visibleGapCount
@@ -623,14 +623,14 @@ final class MeetingOverlayRootView: NSView {
 
         closeButton.frame = NSRect(
             x: buttonStartX,
-            y: 10,
+            y: 8,
             width: secondaryWidth,
             height: buttonHeight
         )
         if showsRemind {
             remindButton.frame = NSRect(
                 x: closeButton.frame.maxX + buttonGap,
-                y: 10,
+                y: 8,
                 width: remindWidth,
                 height: buttonHeight
             )
@@ -639,7 +639,7 @@ final class MeetingOverlayRootView: NSView {
         }
         recordButton.frame = NSRect(
             x: bounds.width - pad - primaryWidth,
-            y: 10,
+            y: 8,
             width: primaryWidth,
             height: buttonHeight
         )
@@ -1292,7 +1292,8 @@ enum MeetingOverlayTokens {
     static let condensedPillWidth: CGFloat = 120
     static let panelHeight: CGFloat = 44
     static let condensedPillHeight: CGFloat = 32
-    static let promptHeight: CGFloat = 88
+    static let promptButtonHeight: CGFloat = 40
+    static let promptHeight: CGFloat = 106
     static let warmupHeight: CGFloat = 96
     static let errorHeight: CGFloat = 72
     static let cornerRadius: CGFloat = 22
@@ -1305,9 +1306,9 @@ enum MeetingOverlayTokens {
     static let condensedGap: CGFloat = 7
     static let timerFontSize: CGFloat = 13
     static let drawerPad: CGFloat = 12
-    static let drawerBrowserButtonSize: CGFloat = 20
-    static let drawerResizeHandleHeight: CGFloat = 12
-    static let stopHeight: CGFloat  = 28
+    static let drawerBrowserButtonSize: CGFloat = 40
+    static let drawerResizeHandleHeight: CGFloat = 40
+    static let stopHeight: CGFloat  = 40
     static let recordingWaveformWidth: CGFloat = 124
     static let tooltipOffset: CGFloat = 8
     static let tooltipScreenInset: CGFloat = 6

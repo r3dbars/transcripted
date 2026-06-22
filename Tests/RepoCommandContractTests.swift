@@ -3101,6 +3101,31 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - meeting overlay transient controls keep 40pt hit targets") {
+        let overlayContents = readRepoTextFile("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let drawerContents = readRepoTextFile("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift")
+        assertTrue(
+            overlayContents.contains("static let promptButtonHeight: CGFloat = 40")
+                && overlayContents.contains("let buttonHeight = MeetingOverlayTokens.promptButtonHeight"),
+            "meeting prompt primary, remind, and dismiss controls should use a named 40pt hit height"
+        )
+        assertTrue(
+            overlayContents.contains("static let stopHeight: CGFloat  = 40")
+                && overlayContents.contains("width: tokens.stopHeight,\n            height: tokens.stopHeight"),
+            "meeting recording stop control should keep a 40x40 hit area"
+        )
+        assertTrue(
+            overlayContents.contains("static let drawerBrowserButtonSize: CGFloat = 40")
+                && drawerContents.contains("width: buttonSize, height: buttonSize"),
+            "live transcript drawer copy and more actions should keep 40x40 hit areas"
+        )
+        assertTrue(
+            overlayContents.contains("static let drawerResizeHandleHeight: CGFloat = 40")
+                && drawerContents.contains("height: MeetingOverlayTokens.drawerResizeHandleHeight"),
+            "live transcript drawer resize grip should keep a 40pt drag target"
+        )
+    }
+
     runSuite("Repo command contract - Home meeting deletion hashes audio only after metadata candidates") {
         let deletionContents = readRepoTextFile("Sources/UI/Shared/HomeMeetingDeletion.swift")
         let duplicateBlock = sourceSlice(
