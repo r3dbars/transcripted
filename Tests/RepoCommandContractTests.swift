@@ -1730,6 +1730,11 @@ func testRepoCommandContract() {
         let sendRange = autoEnterBlock.range(of: "return autoSender.send(DictationAutoSendPreferences.sendKey())")
 
         assertTrue(
+            contents.contains("overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? \"Pasted\")")
+                && contents.contains("Text pasted, but Auto Enter didn't run."),
+            "Auto Enter should surface visible success and failure feedback after paste"
+        )
+        assertTrue(
             delayRange != nil
                 && readinessRange != nil
                 && sendRange != nil
@@ -1908,6 +1913,7 @@ func testRepoCommandContract() {
             headerContents.contains("setAccessibilityLabel(accessibilityLabel(for: state, successTitle: successTitle))")
                 && headerContents.contains("Dictation listening")
                 && headerContents.contains("Dictation saved only")
+                && headerContents.contains("Dictation pasted and sent")
                 && headerContents.contains("Press Escape or your dictation shortcut"),
             "mini cursor waveform-only and success states should expose accessible dictation status and stop hint"
         )

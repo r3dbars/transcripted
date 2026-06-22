@@ -379,6 +379,9 @@ final class OverlayHeaderView: NSView {
             if successTitle == DictationDelivery.savedWithoutPaste.summaryText {
                 return "Dictation saved only"
             }
+            if let sentKey = sentKeyDescription(from: successTitle) {
+                return "Dictation pasted and sent \(sentKey)"
+            }
             return "Dictation pasted"
         case .loading:
             return "Dictation loading"
@@ -400,11 +403,20 @@ final class OverlayHeaderView: NSView {
             if successTitle == DictationDelivery.savedWithoutPaste.summaryText {
                 return "Text saved without paste"
             }
+            if let sentKey = sentKeyDescription(from: successTitle) {
+                return "Text pasted, then \(sentKey) sent"
+            }
             return "Text pasted"
         case .loading:
             return "Preparing local voice model"
         case .idle:
             return ""
         }
+    }
+
+    private func sentKeyDescription(from successTitle: String) -> String? {
+        let prefix = "Pasted + "
+        guard successTitle.hasPrefix(prefix) else { return nil }
+        return String(successTitle.dropFirst(prefix.count))
     }
 }
