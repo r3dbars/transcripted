@@ -362,6 +362,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/SupportDiagnosticsBundle.swift"
     "Sources/UI/Shared/FirstRunExperience.swift"
     "Sources/UI/Shared/AppSoundPlayer.swift"
+    "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/SettingsContentLayoutPolicy.swift"
