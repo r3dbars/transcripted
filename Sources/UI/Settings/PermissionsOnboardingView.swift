@@ -726,14 +726,6 @@ struct PermissionsOnboardingView: View {
         currentPermissionStatuses()[kind] ?? "unknown"
     }
 
-    static var hasCompleted: Bool {
-        UserDefaults.standard.bool(forKey: "permissionsOnboardingCompleted")
-    }
-
-    static func markCompleted() {
-        UserDefaults.standard.set(true, forKey: "permissionsOnboardingCompleted")
-    }
-
     private static func steps(for useCase: OnboardingUseCase) -> [OnboardingStepSpec] {
         switch useCase {
         case .meetings:

@@ -3038,6 +3038,35 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - existing installs skip first-run onboarding") {
+        let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
+        let onboardingContents = readRepoTextFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
+        let preferencesContents = readRepoTextFile("Sources/Support/PermissionsOnboardingPreferences.swift")
+
+        assertTrue(
+            preferencesContents.contains("static func hasCompleted(userDefaults: UserDefaults = .standard) -> Bool")
+                && preferencesContents.contains("if userDefaults.bool(forKey: forceKey)")
+                && preferencesContents.contains("return userDefaults.bool(forKey: completionKey)")
+                && preferencesContents.contains("static func markCompleted(userDefaults: UserDefaults = .standard)")
+                && preferencesContents.contains("userDefaults.removeObject(forKey: forceKey)"),
+            "onboarding completion should stay centralized so existing installs skip onboarding while forced reruns still work"
+        )
+        assertTrue(
+            appContents.contains("guard !PermissionsOnboardingPreferences.hasCompleted(), !hasPresentedInitialOnboarding else { return }")
+                && appContents.contains("guard let self, !self.onboardingWindowController.isVisible, !PermissionsOnboardingPreferences.hasCompleted() else { return }")
+                && appContents.contains("onboardingWindowController.present(entrypoint: \"dock_icon\")")
+                && appContents.contains("onboardingWindowController.present(entrypoint: \"single_instance_reopen\")")
+                && appContents.contains("onboardingWindowController.present(entrypoint: \"status_item\")")
+                && appContents.contains("private func finishOnboarding()")
+                && appContents.contains("PermissionsOnboardingPreferences.markCompleted()"),
+            "all app entry points should route completed installs to Home/menu instead of reopening first-run onboarding"
+        )
+        assertFalse(
+            onboardingContents.contains("permissionsOnboardingCompleted"),
+            "the SwiftUI onboarding view should not carry a raw completion-key helper that can drift from forced-rerun behavior"
+        )
+    }
+
     runSuite("Repo command contract - onboarding funnel telemetry is wired from the active view") {
         let contents = readRepoTextFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
 
