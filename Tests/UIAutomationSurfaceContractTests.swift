@@ -555,6 +555,32 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(onboardingSource.contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
         }
+
+        assertTrue(
+            onboardingSource.contains("private func startPolling()")
+                && onboardingSource.contains("pollTask = Task { @MainActor in")
+                && onboardingSource.contains("checkAllPermissions(trackChanges: true)")
+                && onboardingSource.contains("try? await Task.sleep(nanoseconds: 1_000_000_000)")
+                && onboardingSource.contains("pollTask?.cancel()"),
+            "onboarding permission retry should keep polling async grants without relying on a manual refresh button"
+        )
+
+        let permissionGrantRowSource = onboardingSource
+            .components(separatedBy: "private struct PermissionGrantRow: View")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "private struct UseCaseChoiceCard: View")
+            .first ?? ""
+
+        assertTrue(
+            !permissionGrantRowSource.isEmpty
+                && permissionGrantRowSource.contains(".lineLimit(2)")
+                && permissionGrantRowSource.contains(".fixedSize(horizontal: false, vertical: true)")
+                && permissionGrantRowSource.contains(".layoutPriority(1)")
+                && permissionGrantRowSource.contains(".accessibilityLabel(granted ? title : \"\\(actionTitle) \\(title) permission\")")
+                && permissionGrantRowSource.contains(".accessibilityValue(granted ? \"Granted\" : \"Needs permission\")"),
+            "onboarding permission rows should keep stable wrapping and readable state"
+        )
     }
 
     runSuite("UI automation surface contract - QA CLI exposes a real AX smoke") {

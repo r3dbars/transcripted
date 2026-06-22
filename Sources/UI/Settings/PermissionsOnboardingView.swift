@@ -1275,11 +1275,16 @@ private struct PermissionGrantRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
                 Text(reason)
                     .font(.system(size: 12))
                     .foregroundStyle(OnboardingTheme.muted)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.94)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(granted ? OnboardingTheme.window : OnboardingTheme.ink)
+            .layoutPriority(1)
 
             Spacer()
 
@@ -1288,6 +1293,9 @@ private struct PermissionGrantRow: View {
             }
             .buttonStyle(InkButtonStyle(isSubtle: granted, compact: true))
             .disabled(granted)
+            .help(granted ? "\(title) permission is granted" : "\(actionTitle) \(title) permission")
+            .accessibilityLabel(granted ? title : "\(actionTitle) \(title) permission")
+            .accessibilityValue(granted ? "Granted" : "Needs permission")
             .accessibilityIdentifier(automationIdentifier)
         }
         .padding(.horizontal, 20)
