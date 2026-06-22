@@ -199,7 +199,6 @@ func testUIAutomationSurfaceContract() {
         let settingsRowsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsRows.swift")
         let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
-        let settingsRowsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsRows.swift")
         let meetingAudioPlaybackSource = readUIAutomationContractFile("Sources/UI/Shared/MeetingAudioPlayback.swift")
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
         let speakerReviewSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerNamingSheet.swift")
