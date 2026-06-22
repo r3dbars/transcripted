@@ -237,13 +237,16 @@ struct TranscriptedSettingsView: View {
         .alert(item: rootAlertBinding) { alert in
             switch alert {
             case .deleteConfirmation(let confirmation):
+                // Cancel is the primary (default) button so Return lands on the
+                // safe, reversible choice; the destructive action stays a clearly
+                // marked `.destructive` secondary button.
                 return Alert(
                     title: Text(confirmation.title),
                     message: Text(confirmation.message),
-                    primaryButton: .destructive(Text(confirmation.confirmTitle)) {
+                    primaryButton: .cancel(),
+                    secondaryButton: .destructive(Text(confirmation.confirmTitle)) {
                         confirmation.perform()
-                    },
-                    secondaryButton: .cancel()
+                    }
                 )
             case .deleteFailure(let failure):
                 return Alert(
@@ -255,10 +258,10 @@ struct TranscriptedSettingsView: View {
                 return Alert(
                     title: Text("Delete old replay audio?"),
                     message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
-                    primaryButton: .destructive(Text("Delete Old Audio")) {
+                    primaryButton: .cancel(),
+                    secondaryButton: .destructive(Text("Delete Old Audio")) {
                         applyAudioRetentionWindow(window)
-                    },
-                    secondaryButton: .cancel()
+                    }
                 )
             }
         }
@@ -3017,6 +3020,7 @@ struct TranscriptedSettingsView: View {
                     removeReclaimableModelCaches()
                 }
                 Button("Cancel", role: .cancel) {}
+                    .keyboardShortcut(.defaultAction)
             } message: {
                 let includeWhisper = !effectiveTranscriptionModel.isWhisper
                 Text(includeWhisper
@@ -3028,6 +3032,7 @@ struct TranscriptedSettingsView: View {
                     removeStaleModelCaches()
                 }
                 Button("Cancel", role: .cancel) {}
+                    .keyboardShortcut(.defaultAction)
             } message: {
                 Text("Transcripted will remove only known old Parakeet folders: \(modelCacheSnapshot?.staleModelSummary ?? "none"). Active Parakeet CoreML and Whisper caches stay.")
             }
@@ -3036,6 +3041,7 @@ struct TranscriptedSettingsView: View {
                     removeWhisperModelCache()
                 }
                 Button("Cancel", role: .cancel) {}
+                    .keyboardShortcut(.defaultAction)
             } message: {
                 Text("Transcripted will remove downloaded Whisper model files. Parakeet stays available, and Whisper can download again later if you choose it.")
             }

@@ -887,6 +887,7 @@ private struct SpeakerVoiceToNameRow: View {
                 deleteVoice()
             }
             Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
         } message: {
             Text(SpeakerVoiceRowMenuPolicy.deleteConfirmationMessage)
         }
@@ -1266,6 +1267,7 @@ private struct SpeakerPersonRow: View {
                 model.delete(profile: profile)
             }
             Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
         } message: {
             Text("This removes the saved voice profile and sample clip. Past transcripts stay unchanged.")
         }
