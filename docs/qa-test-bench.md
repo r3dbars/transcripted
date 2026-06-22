@@ -31,6 +31,18 @@ or TCC prompts. The local summary fixture also proves the Gemma summary app path
 can start, finish, and rewrite a saved synthetic meeting into the expected
 Markdown shape without private meeting content or a model download.
 
+For real local Gemma/MLX proof on the synthetic fixture, run:
+
+```bash
+bash scripts/ops/run-local-summary-fixture.sh --real-gemma
+```
+
+That path uses `uv run --with mlx-vlm==0.6.1` and the bundled
+`Resources/LocalSummarizer/gemma4_mlx_prompt_runner.py`. It may download the
+MLX runtime/model on first run. Missing `uv`, missing Python 3.10+ for `uv`,
+insufficient RAM, runtime install failure, or model execution failure is a real
+host blocker, not a green fixture.
+
 ## Pasteback Synthetic Run
 
 ```bash
@@ -117,6 +129,17 @@ runs `deep`, then adds:
 
 - deterministic release-health fixture checks
 - a local Gemma meeting-summary dry-run plan when eligible local transcripts are present
+
+To make the Gemma rows execute instead of planning only:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode full --gemma-execute
+```
+
+`--gemma-execute` also makes quick/deep/full run the real synthetic Gemma
+fixture. In full mode, the local transcript autoeval only runs when eligible
+local transcripts are present; otherwise the synthetic fixture remains the real
+runtime proof.
 
 The report includes a compact operator verdict:
 

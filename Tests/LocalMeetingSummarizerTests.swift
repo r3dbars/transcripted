@@ -149,6 +149,7 @@ func testLocalMeetingSummarizer() async {
                 "HOME": "/Users/example",
                 "TMPDIR": "/tmp/example",
                 "HF_HOME": "/tmp/hf-cache",
+                "UV_PYTHON": "/opt/homebrew/bin/python3.12",
                 "SENTRY_DSN": "https://secret@example.invalid/1",
                 "POSTHOG_API_KEY": "phc_secret",
                 "OPENAI_API_KEY": "sk-secret",
@@ -162,6 +163,7 @@ func testLocalMeetingSummarizer() async {
         assertEqual(env["PATH"], "/usr/bin", "safe executable lookup should be preserved")
         assertEqual(env["HOME"], "/Users/example", "safe home path should be preserved for cache resolution")
         assertEqual(env["HF_HOME"], "/tmp/hf-cache", "explicit local Hugging Face cache should be preserved")
+        assertEqual(env["UV_PYTHON"], "/opt/homebrew/bin/python3.12", "uv Python selection should be preserved for mlx-vlm's Python floor")
         assertEqual(env["OMP_NUM_THREADS"], "2", "thread cap should be forwarded")
         assertEqual(env["TOKENIZERS_PARALLELISM"], "false", "tokenizer helper threads should stay disabled")
         assertNil(env["SENTRY_DSN"], "Sentry DSNs should not reach local model subprocesses")

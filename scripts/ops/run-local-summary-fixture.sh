@@ -8,7 +8,47 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT_ROOT="${TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_OUT:-${REPO_ROOT}/build/local-summary-fixture}"
 RUN_ID="${TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_RUN_ID:-fixture-$(date +%Y%m%d-%H%M%S)}"
-TIMEOUT_SECONDS="${TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_TIMEOUT:-10}"
+REAL_GEMMA="${TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_REAL_GEMMA:-0}"
+
+usage() {
+  cat <<'USAGE'
+Usage: bash scripts/ops/run-local-summary-fixture.sh [--real-gemma]
+
+Runs the deterministic local-summary fixture by default.
+
+Options:
+  --real-gemma  Run the real Gemma MLX runtime on the synthetic fixture.
+                Requires uv plus the pinned mlx-vlm runtime/model prerequisites.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --real-gemma)
+      REAL_GEMMA=1
+      shift
+      ;;
+    --mock|--deterministic)
+      REAL_GEMMA=0
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "${REAL_GEMMA}" == "1" ]]; then
+  TIMEOUT_SECONDS="${TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_TIMEOUT:-1200}"
+else
+  TIMEOUT_SECONDS="${TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_TIMEOUT:-10}"
+fi
 RUN_ROOT="${OUT_ROOT}/${RUN_ID}"
 BUILD_DIR="${RUN_ROOT}/build"
 FAKE_HOME="${RUN_ROOT}/home"
@@ -39,14 +79,19 @@ struct LocalSummaryFixture {
                 fileURLWithPath: ProcessInfo.processInfo.environment["TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_RUN_ROOT"]!,
                 isDirectory: true
             )
-            try await run(in: runRoot)
+            let repoRoot = URL(
+                fileURLWithPath: ProcessInfo.processInfo.environment["TRANSCRIPTED_REPO_ROOT"]!,
+                isDirectory: true
+            )
+            let realGemma = ProcessInfo.processInfo.environment["TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_REAL_GEMMA"] == "1"
+            try await run(in: runRoot, repoRoot: repoRoot, realGemma: realGemma)
         } catch {
             fputs("[local-summary-fixture] FAIL: \(error)\n", stderr)
             exit(1)
         }
     }
 
-    private static func run(in runRoot: URL) async throws {
+    private static func run(in runRoot: URL, repoRoot: URL, realGemma: Bool) async throws {
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: runRoot, withIntermediateDirectories: true)
 
@@ -54,18 +99,28 @@ struct LocalSummaryFixture {
         let promptCaptureURL = runRoot.appendingPathComponent("captured-prompt.txt")
         try fixtureTranscript.write(to: transcriptURL, atomically: true, encoding: .utf8)
 
-        let configuration = fixtureConfiguration()
-        let runtime = LocalGemmaSummaryRuntime(
-            configuration: configuration,
-            generateBatchOverride: { prompts, _ in
-                guard prompts.count == 1 else {
-                    throw FixtureError.failed("expected direct one-prompt fixture, got \(prompts.count)")
+        let configuration = realGemma ? LocalGemmaSummaryConfiguration.m1Optimized() : fixtureConfiguration()
+        let runtime: LocalGemmaSummaryRuntime
+        if realGemma {
+            try configuration.validateHardware()
+            let runnerURL = repoRoot.appendingPathComponent("Resources/LocalSummarizer/gemma4_mlx_prompt_runner.py")
+            try expect(fileManager.fileExists(atPath: runnerURL.path), "bundled Gemma MLX runner should exist")
+            var realRuntime = LocalGemmaSummaryRuntime(configuration: configuration)
+            realRuntime.runnerURLOverride = runnerURL
+            runtime = realRuntime
+        } else {
+            runtime = LocalGemmaSummaryRuntime(
+                configuration: configuration,
+                generateBatchOverride: { prompts, _ in
+                    guard prompts.count == 1 else {
+                        throw FixtureError.failed("expected direct one-prompt fixture, got \(prompts.count)")
+                    }
+                    let promptText = prompts.map(\.prompt).joined(separator: "\n---\n")
+                    try promptText.write(to: promptCaptureURL, atomically: true, encoding: .utf8)
+                    return [fixtureModelOutput]
                 }
-                let promptText = prompts.map(\.prompt).joined(separator: "\n---\n")
-                try promptText.write(to: promptCaptureURL, atomically: true, encoding: .utf8)
-                return [fixtureModelOutput]
-            }
-        )
+            )
+        }
 
         let result = try await LocalMeetingSummarizer(
             configuration: configuration,
@@ -77,28 +132,41 @@ struct LocalSummaryFixture {
         )
 
         let updatedMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        let capturedPrompt = try String(contentsOf: promptCaptureURL, encoding: .utf8)
 
         try expect(result.chunkCount == 1, "fixture should use the direct summary path")
-        try expect(result.profileName == "fixture", "fixture profile should be reported")
-        try expect(capturedPrompt.contains("summary fixture stays local"), "prompt should include synthetic transcript text")
-        try expect(!capturedPrompt.contains("fixture-secret"), "prompt should exclude non-transcript notes")
+        try expect(result.profileName == configuration.profileName, "fixture profile should be reported")
         try expect(updatedMarkdown.contains("local_summary_version: \"1\""), "frontmatter should include local summary version")
         try expect(updatedMarkdown.contains("local_summary_source_transcript: \"Synthetic Summary Fixture.md\""), "frontmatter should backlink the source transcript")
-        try expect(updatedMarkdown.contains("local_summary_title: \"Fixture Summary Review\""), "frontmatter should include generated title")
         try expect(updatedMarkdown.contains("local_summary_chunk_count: \"1\""), "frontmatter should include chunk count")
         try expect(updatedMarkdown.contains("local_summary_participants: \"- Alex | - Riley\""), "frontmatter should include transcript participants")
+        try expect(updatedMarkdown.contains("local_summary_model: \"\(configuration.modelID)\""), "frontmatter should include the model id")
+        try expect(updatedMarkdown.contains("local_summary_runtime: \"\(configuration.runtimePackage)\""), "frontmatter should include the runtime package")
+        try expect(updatedMarkdown.contains("local_summary_profile: \"\(configuration.profileName)\""), "frontmatter should include the runtime profile")
         try expect(updatedMarkdown.contains("local_summary_next_steps:"), "frontmatter should include agent next steps")
         try expect(updatedMarkdown.contains("local_summary_commitments:"), "frontmatter should include commitment aliases")
         try expect(updatedMarkdown.contains(LocalMeetingSummaryMarkdownUpdater.startMarker), "managed summary start marker should be present")
         try expect(updatedMarkdown.contains("## Local Gemma Summary"), "managed summary heading should be present")
         try expect(updatedMarkdown.contains("Source transcript: `Synthetic Summary Fixture.md`"), "managed summary should backlink the source transcript")
-        try expect(updatedMarkdown.contains("### Summary\nThe fixture proves local summary generation can finish and rewrite the saved meeting."), "summary body should be written")
-        try expect(updatedMarkdown.contains("### Next Steps\nQA should keep this fixture in the bench.\nThe release gate should not treat fixture output as quality proof."), "next steps body should be written")
+        try expect(updatedMarkdown.contains("### Summary\n"), "summary body should be written")
+        try expect(updatedMarkdown.contains("### Next Steps\n"), "next steps body should be written")
         try expect(updatedMarkdown.contains("### Participants\n- Alex\n- Riley"), "participants body should be written")
-        try expect(updatedMarkdown.contains("### Action Items\nQA should keep this fixture in the bench."), "action item body should be written")
+        try expect(updatedMarkdown.contains("### Action Items\n"), "action item body should be written")
         try expect(updatedMarkdown.contains(LocalMeetingSummaryMarkdownUpdater.endMarker), "managed summary end marker should be present")
         try expect(!fileManager.fileExists(atPath: LocalMeetingSummaryStore.summaryURL(for: transcriptURL).path), "fixture should not create a sibling summary sidecar")
+
+        if realGemma {
+            print("[local-summary-fixture] PASS: generated real Gemma local summary fixture")
+            print("[local-summary-fixture] Transcript: \(transcriptURL.path)")
+            return
+        }
+
+        let capturedPrompt = try String(contentsOf: promptCaptureURL, encoding: .utf8)
+        try expect(capturedPrompt.contains("summary fixture stays local"), "prompt should include synthetic transcript text")
+        try expect(!capturedPrompt.contains("fixture-secret"), "prompt should exclude non-transcript notes")
+        try expect(updatedMarkdown.contains("local_summary_title: \"Fixture Summary Review\""), "frontmatter should include generated title")
+        try expect(updatedMarkdown.contains("### Summary\nThe fixture proves local summary generation can finish and rewrite the saved meeting."), "summary body should be written")
+        try expect(updatedMarkdown.contains("### Next Steps\nQA should keep this fixture in the bench.\nThe release gate should not treat fixture output as quality proof."), "next steps body should be written")
+        try expect(updatedMarkdown.contains("### Action Items\nQA should keep this fixture in the bench."), "action item body should be written")
 
         print("[local-summary-fixture] PASS: generated deterministic local summary fixture")
         print("[local-summary-fixture] Transcript: \(transcriptURL.path)")
@@ -336,8 +404,30 @@ run_with_timeout() {
 }
 
 echo "[local-summary-fixture] Run root: ${RUN_ROOT}"
+if [[ "${REAL_GEMMA}" == "1" ]]; then
+  echo "[local-summary-fixture] Real Gemma mode: requires uv plus mlx-vlm/model availability through uv."
+  if [[ -z "${TRANSCRIPTED_UV_PATH:-}" ]]; then
+    RESOLVED_UV="$(command -v uv || true)"
+    if [[ -n "${RESOLVED_UV}" ]]; then
+      export TRANSCRIPTED_UV_PATH="${RESOLVED_UV}"
+    fi
+  fi
+  if [[ -z "${UV_PYTHON:-}" ]]; then
+    for PYTHON_CANDIDATE in python3.14 python3.13 python3.12 python3.11 python3.10; do
+      RESOLVED_PYTHON="$(command -v "${PYTHON_CANDIDATE}" || true)"
+      if [[ -n "${RESOLVED_PYTHON}" ]]; then
+        export UV_PYTHON="${RESOLVED_PYTHON}"
+        break
+      fi
+    done
+  fi
+else
+  echo "[local-summary-fixture] Deterministic mode: mocked model output, no mlx runtime required."
+fi
 export CFFIXED_USER_HOME="${FAKE_HOME}"
 export HOME="${FAKE_HOME}"
 export TRANSCRIPTED_DISABLE_FILE_LOGGER=1
+export TRANSCRIPTED_REPO_ROOT="${REPO_ROOT}"
 export TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_RUN_ROOT="${RUN_ROOT}"
+export TRANSCRIPTED_LOCAL_SUMMARY_FIXTURE_REAL_GEMMA="${REAL_GEMMA}"
 run_with_timeout "${BIN}"
