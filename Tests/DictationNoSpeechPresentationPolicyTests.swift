@@ -6,18 +6,18 @@ func testDictationNoSpeechPresentationPolicy() {
 
         assertEqual(
             message,
-            "Transcripted didn't catch your voice. Keep holding the dictation key until you're done talking.",
+            "No speech heard. Hold the dictation key while you talk.",
             "physical key no-speech copy should explain the press-and-hold behavior"
         )
     }
 
-    runSuite("DictationNoSpeechPresentationPolicy keeps generic copy for menu dictation") {
+    runSuite("DictationNoSpeechPresentationPolicy gives menu users a direct retry path") {
         let message = DictationNoSpeechPresentationPolicy.message(trigger: "menu")
 
         assertEqual(
             message,
-            "No speech heard. Try speaking a little longer.",
-            "non-physical-key dictation should keep the broader no-speech guidance"
+            "No speech heard. Start over and speak a little longer.",
+            "non-physical-key dictation should explain the next retry action"
         )
     }
 }

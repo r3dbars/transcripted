@@ -59,6 +59,41 @@ func testUIAutomationSurfaceContract() {
 
     }
 
+    runSuite("UI automation surface contract - menubar controls keep polished hit targets") {
+        let tokenSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuTokens.swift")
+        let actionRowSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarActionRowView.swift")
+        let iconButtonSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuIconButton.swift")
+        let outlineButtonSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuOutlineButton.swift")
+        let modelStatusSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarModelStatusView.swift")
+
+        assertTrue(
+            tokenSource.contains("minimumHitTargetSize: CGFloat = 40")
+                && actionRowSource.contains("MenuTokens.minimumHitTargetSize"),
+            "menubar rows should stay at or above the 40px minimum hit target"
+        )
+
+        for source in [iconButtonSource, outlineButtonSource] {
+            assertTrue(
+                source.contains("override func hitTest(_ point: NSPoint)")
+                    && source.contains("let localPoint = convert(point, from: superview)")
+                    && source.contains("minimumHitBounds.contains(localPoint)")
+                    && source.contains("trackPressInMinimumHitBounds()")
+                    && source.contains("NSApp.sendAction(action, to: target, from: self)")
+                    && source.contains("CATransform3DMakeScale(0.96, 0.96, 1)"),
+                "small menubar buttons should keep expanded hit testing and subtle 0.96 press feedback"
+            )
+        }
+
+        assertTrue(
+            modelStatusSource.contains("NSFont.monospacedDigitSystemFont")
+                && modelStatusSource.contains("setAccessibilityRole(.button)")
+                && modelStatusSource.contains("setAccessibilityValue(label.stringValue)")
+                && modelStatusSource.contains("override func resetCursorRects()")
+                && modelStatusSource.contains("override func accessibilityPerformPress()"),
+            "menubar model status should keep tabular progress digits and a real AX button contract"
+        )
+    }
+
     runSuite("UI automation surface contract - app commands expose capture shortcuts") {
         let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
 
@@ -161,8 +196,10 @@ func testUIAutomationSurfaceContract() {
         let settingsSidebarSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
         let settingsComponentsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsComponents.swift")
         let generalControlsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift")
+        let settingsRowsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsRows.swift")
         let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
+        let meetingAudioPlaybackSource = readUIAutomationContractFile("Sources/UI/Shared/MeetingAudioPlayback.swift")
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
         let speakerReviewSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerNamingSheet.swift")
         let agentSettingsSource = readUIAutomationContractFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
@@ -190,6 +227,23 @@ func testUIAutomationSurfaceContract() {
             pagesSource.contains("var automationIdentifier: String")
                 && settingsSidebarSource.contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "settings sidebar pages should expose stable automation identifiers"
+        )
+
+        assertTrue(
+            generalControlsSource.contains(".frame(width: 40, height: 40)")
+                && generalControlsSource.contains("accessibilityIdentifier(\"transcripted.settings.general.info.\\(automationSlug(info.title))\")"),
+            "General settings info buttons should keep compact visuals with a 40pt hit target and stable AX identifiers"
+        )
+        assertTrue(
+            settingsRowsSource.contains(".frame(width: 40, height: 40)")
+                && settingsRowsSource.contains(".accessibilityLabel(Text(\"Remove correction\"))"),
+            "custom dictionary remove controls should keep a 40pt destructive hit target with a clear AX label"
+        )
+        assertTrue(
+            settingsSource.contains("Label(\"Add correction\", systemImage: \"plus\")")
+                && settingsSource.contains(".frame(minHeight: 40)")
+                && settingsSource.contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            "custom dictionary add correction should keep a 40pt tactile action target"
         )
 
         for requiredSourceHook in [
@@ -229,6 +283,12 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
+        assertTrue(
+            homeSource.contains("private enum HomeHitTarget")
+                && homeSource.contains("static let minimum: CGFloat = 40")
+                && homeSource.contains("HomeHitTarget.minimum"),
+            "Home icon buttons and compact row actions should keep a shared 40pt hit-target floor"
+        )
         for requiredFailedMeetingPolicyHook in [
             "clearTitle: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
             "clearSymbolName: hasRetainedAudioFiles ? \"trash\" : \"xmark\"",
@@ -237,9 +297,36 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(failedMeetingRecoverySource.contains(requiredFailedMeetingPolicyHook), "\(requiredFailedMeetingPolicyHook) should keep failed-meeting action policy visible")
         }
+        assertTrue(
+            settingsComponentsSource.contains(".frame(minHeight: 40)")
+                && settingsComponentsSource.contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            "shared inline settings actions should keep a 40pt hit floor for failed-meeting recovery controls"
+        )
+        assertTrue(
+            homeSource.contains(".frame(minHeight: 40, alignment: .leading)")
+                && homeSource.contains(".accessibilityIdentifier(\"transcripted.home.audio.inline-toggle\")"),
+            "Home retained-audio play controls should keep a 40pt hit floor"
+        )
+        assertTrue(
+            settingsRowsSource.contains(".frame(minHeight: 40, alignment: .leading)")
+                && settingsRowsSource.contains("struct SettingsRecentMeetingAudioControl"),
+            "Settings retained-audio play controls should keep a 40pt hit floor"
+        )
+        assertTrue(
+            meetingAudioPlaybackSource.contains(".frame(minHeight: 40)")
+                && meetingAudioPlaybackSource.contains("struct MeetingAudioSourceMenu"),
+            "retained-audio source menus should keep a 40pt hit floor"
+        )
         assertFalse(
             homeSource.contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
+        )
+        assertTrue(
+            settingsComponentsSource.contains(".frame(width: 40, height: 40)")
+                && settingsComponentsSource.contains(".accessibilityIdentifier(\"transcripted.settings.activity-card.dismiss\")")
+                && settingsComponentsSource.contains(".frame(minHeight: 40)")
+                && settingsComponentsSource.contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            "activity cards should keep 40pt action and dismiss hit targets for Home progress/notice cards"
         )
 
         // Regression guards for fix/home-delete-confirmation-menu-loop. The Home
@@ -390,6 +477,19 @@ func testUIAutomationSurfaceContract() {
                 "\(identifier) should keep speaker review scriptable without using speaker names"
             )
         }
+        assertTrue(
+            speakerReviewSource.contains("static let minimum: CGFloat = 40")
+                && speakerReviewSource.contains("let btnH = SpeakerNamingHitTargets.minimum")
+                && speakerReviewSource.contains("let fieldH = SpeakerNamingHitTargets.minimum")
+                && speakerReviewSource.contains("let hitTarget = SpeakerNamingHitTargets.minimum"),
+            "speaker review save/cancel/name/play/confirm/discard controls should keep a 40pt hit floor"
+        )
+        assertTrue(
+            speakerReviewSource.contains("static let sectionHeaderHeight: CGFloat = 40")
+                && speakerReviewSource.contains("let headerHeight = SpeakerNamingHitTargets.sectionHeaderHeight")
+                && speakerReviewSource.contains("keepAsYouButton.frame = NSRect("),
+            "speaker review Keep Local Mic as You should keep a 40pt section-header hit floor"
+        )
 
         for requiredAgentHook in [
             "transcripted.settings.agent.connect.\\(agent.rawValue)",
@@ -427,6 +527,18 @@ func testUIAutomationSurfaceContract() {
                 && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle"),
             "pill context-menu and drawer overflow actions should keep policy-pinned titles for automation"
         )
+        assertTrue(
+            transcriptDrawerSource.contains("transientStatusText ?? statusText")
+                && transcriptDrawerSource.contains("openInBrowserFailedStatus")
+                && transcriptDrawerSource.contains(".announcement: MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus"),
+            "browser-open failures should remain visible and announced even while transcript updates continue"
+        )
+        assertTrue(
+            meetingOverlaySource.contains("showLiveViewBrowserOpenFailure")
+                && meetingOverlaySource.contains("isTranscriptExpanded = true")
+                && meetingOverlaySource.contains("rootView?.flashTranscriptBrowserOpenFailure()"),
+            "browser-open failures from the collapsed pill menu should reveal the drawer before showing feedback"
+        )
 
         assertTrue(
             deletePolicySource.contains("Delete this meeting?")
@@ -455,7 +567,9 @@ func testUIAutomationSurfaceContract() {
         let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
         let speakerPeopleSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
+        let settingsComponentsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsComponents.swift")
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
+        let firstRunSource = readUIAutomationContractFile("Sources/UI/Shared/FirstRunExperience.swift")
 
         for identifier in [
             "transcripted.home.stats.view",
@@ -485,11 +599,6 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(homeSource.contains(identifier), "\(identifier) should stay attached to Home click-flow controls")
         }
-
-        assertTrue(
-            homeSource.contains("transcripted.home.audio.\\(isPlaying ?"),
-            "Home audio play/pause action should keep a stable dynamic automation ID"
-        )
 
         for identifier in [
             "transcripted.settings.footer.check-updates",
@@ -522,6 +631,37 @@ func testUIAutomationSurfaceContract() {
         )
 
         assertTrue(
+            speakerPeopleSource.contains("enum SpeakerPeopleSettingsPolishContract")
+                && speakerPeopleSource.contains("struct SpeakerCompactIconLabel")
+                && speakerPeopleSource.contains("static let minimumHitTarget: CGFloat = 40")
+                && speakerPeopleSource.contains("static let playButtonVisibleDiameter: CGFloat = 36")
+                && speakerPeopleSource.contains("static let compactIconVisibleDiameter: CGFloat = 28")
+                && speakerPeopleSource.contains(".contentShape(Rectangle())"),
+            "speaker settings should pin compact icon chrome separately from the 40pt hit shape"
+        )
+
+        let speakerCompactIconLabelApplications = speakerPeopleSource
+            .components(separatedBy: "SpeakerCompactIconLabel(")
+            .count - 1
+        assertTrue(
+            speakerCompactIconLabelApplications >= 4,
+            "speaker refresh, all-speakers play, and overflow icon controls should use the compact 40pt hit-target label"
+        )
+
+        for identifier in [
+            "transcripted.speakers.voice-to-name.play",
+            "transcripted.speakers.voice-to-name.menu",
+            "transcripted.speakers.refresh",
+            "transcripted.speakers.person.play",
+            "transcripted.speakers.person.menu",
+        ] {
+            assertTrue(
+                speakerPeopleSource.contains(identifier),
+                "\(identifier) should keep the speakers surface's icon-only controls scriptable without using speaker names"
+            )
+        }
+
+        assertTrue(
             homeSource.contains("HomeAttentionPillsRow")
                 && homeSource.contains(".accessibilityHint(issue.detail)")
                 && homeSource.contains("transcripted.home.needs-attention.review."),
@@ -540,6 +680,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.onboarding.nav.back",
             "transcripted.onboarding.nav.skip",
             "transcripted.onboarding.nav.primary",
+            "transcripted.onboarding.dictation-test.clear",
             "transcripted.onboarding.use-case.meetings",
             "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.microphone",
@@ -555,6 +696,34 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(onboardingSource.contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
         }
+
+        assertTrue(
+            onboardingSource.contains("UseCaseChoiceCard(")
+                && onboardingSource.contains("transcripted.onboarding.use-case.meetings")
+                && onboardingSource.contains("transcripted.onboarding.use-case.dictation")
+                && onboardingSource.contains("selectedStateStrokeWidth")
+                && onboardingSource.contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"),
+            "onboarding use-case cards should keep their scriptable card-button and selected-state hooks"
+        )
+
+        assertTrue(
+            firstRunSource.contains("static let minimumHitTarget: Double = 44")
+                && firstRunSource.contains("static let modelProgressLabelMinimumWidth: Double = 104")
+                && firstRunSource.contains("static let selectedStateStrokeWidth: Double = 2")
+                && onboardingSource.contains("transcripted.onboarding.nav.skip")
+                && onboardingSource.contains("transcripted.onboarding.nav.primary")
+                && onboardingSource.contains("FirstRunOnboardingPolishContract.minimumHitTarget")
+                && onboardingSource.contains(".contentShape(Rectangle())")
+                && onboardingSource.contains(".contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))"),
+            "onboarding nav and compact controls should keep pinned polish constants and hit-shape hooks"
+        )
+
+        assertTrue(
+            settingsComponentsSource.contains(".monospacedDigit()")
+                && settingsComponentsSource.contains("modelProgressLabelMinimumWidth")
+                && settingsComponentsSource.contains(".accessibilityLabel(Text(status))"),
+            "onboarding/local-model progress labels should stay stable, tabular, and accessible"
+        )
     }
 
     runSuite("UI automation surface contract - QA CLI exposes a real AX smoke") {

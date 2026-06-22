@@ -6,10 +6,6 @@ import ApplicationServices
 
 @MainActor
 struct AccessibilityBridge {
-
-    private static let secureTextFieldRole = "AXSecureTextField"
-    private static let textRoles: Set<String> = ["AXTextArea", "AXTextField", "AXWebArea", "AXTextView", "AXComboBox"]
-
     /// Return the focused text element in the given app, or nil if not a text field.
     static func focusedTextElement(for app: NSRunningApplication) -> AXUIElement? {
         guard AXIsProcessTrusted() else { return nil }
@@ -27,19 +23,17 @@ struct AccessibilityBridge {
         AXUIElementCopyAttributeValue(axElement, kAXRoleAttribute as CFString, &roleRef)
         let role = roleRef as? String ?? ""
 
-        // Never expose secure text fields (password, PIN, biometric auth). Some
-        // AppKit hosts surface secure fields as AXTextField with subrole
-        // AXSecureTextField, so we check both the role and the subrole.
-        if role == secureTextFieldRole { return nil }
-        guard textRoles.contains(role) || role.contains("Text") else { return nil }
-
-        // Subrole IPC only runs for elements that passed the text-role check above,
-        // avoiding a cross-process call for buttons, sliders, and other non-text elements.
         var subroleRef: AnyObject?
         AXUIElementCopyAttributeValue(axElement, kAXSubroleAttribute as CFString, &subroleRef)
-        if let subrole = subroleRef as? String, subrole == secureTextFieldRole { return nil }
+        let subrole = subroleRef as? String
+
+        guard acceptsFocusedTextRole(role, subrole: subrole) else { return nil }
 
         return axElement
+    }
+
+    nonisolated static func acceptsFocusedTextRole(_ role: String, subrole: String?) -> Bool {
+        AccessibilityFocusedTextPolicy.accepts(role: role, subrole: subrole)
     }
 
     /// Read the text value of an AX element (kAXValueAttribute).
@@ -81,5 +75,21 @@ struct AccessibilityBridge {
         guard let value,
               CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
         return unsafeBitCast(value, to: AXValue.self)
+    }
+}
+
+private enum AccessibilityFocusedTextPolicy {
+    private static let secureTextFieldRole = "AXSecureTextField"
+    private static let textRoles: Set<String> = ["AXTextArea", "AXTextField", "AXWebArea", "AXTextView", "AXComboBox"]
+
+    static func accepts(role: String, subrole: String?) -> Bool {
+        // Never expose secure text fields (password, PIN, biometric auth). Some
+        // AppKit hosts surface secure fields as AXTextField with subrole
+        // AXSecureTextField, so we check both the role and the subrole.
+        guard role != secureTextFieldRole, subrole != secureTextFieldRole else {
+            return false
+        }
+
+        return textRoles.contains(role) || role.contains("Text")
     }
 }

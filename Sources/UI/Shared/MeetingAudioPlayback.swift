@@ -351,6 +351,8 @@ struct MeetingAudioSourceMenu: View {
             }
             .buttonStyle(.plain)
             .fixedSize()
+            .frame(minHeight: 40)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .help("Choose retained meeting audio source")
         }
     }

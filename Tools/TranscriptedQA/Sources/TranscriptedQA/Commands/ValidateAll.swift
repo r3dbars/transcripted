@@ -15,6 +15,7 @@ struct ValidateAll: ParsableCommand {
         var results: [ValidationResult] = []
 
         results += TranscriptValidator(directory: paths.meetingsDir).validate()
+        results += DictationValidator(directory: paths.dictationsDir).validate()
         results += JSONSidecarValidator(directory: paths.meetingsDir).validate()
         results += SpeakerDBValidator(dbPath: paths.stateDir.appendingPathComponent("speakers.sqlite").path).validate()
         results += StatsDBValidator(dbPath: paths.stateDir.appendingPathComponent("stats.sqlite").path).validate()

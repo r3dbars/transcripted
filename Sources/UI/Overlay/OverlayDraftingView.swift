@@ -91,7 +91,11 @@ final class OverlayDraftingView: NSView {
 
         // Status text
         statusLabel.font = NSFont.systemFont(ofSize: 12)
-        statusLabel.textColor = OverlayTokens.textMuted
+        // The loading/processing status is the sole readable message in this
+        // state, so it tracks the secondary text token (matching the error and
+        // "Refining…" labels) instead of the weakest muted token, which kept it
+        // a notch under contrast on the translucent overlay over bright windows.
+        statusLabel.textColor = OverlayTokens.textSecondary
         statusLabel.isBezeled = false
         statusLabel.isEditable = false
         statusLabel.drawsBackground = false

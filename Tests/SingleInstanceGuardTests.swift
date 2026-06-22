@@ -29,4 +29,24 @@ func testSingleInstanceGuard() {
         assertEqual(guardInstance.acquire(), .acquired, "first acquire should succeed")
         assertEqual(guardInstance.acquire(), .acquired, "same guard should not reject its own repeated acquire")
     }
+
+    runSuite("SingleInstanceGuard duplicate-launch handoff copy is user-ready") {
+        assertEqual(
+            SingleInstanceGuard.HandoffNotice.alreadyRunningTitle,
+            "Transcripted is already running",
+            "the handoff title should name the already-running state plainly"
+        )
+        assertTrue(
+            SingleInstanceGuard.HandoffNotice.alreadyRunningMessage.contains("menu bar"),
+            "the handoff message should explain where the running copy lives"
+        )
+        assertFalse(
+            SingleInstanceGuard.HandoffNotice.openButtonTitle.isEmpty,
+            "the handoff should offer a way to bring the running instance forward"
+        )
+        assertFalse(
+            SingleInstanceGuard.HandoffNotice.dismissButtonTitle.isEmpty,
+            "the handoff should offer a way to dismiss the notice"
+        )
+    }
 }

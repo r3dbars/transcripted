@@ -63,11 +63,38 @@ func testLiveMeetingPreviewServer() {
         assertEqual(transcript.statusCode, 200, "authorized transcript route should be readable")
         assertTrue(transcript.body.contains("Status: idle"), "transcript route should serve the live transcript file")
 
+        let handoffWithoutToken = sendPreviewRequest(path: "/codex-handoff.md", port: port)
+        assertEqual(handoffWithoutToken.statusCode, 401, "handoff route should require a token")
+
+        let handoff = sendPreviewRequest(path: "/codex-handoff.md?token=\(token)", port: port)
+        assertEqual(handoff.statusCode, 200, "authorized handoff route should be readable")
+        assertTrue(handoff.body.contains("Status: idle"), "handoff route should serve the agent handoff file")
+
+        let watcherStateWithoutToken = sendPreviewRequest(path: "/codex-watcher-state.json", port: port)
+        assertEqual(watcherStateWithoutToken.statusCode, 401, "watcher state route should require a token")
+
+        let watcherState = sendPreviewRequest(path: "/codex-watcher-state.json?token=\(token)", port: port)
+        assertEqual(watcherState.statusCode, 200, "authorized watcher state route should be readable")
+        assertTrue(
+            watcherState.body.contains("\"lastHandledFinalTranscriptPath\": null"),
+            "watcher state should serve the agent watcher JSON"
+        )
+
+        let head = sendPreviewRequest(path: "/state.json?token=\(token)", method: "HEAD", port: port)
+        assertEqual(head.statusCode, 200, "HEAD should be allowed for authorized preview reads")
+        assertTrue(head.body.isEmpty, "HEAD should return headers without a response body")
+
         let post = sendPreviewRequest(path: "/state.json?token=\(token)", method: "POST", port: port)
         assertEqual(post.statusCode, 405, "preview server should reject mutating methods")
 
         let favicon = sendPreviewRequest(path: "/favicon.ico", port: port)
         assertEqual(favicon.statusCode, 204, "favicon route should stay harmless without a token")
+
+        server.stop()
+        assertTrue(
+            waitForPreviewServerToStop(port: port),
+            "stop should tear down the loopback listener"
+        )
     }
 }
 
@@ -164,4 +191,16 @@ private func availableLoopbackPort() -> UInt16 {
     guard named == 0 else { return 0 }
 
     return UInt16(bigEndian: boundAddress.sin_port)
+}
+
+private func waitForPreviewServerToStop(port: UInt16) -> Bool {
+    let deadline = Date().addingTimeInterval(1.0)
+    while Date() < deadline {
+        let response = sendPreviewRequest(path: "/favicon.ico", port: port)
+        if response.statusCode == -1 {
+            return true
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    return false
 }

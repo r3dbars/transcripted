@@ -84,7 +84,7 @@ struct CorrectionEditorRow: View {
             Button(role: .destructive, action: onRemove) {
                 Image(systemName: "minus.circle.fill")
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 40, height: 40)
             }
             .buttonStyle(SettingsHoverButtonStyle(tone: .destructive, cornerRadius: 7))
             .accessibilityLabel(Text("Remove correction"))
@@ -243,6 +243,8 @@ struct SettingsRecentMeetingAudioControl: View {
                 normalFill: background,
                 normalStroke: stroke
             ))
+            .frame(minHeight: 40, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             if let scrubber {
                 scrubber

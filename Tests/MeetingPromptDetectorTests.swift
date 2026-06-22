@@ -495,6 +495,46 @@ func testMeetingPromptDetector() async {
         assertEqual(box.candidate?.source, .calendarEvent, "the visible scheduled prompt should keep its calendar context")
         assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "the scheduled prompt should keep the meeting title hint")
     }
+
+    await runSuite("MeetingPromptDetector.updateCameraInUse — mic and camera on the same call prompt once") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        // The camera turning on for the same call must not raise a second prompt.
+        detector.updateCameraInUse(true)
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "a mic call corroborated by the camera should still prompt exactly once")
+        assertEqual(box.candidate?.id, "mic:googleMeet", "the de-duped candidate keeps the stable browser-call id")
+        assertEqual(box.candidate?.reason, .micInput, "the mic signal wins when both mic and camera are active")
+    }
+
+    await runSuite("MeetingPromptDetector.updateCameraInUse — a camera-on with no call app frontmost stays quiet") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        // The test runner is not a browser or conferencing app, so a bare
+        // camera-on signal cannot be attributed and must not prompt.
+        detector.updateCameraInUse(true)
+        await waitForPromptEvaluation()
+
+        assertNil(box.candidate, "a camera-on we cannot attribute to a call app should not prompt")
+        assertEqual(box.promptCount, 0, "an unattributable camera signal should never ask the overlay to present")
+    }
 }
 
 @available(macOS 14.0, *)

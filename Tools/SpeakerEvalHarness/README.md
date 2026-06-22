@@ -42,7 +42,30 @@ speaker-eval-harness dump --audio path.wav --meeting NAME --out raw.json
 # replay a series in order through clusterer + DB, emit hypothesis assignments (cheap; sweepable)
 speaker-eval-harness replay --inputs a.json,b.json,c.json,d.json \
     --consolidation none|0.88 --match 0.6 --out result.json
+
+# A/B the write-path fixes (#6 write-time contamination gate + #8 cross-cluster link/merge decouple)
+speaker-eval-harness replay --inputs ... --write-path-fixes off|on --out result.json
 ```
+
+`--write-path-fixes` (default `off`): `off` is the legacy write path (every match blends at the
+full EMA rate; clusters matching the same profile collapse together). `on` applies the
+`SpeakerWritePathPolicy` gates, mirroring `TranscriptionPipeline` (gated EMA blend + cross-cluster
+spin-off of distinct voices). Replay the same dumps both ways to get a clean before/after.
+
+## Network-free synthetic A/B (no corpus / no models)
+
+The real corpora need multi-GB downloads + CoreML models. When that's unavailable, the
+write-path fixes can still be A/B'd on **synthetic embeddings with controlled cosine geometry** —
+the `replay` stage only consumes embeddings + RTTMs, both of which can be fabricated:
+
+```bash
+python3 scripts/gen_synthetic_speaker_eval.py     # -> data/eval/synthetic/{normal,twopeople,contamination}
+MATCH=0.70 bash scripts/run_synthetic_speaker_eval.sh   # replay off/on + score each, print before/after
+```
+
+`normal` is a no-regression control; `twopeople` reproduces the #8 cross-cluster fusion bug;
+`contamination` reproduces the #6 voiceprint-drift bug. Data is gitignored; the generator + driver
+are committed so the probe is reproducible.
 
 ## Run the whole thing
 
