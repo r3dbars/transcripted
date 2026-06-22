@@ -563,7 +563,7 @@ def render_markdown(data: dict[str, Any], findings: dict[str, Finding]) -> str:
         "## Privacy Boundary",
         "",
         "- Aggregate only. No raw rows or user-level forensics.",
-        "- Treat agent setup, prompt copy, and return events as proxies until `agent_capture_query_observed` exists.",
+        "- Treat agent setup, prompt copy, and return events as proxies; `agent_capture_query_observed` is the stronger saved-capture query proof, but not answer-quality proof.",
         "",
     ])
     return "\n".join(lines)

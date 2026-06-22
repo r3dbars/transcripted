@@ -400,7 +400,7 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
     if launch <= 0:
         unknowns.append(UnknownReason("activation.bottleneck", "No launch devices were available for the selected window."))
     if true_agent_query == 0:
-        unknowns.append(UnknownReason("activation.true_agent_use", "`agent_capture_query_observed` is missing or zero; prompt/setup clicks are intent proxies only."))
+        unknowns.append(UnknownReason("activation.true_agent_use", "`agent_capture_query_observed` is zero in this window; prompt/setup clicks are intent proxies only."))
 
     artifact_rate = pct(first_artifact, launch)
     prompt_rate = pct(agent_prompt, first_artifact)
@@ -575,9 +575,9 @@ def build_recommendations(
     elif true_agent_query == 0:
         recs.append({
             "rank": len(recs) + 1,
-            "title": "Add privacy-safe sourced-agent-use proof",
-            "why": "`agent_capture_query_observed` is missing or zero, so agents still cannot tell whether saved Markdown produced a sourced answer.",
-            "suggested_pr": "Emit aggregate-only `agent_capture_query_observed` from the read-only MCP/agent surface with enum result, query kind, agent target, artifact kind, and age buckets.",
+            "title": "Verify privacy-safe sourced-agent-use proof",
+            "why": "`agent_capture_query_observed` is zero in this window, so agents still cannot tell from live aggregates whether saved Markdown produced a sourced answer.",
+            "suggested_pr": "Verify the read-only MCP/agent surface is emitting aggregate-only `agent_capture_query_observed` rows for current builds, with enum result, query kind, agent target, artifact kind, and age buckets.",
         })
     elif launch > 0 and first_artifact / launch < 0.2:
         recs.append({
@@ -680,7 +680,7 @@ def render_markdown(pack: dict[str, Any]) -> str:
         f"- Launch devices: {pack['activation'].get('launch_devices')}",
         f"- First artifact devices: {pack['activation'].get('first_artifact_devices')} ({md_value(pack['activation'].get('first_artifact_rate_pct'))} of launch)",
         f"- Agent prompt devices: {pack['activation'].get('agent_prompt_devices')} ({md_value(pack['activation'].get('agent_prompt_per_first_artifact_pct'))} of first artifact)",
-        f"- True agent-query devices: {pack['activation'].get('true_agent_query_devices')} (UNKNOWN if zero because the event may not exist yet)",
+        f"- True agent-query devices: {pack['activation'].get('true_agent_query_devices')} (UNKNOWN if zero in this window)",
         f"- Return proxy devices: {pack['activation'].get('return_proxy_devices')} ({md_value(pack['activation'].get('return_proxy_per_first_artifact_pct'))} of first artifact)",
         "",
         "## Recommended Next PRs",
