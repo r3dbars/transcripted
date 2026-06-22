@@ -156,6 +156,8 @@ allowlist.
 - `local_meeting_summary_failed`
 - `meeting_transcript_failed`
 - `meeting_speaker_finalization_failed`
+- `meeting_speaker_review_shown`
+- `meeting_speaker_review_submitted`
 - `meeting_transcript_skipped`
 - `meeting_saved_audio_retranscription_requested`
 

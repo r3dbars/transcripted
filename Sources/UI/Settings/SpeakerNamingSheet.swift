@@ -167,6 +167,7 @@ final class SpeakerNamingContentView: NSView {
         super.init(frame: frame)
         setupViews()
         buildRows()
+        trackReviewShown()
     }
 
     @available(*, unavailable)
@@ -401,10 +402,12 @@ final class SpeakerNamingContentView: NSView {
             guard let update = row.buildUpdate() else { continue }
             updates.append(update)
         }
+        trackReviewSubmitted(completionKind: "save", updateCount: updates.count)
         onSave?(updates)
     }
 
     @objc private func handleCancel() {
+        trackReviewSubmitted(completionKind: "review_later", updateCount: 0)
         onCancel?()
     }
 
@@ -413,6 +416,55 @@ final class SpeakerNamingContentView: NSView {
         keepAsYouButton.title = localCollapsedToMe ? "Review Local Mic Voices" : "Keep Local Mic as You"
         for row in micRows {
             row.setCollapsedToMe(localCollapsedToMe)
+        }
+    }
+
+    private func trackReviewShown() {
+        AnalyticsReporter.track(
+            "meeting_speaker_review_shown",
+            properties: speakerReviewAnalyticsProperties()
+        )
+    }
+
+    private func trackReviewSubmitted(completionKind: String, updateCount: Int) {
+        var properties = speakerReviewAnalyticsProperties()
+        properties["completion_kind"] = completionKind
+        properties["result"] = updateCount > 0 ? "updates_submitted" : "no_updates"
+        properties["updates_submitted_bucket"] = AnalyticsReporter.countBucket(updateCount)
+        AnalyticsReporter.track(
+            "meeting_speaker_review_submitted",
+            properties: properties
+        )
+    }
+
+    private func speakerReviewAnalyticsProperties() -> [String: String] {
+        [
+            "known_people_bucket": AnalyticsReporter.countBucket(request.knownPeople.count),
+            "local_voice_bucket": AnalyticsReporter.countBucket(micRows.count),
+            "match_suggestion_bucket": AnalyticsReporter.countBucket(suggestedMatchCount),
+            "remote_voice_bucket": AnalyticsReporter.countBucket(systemRows.count),
+            "review_item_bucket": AnalyticsReporter.countBucket(micRows.count + systemRows.count),
+            "review_reason": reviewReason,
+            "surface": "speaker_review_sheet",
+        ]
+    }
+
+    private var suggestedMatchCount: Int {
+        request.speakers.filter { $0.suggestedProfileId != nil }.count
+    }
+
+    private var reviewReason: String {
+        let needsNaming = request.speakers.contains { $0.needsNaming }
+        let needsConfirmation = request.speakers.contains { $0.needsConfirmation }
+        switch (needsNaming, needsConfirmation) {
+        case (true, true):
+            return "mixed"
+        case (true, false):
+            return "needs_naming"
+        case (false, true):
+            return "needs_confirmation"
+        case (false, false):
+            return "unknown"
         }
     }
 }

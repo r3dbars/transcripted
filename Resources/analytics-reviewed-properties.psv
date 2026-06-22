@@ -38,6 +38,7 @@ captured_input_volume_during
 cleanup_changed
 cleanup_enabled
 completion_flow
+completion_kind
 cooldown_reason
 copy_reason
 crash_reporting_available
@@ -124,6 +125,7 @@ reporting_kind
 required
 result
 retry_source
+review_reason
 route_ready
 route_shape
 runtime
