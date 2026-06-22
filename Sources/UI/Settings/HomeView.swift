@@ -435,6 +435,9 @@ struct HomeCanvasHeader: View {
             Text(greeting)
                 .font(.system(size: 28, weight: .light))
                 .tracking(0.2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .fixedSize(horizontal: false, vertical: true)
 
             Button(action: { onViewStats() }) {
                 HStack(spacing: 9) {

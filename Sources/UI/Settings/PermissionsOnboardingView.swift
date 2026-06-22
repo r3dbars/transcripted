@@ -1132,6 +1132,10 @@ private struct Headline: View {
     var emphasis: String?
     var size: CGFloat = 58
     var alignment: TextAlignment = .center
+    // Cap the line measure so long headings wrap onto balanced lines instead of
+    // running nearly edge-to-edge (CenterStage is 800pt, SplitStage's column is
+    // full width) and leaving an orphan word on the last line.
+    var measure: CGFloat = 640
 
     var body: some View {
         VStack(alignment: alignment == .leading ? .leading : .center, spacing: 2) {
@@ -1147,6 +1151,7 @@ private struct Headline: View {
         .multilineTextAlignment(alignment)
         .lineLimit(nil)
         .minimumScaleFactor(0.92)
+        .frame(maxWidth: measure, alignment: alignment == .leading ? .leading : .center)
         .fixedSize(horizontal: false, vertical: true)
     }
 }
