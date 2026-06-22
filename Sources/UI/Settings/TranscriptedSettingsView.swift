@@ -506,6 +506,25 @@ struct TranscriptedSettingsView: View {
                 }
             }
 
+            if let warning = homeViewModel.scanWarning {
+                HomeScanWarningCard(
+                    model: warning,
+                    onRetry: {
+                        trackSettingsAction("home_scan_warning_retry", page: .home)
+                        homeViewModel.retryScan()
+                    },
+                    onReveal: {
+                        trackSettingsAction("home_scan_warning_reveal", page: .home)
+                        NSWorkspace.shared.activateFileViewerSelecting([MeetingStoragePaths.transcriptsFolder])
+                    },
+                    onDismiss: {
+                        trackSettingsAction("home_scan_warning_dismiss", page: .home)
+                        homeViewModel.dismissScanWarning()
+                    }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             homeFailedMeetingsCard
 
             if let activity = homeTranscriptionActivity {

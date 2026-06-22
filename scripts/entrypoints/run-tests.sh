@@ -371,6 +371,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/SettingsContentLayoutPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
     "Sources/UI/Settings/HomeRootAlertPolicy.swift"
+    "Sources/UI/Settings/HomeScanWarningPolicy.swift"
     "Sources/UI/Settings/HomeCanvasGreeting.swift"
     "Sources/UI/Shared/HomeMeetingDeletion.swift"
     "Sources/UI/Shared/OwnFileResolver.swift"
