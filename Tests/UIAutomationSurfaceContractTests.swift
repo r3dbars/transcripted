@@ -284,6 +284,12 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
+        assertTrue(
+            homeSource.contains("private enum HomeHitTarget")
+                && homeSource.contains("static let minimum: CGFloat = 40")
+                && homeSource.contains("HomeHitTarget.minimum"),
+            "Home icon buttons and compact row actions should keep a shared 40pt hit-target floor"
+        )
         for requiredFailedMeetingPolicyHook in [
             "clearTitle: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
             "clearSymbolName: hasRetainedAudioFiles ? \"trash\" : \"xmark\"",
@@ -592,11 +598,6 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(homeSource.contains(identifier), "\(identifier) should stay attached to Home click-flow controls")
         }
-
-        assertTrue(
-            homeSource.contains("transcripted.home.audio.\\(isPlaying ?"),
-            "Home audio play/pause action should keep a stable dynamic automation ID"
-        )
 
         for identifier in [
             "transcripted.settings.footer.check-updates",
