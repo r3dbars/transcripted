@@ -487,6 +487,18 @@ func testUIAutomationSurfaceContract() {
                 && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle"),
             "pill context-menu and drawer overflow actions should keep policy-pinned titles for automation"
         )
+        assertTrue(
+            transcriptDrawerSource.contains("transientStatusText ?? statusText")
+                && transcriptDrawerSource.contains("openInBrowserFailedStatus")
+                && transcriptDrawerSource.contains(".announcement: MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus"),
+            "browser-open failures should remain visible and announced even while transcript updates continue"
+        )
+        assertTrue(
+            meetingOverlaySource.contains("showLiveViewBrowserOpenFailure")
+                && meetingOverlaySource.contains("isTranscriptExpanded = true")
+                && meetingOverlaySource.contains("rootView?.flashTranscriptBrowserOpenFailure()"),
+            "browser-open failures from the collapsed pill menu should reveal the drawer before showing feedback"
+        )
 
         assertTrue(
             deletePolicySource.contains("Delete this meeting?")
