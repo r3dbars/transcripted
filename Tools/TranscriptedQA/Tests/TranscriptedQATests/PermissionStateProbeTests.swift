@@ -101,6 +101,34 @@ final class PermissionStateProbeTests: XCTestCase {
         XCTAssertTrue(result?.detail?.contains("OSStatus -1743") == true)
     }
 
+    func testAutomationStatusRetriesOnceWhenTargetIsNotRunning() {
+        var statuses = [OSStatus(procNotFound), noErr]
+        var warmedTargets: [String] = []
+
+        let status = PermissionStateProbe.automationStatus(
+            targetBundleID: "com.apple.systemevents",
+            permissionStatusProvider: { statuses.removeFirst() },
+            warmUpTargetProvider: {
+                warmedTargets.append($0)
+                return true
+            }
+        )
+
+        XCTAssertEqual(status, .allowed)
+        XCTAssertEqual(warmedTargets, ["com.apple.systemevents"])
+        XCTAssertTrue(statuses.isEmpty, "the permission check should retry exactly once after warming the target")
+    }
+
+    func testAutomationStatusKeepsProcNotFoundWhenWarmupFails() {
+        let status = PermissionStateProbe.automationStatus(
+            targetBundleID: "com.apple.systemevents",
+            permissionStatusProvider: { OSStatus(procNotFound) },
+            warmUpTargetProvider: { _ in false }
+        )
+
+        XCTAssertEqual(status, .unavailable(OSStatus(procNotFound)))
+    }
+
     func testLiveCaptureModeWarnsWhenTranscriptedDefaultsDomainCannotOpen() {
         let results = makeProbe(mode: .liveCapture, defaults: nil).validate()
         let result = results.first { $0.check == "permissions/app/system-audio-cache" }
