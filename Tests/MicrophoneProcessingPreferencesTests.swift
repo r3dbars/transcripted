@@ -45,6 +45,29 @@ func testMicrophoneProcessingPreferences() {
         )
     }
 
+    runSuite("MicrophoneProcessingPreferences explains raw input for tuned USB mics") {
+        assertTrue(
+            MicrophoneProcessingMode.none.title.contains("no Transcripted gain"),
+            "Raw/off picker title should explain that Transcripted gain is off"
+        )
+        assertTrue(
+            MicrophoneProcessingMode.none.detail.contains("without software autogain"),
+            "Raw/off help text should answer whether Transcripted applies software autogain"
+        )
+        assertTrue(
+            MicrophoneProcessingMode.none.detail.contains("Blue Yeti"),
+            "Raw/off help text should name tuned USB mics like Stephen's Blue Yeti"
+        )
+        assertTrue(
+            MicrophoneProcessingMode.none.detail.contains("physical gain controls the level"),
+            "Raw/off help text should make the user's hardware gain the control point"
+        )
+        assertTrue(
+            MicrophoneProcessingMode.none.detail.contains("microphone.m4a"),
+            "Raw/off help text should tie the setting to the saved mic track users inspect"
+        )
+    }
+
     runSuite("MicrophoneProcessingPreferences persists Apple voice processing mode") {
         let (defaults, suiteName) = makeMicrophoneProcessingDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
