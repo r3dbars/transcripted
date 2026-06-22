@@ -833,14 +833,15 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func pasteLastDictationFromSettings() {
         guard let latestText = DictationTranscriptStore.latestSavedText() else {
-            NSSound.beep()
+            PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)
             return
         }
 
         let sourceApp = resolvedSourceApp()
         let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sourceApp?.activate(options: [])
-        _ = settingsTextPaster.paste(latestText, target: pasteTarget)
+        let outcome = settingsTextPaster.paste(latestText, target: pasteTarget)
+        PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))
     }
 
     @available(macOS 14.0, *)
