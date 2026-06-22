@@ -1023,6 +1023,7 @@ private struct NavBar: View {
                 Text("← Back")
                     .font(.system(size: 13))
                     .foregroundStyle(OnboardingTheme.muted)
+                    .frame(minWidth: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget), minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget))
             }
             .buttonStyle(.plain)
             .opacity(canGoBack ? 1 : 0)
@@ -1038,6 +1039,7 @@ private struct NavBar: View {
                 .font(.system(size: 13))
                 .buttonStyle(.plain)
                 .foregroundStyle(OnboardingTheme.muted)
+                .frame(minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget))
                 .accessibilityIdentifier("transcripted.onboarding.nav.skip")
             }
 
@@ -1146,6 +1148,7 @@ private struct Headline: View {
         .foregroundStyle(OnboardingTheme.ink)
         .multilineTextAlignment(alignment)
         .lineLimit(nil)
+        .minimumScaleFactor(0.92)
         .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -1166,6 +1169,8 @@ private struct Lede: View {
             .foregroundStyle(OnboardingTheme.body)
             .multilineTextAlignment(.center)
             .frame(maxWidth: maxWidth)
+            .lineLimit(FirstRunOnboardingPolishContract.bodyCopyLineLimit)
+            .minimumScaleFactor(0.94)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -1185,6 +1190,8 @@ private struct BodyCopy: View {
             .lineSpacing(3)
             .foregroundStyle(OnboardingTheme.body)
             .frame(maxWidth: maxWidth, alignment: .leading)
+            .lineLimit(FirstRunOnboardingPolishContract.bodyCopyLineLimit)
+            .minimumScaleFactor(0.94)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -1285,6 +1292,7 @@ private struct PermissionGrantRow: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+        .frame(minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget))
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(granted ? OnboardingTheme.ink : OnboardingTheme.card)
@@ -1335,10 +1343,14 @@ private struct UseCaseChoiceCard: View {
                         .font(.system(size: 13.5))
                         .foregroundStyle(OnboardingTheme.body)
                         .lineSpacing(2)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.94)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(footnote)
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(OnboardingTheme.muted)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 0)
@@ -1349,12 +1361,16 @@ private struct UseCaseChoiceCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? OnboardingTheme.ink.opacity(0.45) : OnboardingTheme.border, lineWidth: isSelected ? 1.4 : 1)
+                    .stroke(
+                        isSelected ? OnboardingTheme.ink.opacity(0.62) : OnboardingTheme.border,
+                        lineWidth: isSelected ? CGFloat(FirstRunOnboardingPolishContract.selectedStateStrokeWidth) : 1
+                    )
             )
             .shadow(color: .black.opacity(isSelected ? 0.08 : 0.03), radius: isSelected ? 16 : 8, y: 8)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(automationIdentifier)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -1368,6 +1384,8 @@ private struct InkButtonStyle: ButtonStyle {
             .foregroundStyle(isSubtle ? OnboardingTheme.ink : OnboardingTheme.window)
             .padding(.horizontal, compact ? 14 : 22)
             .padding(.vertical, compact ? 8 : 12)
+            .frame(minWidth: CGFloat(compact ? FirstRunOnboardingPolishContract.minimumCompactButtonHeight : FirstRunOnboardingPolishContract.minimumHitTarget))
+            .frame(minHeight: CGFloat(compact ? FirstRunOnboardingPolishContract.minimumCompactButtonHeight : FirstRunOnboardingPolishContract.minimumHitTarget))
             .background(
                 RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
                     .fill(isSubtle ? Color.clear : OnboardingTheme.ink)
@@ -1377,6 +1395,8 @@ private struct InkButtonStyle: ButtonStyle {
                     .stroke(isSubtle ? OnboardingTheme.border : Color.clear, lineWidth: 1)
             )
             .opacity(configuration.isPressed ? 0.72 : 1)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -1398,6 +1418,9 @@ private struct BulletList: View {
                     Text(item)
                         .font(.system(size: 13.5))
                         .foregroundStyle(OnboardingTheme.body)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.95)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -1747,9 +1770,14 @@ private struct ToggleCard: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .onboardingAutomationIdentifier(automationIdentifier)
+                .frame(
+                    minWidth: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget),
+                    minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget)
+                )
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+        .frame(minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget))
         .background(OnboardingTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(

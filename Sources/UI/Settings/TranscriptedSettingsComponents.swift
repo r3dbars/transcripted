@@ -536,7 +536,12 @@ struct SettingsStatusCard: View {
 
                 Text(status)
                     .font(.caption.weight(.semibold))
+                    .monospacedDigit()
                     .foregroundStyle(tintColor)
+                    .frame(
+                        minWidth: progress == nil ? 0 : CGFloat(FirstRunOnboardingPolishContract.modelProgressLabelMinimumWidth),
+                        alignment: .trailing
+                    )
             }
 
             Text(detail)
@@ -650,7 +655,12 @@ struct SettingsActivityCard: View {
 
                     Text("\(Int(progress * 100))% complete")
                         .font(.caption2)
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
+                        .frame(
+                            minWidth: CGFloat(FirstRunOnboardingPolishContract.modelProgressLabelMinimumWidth),
+                            alignment: .leading
+                        )
                 }
             }
 
