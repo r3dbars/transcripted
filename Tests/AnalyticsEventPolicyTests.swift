@@ -1052,6 +1052,78 @@ func testAnalyticsEventPolicy() {
         assertEqual(skipped?.allowedProperties.contains("trigger"), true, "skipped meeting transcripts should preserve trigger attribution")
     }
 
+    runSuite("AnalyticsEventPolicy allows speaker review funnel events without names") {
+        let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_shown")
+        let submitted = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_submitted")
+
+        assertEqual(
+            shown?.allowedProperties ?? Set<String>(),
+            [
+                "known_people_bucket",
+                "local_voice_bucket",
+                "match_suggestion_bucket",
+                "remote_voice_bucket",
+                "review_item_bucket",
+                "review_reason",
+                "surface",
+            ],
+            "speaker review shown should keep only inventory buckets and enums"
+        )
+        assertEqual(
+            submitted?.allowedProperties ?? Set<String>(),
+            [
+                "completion_kind",
+                "known_people_bucket",
+                "local_voice_bucket",
+                "match_suggestion_bucket",
+                "remote_voice_bucket",
+                "result",
+                "review_item_bucket",
+                "review_reason",
+                "surface",
+                "updates_submitted_bucket",
+            ],
+            "speaker review submitted should keep only outcome enums and buckets"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "completion_kind": "save",
+                "known_people_bucket": "4_9",
+                "local_voice_bucket": "1",
+                "match_suggestion_bucket": "2_3",
+                "remote_voice_bucket": "2_3",
+                "result": "updates_submitted",
+                "review_item_bucket": "4_9",
+                "review_reason": "mixed",
+                "surface": "speaker_review_sheet",
+                "updates_submitted_bucket": "2_3",
+                "audio_path": "/Users/jane/Private/customer.wav",
+                "meeting_title": "Customer Roadmap",
+                "speaker_id": "private-id",
+                "speaker_name": "Alice Customer",
+                "transcript_text": "private transcript words",
+            ],
+            allowedKeys: (shown?.allowedProperties ?? []).union(submitted?.allowedProperties ?? [])
+        )
+
+        assertEqual(sanitized["completion_kind"], "save", "completion kind should survive")
+        assertEqual(sanitized["known_people_bucket"], "4_9", "known people bucket should survive")
+        assertEqual(sanitized["local_voice_bucket"], "1", "local voice bucket should survive")
+        assertEqual(sanitized["match_suggestion_bucket"], "2_3", "suggestion bucket should survive")
+        assertEqual(sanitized["remote_voice_bucket"], "2_3", "remote voice bucket should survive")
+        assertEqual(sanitized["result"], "updates_submitted", "coarse result should survive")
+        assertEqual(sanitized["review_item_bucket"], "4_9", "review item bucket should survive")
+        assertEqual(sanitized["review_reason"], "mixed", "review reason should survive")
+        assertEqual(sanitized["surface"], "speaker_review_sheet", "surface should survive")
+        assertEqual(sanitized["updates_submitted_bucket"], "2_3", "submitted update bucket should survive")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["speaker_id"], "speaker ids must not be sent")
+        assertNil(sanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(sanitized["transcript_text"], "transcript text must not be sent")
+    }
+
     runSuite("AnalyticsEventPolicy meeting outcomes drop adversarial private fields") {
         let privateFields = [
             "audio_device": "Jane's AirPods Pro",

@@ -206,9 +206,9 @@ aggregate reliability sizing and should not be expanded to raw device names.
   funnel. Summary attempts, generated results, failure kind, model readiness,
   and latency buckets should be captured when the summary flow is product-ready
   enough to learn from.
-- Speaker review is visible mainly through meeting outcome and failure events.
-  `workflow_abandoned` reserves `speaker_review`, but there is no clean
-  accepted/dismissed/completed review funnel yet.
+- Speaker review now has a narrow prompt/submission funnel, but final transcript
+  rewrite quality is still visible mainly through meeting outcome and
+  finalization failure events.
 - Retention is a return proxy, not a real habit model. It needs day/week active
   cohorts and first-artifact-to-second-artifact conversion in PostHog dashboards.
 
@@ -222,8 +222,8 @@ Prefer a small number of lifecycle events over broad click tracking.
 | `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
-| `meeting_speaker_review_prompted` | A saved meeting has review work surfaced | `participant_count_bucket`, `review_reason`, `surface` |
-| `meeting_speaker_review_completed` | User completes or dismisses speaker review | `participant_count_bucket`, `result`, `surface` |
+| `meeting_speaker_review_shown` | A saved meeting has review work surfaced | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `surface` |
+| `meeting_speaker_review_submitted` | User saves or defers speaker review | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `completion_kind`, `result`, `updates_submitted_bucket`, `surface` |
 | `meeting_summary_requested` | User asks for a local summary | `artifact_age_bucket`, `model_state`, `surface` |
 | `meeting_summary_finished` | Summary succeeds or fails | `duration_bucket`, `failure_kind`, `latency_bucket`, `model_state`, `result`, `surface` |
 | `settings_feature_discovered` | A high-leverage feature panel is first viewed | `feature_area`, `page_id`, `source` |
