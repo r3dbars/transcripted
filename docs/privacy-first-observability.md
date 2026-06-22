@@ -75,7 +75,9 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 
 ## Allowlisted analytics events
 
-This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
+This list should match `Resources/analytics-events.psv`, which
+`Sources/Observability/AnalyticsEventPolicy.swift` compiles into the runtime
+allowlist.
 
 - `app_launched`
 - `app_unclean_shutdown_detected`
@@ -174,13 +176,16 @@ privacy review and a matching allowlist change.
 
 ## Analytics taxonomy review checklist
 
-Every analytics change should update `AnalyticsEventPolicy.swift` and this doc
-in the same PR. `Tests/AnalyticsEventPolicyTests.swift` machine-checks the
-event-name list above and the compiled property taxonomy.
+Every analytics change should update `Resources/analytics-events.psv`,
+`Resources/analytics-reviewed-properties.psv` when new non-bucket properties
+are introduced, and this doc in the same PR. `Tests/AnalyticsEventPolicyTests.swift`
+machine-checks the event-name list above and the compiled property taxonomy.
 
 For each new or changed event:
 
 - document the event name in "Allowlisted analytics events"
+- keep the registry normalized with
+  `python3 scripts/ops/normalize-analytics-taxonomy.py --check`
 - keep event names stable once released; add a new event instead of changing the
   meaning of an old one
 - use enum, bucket, boolean, or count-bucket properties whenever possible
