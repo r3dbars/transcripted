@@ -397,6 +397,8 @@ struct TranscriptedSettingsView: View {
                         .contentShape(Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .frame(minWidth: 44, minHeight: 40)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("transcripted.settings.tab.\(page.rawValue)")
             }
 

@@ -3101,6 +3101,25 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Home compact controls keep 40pt hit targets") {
+        let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        assertTrue(
+            homeContents.contains("static let minimumHitArea: CGFloat = 40"),
+            "Home compact controls should keep a named 40pt minimum hit target"
+        )
+        assertTrue(
+            homeContents.contains(".frame(width: HomeControlMetrics.minimumHitArea, height: HomeControlMetrics.minimumHitArea)")
+                && homeContents.contains(".frame(minHeight: HomeControlMetrics.minimumHitArea"),
+            "Home row action buttons, search clears, and failed-meeting actions should use the minimum hit target"
+        )
+        assertTrue(
+            settingsContents.contains(".frame(minWidth: 44, minHeight: 40)")
+                && settingsContents.contains("transcripted.settings.tab.\\(page.rawValue)"),
+            "settings tab chips should keep at least a 44x40 hit area"
+        )
+    }
+
     runSuite("Repo command contract - Home meeting deletion hashes audio only after metadata candidates") {
         let deletionContents = readRepoTextFile("Sources/UI/Shared/HomeMeetingDeletion.swift")
         let duplicateBlock = sourceSlice(

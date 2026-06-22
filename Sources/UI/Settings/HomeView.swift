@@ -559,6 +559,8 @@ private struct HomeAttentionPill: View {
             .contentShape(Capsule(style: .continuous))
         }
         .buttonStyle(.plain)
+        .frame(minHeight: 40)
+        .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .help(issue.detail)
@@ -716,6 +718,11 @@ struct HomeArtifactStatus: Equatable {
 
 // MARK: - Row action buttons
 
+private enum HomeControlMetrics {
+    static let minimumHitArea: CGFloat = 40
+    static let compactVisualSize: CGFloat = 26
+}
+
 struct HomeRowMenuItem: Identifiable {
     let id = UUID()
     let title: String
@@ -760,7 +767,7 @@ struct HomeRowActionButtons: View {
 
             if !menuItems.isEmpty {
                 HomeRowMoreMenuButton(items: menuItems)
-                    .frame(width: 26, height: 26)
+                    .frame(width: HomeControlMetrics.minimumHitArea, height: HomeControlMetrics.minimumHitArea)
                     .help("More options")
             }
         }
@@ -771,10 +778,12 @@ struct HomeRowActionButtons: View {
             Image(systemName: systemName)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 26, height: 26)
+                .frame(width: HomeControlMetrics.compactVisualSize, height: HomeControlMetrics.compactVisualSize)
                 .contentShape(Rectangle())
         }
         .buttonStyle(SettingsHoverButtonStyle(cornerRadius: 7))
+        .frame(width: HomeControlMetrics.minimumHitArea, height: HomeControlMetrics.minimumHitArea)
+        .contentShape(Rectangle())
         .help(help)
         .accessibilityLabel(Text(help))
         .accessibilityIdentifier("transcripted.home.row.copy")
@@ -793,6 +802,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
         let button = HoverMenuButton()
         button.isBordered = false
         button.imagePosition = .imageOnly
+        button.imageScaling = .scaleNone
         button.image = NSImage(
             systemSymbolName: "ellipsis",
             accessibilityDescription: "More options"
@@ -1148,6 +1158,8 @@ struct HomeDictationRow: View {
                     }
                     .buttonStyle(.plain)
                     .help("Open Markdown")
+                    .frame(minHeight: HomeControlMetrics.minimumHitArea, alignment: .leading)
+                    .contentShape(Rectangle())
                     .accessibilityIdentifier("transcripted.home.dictation.open-markdown")
                 }
 
@@ -1404,6 +1416,8 @@ struct HomeFailedMeetingInlineRow: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(minHeight: HomeControlMetrics.minimumHitArea)
+                .contentShape(Rectangle())
                 .help("Show saved audio in Finder")
                 .accessibilityIdentifier("transcripted.home.failed-meeting.show-audio")
             }
@@ -1426,7 +1440,7 @@ struct HomeFailedMeetingInlineRow: View {
                     action: onClear
                 )
             ], automationIdentifier: "transcripted.home.failed-meeting.more")
-            .frame(width: 26, height: 26)
+            .frame(width: HomeControlMetrics.minimumHitArea, height: HomeControlMetrics.minimumHitArea)
             .help("More options")
         }
     }
@@ -1524,6 +1538,8 @@ private struct HomeAttentionActionButton: View {
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
+        .frame(minHeight: HomeControlMetrics.minimumHitArea)
+        .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .homeAutomationIdentifier(automationIdentifier)
     }
@@ -1781,6 +1797,8 @@ struct HomeMeetingSearchField: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                        .frame(width: HomeControlMetrics.minimumHitArea, height: HomeControlMetrics.minimumHitArea)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Clear filter")
@@ -1788,7 +1806,8 @@ struct HomeMeetingSearchField: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 0)
+        .frame(minHeight: HomeControlMetrics.minimumHitArea)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.primary.opacity(0.04))
@@ -2495,6 +2514,8 @@ private struct HomeTranscriptFindBar: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                        .frame(width: HomeControlMetrics.minimumHitArea, height: HomeControlMetrics.minimumHitArea)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Clear find")
@@ -2502,7 +2523,8 @@ private struct HomeTranscriptFindBar: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 0)
+        .frame(minHeight: HomeControlMetrics.minimumHitArea)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.primary.opacity(0.04))
@@ -2522,7 +2544,8 @@ private struct HomeTranscriptFindBar: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 20)
+                .frame(width: HomeControlMetrics.minimumHitArea, height: HomeControlMetrics.minimumHitArea)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
@@ -2821,6 +2844,8 @@ private struct HomeFailedMeetingRow: View {
                         ) {
                             onRevealAudio()
                         }
+                        .frame(minHeight: HomeControlMetrics.minimumHitArea)
+                        .contentShape(Rectangle())
                     } else {
                         Label("No audio kept", systemImage: "speaker.slash")
                             .font(.caption)
@@ -2852,7 +2877,7 @@ private struct HomeFailedMeetingRow: View {
                     ) {
                         onClear()
                     }
-                    .frame(width: presentation.clearIsDestructive ? 78 : 82, height: 30)
+                    .frame(width: presentation.clearIsDestructive ? 78 : 82, height: HomeControlMetrics.minimumHitArea)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
