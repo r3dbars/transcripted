@@ -78,6 +78,10 @@ struct HomeLocalSummaryNotice: Identifiable, Equatable {
         !isFailure
     }
 
+    var allowsManualDismiss: Bool {
+        !isFailure
+    }
+
     var isFailure: Bool {
         if case .failed = kind { return true }
         return false

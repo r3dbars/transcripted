@@ -612,6 +612,7 @@ struct SettingsActivityCard: View {
     let progress: Double?
     let actionTitle: String?
     let action: (() -> Void)?
+    var dismissAction: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -640,6 +641,20 @@ struct SettingsActivityCard: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(tintColor.opacity(0.12), in: Capsule())
+
+                if let dismissAction {
+                    Button(action: dismissAction) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(SettingsHoverButtonStyle(cornerRadius: 7))
+                    .help("Dismiss")
+                    .accessibilityLabel("Dismiss")
+                    .accessibilityIdentifier("transcripted.settings.activity-card.dismiss")
+                }
             }
 
             if let progress {

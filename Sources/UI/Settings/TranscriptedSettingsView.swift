@@ -559,7 +559,13 @@ struct TranscriptedSettingsView: View {
                                 failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
                             )
                         }
-                    }
+                    },
+                    dismissAction: notice.allowsManualDismiss
+                        ? {
+                            trackSettingsAction("dismiss_local_meeting_summary_notice", page: .home)
+                            clearHomeLocalSummaryNotice(id: notice.id)
+                        }
+                        : nil
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
