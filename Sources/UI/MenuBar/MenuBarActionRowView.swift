@@ -205,14 +205,15 @@ final class MenuBarActionRowView: NSControl {
             titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
             detailLabel.frame = .zero
         } else {
-            let titleY: CGFloat = 1
+            let contentHeight: CGFloat = 30
+            let titleY = floor((bounds.height - contentHeight) / 2)
             titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: 16)
             detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: 13)
         }
 
         if trailingWidth > 0 {
             let trailingX = bounds.width - padX - trailingWidth
-            let trailingY = hasDetail ? 2 : (bounds.height - 14) / 2
+            let trailingY = floor((bounds.height - 14) / 2)
             trailingLabel.frame = NSRect(x: trailingX, y: trailingY, width: trailingWidth, height: 14)
         }
     }
@@ -234,9 +235,9 @@ final class MenuBarActionRowView: NSControl {
         let hasDetail = !detailLabel.stringValue.isEmpty
         switch rowSize {
         case .primary:
-            return hasDetail ? MenuTokens.compactActionRowHeight : 24
+            return hasDetail ? MenuTokens.actionRowHeight : MenuTokens.minimumActionHitTarget
         case .utility:
-            return hasDetail ? 28 : 24
+            return hasDetail ? MenuTokens.compactActionRowHeight : MenuTokens.minimumActionHitTarget
         }
     }
 
