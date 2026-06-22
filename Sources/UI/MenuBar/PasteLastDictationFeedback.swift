@@ -68,8 +68,18 @@ final class PasteLastDictationFeedbackPresenter {
         panel.contentView = view
         panel.setContentSize(PasteLastDictationFeedbackView.size)
         panel.setFrameOrigin(origin(for: PasteLastDictationFeedbackView.size))
-        panel.alphaValue = 1
+        // Ease the notice in instead of snapping to full opacity. If it is already
+        // on screen (a back-to-back notice), keep it visible and skip the fade.
+        let wasVisible = panel.isVisible
+        panel.alphaValue = wasVisible ? 1 : 0
         panel.orderFrontRegardless()
+        if !wasVisible {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.18
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        }
         NSAccessibility.post(
             element: panel,
             notification: .announcementRequested,
@@ -83,8 +93,22 @@ final class PasteLastDictationFeedbackPresenter {
                 return
             }
             guard let self, let panel, self.panel === panel else { return }
-            panel.orderOut(nil)
             self.dismissTask = nil
+            // Ease the notice out so it does not vanish mid-read.
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.22
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 0
+            }, completionHandler: { [weak self, weak panel] in
+                Task { @MainActor [weak self, weak panel] in
+                    guard let self, let panel, self.panel === panel else { return }
+                    // A newer notice re-presented during the fade restores full
+                    // opacity; only tear down if we actually faded all the way out.
+                    guard panel.alphaValue == 0 else { return }
+                    panel.orderOut(nil)
+                    panel.alphaValue = 1
+                }
+            })
         }
     }
 
