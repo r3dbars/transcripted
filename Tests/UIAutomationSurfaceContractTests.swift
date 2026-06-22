@@ -161,6 +161,7 @@ func testUIAutomationSurfaceContract() {
         let settingsSidebarSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
         let settingsComponentsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsComponents.swift")
         let generalControlsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift")
+        let settingsRowsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsRows.swift")
         let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
@@ -190,6 +191,23 @@ func testUIAutomationSurfaceContract() {
             pagesSource.contains("var automationIdentifier: String")
                 && settingsSidebarSource.contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "settings sidebar pages should expose stable automation identifiers"
+        )
+
+        assertTrue(
+            generalControlsSource.contains(".frame(width: 40, height: 40)")
+                && generalControlsSource.contains("accessibilityIdentifier(\"transcripted.settings.general.info.\\(automationSlug(info.title))\")"),
+            "General settings info buttons should keep compact visuals with a 40pt hit target and stable AX identifiers"
+        )
+        assertTrue(
+            settingsRowsSource.contains(".frame(width: 40, height: 40)")
+                && settingsRowsSource.contains(".accessibilityLabel(Text(\"Remove correction\"))"),
+            "custom dictionary remove controls should keep a 40pt destructive hit target with a clear AX label"
+        )
+        assertTrue(
+            settingsSource.contains("Label(\"Add correction\", systemImage: \"plus\")")
+                && settingsSource.contains(".frame(minHeight: 40)")
+                && settingsSource.contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            "custom dictionary add correction should keep a 40pt tactile action target"
         )
 
         for requiredSourceHook in [
