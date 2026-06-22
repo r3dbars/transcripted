@@ -41,10 +41,22 @@ final class SpeakerDBDimensionIsolationTests: XCTestCase {
     func testMatchSpeakerGuardsDimension() {
         let db = tmpDB()
         _ = db.addOrUpdateSpeaker(embedding: vec(0.2, 192), existingId: nil)
-        // 256-d query: no match (dimension guard in cosineSimilarity).
+        // 256-d query: no match, even at threshold zero.
+        XCTAssertNil(db.matchSpeaker(embedding: vec(0.2, 256), threshold: 0.0))
         XCTAssertNil(db.matchSpeaker(embedding: vec(0.2, 256), threshold: 0.1))
         // 192-d query of the same vector: matches.
         XCTAssertNotNil(db.matchSpeaker(embedding: vec(0.2, 192), threshold: 0.5))
+    }
+
+    func testExplicitCrossDimUpdateCreatesNewProfileInsteadOfBlending() {
+        let db = tmpDB()
+        let existing = db.addOrUpdateSpeaker(embedding: vec(0.1, 192), existingId: nil)
+        let crossDim = db.addOrUpdateSpeaker(embedding: vec(0.3, 256), existingId: existing.id)
+
+        XCTAssertNotEqual(crossDim.id, existing.id)
+        XCTAssertEqual(db.getSpeaker(id: existing.id)?.embedding.count, 192)
+        XCTAssertEqual(db.getSpeaker(id: crossDim.id)?.embedding.count, 256)
+        XCTAssertEqual(Set(db.allSpeakers().map { $0.embedding.count }), [192, 256])
     }
 
     func testEMAUpdateWithinDimensionStaysSameDimAndUnitNorm() {
