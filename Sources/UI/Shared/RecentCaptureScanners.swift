@@ -350,9 +350,54 @@ private final class LoadTaskBox: @unchecked Sendable {
     }
 }
 
+/// Why the meetings-folder scan could not list rows. Separates the benign
+/// "folder isn't there yet" empty state from a genuinely damaged/broken path
+/// (the path exists but isn't a directory, or it can't be read) so Home can
+/// surface a named warning only in the second case.
+enum RecentMeetingsScanDiagnosis: Equatable, Sendable {
+    case ok
+    /// Folder does not exist yet — normal first-run empty state, not a warning.
+    case missingFolder
+    /// The path exists but the app cannot scan it as a meetings folder.
+    case damagedPath(reason: RecentMeetingsScanDamageReason)
+}
+
+enum RecentMeetingsScanDamageReason: Equatable, Sendable {
+    /// The capture-library meetings path resolves to a file, not a folder.
+    case notADirectory
+    /// The folder exists but its contents could not be listed.
+    case unreadable
+}
+
 enum RecentMeetingsScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
     private static let summaryPreviewByteLimit = 64 * 1024
+
+    /// Classifies the meetings folder without loading rows. `loadRecent` fails
+    /// closed (returns `[]`) for both a missing folder and a damaged path, which
+    /// is correct for the list but hides breakage from the user — Home calls this
+    /// to tell those two cases apart and warn only on real damage.
+    static func diagnose(directory: URL? = nil) -> RecentMeetingsScanDiagnosis {
+        let dir = directory ?? MeetingStoragePaths.transcriptsFolder
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: dir.path, isDirectory: &isDirectory) else {
+            return .missingFolder
+        }
+        guard isDirectory.boolValue else {
+            return .damagedPath(reason: .notADirectory)
+        }
+        do {
+            _ = try fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return .damagedPath(reason: .unreadable)
+        }
+        return .ok
+    }
 
     static func loadRecent(limit: Int = 3, directory: URL? = nil) -> [RecentMeetingItem] {
         guard limit > 0 else { return [] }

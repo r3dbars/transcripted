@@ -344,6 +344,26 @@ struct PermissionStateProbe {
     }
 
     static func determineAutomationStatus(targetBundleID: String) -> AutomationStatus {
+        automationStatus(
+            targetBundleID: targetBundleID,
+            permissionStatusProvider: { automationPermissionStatus(targetBundleID: targetBundleID) },
+            warmUpTargetProvider: { warmUpAutomationTargetIfNeeded(targetBundleID: $0) }
+        )
+    }
+
+    static func automationStatus(
+        targetBundleID: String,
+        permissionStatusProvider: () -> OSStatus,
+        warmUpTargetProvider: (String) -> Bool
+    ) -> AutomationStatus {
+        let status = permissionStatusProvider()
+        if status == OSStatus(procNotFound), warmUpTargetProvider(targetBundleID) {
+            return mapAutomationPermissionStatus(permissionStatusProvider())
+        }
+        return mapAutomationPermissionStatus(status)
+    }
+
+    private static func automationPermissionStatus(targetBundleID: String) -> OSStatus {
         var target = AEAddressDesc()
         let createStatus = OSStatus(targetBundleID.withCString { pointer in
             AECreateDesc(
@@ -354,16 +374,19 @@ struct PermissionStateProbe {
             )
         })
         guard createStatus == noErr else {
-            return .unavailable(createStatus)
+            return createStatus
         }
         defer { AEDisposeDesc(&target) }
 
-        let status = AEDeterminePermissionToAutomateTarget(
+        return AEDeterminePermissionToAutomateTarget(
             &target,
             typeWildCard,
             typeWildCard,
             false
         )
+    }
+
+    private static func mapAutomationPermissionStatus(_ status: OSStatus) -> AutomationStatus {
         if status == noErr {
             return .allowed
         }
@@ -374,6 +397,25 @@ struct PermissionStateProbe {
             return .denied
         }
         return .unavailable(status)
+    }
+
+    private static func warmUpAutomationTargetIfNeeded(targetBundleID: String) -> Bool {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: targetBundleID) else {
+            return false
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.addsToRecentItems = false
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var didLaunch = false
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { app, error in
+            didLaunch = app != nil && error == nil
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 2)
+        return didLaunch
     }
 
     private static func bundleIdentifier(atPath path: String) -> String? {

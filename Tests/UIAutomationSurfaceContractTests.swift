@@ -199,7 +199,6 @@ func testUIAutomationSurfaceContract() {
         let settingsRowsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsRows.swift")
         let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
-        let settingsRowsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsRows.swift")
         let meetingAudioPlaybackSource = readUIAutomationContractFile("Sources/UI/Shared/MeetingAudioPlayback.swift")
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
         let speakerReviewSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerNamingSheet.swift")
@@ -648,6 +647,19 @@ func testUIAutomationSurfaceContract() {
             speakerCompactIconLabelApplications >= 4,
             "speaker refresh, all-speakers play, and overflow icon controls should use the compact 40pt hit-target label"
         )
+
+        for identifier in [
+            "transcripted.speakers.voice-to-name.play",
+            "transcripted.speakers.voice-to-name.menu",
+            "transcripted.speakers.refresh",
+            "transcripted.speakers.person.play",
+            "transcripted.speakers.person.menu",
+        ] {
+            assertTrue(
+                speakerPeopleSource.contains(identifier),
+                "\(identifier) should keep the speakers surface's icon-only controls scriptable without using speaker names"
+            )
+        }
 
         assertTrue(
             homeSource.contains("HomeAttentionPillsRow")

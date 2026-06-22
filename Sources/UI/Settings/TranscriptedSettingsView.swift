@@ -237,13 +237,16 @@ struct TranscriptedSettingsView: View {
         .alert(item: rootAlertBinding) { alert in
             switch alert {
             case .deleteConfirmation(let confirmation):
+                // Cancel is the primary (default) button so Return lands on the
+                // safe, reversible choice; the destructive action stays a clearly
+                // marked `.destructive` secondary button.
                 return Alert(
                     title: Text(confirmation.title),
                     message: Text(confirmation.message),
-                    primaryButton: .destructive(Text(confirmation.confirmTitle)) {
+                    primaryButton: .cancel(),
+                    secondaryButton: .destructive(Text(confirmation.confirmTitle)) {
                         confirmation.perform()
-                    },
-                    secondaryButton: .cancel()
+                    }
                 )
             case .deleteFailure(let failure):
                 return Alert(
@@ -255,10 +258,10 @@ struct TranscriptedSettingsView: View {
                 return Alert(
                     title: Text("Delete old replay audio?"),
                     message: Text("Transcripted will keep your Markdown transcripts, but retained replay audio older than \(window.title) will be permanently removed now and cleaned up automatically later."),
-                    primaryButton: .destructive(Text("Delete Old Audio")) {
+                    primaryButton: .cancel(),
+                    secondaryButton: .destructive(Text("Delete Old Audio")) {
                         applyAudioRetentionWindow(window)
-                    },
-                    secondaryButton: .cancel()
+                    }
                 )
             }
         }
@@ -407,6 +410,7 @@ struct TranscriptedSettingsView: View {
 
     private var settingsSidebarFooter: some View {
         Button {
+            guard settingsFooterActionEnabled else { return }
             trackSettingsAction(settingsUpdateActionID, page: .about)
             sparkleUpdater.performUserUpdateAction(surface: "settings_footer")
         } label: {
@@ -502,6 +506,25 @@ struct TranscriptedSettingsView: View {
                 }
             }
 
+            if let warning = homeViewModel.scanWarning {
+                HomeScanWarningCard(
+                    model: warning,
+                    onRetry: {
+                        trackSettingsAction("home_scan_warning_retry", page: .home)
+                        homeViewModel.retryScan()
+                    },
+                    onReveal: {
+                        trackSettingsAction("home_scan_warning_reveal", page: .home)
+                        NSWorkspace.shared.activateFileViewerSelecting([MeetingStoragePaths.transcriptsFolder])
+                    },
+                    onDismiss: {
+                        trackSettingsAction("home_scan_warning_dismiss", page: .home)
+                        homeViewModel.dismissScanWarning()
+                    }
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             homeFailedMeetingsCard
 
             if let activity = homeTranscriptionActivity {
@@ -527,7 +550,13 @@ struct TranscriptedSettingsView: View {
                                 failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment."
                             )
                         }
-                    }
+                    },
+                    cancelAction: homeTranscriptionActivityIsCancellable
+                        ? {
+                            trackSettingsAction("cancel_current_activity", page: .home)
+                            meetingSession.cancelActiveTranscription(reason: .userRequested)
+                        }
+                        : nil
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -1863,6 +1892,12 @@ struct TranscriptedSettingsView: View {
         savedMeetingRetranscriptionUnavailableReason == nil
     }
 
+    private var modelCacheBusyHelp: String {
+        modelCacheCleanupInProgress
+            ? "A cache cleanup is already running."
+            : "Wait for the storage scan to finish."
+    }
+
     private var failedMeetingRetryUnavailableReason: String? {
         if sttRouter.isRecording || sttRouter.isTranscribing {
             return "Wait for the current dictation to finish before retrying a failed meeting."
@@ -2182,7 +2217,7 @@ struct TranscriptedSettingsView: View {
                         : "Only detect meetings from your calendar and conferencing apps.",
                     info: GeneralInfo(
                         title: "Auto-detect calls",
-                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone — like a spontaneous Google Meet — and offers to record it. It only checks which app holds the mic on your Mac; nothing about the audio ever leaves your device."
+                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone, or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
                 )
@@ -2349,6 +2384,9 @@ struct TranscriptedSettingsView: View {
                             updatePreferredTranscriptionModel(.parakeetTDTv3, page: .general)
                         }
                         .disabled(preferredTranscriptionModel == .parakeetTDTv3)
+                        .help(preferredTranscriptionModel == .parakeetTDTv3
+                            ? "Parakeet is already the selected transcription model."
+                            : "")
 
                         Text("Changes apply to the next capture.")
                             .font(.caption)
@@ -2686,6 +2724,7 @@ struct TranscriptedSettingsView: View {
                     clearCorrectionRows()
                 }
                 .disabled(!hasCustomDictionaryContent)
+                .help(hasCustomDictionaryContent ? "" : "No saved corrections to clear yet.")
             }
 
             DisclosureGroup("Try a phrase", isExpanded: $showCorrectionPreview) {
@@ -2804,6 +2843,9 @@ struct TranscriptedSettingsView: View {
                                 updatePreferredTranscriptionModel(.parakeetTDTv3)
                             }
                             .disabled(preferredTranscriptionModel == .parakeetTDTv3)
+                            .help(preferredTranscriptionModel == .parakeetTDTv3
+                                ? "Parakeet is already the selected transcription model."
+                                : "")
 
                             Text("Changes apply to the next capture.")
                                 .font(.caption)
@@ -2942,6 +2984,7 @@ struct TranscriptedSettingsView: View {
                             showReclaimableCacheCleanupConfirmation = true
                         }
                         .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
                     }
                     ModelCacheMetricRow(
                         title: "FluidAudio models",
@@ -2961,6 +3004,9 @@ struct TranscriptedSettingsView: View {
                             showWhisperCacheCleanupConfirmation = true
                         }
                         .disabled(effectiveTranscriptionModel.isWhisper || modelCacheCleanupInProgress || modelCacheLoading)
+                        .help(effectiveTranscriptionModel.isWhisper
+                            ? "Switch back to Parakeet before removing the Whisper cache."
+                            : (modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : ""))
 
                         if effectiveTranscriptionModel.isWhisper {
                             Text("Switch back to Parakeet before removing the Whisper cache.")
@@ -2983,6 +3029,7 @@ struct TranscriptedSettingsView: View {
                             showModelCacheCleanupConfirmation = true
                         }
                         .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
                     } else {
                         Text("No known stale Parakeet model folders found.")
                             .font(.caption)
@@ -3006,6 +3053,7 @@ struct TranscriptedSettingsView: View {
                     refreshModelCacheSnapshot()
                 }
                 .disabled(modelCacheLoading)
+                .help(modelCacheLoading ? "Storage sizes are being scanned." : "")
             }
             .onAppear {
                 if modelCacheSnapshot == nil, !modelCacheLoading {
@@ -3017,6 +3065,7 @@ struct TranscriptedSettingsView: View {
                     removeReclaimableModelCaches()
                 }
                 Button("Cancel", role: .cancel) {}
+                    .keyboardShortcut(.defaultAction)
             } message: {
                 let includeWhisper = !effectiveTranscriptionModel.isWhisper
                 Text(includeWhisper
@@ -3028,6 +3077,7 @@ struct TranscriptedSettingsView: View {
                     removeStaleModelCaches()
                 }
                 Button("Cancel", role: .cancel) {}
+                    .keyboardShortcut(.defaultAction)
             } message: {
                 Text("Transcripted will remove only known old Parakeet folders: \(modelCacheSnapshot?.staleModelSummary ?? "none"). Active Parakeet CoreML and Whisper caches stay.")
             }
@@ -3036,6 +3086,7 @@ struct TranscriptedSettingsView: View {
                     removeWhisperModelCache()
                 }
                 Button("Cancel", role: .cancel) {}
+                    .keyboardShortcut(.defaultAction)
             } message: {
                 Text("Transcripted will remove downloaded Whisper model files. Parakeet stays available, and Whisper can download again later if you choose it.")
             }
@@ -3114,6 +3165,9 @@ struct TranscriptedSettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(isLocalSummaryModelPreparing)
+                    .help(isLocalSummaryModelPreparing
+                        ? "Finish or cancel the current model setup before switching providers."
+                        : "")
 
                     Text(localMeetingSummaryProvider.detail)
                         .font(.caption)
@@ -3928,6 +3982,7 @@ struct TranscriptedSettingsView: View {
                         title: aboutUpdateButtonTitle,
                         tone: .accent
                     ) {
+                        guard aboutUpdateButtonEnabled else { return }
                         trackSettingsAction(settingsUpdateActionID, page: .about)
                         sparkleUpdater.performUserUpdateAction(surface: "settings_about")
                     }
@@ -3983,12 +4038,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var settingsFooterActionEnabled: Bool {
-        switch sparkleUpdater.updateStatus.state {
-        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
-            return false
-        default:
-            return sparkleUpdater.updateStatus.canRunUserUpdateAction
-        }
+        updateActionEnabled(for: sparkleUpdater.updateStatus)
     }
 
     private var settingsFooterTitle: String {
@@ -4020,6 +4070,9 @@ struct TranscriptedSettingsView: View {
     }
 
     private var settingsFooterHelp: String {
+        if let captureHelp = updateCaptureSafetyHelp(for: sparkleUpdater.updateStatus) {
+            return captureHelp
+        }
         if let version = sparkleUpdater.updateStatus.availableUpdateVersion {
             if case .readyToInstall = sparkleUpdater.updateStatus.state {
                 return "Restart to install update \(version)."
@@ -4144,6 +4197,18 @@ struct TranscriptedSettingsView: View {
             return .working
         case .failed:
             return .caution
+        }
+    }
+
+    /// Whether the live transcription activity card represents in-flight work
+    /// that the user can explicitly cancel (an imported-audio copy or a running
+    /// transcription), as opposed to a finished/failed state.
+    private var homeTranscriptionActivityIsCancellable: Bool {
+        switch meetingSession.displayStatus {
+        case .gettingReady, .transcribing, .finishing:
+            return true
+        case .idle, .transcriptSaved, .failed:
+            return false
         }
     }
 
@@ -4625,7 +4690,11 @@ struct TranscriptedSettingsView: View {
         panel.directoryURL = captureLibraryURL
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        TranscriptedStoragePreferences.setCaptureLibraryURL(url)
+        guard TranscriptedStoragePreferences.setCaptureLibraryURL(url) else {
+            refreshStoragePaths()
+            showCaptureLibrarySelectionError()
+            return
+        }
         refreshStoragePaths()
         AnalyticsReporter.track(
             "settings_capture_library_changed",
@@ -4634,6 +4703,15 @@ struct TranscriptedSettingsView: View {
                 "page_id": TranscriptedSettingsPage.storage.analyticsValue,
             ]
         )
+    }
+
+    private func showCaptureLibrarySelectionError() {
+        let alert = NSAlert()
+        alert.messageText = "Transcripted can't use that folder."
+        alert.informativeText = "Choose a folder where Transcripted can create meeting and dictation files, or reset to the default capture library."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private var sortedAutoEnterAllowedBundleIDs: [String] {
@@ -4783,12 +4861,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private var aboutUpdateButtonEnabled: Bool {
-        switch sparkleUpdater.updateStatus.state {
-        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
-            return false
-        default:
-            return sparkleUpdater.updateStatus.canRunUserUpdateAction
-        }
+        updateActionEnabled(for: sparkleUpdater.updateStatus)
     }
 
     private var automaticUpdatesDetail: String {
@@ -4812,6 +4885,51 @@ struct TranscriptedSettingsView: View {
             return "view_update_progress"
         case .unknown, .readyToCheck, .noUpdateAvailable:
             return "check_updates"
+        }
+    }
+
+    private var isCaptureActiveForUpdateSafety: Bool {
+        sttRouter.isRecording
+            || sttRouter.isTranscribing
+            || meetingSession.isRecording
+            || meetingSession.hasRuntimeDiagnosticsWork
+            || meetingSession.isSpeakerReviewPending
+    }
+
+    private func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {
+        UpdateActionSafetyPolicy.canRunUserAction(
+            state: updateActionSafetyState(for: status.state),
+            sparkleCanRunUserAction: status.canRunUserUpdateAction,
+            automaticDownloadsEnabled: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled,
+            isCaptureActive: isCaptureActiveForUpdateSafety
+        )
+    }
+
+    private func updateCaptureSafetyHelp(for status: SparkleUpdaterController.UpdateStatus) -> String? {
+        UpdateActionSafetyPolicy.captureSafetyHelp(
+            state: updateActionSafetyState(for: status.state),
+            isCaptureActive: isCaptureActiveForUpdateSafety
+        )
+    }
+
+    private func updateActionSafetyState(
+        for state: SparkleUpdaterController.UpdateStatus.State
+    ) -> UpdateActionSafetyState {
+        switch state {
+        case .unknown:
+            return .unknown
+        case .readyToCheck:
+            return .readyToCheck
+        case .checking:
+            return .checking
+        case .noUpdateAvailable:
+            return .noUpdateAvailable
+        case .updateAvailable:
+            return .updateAvailable
+        case .downloading:
+            return .downloading
+        case .readyToInstall:
+            return .readyToInstall
         }
     }
 

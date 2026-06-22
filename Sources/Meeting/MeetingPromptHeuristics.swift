@@ -139,6 +139,30 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
         }
         return nil
     }
+
+    /// Attributes a "camera is on, nothing is holding the mic" signal to a meeting
+    /// provider using only the *frontmost* app, or `nil` if the frontmost app is
+    /// not a known call surface.
+    ///
+    /// The camera boolean carries no process attribution (CoreMediaIO exposes no
+    /// per-process camera API), so this is the conservative sanity gate that
+    /// distinguishes a camera-on call from a Photo Booth selfie: we attribute a
+    /// camera-only signal only when the user is actually looking at a browser or a
+    /// native conferencing app. A frontmost browser → `.googleMeet` (the generic
+    /// browser call); a frontmost native conferencing app → that provider; a
+    /// frontmost Photo Booth / QuickTime / anything else → `nil` (no prompt).
+    static func cameraCallProvider(forFrontmostBundleID frontmostBundleID: String?) -> MeetingPromptProvider? {
+        guard let frontmostBundleID else { return nil }
+        if let native = allCases.first(where: { provider in
+            provider.activeBundleIdentifiers.contains { frontmostBundleID.matchesBundleFamily($0) }
+        }) {
+            return native
+        }
+        if isBrowserBundleID(frontmostBundleID) {
+            return .googleMeet
+        }
+        return nil
+    }
 }
 
 extension String {
@@ -163,6 +187,19 @@ enum MeetingPromptReason: String, Equatable {
     // Distinct from `runtimeOnly` so analytics can tell the stronger signal
     // apart, even though both reuse the `.runtimeApp` source for backoff.
     case micInput = "mic_input"
+    // A camera turned on while a call app was frontmost and nothing was holding
+    // the mic (e.g. a camera-on, mic-muted Meet join). Same prompt + backoff as
+    // `.micInput`; distinct only so analytics can tell the camera-led signal
+    // apart. When the mic is also active the mic candidate wins, so this reason
+    // marks the camera-only case.
+    case cameraInput = "camera_input"
+
+    /// Mic- or camera-driven ad-hoc call detection (as opposed to calendar- or
+    /// runtime-app-driven). Both feed the same prompt and the same browser-call
+    /// vs calendar preference logic.
+    var isAdHocCallSignal: Bool {
+        self == .micInput || self == .cameraInput
+    }
 }
 
 enum MeetingPromptBackoffKind: String, Equatable {
@@ -396,6 +433,10 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
     let recentNativeActivity: [MeetingPromptProvider: Date]
     let runtimeSuppressedUntil: [MeetingPromptProvider: Date]
     let micActiveBundleIDs: Set<String>
+    /// Whether a camera has been confirmed in use (CameraActivityMonitor). Boolean
+    /// only — CoreMediaIO gives no process attribution — so it is attributed to a
+    /// provider via the frontmost app when nothing holds the mic.
+    let cameraInUse: Bool
     let isOwnCaptureActive: Bool
     let isMicInputPromptEnabled: Bool
 
@@ -405,6 +446,7 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
         recentNativeActivity: [MeetingPromptProvider: Date],
         runtimeSuppressedUntil: [MeetingPromptProvider: Date],
         micActiveBundleIDs: Set<String> = [],
+        cameraInUse: Bool = false,
         isOwnCaptureActive: Bool = false,
         isMicInputPromptEnabled: Bool = true
     ) {
@@ -413,6 +455,7 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
         self.recentNativeActivity = recentNativeActivity
         self.runtimeSuppressedUntil = runtimeSuppressedUntil
         self.micActiveBundleIDs = micActiveBundleIDs
+        self.cameraInUse = cameraInUse
         self.isOwnCaptureActive = isOwnCaptureActive
         self.isMicInputPromptEnabled = isMicInputPromptEnabled
     }
@@ -450,7 +493,7 @@ extension MeetingPromptDetector.Candidate {
             return "linked_event_runtime_match"
         case .calendarNearby:
             return "linked_event"
-        case .micInput, .runtimeOnly:
+        case .micInput, .cameraInput, .runtimeOnly:
             return "none"
         }
     }
@@ -459,6 +502,8 @@ extension MeetingPromptDetector.Candidate {
         switch reason {
         case .micInput:
             return "mic_active"
+        case .cameraInput:
+            return "camera_active"
         case .calendarPlusRuntimeMatch, .runtimeOnly:
             return "app_active"
         case .calendarNearby:
@@ -470,6 +515,8 @@ extension MeetingPromptDetector.Candidate {
         switch reason {
         case .micInput:
             return provider == .googleMeet ? "browser_mic" : "native_mic"
+        case .cameraInput:
+            return provider == .googleMeet ? "browser_camera" : "native_camera"
         case .runtimeOnly:
             return "native_runtime"
         case .calendarPlusRuntimeMatch:
@@ -612,14 +659,36 @@ enum MeetingPromptSyntheticEvaluator {
     ) -> [MeetingPromptScoredCandidate] {
         guard micInputSuppression(from: snapshot, now: now) == nil else { return [] }
 
-        var seenProviders: Set<MeetingPromptProvider> = []
-        return micInputProviders(from: snapshot).compactMap { provider in
-            guard seenProviders.insert(provider).inserted else { return nil }
-            if let suppressedUntil = snapshot.runtimeSuppressedUntil[provider], suppressedUntil > now {
+        return callSignals(from: snapshot).compactMap { signal in
+            if let suppressedUntil = snapshot.runtimeSuppressedUntil[signal.provider], suppressedUntil > now {
                 return nil
             }
-            return micInputCandidate(for: provider, now: now)
+            return micInputCandidate(for: signal.provider, reason: signal.reason, now: now)
         }
+    }
+
+    /// The ad-hoc call signals from this snapshot, de-duped to one entry per
+    /// provider so mic-and-camera on the same call surface a single prompt. Mic
+    /// activity is the primary signal (`.micInput`). The camera is only a
+    /// *standalone* signal when **nothing holds the mic** — the camera-on,
+    /// mic-muted join — because the camera boolean has no process attribution, so
+    /// attributing it to the frontmost app while the mic already identifies a call
+    /// could point at a different (wrong) app or double-prompt. When the mic is
+    /// active it already names the call and the camera adds nothing.
+    static func callSignals(
+        from snapshot: MeetingPromptRuntimeSnapshot
+    ) -> [(provider: MeetingPromptProvider, reason: MeetingPromptReason)] {
+        let micProviders = micInputProviders(from: snapshot)
+        if !micProviders.isEmpty {
+            return micProviders.map { ($0, .micInput) }
+        }
+
+        if snapshot.cameraInUse,
+           let provider = MeetingPromptProvider.cameraCallProvider(forFrontmostBundleID: snapshot.frontmostBundleID) {
+            return [(provider, .cameraInput)]
+        }
+
+        return []
     }
 
     private static func micInputProviders(
@@ -633,7 +702,7 @@ enum MeetingPromptSyntheticEvaluator {
         from snapshot: MeetingPromptRuntimeSnapshot,
         now: Date
     ) -> MeetingPromptSyntheticSuppressionReason? {
-        let providers = micInputProviders(from: snapshot)
+        let providers = callSignals(from: snapshot).map(\.provider)
         guard !providers.isEmpty else { return nil }
 
         if !snapshot.isMicInputPromptEnabled {
@@ -653,6 +722,7 @@ enum MeetingPromptSyntheticEvaluator {
 
     private static func micInputCandidate(
         for provider: MeetingPromptProvider,
+        reason: MeetingPromptReason,
         now: Date
     ) -> MeetingPromptScoredCandidate {
         let title = provider == .googleMeet
@@ -666,7 +736,7 @@ enum MeetingPromptSyntheticEvaluator {
                 title: presentation.title,
                 detail: presentation.detail,
                 provider: provider,
-                reason: .micInput,
+                reason: reason,
                 source: .runtimeApp,
                 startDate: now,
                 endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
@@ -684,7 +754,7 @@ enum MeetingPromptSyntheticEvaluator {
         now: Date
     ) -> MeetingPromptScoredCandidate? {
         guard let first = sortedCandidates.first else { return nil }
-        guard first.candidate.reason == .micInput else { return first }
+        guard first.candidate.reason.isAdHocCallSignal else { return first }
 
         let calendarCandidate = sortedCandidates.first {
             $0.candidate.source == .calendarEvent &&

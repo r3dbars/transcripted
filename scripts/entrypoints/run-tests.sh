@@ -282,6 +282,7 @@ APP_SOURCES=(
     "Sources/Support/DictationOverlayPresentationPreferences.swift"
     "Sources/Support/DictationFillerCleanupPolicy.swift"
     "Sources/Support/ClipboardRestoringTextPaster.swift"
+    "Sources/Accessibility/AccessibilityBridge.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationStopFinalizationPolicy.swift"
@@ -309,6 +310,8 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingPromptTelemetry.swift"
     "Sources/Meeting/MicActivityMonitor.swift"
+    "Sources/Meeting/CameraActivityMonitor.swift"
+    "Sources/Meeting/SustainedActivityConfirmer.swift"
     "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingAudioStorageManager.swift"
     "Sources/Meeting/MeetingRecordingCleanup.swift"
@@ -331,6 +334,7 @@ APP_SOURCES=(
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/JSONLWriter.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
+    "Sources/Observability/UpdateActionSafetyPolicy.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
     "Sources/Observability/ObservabilityLogRotation.swift"
     "Sources/Observability/PayloadSanitizationCore.swift"
@@ -362,11 +366,13 @@ APP_SOURCES=(
     "Sources/UI/Shared/SupportDiagnosticsBundle.swift"
     "Sources/UI/Shared/FirstRunExperience.swift"
     "Sources/UI/Shared/AppSoundPlayer.swift"
+    "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/SettingsContentLayoutPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
     "Sources/UI/Settings/HomeRootAlertPolicy.swift"
+    "Sources/UI/Settings/HomeScanWarningPolicy.swift"
     "Sources/UI/Settings/HomeCanvasGreeting.swift"
     "Sources/UI/Shared/HomeMeetingDeletion.swift"
     "Sources/UI/Shared/OwnFileResolver.swift"
@@ -445,6 +451,7 @@ SWIFTC_ARGS+=(
     -framework ApplicationServices
     -framework Carbon
     -framework CoreMedia
+    -framework CoreMediaIO
     -framework EventKit
     -framework FoundationModels
     -framework Network

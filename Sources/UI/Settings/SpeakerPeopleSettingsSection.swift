@@ -887,6 +887,7 @@ private struct SpeakerVoiceToNameRow: View {
                 deleteVoice()
             }
             Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
         } message: {
             Text(SpeakerVoiceRowMenuPolicy.deleteConfirmationMessage)
         }
@@ -1043,6 +1044,7 @@ private struct SpeakerPlayClipButton: View {
         .disabled(!hasClip)
         .help(SpeakerClipPlaybackPresentation.helpText(hasClip: hasClip, isPlaying: isPlaying))
         .accessibilityLabel(SpeakerClipPlaybackPresentation.accessibilityLabel(isPlaying: isPlaying))
+        .accessibilityIdentifier("transcripted.speakers.voice-to-name.play")
     }
 
     private var isActive: Bool {
@@ -1194,6 +1196,7 @@ private struct SpeakerSearchRow: View {
             .buttonStyle(.plain)
             .help("Refresh the speaker list")
             .accessibilityLabel("Refresh speakers")
+            .accessibilityIdentifier("transcripted.speakers.refresh")
         }
     }
 }
@@ -1251,6 +1254,7 @@ private struct SpeakerPersonRow: View {
                     .buttonStyle(.plain)
                     .help(isPlaying ? "Pause this voice" : "Play this voice")
                     .accessibilityLabel(isPlaying ? "Pause voice sample" : "Play voice sample")
+                    .accessibilityIdentifier("transcripted.speakers.person.play")
                 }
 
                 rowMenu
@@ -1266,6 +1270,7 @@ private struct SpeakerPersonRow: View {
                 model.delete(profile: profile)
             }
             Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
         } message: {
             Text("This removes the saved voice profile and sample clip. Past transcripts stay unchanged.")
         }
@@ -1320,6 +1325,7 @@ private struct SpeakerPersonRow: View {
         .fixedSize()
         .help("Rename, merge, or delete this speaker")
         .accessibilityLabel("Speaker actions")
+        .accessibilityIdentifier("transcripted.speakers.person.menu")
     }
 
     private var displayName: String {

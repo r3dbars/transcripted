@@ -129,7 +129,21 @@ func testTranscriptedStoragePaths() {
             .appendingPathComponent("TranscriptedStoragePathsTests-custom-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: customRoot) }
 
-        TranscriptedStoragePreferences.setCaptureLibraryURL(customRoot)
+        let persisted = TranscriptedStoragePreferences.setCaptureLibraryURL(customRoot)
+
+        assertTrue(persisted, "safe custom capture-library folders should persist")
+        assertTrue(
+            FileManager.default.fileExists(atPath: customRoot.path),
+            "setting a custom capture library should create the selected root immediately"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: customRoot.appendingPathComponent("meetings", isDirectory: true).path),
+            "setting a custom capture library should prepare the meetings folder before writers use it"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: customRoot.appendingPathComponent("dictations", isDirectory: true).path),
+            "setting a custom capture library should prepare the dictations folder before writers use it"
+        )
 
         let captureLibrary = FileManager.default.transcriptedCaptureLibraryDir
         let meetings = FileManager.default.meetingSupportDir
@@ -211,6 +225,69 @@ func testTranscriptedStoragePaths() {
             FileManager.default.dictationSupportDir,
             FileManager.default.transcriptedDefaultCaptureLibraryDir.appendingPathComponent("dictations", isDirectory: true),
             "dictation storage should also stay under the default root when preferences are tampered with"
+        )
+    }
+
+    runSuite("Transcripted capture library helpers — reject file-shaped capture folders") {
+        let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        defer {
+            restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        }
+
+        let fileURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("TranscriptedStoragePathsTests-file-root-\(UUID().uuidString)", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        FileManager.default.createFile(atPath: fileURL.path, contents: Data("not a directory".utf8))
+
+        let persisted = TranscriptedStoragePreferences.setCaptureLibraryURL(fileURL)
+
+        assertFalse(persisted, "file-shaped capture-library roots should be rejected before persistence")
+        assertEqual(
+            UserDefaults.standard.string(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey),
+            nil,
+            "unusable capture-library paths should not stay in preferences"
+        )
+        assertEqual(
+            FileManager.default.transcriptedCaptureLibraryDir,
+            FileManager.default.transcriptedDefaultCaptureLibraryDir,
+            "storage should fall back to the default capture root after rejecting an unusable folder"
+        )
+    }
+
+    runSuite("Transcripted capture library helpers — preserve current folder after failed replacement") {
+        let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        defer {
+            restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        }
+
+        let existingRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("TranscriptedStoragePathsTests-existing-root-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("TranscriptedStoragePathsTests-replacement-file-root-\(UUID().uuidString)", isDirectory: false)
+        defer {
+            try? FileManager.default.removeItem(at: existingRoot)
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+
+        assertTrue(
+            TranscriptedStoragePreferences.setCaptureLibraryURL(existingRoot),
+            "test setup should persist the existing safe capture library"
+        )
+        FileManager.default.createFile(atPath: fileURL.path, contents: Data("not a directory".utf8))
+
+        let persisted = TranscriptedStoragePreferences.setCaptureLibraryURL(fileURL)
+
+        assertFalse(persisted, "unusable replacement folders should be rejected")
+        assertEqual(
+            UserDefaults.standard.string(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey),
+            existingRoot.standardizedFileURL.path,
+            "rejecting a replacement folder should preserve the current capture-library preference"
+        )
+        assertEqual(
+            FileManager.default.transcriptedCaptureLibraryDir,
+            existingRoot.standardizedFileURL,
+            "storage should keep using the previous capture library after a rejected replacement"
         )
     }
 }

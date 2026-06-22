@@ -32,6 +32,7 @@ struct PermissionsOnboardingView: View {
     static let preferredSize = NSSize(width: 960, height: 680)
     private static let defaultDictationShortcut = "Right Option"
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var currentStepIndex = 0
     @State private var navigationDirection: OnboardingNavigationDirection = .forward
     @State private var micGranted = false
@@ -289,7 +290,7 @@ struct PermissionsOnboardingView: View {
             SplitStage {
                 Kicker("Calendar")
                 Headline(primary: "Want meeting\nreminders?", size: 42, alignment: .leading)
-                BodyCopy("Transcripted can look at your calendar and offer a quiet prompt when a call is about to start.")
+                BodyCopy("Transcripted can look at your calendar and offer a quiet prompt when a call is about to start. Spontaneous calls — like a Google Meet with no invite — are detected automatically too, and you can turn that off anytime in Settings.")
                 ToggleCard(
                     title: "Meeting reminders",
                     detail: "Use read-only calendar access to notice upcoming calls.",
@@ -440,7 +441,7 @@ struct PermissionsOnboardingView: View {
 
     private func goBack() {
         guard currentStepIndex > 0 else { return }
-        withAnimation(.easeInOut(duration: 0.24)) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
             navigationDirection = .backward
             currentStepIndex -= 1
         }
@@ -448,7 +449,7 @@ struct PermissionsOnboardingView: View {
 
     private func goNext() {
         guard currentStepIndex < steps.count - 1 else { return }
-        withAnimation(.easeInOut(duration: 0.24)) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
             navigationDirection = .forward
             currentStepIndex += 1
         }
@@ -892,6 +893,7 @@ private enum OnboardingTheme {
 }
 
 private struct OnboardingWindowShell<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let current: Int
     let total: Int
     let direction: OnboardingNavigationDirection
@@ -945,7 +947,7 @@ private struct OnboardingWindowShell<Content: View>: View {
 
                 ZStack {
                     content
-                        .transition(direction.transition)
+                        .transition(reduceMotion ? .opacity : direction.transition)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
@@ -1132,6 +1134,10 @@ private struct Headline: View {
     var emphasis: String?
     var size: CGFloat = 58
     var alignment: TextAlignment = .center
+    // Cap the line measure so long headings wrap onto balanced lines instead of
+    // running nearly edge-to-edge (CenterStage is 800pt, SplitStage's column is
+    // full width) and leaving an orphan word on the last line.
+    var measure: CGFloat = 640
 
     var body: some View {
         VStack(alignment: alignment == .leading ? .leading : .center, spacing: 2) {
@@ -1147,6 +1153,7 @@ private struct Headline: View {
         .multilineTextAlignment(alignment)
         .lineLimit(nil)
         .minimumScaleFactor(0.92)
+        .frame(maxWidth: measure, alignment: alignment == .leading ? .leading : .center)
         .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -1195,11 +1202,13 @@ private struct BodyCopy: View {
 }
 
 private struct HeroWaveCircle: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let count = 26
 
     var body: some View {
         TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
+            // Reduce Motion: freeze the wave at a fixed phase instead of looping.
+            let t = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
             ZStack {
                 Circle()
                     .fill(OnboardingTheme.ink)

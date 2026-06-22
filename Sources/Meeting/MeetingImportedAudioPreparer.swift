@@ -64,6 +64,10 @@ enum MeetingImportedAudioPreparer {
         from sourceURL: URL,
         scratchDirectory: URL = MeetingStoragePaths.recordingsScratch
     ) async throws -> PreparedImportedMeetingAudio {
+        // Bail before doing any work if the import was already cancelled, so an
+        // explicit cancel never even starts copying.
+        try Task.checkCancellation()
+
         let fileManager = FileManager.default
         fileManager.ensurePrivateDirectory(
             at: scratchDirectory,
@@ -119,8 +123,16 @@ enum MeetingImportedAudioPreparer {
         )
 
         do {
-            try fileManager.copyItem(at: resolvedSourceURL, to: destinationURL)
+            try copyInterruptibly(
+                from: resolvedSourceURL,
+                to: destinationURL,
+                fileManager: fileManager
+            )
             fileManager.restrictFileToOwnerOnly(at: destinationURL)
+        } catch is CancellationError {
+            // copyInterruptibly already removed the partial copy; surface the
+            // cancellation so the caller can leave no ambiguous artifact behind.
+            throw CancellationError()
         } catch {
             try? fileManager.removeItem(at: destinationURL)
             throw MeetingImportedAudioPreparationError.copyFailed
@@ -365,6 +377,47 @@ enum MeetingImportedAudioPreparer {
         }
 
         return nil
+    }
+
+    /// Streams the source file into scratch in chunks so an explicit cancel can
+    /// interrupt a large import between chunks instead of blocking inside one
+    /// atomic `copyItem` call. Any partial destination is removed before this
+    /// throws — on cancellation or on a copy error — so a cancelled or failed
+    /// import never leaves an ambiguous half-written file behind.
+    static func copyInterruptibly(
+        from sourceURL: URL,
+        to destinationURL: URL,
+        fileManager: FileManager,
+        chunkSize: Int = 1 << 20
+    ) throws {
+        let readHandle = try FileHandle(forReadingFrom: sourceURL)
+        defer { try? readHandle.close() }
+
+        guard fileManager.createFile(atPath: destinationURL.path, contents: nil) else {
+            throw MeetingImportedAudioPreparationError.copyFailed
+        }
+
+        let writeHandle: FileHandle
+        do {
+            writeHandle = try FileHandle(forWritingTo: destinationURL)
+        } catch {
+            try? fileManager.removeItem(at: destinationURL)
+            throw error
+        }
+
+        do {
+            while true {
+                try Task.checkCancellation()
+                let chunk = try readHandle.read(upToCount: chunkSize) ?? Data()
+                if chunk.isEmpty { break }
+                try writeHandle.write(contentsOf: chunk)
+            }
+            try writeHandle.close()
+        } catch {
+            try? writeHandle.close()
+            try? fileManager.removeItem(at: destinationURL)
+            throw error
+        }
     }
 
     private static func uniqueScratchURL(

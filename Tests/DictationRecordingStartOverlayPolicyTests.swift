@@ -254,4 +254,36 @@ func testDictationRecordingStartOverlayPolicy() {
         assertTrue(plan.cancelStreamingTask, "idle streaming tasks can still be cancelled")
         assertFalse(plan.cancelSpeechEngine, "idle overlay cleanup should not reset the speech engine")
     }
+
+    runSuite("DictationStartAvailabilityPolicy blocks dictation during meeting work") {
+        assertEqual(
+            DictationStartAvailabilityPolicy.unavailableReason(
+                hasMeetingWork: true,
+                isSpeakerReviewPending: false
+            ),
+            DictationStartAvailabilityPolicy.meetingWorkMessage,
+            "dictation should not start while a meeting is recording, saving, or transcribing"
+        )
+    }
+
+    runSuite("DictationStartAvailabilityPolicy blocks dictation during speaker review") {
+        assertEqual(
+            DictationStartAvailabilityPolicy.unavailableReason(
+                hasMeetingWork: false,
+                isSpeakerReviewPending: true
+            ),
+            DictationStartAvailabilityPolicy.speakerReviewMessage,
+            "dictation should wait for speaker review because it owns meeting post-processing UI"
+        )
+    }
+
+    runSuite("DictationStartAvailabilityPolicy allows dictation when meeting work is idle") {
+        assertNil(
+            DictationStartAvailabilityPolicy.unavailableReason(
+                hasMeetingWork: false,
+                isSpeakerReviewPending: false
+            ),
+            "idle meeting state should not block dictation"
+        )
+    }
 }

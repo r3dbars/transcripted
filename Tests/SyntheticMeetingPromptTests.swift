@@ -10,6 +10,7 @@ private func syntheticRuntimeSnapshot(
     recentNativeActivity: [MeetingPromptProvider: Date] = [:],
     runtimeSuppressedUntil: [MeetingPromptProvider: Date] = [:],
     micActiveBundleIDs: Set<String> = [],
+    cameraInUse: Bool = false,
     isOwnCaptureActive: Bool = false,
     isMicInputPromptEnabled: Bool = true
 ) -> MeetingPromptRuntimeSnapshot {
@@ -19,6 +20,7 @@ private func syntheticRuntimeSnapshot(
         recentNativeActivity: recentNativeActivity,
         runtimeSuppressedUntil: runtimeSuppressedUntil,
         micActiveBundleIDs: micActiveBundleIDs,
+        cameraInUse: cameraInUse,
         isOwnCaptureActive: isOwnCaptureActive,
         isMicInputPromptEnabled: isMicInputPromptEnabled
     )
@@ -579,5 +581,98 @@ func testSyntheticMeetingPrompts() {
 
         assertFalse(result.shouldPrompt, "valid candidates should stay hidden while recording")
         assertEqual(result.suppressionReason, .presentationBlocked, "busy presentation state should be visible to tests")
+    }
+
+    runSuite("SyntheticMeetingPrompts — camera on with a frontmost browser prompts an ad-hoc call even with the mic muted") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "com.google.Chrome",
+                cameraInUse: true
+            )
+        )
+        assertTrue(result.shouldPrompt, "a camera-on call in a browser should prompt even when nothing holds the mic")
+        assertEqual(result.candidate?.id, "mic:googleMeet", "a camera-attributed browser call reuses the stable browser-call id")
+        assertEqual(result.candidate?.reason, .cameraInput, "a camera-led signal should record the distinct camera-input reason")
+    }
+
+    runSuite("SyntheticMeetingPrompts — camera on while Photo Booth is frontmost stays quiet") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "com.apple.PhotoBooth",
+                cameraInUse: true
+            )
+        )
+        assertFalse(result.shouldPrompt, "a camera-on selfie with no call app frontmost is not a meeting")
+        assertEqual(result.suppressionReason, .noCandidate, "no call app means no candidate at all")
+    }
+
+    runSuite("SyntheticMeetingPrompts — mic and camera on the same browser call raise exactly one prompt") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "com.google.Chrome",
+                micActiveBundleIDs: ["com.google.Chrome.helper"],
+                cameraInUse: true
+            )
+        )
+        assertTrue(result.shouldPrompt, "a normal video call should still prompt")
+        assertEqual(result.candidate?.id, "mic:googleMeet", "mic and camera on one call collapse to a single candidate id")
+        assertEqual(result.candidate?.reason, .micInput, "when the mic is also active, the mic signal wins so the call is not double-counted")
+    }
+
+    runSuite("SyntheticMeetingPrompts — an active mic call is never overridden by camera attribution to a different frontmost app") {
+        // The mic identifies a browser call, but a *different* conferencing app is
+        // frontmost. The camera boolean has no attribution, so it must NOT invent a
+        // second (wrong) candidate — the live mic call wins outright.
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "com.microsoft.teams",
+                micActiveBundleIDs: ["com.google.Chrome.helper"],
+                cameraInUse: true
+            )
+        )
+        assertTrue(result.shouldPrompt, "the live mic call should still prompt")
+        assertEqual(result.candidate?.id, "mic:googleMeet", "the mic-attributed browser call wins; the camera must not retarget to the frontmost Teams")
+        assertEqual(result.candidate?.reason, .micInput, "an active mic call keeps the mic reason, not a camera misattribution")
+    }
+
+    runSuite("SyntheticMeetingPrompts — native camera call attributes to its own provider") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "us.zoom.xos",
+                cameraInUse: true
+            )
+        )
+        assertTrue(result.shouldPrompt, "a camera-on native Zoom call should prompt")
+        assertEqual(result.candidate?.id, "mic:zoom", "a native camera call attributes to its own provider")
+        assertEqual(result.candidate?.reason, .cameraInput, "camera-led native call keeps the camera-input reason")
+    }
+
+    runSuite("SyntheticMeetingPrompts — camera signal respects own-capture and the auto-detect toggle") {
+        let recording = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "com.google.Chrome",
+                cameraInUse: true,
+                isOwnCaptureActive: true
+            )
+        )
+        assertFalse(recording.shouldPrompt, "never prompt for a camera call while Transcripted itself records")
+        assertEqual(recording.suppressionReason, .ownCaptureActive, "own-capture should gate the camera path too")
+
+        let disabled = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "com.google.Chrome",
+                cameraInUse: true,
+                isMicInputPromptEnabled: false
+            )
+        )
+        assertFalse(disabled.shouldPrompt, "a disabled auto-detect toggle should suppress the camera path")
+        assertEqual(disabled.suppressionReason, .micInputDisabled, "the disabled gate covers mic and camera signals")
     }
 }

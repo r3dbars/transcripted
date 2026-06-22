@@ -12,6 +12,7 @@ OUT_ROOT="${TRANSCRIPTED_QA_BENCH_OUT:-/tmp/transcripted-qa-bench}"
 RUN_ID="${TRANSCRIPTED_QA_BENCH_RUN_ID:-qa-$(date +%Y%m%d-%H%M%S)}"
 SKIP_BUILD=0
 STRICT_ARTIFACTS=0
+GEMMA_EXECUTE="${TRANSCRIPTED_QA_GEMMA_EXECUTE:-0}"
 LIVE_DURATION="${TRANSCRIPTED_QA_LIVE_DURATION:-2.0}"
 CORPUS_ROOT="${TRANSCRIPTED_QA_CORPUS_ROOT:-${HOME}/Downloads/meeting-corpus}"
 CORPUS_IDS="${TRANSCRIPTED_QA_CORPUS_IDS:-}"
@@ -53,6 +54,8 @@ Modes:
 Options:
   --skip-build          Do not run build.sh in quick/deep/live modes.
   --strict-artifacts    Make live artifact validation blocking in deep/full/live mode.
+  --gemma-execute       Run real Gemma/MLX proof where the bench has local inputs.
+                       Equivalent to TRANSCRIPTED_QA_GEMMA_EXECUTE=1.
   --duration seconds    Live capture duration. Default: 2.0
   --corpus-root path    Meeting corpus root. Default: ~/Downloads/meeting-corpus
   --corpus-ids ids      Comma-separated meeting ids to validate.
@@ -87,6 +90,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --strict-artifacts)
       STRICT_ARTIFACTS=1
+      shift
+      ;;
+    --gemma-execute)
+      GEMMA_EXECUTE=1
       shift
       ;;
     --duration)
@@ -673,8 +680,13 @@ run_quick() {
   run_step "02-fast-tests" "Fast tests" "yes" "bash run-tests.sh"
   run_step "03-e2e-smoke" "Deterministic E2E smoke" "yes" "bash run-e2e-smoke.sh"
   run_pasteback_synthetic
-  run_step "05-local-summary-fixture" "Local Gemma summary fixture smoke" "yes" \
-    "bash scripts/ops/run-local-summary-fixture.sh"
+  if [[ "${GEMMA_EXECUTE}" == "1" ]]; then
+    run_step "05-local-summary-fixture" "Real Gemma summary fixture smoke" "yes" \
+      "bash scripts/ops/run-local-summary-fixture.sh --real-gemma"
+  else
+    run_step "05-local-summary-fixture" "Local Gemma summary fixture smoke" "yes" \
+      "bash scripts/ops/run-local-summary-fixture.sh"
+  fi
 }
 
 run_pasteback_synthetic() {
@@ -785,8 +797,15 @@ run_gemma_summary_plan() {
     return "${candidate_status}"
   fi
 
-  run_step "61-gemma-summary-plan" "Local Gemma summary dry-run plan" "no" \
-    "python3 scripts/ops/local-gemma-summary-autoeval.py --out-root $(shell_quote "${OUT}/local-gemma-summary") --run-id plan --limit 1 --include-longest 1 --sample-count 0 --repeats 1"
+  local execute_arg=""
+  local title="Local Gemma summary dry-run plan"
+  if [[ "${GEMMA_EXECUTE}" == "1" ]]; then
+    execute_arg=" --execute"
+    title="Local Gemma summary executable proof"
+  fi
+
+  run_step "61-gemma-summary-plan" "${title}" "no" \
+    "python3 scripts/ops/local-gemma-summary-autoeval.py --out-root $(shell_quote "${OUT}/local-gemma-summary") --run-id plan --limit 1 --include-longest 1 --sample-count 0 --repeats 1${execute_arg}"
 }
 
 run_full_tail() {

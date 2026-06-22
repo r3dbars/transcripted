@@ -818,6 +818,7 @@ struct LocalGemmaSummaryRuntime: @unchecked Sendable {
             "HF_HUB_CACHE",
             "TRANSFORMERS_CACHE",
             "UV_CACHE_DIR",
+            "UV_PYTHON",
         ]
         var sanitized: [String: String] = [:]
         for key in allowedParentKeys {

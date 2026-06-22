@@ -178,6 +178,8 @@ final class LiveMeetingPreviewServer {
             )
         }
 
+        let includeBody = request.method != "HEAD"
+
         if request.method == "OPTIONS" {
             return httpResponse(status: "204 No Content", contentType: "text/plain; charset=utf-8", body: Data())
         }
@@ -186,7 +188,8 @@ final class LiveMeetingPreviewServer {
             return httpResponse(
                 status: "405 Method Not Allowed",
                 contentType: "text/plain; charset=utf-8",
-                body: Data("Method not allowed".utf8)
+                body: Data("Method not allowed".utf8),
+                includeBody: includeBody
             )
         }
 
@@ -195,44 +198,67 @@ final class LiveMeetingPreviewServer {
             return httpResponse(
                 status: "401 Unauthorized",
                 contentType: "text/plain; charset=utf-8",
-                body: Data("Unauthorized".utf8)
+                body: Data("Unauthorized".utf8),
+                includeBody: includeBody
             )
         }
 
         switch route {
         case "/", LiveMeetingCodexSession.previewServerPath:
-            return fileResponse(filename: LiveMeetingCodexSession.previewFilename, contentType: "text/html; charset=utf-8")
+            return fileResponse(
+                filename: LiveMeetingCodexSession.previewFilename,
+                contentType: "text/html; charset=utf-8",
+                includeBody: includeBody
+            )
         case "/live-transcript", "/live_transcript.md":
-            return fileResponse(filename: LiveMeetingCodexSession.liveTranscriptFilename, contentType: "text/markdown; charset=utf-8")
+            return fileResponse(
+                filename: LiveMeetingCodexSession.liveTranscriptFilename,
+                contentType: "text/markdown; charset=utf-8",
+                includeBody: includeBody
+            )
         case "/handoff", "/agent-handoff.md", "/codex-handoff.md":
-            return fileResponse(filename: LiveMeetingCodexSession.handoffFilename, contentType: "text/markdown; charset=utf-8")
+            return fileResponse(
+                filename: LiveMeetingCodexSession.handoffFilename,
+                contentType: "text/markdown; charset=utf-8",
+                includeBody: includeBody
+            )
         case "/watcher-state", "/agent-watcher-state.json", "/codex-watcher-state.json":
-            return fileResponse(filename: LiveMeetingCodexSession.watcherStateFilename, contentType: "application/json; charset=utf-8")
+            return fileResponse(
+                filename: LiveMeetingCodexSession.watcherStateFilename,
+                contentType: "application/json; charset=utf-8",
+                includeBody: includeBody
+            )
         case "/state", "/state.json":
-            return fileResponse(filename: LiveMeetingCodexSession.stateFilename, contentType: "application/json; charset=utf-8")
+            return fileResponse(
+                filename: LiveMeetingCodexSession.stateFilename,
+                contentType: "application/json; charset=utf-8",
+                includeBody: includeBody
+            )
         case "/favicon.ico":
             return httpResponse(status: "204 No Content", contentType: "image/x-icon", body: Data())
         default:
             return httpResponse(
                 status: "404 Not Found",
                 contentType: "text/plain; charset=utf-8",
-                body: Data("Not found".utf8)
+                body: Data("Not found".utf8),
+                includeBody: includeBody
             )
         }
     }
 
-    private func fileResponse(filename: String, contentType: String) -> Data {
+    private func fileResponse(filename: String, contentType: String, includeBody: Bool = true) -> Data {
         let workspaceURL = currentWorkspaceURL()
         let fileURL = workspaceURL.appendingPathComponent(filename, isDirectory: false)
         guard let data = try? Data(contentsOf: fileURL) else {
             return httpResponse(
                 status: "503 Service Unavailable",
                 contentType: "text/plain; charset=utf-8",
-                body: Data("Live preview is not ready yet.".utf8)
+                body: Data("Live preview is not ready yet.".utf8),
+                includeBody: includeBody
             )
         }
 
-        return httpResponse(status: "200 OK", contentType: contentType, body: data)
+        return httpResponse(status: "200 OK", contentType: contentType, body: data, includeBody: includeBody)
     }
 
     private func currentWorkspaceURL() -> URL {
@@ -345,7 +371,7 @@ final class LiveMeetingPreviewServer {
         return components.url ?? LiveMeetingCodexSession.authenticatedPreviewServerURL(token: token)
     }
 
-    private func httpResponse(status: String, contentType: String, body: Data) -> Data {
+    private func httpResponse(status: String, contentType: String, body: Data, includeBody: Bool = true) -> Data {
         var header = "HTTP/1.1 \(status)\r\n"
         header += "Content-Type: \(contentType)\r\n"
         header += "Content-Length: \(body.count)\r\n"
@@ -354,7 +380,9 @@ final class LiveMeetingPreviewServer {
         header += "\r\n"
 
         var response = Data(header.utf8)
-        response.append(body)
+        if includeBody {
+            response.append(body)
+        }
         return response
     }
 }

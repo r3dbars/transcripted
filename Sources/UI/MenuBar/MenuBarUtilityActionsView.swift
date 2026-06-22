@@ -140,6 +140,12 @@ final class MenuBarUtilityActionsView: NSView {
             .reduce(0, +) + CGFloat(rowSpacing)
     }
 
+    /// Visible rows in keyboard Tab order, matching
+    /// `FocusOrderContract.menuBarUtilityOrder`.
+    var keyboardFocusableRows: [MenuBarActionRowView] {
+        visibleRows
+    }
+
     private var allRows: [MenuBarActionRowView] {
         [connectAgentRow, feedbackRow, updatesRow, settingsRow, quitRow]
     }
