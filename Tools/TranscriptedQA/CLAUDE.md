@@ -1,6 +1,6 @@
 # TranscriptedQA - QA Testing CLI Tool
 
-QA testing suite for Transcripted. 30 Swift files total: `Package.swift`, 25 files under `Sources/TranscriptedQA/`, and 4 test files under `Tests/TranscriptedQATests/`.
+QA testing suite for Transcripted. 31 Swift files total: `Package.swift`, 26 files under `Sources/TranscriptedQA/`, and 4 test files under `Tests/TranscriptedQATests/`.
 
 The current package is intentionally small:
 
@@ -27,7 +27,7 @@ The current package is intentionally small:
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
 | `UISmoke.swift` | Launch a built app and validate onboarding, menu bar, Home, Settings, and General navigation through macOS Accessibility |
-| `ValidateAll.swift` | Run all validators: transcripts, DB, index, logs, artifacts |
+| `ValidateAll.swift` | Run all validators: transcripts, dictations, DB, index, logs, artifacts |
 | `ValidateArtifacts.swift` | Check optional legacy JSON artifacts, YAML frontmatter, speaker clips |
 | `ValidateDatabase.swift` | SpeakerDB and StatsDB integrity, schema validation, corruption check |
 | `ValidateIndex.swift` | Legacy transcripted.json consistency and orphan-file checks |
@@ -40,10 +40,11 @@ The current package is intentionally small:
 |------|---------|
 | `TestDataGenerator.swift` | Shared fixture builder used by `GenerateFixtures`, `RoundTrip`, and `StressTest` |
 
-### Validators/ (7 files)
+### Validators/ (8 files)
 
 | File | Purpose |
 |------|---------|
+| `DictationValidator.swift` | Dictation day markdown evidence and metadata checks |
 | `HealthChecker.swift` | System health: disk space, model files, DB existence |
 | `IndexValidator.swift` | Legacy index consistency and orphan-file checks |
 | `JSONSidecarValidator.swift` | YAML frontmatter and agent JSON structure |
@@ -97,7 +98,7 @@ swift run transcripted-qa packaged-app-smoke --app ../../build/Transcripted.app 
 swift run transcripted-qa ui-smoke --app ../../build/Transcripted.app
 
 # Override nonstandard locations when captures are relocated
-swift run transcripted-qa validate-all --path /path/to/meetings --state-dir /path/to/state --log-path /path/to/app.jsonl
+swift run transcripted-qa validate-all --path /path/to/meetings --dictations-path /path/to/dictations --state-dir /path/to/state --log-path /path/to/app.jsonl
 
 # Test data generation
 swift run transcripted-qa generate-fixtures --output /tmp/my-test-data
@@ -141,6 +142,6 @@ For agent and automation use, the JSON form also includes:
 - SQLite readers open read-only connections with no internal queueing — callers own thread safety
 - Validation results are structured for programmatic consumption and can be emitted as aligned text or pretty JSON via `ValidationReport`
 - Error messages are human-readable for CLI output
-- Defaults now prefer `~/Library/Application Support/Transcripted/captures/meetings`, `~/Library/Application Support/Transcripted/state/`, and `~/Library/Application Support/Transcripted/logs/app.jsonl`
+- Defaults now prefer `~/Library/Application Support/Transcripted/captures/meetings`, `~/Library/Application Support/Transcripted/captures/dictations`, `~/Library/Application Support/Transcripted/state/`, and `~/Library/Application Support/Transcripted/logs/app.jsonl`
 - If current Transcripted paths are missing, the resolver falls back to legacy Draft exports and then `~/Documents/Transcripted/`
-- `--path` overrides the meetings capture directory only; use `--state-dir` and `--log-path` when validating unusual layouts
+- `--path` overrides the meetings capture directory only; use `--dictations-path`, `--state-dir`, and `--log-path` when validating unusual layouts

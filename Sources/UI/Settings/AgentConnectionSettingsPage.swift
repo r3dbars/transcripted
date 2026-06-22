@@ -50,6 +50,7 @@ struct AgentConnectionSettingsPage: View {
             liveMeetingSection
             advancedSection
         }
+        .accessibilityIdentifier("transcripted.settings.page.agent")
         .onAppear(perform: refreshAgentStates)
     }
 
