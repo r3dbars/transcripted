@@ -2672,6 +2672,8 @@ struct TranscriptedSettingsView: View {
                     normalFill: Color.accentColor.opacity(0.08),
                     normalStroke: Color.accentColor.opacity(0.16)
                 ))
+                .frame(minHeight: 40)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 Spacer()
 
