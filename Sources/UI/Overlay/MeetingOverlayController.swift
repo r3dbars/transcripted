@@ -346,6 +346,10 @@ final class MeetingOverlayRootView: NSView {
         transcriptDrawer.flashCopyFeedback()
     }
 
+    func flashTranscriptBrowserOpenFailure() {
+        transcriptDrawer.flashBrowserOpenFailure()
+    }
+
     override func layout() {
         super.layout()
         if currentState == .preparing {
@@ -2273,8 +2277,11 @@ final class MeetingOverlayController: NSObject {
                     agentTarget: .localAgent,
                     surface: .meetingOverlay
                 )
+            } else {
+                showLiveViewBrowserOpenFailure()
             }
         } catch {
+            showLiveViewBrowserOpenFailure()
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .livePreview,
                 agentTarget: .localAgent,
@@ -2289,6 +2296,19 @@ final class MeetingOverlayController: NSObject {
                 context: ["error": error.localizedDescription]
             )
         }
+    }
+
+    private func showLiveViewBrowserOpenFailure() {
+        guard state == .recording else {
+            rootView?.flashTranscriptBrowserOpenFailure()
+            return
+        }
+
+        isTranscriptExpanded = true
+        bloomFromRest()
+        flushPendingTranscriptIfNeeded()
+        pushToView()
+        rootView?.flashTranscriptBrowserOpenFailure()
     }
 
     private func dismissPrompt(notifyDetector: Bool) {
