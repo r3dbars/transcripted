@@ -652,6 +652,7 @@ private struct HomeStatsDetailMetric: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(stat.value)
                     .font(.system(size: 20, weight: .semibold))
+                    .monospacedDigit()
                     .foregroundStyle(Color.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)

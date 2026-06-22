@@ -136,6 +136,7 @@ struct AgentConnectionSettingsPage: View {
             if agent == .claudeDesktop, let claudeDesktopSelfTest {
                 Text("\(claudeDesktopSelfTest.meetingFileCount) meetings, \(claudeDesktopSelfTest.dictationFileCount) dictation files visible.")
                     .font(.caption)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
         }

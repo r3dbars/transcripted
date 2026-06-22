@@ -769,6 +769,7 @@ private struct SpeakerVoiceToNameRow: View {
 
                     Text(metaLine)
                         .font(.caption)
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -1014,6 +1015,7 @@ private struct SpeakerDuplicateCandidateRow: View {
 
                 Text(candidate.summaryLine)
                     .font(.caption)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1162,6 +1164,7 @@ private struct SpeakerPersonRow: View {
 
                     Text(metadataLine)
                         .font(.caption)
+                        .monospacedDigit()
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
