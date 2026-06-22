@@ -108,6 +108,93 @@ extension Transcription {
                                    secondBestSimilarity: secondBestSimilarity)
     }
 
+    // MARK: - Cross-Cluster Link/Merge (#8)
+
+    /// Plan for resolving multiple diarizer clusters that matched the same DB profile.
+    public struct CrossClusterLinkPlan: Equatable {
+        /// `member speakerId -> representative speakerId`: clusters that share one final identity
+        /// (either genuine over-segmentation kept on the matched profile, or fragments of one
+        /// spun-off distinct voice). The representative carries the identity for the whole group.
+        public var remaps: [Int: Int] = [:]
+        /// Representative speakerIds whose group should be discarded from the matched profile and
+        /// given a *fresh* profile — a distinct voice (or fragments of one) that only coincidentally
+        /// resembled the matched profile. Sorted for deterministic output.
+        public var spinOffs: [Int] = []
+        public init() {}
+    }
+
+    /// Decide, for clusters that matched the same DB profile, which are genuine over-segmentation of
+    /// one voice (fuse) and which are distinct voices that merely resemble the profile (spin off).
+    ///
+    /// Decouples the link/merge decision from the per-utterance attach floor (#8): a cluster
+    /// attaches to a profile at the loose adaptive floor (0.70), but two clusters only FUSE when
+    /// they are directly similar *to each other* (cross-cluster cosine ≥
+    /// `SpeakerWritePathPolicy.crossClusterLinkFloor`).
+    ///
+    /// Clusters on one profile are grouped by mutual cross-cluster similarity (union-find, so three
+    /// fragments of one voice all collapse even if no single pair-with-the-largest holds). The group
+    /// containing the cluster that *best matches the profile* keeps the identity; every other group
+    /// is a distinct voice and is spun off to its own profile. Within each group the representative
+    /// is the highest-similarity-to-profile cluster (ties: more segments, then lower id), so the
+    /// real returning speaker keeps the name even when a longer distinct voice also matched.
+    ///
+    /// Pure and deterministic so the eval harness and unit tests exercise the two-people-one-profile
+    /// (and N-people / 3-fragment) cases directly without the full audio pipeline.
+    nonisolated public static func planCrossClusterLinks(
+        matchedProfileBySpeaker: [Int: UUID],
+        matchSimilarityBySpeaker: [Int: Double],
+        meanBySpeaker: [Int: [Float]],
+        segmentCountBySpeaker: [Int: Int]
+    ) -> CrossClusterLinkPlan {
+        var plan = CrossClusterLinkPlan()
+        let byProfile = Dictionary(grouping: matchedProfileBySpeaker.keys) { matchedProfileBySpeaker[$0] }
+        for (profileId, ids) in byProfile where profileId != nil && ids.count >= 2 {
+            let clusters = ids.filter { meanBySpeaker[$0] != nil }
+            guard clusters.count >= 2 else { continue }
+
+            // Union-find over the same-profile clusters: fuse any pair similar enough to be one
+            // voice, transitively (A≈B, B≈C ⇒ {A,B,C}).
+            var parent = Dictionary(uniqueKeysWithValues: clusters.map { ($0, $0) })
+            func find(_ x: Int) -> Int {
+                var r = x
+                while parent[r]! != r { r = parent[r]! }
+                var n = x
+                while n != r { let nx = parent[n]!; parent[n] = r; n = nx }
+                return r
+            }
+            func union(_ a: Int, _ b: Int) {
+                let ra = find(a), rb = find(b)
+                if ra != rb { parent[rb] = ra }
+            }
+            for i in 0..<clusters.count {
+                for j in (i + 1)..<clusters.count {
+                    let s = cosineSimilarityStatic(meanBySpeaker[clusters[i]]!, meanBySpeaker[clusters[j]]!)
+                    if SpeakerWritePathPolicy.shouldFuseMatchedClusters(crossClusterSimilarity: s) {
+                        union(clusters[i], clusters[j])
+                    }
+                }
+            }
+
+            // Rank key: best match to the profile, then most segments, then lowest id (deterministic).
+            func rank(_ c: Int) -> (Double, Int, Int) {
+                (matchSimilarityBySpeaker[c] ?? -1, segmentCountBySpeaker[c] ?? 0, -c)
+            }
+
+            // The group that owns the profile = the one containing the overall best-matching cluster.
+            let keeperRoot = clusters.max(by: { rank($0) < rank($1) }).map { find($0) }
+
+            var components: [Int: [Int]] = [:]
+            for c in clusters { components[find(c), default: []].append(c) }
+            for (root, members) in components {
+                let rep = members.max(by: { rank($0) < rank($1) })!
+                for other in members where other != rep { plan.remaps[other] = rep }
+                if root != keeperRoot { plan.spinOffs.append(rep) }
+            }
+        }
+        plan.spinOffs.sort()
+        return plan
+    }
+
     /// Compute L2-normalized weighted mean of multiple embeddings.
     /// Higher-weight embeddings contribute more to the mean. Segments recorded while
     /// the local mic was active have lower weight (system audio contaminated by local voice).

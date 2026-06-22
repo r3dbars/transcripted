@@ -53,7 +53,7 @@ enum MicrophoneProcessingMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .none:
-            return "Off / raw input"
+            return "Off / raw input (no Transcripted gain)"
         case .softwareAGC:
             return "Software autogain"
         case .appleVoiceProcessing:
@@ -64,7 +64,7 @@ enum MicrophoneProcessingMode: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .none:
-            return "No Transcripted gain is applied to the saved mic track. Best for tuned USB mics."
+            return "Transcripted records microphone.m4a without software autogain. Best for tuned USB mics like Blue Yeti; your mic's physical gain controls the level."
         case .softwareAGC:
             return "Default. Transcripted boosts quiet saved mic audio without using Apple voice processing."
         case .appleVoiceProcessing:

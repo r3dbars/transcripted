@@ -26,9 +26,11 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     private let resizeHandle = MeetingLiveTranscriptResizeHandle()
 
     private var statusText: String?
+    private var transientStatusText: String?
     private var hasEntries = false
     private var needsScrollToEnd = false
     private var copyFeedbackTask: Task<Void, Never>?
+    private var transientStatusTask: Task<Void, Never>?
     private var hoverTrackingArea: NSTrackingArea?
 
     var onOpenInBrowser: (() -> Void)?
@@ -123,6 +125,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
 
     deinit {
         copyFeedbackTask?.cancel()
+        transientStatusTask?.cancel()
     }
 
     private func configureHeaderButton(
@@ -180,7 +183,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
 
     private func setHeaderRevealed(_ revealed: Bool) {
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
+            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.15)
             hoverBar.animator().alphaValue = revealed ? 1 : 0
         }
     }
@@ -188,8 +191,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     func update(transcript: NSAttributedString, statusText: String?, hasEntries: Bool) {
         self.statusText = statusText
         self.hasEntries = hasEntries
-        statusLabel.stringValue = statusText ?? ""
-        statusLabel.isHidden = statusText == nil
+        refreshStatusLabel()
         scrollView.isHidden = !hasEntries
         copyButton.isEnabled = hasEntries
 
@@ -223,6 +225,34 @@ final class MeetingLiveTranscriptDrawerView: NSView {
             self.copyButton.image = Self.copyButtonImage()
             self.copyButton.contentTintColor = MeetingOverlayTokens.quietActionTint
         }
+    }
+
+    /// Brief user-visible feedback when macOS refuses the browser handoff.
+    func flashBrowserOpenFailure() {
+        transientStatusTask?.cancel()
+        transientStatusText = MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus
+        refreshStatusLabel()
+        NSAccessibility.post(
+            element: window ?? self,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue
+            ]
+        )
+        transientStatusTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.transientStatusText = nil
+            self.refreshStatusLabel()
+        }
+    }
+
+    private func refreshStatusLabel() {
+        let visibleStatus = transientStatusText ?? statusText
+        statusLabel.stringValue = visibleStatus ?? ""
+        statusLabel.isHidden = visibleStatus == nil
+        needsLayout = true
     }
 
     override func layout() {

@@ -103,6 +103,10 @@ class DictationSessionController: ObservableObject {
             overlayController.showError("Still finishing the last dictation. Try again in a moment.")
             return
         }
+        if let unavailableReason = dictationStartUnavailableReason(appState: appState) {
+            overlayController.showError(unavailableReason)
+            return
+        }
         isDictating = true
         currentDictationSessionID = UUID()
         sessionSourceApp = sourceApp
@@ -232,6 +236,14 @@ class DictationSessionController: ObservableObject {
         }
 
         startDictationAfterWarmup(sourceApp: sourceApp)
+    }
+
+    private func dictationStartUnavailableReason(appState: TranscriptedAppState) -> String? {
+        guard #available(macOS 14.0, *) else { return nil }
+        return DictationStartAvailabilityPolicy.unavailableReason(
+            hasMeetingWork: appState.meetingSession.hasRuntimeDiagnosticsWork,
+            isSpeakerReviewPending: appState.meetingSession.isSpeakerReviewPending
+        )
     }
 
     /// Actually start dictation recording — called directly from startDictation

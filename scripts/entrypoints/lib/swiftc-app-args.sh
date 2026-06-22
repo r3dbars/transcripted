@@ -57,6 +57,7 @@ build_app_swiftc_args() {
         -framework ESpeakNG
         -framework CoreML
         -framework CoreAudio
+        -framework CoreMediaIO
     )
 
     APP_SWIFTC_TAIL_ARGS=(

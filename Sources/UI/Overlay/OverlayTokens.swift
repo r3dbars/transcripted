@@ -25,6 +25,7 @@ enum OverlayTokens {
     static let cornerRadius: CGFloat   = 12
     static let panelCursorMiniCornerRadius: CGFloat = 17
     static let contentPadding: CGFloat = 12
+    static let minimumHitTarget: CGFloat = 40
 
     // Header
     static let headerHeight: CGFloat = 32

@@ -196,6 +196,8 @@ final class WaveformDrawingLayer: CALayer {
     }
 
     private func scrollingOffset(now: CFAbsoluteTime, stride: CGFloat) -> CGFloat {
+        // Reduce Motion: skip the sub-pixel glide so bars don't continuously slide.
+        guard !AccessibilityDisplayPolicy.reduceMotion else { return 0 }
         let currentElapsed = now - lastSampleTime
         let fractionalProgress = min(currentElapsed / sampleInterval, 1.0)
         return CGFloat(fractionalProgress) * stride
@@ -435,6 +437,8 @@ final class DualWaveformDrawingLayer: CALayer {
     }
 
     private func scrollingOffset(now: CFAbsoluteTime) -> CGFloat {
+        // Reduce Motion: skip the sub-pixel glide so bars don't continuously slide.
+        guard !AccessibilityDisplayPolicy.reduceMotion else { return 0 }
         let currentElapsed = now - lastSampleTime
         let fractionalProgress = min(currentElapsed / sampleInterval, 1.0)
         return CGFloat(fractionalProgress) * barStride

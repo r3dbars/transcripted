@@ -1,77 +1,63 @@
-# Analytics Taxonomy Merge Cascade — root cause & fix
+# Analytics Taxonomy Merge Cascade
 
 ## Symptom
 
-Dozens of auto-generated telemetry PRs sit `DIRTY` at once. Merging any one of
-them instantly re-conflicts all the others, faster than they can be rebased.
+Generated telemetry PRs kept going dirty in a pile. Merging one analytics event
+would conflict the next branch because every PR edited the same Swift dictionary
+and the same test allowlist.
 
-## Root cause
+## Root Cause
 
-Every privacy-reviewed telemetry PR adds one or more analytics events, and each
-new event is appended at the **same anchor** in a set of lockstep files:
+Each privacy-reviewed telemetry PR used to add one event in several lockstep
+places:
 
-- `Sources/Observability/AnalyticsEventPolicy.swift` — the `allowedPolicies`
-  dictionary (plus a `…Properties` set above it)
-- `Tests/AnalyticsEventPolicyTests.swift` — an additive `runSuite(…)` block
-- `docs/privacy-first-observability.md` — the `## Allowlisted analytics events`
-  list (and sibling planning docs)
-- `scripts/ops/generate-nightly-digest.py`,
-  `scripts/ops/posthog-activation-funnel.py` — per-line event tuples
-- `scripts/ops/health-probe.sh` — the event list as a **single-line string**
+- `Sources/Observability/AnalyticsEventPolicy.swift`
+- `Tests/AnalyticsEventPolicyTests.swift`
+- `docs/privacy-first-observability.md`
+- product-health scripts that list PostHog events
 
-Because every PR edits the identical anchor, one merge dirties all the rest.
+The Swift policy and test entries are multi-line, brace-balanced blocks. They
+are not safe for `merge=union`; git can produce a clean-looking but unbalanced
+Swift file.
 
-## What works: union merge on the line-oriented docs
+## Durable Fix
 
-The markdown registries list one event per self-contained line
-(`` - `event_name` ``). A union merge of two such inserts is always a valid
-superset, and the docs↔source parity test sorts before comparing, so order is
-irrelevant. `.gitattributes` therefore sets `merge=union` on those docs only.
+The compiled analytics allowlist is now loaded from line-oriented registry
+files:
 
-## What does NOT work: union merge on the Swift policy (verified trap)
+- `Resources/analytics-events.psv`
+- `Resources/analytics-reviewed-properties.psv`
 
-It is tempting to also `merge=union` `AnalyticsEventPolicy.swift`. **Do not.**
-The dictionary entries and `…Properties` sets are multi-line, brace-balanced
-blocks, and when two PRs insert at the same anchor git aligns the shared trailing
-`]` / `)` as common context. A union merge then emits *both* opening blocks but
-only *one* closing delimiter:
+Each event or reviewed property is one independent line, and `.gitattributes`
+marks `*.psv` as `merge=union`. After a union merge, run:
 
-```swift
-private static let workflowAbandonedProperties: Set<String> = [
-    ...
-    "workflow_kind",
-private static let productFrictionProperties: Set<String> = [   // ← previous set never closed
-    ...
-    "surface",
-]
+```bash
+python3 scripts/ops/normalize-analytics-taxonomy.py
 ```
 
-Git reports a **clean auto-merge** (no conflict markers); the file is silently
-unbalanced and will not compile. Reproduced on `#1210` ⊕ `#1222`: the result had
-`[` 74/`]` 73 and `(` 105/`)` 104. Only Swift CI catches it — a conflict that
-*looks* resolved is worse than one that doesn't. The same applies to the test
-file's `runSuite { … }` blocks.
+or check without writing:
 
-So the Swift policy + its test are intentionally left to normal (conflicting)
-merges until the durable fix below lands.
+```bash
+python3 scripts/ops/normalize-analytics-taxonomy.py --check
+```
 
-## Durable fix (recommended — needs a scope decision)
+The Swift API stays the same:
 
-Single-source the taxonomy so the brace-balanced Swift is **generated**, never
-hand-merged:
+- `AnalyticsEventPolicy.policy(forEvent:)`
+- `AnalyticsEventPolicy.allEventNames`
+- `AnalyticsEventPolicy.allPolicies`
 
-1. Move the allowlist to one line-oriented data file — e.g.
-   `analytics-events.psv`: `event_name|prop_a,prop_b,…`, one event per line.
-   This file is safely `merge=union` (each line independent) + a trivial
-   normalizer (`sort -u`) keeps it canonical and dedups.
-2. Generate (or load at runtime) `AnalyticsEventPolicy`, the doc list, and the
-   ops-script event tuples from that single source. The duplicate-event guard
-   stays in `Tests/AnalyticsEventPolicyTests.swift`.
-3. Make `scripts/ops/health-probe.sh` read the same file instead of hard-coding
-   a single-line copy (its current shape can't be union-merged at all).
+If the registry cannot be read, the allowlist fails closed to empty, so
+`AnalyticsReporter` drops events instead of forwarding an unreviewed payload.
 
-That removes every hand-merge point and makes the taxonomy single-sourced.
+## Adding a Telemetry Event
 
-Until then: rebasing a telemetry PR needs only a trivial keep-both resolution of
-the Swift policy/test conflict (add the missing closing `]`/`)` so both events
-remain). The doc/script conflicts auto-resolve via the union attribute above.
+1. Add one line to `Resources/analytics-events.psv`.
+2. Add any new non-`_bucket` property to `Resources/analytics-reviewed-properties.psv`.
+3. Add the event to `docs/privacy-first-observability.md`.
+4. Run `python3 scripts/ops/normalize-analytics-taxonomy.py --check`.
+5. Run the analytics policy and sanitizer tests.
+
+Keep payloads enum-only, boolean, public-version, or bucketed. Do not add raw
+titles, transcripts, paths, source apps, device names, speaker names, emails,
+tokens, URLs, or free-form text.

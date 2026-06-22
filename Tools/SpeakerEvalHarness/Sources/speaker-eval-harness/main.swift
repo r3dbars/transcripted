@@ -55,6 +55,7 @@ struct MeetingResult: Codable {
 struct ReplayResult: Codable {
     let consolidationThreshold: String   // "none" or a float as string
     let matchThreshold: Double
+    let writePathFixes: Bool             // #6 write-gate + #8 link-decouple applied?
     let profilesAtEnd: Int
     let meetings: [MeetingResult]
 }
@@ -94,6 +95,33 @@ func clusterMeanEmbedding(_ segs: [SegmentDump]) -> [Float]? {
     if !filtered.isEmpty { return mean(filtered) }
     let all = segs.compactMap { $0.embedding }.filter { !$0.isEmpty }
     return all.isEmpty ? nil : mean(all)
+}
+
+/// Cosine similarity between two equal-length vectors (eval-local mirror of the app's helper).
+func cosineSim(_ a: [Float], _ b: [Float]) -> Double {
+    guard a.count == b.count, !a.isEmpty else { return 0 }
+    var dot: Float = 0, na: Float = 0, nb: Float = 0
+    for i in 0..<a.count { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
+    let denom = (na.squareRoot()) * (nb.squareRoot())
+    return denom > 0 ? Double(dot / denom) : 0
+}
+
+/// Best + second-best profile (above `threshold`) for an embedding against a frozen snapshot.
+/// Returns the matched profile id, its similarity, and the runner-up similarity (-1 if none) so the
+/// eval can feed `SpeakerWritePathPolicy.voiceprintBlendAlpha`'s margin guard exactly like the app.
+func bestAndSecond(_ emb: [Float], profiles: [SpeakerProfile], threshold: Double)
+    -> (id: UUID, similarity: Double, second: Double)? {
+    var bestId: UUID?
+    var best = -1.0, second = -1.0
+    for p in profiles {
+        guard p.disputeCount == 0, p.embedding.count == emb.count else { continue }
+        let s = cosineSim(emb, p.embedding)
+        guard s >= threshold else { continue }
+        if s > best { second = best; best = s; bestId = p.id }
+        else if s > second { second = s }
+    }
+    guard let id = bestId else { return nil }
+    return (id, best, second)
 }
 
 // MARK: - dump
@@ -154,6 +182,12 @@ func runReplay(_ args: [String]) async {
     let consolidationArg = (argValue("--consolidation", in: args) ?? "none").lowercased()
     let consolidation: Float? = consolidationArg == "none" ? nil : Float(consolidationArg)
 
+    // Write-path fixes (#6 write-time contamination gate + #8 cross-cluster link/merge decouple).
+    // "off" (default) = legacy behavior: every match blends at the full EMA rate and any clusters
+    // matching the same profile collapse together. "on" = apply the SpeakerWritePathPolicy gates,
+    // mirroring TranscriptionPipeline. Use the flag to A/B before/after on the same dumps.
+    let writePathFixes = (argValue("--write-path-fixes", in: args) ?? "off").lowercased() == "on"
+
     let inputs = inputsCSV.split(separator: ",").map(String.init)
     let dec = JSONDecoder()
     var dumps: [RawDump] = []
@@ -207,22 +241,69 @@ func runReplay(_ args: [String]) async {
             let b = byCluster[$1]!.reduce(0.0) { $0 + ($1.end - $1.start) }
             return a > b
         }
-        for cid in clusterOrder {
-            let emb = clusterEmb[cid]!
-            let matched = await MainActor.run { db.matchSpeaker(embedding: emb, threshold: matchThreshold) }
-            _ = await MainActor.run { db.addOrUpdateSpeaker(embedding: emb, existingId: matched?.profile.id) }
+        var spunOffProfileIds: Set<UUID> = []
+        var memberToRep: [Int: Int] = [:]   // (fixes mode) fused member cluster -> representative
+        if !writePathFixes {
+            // Legacy: match against the live DB, blend every match at the full EMA rate.
+            for cid in clusterOrder {
+                let emb = clusterEmb[cid]!
+                let matched = await MainActor.run { db.matchSpeaker(embedding: emb, threshold: matchThreshold) }
+                _ = await MainActor.run { db.addOrUpdateSpeaker(embedding: emb, existingId: matched?.profile.id) }
+            }
+            // 3) Dedup pass — the app runs mergeDuplicates after each transcript.
+            await MainActor.run { db.mergeDuplicates(threshold: matchThreshold) }
+        } else {
+            // Production mirror of TranscriptionPipeline's write path: match-all vs the pre-meeting
+            // snapshot → cross-cluster link/merge (#8) via the SAME planner the app uses → gated
+            // write-back (#6) → mergeDuplicates protecting spun-off distinct voices.
+            var matchedProfile: [Int: UUID] = [:]
+            var matchSim: [Int: Double] = [:]
+            var matchSecond: [Int: Double] = [:]
+            for cid in clusterOrder {
+                if let m = bestAndSecond(clusterEmb[cid]!, profiles: existing, threshold: matchThreshold) {
+                    matchedProfile[cid] = m.id; matchSim[cid] = m.similarity; matchSecond[cid] = m.second
+                }
+            }
+            let plan = Transcription.planCrossClusterLinks(
+                matchedProfileBySpeaker: matchedProfile,
+                matchSimilarityBySpeaker: matchSim,
+                meanBySpeaker: clusterEmb,
+                segmentCountBySpeaker: byCluster.mapValues { $0.count }
+            )
+            memberToRep = plan.remaps
+            let spinOffReps = Set(plan.spinOffs)
+            // Write-back for representatives + uncontended clusters only; fused members inherit their
+            // representative (they don't write back, mirroring the pipeline).
+            for cid in clusterOrder where memberToRep[cid] == nil {
+                let emb = clusterEmb[cid]!
+                if spinOffReps.contains(cid) {
+                    let p = await MainActor.run { db.addOrUpdateSpeaker(embedding: emb, existingId: nil) }
+                    spunOffProfileIds.insert(p.id)
+                } else if let pid = matchedProfile[cid] {
+                    let alpha = SpeakerWritePathPolicy.voiceprintBlendAlpha(
+                        similarity: matchSim[cid] ?? 0, secondBestSimilarity: matchSecond[cid])
+                    _ = await MainActor.run {
+                        db.addOrUpdateSpeaker(embedding: emb, existingId: pid, blendAlpha: alpha)
+                    }
+                } else {
+                    _ = await MainActor.run { db.addOrUpdateSpeaker(embedding: emb, existingId: nil) }
+                }
+            }
+            await MainActor.run { db.mergeDuplicates(threshold: matchThreshold, protecting: spunOffProfileIds) }
         }
 
-        // 3) Dedup pass — the app runs mergeDuplicates after each transcript.
-        await MainActor.run { db.mergeDuplicates(threshold: matchThreshold) }
-
-        // Resolve each cluster to its FINAL surviving profile by re-matching its mean
-        // embedding against the post-merge DB (a merge folds a UUID into its survivor).
+        // Resolve each cluster to its FINAL surviving profile. Representatives + uncontended clusters
+        // re-match their mean against the post-merge DB; fused members inherit their representative's
+        // profile (matchSpeaker alone could wrongly route a spun-off member back to the profile it
+        // merely resembled).
         var resolved: [Int: String] = [:]
-        for cid in clusterOrder {
+        for cid in clusterOrder where memberToRep[cid] == nil {
             let emb = clusterEmb[cid]!
             let m: SpeakerMatchResult? = await MainActor.run { db.matchSpeaker(embedding: emb, threshold: matchThreshold) }
             if let m { resolved[cid] = m.profile.id.uuidString }
+        }
+        for (member, rep) in memberToRep where resolved[rep] != nil {
+            resolved[member] = resolved[rep]
         }
         let surviving = Set(await MainActor.run { db.allSpeakers() }.map { $0.id.uuidString })
 
@@ -240,13 +321,15 @@ func runReplay(_ args: [String]) async {
 
         FileHandle.standardError.write(Data((
             "[replay] \(dump.meeting): clusters=\(byCluster.count) "
-            + "profilesNow=\(surviving.count) (match=\(matchThreshold) consolidation=\(consolidationArg))\n").utf8))
+            + "profilesNow=\(surviving.count) (match=\(matchThreshold) consolidation=\(consolidationArg) "
+            + "fixes=\(writePathFixes ? "on" : "off") spunOff=\(spunOffProfileIds.count))\n").utf8))
     }
 
     let profilesAtEnd = await MainActor.run { db.allSpeakers().count }
     let result = ReplayResult(
         consolidationThreshold: consolidationArg,
         matchThreshold: matchThreshold,
+        writePathFixes: writePathFixes,
         profilesAtEnd: profilesAtEnd,
         meetings: meetingResults)
     let enc = JSONEncoder()

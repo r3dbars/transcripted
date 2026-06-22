@@ -151,6 +151,12 @@ final class MenuBarPrimaryActionsView: NSView {
             + CGFloat(rowSpacing)
     }
 
+    /// Visible rows in keyboard Tab order — Home first, then the visible action
+    /// rows — matching `FocusOrderContract.menuBarPrimaryOrder`.
+    var keyboardFocusableRows: [MenuBarActionRowView] {
+        [homeRow] + visibleActionRows
+    }
+
     private var actionRows: [MenuBarActionRowView] {
         [dictationRow, meetingRow, pasteRow, recentMeetingsRow]
     }

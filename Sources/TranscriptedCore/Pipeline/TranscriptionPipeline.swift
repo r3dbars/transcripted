@@ -246,6 +246,10 @@ extension Transcription {
             var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double, secondSimilarity: Double)] = [:]
             var speakerNewProfiles: [Int: UUID] = [:]
             var speakerIdRemap: [Int: Int] = [:]
+            // Session mean embedding actually matched for each non-ghost speaker, kept so the
+            // cross-cluster link/merge step can compare clusters directly to each other (#8)
+            // instead of relying only on "matched the same profile".
+            var matchedMeanPerSpeaker: [Int: [Float]] = [:]
 
             // Pre-compute unweighted means for non-ghost speakers so the ghost merge inner
             // loop doesn't recompute the same means once per ghost (O(G×N) → O(N)).
@@ -258,6 +262,7 @@ extension Transcription {
                 let meanEmbedding = Self.computeWeightedMeanEmbedding(embeddings, weights: weights)
 
                 let isGhost = ghostSpeakerIdSet.contains(speakerId)
+                if !isGhost { matchedMeanPerSpeaker[speakerId] = meanEmbedding }
 
                 // Ghost speakers have unreliable embeddings (laughter, coughs, codec artifacts).
                 // Prefer force-merging into the closest real speaker, but if every detected
@@ -303,14 +308,18 @@ extension Transcription {
                     default: 0.70      // 4+ segments — reliable mean embedding
                 }
 
-                // Match only against profiles that existed BEFORE this recording
+                // Match only against profiles that existed BEFORE this recording.
+                // Write-back is DEFERRED until after the cross-cluster link/merge decision below,
+                // so a cluster that turns out to be a distinct voice (spun off) never blends into
+                // the shared profile. Matching reads only the `existingProfiles` snapshot, so
+                // deferring the blend cannot change any match decision.
                 if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold) {
                     speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity)
-                    _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: matchResult.profileId)
                     let matchedProfile = existingProfiles.first(where: { $0.id == matchResult.profileId })
                     AppLogger.transcription.info("Speaker matched DB profile", [
                         "speakerId": "\(speakerId)",
                         "similarity": String(format: "%.3f", matchResult.similarity),
+                        "secondBest": String(format: "%.3f", matchResult.secondBestSimilarity),
                         "threshold": String(format: "%.2f", adaptiveThreshold),
                         "segmentsAveraged": "\(embeddings.count)",
                         "profileName": matchedProfile?.displayName ?? "unnamed",
@@ -327,23 +336,73 @@ extension Transcription {
                 }
             }
 
-            // Merge speaker IDs that matched the same DB profile.
-            // Fixes cross-cluster fragmentation: if Sortformer split one person
-            // into spk1 and spk3, and DB matching identified both as the same
-            // profile, unify them under the speaker ID with the most segments.
-            let profileToSpeakers = Dictionary(grouping: speakerMatchResults.keys) { speakerMatchResults[$0]?.persistentId }
-            for (profileId, matchedSpeakerIds) in profileToSpeakers where profileId != nil && matchedSpeakerIds.count >= 2 {
-                let sorted = matchedSpeakerIds.sorted { a, b in
-                    embeddingsPerSpeaker[a]?.count ?? 0 > embeddingsPerSpeaker[b]?.count ?? 0
-                }
-                let canonical = sorted[0]
-                for other in sorted.dropFirst() {
-                    speakerIdRemap[other] = canonical
-                }
+            // Cross-cluster link/merge (#8): two diarizer clusters that matched the SAME DB profile
+            // are candidates for fusion into one transcript row. The 0.70 attach floor that bound
+            // each cluster to the profile is too loose to ALSO prove they are the same person — two
+            // distinct people who each merely resemble one profile would be silently fused, then
+            // named once in review. Decouple it: only fuse clusters that are directly similar to
+            // EACH OTHER (cross-cluster cosine ≥ link floor — the genuine over-segmentation
+            // signature). A cluster that matched the same profile but is a distinct voice is spun
+            // off to its own profile so it stays independently nameable.
+            let linkPlan = Self.planCrossClusterLinks(
+                matchedProfileBySpeaker: speakerMatchResults.mapValues { $0.persistentId },
+                matchSimilarityBySpeaker: speakerMatchResults.mapValues { $0.similarity },
+                meanBySpeaker: matchedMeanPerSpeaker,
+                segmentCountBySpeaker: embeddingsPerSpeaker.mapValues { $0.count }
+            )
+            // Spin-off representatives: a distinct voice (or fragments of one) that only resembled the
+            // matched profile — give it its own identity so review names it separately. Removed from
+            // the matched set so it never writes back into the shared profile.
+            for rep in linkPlan.spinOffs {
+                let repMean = matchedMeanPerSpeaker[rep]
+                    ?? Self.computeMeanEmbedding(embeddingsPerSpeaker[rep] ?? [])
+                let spinoff = speakerDB.addOrUpdateSpeaker(embedding: repMean, existingId: nil)
+                speakerMatchResults.removeValue(forKey: rep)
+                speakerNewProfiles[rep] = spinoff.id
+            }
+            // Group members fuse into their representative; drop their own match so only the
+            // representative writes back (keeper group → shared profile, spin-off group → new profile).
+            for (other, rep) in linkPlan.remaps {
+                speakerIdRemap[other] = rep
+                speakerMatchResults.removeValue(forKey: other)
+            }
+            if !linkPlan.remaps.isEmpty {
                 AppLogger.transcription.info("Merged speaker IDs with same DB profile", [
-                    "merged": sorted.dropFirst().map { "spk\($0)" }.joined(separator: "+"),
-                    "canonical": "spk\(canonical)"
+                    "merged": linkPlan.remaps.keys.map { "spk\($0)" }.joined(separator: "+"),
+                    "remaps": "\(linkPlan.remaps.count)"
                 ])
+            }
+            if !linkPlan.spinOffs.isEmpty {
+                AppLogger.transcription.info("Cross-cluster fusion declined — distinct voices spun off", [
+                    "spunOff": linkPlan.spinOffs.map { "spk\($0)" }.joined(separator: "+"),
+                    "linkFloor": String(format: "%.2f", SpeakerWritePathPolicy.crossClusterLinkFloor)
+                ])
+            }
+
+            // Deferred write-back (#6): now that fusion/spin-off is resolved, blend each surviving
+            // matched cluster's session mean into its profile under the write-time contamination
+            // gate. A weak or ambiguous match freezes the voiceprint (alpha 0) — still recorded as
+            // an appearance, never silently drifting the stored fingerprint. Spun-off clusters were
+            // removed from speakerMatchResults above and so never contaminate the shared profile.
+            for (speakerId, match) in speakerMatchResults {
+                guard let meanEmbedding = matchedMeanPerSpeaker[speakerId] else { continue }
+                let writeAlpha = SpeakerWritePathPolicy.voiceprintBlendAlpha(
+                    similarity: match.similarity,
+                    secondBestSimilarity: match.secondSimilarity
+                )
+                _ = speakerDB.addOrUpdateSpeaker(
+                    embedding: meanEmbedding,
+                    existingId: match.persistentId,
+                    blendAlpha: writeAlpha
+                )
+                if writeAlpha < SpeakerWritePathPolicy.confidentBlendAlpha {
+                    AppLogger.transcription.info("Voiceprint write-back gated", [
+                        "speakerId": "\(speakerId)",
+                        "similarity": String(format: "%.3f", match.similarity),
+                        "secondBest": String(format: "%.3f", match.secondSimilarity),
+                        "writeBackAlpha": String(format: "%.2f", writeAlpha)
+                    ])
+                }
             }
 
             var systemSpeakerContexts: [String: ChannelSpeakerContext] = [:]
@@ -726,9 +785,12 @@ extension Transcription {
                 default: 0.70
             }
 
+            // Write-back is DEFERRED until after the cross-cluster decision below (#6/#8 — same
+            // rationale as the system path: matching reads only the existingProfiles snapshot, so
+            // deferring the blend changes no match decision, and a spun-off distinct voice never
+            // contaminates the shared profile).
             if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold) {
                 speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity)
-                _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: matchResult.profileId)
             } else {
                 let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
                 speakerNewProfiles[speakerId] = newProfile.id
@@ -736,14 +798,41 @@ extension Transcription {
             }
         }
 
-        // Cross-cluster merge: same-DB-profile speakers collapse.
-        let profileToSpeakers = Dictionary(grouping: speakerMatchResults.keys) { speakerMatchResults[$0]?.persistentId }
-        for (profileId, matchedSpeakerIds) in profileToSpeakers where profileId != nil && matchedSpeakerIds.count >= 2 {
-            let sorted = matchedSpeakerIds.sorted { a, b in
-                embeddingsPerSpeaker[a]?.count ?? 0 > embeddingsPerSpeaker[b]?.count ?? 0
-            }
-            let canonical = sorted[0]
-            for other in sorted.dropFirst() { speakerIdRemap[other] = canonical }
+        // Cross-cluster link/merge (#8): only fuse same-profile clusters that are directly similar
+        // to each other; spin distinct voices off to their own profile (see system path for the
+        // full rationale). `nonGhostMeans` holds the matched mean per non-ghost speaker.
+        let micLinkPlan = Self.planCrossClusterLinks(
+            matchedProfileBySpeaker: speakerMatchResults.mapValues { $0.persistentId },
+            matchSimilarityBySpeaker: speakerMatchResults.mapValues { $0.similarity },
+            meanBySpeaker: nonGhostMeans,
+            segmentCountBySpeaker: embeddingsPerSpeaker.mapValues { $0.count }
+        )
+        for rep in micLinkPlan.spinOffs {
+            let repMean = nonGhostMeans[rep]
+                ?? Self.computeMeanEmbedding(embeddingsPerSpeaker[rep] ?? [])
+            let spinoff = speakerDB.addOrUpdateSpeaker(embedding: repMean, existingId: nil)
+            speakerMatchResults.removeValue(forKey: rep)
+            speakerNewProfiles[rep] = spinoff.id
+            newlyCreatedProfileIds.insert(spinoff.id)
+        }
+        for (other, rep) in micLinkPlan.remaps {
+            speakerIdRemap[other] = rep
+            speakerMatchResults.removeValue(forKey: other)
+        }
+
+        // Deferred write-back (#6): blend each surviving matched cluster under the contamination
+        // gate. Spun-off clusters were removed above and never write into the shared profile.
+        for (speakerId, match) in speakerMatchResults {
+            guard let meanEmbedding = nonGhostMeans[speakerId] else { continue }
+            let writeAlpha = SpeakerWritePathPolicy.voiceprintBlendAlpha(
+                similarity: match.similarity,
+                secondBestSimilarity: match.secondSimilarity
+            )
+            _ = speakerDB.addOrUpdateSpeaker(
+                embedding: meanEmbedding,
+                existingId: match.persistentId,
+                blendAlpha: writeAlpha
+            )
         }
 
         // Build speaker contexts keyed by effective speakerId (post-remap).
