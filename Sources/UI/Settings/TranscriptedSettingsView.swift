@@ -980,6 +980,18 @@ struct TranscriptedSettingsView: View {
         }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         let provider = localMeetingSummaryProvider
+        let summaryAction = hasExistingSummary ? "regenerate" : "generate"
+        let summaryStartedAt = CFAbsoluteTimeGetCurrent()
+        trackLocalSummaryAnalytics(
+            event: "local_meeting_summary_started",
+            properties: [
+                "provider": provider.rawValue,
+                "summary_action": summaryAction,
+                "setup_ready": selectedLocalSummaryProviderIsReady ? "true" : "false",
+                "runtime": selectedLocalSummaryProviderProfileName,
+                "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(homeLocalSummaryTasks.count),
+            ]
+        )
         recordLocalSummaryEvent(
             event: "local_meeting_summary_started",
             message: "\(provider.title) meeting summary started",
@@ -1037,6 +1049,16 @@ struct TranscriptedSettingsView: View {
                         "profile": result.profileName,
                     ]
                 )
+                trackLocalSummaryAnalytics(
+                    event: "local_meeting_summary_completed",
+                    properties: [
+                        "provider": result.provider.rawValue,
+                        "summary_action": summaryAction,
+                        "chunk_count_bucket": AnalyticsReporter.countBucket(result.chunkCount),
+                        "runtime": result.profileName,
+                        "duration_bucket": localSummaryRunDurationBucket(since: summaryStartedAt),
+                    ]
+                )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
                 if homeLocalSummaryTaskTokens[summaryID] == taskToken {
@@ -1052,6 +1074,7 @@ struct TranscriptedSettingsView: View {
                 return
             } catch {
                 guard localMeetingSummariesEnabled else { return }
+                let failureKind = localSummaryFailureKind(error)
                 trackLocalSummaryAbandoned(reason: .failed, stage: "generate", priorReadyState: "ready")
                 recordLocalSummaryEvent(
                     level: .error,
@@ -1059,7 +1082,17 @@ struct TranscriptedSettingsView: View {
                     message: "\(provider.title) meeting summary failed",
                     context: [
                         "provider": provider.rawValue,
-                        "error": error.localizedDescription,
+                        "failure_kind": failureKind,
+                    ]
+                )
+                trackLocalSummaryAnalytics(
+                    event: "local_meeting_summary_failed",
+                    properties: [
+                        "provider": provider.rawValue,
+                        "summary_action": summaryAction,
+                        "failure_kind": failureKind,
+                        "stage": "generate",
+                        "duration_bucket": localSummaryRunDurationBucket(since: summaryStartedAt),
                     ]
                 )
                 NSSound.beep()
@@ -3482,6 +3515,42 @@ struct TranscriptedSettingsView: View {
             message: message,
             context: context
         )
+    }
+
+    private func trackLocalSummaryAnalytics(event: String, properties: [String: String]) {
+        AnalyticsReporter.track(event, properties: properties)
+    }
+
+    private func localSummaryRunDurationBucket(since start: CFAbsoluteTime) -> String {
+        AnalyticsReporter.durationBucket(seconds: max(0, CFAbsoluteTimeGetCurrent() - start))
+    }
+
+    private func localSummaryFailureKind(_ error: Error) -> String {
+        if error is CancellationError { return "cancelled" }
+        guard let summaryError = error as? LocalMeetingSummaryError else {
+            return "other"
+        }
+
+        switch summaryError {
+        case .emptyTranscript:
+            return "empty_transcript"
+        case .insufficientMemory:
+            return "insufficient_memory"
+        case .runtimeUnavailable:
+            return "runtime_unavailable"
+        case .appleFoundationUnavailable:
+            return "apple_foundation_unavailable"
+        case .missingBundledRunner:
+            return "missing_runner"
+        case .transcriptChanged:
+            return "transcript_changed"
+        case .processTimedOut:
+            return "timeout"
+        case .processFailed:
+            return "process_failed"
+        case .outputMissing:
+            return "output_missing"
+        }
     }
 
     private func trackLocalSummaryAbandoned(
