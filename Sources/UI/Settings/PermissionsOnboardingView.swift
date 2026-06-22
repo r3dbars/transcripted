@@ -1039,7 +1039,11 @@ private struct NavBar: View {
                 .font(.system(size: 13))
                 .buttonStyle(.plain)
                 .foregroundStyle(OnboardingTheme.muted)
-                .frame(minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget))
+                .frame(
+                    minWidth: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget),
+                    minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget)
+                )
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("transcripted.onboarding.nav.skip")
             }
 
@@ -1054,10 +1058,12 @@ private struct NavBar: View {
                 .foregroundStyle(OnboardingTheme.window)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 12)
+                .frame(minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget))
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(primaryDisabled ? OnboardingTheme.muted.opacity(0.45) : OnboardingTheme.ink)
                 )
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
             .disabled(primaryDisabled)
@@ -1555,8 +1561,13 @@ private struct DemoPasteTarget: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(OnboardingTheme.muted)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .frame(
+                    minWidth: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget),
+                    minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget)
+                )
+                .contentShape(Rectangle())
+                .accessibilityLabel("Clear dictation test text")
+                .accessibilityIdentifier("transcripted.onboarding.dictation-test.clear")
             }
         }
     }
