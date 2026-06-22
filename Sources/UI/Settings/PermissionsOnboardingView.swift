@@ -32,6 +32,7 @@ struct PermissionsOnboardingView: View {
     static let preferredSize = NSSize(width: 960, height: 680)
     private static let defaultDictationShortcut = "Right Option"
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var currentStepIndex = 0
     @State private var navigationDirection: OnboardingNavigationDirection = .forward
     @State private var micGranted = false
@@ -440,7 +441,7 @@ struct PermissionsOnboardingView: View {
 
     private func goBack() {
         guard currentStepIndex > 0 else { return }
-        withAnimation(.easeInOut(duration: 0.24)) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
             navigationDirection = .backward
             currentStepIndex -= 1
         }
@@ -448,7 +449,7 @@ struct PermissionsOnboardingView: View {
 
     private func goNext() {
         guard currentStepIndex < steps.count - 1 else { return }
-        withAnimation(.easeInOut(duration: 0.24)) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
             navigationDirection = .forward
             currentStepIndex += 1
         }
@@ -892,6 +893,7 @@ private enum OnboardingTheme {
 }
 
 private struct OnboardingWindowShell<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let current: Int
     let total: Int
     let direction: OnboardingNavigationDirection
@@ -945,7 +947,7 @@ private struct OnboardingWindowShell<Content: View>: View {
 
                 ZStack {
                     content
-                        .transition(direction.transition)
+                        .transition(reduceMotion ? .opacity : direction.transition)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
@@ -1195,11 +1197,13 @@ private struct BodyCopy: View {
 }
 
 private struct HeroWaveCircle: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let count = 26
 
     var body: some View {
         TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
+            // Reduce Motion: freeze the wave at a fixed phase instead of looping.
+            let t = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
             ZStack {
                 Circle()
                     .fill(OnboardingTheme.ink)
