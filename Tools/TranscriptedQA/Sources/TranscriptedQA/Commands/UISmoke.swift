@@ -243,6 +243,7 @@ final class UIAutomationSmokeRunner {
             "transcripted.menubar.primary.recent-meetings",
             "transcripted.menubar.utility.connect-agent",
             "transcripted.menubar.utility.submit-feedback",
+            "transcripted.menubar.utility.check-updates",
             "transcripted.menubar.utility.settings",
             "transcripted.menubar.utility.quit",
         ]
@@ -283,6 +284,32 @@ final class UIAutomationSmokeRunner {
             observed: menuObserved
         ))
         builder.add(.pass("menu-enabled", "Core menu bar controls are enabled", target: "menubar", observed: menuObserved))
+
+        let menuAuditRows = MenuBarAuditRow.manualProofTailRows
+        let auditObserved = observedElements(
+            for: menuAuditRows.flatMap { $0.targets.map(\.identifier) },
+            inspector: appInspector
+        )
+        if let failure = MenuBarAuditRow.firstFailure(in: auditObserved, rows: menuAuditRows) {
+            builder.add(.fail(
+                failure.checkID,
+                failure.title,
+                target: failure.target,
+                detail: failure.detail,
+                observed: auditObserved
+            ))
+            return builder.build()
+        }
+        for row in menuAuditRows {
+            builder.add(.pass(
+                row.checkID,
+                row.title,
+                target: row.targetSummary,
+                observed: auditObserved.filter { observed in
+                    row.targets.contains { $0.identifier == observed.identifier }
+                }
+            ))
+        }
 
         guard let homeRow = appInspector.first(identifier: "transcripted.menubar.primary.home"),
               AXInspector.performPress(homeRow.element) else {
@@ -1155,6 +1182,126 @@ struct AXFrame: Codable, Equatable {
     let y: Double
     let width: Double
     let height: Double
+}
+
+struct MenuBarAuditTarget: Equatable {
+    let identifier: String
+    let requiresEnabled: Bool?
+
+    init(_ identifier: String, requiresEnabled: Bool? = true) {
+        self.identifier = identifier
+        self.requiresEnabled = requiresEnabled
+    }
+}
+
+struct MenuBarAuditRow: Equatable {
+    let rowNumber: Int
+    let title: String
+    let targets: [MenuBarAuditTarget]
+    let minimumHitSize: Double
+
+    var checkID: String { "menu-audit-row-\(rowNumber)" }
+    var targetSummary: String { targets.map(\.identifier).joined(separator: ", ") }
+
+    static let manualProofTailRows: [MenuBarAuditRow] = [
+        MenuBarAuditRow(
+            rowNumber: 18,
+            title: "Audit row 18: menu popover core actions are visible and scriptable",
+            targets: [
+                MenuBarAuditTarget("transcripted.menubar.primary.home"),
+                MenuBarAuditTarget("transcripted.menubar.primary.recent-meetings", requiresEnabled: nil),
+            ],
+            minimumHitSize: 40
+        ),
+        MenuBarAuditRow(
+            rowNumber: 25,
+            title: "Audit row 25: Start Dictation menu action is visible, enabled, and 40pt",
+            targets: [
+                MenuBarAuditTarget("transcripted.menubar.primary.start-dictation"),
+            ],
+            minimumHitSize: 40
+        ),
+        MenuBarAuditRow(
+            rowNumber: 27,
+            title: "Audit row 27: Start Meeting menu action is visible, enabled, and 40pt",
+            targets: [
+                MenuBarAuditTarget("transcripted.menubar.primary.start-meeting"),
+            ],
+            minimumHitSize: 40
+        ),
+        MenuBarAuditRow(
+            rowNumber: 29,
+            title: "Audit row 29: Paste Last Dictation menu action is visible and 40pt",
+            targets: [
+                MenuBarAuditTarget("transcripted.menubar.primary.paste-last-dictation", requiresEnabled: nil),
+            ],
+            minimumHitSize: 40
+        ),
+        MenuBarAuditRow(
+            rowNumber: 31,
+            title: "Audit row 31: menu utility actions are visible, enabled, and 40pt",
+            targets: [
+                MenuBarAuditTarget("transcripted.menubar.utility.connect-agent"),
+                MenuBarAuditTarget("transcripted.menubar.utility.submit-feedback"),
+                MenuBarAuditTarget("transcripted.menubar.utility.check-updates", requiresEnabled: nil),
+                MenuBarAuditTarget("transcripted.menubar.utility.settings"),
+                MenuBarAuditTarget("transcripted.menubar.utility.quit"),
+            ],
+            minimumHitSize: 40
+        ),
+    ]
+
+    struct Failure: Equatable {
+        let checkID: String
+        let title: String
+        let target: String
+        let detail: String
+    }
+
+    static func firstFailure(in observed: [AXObservedElement], rows: [MenuBarAuditRow] = manualProofTailRows) -> Failure? {
+        let observedByIdentifier = Dictionary(uniqueKeysWithValues: observed.compactMap { element -> (String, AXObservedElement)? in
+            guard let identifier = element.identifier else { return nil }
+            return (identifier, element)
+        })
+
+        for row in rows {
+            for target in row.targets {
+                guard let element = observedByIdentifier[target.identifier] else {
+                    return Failure(
+                        checkID: row.checkID,
+                        title: row.title,
+                        target: target.identifier,
+                        detail: "Expected menu action identifier was missing from the AX tree."
+                    )
+                }
+                if let requiresEnabled = target.requiresEnabled, element.isEnabled != requiresEnabled {
+                    return Failure(
+                        checkID: row.checkID,
+                        title: row.title,
+                        target: target.identifier,
+                        detail: "Expected AXEnabled=\(requiresEnabled), got \(String(describing: element.isEnabled))."
+                    )
+                }
+                guard let frame = element.frame else {
+                    return Failure(
+                        checkID: row.checkID,
+                        title: row.title,
+                        target: target.identifier,
+                        detail: "Expected a readable AX frame for hit-target proof."
+                    )
+                }
+                if frame.width < row.minimumHitSize || frame.height < row.minimumHitSize {
+                    return Failure(
+                        checkID: row.checkID,
+                        title: row.title,
+                        target: target.identifier,
+                        detail: "Expected at least \(Int(row.minimumHitSize))x\(Int(row.minimumHitSize))pt hit target, got \(Int(frame.width))x\(Int(frame.height))pt."
+                    )
+                }
+            }
+        }
+        return nil
+    }
 }
 
 enum UIAutomationSmokeStatus: String, Codable {
