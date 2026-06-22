@@ -28,6 +28,34 @@ func testDictationMicrophoneLoadingPresentationPolicy() {
         assertEqual(copy.detail, "Connecting to the new audio device.", "real recovery should keep recovery detail")
     }
 
+    runSuite("DictationMicrophoneLoadingPresentationPolicy suppresses brief retry flicker") {
+        let copy = DictationMicrophoneLoadingPresentationPolicy.copy(
+            elapsed: 0.2,
+            deviceName: "MacBook Pro Microphone",
+            isRecovering: true,
+            inputFormatReady: false,
+            startAttempts: 2
+        )
+
+        assertEqual(copy.title, "Starting microphone", "brief route churn should keep the initial title stable")
+        assertEqual(copy.detail, "Opening the selected audio input.", "brief route churn should avoid flashing switching copy")
+        assertNil(copy.status, "brief retry attempts should not flash a retry status before the switching delay")
+    }
+
+    runSuite("DictationMicrophoneLoadingPresentationPolicy shows retry at the switching boundary") {
+        let copy = DictationMicrophoneLoadingPresentationPolicy.copy(
+            elapsed: DictationMicrophoneLoadingPresentationPolicy.switchingCopyDelay,
+            deviceName: "MacBook Pro Microphone",
+            isRecovering: true,
+            inputFormatReady: false,
+            startAttempts: 2
+        )
+
+        assertEqual(copy.title, "Switching microphone", "visible recovery should name the route change")
+        assertEqual(copy.detail, "Connecting to the new audio device.", "visible recovery should explain the wait")
+        assertEqual(copy.status, "Retrying MacBook Pro Microphone", "retry status should arrive with the switching copy")
+    }
+
     runSuite("DictationMicrophoneLoadingPresentationPolicy keeps retry status") {
         let copy = DictationMicrophoneLoadingPresentationPolicy.copy(
             elapsed: 2.0,
