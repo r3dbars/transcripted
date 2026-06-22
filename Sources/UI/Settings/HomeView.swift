@@ -466,6 +466,7 @@ struct HomeCanvasHeader: View {
         HStack(spacing: 4) {
             Text(value)
                 .font(.system(size: 12.5, weight: .medium))
+                .monospacedDigit()
                 .foregroundStyle(Color.primary.opacity(0.9))
             Text(label)
                 .font(.system(size: 12.5))
