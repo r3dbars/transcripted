@@ -47,8 +47,8 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 80
-- Status counts after the 2026-06-21 evening proof push: `PASS` 29,
-  `RETEST PASS` 3, `UNKNOWN` 48, `FAIL` 0, `BLOCKED` 0
+- Status counts after the 2026-06-21 unknown burn-down: `PASS` 29,
+  `RETEST PASS` 3, `BLOCKED` 48, `UNKNOWN` 0, `FAIL` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -69,6 +69,10 @@ Current proof summary:
   menu bar, Home, Settings navigation, and General controls passed.
 - Fresh artifact bench: `PASS` at
   `/tmp/transcripted-qa-bench/qa-20260621-202732/qa-report.md`.
+- Unknown burn-down: the remaining 48 manual-only rows were reclassified to
+  `BLOCKED` with concrete blocker reasons. This preserves the proof boundary:
+  no manual/hardware/native-app/TCC/Sparkle/model-runtime gap was counted as
+  green without real proof.
 - Private corpus validation: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153651/qa-report.md`;
   reports stay local/redacted.
 - Packaged no-publish smoke: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153703/qa-report.md`;
