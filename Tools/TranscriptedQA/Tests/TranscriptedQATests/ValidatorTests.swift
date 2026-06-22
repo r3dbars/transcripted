@@ -169,6 +169,97 @@ final class ValidatorTests: XCTestCase {
         XCTAssertFalse(results.contains { $0.status == .fail })
     }
 
+    func testDictationValidatorRequiresDictationDayEvidence() throws {
+        try """
+        ---
+        title: "Dictations for 2026-05-18"
+        date: 2026-05-18
+        capture_type: dictation_day
+        ---
+
+        # Dictations for May 18, 2026
+
+        ## 8:45 AM - Verify the release checklist
+
+        Entry ID: `dictation-20260518-084500-000`
+        Captured: 2026-05-18T13:45:00.000Z
+        Words: 9
+
+        Verify the release checklist before touching the signed build.
+        """.write(
+            to: tempRoot.appendingPathComponent("Dictations_2026-05-18.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let results = DictationValidator(directory: tempRoot).validate()
+
+        XCTAssertTrue(results.contains { $0.status == .pass && $0.check == "dictation/files-exist" })
+        XCTAssertTrue(results.contains { $0.status == .pass && $0.check == "dictation/capture-type" })
+        XCTAssertTrue(results.contains { $0.status == .pass && $0.check == "dictation/entry-ids" })
+        XCTAssertFalse(results.contains { $0.status == .fail })
+    }
+
+    func testDictationValidatorWarnsWhenNoDictationFilesExist() {
+        let results = DictationValidator(directory: tempRoot).validate()
+
+        XCTAssertTrue(results.contains {
+            $0.status == .warn
+                && $0.check == "dictation/files-exist"
+                && ($0.detail ?? "").contains("No dictation markdown files found")
+        })
+    }
+
+    func testDictationValidatorIgnoresMeetingMarkdownInSharedFolders() throws {
+        try """
+        ---
+        title: "Shared legacy meeting"
+        date: "2026-05-18"
+        time: "14:43:40"
+        duration: "600"
+        transcription_engine: "parakeet_local"
+        diarization_engine: "pyannote_offline"
+        capture_type: meeting
+        ---
+
+        ## Transcript
+        Speaker 1: Hello.
+        """.write(
+            to: tempRoot.appendingPathComponent("Shared_Meeting_2026-05-18.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let results = DictationValidator(directory: tempRoot).validate()
+
+        XCTAssertTrue(results.contains { $0.status == .warn && $0.check == "dictation/files-exist" })
+        XCTAssertFalse(results.contains { $0.check == "dictation/capture-type" })
+        XCTAssertFalse(results.contains { $0.status == .fail })
+    }
+
+    func testPathOptionsInferSiblingDictationsForExplicitMeetingsPath() throws {
+        let captureRoot = tempRoot.appendingPathComponent("captures", isDirectory: true)
+        let meetingsDir = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+        let dictationsDir = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        let resolved = QADataDirectories.resolve(meetingsDir: meetingsDir.path, fileManager: .default)
+
+        XCTAssertEqual(resolved.meetingsDir.path, meetingsDir.path)
+        XCTAssertEqual(resolved.dictationsDir.path, dictationsDir.path)
+    }
+
+    func testPathOptionsInferChildDictationsForFixtureRootPath() throws {
+        let dictationsDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+
+        let resolved = QADataDirectories.resolve(meetingsDir: tempRoot.path, fileManager: .default)
+
+        XCTAssertEqual(resolved.meetingsDir.path, tempRoot.path)
+        XCTAssertEqual(resolved.dictationsDir.path, dictationsDir.path)
+    }
+
     func testLogValidatorAcceptsStableJSONLFields() throws {
         let logURL = tempRoot.appendingPathComponent("app.jsonl")
         try """

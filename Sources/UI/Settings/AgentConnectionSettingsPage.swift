@@ -50,6 +50,7 @@ struct AgentConnectionSettingsPage: View {
             liveMeetingSection
             advancedSection
         }
+        .accessibilityIdentifier("transcripted.settings.page.agent")
         .onAppear(perform: refreshAgentStates)
     }
 
@@ -394,10 +395,12 @@ struct AgentConnectionSettingsPage: View {
                     )
                 }
 
+                let claudeDesktopConfigExists = FileManager.default.fileExists(atPath: ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL.path)
                 SettingsInlineActionButton(title: "Show Config", symbolName: "folder") {
                     revealClaudeDesktopConfig()
                 }
-                .disabled(!FileManager.default.fileExists(atPath: ClaudeDesktopIntegrationInstaller.claudeDesktopConfigURL.path))
+                .disabled(!claudeDesktopConfigExists)
+                .help(claudeDesktopConfigExists ? "" : "No Claude Desktop config file exists yet.")
             }
         }
     }
@@ -905,6 +908,7 @@ private struct AgentFolderRow: View {
 
             SettingsInlineActionButton(title: "Reveal", action: action)
                 .disabled(!isAvailable)
+                .help(isAvailable ? "" : "This location hasn't been created yet.")
         }
     }
 }

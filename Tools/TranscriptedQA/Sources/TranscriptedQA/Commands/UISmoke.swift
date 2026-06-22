@@ -326,6 +326,58 @@ final class UIAutomationSmokeRunner {
             observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
         ))
 
+        let primaryPageChecks: [(id: String, title: String, triggerID: String, requiredIDs: [String])] = [
+            (
+                id: "settings-dictations",
+                title: "Dictations settings surface is visible",
+                triggerID: "transcripted.settings.sidebar.dictations",
+                requiredIDs: ["transcripted.settings.page.dictations"]
+            ),
+            (
+                id: "settings-speakers",
+                title: "Speakers settings surface is visible",
+                triggerID: "transcripted.settings.sidebar.people",
+                requiredIDs: ["transcripted.settings.page.people"]
+            ),
+            (
+                id: "settings-agent",
+                title: "Agent settings surface is visible",
+                triggerID: "transcripted.settings.sidebar.connect-agent",
+                requiredIDs: ["transcripted.settings.page.agent"]
+            ),
+        ]
+
+        for check in primaryPageChecks {
+            guard appInspector.performPressOrClick(identifier: check.triggerID) else {
+                builder.add(.fail(
+                    check.id,
+                    check.title,
+                    target: check.triggerID,
+                    detail: "Could not open this sidebar surface."
+                ))
+                return builder.build()
+            }
+            guard waitUntil(timeout: timeout, description: check.title, condition: {
+                let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
+                return check.requiredIDs.allSatisfy(ids.contains)
+            }) else {
+                builder.add(.fail(
+                    check.id,
+                    check.title,
+                    target: check.triggerID,
+                    detail: "Surface did not expose expected automation identifiers.",
+                    observed: observedElements(for: check.requiredIDs, inspector: appInspector)
+                ))
+                return builder.build()
+            }
+            builder.add(.pass(
+                check.id,
+                check.title,
+                target: check.triggerID,
+                observed: observedElements(for: check.requiredIDs, inspector: appInspector)
+            ))
+        }
+
         guard appInspector.performPressOrClick(identifier: "transcripted.settings.sidebar.settings-toggle") else {
             builder.add(.fail(
                 "settings-pages-toggle",
@@ -406,6 +458,102 @@ final class UIAutomationSmokeRunner {
             target: "General",
             observed: observedElements(for: generalIDs, inspector: appInspector)
         ))
+
+        let consolidatedGeneralChecks: [(id: String, title: String, requiredIDs: [String])] = [
+            (
+                id: "settings-models-consolidated",
+                title: "Models settings are exposed in General",
+                requiredIDs: ["transcripted.settings.general.disclosure.transcription-model"]
+            ),
+            (
+                id: "settings-shortcuts-consolidated",
+                title: "Shortcut settings are exposed in General",
+                requiredIDs: ["transcripted.settings.general.disclosure.keyboard-shortcuts"]
+            ),
+            (
+                id: "settings-privacy-consolidated",
+                title: "Privacy settings are exposed in General",
+                requiredIDs: ["transcripted.settings.general.disclosure.privacy"]
+            ),
+        ]
+        let generalSnapshotIDs = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
+        for check in consolidatedGeneralChecks {
+            if check.requiredIDs.allSatisfy(generalSnapshotIDs.contains) {
+                builder.add(.pass(
+                    check.id,
+                    check.title,
+                    target: "General",
+                    observed: observedElements(for: check.requiredIDs, inspector: appInspector)
+                ))
+            } else {
+                builder.add(.fail(
+                    check.id,
+                    check.title,
+                    target: "General",
+                    detail: "General did not expose the consolidated settings disclosure.",
+                    observed: observedElements(for: check.requiredIDs, inspector: appInspector)
+                ))
+                return builder.build()
+            }
+        }
+
+        let settingsPageChecks: [(id: String, title: String, triggerID: String, requiredIDs: [String])] = [
+            (
+                id: "settings-storage",
+                title: "Storage settings tab is reachable",
+                triggerID: "transcripted.settings.tab.storage",
+                requiredIDs: ["transcripted.settings.page.storage"]
+            ),
+            (
+                id: "settings-beta",
+                title: "Beta settings tab is reachable",
+                triggerID: "transcripted.settings.tab.beta",
+                requiredIDs: ["transcripted.settings.page.beta"]
+            ),
+            (
+                id: "settings-support",
+                title: "Support settings tab is reachable",
+                triggerID: "transcripted.settings.tab.support",
+                requiredIDs: ["transcripted.settings.page.support"]
+            ),
+            (
+                id: "settings-about",
+                title: "About settings tab is reachable",
+                triggerID: "transcripted.settings.tab.about",
+                requiredIDs: ["transcripted.settings.page.about"]
+            ),
+        ]
+
+        for check in settingsPageChecks {
+            guard appInspector.performPressOrClick(identifier: check.triggerID) else {
+                builder.add(.fail(
+                    check.id,
+                    check.title,
+                    target: check.triggerID,
+                    detail: "Could not open this settings tab."
+                ))
+                return builder.build()
+            }
+            guard waitUntil(timeout: timeout, description: check.title, condition: {
+                let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
+                return check.requiredIDs.allSatisfy(ids.contains)
+            }) else {
+                builder.add(.fail(
+                    check.id,
+                    check.title,
+                    target: check.triggerID,
+                    detail: "Settings tab did not expose expected automation identifiers.",
+                    observed: observedElements(for: check.requiredIDs, inspector: appInspector)
+                ))
+                return builder.build()
+            }
+            builder.add(.pass(
+                check.id,
+                check.title,
+                target: check.triggerID,
+                observed: observedElements(for: check.requiredIDs, inspector: appInspector)
+            ))
+        }
 
         return builder.build()
     }

@@ -18,10 +18,25 @@
 // starting does NOT change kAudioHardwarePropertyProcessObjectList — the browser
 // helper process already exists; only its IsRunningInput flag flips. So a pure
 // process-list listener would miss the start. We listen on the input device's
-// "is running somewhere" edge for low latency on the common path, and run a small
-// slower periodic scan as a correctness guarantee for any edge a listener
-// doesn't catch (e.g. capture on a non-default device). The listener gives the
-// fast common path; the poll is intentionally slower for idle battery life.
+// "is running somewhere" edge for low latency on the common path, and run a
+// periodic process-object scan as a correctness guarantee for any edge a listener
+// doesn't catch. That second case is more common than it sounds: the edge fires
+// only on a 0→1 transition of the *default* input device's aggregate running
+// state, so a call that starts while the device is already running (another app
+// holds the mic, our own warmup touched it) or on a non-default device never
+// trips the listener and falls entirely to the poll. The original 60s poll meant
+// such calls surfaced up to a minute late — or, for a short call, never. The poll
+// is now a few seconds (`pollInterval`); the process-object reads it performs are
+// cheap, so this is the high-value reliability fix for "spontaneous browser calls
+// feel invisible."
+//
+// Why a sustain gate: with a fast poll the raw signal would also fire on
+// momentary mic access (a voice search, a permission probe). We pass every scan
+// through `SustainedActivityConfirmer` and only emit a bundle once it has held
+// the mic continuously for `sustainInterval`, re-scanning at the confirmation
+// deadline so a genuine call still surfaces within a couple of seconds. This is
+// the on-device "is this really a call?" check that lets us be aggressive on
+// latency without prompting on every blip.
 
 import CoreAudio
 import Foundation
@@ -38,6 +53,7 @@ final class MicActivityMonitor: @unchecked Sendable {
     private let queue = DispatchQueue(label: "MicActivityMonitor.process-objects", qos: .utility)
     private let debounceInterval: TimeInterval
     private let pollInterval: TimeInterval
+    private let sustainInterval: TimeInterval
 
     // All of the following are touched only on `queue`.
     private var started = false
@@ -45,16 +61,20 @@ final class MicActivityMonitor: @unchecked Sendable {
     private var deviceListener: (device: AudioObjectID, address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)?
     private var backstopTimer: DispatchSourceTimer?
     private var debounceWorkItem: DispatchWorkItem?
+    private var sustainWorkItem: DispatchWorkItem?
+    private var activeSince: [String: Date] = [:]
     private var lastEmitted: Set<String>?
 
     init(
         ownBundleID: String = Bundle.main.bundleIdentifier ?? "",
         debounceInterval: TimeInterval = 1.0,
-        pollInterval: TimeInterval = 60.0
+        pollInterval: TimeInterval = 5.0,
+        sustainInterval: TimeInterval = 3.0
     ) {
         self.ownBundleID = ownBundleID
         self.debounceInterval = debounceInterval
         self.pollInterval = pollInterval
+        self.sustainInterval = sustainInterval
     }
 
     // MARK: - Lifecycle (called on the main actor)
@@ -78,6 +98,9 @@ final class MicActivityMonitor: @unchecked Sendable {
             self.backstopTimer = nil
             self.debounceWorkItem?.cancel()
             self.debounceWorkItem = nil
+            self.sustainWorkItem?.cancel()
+            self.sustainWorkItem = nil
+            self.activeSince = [:]
             self.lastEmitted = nil
         }
     }
@@ -113,11 +136,36 @@ final class MicActivityMonitor: @unchecked Sendable {
     }
 
     private func scanAndEmit() {
-        let users = Self.micUsingBundleIDs(from: currentProcessInputState(), ownBundleID: ownBundleID)
+        let raw = Self.micUsingBundleIDs(from: currentProcessInputState(), ownBundleID: ownBundleID)
+        let now = Date()
+        let outcome = SustainedActivityConfirmer.confirm(
+            raw: raw,
+            activeSince: activeSince,
+            now: now,
+            sustain: sustainInterval
+        )
+        activeSince = outcome.activeSince
+        // Re-scan exactly when the next pending bundle would cross the sustain
+        // threshold, so a real call surfaces ~`sustainInterval` after it starts
+        // rather than waiting for the next backstop poll.
+        scheduleSustainScan(at: outcome.nextDeadline, now: now)
+
+        let users = outcome.confirmed
         guard users != lastEmitted else { return }
         lastEmitted = users
         let callback = onChange
         DispatchQueue.main.async { callback?(users) }
+    }
+
+    private func scheduleSustainScan(at deadline: Date?, now: Date) {
+        sustainWorkItem?.cancel()
+        guard let deadline else {
+            sustainWorkItem = nil
+            return
+        }
+        let item = DispatchWorkItem { [weak self] in self?.scanAndEmit() }
+        sustainWorkItem = item
+        queue.asyncAfter(deadline: .now() + max(0, deadline.timeIntervalSince(now)), execute: item)
     }
 
     private func startBackstopTimer() {

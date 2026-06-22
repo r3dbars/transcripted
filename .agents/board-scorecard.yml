@@ -52,9 +52,9 @@ boards:
     automatable: auto
     weight: 1.0
     ui:
-      check_globs: ["ui/dictation*"]
+      check_globs: ["settings-dictations"]
     functional:
-      check_globs: ["transcript/dictation*", "log/dictation*"]
+      check_globs: ["dictation/*"]
 
   - id: speakers
     name: Speakers (People)
@@ -62,9 +62,9 @@ boards:
     automatable: auto
     weight: 1.0
     ui:
-      check_globs: ["ui/speaker*", "ui/people*"]
+      check_globs: ["settings-speakers"]
     functional:
-      check_globs: ["speakerdb/*", "transcript/speaker*"]
+      check_globs: ["database/speakers*", "transcript/yaml-engine-diarize"]
     accuracy:
       input: diarization
 
@@ -74,7 +74,7 @@ boards:
     automatable: auto
     weight: 0.75
     ui:
-      check_globs: ["ui/agent*", "ui/connect*"]
+      check_globs: ["settings-agent", "menu-identifiers"]
     functional:
       check_globs: ["index/*", "artifact/agent*"]
 
@@ -95,7 +95,7 @@ boards:
     automatable: auto
     weight: 0.75
     ui:
-      check_globs: ["ui/models*"]
+      check_globs: ["settings-models-consolidated"]
     functional:
       check_globs: ["health/model*"]
 
@@ -105,7 +105,7 @@ boards:
     automatable: auto
     weight: 0.75
     ui:
-      check_globs: ["ui/shortcut*"]
+      check_globs: ["settings-shortcuts-consolidated"]
 
   - id: settings-storage
     name: Settings · Storage
@@ -113,7 +113,7 @@ boards:
     automatable: auto
     weight: 0.75
     ui:
-      check_globs: ["ui/storage*"]
+      check_globs: ["settings-storage"]
     functional:
       check_globs: ["health/disk*", "artifact/retention*"]
 
@@ -123,9 +123,9 @@ boards:
     automatable: auto
     weight: 1.0
     ui:
-      check_globs: ["ui/privacy*"]
+      check_globs: ["settings-privacy-consolidated"]
     functional:
-      check_globs: ["log/privacy*", "artifact/privacy*"]
+      check_globs: ["logs/*"]
 
   - id: settings-support
     name: Settings · Support
@@ -133,9 +133,9 @@ boards:
     automatable: auto
     weight: 0.5
     ui:
-      check_globs: ["ui/support*"]
+      check_globs: ["settings-support"]
     functional:
-      check_globs: ["log/*"]
+      check_globs: ["logs/*"]
 
   # ---- Quality / accuracy boards ---------------------------------------------
   - id: transcription
@@ -160,7 +160,7 @@ boards:
       functional: 0.3
       accuracy: 0.7
     functional:
-      check_globs: ["speakerdb/*", "transcript/speaker*"]
+      check_globs: ["database/speakers*", "transcript/yaml-engine-diarize"]
     accuracy:
       input: diarization
 
@@ -173,7 +173,7 @@ boards:
       functional: 0.4
       accuracy: 0.6
     functional:
-      check_globs: ["artifact/summary*", "transcript/summary*"]
+      check_globs: ["settings-beta", "transcript/body-has-sections"]
     accuracy:
       input: summary         # score-summary.json (from score-summary-judge)
 
@@ -186,7 +186,7 @@ boards:
       functional: 0.4
       accuracy: 0.6
     functional:
-      check_globs: ["transcript/dictation*"]
+      check_globs: ["dictation/*"]
     accuracy:
       input: dictation       # score-dictation.json
 
@@ -199,7 +199,7 @@ boards:
       functional: 0.4
       accuracy: 0.6
     functional:
-      check_globs: ["log/detection*"]
+      check_globs: ["logs/*"]
     accuracy:
       input: detection       # score-detection.json
 

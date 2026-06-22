@@ -8,11 +8,13 @@ private func transcriptedQAApplicationSupportDirectory(fileManager: FileManager 
 
 struct QADataDirectories {
     let meetingsDir: URL
+    let dictationsDir: URL
     let stateDir: URL
     let logFilePath: String
 
     static func resolve(
         meetingsDir: String? = nil,
+        dictationsDir: String? = nil,
         stateDir: String? = nil,
         logPath: String? = nil,
         fileManager: FileManager = .default
@@ -23,6 +25,7 @@ struct QADataDirectories {
         let currentRoot = appSupport.appendingPathComponent("Transcripted", isDirectory: true)
         let current = QADataDirectories(
             meetingsDir: currentRoot.appendingPathComponent("captures/meetings", isDirectory: true),
+            dictationsDir: currentRoot.appendingPathComponent("captures/dictations", isDirectory: true),
             stateDir: currentRoot.appendingPathComponent("state", isDirectory: true),
             logFilePath: currentRoot.appendingPathComponent("logs/app.jsonl", isDirectory: false).path
         )
@@ -30,6 +33,7 @@ struct QADataDirectories {
         let draftRoot = appSupport.appendingPathComponent("Draft", isDirectory: true)
         let legacyDraft = QADataDirectories(
             meetingsDir: draftRoot.appendingPathComponent("meetings/transcripts", isDirectory: true),
+            dictationsDir: draftRoot.appendingPathComponent("transcripts", isDirectory: true),
             stateDir: draftRoot.appendingPathComponent("meetings", isDirectory: true),
             logFilePath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl", isDirectory: false).path
         )
@@ -37,6 +41,7 @@ struct QADataDirectories {
         let legacySharedRoot = home.appendingPathComponent("Documents/Transcripted", isDirectory: true)
         let legacyShared = QADataDirectories(
             meetingsDir: legacySharedRoot,
+            dictationsDir: legacySharedRoot,
             stateDir: legacySharedRoot,
             logFilePath: home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl", isDirectory: false).path
         )
@@ -52,6 +57,12 @@ struct QADataDirectories {
             )
             selectedBase = QADataDirectories(
                 meetingsDir: normalizedMeetings,
+                dictationsDir: resolveDictationsDirectory(
+                    explicit: dictationsDir,
+                    meetingsDir: normalizedMeetings,
+                    inferredBase: inferredBase,
+                    fileManager: fileManager
+                ),
                 stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? inferredBase.stateDir,
                 logFilePath: logPath ?? inferredBase.logFilePath
             )
@@ -69,6 +80,7 @@ struct QADataDirectories {
 
             selectedBase = QADataDirectories(
                 meetingsDir: defaultBase.meetingsDir,
+                dictationsDir: dictationsDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? defaultBase.dictationsDir,
                 stateDir: stateDir.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? defaultBase.stateDir,
                 logFilePath: logPath ?? defaultBase.logFilePath
             )
@@ -90,6 +102,46 @@ struct QADataDirectories {
             }
         }
         return standardized
+    }
+
+    private static func resolveDictationsDirectory(
+        explicit dictationsDir: String?,
+        meetingsDir: URL,
+        inferredBase: QADataDirectories,
+        fileManager: FileManager
+    ) -> URL {
+        if let dictationsDir, !dictationsDir.isEmpty {
+            return URL(fileURLWithPath: dictationsDir).standardizedFileURL
+        }
+
+        let standardized = meetingsDir.standardizedFileURL
+
+        if standardized.lastPathComponent == "meetings" {
+            return standardized.deletingLastPathComponent().appendingPathComponent("dictations", isDirectory: true)
+        }
+
+        let childDictations = standardized.appendingPathComponent("dictations", isDirectory: true)
+        if fileManager.fileExists(atPath: childDictations.path) {
+            return childDictations
+        }
+
+        if containsDictationDayMarkdown(in: standardized, fileManager: fileManager) {
+            return standardized
+        }
+
+        if standardized.path.hasPrefix(inferredBase.meetingsDir.standardizedFileURL.path)
+            || standardized.path.hasPrefix(inferredBase.stateDir.standardizedFileURL.path) {
+            return inferredBase.dictationsDir
+        }
+
+        return childDictations
+    }
+
+    private static func containsDictationDayMarkdown(in directory: URL, fileManager: FileManager) -> Bool {
+        guard let files = try? fileManager.contentsOfDirectory(atPath: directory.path) else {
+            return false
+        }
+        return files.contains { $0.hasPrefix("Dictations_") && $0.hasSuffix(".md") }
     }
 
     private static func inferBaseLayout(
@@ -139,6 +191,9 @@ struct PathOptions: ParsableArguments {
     @Option(name: .long, help: "Path to the meetings capture directory. Defaults to ~/Library/Application Support/Transcripted/captures/meetings, with legacy Draft/Documents fallback.")
     var path: String?
 
+    @Option(name: .long, help: "Path to the dictations capture directory. Defaults follow the selected layout.")
+    var dictationsPath: String?
+
     @Option(name: .long, help: "Path to the state directory containing speakers.sqlite and stats.sqlite. Defaults follow the selected layout.")
     var stateDir: String?
 
@@ -146,7 +201,7 @@ struct PathOptions: ParsableArguments {
     var logPath: String?
 
     var resolved: QADataDirectories {
-        QADataDirectories.resolve(meetingsDir: path, stateDir: stateDir, logPath: logPath)
+        QADataDirectories.resolve(meetingsDir: path, dictationsDir: dictationsPath, stateDir: stateDir, logPath: logPath)
     }
 }
 

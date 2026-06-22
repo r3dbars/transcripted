@@ -373,4 +373,415 @@ func testAnalyticsReporter() {
             "invalid negative timings should fail closed to the smallest latency bucket"
         )
     }
+
+    runSuite("AnalyticsReporter persists only sanitized allowlisted retry records") {
+        let fixture = makeAnalyticsReporterFixture(responses: [.networkFailure])
+        defer { fixture.cleanup() }
+
+        fixture.reporter.trackEvent(
+            "dictation_completed",
+            properties: [
+                "trigger": "hotkey",
+                "duration_bucket": "30_119s",
+                "word_count_bucket": "50_149",
+                "audio_path": "/Users/jane/private.wav",
+                "meeting_title": "Secret roadmap",
+                "speaker_name": "Jane",
+                "transcript_text": "private words",
+            ]
+        )
+
+        assertTrue(
+            waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 1 && loadBufferedAnalyticsCaptures(from: fixture.bufferURL).first?.attemptCount == 1 },
+            "failed delivery should leave one persisted retry record"
+        )
+
+        let captures = loadBufferedAnalyticsCaptures(from: fixture.bufferURL)
+        assertEqual(captures.count, 1, "one failed capture should remain buffered")
+        assertEqual(captures.first?.event, "dictation_completed", "buffer should persist the reviewed event name")
+        assertEqual(captures.first?.properties["trigger"], "hotkey", "allowlisted properties should survive persistence")
+        assertEqual(captures.first?.properties["duration_bucket"], "30_119s", "allowlisted buckets should survive persistence")
+        assertNil(captures.first?.properties["audio_path"], "audio paths should never be persisted")
+        assertNil(captures.first?.properties["meeting_title"], "meeting titles should never be persisted")
+        assertNil(captures.first?.properties["speaker_name"], "speaker names should never be persisted")
+        assertNil(captures.first?.properties["transcript_text"], "transcript text should never be persisted")
+
+        let diskJSON = readStringIfPresent(fixture.bufferURL) ?? ""
+        assertFalse(diskJSON.contains("test-api-key"), "retry buffer must not persist the PostHog API key")
+        assertFalse(diskJSON.contains("posthog.example.com"), "retry buffer must not persist the PostHog host")
+        assertFalse(diskJSON.contains("api_key"), "retry buffer must not persist capture request secrets")
+        assertFalse(diskJSON.contains("Content-Type"), "retry buffer must not persist HTTP headers")
+        assertFalse(diskJSON.contains("/Users/jane/private.wav"), "retry buffer must not persist raw local paths")
+        assertFalse(diskJSON.contains("Secret roadmap"), "retry buffer must not persist raw titles")
+        assertFalse(diskJSON.contains("private words"), "retry buffer must not persist transcript text")
+    }
+
+    runSuite("AnalyticsReporter retries transient failures and deletes after success") {
+        let fixture = makeAnalyticsReporterFixture(
+            responses: [.status(503), .status(200)],
+            retryDelay: { _ in 0 }
+        )
+        defer { fixture.cleanup() }
+
+        fixture.reporter.trackEvent("app_launched")
+
+        assertTrue(
+            waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 1 && loadBufferedAnalyticsCaptures(from: fixture.bufferURL).first?.attemptCount == 1 },
+            "5xx delivery should leave the capture ready for retry"
+        )
+
+        fixture.reporter.flushPendingCapturesForTesting()
+
+        assertTrue(
+            waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 2 && !FileManager.default.fileExists(atPath: fixture.bufferURL.path) },
+            "successful retry should delete the persisted capture"
+        )
+    }
+
+    runSuite("AnalyticsReporter drops non-429 4xx responses and retains 429 responses") {
+        let badRequest = makeAnalyticsReporterFixture(responses: [.status(400)])
+        defer { badRequest.cleanup() }
+
+        badRequest.reporter.trackEvent("app_launched")
+
+        assertTrue(
+            waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 1 && !FileManager.default.fileExists(atPath: badRequest.bufferURL.path) },
+            "400 responses should drop the persisted capture"
+        )
+
+        let retryAfter429 = makeAnalyticsReporterFixture(
+            responses: [.status(429)],
+            now: Date(timeIntervalSince1970: 1_000),
+            retryDelay: { _ in 30 }
+        )
+        defer { retryAfter429.cleanup() }
+
+        retryAfter429.reporter.trackEvent("app_launched")
+
+        assertTrue(
+            waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 1 && loadBufferedAnalyticsCaptures(from: retryAfter429.bufferURL).first?.attemptCount == 1 },
+            "429 responses should retain the capture"
+        )
+
+        let captures = loadBufferedAnalyticsCaptures(from: retryAfter429.bufferURL)
+        assertEqual(captures.count, 1, "429 capture should stay buffered")
+        assertEqual(captures.first?.nextRetryAt, Optional(1_030.0), "429 capture should honor retry backoff")
+
+        retryAfter429.reporter.flushPendingCapturesForTesting()
+        Thread.sleep(forTimeInterval: 0.05)
+        assertEqual(AnalyticsReporterTestURLProtocol.requestCount(), 1, "backoff should prevent an immediate retry")
+    }
+
+    runSuite("AnalyticsReporter flushes persisted launch captures on reporter initialization") {
+        let fixture = makeAnalyticsReporterFixture(responses: [.status(200)], autostart: false)
+        defer { fixture.cleanup() }
+
+        fixture.store.save([
+            makePendingAnalyticsCapture(event: "app_launched", enqueuedAt: 1_000),
+        ], now: Date(timeIntervalSince1970: 1_000))
+
+        fixture.start()
+
+        assertTrue(
+            waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 1 && !FileManager.default.fileExists(atPath: fixture.bufferURL.path) },
+            "reporter startup should flush pending launch captures"
+        )
+    }
+
+    runSuite("AnalyticsReporter opt-out wipes the retry buffer and prevents delivery") {
+        let fixture = makeAnalyticsReporterFixture(responses: [.networkFailure], observePreferenceChanges: true)
+        defer { fixture.cleanup() }
+
+        fixture.reporter.trackEvent("app_launched")
+
+        assertTrue(
+            waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 1 && loadBufferedAnalyticsCaptures(from: fixture.bufferURL).count == 1 },
+            "failed delivery should create a retry file before opt-out"
+        )
+
+        AnalyticsPreferences.setEnabled(false, userDefaults: fixture.userDefaults)
+
+        assertTrue(
+            waitUntil { !FileManager.default.fileExists(atPath: fixture.bufferURL.path) },
+            "analytics opt-out notification should delete the retry file"
+        )
+
+        fixture.reporter.trackEvent("app_launched")
+
+        assertTrue(
+            waitUntil { !FileManager.default.fileExists(atPath: fixture.bufferURL.path) },
+            "analytics opt-out should delete the retry file"
+        )
+        assertEqual(AnalyticsReporterTestURLProtocol.requestCount(), 1, "opt-out should prevent new delivery attempts")
+    }
+
+    runSuite("AnalyticsReporter refuses non-HTTPS PostHog hosts before buffering") {
+        let fixture = makeAnalyticsReporterFixture(
+            responses: [.status(200)],
+            captureHost: "http://posthog.example.com"
+        )
+        defer { fixture.cleanup() }
+
+        fixture.reporter.trackEvent("app_launched")
+
+        assertEqual(AnalyticsReporterTestURLProtocol.requestCount(), 0, "non-HTTPS hosts should not be contacted")
+        assertFalse(FileManager.default.fileExists(atPath: fixture.bufferURL.path), "non-HTTPS hosts should not create retry records")
+    }
+
+    runSuite("AnalyticsDeliveryBufferStore caps records, expires stale captures, and recovers from corrupt JSON") {
+        let fixture = makeAnalyticsReporterFixture(responses: [], autostart: false)
+        defer { fixture.cleanup() }
+
+        let defaultStore = AnalyticsDeliveryBufferStore(fileURL: fixture.bufferURL)
+        let records = (0..<105).map { index in
+            makePendingAnalyticsCapture(id: "capture-\(index)", enqueuedAt: TimeInterval(index))
+        }
+        defaultStore.save(records, now: Date(timeIntervalSince1970: 200))
+
+        let capped = defaultStore.load(now: Date(timeIntervalSince1970: 200))
+        assertEqual(capped.count, 100, "buffer should cap persisted captures near one hundred records")
+        assertEqual(capped.first?.id, "capture-5", "record cap should drop the oldest captures first")
+
+        let tinyStore = AnalyticsDeliveryBufferStore(
+            fileURL: fixture.bufferURL,
+            maxRecordCount: 100,
+            maxFileBytes: 1_200,
+            ttl: AnalyticsDeliveryBufferStore.defaultTTL
+        )
+        tinyStore.save(records, now: Date(timeIntervalSince1970: 200))
+        let byteCapped = tinyStore.load(now: Date(timeIntervalSince1970: 200))
+        assertTrue(byteCapped.count < 100, "byte cap should drop old records until the JSON file is small")
+        assertTrue((try? Data(contentsOf: fixture.bufferURL).count) ?? Int.max <= 1_200, "retry file should stay under the configured byte cap")
+
+        let ttlStore = AnalyticsDeliveryBufferStore(
+            fileURL: fixture.bufferURL,
+            maxRecordCount: 100,
+            maxFileBytes: AnalyticsDeliveryBufferStore.defaultMaxFileBytes,
+            ttl: 10
+        )
+        ttlStore.save([
+            makePendingAnalyticsCapture(id: "old", enqueuedAt: 1_000),
+            makePendingAnalyticsCapture(id: "fresh", enqueuedAt: 1_016),
+        ], now: Date(timeIntervalSince1970: 1_020))
+        let ttlCaptures = ttlStore.load(now: Date(timeIntervalSince1970: 1_020))
+        assertEqual(ttlCaptures.map(\.id), ["fresh"], "TTL should drop records older than one day in production")
+
+        try? Data("not-json".utf8).write(to: fixture.bufferURL, options: [.atomic])
+        assertEqual(defaultStore.load().count, 0, "corrupt retry files should recover as an empty buffer")
+        assertFalse(FileManager.default.fileExists(atPath: fixture.bufferURL.path), "corrupt retry files should be deleted")
+    }
+}
+
+private final class AnalyticsReporterFixture {
+    let directory: URL
+    let bufferURL: URL
+    let store: AnalyticsDeliveryBufferStore
+    let userDefaults: UserDefaults
+    private let makeReporter: () -> AnalyticsReporter
+    private let suiteName: String
+    private var startedReporter: AnalyticsReporter?
+
+    var reporter: AnalyticsReporter {
+        if let startedReporter {
+            return startedReporter
+        }
+        let reporter = makeReporter()
+        startedReporter = reporter
+        return reporter
+    }
+
+    init(
+        directory: URL,
+        bufferURL: URL,
+        store: AnalyticsDeliveryBufferStore,
+        userDefaults: UserDefaults,
+        suiteName: String,
+        makeReporter: @escaping () -> AnalyticsReporter,
+        startedReporter: AnalyticsReporter? = nil
+    ) {
+        self.directory = directory
+        self.bufferURL = bufferURL
+        self.store = store
+        self.userDefaults = userDefaults
+        self.suiteName = suiteName
+        self.makeReporter = makeReporter
+        self.startedReporter = startedReporter
+    }
+
+    func start() {
+        _ = reporter
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: directory)
+        userDefaults.removePersistentDomain(forName: suiteName)
+    }
+}
+
+private enum AnalyticsReporterTestResponse {
+    case status(Int)
+    case networkFailure
+}
+
+private func makeAnalyticsReporterFixture(
+    responses: [AnalyticsReporterTestResponse],
+    captureHost: String = "https://posthog.example.com",
+    now: Date = Date(timeIntervalSince1970: 2_000),
+    retryDelay: @escaping (Int) -> TimeInterval = { _ in 1 },
+    analyticsEnabled: (() -> Bool)? = nil,
+    observePreferenceChanges: Bool = false,
+    autostart: Bool = true
+) -> AnalyticsReporterFixture {
+    AnalyticsReporterTestURLProtocol.reset(responses: responses)
+
+    let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("AnalyticsReporterTests-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let bufferURL = directory.appendingPathComponent(AnalyticsDeliveryBufferStore.fileName)
+    let store = AnalyticsDeliveryBufferStore(fileURL: bufferURL)
+    let suiteName = "AnalyticsReporterTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [AnalyticsReporterTestURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+
+    let fixture = AnalyticsReporterFixture(
+        directory: directory,
+        bufferURL: bufferURL,
+        store: store,
+        userDefaults: defaults,
+        suiteName: suiteName,
+        makeReporter: {
+            AnalyticsReporter(
+                apiKey: "test-api-key",
+                captureHost: captureHost,
+                session: session,
+                bufferStore: store,
+                userDefaults: defaults,
+                currentDate: { now },
+                retryDelay: retryDelay,
+                analyticsEnabled: analyticsEnabled,
+                observePreferenceChanges: observePreferenceChanges
+            )
+        }
+    )
+
+    if autostart {
+        fixture.start()
+    }
+
+    return fixture
+}
+
+private func makePendingAnalyticsCapture(
+    id: String = UUID().uuidString,
+    event: String = "app_launched",
+    enqueuedAt: TimeInterval = 1_000,
+    nextRetryAt: TimeInterval? = nil
+) -> PendingAnalyticsCapture {
+    PendingAnalyticsCapture(
+        id: id,
+        event: event,
+        distinctID: "anonymous-device",
+        timestamp: "2026-06-20T12:00:00Z",
+        enqueuedAt: enqueuedAt,
+        attemptCount: 0,
+        nextRetryAt: nextRetryAt,
+        properties: [
+            "distinct_id": "anonymous-device",
+            "app_version": "1.0",
+            "build_version": "1",
+            "build_channel": "test",
+            "build_revision": "abc123",
+            "os_major": "26",
+            "session_id": "session-1",
+        ]
+    )
+}
+
+private struct AnalyticsReporterTestBufferFile: Decodable {
+    let version: Int
+    let records: [PendingAnalyticsCapture]
+}
+
+private func loadBufferedAnalyticsCaptures(from url: URL) -> [PendingAnalyticsCapture] {
+    guard let data = try? Data(contentsOf: url),
+          let file = try? JSONDecoder().decode(AnalyticsReporterTestBufferFile.self, from: data) else {
+        return []
+    }
+    return file.records
+}
+
+private func readStringIfPresent(_ url: URL) -> String? {
+    guard let data = try? Data(contentsOf: url) else { return nil }
+    return String(data: data, encoding: .utf8)
+}
+
+private func waitUntil(timeout: TimeInterval = 2, condition: () -> Bool) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() {
+            return true
+        }
+        Thread.sleep(forTimeInterval: 0.01)
+    }
+    return condition()
+}
+
+private final class AnalyticsReporterTestURLProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var responses: [AnalyticsReporterTestResponse] = []
+    private static var requests: [URLRequest] = []
+
+    static func reset(responses: [AnalyticsReporterTestResponse]) {
+        lock.lock()
+        self.responses = responses
+        self.requests = []
+        lock.unlock()
+    }
+
+    static func requestCount() -> Int {
+        lock.lock()
+        let count = requests.count
+        lock.unlock()
+        return count
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        let response = Self.nextResponse(recording: request)
+        switch response {
+        case .networkFailure:
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+        case .status(let status):
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: status,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data("{}".utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+
+    override func stopLoading() {}
+
+    private static func nextResponse(recording request: URLRequest) -> AnalyticsReporterTestResponse {
+        lock.lock()
+        requests.append(request)
+        let response = responses.isEmpty ? .status(200) : responses.removeFirst()
+        lock.unlock()
+        return response
+    }
 }

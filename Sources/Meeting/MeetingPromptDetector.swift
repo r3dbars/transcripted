@@ -57,6 +57,8 @@ final class MeetingPromptDetector {
     private var suppressionTelemetryUntil: [String: Date] = [:]
     // Bundle IDs currently holding the mic input, pushed by MicActivityMonitor.
     private var micActiveBundleIDs: Set<String> = []
+    // Whether a camera is confirmed in use, pushed by CameraActivityMonitor.
+    private var cameraInUse = false
 
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
@@ -233,7 +235,7 @@ final class MeetingPromptDetector {
             runningBundleIDs: runningBundleIDs,
             frontmostBundleID: frontmostBundleID
         ))
-        candidates.append(contentsOf: micInputCandidates(now: now))
+        candidates.append(contentsOf: micInputCandidates(now: now, frontmostBundleID: frontmostBundleID))
 
         let sortedCandidates = candidates.sorted(by: sortCandidates)
         guard let match = preferredCandidate(from: sortedCandidates) else { return }
@@ -387,14 +389,24 @@ final class MeetingPromptDetector {
         }
     }
 
-    private func micInputCandidates(now: Date) -> [ScoredCandidate] {
-        guard !micActiveBundleIDs.isEmpty else { return [] }
-        let providers = micInputProviders()
-        guard !providers.isEmpty else { return [] }
+    /// Pushed by `CameraActivityMonitor`: `true` when a camera is confirmed in
+    /// use. Re-evaluates so a camera-on, mic-muted call can prompt; de-dupes with
+    /// the mic signal in `callSignals` so a normal video call raises one prompt.
+    func updateCameraInUse(_ inUse: Bool) {
+        guard inUse != cameraInUse else { return }
+        cameraInUse = inUse
+        Task { @MainActor [weak self] in
+            await self?.evaluate()
+        }
+    }
+
+    private func micInputCandidates(now: Date, frontmostBundleID: String?) -> [ScoredCandidate] {
+        let signals = callSignals(frontmostBundleID: frontmostBundleID)
+        guard !signals.isEmpty else { return [] }
         guard isMicInputPromptEnabled?() != false else {
-            providers.forEach {
+            signals.forEach {
                 recordSuppression(
-                    candidate: micInputCandidate(for: $0, now: now).candidate,
+                    candidate: micInputCandidate(for: $0.provider, reason: $0.reason, now: now).candidate,
                     reason: .micInputDisabled,
                     now: now
                 )
@@ -404,9 +416,9 @@ final class MeetingPromptDetector {
         // Never prompt to record a call while we already hold the mic ourselves.
         let captureActivity = currentOwnCaptureActivity()
         guard captureActivity == .none else {
-            providers.forEach {
+            signals.forEach {
                 recordSuppression(
-                    candidate: micInputCandidate(for: $0, now: now).candidate,
+                    candidate: micInputCandidate(for: $0.provider, reason: $0.reason, now: now).candidate,
                     reason: .ownCaptureActive,
                     now: now,
                     captureActivity: captureActivity
@@ -415,23 +427,42 @@ final class MeetingPromptDetector {
             return []
         }
 
-        var seenProviders: Set<MeetingPromptProvider> = []
         var candidates: [ScoredCandidate] = []
-        for provider in providers {
-            guard seenProviders.insert(provider).inserted else { continue }
-            if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now {
+        for signal in signals {
+            if let suppressedUntil = runtimeSuppressedUntil[signal.provider], suppressedUntil > now {
                 recordSuppression(
-                    candidate: micInputCandidate(for: provider, now: now).candidate,
+                    candidate: micInputCandidate(for: signal.provider, reason: signal.reason, now: now).candidate,
                     reason: .runtimeSuppressed,
                     now: now,
-                    cooldownReason: runtimeSuppressionReasons[provider]
+                    cooldownReason: runtimeSuppressionReasons[signal.provider]
                 )
                 continue
             }
 
-            candidates.append(micInputCandidate(for: provider, now: now))
+            candidates.append(micInputCandidate(for: signal.provider, reason: signal.reason, now: now))
         }
         return candidates
+    }
+
+    /// Ad-hoc call signals. The mic is the primary signal; the camera is only a
+    /// standalone signal when nothing holds the mic (the mic-muted join), so a
+    /// normal mic-and-camera call is a single mic prompt and the camera's
+    /// frontmost-based attribution never overrides or duplicates a live mic call.
+    /// Mirrors `MeetingPromptHeuristics.callSignals` used by the synthetic evaluator.
+    private func callSignals(
+        frontmostBundleID: String?
+    ) -> [(provider: MeetingPromptProvider, reason: MeetingPromptReason)] {
+        let micProviders = micInputProviders()
+        if !micProviders.isEmpty {
+            return micProviders.map { ($0, .micInput) }
+        }
+
+        if cameraInUse,
+           let provider = MeetingPromptProvider.cameraCallProvider(forFrontmostBundleID: frontmostBundleID) {
+            return [(provider, .cameraInput)]
+        }
+
+        return []
     }
 
     private func micInputProviders() -> [MeetingPromptProvider] {
@@ -459,7 +490,11 @@ final class MeetingPromptDetector {
         )
     }
 
-    private func micInputCandidate(for provider: MeetingPromptProvider, now: Date) -> ScoredCandidate {
+    private func micInputCandidate(
+        for provider: MeetingPromptProvider,
+        reason: MeetingPromptReason,
+        now: Date
+    ) -> ScoredCandidate {
         // Browser calls map to .googleMeet generically (could be Meet/Zoom-web/
         // Teams-web), so keep their title neutral instead of mislabeling them.
         let isBrowserCall = provider == .googleMeet
@@ -474,7 +509,7 @@ final class MeetingPromptDetector {
                 title: presentation.title,
                 detail: presentation.detail,
                 provider: provider,
-                reason: .micInput,
+                reason: reason,
                 source: .runtimeApp,
                 startDate: now,
                 endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
@@ -491,7 +526,7 @@ final class MeetingPromptDetector {
 
     private func preferredCandidate(from sortedCandidates: [ScoredCandidate]) -> ScoredCandidate? {
         guard let first = sortedCandidates.first else { return nil }
-        guard first.candidate.reason == .micInput else { return first }
+        guard first.candidate.reason.isAdHocCallSignal else { return first }
         let calendarCandidate = sortedCandidates.first {
             $0.candidate.source == .calendarEvent &&
                 $0.candidate.provider == first.candidate.provider

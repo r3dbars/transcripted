@@ -88,6 +88,11 @@ func testMeetingLiveViewAffordancePolicy() {
         )
         assertEqual(MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle, "Open Live View in Browser")
         assertEqual(MeetingLiveViewAffordancePolicy.copyTranscriptMenuTitle, "Copy Transcript")
+        assertEqual(
+            MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus,
+            "Could not open Live View in your browser. Try again from the menu.",
+            "browser handoff failures should have visible drawer feedback, not just telemetry"
+        )
     }
 
     runSuite("MeetingLiveViewAffordancePolicy — drawer status copy follows the feed phase") {

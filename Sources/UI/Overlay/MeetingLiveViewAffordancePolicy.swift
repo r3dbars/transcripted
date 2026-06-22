@@ -27,6 +27,7 @@ enum MeetingLiveViewAffordancePolicy {
     static let openInBrowserMenuTitle = "Open Live View in Browser"
     static let keepControlsVisibleMenuTitle = "Keep Controls Visible"
     static let discardRecordingMenuTitle = "Discard Recording…"
+    static let openInBrowserFailedStatus = "Could not open Live View in your browser. Try again from the menu."
 
     struct Affordance: Equatable {
         let tooltip: String

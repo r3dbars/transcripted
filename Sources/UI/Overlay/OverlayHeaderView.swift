@@ -52,6 +52,8 @@ private final class OverlayPrimaryButton: NSButton {
     }
 
     private func updateLayerAppearance() {
+        let shouldScale = isHighlighted && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        layer?.transform = shouldScale ? CATransform3DMakeScale(0.97, 0.97, 1) : CATransform3DIdentity
         layer?.backgroundColor = (isHighlighted
             ? NSColor.white.withAlphaComponent(0.78)
             : NSColor.white.withAlphaComponent(0.94)
@@ -77,6 +79,19 @@ final class OverlayHeaderView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if !stopButton.isHidden, stopButton.isEnabled, stopButton.alphaValue > 0 {
+            let stopPoint = convert(point, to: stopButton)
+            let widthInset = min(0, (stopButton.bounds.width - OverlayTokens.minimumHitTarget) / 2)
+            let heightInset = min(0, (stopButton.bounds.height - OverlayTokens.minimumHitTarget) / 2)
+            if stopButton.bounds.insetBy(dx: widthInset, dy: heightInset).contains(stopPoint) {
+                return stopButton
+            }
+        }
+
+        return super.hitTest(point)
+    }
 
     private func setupViews() {
         // Mode label

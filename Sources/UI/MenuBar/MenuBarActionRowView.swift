@@ -205,14 +205,15 @@ final class MenuBarActionRowView: NSControl {
             titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
             detailLabel.frame = .zero
         } else {
-            let titleY: CGFloat = 1
+            let textBlockHeight: CGFloat = 30
+            let titleY = floor((bounds.height - textBlockHeight) / 2)
             titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: 16)
             detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: 13)
         }
 
         if trailingWidth > 0 {
             let trailingX = bounds.width - padX - trailingWidth
-            let trailingY = hasDetail ? 2 : (bounds.height - 14) / 2
+            let trailingY = hasDetail ? titleLabel.frame.minY + 1 : (bounds.height - 14) / 2
             trailingLabel.frame = NSRect(x: trailingX, y: trailingY, width: trailingWidth, height: 14)
         }
     }
@@ -234,9 +235,9 @@ final class MenuBarActionRowView: NSControl {
         let hasDetail = !detailLabel.stringValue.isEmpty
         switch rowSize {
         case .primary:
-            return hasDetail ? MenuTokens.compactActionRowHeight : 24
+            return hasDetail ? MenuTokens.compactActionRowHeight : MenuTokens.minimumHitTargetSize
         case .utility:
-            return hasDetail ? 28 : 24
+            return hasDetail ? MenuTokens.utilityActionRowHeight : MenuTokens.minimumHitTargetSize
         }
     }
 
@@ -289,6 +290,35 @@ final class MenuBarActionRowView: NSControl {
         onPress?()
         return true
     }
+
+    // MARK: - Keyboard focus
+
+    // Rows are real controls, so they join the popover's key-view loop and stay
+    // reachable by keyboard. An enabled, visible row can take focus; a disabled
+    // or hidden one is skipped so Tab never lands on a dead control.
+    override var acceptsFirstResponder: Bool { isEnabled && !isHidden }
+
+    override var canBecomeKeyView: Bool { acceptsFirstResponder }
+
+    override func keyDown(with event: NSEvent) {
+        // Space (49) and Return / keypad Enter (36 / 76) activate the focused row,
+        // matching how AppKit buttons respond to keyboard activation.
+        if isEnabled, event.keyCode == 49 || event.keyCode == 36 || event.keyCode == 76 {
+            onPress?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(
+            roundedRect: bounds,
+            xRadius: MenuTokens.cardCornerRadius,
+            yRadius: MenuTokens.cardCornerRadius
+        ).fill()
+    }
+
+    override var focusRingMaskBounds: NSRect { bounds }
 
     var smokeSnapshot: MenuBarActionRowSmokeSnapshot {
         MenuBarActionRowSmokeSnapshot(

@@ -36,20 +36,20 @@ enum TranscriptedStoragePreferences {
         return fileManager.transcriptedDefaultCaptureLibraryDir
     }
 
+    @discardableResult
     static func setCaptureLibraryURL(
         _ url: URL?,
         userDefaults: UserDefaults = .standard,
         fileManager: FileManager = .default
-    ) {
+    ) -> Bool {
         if let url {
             // Security: keep unsafe roots out of preferences while preserving custom
             // capture-library locations chosen in Settings.
-            guard isSafeCaptureLibraryURL(url) else {
-                userDefaults.removeObject(forKey: captureLibraryLocationKey)
+            guard prepareCaptureLibraryURL(url, fileManager: fileManager) else {
                 try? fileManager.writeTranscriptedMCPDirectoriesManifestIfNeeded(
                     captureLibraryURL: captureLibraryURL(userDefaults: userDefaults, fileManager: fileManager)
                 )
-                return
+                return false
             }
             let candidate = url.standardizedFileURL
             userDefaults.set(candidate.path, forKey: captureLibraryLocationKey)
@@ -60,6 +60,7 @@ enum TranscriptedStoragePreferences {
         try? fileManager.writeTranscriptedMCPDirectoriesManifestIfNeeded(
             captureLibraryURL: captureLibraryURL(userDefaults: userDefaults, fileManager: fileManager)
         )
+        return true
     }
 
     static func isSafeCaptureLibraryURL(_ url: URL) -> Bool {
@@ -77,6 +78,33 @@ enum TranscriptedStoragePreferences {
         let forbiddenPrefixes = ["/System", "/Library", "/usr", "/bin", "/sbin", "/private"]
         return !forbiddenPrefixes.contains { prefix in
             candidate.path == prefix || candidate.path.hasPrefix(prefix + "/")
+        }
+    }
+
+    static func prepareCaptureLibraryURL(
+        _ url: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        guard isSafeCaptureLibraryURL(url) else {
+            return false
+        }
+
+        let root = url.standardizedFileURL
+        let meetings = root.appendingPathComponent("meetings", isDirectory: true)
+        let dictations = root.appendingPathComponent("dictations", isDirectory: true)
+        let probe = root.appendingPathComponent(".transcripted-write-test-\(UUID().uuidString)", isDirectory: false)
+
+        do {
+            try fileManager.createPrivateDirectory(at: root)
+            try fileManager.createPrivateDirectory(at: meetings)
+            try fileManager.createPrivateDirectory(at: dictations)
+            try Data().write(to: probe, options: [.atomic])
+            fileManager.restrictFileToOwnerOnly(at: probe)
+            try fileManager.removeItem(at: probe)
+            return true
+        } catch {
+            try? fileManager.removeItem(at: probe)
+            return false
         }
     }
 }

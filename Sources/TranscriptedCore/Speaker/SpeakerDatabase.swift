@@ -233,12 +233,24 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// Callers that pre-generate IDs (e.g. naming coordinator) rely on this;
     /// callers that pass `nil` always get a fresh UUID.
     public func addOrUpdateSpeaker(embedding: [Float], existingId: UUID? = nil) -> SpeakerProfile {
+        return addOrUpdateSpeaker(
+            embedding: embedding,
+            existingId: existingId,
+            blendAlpha: SpeakerWritePathPolicy.confidentBlendAlpha
+        )
+    }
+
+    /// Gated write-back: `blendAlpha` controls how much of the new embedding is blended into an
+    /// existing matched profile's voiceprint. `0` freezes the fingerprint while still bumping
+    /// call-count / last-seen (records the appearance without contaminating the identity).
+    /// New-speaker inserts ignore `blendAlpha`. See `SpeakerWritePathPolicy`.
+    public func addOrUpdateSpeaker(embedding: [Float], existingId: UUID?, blendAlpha: Float) -> SpeakerProfile {
         return queue.sync {
-            addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId)
+            addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId, blendAlpha: blendAlpha)
         }
     }
 
-    private func addOrUpdateSpeakerImpl(embedding: [Float], existingId: UUID?) -> SpeakerProfile {
+    private func addOrUpdateSpeakerImpl(embedding: [Float], existingId: UUID?, blendAlpha: Float) -> SpeakerProfile {
         guard isDatabaseOpen else {
             AppLogger.speakers.error("CRITICAL: addOrUpdateSpeaker returning in-memory-only profile — database not open, speaker will NOT be persisted", ["existingId": existingId?.uuidString ?? "new"])
             return SpeakerProfile(id: existingId ?? UUID(), displayName: nil, nameSource: nil, embedding: embedding, firstSeen: Date(), lastSeen: Date(), callCount: 1, confidence: 0.5, disputeCount: 0)
@@ -248,8 +260,12 @@ public final class SpeakerDatabase: @unchecked Sendable {
         let now = isoFormatter.string(from: Date())
 
         if let existingId = existingId, let existing = getSpeakerImpl(id: existingId) {
-            // Update: blend embedding with exponential moving average
-            let alpha: Float = 0.15  // Weight for new embedding (0.15 = slow adaptation, preserves identity)
+            // Update: blend embedding with exponential moving average.
+            // alpha is the write-time contamination gate (SpeakerWritePathPolicy): the caller
+            // passes a reduced/zero weight for marginal or ambiguous matches so a low-quality
+            // re-identification cannot permanently drift a mature profile's stored voiceprint.
+            // alpha == 0 leaves the embedding byte-identical while still recording the appearance.
+            let alpha = max(0, min(1, blendAlpha))
             let blended = zip(existing.embedding, embedding).map { old, new in
                 old * (1 - alpha) + new * alpha
             }

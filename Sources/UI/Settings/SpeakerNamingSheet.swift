@@ -13,6 +13,14 @@ import AppKit
 import Combine
 import TranscriptedCore
 
+enum SpeakerNamingHitTargets {
+    static let minimum: CGFloat = 40
+    static let rowHeight: CGFloat = 136
+    static let rowSpacing: CGFloat = 12
+    static let sectionHeaderHeight: CGFloat = 40
+    static let sectionHeaderGap: CGFloat = 10
+}
+
 @available(macOS 14.0, *)
 @MainActor
 final class SpeakerNamingSheet {
@@ -207,7 +215,6 @@ final class SpeakerNamingContentView: NSView {
         remoteSectionLabel.textColor = NSColor.labelColor
 
         keepAsYouButton.bezelStyle = .rounded
-        keepAsYouButton.controlSize = .small
         keepAsYouButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         keepAsYouButton.toolTip = "Use one \"You\" label for everyone picked up by the local microphone"
         keepAsYouButton.target = self
@@ -274,7 +281,7 @@ final class SpeakerNamingContentView: NSView {
         )
 
         // Buttons at bottom-right.
-        let btnH: CGFloat = 28
+        let btnH = SpeakerNamingHitTargets.minimum
         let saveSize = saveButton.fittingSize
         let cancelSize = cancelButton.fittingSize
         saveButton.frame = NSRect(
@@ -303,10 +310,10 @@ final class SpeakerNamingContentView: NSView {
 
         // Layout rows + section headers inside the document view. Flipped coordinates:
         // rows stack top-down visually, laid out with bottom-up math.
-        let rowHeight: CGFloat = 104
-        let rowSpacing: CGFloat = 12
-        let headerHeight: CGFloat = 24
-        let headerGap: CGFloat = 10
+        let rowHeight = SpeakerNamingHitTargets.rowHeight
+        let rowSpacing = SpeakerNamingHitTargets.rowSpacing
+        let headerHeight = SpeakerNamingHitTargets.sectionHeaderHeight
+        let headerGap = SpeakerNamingHitTargets.sectionHeaderGap
 
         let micCount = micRows.count
         let systemCount = systemRows.count
@@ -339,13 +346,13 @@ final class SpeakerNamingContentView: NSView {
             let btnW = max(110, btnSize.width + 12)
             localSectionLabel.frame = NSRect(
                 x: 0,
-                y: y + 2,
+                y: y + 10,
                 width: docInnerWidth - btnW - 8,
-                height: headerHeight - 2
+                height: 20
             )
             keepAsYouButton.frame = NSRect(
                 x: docInnerWidth - btnW,
-                y: y + 1,
+                y: y,
                 width: btnW,
                 height: headerHeight
             )
@@ -362,7 +369,7 @@ final class SpeakerNamingContentView: NSView {
         if hasSystemSection {
             if hasMicSection {
                 y -= headerHeight
-                remoteSectionLabel.frame = NSRect(x: 0, y: y + 2, width: docInnerWidth, height: headerHeight - 2)
+                remoteSectionLabel.frame = NSRect(x: 0, y: y + 10, width: docInnerWidth, height: 20)
                 y -= headerGap
             }
             for row in systemRows {
@@ -615,11 +622,12 @@ final class SpeakerRowView: NSView {
             width: max(120, w - playSize.width - 8),
             height: 18
         )
+        let hitTarget = SpeakerNamingHitTargets.minimum
         playButton.frame = NSRect(
             x: bounds.width - pad - max(92, playSize.width),
-            y: bounds.height - pad - 22,
+            y: bounds.height - pad - hitTarget,
             width: max(92, playSize.width),
-            height: 22
+            height: hitTarget
         )
         evidenceField.frame = NSRect(
             x: pad,
@@ -634,7 +642,7 @@ final class SpeakerRowView: NSView {
             height: 26
         )
 
-        let fieldH: CGFloat = 22
+        let fieldH = SpeakerNamingHitTargets.minimum
         let discardSize = discardButton.fittingSize
         let discardW = max(72, discardSize.width + 8)
         discardButton.frame = NSRect(

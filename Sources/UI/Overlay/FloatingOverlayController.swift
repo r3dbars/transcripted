@@ -336,7 +336,7 @@ class FloatingOverlayController {
         }
 
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.2
+            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.2)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 1.0
         })
@@ -392,7 +392,7 @@ class FloatingOverlayController {
         panel.orderOut(nil)
 
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.14
+            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.14)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
@@ -419,7 +419,8 @@ class FloatingOverlayController {
         panel.ignoresMouseEvents = true
 
         let baseX = panel.frame.origin.x
-        let offsets: [CGFloat] = [7, -5, 3, -1, 0]
+        // Skip the horizontal shake under Reduce Motion; the fade below still runs.
+        let offsets: [CGFloat] = AccessibilityDisplayPolicy.reduceMotion ? [] : [7, -5, 3, -1, 0]
         let stepDuration = 0.068
 
         for (i, offset) in offsets.enumerated() {
@@ -440,7 +441,7 @@ class FloatingOverlayController {
                 return
             }
             NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.14
+                ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.14)
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 panel.animator().alphaValue = 0
             }, completionHandler: { [weak self] in

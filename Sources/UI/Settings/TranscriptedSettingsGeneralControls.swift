@@ -61,7 +61,7 @@ struct GeneralInfoButton: View {
                     Circle()
                         .fill(Color.primary.opacity(isHovering ? 0.10 : 0.04))
                 )
-                .frame(width: 24, height: 24)
+                .frame(width: 40, height: 40)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
