@@ -390,6 +390,19 @@ func testUIAutomationSurfaceContract() {
                 "\(identifier) should keep speaker review scriptable without using speaker names"
             )
         }
+        assertTrue(
+            speakerReviewSource.contains("static let minimum: CGFloat = 40")
+                && speakerReviewSource.contains("let btnH = SpeakerNamingHitTargets.minimum")
+                && speakerReviewSource.contains("let fieldH = SpeakerNamingHitTargets.minimum")
+                && speakerReviewSource.contains("let hitTarget = SpeakerNamingHitTargets.minimum"),
+            "speaker review save/cancel/name/play/confirm/discard controls should keep a 40pt hit floor"
+        )
+        assertTrue(
+            speakerReviewSource.contains("static let sectionHeaderHeight: CGFloat = 40")
+                && speakerReviewSource.contains("let headerHeight = SpeakerNamingHitTargets.sectionHeaderHeight")
+                && speakerReviewSource.contains("keepAsYouButton.frame = NSRect("),
+            "speaker review Keep Local Mic as You should keep a 40pt section-header hit floor"
+        )
 
         for requiredAgentHook in [
             "transcripted.settings.agent.connect.\\(agent.rawValue)",
