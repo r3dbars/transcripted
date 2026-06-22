@@ -243,6 +243,8 @@ struct SettingsRecentMeetingAudioControl: View {
                 normalFill: background,
                 normalStroke: stroke
             ))
+            .frame(minHeight: 40, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             if let scrubber {
                 scrubber

@@ -164,6 +164,8 @@ func testUIAutomationSurfaceContract() {
         let settingsRowsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsRows.swift")
         let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
+        let settingsRowsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsRows.swift")
+        let meetingAudioPlaybackSource = readUIAutomationContractFile("Sources/UI/Shared/MeetingAudioPlayback.swift")
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
         let speakerReviewSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerNamingSheet.swift")
         let agentSettingsSource = readUIAutomationContractFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
@@ -255,6 +257,26 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(failedMeetingRecoverySource.contains(requiredFailedMeetingPolicyHook), "\(requiredFailedMeetingPolicyHook) should keep failed-meeting action policy visible")
         }
+        assertTrue(
+            settingsComponentsSource.contains(".frame(minHeight: 40)")
+                && settingsComponentsSource.contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            "shared inline settings actions should keep a 40pt hit floor for failed-meeting recovery controls"
+        )
+        assertTrue(
+            homeSource.contains(".frame(minHeight: 40, alignment: .leading)")
+                && homeSource.contains(".accessibilityIdentifier(\"transcripted.home.audio.inline-toggle\")"),
+            "Home retained-audio play controls should keep a 40pt hit floor"
+        )
+        assertTrue(
+            settingsRowsSource.contains(".frame(minHeight: 40, alignment: .leading)")
+                && settingsRowsSource.contains("struct SettingsRecentMeetingAudioControl"),
+            "Settings retained-audio play controls should keep a 40pt hit floor"
+        )
+        assertTrue(
+            meetingAudioPlaybackSource.contains(".frame(minHeight: 40)")
+                && meetingAudioPlaybackSource.contains("struct MeetingAudioSourceMenu"),
+            "retained-audio source menus should keep a 40pt hit floor"
+        )
         assertFalse(
             homeSource.contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
