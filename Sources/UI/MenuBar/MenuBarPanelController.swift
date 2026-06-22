@@ -386,8 +386,8 @@ final class MenuBarPanelController: NSViewController {
 
             return (
                 "arrow.down.circle.fill",
-                "Install \(version)",
-                "Update ready",
+                "Update available: \(version)",
+                "A new version is ready to install",
                 "Install",
                 .warning,
                 true

@@ -38,6 +38,29 @@ Future agents should treat this as a release requirement:
   automatically`; if Sparkle has already downloaded an update, the primary
   action becomes `Restart to Update`
 
+## In-app update prompt surfaces (inventory)
+
+Transcripted suppresses Sparkle's own automatic pop-ups (only critical updates
+hand back to the standard Sparkle UI), so every routine "an update is available"
+prompt is native Transcripted copy. Each surface must show the version and read
+unmistakably as *an update is available to install* — never as "you're done" or
+"shipped". The surfaces are:
+
+| Surface | Where | "Update available" copy | "Ready to install" copy |
+|---------|-------|-------------------------|-------------------------|
+| Menu bar footer row | `MenuBarPanelController.menuUpdatePresentation` | title `Update available: <version>`, detail `A new version is ready to install`, trailing `Install` | title `Restart to Update`, detail `Version <version> downloaded`, trailing `Restart` |
+| Settings → About status card | `TranscriptedSettingsView.aboutUpdateStatus*` | title `Update available (<version>)`, detail `Version <version> is ready to install.` | title `Ready to restart (<version>)`, detail `Version <version> is downloaded.` |
+| Settings → About primary button | `TranscriptedSettingsView.aboutUpdateButtonTitle` | `Install <version>` | `Restart to Update` |
+| Menu bar status-item badge + tooltip | `TranscriptedApp.updateStatusItemBadge` | (badge hidden until staged) | tooltip `Transcripted - restart to update to <version>` |
+
+When automatic downloads are enabled the available/downloading states stay quiet
+(`Preparing Update` / `Downloading…`) and the only user-facing action is the
+ready-to-install restart. The failure taxonomy behind these states lives in
+`Sources/Observability/UpdateFailureKind.swift`.
+
+If you add or rename an update prompt surface, update this table in the same
+change so the inventory stays complete.
+
 ## Local tooling
 
 `bash build-deps.sh --force` now downloads Sparkle's official pinned distribution and installs:
