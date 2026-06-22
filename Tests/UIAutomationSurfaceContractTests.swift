@@ -568,7 +568,9 @@ func testUIAutomationSurfaceContract() {
         let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
         let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
         let speakerPeopleSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
+        let settingsComponentsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsComponents.swift")
         let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
+        let firstRunSource = readUIAutomationContractFile("Sources/UI/Shared/FirstRunExperience.swift")
 
         for identifier in [
             "transcripted.home.stats.view",
@@ -666,6 +668,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.onboarding.nav.back",
             "transcripted.onboarding.nav.skip",
             "transcripted.onboarding.nav.primary",
+            "transcripted.onboarding.dictation-test.clear",
             "transcripted.onboarding.use-case.meetings",
             "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.microphone",
@@ -681,6 +684,34 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(onboardingSource.contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
         }
+
+        assertTrue(
+            onboardingSource.contains("UseCaseChoiceCard(")
+                && onboardingSource.contains("transcripted.onboarding.use-case.meetings")
+                && onboardingSource.contains("transcripted.onboarding.use-case.dictation")
+                && onboardingSource.contains("selectedStateStrokeWidth")
+                && onboardingSource.contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"),
+            "onboarding use-case cards should keep their scriptable card-button and selected-state hooks"
+        )
+
+        assertTrue(
+            firstRunSource.contains("static let minimumHitTarget: Double = 44")
+                && firstRunSource.contains("static let modelProgressLabelMinimumWidth: Double = 104")
+                && firstRunSource.contains("static let selectedStateStrokeWidth: Double = 2")
+                && onboardingSource.contains("transcripted.onboarding.nav.skip")
+                && onboardingSource.contains("transcripted.onboarding.nav.primary")
+                && onboardingSource.contains("FirstRunOnboardingPolishContract.minimumHitTarget")
+                && onboardingSource.contains(".contentShape(Rectangle())")
+                && onboardingSource.contains(".contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))"),
+            "onboarding nav and compact controls should keep pinned polish constants and hit-shape hooks"
+        )
+
+        assertTrue(
+            settingsComponentsSource.contains(".monospacedDigit()")
+                && settingsComponentsSource.contains("modelProgressLabelMinimumWidth")
+                && settingsComponentsSource.contains(".accessibilityLabel(Text(status))"),
+            "onboarding/local-model progress labels should stay stable, tabular, and accessible"
+        )
     }
 
     runSuite("UI automation surface contract - QA CLI exposes a real AX smoke") {
