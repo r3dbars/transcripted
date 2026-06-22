@@ -22,6 +22,7 @@ extension SpeakerDatabase {
         var bestSimilarity: Double = -1
 
         for speaker in allSpeakers {
+            guard speaker.embedding.count == embedding.count else { continue }
             let similarity = cosineSimilarity(embedding, speaker.embedding)
             if similarity > bestSimilarity && similarity >= threshold {
                 bestSimilarity = similarity

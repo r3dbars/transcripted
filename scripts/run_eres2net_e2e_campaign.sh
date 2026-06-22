@@ -44,6 +44,7 @@ a="$(run_arm /tmp/ami_e2e_90s.wav | grep -i '\[e2e\]')"
 b="$(run_arm /tmp/ami_e2e_90s.wav | grep -i '\[e2e\]')"
 echo "run A: $a"
 echo "run B: $b"
-[ "$a" = "$b" ] && echo "DETERMINISTIC: identical segment/speaker/dim summary" || echo "WARN: runs differ"
+[ "$a" = "$b" ] && echo "DETERMINISTIC: identical segment/speaker/dim summary" || { echo "WARN: runs differ"; fail=$((fail+1)); }
 
 echo "================ campaign done: $pass passed, $fail failed ================"
+exit "$fail"

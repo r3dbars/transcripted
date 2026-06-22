@@ -248,6 +248,18 @@ public final class SpeakerDatabase: @unchecked Sendable {
         let now = isoFormatter.string(from: Date())
 
         if let existingId = existingId, let existing = getSpeakerImpl(id: existingId) {
+            guard existing.embedding.count == embedding.count else {
+                AppLogger.speakers.warning(
+                    "Refusing to blend speaker embeddings with different dimensions",
+                    [
+                        "id": existingId.uuidString,
+                        "existing_dim": "\(existing.embedding.count)",
+                        "new_dim": "\(embedding.count)"
+                    ]
+                )
+                return insertSpeakerImpl(embedding: embedding, preferredId: nil, now: now)
+            }
+
             // Update: blend embedding with exponential moving average
             let alpha: Float = 0.15  // Weight for new embedding (0.15 = slow adaptation, preserves identity)
             let blended = zip(existing.embedding, embedding).map { old, new in
@@ -294,49 +306,52 @@ public final class SpeakerDatabase: @unchecked Sendable {
                 disputeCount: existing.disputeCount
             )
         } else {
-            // New speaker
-            let newId = existingId ?? UUID()
-            let normalized = l2Normalize(embedding)
-            let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
-
-            var sqlSucceeded = false
-            let sql = """
-            INSERT INTO speakers (id, embedding, first_seen, last_seen, call_count, confidence)
-            VALUES (?, ?, ?, ?, 1, 0.5);
-            """
-            var statement: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                sqlite3_bind_text(statement, 1, (newId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_blob(statement, 2, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
-                sqlite3_bind_text(statement, 3, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_text(statement, 4, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                if sqlite3_step(statement) != SQLITE_DONE {
-                    AppLogger.speakers.error("Failed to insert new speaker", ["sqlite_error": dbErrorMessage(), "id": newId.uuidString])
-                } else {
-                    sqlSucceeded = true
-                }
-            } else {
-                AppLogger.speakers.error("Failed to prepare insert speaker", ["sqlite_error": dbErrorMessage()])
-            }
-            sqlite3_finalize(statement)
-
-            if !sqlSucceeded {
-                AppLogger.speakers.error("CRITICAL: new speaker was NOT persisted to database — profile exists only in memory", ["id": newId.uuidString])
-            }
-
-            AppLogger.speakers.info("Created new speaker", ["id": "\(newId)"])
-            return SpeakerProfile(
-                id: newId,
-                displayName: nil,
-                nameSource: nil,
-                embedding: normalized,
-                firstSeen: Date(),
-                lastSeen: Date(),
-                callCount: 1,
-                confidence: 0.5,
-                disputeCount: 0
-            )
+            return insertSpeakerImpl(embedding: embedding, preferredId: existingId, now: now)
         }
+    }
+
+    private func insertSpeakerImpl(embedding: [Float], preferredId: UUID?, now: String) -> SpeakerProfile {
+        let newId = preferredId ?? UUID()
+        let normalized = l2Normalize(embedding)
+        let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
+
+        var sqlSucceeded = false
+        let sql = """
+        INSERT INTO speakers (id, embedding, first_seen, last_seen, call_count, confidence)
+        VALUES (?, ?, ?, ?, 1, 0.5);
+        """
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_text(statement, 1, (newId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_blob(statement, 2, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 3, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 4, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            if sqlite3_step(statement) != SQLITE_DONE {
+                AppLogger.speakers.error("Failed to insert new speaker", ["sqlite_error": dbErrorMessage(), "id": newId.uuidString])
+            } else {
+                sqlSucceeded = true
+            }
+        } else {
+            AppLogger.speakers.error("Failed to prepare insert speaker", ["sqlite_error": dbErrorMessage()])
+        }
+        sqlite3_finalize(statement)
+
+        if !sqlSucceeded {
+            AppLogger.speakers.error("CRITICAL: new speaker was NOT persisted to database — profile exists only in memory", ["id": newId.uuidString])
+        }
+
+        AppLogger.speakers.info("Created new speaker", ["id": "\(newId)"])
+        return SpeakerProfile(
+            id: newId,
+            displayName: nil,
+            nameSource: nil,
+            embedding: normalized,
+            firstSeen: Date(),
+            lastSeen: Date(),
+            callCount: 1,
+            confidence: 0.5,
+            disputeCount: 0
+        )
     }
 
     // MARK: - Row Parsing
