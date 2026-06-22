@@ -2182,7 +2182,7 @@ struct TranscriptedSettingsView: View {
                         : "Only detect meetings from your calendar and conferencing apps.",
                     info: GeneralInfo(
                         title: "Auto-detect calls",
-                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone — like a spontaneous Google Meet — and offers to record it. It only checks which app holds the mic on your Mac; nothing about the audio ever leaves your device."
+                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone, or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
                 )

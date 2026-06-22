@@ -309,6 +309,8 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingPromptTelemetry.swift"
     "Sources/Meeting/MicActivityMonitor.swift"
+    "Sources/Meeting/CameraActivityMonitor.swift"
+    "Sources/Meeting/SustainedActivityConfirmer.swift"
     "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingAudioStorageManager.swift"
     "Sources/Meeting/MeetingRecordingCleanup.swift"
@@ -445,6 +447,7 @@ SWIFTC_ARGS+=(
     -framework ApplicationServices
     -framework Carbon
     -framework CoreMedia
+    -framework CoreMediaIO
     -framework EventKit
     -framework FoundationModels
     -framework Network
