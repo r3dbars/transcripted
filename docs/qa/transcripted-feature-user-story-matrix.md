@@ -47,8 +47,8 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 80
-- Status counts after this pass: `PASS` 27, `RETEST PASS` 3,
-  `UNKNOWN` 50, `FAIL` 0, `BLOCKED` 0
+- Status counts after the 2026-06-21 evening proof push: `PASS` 29,
+  `RETEST PASS` 3, `UNKNOWN` 48, `FAIL` 0, `BLOCKED` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -56,6 +56,19 @@ Current proof summary:
 - Live capture smoke: `PASS` via `bash run-live-capture-smoke.sh --skip-build`;
   real mic + system-audio capture started/stopped and wrote scratch files on
   this Mac.
+- Fresh live bench: `INCOMPLETE` at
+  `/tmp/transcripted-qa-bench/qa-20260621-202408/qa-report.md`; build, fast
+  tests, E2E, pasteback synthetic, local summary fixture, integration,
+  `swift test`, QA CLI, artifact checks, synthetic audio, release-health, and
+  PostHog fixture passed, but System Events Automation warned and the bench
+  skipped live smoke.
+- Direct live capture retest after that warning: `PASS` via
+  `bash run-live-capture-smoke.sh --skip-build`.
+- Fresh UI bench: `PASS` at
+  `/tmp/transcripted-qa-bench/qa-20260621-202731/qa-report.md`; onboarding,
+  menu bar, Home, Settings navigation, and General controls passed.
+- Fresh artifact bench: `PASS` at
+  `/tmp/transcripted-qa-bench/qa-20260621-202732/qa-report.md`.
 - Private corpus validation: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153651/qa-report.md`;
   reports stay local/redacted.
 - Packaged no-publish smoke: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153703/qa-report.md`;
