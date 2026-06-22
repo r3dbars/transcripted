@@ -389,8 +389,8 @@ class FloatingOverlayController {
         panel.orderOut(nil)
 
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.14
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            ctx.duration = 0.22
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             completion?()
@@ -403,9 +403,9 @@ class FloatingOverlayController {
         if !AccessibilityDisplayPolicy.reduceMotion, let contentLayer = panel.contentView?.layer {
             let shrink = CABasicAnimation(keyPath: "transform.scale")
             shrink.fromValue = 1.0
-            shrink.toValue = 0.93
-            shrink.duration = 0.14
-            shrink.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            shrink.toValue = 0.96
+            shrink.duration = 0.22
+            shrink.timingFunction = CAMediaTimingFunction(name: .easeOut)
             contentLayer.add(shrink, forKey: "confirmShrink")
         }
     }
@@ -602,7 +602,9 @@ class FloatingOverlayController {
         pushStateToViews()
         successDismissTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: 450_000_000)
+                // Let the "Pasted" confirmation stay readable before it eases out
+                // instead of flashing past in under half a second.
+                try await Task.sleep(nanoseconds: 800_000_000)
             } catch { return }
             guard let self else { return }
             self.hideWithConfirmAnimation(completion: completion)
