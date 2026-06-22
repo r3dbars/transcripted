@@ -1864,6 +1864,12 @@ struct TranscriptedSettingsView: View {
         savedMeetingRetranscriptionUnavailableReason == nil
     }
 
+    private var modelCacheBusyHelp: String {
+        modelCacheCleanupInProgress
+            ? "A cache cleanup is already running."
+            : "Wait for the storage scan to finish."
+    }
+
     private var failedMeetingRetryUnavailableReason: String? {
         if sttRouter.isRecording || sttRouter.isTranscribing {
             return "Wait for the current dictation to finish before retrying a failed meeting."
@@ -2350,6 +2356,9 @@ struct TranscriptedSettingsView: View {
                             updatePreferredTranscriptionModel(.parakeetTDTv3, page: .general)
                         }
                         .disabled(preferredTranscriptionModel == .parakeetTDTv3)
+                        .help(preferredTranscriptionModel == .parakeetTDTv3
+                            ? "Parakeet is already the selected transcription model."
+                            : "")
 
                         Text("Changes apply to the next capture.")
                             .font(.caption)
@@ -2687,6 +2696,7 @@ struct TranscriptedSettingsView: View {
                     clearCorrectionRows()
                 }
                 .disabled(!hasCustomDictionaryContent)
+                .help(hasCustomDictionaryContent ? "" : "No saved corrections to clear yet.")
             }
 
             DisclosureGroup("Try a phrase", isExpanded: $showCorrectionPreview) {
@@ -2805,6 +2815,9 @@ struct TranscriptedSettingsView: View {
                                 updatePreferredTranscriptionModel(.parakeetTDTv3)
                             }
                             .disabled(preferredTranscriptionModel == .parakeetTDTv3)
+                            .help(preferredTranscriptionModel == .parakeetTDTv3
+                                ? "Parakeet is already the selected transcription model."
+                                : "")
 
                             Text("Changes apply to the next capture.")
                                 .font(.caption)
@@ -2943,6 +2956,7 @@ struct TranscriptedSettingsView: View {
                             showReclaimableCacheCleanupConfirmation = true
                         }
                         .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
                     }
                     ModelCacheMetricRow(
                         title: "FluidAudio models",
@@ -2962,6 +2976,9 @@ struct TranscriptedSettingsView: View {
                             showWhisperCacheCleanupConfirmation = true
                         }
                         .disabled(effectiveTranscriptionModel.isWhisper || modelCacheCleanupInProgress || modelCacheLoading)
+                        .help(effectiveTranscriptionModel.isWhisper
+                            ? "Switch back to Parakeet before removing the Whisper cache."
+                            : (modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : ""))
 
                         if effectiveTranscriptionModel.isWhisper {
                             Text("Switch back to Parakeet before removing the Whisper cache.")
@@ -2984,6 +3001,7 @@ struct TranscriptedSettingsView: View {
                             showModelCacheCleanupConfirmation = true
                         }
                         .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
                     } else {
                         Text("No known stale Parakeet model folders found.")
                             .font(.caption)
@@ -3007,6 +3025,7 @@ struct TranscriptedSettingsView: View {
                     refreshModelCacheSnapshot()
                 }
                 .disabled(modelCacheLoading)
+                .help(modelCacheLoading ? "Storage sizes are being scanned." : "")
             }
             .onAppear {
                 if modelCacheSnapshot == nil, !modelCacheLoading {
@@ -3115,6 +3134,9 @@ struct TranscriptedSettingsView: View {
                     }
                     .pickerStyle(.segmented)
                     .disabled(isLocalSummaryModelPreparing)
+                    .help(isLocalSummaryModelPreparing
+                        ? "Finish or cancel the current model setup before switching providers."
+                        : "")
 
                     Text(localMeetingSummaryProvider.detail)
                         .font(.caption)
