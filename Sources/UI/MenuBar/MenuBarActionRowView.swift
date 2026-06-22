@@ -291,6 +291,35 @@ final class MenuBarActionRowView: NSControl {
         return true
     }
 
+    // MARK: - Keyboard focus
+
+    // Rows are real controls, so they join the popover's key-view loop and stay
+    // reachable by keyboard. An enabled, visible row can take focus; a disabled
+    // or hidden one is skipped so Tab never lands on a dead control.
+    override var acceptsFirstResponder: Bool { isEnabled && !isHidden }
+
+    override var canBecomeKeyView: Bool { acceptsFirstResponder }
+
+    override func keyDown(with event: NSEvent) {
+        // Space (49) and Return / keypad Enter (36 / 76) activate the focused row,
+        // matching how AppKit buttons respond to keyboard activation.
+        if isEnabled, event.keyCode == 49 || event.keyCode == 36 || event.keyCode == 76 {
+            onPress?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(
+            roundedRect: bounds,
+            xRadius: MenuTokens.cardCornerRadius,
+            yRadius: MenuTokens.cardCornerRadius
+        ).fill()
+    }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+
     var smokeSnapshot: MenuBarActionRowSmokeSnapshot {
         MenuBarActionRowSmokeSnapshot(
             title: titleLabel.stringValue,

@@ -115,6 +115,28 @@ final class MenuBarContentView: NSView {
 
         documentHeight = y
         documentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: y)
+
+        configureKeyViewLoop()
+    }
+
+    /// Chains the visible action rows into one explicit key-view loop so Tab
+    /// travels them in visual order — update callout (when shown), then the
+    /// primary section, then the utility section — matching
+    /// `FocusOrderContract.menuBarPopoverOrder`. AppKit's inferred loop is
+    /// unreliable for these manually laid-out flipped rows, so we set it.
+    private func configureKeyViewLoop() {
+        var chain: [MenuBarActionRowView] = []
+        if !updateCalloutRow.isHidden {
+            chain.append(updateCalloutRow)
+        }
+        chain.append(contentsOf: primaryActionsView.keyboardFocusableRows)
+        chain.append(contentsOf: utilityActionsView.keyboardFocusableRows)
+
+        for (index, row) in chain.enumerated() {
+            row.nextKeyView = index + 1 < chain.count ? chain[index + 1] : chain.first
+        }
+
+        window?.initialFirstResponder = chain.first
     }
 
     func scrollToTop() {
