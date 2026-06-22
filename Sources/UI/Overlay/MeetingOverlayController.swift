@@ -886,7 +886,7 @@ final class MeetingOverlayRootView: NSView {
             }
         }
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = fadeOut ? 0.12 : 0.18
+            ctx.duration = AccessibilityDisplayPolicy.motionDuration(fadeOut ? 0.12 : 0.18)
             ctx.timingFunction = CAMediaTimingFunction(name: fadeOut ? .easeIn : .easeOut)
             for view in fadeViews {
                 view.animator().alphaValue = fadeOut ? 0 : 1
@@ -935,13 +935,13 @@ final class MeetingOverlayRootView: NSView {
             transcriptDrawer.isHidden = false
             transcriptDrawer.prepareForReveal()
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.18
+                ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.18)
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 transcriptDrawer.animator().alphaValue = 1
             }
         } else {
             NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.12
+                ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.12)
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 transcriptDrawer.animator().alphaValue = 0
             }, completionHandler: { [weak self] in
@@ -1014,7 +1014,8 @@ final class MeetingOverlayRootView: NSView {
     private func setStatusDotPulsing(_ pulsing: Bool) {
         let key = "transcribingPulse"
         guard let layer = statusDot.layer else { return }
-        if pulsing {
+        // Reduce Motion: keep the dot at full opacity instead of breathing.
+        if pulsing && !AccessibilityDisplayPolicy.reduceMotion {
             guard layer.animation(forKey: key) == nil else { return }
             let pulse = CABasicAnimation(keyPath: "opacity")
             pulse.fromValue = 1.0
@@ -1838,7 +1839,7 @@ final class MeetingOverlayController: NSObject {
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.18
+            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.18)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 1.0
         }
@@ -1886,7 +1887,7 @@ final class MeetingOverlayController: NSObject {
         // stale hover flag would silently block resting next recording.
         isPanelHovered = false
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.14
+            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.14)
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak panel] in

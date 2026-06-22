@@ -183,7 +183,7 @@ final class MeetingLiveTranscriptDrawerView: NSView {
 
     private func setHeaderRevealed(_ revealed: Bool) {
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
+            ctx.duration = AccessibilityDisplayPolicy.motionDuration(0.15)
             hoverBar.animator().alphaValue = revealed ? 1 : 0
         }
     }
