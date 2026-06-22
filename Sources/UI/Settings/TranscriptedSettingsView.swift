@@ -630,6 +630,7 @@ struct TranscriptedSettingsView: View {
 
             homeDictationsListSection
         }
+        .accessibilityIdentifier("transcripted.settings.page.dictations")
     }
 
     private var homeMeetingsListSection: some View {
@@ -2812,6 +2813,7 @@ struct TranscriptedSettingsView: View {
                 }
             }
         }
+        .accessibilityIdentifier("transcripted.settings.page.general")
     }
 
     private var peoplePage: some View {
@@ -2823,6 +2825,7 @@ struct TranscriptedSettingsView: View {
 
             SpeakerPeopleSettingsSection(model: speakerPeopleModel)
         }
+        .accessibilityIdentifier("transcripted.settings.page.people")
     }
 
     private var storagePage: some View {
@@ -3050,6 +3053,7 @@ struct TranscriptedSettingsView: View {
                 }
             }
         }
+        .accessibilityIdentifier("transcripted.settings.page.storage")
     }
 
     private var connectAgentPage: some View {
@@ -3142,6 +3146,7 @@ struct TranscriptedSettingsView: View {
                 }
             }
         }
+        .accessibilityIdentifier("transcripted.settings.page.beta")
     }
 
     private var betaLocalSummarySetupStatus: some View {
@@ -3928,6 +3933,7 @@ struct TranscriptedSettingsView: View {
                 }
             }
         }
+        .accessibilityIdentifier("transcripted.settings.page.about")
     }
 
     private var supportPage: some View {
@@ -3967,6 +3973,7 @@ struct TranscriptedSettingsView: View {
 
             SupportPrivacyNote()
         }
+        .accessibilityIdentifier("transcripted.settings.page.support")
     }
 
     private var settingsFooterShowsUpdateBadge: Bool {
