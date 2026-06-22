@@ -65,6 +65,7 @@ func testAnalyticsEventPolicy() {
             "anonymous_usage_enabled",
             "app_signal",
             "app_version",
+            "artifact_retained",
             "artifact_kind",
             "attenuation_kind",
             "auto_send",
@@ -171,6 +172,7 @@ func testAnalyticsEventPolicy() {
             "required",
             "reason_kind",
             "result",
+            "retry_source",
             "route_ready",
             "route_shape",
             "sample_flow_started",
@@ -571,6 +573,65 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["raw_error"], "raw errors must not be sent")
         assertNil(sanitized["source_app"], "source apps must not be sent")
         assertNil(sanitized["url"], "raw URLs must not be sent")
+    }
+
+    runSuite("AnalyticsEventPolicy allows workflow recovery lifecycle events") {
+        let attempted = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_attempted")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_finished")
+
+        assertEqual(
+            attempted?.allowedProperties ?? Set<String>(),
+            [
+                "artifact_retained",
+                "attempt_bucket",
+                "failure_kind",
+                "retry_source",
+                "surface",
+                "workflow_kind",
+            ],
+            "recovery attempts should carry only coarse workflow shape"
+        )
+        assertEqual(
+            finished?.allowedProperties ?? Set<String>(),
+            [
+                "artifact_retained",
+                "attempt_bucket",
+                "elapsed_bucket",
+                "failure_kind",
+                "result",
+                "retry_source",
+                "surface",
+                "workflow_kind",
+            ],
+            "recovery finishes should add only result and elapsed bucket"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "meeting_transcription",
+                "failure_kind": "models_not_ready",
+                "retry_source": "queued_transcription",
+                "attempt_bucket": "1",
+                "result": "success",
+                "elapsed_bucket": "10_29s",
+                "surface": "meeting",
+                "artifact_retained": "true",
+                "error": "raw error",
+                "transcript_path": "/private/tmp/meeting.md",
+            ],
+            allowedKeys: finished?.allowedProperties ?? Set<String>()
+        )
+
+        assertEqual(sanitized["workflow_kind"], "meeting_transcription", "workflow kind should survive")
+        assertEqual(sanitized["failure_kind"], "models_not_ready", "failure kind should survive")
+        assertEqual(sanitized["retry_source"], "queued_transcription", "retry source should survive")
+        assertEqual(sanitized["attempt_bucket"], "1", "attempt bucket should survive")
+        assertEqual(sanitized["result"], "success", "result should survive")
+        assertEqual(sanitized["elapsed_bucket"], "10_29s", "elapsed bucket should survive")
+        assertEqual(sanitized["surface"], "meeting", "surface should survive")
+        assertEqual(sanitized["artifact_retained"], "true", "artifact retained state should survive")
+        assertNil(sanitized["error"], "raw errors must not be sent")
+        assertNil(sanitized["transcript_path"], "transcript paths must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {

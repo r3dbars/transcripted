@@ -105,6 +105,8 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - `agent_capture_query_observed`
 - `activation_return_proxy_observed`
 - `workflow_abandoned`
+- `workflow_recovery_attempted`
+- `workflow_recovery_finished`
 - `product_friction_observed`
 - `menu_bar_opened`
 - `menu_bar_action_clicked`
@@ -162,6 +164,9 @@ This list should match `Sources/Observability/AnalyticsEventPolicy.swift`.
 - normalized failure-code buckets like `url_-1009`, `sparkle_2003`, `other_42`
 - feature discovery enums like `agent_setup`, `beta_summaries`,
   `capture_library`, `permissions`, `speaker_review`, and `update_settings`
+- workflow recovery fields limited to `workflow_kind`, `failure_kind`,
+  `retry_source`, `attempt_bucket`, `surface`, `artifact_retained`, `result`,
+  and `elapsed_bucket`
 - product friction fields limited to `surface`, `stage`, `result`,
   `failure_kind`, `elapsed_bucket`, `route_shape`, and `model_state`
 
