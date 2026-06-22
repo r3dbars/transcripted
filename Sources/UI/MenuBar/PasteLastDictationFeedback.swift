@@ -100,12 +100,14 @@ final class PasteLastDictationFeedbackPresenter {
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 panel.animator().alphaValue = 0
             }, completionHandler: { [weak self, weak panel] in
-                guard let self, let panel, self.panel === panel else { return }
-                // A newer notice re-presented during the fade restores full
-                // opacity; only tear down if we actually faded all the way out.
-                guard panel.alphaValue == 0 else { return }
-                panel.orderOut(nil)
-                panel.alphaValue = 1
+                Task { @MainActor [weak self, weak panel] in
+                    guard let self, let panel, self.panel === panel else { return }
+                    // A newer notice re-presented during the fade restores full
+                    // opacity; only tear down if we actually faded all the way out.
+                    guard panel.alphaValue == 0 else { return }
+                    panel.orderOut(nil)
+                    panel.alphaValue = 1
+                }
             })
         }
     }
