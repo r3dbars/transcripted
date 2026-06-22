@@ -64,6 +64,23 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertNil(sanitized["token"])
     }
 
+    func testTelemetryPolicyAllowsOrientationQueryKinds() throws {
+        for queryKind in ["list", "recent"] {
+            let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize([
+                "agent_target": "mcp_client",
+                "artifact_kind": "meeting",
+                "capture_age_bucket": "lt_12h",
+                "query_kind": queryKind,
+                "result": "success",
+                "return_window_bucket": "same_day",
+                "source_count_bucket": "1",
+                "surface": "mcp",
+            ])
+
+            XCTAssertEqual(sanitized["query_kind"], queryKind)
+        }
+    }
+
     func testTelemetryPolicyRejectsUnexpectedEnumValues() throws {
         let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize([
             "agent_target": "raw-agent-name",
