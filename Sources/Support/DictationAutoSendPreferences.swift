@@ -109,6 +109,15 @@ enum DictationAutoSendOutcome: Equatable {
             return "failed"
         }
     }
+
+    var confirmationTitle: String? {
+        switch self {
+        case .sent(let key):
+            return "Pasted + \(key.title)"
+        case .disabled, .failed:
+            return nil
+        }
+    }
 }
 
 @MainActor

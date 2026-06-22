@@ -1040,8 +1040,10 @@ class DictationSessionController: ObservableObject {
                 AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
+                } else if case .failed(let message) = autoSendOutcome {
+                    overlayController.showError("Text pasted, but Auto Enter didn't run. \(message)")
                 } else {
-                    overlayController.showSuccessAndDismiss()
+                    overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
             case .copied(let message, reason: _), .failed(let message):
                 let combinedMessage: String

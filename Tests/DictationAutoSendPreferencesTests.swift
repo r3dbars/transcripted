@@ -36,6 +36,27 @@ func testDictationAutoSendPreferences() {
         assertEqual(DictationAutoSendPreferences.sendKey(userDefaults: defaults), .enter, "unknown send key should fall back to Enter")
     }
 
+    runSuite("DictationAutoSendOutcome confirmation titles distinguish sent keys") {
+        assertEqual(
+            DictationAutoSendOutcome.sent(.enter).confirmationTitle,
+            "Pasted + Enter",
+            "sent Enter should make the fired key visible in the overlay confirmation"
+        )
+        assertEqual(
+            DictationAutoSendOutcome.sent(.commandEnter).confirmationTitle,
+            "Pasted + Cmd + Enter",
+            "sent Cmd+Enter should make the fired key visible in the overlay confirmation"
+        )
+        assertNil(
+            DictationAutoSendOutcome.disabled.confirmationTitle,
+            "disabled Auto Enter should keep the plain pasted confirmation"
+        )
+        assertNil(
+            DictationAutoSendOutcome.failed("Accessibility is off").confirmationTitle,
+            "failed Auto Enter should route to the visible error path instead"
+        )
+    }
+
     runSuite("DictationAutoSendPolicy only sends after a real paste with text") {
         assertTrue(
             DictationAutoSendPolicy.shouldSend(
