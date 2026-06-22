@@ -158,7 +158,7 @@ func testDictationRecordingStartOverlayPolicy() {
 
         assertEqual(
             message,
-            "Couldn't start the built-in microphone while Bluetooth audio was active. Try again, or choose a different input in System Settings.",
+            "Bluetooth audio blocked the mic. Try again.",
             "Bluetooth fallback timeouts should tell users what changed instead of blaming only the selected mic"
         )
     }
@@ -179,7 +179,7 @@ func testDictationRecordingStartOverlayPolicy() {
 
         assertEqual(
             message,
-            "Couldn't start the built-in microphone while Bluetooth audio was active. Try again, or choose a different input in System Settings.",
+            "Bluetooth audio blocked the mic. Try again.",
             "Bluetooth fallback start failures should not fall through to generic microphone copy"
         )
     }
@@ -193,8 +193,22 @@ func testDictationRecordingStartOverlayPolicy() {
 
         assertEqual(
             message,
-            "Couldn't reach Studio Display Microphone. Try selecting a different input in System Settings.",
-            "non-Bluetooth route failures should keep the existing device-specific guidance"
+            "Selected mic unavailable. Choose another input.",
+            "non-Bluetooth route failures should keep a short input-change path"
+        )
+    }
+
+    runSuite("DictationMicrophoneTimeoutPresentationPolicy keeps generic retry copy short") {
+        let message = DictationMicrophoneTimeoutPresentationPolicy.message(
+            deviceName: "MacBook Pro Microphone",
+            startAttempts: 1,
+            inputFormatReady: true
+        )
+
+        assertEqual(
+            message,
+            "Mic didn't start. Try again or choose another input.",
+            "generic start failures should keep one visible retry path"
         )
     }
 

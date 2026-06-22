@@ -71,14 +71,14 @@ struct DictationMicrophoneTimeoutPresentationPolicy {
         routeContext: [String: String] = [:]
     ) -> String {
         if isBluetoothFallbackRoute(routeContext) {
-            return "Couldn't start the built-in microphone while Bluetooth audio was active. Try again, or choose a different input in System Settings."
+            return "Bluetooth audio blocked the mic. Try again."
         }
 
         if startAttempts > 0, inputFormatReady {
-            return "Couldn't start the microphone. Try again, or choose a different input in System Settings."
+            return "Mic didn't start. Try again or choose another input."
         }
 
-        return "Couldn't reach \(deviceName). Try selecting a different input in System Settings."
+        return "Selected mic unavailable. Choose another input."
     }
 
     private static func isBluetoothFallbackRoute(_ context: [String: String]) -> Bool {
