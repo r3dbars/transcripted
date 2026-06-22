@@ -40,6 +40,24 @@ struct DictationRecordingStartLifecyclePolicy {
     }
 }
 
+struct DictationStartAvailabilityPolicy {
+    static let meetingWorkMessage = "Finish the current meeting before starting dictation."
+    static let speakerReviewMessage = "Finish the speaker review window before starting dictation."
+
+    static func unavailableReason(
+        hasMeetingWork: Bool,
+        isSpeakerReviewPending: Bool
+    ) -> String? {
+        if hasMeetingWork {
+            return meetingWorkMessage
+        }
+        if isSpeakerReviewPending {
+            return speakerReviewMessage
+        }
+        return nil
+    }
+}
+
 struct DictationRecordingStartFailureCleanupPlan: Equatable {
     let outcome: String
     let resetRuntimeSessionToIdle: Bool
