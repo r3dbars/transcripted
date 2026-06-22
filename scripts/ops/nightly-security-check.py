@@ -852,6 +852,29 @@ def quoted_strings(text: str) -> set[str]:
     return set(re.findall(r'"([A-Za-z0-9_]+)"', text))
 
 
+def psv_event_names(text: str) -> set[str]:
+    events: set[str] = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "|" not in stripped:
+            continue
+        name = stripped.split("|", 1)[0].strip()
+        if name:
+            events.add(name)
+    return events
+
+
+def psv_property_names(text: str) -> set[str]:
+    properties: set[str] = set()
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "|" not in stripped:
+            continue
+        _, props = stripped.split("|", 1)
+        properties.update(prop.strip() for prop in props.split(",") if prop.strip())
+    return properties
+
+
 def check_observability_payload_keys(root: Path, manifest: dict) -> list[dict]:
     findings: list[dict] = []
     disallowed = set(manifest["disallowed_observability_payload_keys"])
@@ -869,10 +892,31 @@ def check_observability_payload_keys(root: Path, manifest: dict) -> list[dict]:
                     relative_path,
                 )
             )
+    registry_path = manifest["paths"].get("analytics_event_registry")
+    if registry_path:
+        registry_keys = psv_property_names(read_text(root / registry_path))
+        bad_keys = sorted(registry_keys.intersection(disallowed))
+        if bad_keys:
+            findings.append(
+                make_finding(
+                    "observability_privacy",
+                    "high",
+                    "raw-analytics-registry-payload-key",
+                    "Analytics event registry includes raw/private payload keys.",
+                    f"Disallowed key(s): {', '.join(bad_keys)}.",
+                    registry_path,
+                )
+            )
     return findings
 
 
 def source_analytics_policy_events(root: Path, manifest: dict) -> set[str]:
+    registry_path = manifest["paths"].get("analytics_event_registry")
+    if registry_path:
+        path = root / registry_path
+        if path.exists():
+            return psv_event_names(read_text(path))
+
     text = read_text(root / manifest["paths"]["analytics_event_policy"])
     return set(re.findall(r'(?m)^\s*"([a-z0-9_]+)":\s*\.init\(', text))
 
