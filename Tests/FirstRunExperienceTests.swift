@@ -398,6 +398,29 @@ func testFirstRunExperience() {
         assertNil(card.progress, "cached files should not show fake download progress")
     }
 
+    runSuite("FirstRunExperience.modelCard — failed setup stays concise and retryable") {
+        let card = FirstRunExperience.modelCard(
+            for: .failed("CoreML failed while reading /Users/example/Library/Application Support/Transcripted/private-model-file")
+        )
+
+        assertEqual(card.title, "Couldn't load Parakeet TDT V3", "failed model card should name the affected model")
+        assertEqual(card.status, "Retry needed", "failed model card should make the recovery state clear")
+        assertEqual(card.tone, .failed, "failed model card should keep the visual failure tone")
+        assertNil(card.progress, "failed model setup should not show fake download progress")
+        assertTrue(
+            card.detail.contains("Local voice setup needs another try"),
+            "failed model card should lead with a plain-language recovery cue"
+        )
+        assertTrue(
+            card.detail.contains("Retry Download"),
+            "failed model card should name the retry action"
+        )
+        assertFalse(
+            card.detail.contains("/Users/example"),
+            "failed model card should not expose raw local diagnostic paths in onboarding"
+        )
+    }
+
     runSuite("FirstRunExperience.modelCard — names Whisper when it is selected") {
         let card = FirstRunExperience.modelCard(
             for: .downloading(progress: 0.25),
