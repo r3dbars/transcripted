@@ -25,6 +25,9 @@ final class MenuBarModelStatusView: NSControl {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.backgroundColor = NSColor.clear.cgColor
@@ -33,7 +36,7 @@ final class MenuBarModelStatusView: NSControl {
         statusDot.layer?.cornerRadius = MenuTokens.statusDotSize / 2
         addSubview(statusDot)
 
-        label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        label.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         label.textColor = MenuTokens.textSecondaryNS
         label.lineBreakMode = .byTruncatingTail
         label.cell?.usesSingleLineMode = true
@@ -87,6 +90,7 @@ final class MenuBarModelStatusView: NSControl {
         currentState = state
         applyState()
         needsLayout = true
+        window?.invalidateCursorRects(for: self)
     }
 
     private func applyState() {
@@ -118,6 +122,14 @@ final class MenuBarModelStatusView: NSControl {
             label.stringValue = "Parakeet TDT V3 · Needs retry"
             toolTip = "Local model failed. Open Models settings to retry the download."
         }
+        setAccessibilityLabel("Local model status")
+        setAccessibilityValue(label.stringValue)
+        setAccessibilityHelp(toolTip)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -141,7 +153,12 @@ final class MenuBarModelStatusView: NSControl {
         }
     }
 
-    var intrinsicHeight: CGFloat { 26 }
+    var intrinsicHeight: CGFloat { MenuTokens.minimumHitTargetSize }
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func accessibilityPerformPress() -> Bool {
+        onOpenSettings?()
+        return true
+    }
 }
