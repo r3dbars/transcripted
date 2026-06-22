@@ -2,6 +2,64 @@ import SwiftUI
 import AppKit
 import TranscriptedCore
 
+enum SpeakerPeopleSettingsPolishContract {
+    static let minimumHitTarget: CGFloat = 40
+    static let playButtonVisibleDiameter: CGFloat = 36
+    static let compactIconVisibleDiameter: CGFloat = 28
+}
+
+private struct SpeakerCompactIconLabel: View {
+    let systemName: String
+    let foregroundColor: Color
+    let fontSize: CGFloat
+    let fontWeight: Font.Weight
+    var tone: SettingsInteractionTone = .neutral
+    var normalFill: Color = Color.primary.opacity(0.025)
+    var normalStroke: Color = Color.primary.opacity(0.06)
+    var cornerRadius: CGFloat = 8
+
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: fontSize, weight: fontWeight))
+            .foregroundStyle(foregroundColor)
+            .frame(
+                width: SpeakerPeopleSettingsPolishContract.compactIconVisibleDiameter,
+                height: SpeakerPeopleSettingsPolishContract.compactIconVisibleDiameter
+            )
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(fillColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(strokeColor, lineWidth: 1)
+            )
+            .frame(
+                width: SpeakerPeopleSettingsPolishContract.minimumHitTarget,
+                height: SpeakerPeopleSettingsPolishContract.minimumHitTarget
+            )
+            .contentShape(Rectangle())
+            .opacity(isEnabled ? 1 : 0.55)
+            .onHover { isHovering = $0 }
+            .animation(SettingsInteractionPalette.animation, value: isHovering)
+    }
+
+    private var fillColor: Color {
+        guard isEnabled else { return normalFill.opacity(0.65) }
+        if isHovering { return SettingsInteractionPalette.hoverFill(for: tone) }
+        return normalFill
+    }
+
+    private var strokeColor: Color {
+        guard isEnabled else { return normalStroke.opacity(0.5) }
+        if isHovering { return SettingsInteractionPalette.hoverStroke(for: tone) }
+        return normalStroke
+    }
+}
+
 enum SpeakerDuplicateReason: Int {
     case sameNameAndVoice
     case sameName
@@ -880,16 +938,14 @@ private struct SpeakerVoiceToNameRow: View {
             }
             .disabled(isDeleting)
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(8)
+            SpeakerCompactIconLabel(
+                systemName: "ellipsis",
+                foregroundColor: .secondary,
+                fontSize: 13,
+                fontWeight: .semibold
+            )
         }
-        .buttonStyle(SettingsHoverButtonStyle(
-            cornerRadius: 8,
-            normalFill: Color.primary.opacity(0.025),
-            normalStroke: Color.primary.opacity(0.06)
-        ))
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Show transcript or delete this voice")
@@ -967,13 +1023,21 @@ private struct SpeakerPlayClipButton: View {
             Image(systemName: SpeakerClipPlaybackPresentation.symbolName(isPlaying: isPlaying))
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(hasClip ? Color.white : Color.secondary)
-                .frame(width: 36, height: 36)
+                .frame(
+                    width: SpeakerPeopleSettingsPolishContract.playButtonVisibleDiameter,
+                    height: SpeakerPeopleSettingsPolishContract.playButtonVisibleDiameter
+                )
                 .background(Circle().fill(hasClip ? Color.accentColor : Color.primary.opacity(0.06)))
                 .overlay(
                     Circle()
                         .stroke(Color.accentColor.opacity(isActive ? 0.9 : 0), lineWidth: 2)
                         .padding(-2)
                 )
+                .frame(
+                    width: SpeakerPeopleSettingsPolishContract.minimumHitTarget,
+                    height: SpeakerPeopleSettingsPolishContract.minimumHitTarget
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!hasClip)
@@ -1120,15 +1184,14 @@ private struct SpeakerSearchRow: View {
             Button {
                 model.refresh()
             } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .semibold))
-                    .padding(7)
+                SpeakerCompactIconLabel(
+                    systemName: "arrow.clockwise",
+                    foregroundColor: .primary,
+                    fontSize: 12,
+                    fontWeight: .semibold
+                )
             }
-            .buttonStyle(SettingsHoverButtonStyle(
-                cornerRadius: 8,
-                normalFill: Color.primary.opacity(0.025),
-                normalStroke: Color.primary.opacity(0.06)
-            ))
+            .buttonStyle(.plain)
             .help("Refresh the speaker list")
             .accessibilityLabel("Refresh speakers")
         }
@@ -1175,12 +1238,17 @@ private struct SpeakerPersonRow: View {
                     Button {
                         model.playSample(for: profile.id)
                     } label: {
-                        Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
-                            .padding(6)
+                        SpeakerCompactIconLabel(
+                            systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill",
+                            foregroundColor: .accentColor,
+                            fontSize: 15,
+                            fontWeight: .semibold,
+                            tone: .accent,
+                            normalFill: .clear,
+                            normalStroke: .clear
+                        )
                     }
-                    .buttonStyle(SettingsHoverButtonStyle(tone: .accent, cornerRadius: 8))
+                    .buttonStyle(.plain)
                     .help(isPlaying ? "Pause this voice" : "Play this voice")
                     .accessibilityLabel(isPlaying ? "Pause voice sample" : "Play voice sample")
                 }
@@ -1240,16 +1308,14 @@ private struct SpeakerPersonRow: View {
                 showDeleteConfirmation = true
             }
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(8)
+            SpeakerCompactIconLabel(
+                systemName: "ellipsis",
+                foregroundColor: .secondary,
+                fontSize: 13,
+                fontWeight: .semibold
+            )
         }
-        .buttonStyle(SettingsHoverButtonStyle(
-            cornerRadius: 8,
-            normalFill: Color.primary.opacity(0.025),
-            normalStroke: Color.primary.opacity(0.06)
-        ))
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Rename, merge, or delete this speaker")

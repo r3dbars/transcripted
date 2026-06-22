@@ -522,6 +522,24 @@ func testUIAutomationSurfaceContract() {
         )
 
         assertTrue(
+            speakerPeopleSource.contains("enum SpeakerPeopleSettingsPolishContract")
+                && speakerPeopleSource.contains("struct SpeakerCompactIconLabel")
+                && speakerPeopleSource.contains("static let minimumHitTarget: CGFloat = 40")
+                && speakerPeopleSource.contains("static let playButtonVisibleDiameter: CGFloat = 36")
+                && speakerPeopleSource.contains("static let compactIconVisibleDiameter: CGFloat = 28")
+                && speakerPeopleSource.contains(".contentShape(Rectangle())"),
+            "speaker settings should pin compact icon chrome separately from the 40pt hit shape"
+        )
+
+        let speakerCompactIconLabelApplications = speakerPeopleSource
+            .components(separatedBy: "SpeakerCompactIconLabel(")
+            .count - 1
+        assertTrue(
+            speakerCompactIconLabelApplications >= 4,
+            "speaker refresh, all-speakers play, and overflow icon controls should use the compact 40pt hit-target label"
+        )
+
+        assertTrue(
             homeSource.contains("HomeAttentionPillsRow")
                 && homeSource.contains(".accessibilityHint(issue.detail)")
                 && homeSource.contains("transcripted.home.needs-attention.review."),
