@@ -9,6 +9,7 @@ func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
         let appSource = readUIAutomationContractFile("Sources/TranscriptedApp.swift")
         let actionRowSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarActionRowView.swift")
+        let menuTokensSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuTokens.swift")
         let primarySource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift")
         let utilitySource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarUtilityActionsView.swift")
         let smokeScript = readUIAutomationContractFile("scripts/entrypoints/build.sh")
@@ -29,6 +30,15 @@ func testUIAutomationSurfaceContract() {
                 && actionRowSource.contains("guard isEnabled else { return false }")
                 && actionRowSource.contains("accessibilityIdentifier()"),
             "menubar smoke snapshots should carry the same accessibility identifier and AXPress path AppKit automation sees"
+        )
+
+        assertTrue(
+            menuTokensSource.contains("static let minimumHitTargetSize: CGFloat = 40")
+                && menuTokensSource.contains("static let panelHeight: CGFloat = 480")
+                && actionRowSource.contains("MenuTokens.minimumHitTargetSize")
+                && actionRowSource.contains("MenuTokens.utilityActionRowHeight")
+                && actionRowSource.contains("MenuTokens.compactActionRowHeight"),
+            "menubar action rows should keep a real 40pt hit-target floor and a panel height that keeps default rows visible"
         )
 
         for identifier in [

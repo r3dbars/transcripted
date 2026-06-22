@@ -480,7 +480,7 @@ final class PackagedAppSmokeRunner {
     private func validateUISmoke(_ report: UIAutomationSmokeReport) -> PackagedAppSmokeCheck {
         switch report.status {
         case .pass:
-            return .pass("ui-smoke", target: appBundleURL.path, detail: "App launched, menu bar appeared, and core menu/settings controls were visible.")
+            return .pass("ui-smoke", target: appBundleURL.path, detail: "App launched, menu bar appeared, audit rows 18/25/27/29/31 passed, and core menu/settings controls were visible.")
         case .incomplete:
             return .warn("ui-smoke", target: appBundleURL.path, detail: firstFlagDetail(in: report) ?? "UI smoke was incomplete.")
         case .fail:

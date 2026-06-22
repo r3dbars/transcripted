@@ -337,6 +337,87 @@ final class ValidatorTests: XCTestCase {
         XCTAssertEqual(failedReport.exitCode, 1)
     }
 
+    func testMenuBarAuditRowsRequireFortyPointScriptableTargets() {
+        let observed = MenuBarAuditRow.manualProofTailRows.flatMap { row in
+            row.targets.map { target in
+                AXObservedElement(
+                    identifier: target.identifier,
+                    title: nil,
+                    role: "AXButton",
+                    description: nil,
+                    help: nil,
+                    isEnabled: target.requiresEnabled ?? false,
+                    frame: AXFrame(x: 0, y: 0, width: 40, height: 40)
+                )
+            }
+        }
+
+        XCTAssertNil(MenuBarAuditRow.firstFailure(in: observed))
+    }
+
+    func testMenuBarAuditRowsAllowStateDependentDisabledActions() {
+        let paste = AXObservedElement(
+            identifier: "transcripted.menubar.primary.paste-last-dictation",
+            title: "Paste Last Dictation",
+            role: "AXButton",
+            description: nil,
+            help: nil,
+            isEnabled: false,
+            frame: AXFrame(x: 0, y: 0, width: 40, height: 40)
+        )
+        let updates = AXObservedElement(
+            identifier: "transcripted.menubar.utility.check-updates",
+            title: "Check for Updates",
+            role: "AXButton",
+            description: nil,
+            help: nil,
+            isEnabled: false,
+            frame: AXFrame(x: 0, y: 0, width: 40, height: 40)
+        )
+
+        let rows = [
+            MenuBarAuditRow(
+                rowNumber: 29,
+                title: "Audit row 29",
+                targets: [MenuBarAuditTarget("transcripted.menubar.primary.paste-last-dictation", requiresEnabled: nil)],
+                minimumHitSize: 40
+            ),
+            MenuBarAuditRow(
+                rowNumber: 31,
+                title: "Audit row 31",
+                targets: [MenuBarAuditTarget("transcripted.menubar.utility.check-updates", requiresEnabled: nil)],
+                minimumHitSize: 40
+            ),
+        ]
+
+        XCTAssertNil(MenuBarAuditRow.firstFailure(in: [paste, updates], rows: rows))
+    }
+
+    func testMenuBarAuditRowsFailSmallTargets() {
+        let observed = AXObservedElement(
+            identifier: "transcripted.menubar.primary.start-dictation",
+            title: "Start Dictation",
+            role: "AXButton",
+            description: nil,
+            help: nil,
+            isEnabled: true,
+            frame: AXFrame(x: 0, y: 0, width: 39, height: 40)
+        )
+        let rows = [
+            MenuBarAuditRow(
+                rowNumber: 25,
+                title: "Audit row 25",
+                targets: [MenuBarAuditTarget("transcripted.menubar.primary.start-dictation")],
+                minimumHitSize: 40
+            ),
+        ]
+
+        let failure = MenuBarAuditRow.firstFailure(in: [observed], rows: rows)
+
+        XCTAssertEqual(failure?.checkID, "menu-audit-row-25")
+        XCTAssertTrue(failure?.detail.contains("40x40pt") == true)
+    }
+
     func testValidationReportJSONIncludesAutomationSummaryAndFingerprints() throws {
         let generatedAt = Date(timeIntervalSince1970: 1_777_777_777)
         let report = ValidationReport(
