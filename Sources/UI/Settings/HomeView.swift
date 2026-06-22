@@ -1641,6 +1641,8 @@ private struct HomeMeetingAudioControl: View {
                 normalFill: isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08),
                 normalStroke: isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10)
             ))
+            .frame(minHeight: 40, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityLabel(title)
             .accessibilityIdentifier("transcripted.home.audio.inline-toggle")
 

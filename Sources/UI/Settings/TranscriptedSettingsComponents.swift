@@ -300,6 +300,8 @@ struct SettingsInlineActionButton: View {
             normalFill: normalFill,
             normalStroke: normalStroke
         ))
+        .frame(minHeight: 40)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .settingsAutomationIdentifier(automationIdentifier)
     }
 
