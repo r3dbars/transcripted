@@ -2110,7 +2110,10 @@ private struct ConnectAgentStage: View {
                     glyph: "◆",
                     color: OnboardingTheme.claude,
                     buttonTitle: claudeDesktopButtonTitle,
-                    automationIdentifier: "transcripted.onboarding.agent.connect-claude-desktop"
+                    automationIdentifier: "transcripted.onboarding.agent.connect-claude-desktop",
+                    accessibilityLabel: claudeDesktopAccessibilityLabel,
+                    accessibilityValue: claudeDesktopAccessibilityValue,
+                    isDisabled: connectPhase == .connecting || connectPhase == .connected
                 ) {
                     onConnectClaudeDesktop()
                 }
@@ -2122,7 +2125,9 @@ private struct ConnectAgentStage: View {
                     glyph: "●",
                     color: OnboardingTheme.codex,
                     buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt",
-                    automationIdentifier: "transcripted.onboarding.agent.copy-local-agent-prompt"
+                    automationIdentifier: "transcripted.onboarding.agent.copy-local-agent-prompt",
+                    accessibilityLabel: "Copy local agent prompt",
+                    accessibilityValue: copiedItem == .localAgentPrompt ? "Copied" : "Ready"
                 ) {
                     onCopy(.localAgentPrompt)
                 }
@@ -2164,6 +2169,32 @@ private struct ConnectAgentStage: View {
             return "Try again"
         }
     }
+
+    private var claudeDesktopAccessibilityLabel: String {
+        switch connectPhase {
+        case .idle:
+            return "Connect Claude Desktop"
+        case .connecting:
+            return "Connecting Claude Desktop"
+        case .connected:
+            return "Claude Desktop connected"
+        case .failed:
+            return "Try connecting Claude Desktop again"
+        }
+    }
+
+    private var claudeDesktopAccessibilityValue: String {
+        switch connectPhase {
+        case .idle:
+            return "Ready"
+        case .connecting:
+            return "Connecting"
+        case .connected:
+            return "Connected"
+        case .failed:
+            return "Needs attention"
+        }
+    }
 }
 
 private struct AgentOptionCard: View {
@@ -2174,7 +2205,10 @@ private struct AgentOptionCard: View {
     let color: Color
     let buttonTitle: String
     let automationIdentifier: String
+    let accessibilityLabel: String
+    let accessibilityValue: String
     var inverted = false
+    var isDisabled = false
     let action: () -> Void
 
     var body: some View {
@@ -2188,13 +2222,18 @@ private struct AgentOptionCard: View {
                 AgentGlyph(glyph: glyph, color: color)
                 Text(title)
                     .font(.system(size: 20, weight: .semibold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.94)
                     .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
             }
 
             Text(detail)
                 .font(.system(size: 13))
                 .lineSpacing(3)
                 .foregroundStyle(inverted ? OnboardingTheme.window.opacity(0.72) : OnboardingTheme.body)
+                .lineLimit(4)
+                .minimumScaleFactor(0.94)
                 .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
@@ -2203,6 +2242,10 @@ private struct AgentOptionCard: View {
                 action()
             }
             .buttonStyle(InkButtonStyle(isSubtle: inverted))
+            .disabled(isDisabled)
+            .help(accessibilityLabel)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityValue(accessibilityValue)
             .accessibilityIdentifier(automationIdentifier)
         }
         .foregroundStyle(inverted ? OnboardingTheme.window : OnboardingTheme.ink)

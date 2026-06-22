@@ -555,6 +555,41 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(onboardingSource.contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
         }
+
+        let connectAgentStageSource = onboardingSource
+            .components(separatedBy: "private struct ConnectAgentStage: View")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "private struct AgentOptionCard: View")
+            .first ?? ""
+        let agentOptionCardSource = onboardingSource
+            .components(separatedBy: "private struct AgentOptionCard: View")
+            .dropFirst()
+            .first?
+            .components(separatedBy: "private struct AgentGlyph: View")
+            .first ?? ""
+
+        assertTrue(
+            !connectAgentStageSource.isEmpty
+                && connectAgentStageSource.contains("accessibilityLabel: claudeDesktopAccessibilityLabel")
+                && connectAgentStageSource.contains("accessibilityValue: claudeDesktopAccessibilityValue")
+                && connectAgentStageSource.contains("isDisabled: connectPhase == .connecting || connectPhase == .connected")
+                && connectAgentStageSource.contains("accessibilityLabel: \"Copy local agent prompt\"")
+                && connectAgentStageSource.contains("accessibilityValue: copiedItem == .localAgentPrompt ? \"Copied\" : \"Ready\""),
+            "onboarding agent cards should keep contextual button state instead of generic Connect/Copy labels"
+        )
+
+        assertTrue(
+            !agentOptionCardSource.isEmpty
+                && agentOptionCardSource.contains(".lineLimit(2)")
+                && agentOptionCardSource.contains(".lineLimit(4)")
+                && agentOptionCardSource.contains(".minimumScaleFactor(0.94)")
+                && agentOptionCardSource.contains(".layoutPriority(1)")
+                && agentOptionCardSource.contains(".help(accessibilityLabel)")
+                && agentOptionCardSource.contains(".accessibilityLabel(accessibilityLabel)")
+                && agentOptionCardSource.contains(".accessibilityValue(accessibilityValue)"),
+            "onboarding agent option cards should keep stable wrapping and explicit action accessibility"
+        )
     }
 
     runSuite("UI automation surface contract - QA CLI exposes a real AX smoke") {
