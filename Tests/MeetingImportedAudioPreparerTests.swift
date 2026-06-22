@@ -339,6 +339,81 @@ func testMeetingImportedAudioPreparer() async {
             "imported audio should use the preserved recording time, not the copy/download date"
         )
     }
+
+    await runSuite("MeetingImportedAudioPreparer cancels an in-flight import and leaves no scratch artifact") {
+        let root = temporaryImportAudioPreparerRoot()
+        let sourceURL = root.appendingPathComponent("Long_Call.wav")
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // A few MB so the chunked copy has real work to interrupt.
+        FileManager.default.createFile(
+            atPath: sourceURL.path,
+            contents: Data(repeating: 7, count: 4 * (1 << 20))
+        )
+
+        // Cancelling synchronously before the detached task starts running means
+        // the preparer observes cancellation before it copies anything.
+        let task = Task.detached {
+            try await MeetingImportedAudioPreparer.prepareImportedAudio(
+                from: sourceURL,
+                scratchDirectory: scratchURL
+            )
+        }
+        task.cancel()
+
+        var threwCancellation = false
+        do {
+            _ = try await task.value
+        } catch is CancellationError {
+            threwCancellation = true
+        } catch {
+            assertTrue(false, "a cancelled import should throw CancellationError, got \(error)")
+        }
+        assertTrue(threwCancellation, "cancelling an in-flight import should stop the work")
+
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: scratchURL.path)) ?? []
+        let importedLeftovers = leftovers.filter { $0.hasPrefix("imported-") }
+        assertTrue(
+            importedLeftovers.isEmpty,
+            "a cancelled import must not leave a partial scratch copy behind, found \(importedLeftovers)"
+        )
+    }
+
+    await runSuite("MeetingImportedAudioPreparer copy removes the partial destination when cancelled") {
+        let root = temporaryImportAudioPreparerRoot()
+        let sourceURL = root.appendingPathComponent("source.wav")
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let destinationURL = scratchURL.appendingPathComponent("imported-partial.wav")
+        try! FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: sourceURL.path,
+            contents: Data(repeating: 3, count: 4 * (1 << 20))
+        )
+
+        let task = Task.detached {
+            try MeetingImportedAudioPreparer.copyInterruptibly(
+                from: sourceURL,
+                to: destinationURL,
+                fileManager: FileManager.default,
+                chunkSize: 4096
+            )
+        }
+        task.cancel()
+
+        var threwCancellation = false
+        do {
+            try await task.value
+        } catch is CancellationError {
+            threwCancellation = true
+        } catch {
+            assertTrue(false, "a cancelled copy should throw CancellationError, got \(error)")
+        }
+        assertTrue(threwCancellation, "cancelling the copy should interrupt it")
+        assertFalse(
+            FileManager.default.fileExists(atPath: destinationURL.path),
+            "a cancelled copy must remove the partial destination file"
+        )
+    }
 }
 
 private func assertImportedAudioPreparationError(

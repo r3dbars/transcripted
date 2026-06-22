@@ -620,6 +620,7 @@ struct SettingsActivityCard: View {
     let actionTitle: String?
     let action: (() -> Void)?
     var dismissAction: (() -> Void)? = nil
+    var cancelAction: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -681,23 +682,49 @@ struct SettingsActivityCard: View {
                 }
             }
 
-            if let actionTitle, let action {
-                Button {
-                    action()
-                } label: {
-                    Text(actionTitle)
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
+            if actionTitle != nil || cancelAction != nil {
+                HStack(spacing: 10) {
+                    if let actionTitle, let action {
+                        Button {
+                            action()
+                        } label: {
+                            Text(actionTitle)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(SettingsHoverButtonStyle(
+                            tone: actionTone,
+                            cornerRadius: 8,
+                            normalFill: tintColor.opacity(0.08),
+                            normalStroke: tintColor.opacity(0.14)
+                        ))
+                        .frame(minHeight: 40)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+
+                    if let cancelAction {
+                        Button {
+                            cancelAction()
+                        } label: {
+                            Text("Cancel")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(SettingsHoverButtonStyle(
+                            tone: .destructive,
+                            cornerRadius: 8,
+                            normalFill: Color.primary.opacity(0.04),
+                            normalStroke: Color.primary.opacity(0.12)
+                        ))
+                        .frame(minHeight: 40)
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .help("Cancel this import and clean up partial files")
+                        .accessibilityLabel("Cancel transcription")
+                        .accessibilityIdentifier("transcripted.settings.activity-card.cancel")
+                    }
                 }
-                .buttonStyle(SettingsHoverButtonStyle(
-                    tone: actionTone,
-                    cornerRadius: 8,
-                    normalFill: tintColor.opacity(0.08),
-                    normalStroke: tintColor.opacity(0.14)
-                ))
-                .frame(minHeight: 40)
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
         .padding(18)

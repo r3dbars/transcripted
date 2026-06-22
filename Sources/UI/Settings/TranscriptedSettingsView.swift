@@ -527,7 +527,13 @@ struct TranscriptedSettingsView: View {
                                 failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment."
                             )
                         }
-                    }
+                    },
+                    cancelAction: homeTranscriptionActivityIsCancellable
+                        ? {
+                            trackSettingsAction("cancel_current_activity", page: .home)
+                            meetingSession.cancelActiveTranscription(reason: .userRequested)
+                        }
+                        : nil
                 )
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -4144,6 +4150,18 @@ struct TranscriptedSettingsView: View {
             return .working
         case .failed:
             return .caution
+        }
+    }
+
+    /// Whether the live transcription activity card represents in-flight work
+    /// that the user can explicitly cancel (an imported-audio copy or a running
+    /// transcription), as opposed to a finished/failed state.
+    private var homeTranscriptionActivityIsCancellable: Bool {
+        switch meetingSession.displayStatus {
+        case .gettingReady, .transcribing, .finishing:
+            return true
+        case .idle, .transcriptSaved, .failed:
+            return false
         }
     }
 

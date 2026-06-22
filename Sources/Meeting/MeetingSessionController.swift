@@ -56,6 +56,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     enum TranscriptionCancelReason: String {
+        case userRequested = "user_requested"
         case unknown = "unknown"
     }
 
@@ -212,6 +213,8 @@ final class MeetingSessionController: ObservableObject {
     private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
     private var preparingQueuedTranscriptionJob: QueuedTranscriptionJob?
     private var queuedTranscriptionStartTask: Task<Void, Never>?
+    private var importPreparationTask: Task<PreparedImportedMeetingAudio, Error>?
+    private var importPreparationToken: UUID?
     private var queuedRuntimeDiagnosticsJobIDs: Set<UUID> = []
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeTranscriptionCaptureDiagnostics: [String: String]?
@@ -1189,12 +1192,56 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
+        // Surface a cancellable "preparing" card while the source file is copied
+        // into scratch. Large imports can take a while; the user can cancel here
+        // and the partial copy is cleaned up before any job is enqueued. Only
+        // drive the card when no other transcription is already owning it, so we
+        // don't stomp an active job's real progress with this prep state.
+        let drivesActivityDisplay = !hasBackgroundTranscriptionWork
+        if drivesActivityDisplay {
+            displayStatus = .gettingReady
+        }
+        let preparationTask = Task.detached(priority: .utility) {
+            try await MeetingImportedAudioPreparer.prepareImportedAudio(from: sourceURL)
+        }
+        let preparationToken = UUID()
+        importPreparationTask = preparationTask
+        importPreparationToken = preparationToken
+        defer {
+            // Only clear if a later import hasn't already replaced this one.
+            if importPreparationToken == preparationToken {
+                importPreparationTask = nil
+                importPreparationToken = nil
+            }
+        }
+
         let preparedAudio: PreparedImportedMeetingAudio
         do {
-            preparedAudio = try await Task.detached(priority: .utility) {
-                try await MeetingImportedAudioPreparer.prepareImportedAudio(from: sourceURL)
-            }.value
+            preparedAudio = try await preparationTask.value
+        } catch is CancellationError {
+            // The user cancelled mid-import. The preparer already removed the
+            // partial scratch copy, so just reset the visible state.
+            if drivesActivityDisplay, case .gettingReady = displayStatus {
+                displayStatus = .idle
+            }
+            if case .transcribing = state {} else {
+                state = .ready
+            }
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_file_import_cancelled",
+                message: "Imported meeting audio preparation cancelled before transcription",
+                context: baseDiagnosticsContext(
+                    extra: ["trigger": StartTrigger.fileImport.rawValue]
+                )
+            )
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "file_import_cancelled")
+            return false
         } catch {
+            if drivesActivityDisplay, case .gettingReady = displayStatus {
+                displayStatus = .idle
+            }
             let failureKind = importPreparationFailureKind(for: error)
             let displayMessage = importPreparationFailureMessage(for: error)
             DiagnosticsTrail.record(
@@ -1281,6 +1328,13 @@ final class MeetingSessionController: ObservableObject {
     /// Cancel any in-progress pipeline. Does not cancel an active recording —
     /// use stopRecording() for that.
     func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {
+        // An in-flight imported-audio copy is cancellable too. Cancelling the
+        // task makes the preparer interrupt the copy and remove the partial
+        // scratch file; importAudioFile() then resets the visible state.
+        importPreparationTask?.cancel()
+        importPreparationTask = nil
+        importPreparationToken = nil
+
         let queuedJobs = queuedTranscriptionJobs
         queuedTranscriptionJobs.removeAll()
         let preparingJob = preparingQueuedTranscriptionJob
