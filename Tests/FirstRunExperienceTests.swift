@@ -349,6 +349,14 @@ func testFirstRunExperience() {
         assertNotNil(card.progress, "model card should show a progress bar during downloads")
     }
 
+    runSuite("FirstRunExperience.modelCard — clamps displayed download progress") {
+        let belowZero = FirstRunExperience.modelCard(for: .downloading(progress: -0.2))
+        let aboveComplete = FirstRunExperience.modelCard(for: .downloading(progress: 1.3))
+
+        assertEqual(belowZero.status, "Starting download", "negative progress should not render a jumpy negative percentage")
+        assertEqual(aboveComplete.status, "100% complete", "over-complete progress should keep the label bounded")
+    }
+
     runSuite("FirstRunExperience.modelCard — names Parakeet TDT V3 in ready state") {
         let card = FirstRunExperience.modelCard(for: .ready)
 
@@ -399,5 +407,28 @@ func testFirstRunExperience() {
         assertEqual(card.title, "Downloading Whisper Large V3 Turbo", "advanced model card should name Whisper")
         assertTrue(card.detail.contains("~632 MB"), "Whisper Turbo card should show the expected model size")
         assertEqual(card.status, "25% complete", "Whisper card should keep progress behavior")
+    }
+
+    runSuite("FirstRunOnboardingPolishContract — protects first-run polish targets") {
+        assertTrue(
+            FirstRunOnboardingPolishContract.minimumHitTarget >= 40,
+            "onboarding controls should keep at least a 40px hit target"
+        )
+        assertTrue(
+            FirstRunOnboardingPolishContract.minimumCompactButtonHeight >= 40,
+            "compact permission buttons should not shrink below the requested target"
+        )
+        assertTrue(
+            FirstRunOnboardingPolishContract.modelProgressLabelMinimumWidth >= 100,
+            "download progress labels need a stable tabular slot"
+        )
+        assertTrue(
+            FirstRunOnboardingPolishContract.selectedStateStrokeWidth >= 2,
+            "selected cards need a visible state that is not just a faint border"
+        )
+        assertTrue(
+            FirstRunOnboardingPolishContract.bodyCopyLineLimit <= 3,
+            "first-run cards should keep short copy from wrapping into tall blocks"
+        )
     }
 }

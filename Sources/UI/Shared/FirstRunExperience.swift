@@ -30,6 +30,14 @@ struct FirstRunModelCardState: Equatable {
     let tone: Tone
 }
 
+enum FirstRunOnboardingPolishContract {
+    static let minimumHitTarget: Double = 44
+    static let minimumCompactButtonHeight: Double = 40
+    static let modelProgressLabelMinimumWidth: Double = 104
+    static let selectedStateStrokeWidth: Double = 2
+    static let bodyCopyLineLimit = 3
+}
+
 struct MenuBarPrimaryActionState: Equatable {
     let title: String
     let symbolName: String
@@ -347,10 +355,11 @@ enum FirstRunExperience {
                 tone: .working
             )
         case .downloading(let progress):
+            let percentage = max(0, min(100, Int(progress * 100)))
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
                 detail: "\(modelPersistenceDetail(for: model)) Downloading from huggingface.co. Keep Transcripted open; if the download fails, use Retry Download.",
-                status: progress > 0 ? "\(Int(progress * 100))% complete" : "Starting download",
+                status: progress > 0 ? "\(percentage)% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
             )
