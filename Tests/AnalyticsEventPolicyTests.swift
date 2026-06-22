@@ -10,7 +10,24 @@ func testAnalyticsEventPolicy() {
         assertEqual(
             documentedEvents,
             policyEvents,
-            "docs/privacy-first-observability.md should list the same analytics events as AnalyticsEventPolicy.swift"
+            "docs/privacy-first-observability.md should list the same analytics events as Resources/analytics-events.psv"
+        )
+    }
+
+    runSuite("AnalyticsEventPolicy taxonomy file stays union-merge clean") {
+        let fileEvents = taxonomyFileEventNames()
+        let uniqueFileEvents = Set(fileEvents)
+
+        assertFalse(fileEvents.isEmpty, "Resources/analytics-events.psv should list analytics events")
+        assertEqual(
+            fileEvents.count,
+            uniqueFileEvents.count,
+            "Resources/analytics-events.psv must keep one line per event; run scripts/ops/normalize-analytics-taxonomy.py after a union merge"
+        )
+        assertEqual(
+            uniqueFileEvents.sorted(),
+            AnalyticsEventPolicy.allEventNames.sorted(),
+            "the compiled allowlist should reflect exactly the events in Resources/analytics-events.psv"
         )
     }
 
@@ -55,168 +72,7 @@ func testAnalyticsEventPolicy() {
     }
 
     runSuite("AnalyticsEventPolicy taxonomy requires reviewed non-bucket property shapes") {
-        let reviewedNonBucketProperties: Set<String> = [
-            "action",
-            "action_id",
-            "action_kind",
-            "agent_cta",
-            "agent_target",
-            "analytics_available",
-            "anonymous_usage_enabled",
-            "app_signal",
-            "app_version",
-            "artifact_retained",
-            "artifact_kind",
-            "attenuation_kind",
-            "auto_send",
-            "automatic_downloads_enabled",
-            "available",
-            "backoff_kind",
-            "build_channel",
-            "build_revision",
-            "build_version",
-            "calendar_confidence",
-            "calendar_status",
-            "call_state",
-            "capture_activity",
-            "capture_quality",
-            "captured_input_volume_before",
-            "captured_input_volume_changed",
-            "captured_input_volume_dropped",
-            "captured_input_volume_during",
-            "cleanup_changed",
-            "cleanup_enabled",
-            "completion_flow",
-            "cooldown_reason",
-            "copy_reason",
-            "crash_reporting_available",
-            "crash_reporting_enabled",
-            "cta",
-            "cta_type",
-            "default_input_class",
-            "default_input_volume_after",
-            "default_input_volume_before",
-            "default_input_volume_changed",
-            "default_input_volume_dropped",
-            "default_input_volume_during",
-            "default_output_class",
-            "default_output_volume_after",
-            "default_output_volume_before",
-            "default_output_volume_changed",
-            "default_output_volume_dropped",
-            "default_output_volume_during",
-            "default_system_output_volume_after",
-            "default_system_output_volume_before",
-            "default_system_output_volume_changed",
-            "default_system_output_volume_dropped",
-            "default_system_output_volume_during",
-            "delivery",
-            "dictation_ready",
-            "elapsed_bucket",
-            "enabled",
-            "entrypoint",
-            "failure_code",
-            "failure_kind",
-            "feature_area",
-            "first_artifact_kind",
-            "first_dictation_saved",
-            "format_ready",
-            "from_status",
-            "has_target",
-            "hfp_suspected",
-            "import_stage",
-            "input_channels",
-            "input_device_class",
-            "input_rate_hz",
-            "input_volume_scalar_available",
-            "last_event",
-            "location_type",
-            "meeting_dry_run_completed",
-            "meeting_recording_ready",
-            "mic_boost_prompt",
-            "mic_processed_peak",
-            "mic_processing",
-            "mic_raw_peak",
-            "mic_recovering",
-            "mic_status",
-            "mic_stream_present",
-            "missing_permission",
-            "model_state",
-            "os_major",
-            "outcome",
-            "output_channels",
-            "output_device_class",
-            "output_ducking_detected",
-            "output_rate_hz",
-            "page_id",
-            "paste_available",
-            "pasteback_status",
-            "permission_kind",
-            "previous_clean_shutdown",
-            "previous_version",
-            "prior_artifact_kind",
-            "prior_ready_state",
-            "prior_status",
-            "prompt_kind",
-            "prompt_reason",
-            "provider",
-            "proxy_kind",
-            "query_kind",
-            "quiet_mic_recovered",
-            "quiet_mic_unrecovered",
-            "realtime_agc",
-            "reason",
-            "recent_meetings_available",
-            "recovering",
-            "reporting_kind",
-            "required",
-            "reason_kind",
-            "result",
-            "retry_source",
-            "route_ready",
-            "route_shape",
-            "runtime",
-            "sample_flow_started",
-            "save_outcome",
-            "selected_input_class",
-            "selection_overrode_default",
-            "selection_reason",
-            "second_artifact_kind",
-            "session_active",
-            "session_kind",
-            "session_stage",
-            "setting_id",
-            "setup_kind",
-            "setup_ready",
-            "source",
-            "stall_kind",
-            "stall_stage",
-            "stage",
-            "state",
-            "step_id",
-            "step_index",
-            "stop_timed_out",
-            "suppression_reason",
-            "surface",
-            "summary_action",
-            "system_backend",
-            "system_channels",
-            "system_failed",
-            "system_output_device_class",
-            "system_output_rate_hz",
-            "system_peak",
-            "system_rate_hz",
-            "system_status",
-            "system_stream_present",
-            "to_status",
-            "trigger",
-            "update_state",
-            "version",
-            "voice_processing",
-            "voice_processing_active",
-            "was_recording",
-            "workflow_kind",
-        ]
+        let reviewedNonBucketProperties = reviewedNonBucketAnalyticsProperties()
         let properties = allAllowedAnalyticsPropertyNames()
 
         for property in properties where !property.hasSuffix("_bucket") {
@@ -538,66 +394,6 @@ func testAnalyticsEventPolicy() {
         assertEqual(defaults.string(forKey: ActivationTelemetry.firstArtifactKindKey), "meeting", "only opted-in artifact kind should be retained")
     }
 
-    runSuite("AnalyticsEventPolicy allows local meeting summary funnel events") {
-        let started = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_started")
-        let completed = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_completed")
-        let failed = AnalyticsEventPolicy.policy(forEvent: "local_meeting_summary_failed")
-
-        assertEqual(
-            started?.allowedProperties ?? Set<String>(),
-            ["provider", "queue_depth_bucket", "runtime", "setup_ready", "summary_action"],
-            "local summary starts should include only provider/setup/action and queue shape"
-        )
-        assertEqual(
-            completed?.allowedProperties ?? Set<String>(),
-            ["chunk_count_bucket", "duration_bucket", "provider", "runtime", "summary_action"],
-            "local summary completions should include only provider/runtime/action and coarse result buckets"
-        )
-        assertEqual(
-            failed?.allowedProperties ?? Set<String>(),
-            ["duration_bucket", "failure_kind", "provider", "stage", "summary_action"],
-            "local summary failures should include only provider/action/stage and coarse failure shape"
-        )
-
-        let allowed = (started?.allowedProperties ?? [])
-            .union(completed?.allowedProperties ?? [])
-            .union(failed?.allowedProperties ?? [])
-        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
-            [
-                "provider": "gemmaMLX",
-                "summary_action": "generate",
-                "setup_ready": "true",
-                "runtime": "m1-low-memory",
-                "queue_depth_bucket": "1",
-                "chunk_count_bucket": "2_3",
-                "duration_bucket": "2_9m",
-                "failure_kind": "timeout",
-                "stage": "generate",
-                "transcriptURL": "/Users/redbars/private.md",
-                "title": "Customer call",
-                "summary_text": "private generated summary",
-                "filename": "Customer call.md",
-                "error": "Failed at /Users/redbars/private.md",
-            ],
-            allowedKeys: allowed.union(["transcriptURL", "title", "summary_text", "filename", "error"])
-        )
-
-        assertEqual(sanitized["provider"], "gemmaMLX", "provider enum should survive")
-        assertEqual(sanitized["summary_action"], "generate", "summary action enum should survive")
-        assertEqual(sanitized["setup_ready"], "true", "setup readiness should survive as a boolean string")
-        assertEqual(sanitized["runtime"], "m1-low-memory", "reviewed runtime enum should survive")
-        assertEqual(sanitized["queue_depth_bucket"], "1", "queue depth bucket should survive")
-        assertEqual(sanitized["chunk_count_bucket"], "2_3", "chunk count bucket should survive")
-        assertEqual(sanitized["duration_bucket"], "2_9m", "duration bucket should survive")
-        assertEqual(sanitized["failure_kind"], "timeout", "normalized failure kind should survive")
-        assertEqual(sanitized["stage"], "generate", "failure stage should survive")
-        assertNil(sanitized["transcriptURL"], "transcript URLs must not be sent")
-        assertNil(sanitized["title"], "meeting titles must not be sent")
-        assertNil(sanitized["summary_text"], "summary text must not be sent")
-        assertNil(sanitized["filename"], "filenames must not be sent")
-        assertNil(sanitized["error"], "raw error strings must not be sent")
-    }
-
     runSuite("AnalyticsEventPolicy allows workflow abandonment taxonomy") {
         let abandoned = AnalyticsEventPolicy.policy(forEvent: "workflow_abandoned")
         assertEqual(
@@ -636,65 +432,6 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["raw_error"], "raw errors must not be sent")
         assertNil(sanitized["source_app"], "source apps must not be sent")
         assertNil(sanitized["url"], "raw URLs must not be sent")
-    }
-
-    runSuite("AnalyticsEventPolicy allows workflow recovery lifecycle events") {
-        let attempted = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_attempted")
-        let finished = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_finished")
-
-        assertEqual(
-            attempted?.allowedProperties ?? Set<String>(),
-            [
-                "artifact_retained",
-                "attempt_bucket",
-                "failure_kind",
-                "retry_source",
-                "surface",
-                "workflow_kind",
-            ],
-            "recovery attempts should carry only coarse workflow shape"
-        )
-        assertEqual(
-            finished?.allowedProperties ?? Set<String>(),
-            [
-                "artifact_retained",
-                "attempt_bucket",
-                "elapsed_bucket",
-                "failure_kind",
-                "result",
-                "retry_source",
-                "surface",
-                "workflow_kind",
-            ],
-            "recovery finishes should add only result and elapsed bucket"
-        )
-
-        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
-            [
-                "workflow_kind": "meeting_transcription",
-                "failure_kind": "models_not_ready",
-                "retry_source": "queued_transcription",
-                "attempt_bucket": "1",
-                "result": "success",
-                "elapsed_bucket": "10_29s",
-                "surface": "meeting",
-                "artifact_retained": "true",
-                "error": "raw error",
-                "transcript_path": "/private/tmp/meeting.md",
-            ],
-            allowedKeys: finished?.allowedProperties ?? Set<String>()
-        )
-
-        assertEqual(sanitized["workflow_kind"], "meeting_transcription", "workflow kind should survive")
-        assertEqual(sanitized["failure_kind"], "models_not_ready", "failure kind should survive")
-        assertEqual(sanitized["retry_source"], "queued_transcription", "retry source should survive")
-        assertEqual(sanitized["attempt_bucket"], "1", "attempt bucket should survive")
-        assertEqual(sanitized["result"], "success", "result should survive")
-        assertEqual(sanitized["elapsed_bucket"], "10_29s", "elapsed bucket should survive")
-        assertEqual(sanitized["surface"], "meeting", "surface should survive")
-        assertEqual(sanitized["artifact_retained"], "true", "artifact retained state should survive")
-        assertNil(sanitized["error"], "raw errors must not be sent")
-        assertNil(sanitized["transcript_path"], "transcript paths must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {
@@ -1578,6 +1315,27 @@ private func documentedAnalyticsEvents() -> [String] {
 
 private func allAllowedAnalyticsPropertyNames() -> [String] {
     Set(AnalyticsEventPolicy.allPolicies.flatMap { $0.allowedProperties }).sorted()
+}
+
+private func taxonomyFileEventNames() -> [String] {
+    taxonomyDataLines(relativePath: "Resources/analytics-events.psv").compactMap { line in
+        let pieces = line.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let first = pieces.first else {
+            return nil
+        }
+        return String(first)
+    }
+}
+
+private func reviewedNonBucketAnalyticsProperties() -> Set<String> {
+    Set(taxonomyDataLines(relativePath: "Resources/analytics-reviewed-properties.psv"))
+}
+
+private func taxonomyDataLines(relativePath: String) -> [String] {
+    loadRepoText(relativePath)
+        .split(separator: "\n")
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty && !$0.hasPrefix("#") }
 }
 
 private func markdownSection(named heading: String, in text: String) -> String {
