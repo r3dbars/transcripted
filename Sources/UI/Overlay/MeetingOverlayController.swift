@@ -43,6 +43,11 @@ final class MeetingOverlayPanel: NSPanel {
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         self.acceptsMouseMovedEvents = true
         self.allowsToolTipsWhenApplicationIsInactive = true
+        // Exclude the meeting overlay (and its live transcript drawer) from
+        // screen capture / screen sharing. Panels default to `.readOnly`, which
+        // ScreenCaptureKit captures, so a user sharing a recorded call could
+        // unintentionally broadcast live transcript text.
+        self.sharingType = .none
     }
 
     // Never steals keyboard focus — meeting UI is read-only status.
@@ -68,6 +73,9 @@ final class MeetingOverlayTooltipPanel: NSPanel {
         self.hasShadow = true
         self.ignoresMouseEvents = true
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        // Keep the hover tooltip out of screen capture too, matching the
+        // recording panel and live transcript drawer.
+        self.sharingType = .none
         self.contentView = tooltipView
     }
 
@@ -346,6 +354,10 @@ final class MeetingOverlayRootView: NSView {
         transcriptDrawer.flashCopyFeedback()
     }
 
+    func flashTranscriptBrowserOpenFailure() {
+        transcriptDrawer.flashBrowserOpenFailure()
+    }
+
     override func layout() {
         super.layout()
         if currentState == .preparing {
@@ -582,7 +594,7 @@ final class MeetingOverlayRootView: NSView {
     private func layoutPrompt() {
         let pad: CGFloat = 12
         let dotSize = MeetingOverlayTokens.dotSize
-        let topY = bounds.height - 22
+        let topY = bounds.height - 24
 
         statusDot.frame = NSRect(x: pad, y: topY - dotSize / 2, width: dotSize, height: dotSize)
 
@@ -606,7 +618,7 @@ final class MeetingOverlayRootView: NSView {
 
         detailLabel.frame = NSRect(
             x: pad,
-            y: 34,
+            y: 55,
             width: bounds.width - pad * 2,
             height: 16
         )
@@ -615,7 +627,7 @@ final class MeetingOverlayRootView: NSView {
         let showsRemind = !remindButton.isHidden
         let remindWidth = showsRemind ? max(118, remindButton.fittingSize.width + 18) : 0
         let primaryWidth = max(74, recordButton.fittingSize.width + 18)
-        let buttonHeight: CGFloat = 24
+        let buttonHeight = MeetingOverlayTokens.promptButtonHeight
         let buttonGap: CGFloat = 8
         let visibleGapCount: CGFloat = showsRemind ? 2 : 1
         let totalButtonWidth = secondaryWidth + remindWidth + primaryWidth + buttonGap * visibleGapCount
@@ -623,14 +635,14 @@ final class MeetingOverlayRootView: NSView {
 
         closeButton.frame = NSRect(
             x: buttonStartX,
-            y: 10,
+            y: 8,
             width: secondaryWidth,
             height: buttonHeight
         )
         if showsRemind {
             remindButton.frame = NSRect(
                 x: closeButton.frame.maxX + buttonGap,
-                y: 10,
+                y: 8,
                 width: remindWidth,
                 height: buttonHeight
             )
@@ -639,7 +651,7 @@ final class MeetingOverlayRootView: NSView {
         }
         recordButton.frame = NSRect(
             x: bounds.width - pad - primaryWidth,
-            y: 10,
+            y: 8,
             width: primaryWidth,
             height: buttonHeight
         )
@@ -1292,7 +1304,8 @@ enum MeetingOverlayTokens {
     static let condensedPillWidth: CGFloat = 120
     static let panelHeight: CGFloat = 44
     static let condensedPillHeight: CGFloat = 32
-    static let promptHeight: CGFloat = 88
+    static let promptButtonHeight: CGFloat = 40
+    static let promptHeight: CGFloat = 106
     static let warmupHeight: CGFloat = 96
     static let errorHeight: CGFloat = 72
     static let cornerRadius: CGFloat = 22
@@ -1305,9 +1318,9 @@ enum MeetingOverlayTokens {
     static let condensedGap: CGFloat = 7
     static let timerFontSize: CGFloat = 13
     static let drawerPad: CGFloat = 12
-    static let drawerBrowserButtonSize: CGFloat = 20
-    static let drawerResizeHandleHeight: CGFloat = 12
-    static let stopHeight: CGFloat  = 28
+    static let drawerBrowserButtonSize: CGFloat = 40
+    static let drawerResizeHandleHeight: CGFloat = 40
+    static let stopHeight: CGFloat  = 40
     static let recordingWaveformWidth: CGFloat = 124
     static let tooltipOffset: CGFloat = 8
     static let tooltipScreenInset: CGFloat = 6
@@ -2273,8 +2286,11 @@ final class MeetingOverlayController: NSObject {
                     agentTarget: .localAgent,
                     surface: .meetingOverlay
                 )
+            } else {
+                showLiveViewBrowserOpenFailure()
             }
         } catch {
+            showLiveViewBrowserOpenFailure()
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .livePreview,
                 agentTarget: .localAgent,
@@ -2289,6 +2305,19 @@ final class MeetingOverlayController: NSObject {
                 context: ["error": error.localizedDescription]
             )
         }
+    }
+
+    private func showLiveViewBrowserOpenFailure() {
+        guard state == .recording else {
+            rootView?.flashTranscriptBrowserOpenFailure()
+            return
+        }
+
+        isTranscriptExpanded = true
+        bloomFromRest()
+        flushPendingTranscriptIfNeeded()
+        pushToView()
+        rootView?.flashTranscriptBrowserOpenFailure()
     }
 
     private func dismissPrompt(notifyDetector: Bool) {

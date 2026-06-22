@@ -135,6 +135,8 @@ struct FirstRunOnboardingCopy {
 }
 
 enum FirstRunExperience {
+    private static let failedModelSetupDetail = "Local voice setup needs another try. Retry Download will try the same one-time local model setup again."
+
     static func modelPersistenceDetail(for model: TranscriptionModelChoice) -> String {
         "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
     }
@@ -387,10 +389,10 @@ enum FirstRunExperience {
                 progress: 1.0,
                 tone: .ready
             )
-        case .failed(let message):
+        case .failed:
             return FirstRunModelCardState(
                 title: "Couldn't load \(model.title)",
-                detail: "\(message) Retry Download will try the same one-time local model setup again.",
+                detail: failedModelSetupDetail,
                 status: "Retry needed",
                 progress: nil,
                 tone: .failed

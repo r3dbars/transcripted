@@ -188,6 +188,17 @@ struct AnalyticsEventPolicy: Equatable {
         "workflow_kind",
     ]
 
+    private static let workflowRecoveryProperties: Set<String> = [
+        "artifact_retained",
+        "attempt_bucket",
+        "elapsed_bucket",
+        "failure_kind",
+        "result",
+        "retry_source",
+        "surface",
+        "workflow_kind",
+    ]
+
     private static let productFrictionProperties: Set<String> = [
         "elapsed_bucket",
         "failure_kind",
@@ -420,6 +431,14 @@ struct AnalyticsEventPolicy: Equatable {
         "workflow_abandoned": .init(
             name: "workflow_abandoned",
             allowedProperties: workflowAbandonedProperties
+        ),
+        "workflow_recovery_attempted": .init(
+            name: "workflow_recovery_attempted",
+            allowedProperties: workflowRecoveryProperties.subtracting(["elapsed_bucket", "result"])
+        ),
+        "workflow_recovery_finished": .init(
+            name: "workflow_recovery_finished",
+            allowedProperties: workflowRecoveryProperties
         ),
         "product_friction_observed": .init(
             name: "product_friction_observed",

@@ -1892,6 +1892,19 @@ func testRepoCommandContract() {
             "mini cursor dictation should never leak the stop button into the tiny pill"
         )
         assertTrue(
+            headerContents.contains("override func hitTest(_ point: NSPoint) -> NSView?")
+                && headerContents.contains("OverlayTokens.minimumHitTarget")
+                && headerContents.contains("convert(point, to: stopButton)")
+                && headerContents.contains("stopButton.bounds.insetBy"),
+            "dictation overlay stop control should keep a 40pt hit target without enlarging the compact header"
+        )
+        assertTrue(
+            headerContents.contains("CATransform3DMakeScale(0.97, 0.97, 1)")
+                && headerContents.contains("isHighlighted")
+                && headerContents.contains("accessibilityDisplayShouldReduceMotion"),
+            "dictation overlay stop control should keep tactile pressed feedback that respects Reduce Motion"
+        )
+        assertTrue(
             headerContents.contains("setAccessibilityLabel(accessibilityLabel(for: state))")
                 && headerContents.contains("Dictation listening")
                 && headerContents.contains("Press Escape or your dictation shortcut"),
@@ -1902,6 +1915,11 @@ func testRepoCommandContract() {
         assertTrue(
             rootContents.contains("showsQuietStartupWaveform: state == .starting && isMiniCursorMode"),
             "mini cursor dictation should show a flat quiet waveform during startup"
+        )
+        let tokensContents = readRepoTextFile("Sources/UI/Overlay/OverlayTokens.swift")
+        assertTrue(
+            tokensContents.contains("static let minimumHitTarget: CGFloat = 40"),
+            "overlay controls should keep a shared 40pt minimum hit target token"
         )
 
         let contents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
@@ -2798,13 +2816,17 @@ func testRepoCommandContract() {
 
         assertTrue(
             menuContents.contains("let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)")
-                && menuContents.contains("textPaster.paste(latestText, target: pasteTarget)"),
-            "menu Paste Last Dictation should copy instead of pasting if focus moves away from the source app"
+                && menuContents.contains("let outcome = textPaster.paste(latestText, target: pasteTarget)")
+                && menuContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))")
+                && menuContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)"),
+            "menu Paste Last Dictation should copy instead of pasting if focus moves away and visibly report every outcome"
         )
         assertTrue(
             appContents.contains("let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)")
-                && appContents.contains("settingsTextPaster.paste(latestText, target: pasteTarget)"),
-            "settings Paste Last Dictation should use the same focus guard as normal dictation paste"
+                && appContents.contains("let outcome = settingsTextPaster.paste(latestText, target: pasteTarget)")
+                && appContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))")
+                && appContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)"),
+            "settings Paste Last Dictation should use the same focus guard and visible outcome feedback"
         )
         assertTrue(
             shortcutContents.contains("var onPasteLastDictation: (() -> Void)?")
@@ -3038,6 +3060,35 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - existing installs skip first-run onboarding") {
+        let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
+        let onboardingContents = readRepoTextFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
+        let preferencesContents = readRepoTextFile("Sources/Support/PermissionsOnboardingPreferences.swift")
+
+        assertTrue(
+            preferencesContents.contains("static func hasCompleted(userDefaults: UserDefaults = .standard) -> Bool")
+                && preferencesContents.contains("if userDefaults.bool(forKey: forceKey)")
+                && preferencesContents.contains("return userDefaults.bool(forKey: completionKey)")
+                && preferencesContents.contains("static func markCompleted(userDefaults: UserDefaults = .standard)")
+                && preferencesContents.contains("userDefaults.removeObject(forKey: forceKey)"),
+            "onboarding completion should stay centralized so existing installs skip onboarding while forced reruns still work"
+        )
+        assertTrue(
+            appContents.contains("guard !PermissionsOnboardingPreferences.hasCompleted(), !hasPresentedInitialOnboarding else { return }")
+                && appContents.contains("guard let self, !self.onboardingWindowController.isVisible, !PermissionsOnboardingPreferences.hasCompleted() else { return }")
+                && appContents.contains("onboardingWindowController.present(entrypoint: \"dock_icon\")")
+                && appContents.contains("onboardingWindowController.present(entrypoint: \"single_instance_reopen\")")
+                && appContents.contains("onboardingWindowController.present(entrypoint: \"status_item\")")
+                && appContents.contains("private func finishOnboarding()")
+                && appContents.contains("PermissionsOnboardingPreferences.markCompleted()"),
+            "all app entry points should route completed installs to Home/menu instead of reopening first-run onboarding"
+        )
+        assertFalse(
+            onboardingContents.contains("permissionsOnboardingCompleted"),
+            "the SwiftUI onboarding view should not carry a raw completion-key helper that can drift from forced-rerun behavior"
+        )
+    }
+
     runSuite("Repo command contract - onboarding funnel telemetry is wired from the active view") {
         let contents = readRepoTextFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
 
@@ -3098,6 +3149,31 @@ func testRepoCommandContract() {
                 || homeContents.contains(".sheet(isPresented: $isShowingDetails")
                 || homeContents.contains(".popover(isPresented: $isShowingDetails"),
             "home stats badge should not own its own details presentation state"
+        )
+    }
+
+    runSuite("Repo command contract - meeting overlay transient controls keep 40pt hit targets") {
+        let overlayContents = readRepoTextFile("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let drawerContents = readRepoTextFile("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift")
+        assertTrue(
+            overlayContents.contains("static let promptButtonHeight: CGFloat = 40")
+                && overlayContents.contains("let buttonHeight = MeetingOverlayTokens.promptButtonHeight"),
+            "meeting prompt primary, remind, and dismiss controls should use a named 40pt hit height"
+        )
+        assertTrue(
+            overlayContents.contains("static let stopHeight: CGFloat  = 40")
+                && overlayContents.contains("width: tokens.stopHeight,\n            height: tokens.stopHeight"),
+            "meeting recording stop control should keep a 40x40 hit area"
+        )
+        assertTrue(
+            overlayContents.contains("static let drawerBrowserButtonSize: CGFloat = 40")
+                && drawerContents.contains("width: buttonSize, height: buttonSize"),
+            "live transcript drawer copy and more actions should keep 40x40 hit areas"
+        )
+        assertTrue(
+            overlayContents.contains("static let drawerResizeHandleHeight: CGFloat = 40")
+                && drawerContents.contains("height: MeetingOverlayTokens.drawerResizeHandleHeight"),
+            "live transcript drawer resize grip should keep a 40pt drag target"
         )
     }
 

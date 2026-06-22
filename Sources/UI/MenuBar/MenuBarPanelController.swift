@@ -272,7 +272,7 @@ final class MenuBarPanelController: NSViewController {
     private func pasteLastDictationFromMenu() {
         trackMenuAction("paste_last_dictation")
         guard let latestText = DictationTranscriptStore.latestSavedText() else {
-            NSSound.beep()
+            PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)
             return
         }
 
@@ -280,7 +280,8 @@ final class MenuBarPanelController: NSViewController {
         let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         dismissPopover()
         sourceApp?.activate(options: [])
-        _ = textPaster.paste(latestText, target: pasteTarget)
+        let outcome = textPaster.paste(latestText, target: pasteTarget)
+        PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))
     }
 
     private func openSettingsFromMenu(_ page: TranscriptedSettingsPage, actionID: String? = nil) {

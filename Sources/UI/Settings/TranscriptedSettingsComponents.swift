@@ -300,6 +300,8 @@ struct SettingsInlineActionButton: View {
             normalFill: normalFill,
             normalStroke: normalStroke
         ))
+        .frame(minHeight: 40)
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .settingsAutomationIdentifier(automationIdentifier)
     }
 
@@ -652,7 +654,7 @@ struct SettingsActivityCard: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(.secondary)
-                            .frame(width: 22, height: 22)
+                            .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(SettingsHoverButtonStyle(cornerRadius: 7))
@@ -694,6 +696,8 @@ struct SettingsActivityCard: View {
                     normalFill: tintColor.opacity(0.08),
                     normalStroke: tintColor.opacity(0.14)
                 ))
+                .frame(minHeight: 40)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
         .padding(18)

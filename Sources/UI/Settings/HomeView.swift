@@ -760,7 +760,7 @@ struct HomeRowActionButtons: View {
 
             if !menuItems.isEmpty {
                 HomeRowMoreMenuButton(items: menuItems)
-                    .frame(width: 26, height: 26)
+                    .frame(width: HomeHitTarget.minimum, height: HomeHitTarget.minimum)
                     .help("More options")
             }
         }
@@ -771,10 +771,8 @@ struct HomeRowActionButtons: View {
             Image(systemName: systemName)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 26, height: 26)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(SettingsHoverButtonStyle(cornerRadius: 7))
+        .buttonStyle(HomeCompactIconButtonStyle())
         .help(help)
         .accessibilityLabel(Text(help))
         .accessibilityIdentifier("transcripted.home.row.copy")
@@ -898,6 +896,7 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
     final class HoverMenuButton: NSButton {
         var retainedActionTarget: AnyObject?
         private var trackingAreaRef: NSTrackingArea?
+        private var hoverBackgroundLayer: CALayer?
         private var isHovering = false {
             didSet { updateAppearance() }
         }
@@ -925,6 +924,11 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
             trackingAreaRef = area
         }
 
+        override func layout() {
+            super.layout()
+            layoutHoverBackgroundLayer()
+        }
+
         override func mouseEntered(with event: NSEvent) {
             guard isEnabled else { return }
             isHovering = true
@@ -935,8 +939,10 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
         }
 
         private func updateAppearance() {
+            layoutHoverBackgroundLayer()
             guard isEnabled else {
                 layer?.backgroundColor = NSColor.clear.cgColor
+                hoverBackgroundLayer?.backgroundColor = NSColor.clear.cgColor
                 alphaValue = 0.55
                 return
             }
@@ -950,7 +956,30 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
             } else {
                 color = .clear
             }
-            layer?.backgroundColor = color.cgColor
+            layer?.backgroundColor = NSColor.clear.cgColor
+            hoverBackgroundLayer?.backgroundColor = color.cgColor
+        }
+
+        private func layoutHoverBackgroundLayer() {
+            guard wantsLayer, let layer else { return }
+            let backgroundLayer: CALayer
+            if let hoverBackgroundLayer {
+                backgroundLayer = hoverBackgroundLayer
+            } else {
+                let createdLayer = CALayer()
+                createdLayer.cornerRadius = 7
+                layer.insertSublayer(createdLayer, at: 0)
+                hoverBackgroundLayer = createdLayer
+                backgroundLayer = createdLayer
+            }
+
+            let size = HomeHitTarget.compactVisibleSize
+            backgroundLayer.frame = CGRect(
+                x: floor((bounds.width - size) / 2),
+                y: floor((bounds.height - size) / 2),
+                width: size,
+                height: size
+            )
         }
     }
 }
@@ -1426,7 +1455,7 @@ struct HomeFailedMeetingInlineRow: View {
                     action: onClear
                 )
             ], automationIdentifier: "transcripted.home.failed-meeting.more")
-            .frame(width: 26, height: 26)
+            .frame(width: HomeHitTarget.minimum, height: HomeHitTarget.minimum)
             .help("More options")
         }
     }
@@ -1548,32 +1577,51 @@ private struct HomeAttentionActionButton: View {
     }
 }
 
-private struct HomeAudioIconButton: View {
-    let title: String
-    let symbolName: String
-    let isActive: Bool
-    let isPlaying: Bool
-    let action: () -> Void
+private enum HomeHitTarget {
+    static let minimum: CGFloat = 40
+    static let compactVisibleSize: CGFloat = 26
+}
 
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbolName)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(isActive ? Color.white : Color.secondary)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(isActive ? Color.accentColor : Color.primary.opacity(0.08)))
-                .overlay(
-                    Circle()
-                        .stroke(isPlaying ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.06), lineWidth: 1)
+private struct HomeCompactIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> Body {
+        Body(configuration: configuration)
+    }
+
+    struct Body: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovering = false
+
+        var body: some View {
+            configuration.label
+                .frame(width: HomeHitTarget.compactVisibleSize, height: HomeHitTarget.compactVisibleSize)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(backgroundColor)
                 )
-                .contentShape(Circle())
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(strokeColor, lineWidth: 1)
+                )
+                .frame(width: HomeHitTarget.minimum, height: HomeHitTarget.minimum)
+                .contentShape(Rectangle())
+                .opacity(isEnabled ? 1 : 0.55)
+                .onHover { isHovering = $0 }
         }
-        .buttonStyle(SettingsHoverButtonStyle(
-            tone: isActive ? .accent : .neutral,
-            cornerRadius: 7
-        ))
-        .accessibilityLabel(title)
-        .accessibilityIdentifier("transcripted.home.audio.\(isPlaying ? "pause" : "play")")
+
+        private var backgroundColor: Color {
+            if configuration.isPressed {
+                return Color.primary.opacity(0.10)
+            }
+            if isHovering {
+                return Color.primary.opacity(0.06)
+            }
+            return Color.clear
+        }
+
+        private var strokeColor: Color {
+            configuration.isPressed || isHovering ? Color.primary.opacity(0.08) : Color.clear
+        }
     }
 }
 
@@ -1641,6 +1689,8 @@ private struct HomeMeetingAudioControl: View {
                 normalFill: isActive ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.08),
                 normalStroke: isActive ? Color.accentColor.opacity(0.28) : Color.primary.opacity(0.10)
             ))
+            .frame(minHeight: 40, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityLabel(title)
             .accessibilityIdentifier("transcripted.home.audio.inline-toggle")
 
@@ -2416,21 +2466,28 @@ private struct HomePodcastPlayerButton: View {
     let automationIdentifier: String
     let action: () -> Void
 
+    private var hitTargetSize: CGFloat {
+        max(size, HomeHitTarget.minimum)
+    }
+
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbolName)
-                .font(.system(size: size >= 40 ? 15 : 12, weight: .bold))
-                .foregroundStyle(foreground)
-                .frame(width: size, height: size)
-                .background(
-                    Circle()
-                        .fill(background)
-                )
-                .overlay(
-                    Circle()
-                        .stroke(Color.primary.opacity(isPrimary ? 0.0 : 0.08), lineWidth: 1)
-                )
-                .contentShape(Circle())
+            ZStack {
+                Circle()
+                    .fill(background)
+                    .frame(width: size, height: size)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.primary.opacity(isPrimary ? 0.0 : 0.08), lineWidth: 1)
+                    )
+
+                Image(systemName: symbolName)
+                    .font(.system(size: size >= 40 ? 15 : 12, weight: .bold))
+                    .foregroundStyle(foreground)
+                    .frame(width: size, height: size)
+            }
+            .frame(width: hitTargetSize, height: hitTargetSize)
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)

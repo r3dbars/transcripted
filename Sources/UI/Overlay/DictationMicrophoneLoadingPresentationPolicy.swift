@@ -22,7 +22,7 @@ struct DictationMicrophoneLoadingPresentationPolicy {
             ? "Connecting to the new audio device."
             : "Opening the selected audio input."
         let status: String?
-        if startAttempts > 1 {
+        if startAttempts > 1 && elapsed >= switchingCopyDelay {
             status = "Retrying \(deviceName)"
         } else if elapsed > 1.5 {
             status = "Still connecting to \(deviceName)\u{2026}"
