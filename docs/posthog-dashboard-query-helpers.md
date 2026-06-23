@@ -128,8 +128,9 @@ as a product analytics failure. Use `--dry-run` or `--fixture` in CI.
 keeps the operating dashboard centered on real product use.
 
 `activation` separates strict saved-Markdown proof from `dictation_completed`
-proxy rows. Agent setup/prompt rows are intent signals only; they do not prove a
-sourced answer until `agent_capture_query_observed` exists.
+proxy rows. Agent setup/prompt rows are intent signals only; the stronger proof
+is `agent_capture_query_observed`, which confirms a saved-capture MCP query but
+still does not measure answer quality.
 
 `reliability` uses coarse failure kinds and latency buckets. It does not expose
 raw error strings, device names, app names, or audio details.
