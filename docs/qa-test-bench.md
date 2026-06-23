@@ -88,6 +88,7 @@ This adds:
 - `swift test --package-path Tools/TranscriptedQA`
 - `swift run --package-path Tools/TranscriptedQA transcripted-qa round-trip`
 - a small `TranscriptedQA` stress pass
+- `swift run --package-path Tools/TranscriptedQA transcripted-qa imported-audio-smoke`
 - `TranscriptedQA` health and live artifact validation
 - `bash run-daily-audio-reliability.sh --synthetic`
 
@@ -104,6 +105,12 @@ Real connected AirPods/Bluetooth hardware remains manual proof.
 Deep inherits the deterministic local summary fixture from quick. That fixture
 is shape and hang-guard proof only; real Gemma summary quality still needs
 manual or corpus review.
+
+The imported-audio smoke generates a synthetic WAV, a canonical imported
+meeting Markdown file, retained single-file audio, and then validates the
+`system_audio`-only parser/validator contract. It is repo-owned deterministic
+artifact proof. It does not click the native file picker and does not prove real
+ML transcription quality for user media.
 
 Live artifact validation is non-blocking by default because a development Mac
 may not have saved meetings yet. To make it strict:
@@ -360,8 +367,9 @@ redacted scores: word recall, content-word recall, speaker-label count, and
 private speaker-name match counts. Reports do not print transcript text or
 speaker names.
 
-This does not yet drive the app UI or import audio automatically. It scores the
-Transcripted Markdown once that Markdown exists.
+This does not drive the app UI or native file picker automatically. It scores
+the Transcripted Markdown once that Markdown exists. For deterministic imported
+artifact shape proof, use `imported-audio-smoke` from the deep bench.
 
 ## Exit Codes
 

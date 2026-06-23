@@ -15,7 +15,7 @@ Status key:
 
 ## App UI And File Pickers
 
-- [!] Row 6: Menu Bar / Import audio entry point - prove native file picker and real audio import UX.
+- [!] Row 6: Menu Bar / Import audio entry point - deterministic imported artifact smoke passed; native file picker and real audio import UX still need proof.
 - [!] Row 20: Home / Open and reveal saved artifacts - prove Finder/open behavior in app.
 - [!] Row 21: Home / Delete meeting confirmation - prove actual menu/alert interaction.
 - [!] Row 22: Home / Rename meeting artifact - prove real row title edit UX.
@@ -51,7 +51,7 @@ Status key:
 - [x] Row 26: Meetings / Start and stop live meeting recording - direct live mic plus system-audio capture smoke passed on this Mac.
 - [!] Row 27: Meetings / Cancel/discard recording - prove real overlay discard confirmation.
 - [!] Row 28: Meetings / Queued transcription state - prove real long transcription UI.
-- [!] Row 29: Meetings / Imported audio transcription - prove real imported media files through UX.
+- [!] Row 29: Meetings / Imported audio transcription - deterministic imported artifact smoke passed; real imported media files through UX still need proof.
 - [!] Row 30: Meetings / Retained meeting audio - prove real playback from retained audio.
 - [!] Row 31: Meetings / Meeting transcript Markdown - prove real saved meeting from app capture.
 - [!] Row 32: Meetings / Failure and retry - prove real failed-transcription retry from app UI.
@@ -99,3 +99,7 @@ Status key:
   `BLOCKED` with concrete blocker reasons. This removes ambiguity without
   counting manual/hardware/native-app proof as passed. Final matrix status:
   `PASS` 29, `RETEST PASS` 3, `BLOCKED` 48, `UNKNOWN` 0.
+- 2026-06-22: `transcripted-qa imported-audio-smoke` passed 11/11 and was added
+  to the deep QA bench. This proves deterministic imported meeting artifact
+  shape and retained single-file audio, but native picker / real media UX remains
+  blocked until directly proven.

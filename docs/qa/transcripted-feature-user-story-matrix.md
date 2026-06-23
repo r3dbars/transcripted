@@ -95,10 +95,15 @@ Current proof summary:
   `MeetingImportedAudioPreparerTests` passed 58/58 and proves unsupported
   file/folder/date-policy handling without needing private audio content.
 - Import-audio entry/transcription proof was refreshed while staying
-  `UNKNOWN`: `UIAutomationSurfaceContractTests` passed 233/233,
-  `HomeImportAudioActionTests` passed 6/6, and
-  `MeetingImportedAudioPreparerTests` passed 58/58. Native file-picker and real
-  imported-media UX proof are still missing, so these rows did not move green.
+  `BLOCKED` only for native picker / real-media UX:
+  `UIAutomationSurfaceContractTests` passed 233/233,
+  `HomeImportAudioActionTests` passed 6/6,
+  `MeetingImportedAudioPreparerTests` passed 58/58, and
+  `transcripted-qa imported-audio-smoke` passed 11/11 on 2026-06-22. The new
+  smoke proves deterministic imported meeting artifact shape, system-audio-only
+  metadata, retained single-file audio, parser discovery, and TranscriptedQA
+  validation. It does not click `NSOpenPanel` or prove real ML transcription
+  quality for user media.
 - Secure input fallback proof was strengthened while staying `UNKNOWN`:
   `AccessibilityBridgeTests` passed 12/12, `ClipboardRestoringTextPasterTests`
   passed 58/58, `bash build.sh --no-open` passed, the full fast suite passed
@@ -136,10 +141,10 @@ Current proof summary:
   preserves the current library on failed replacement, refreshes Settings state,
   and alerts the user. Focused storage tests, app build with launch smoke, full
   fast tests, diff hygiene, Codex review, and Local lane review all passed.
-- Manual/hardware gaps still `UNKNOWN`: real meeting-app volume behavior,
+- Manual/hardware gaps still `BLOCKED` unless separately proven: real meeting-app volume behavior,
   Bluetooth/AirPods route churn, sleep/wake during active capture, secure-field
   pasteback behavior, Transcripted-vs-corpus comparison, summary quality/feel,
-  and real Sparkle install/update prompt behavior.
+  native imported-audio picker UX, and real Sparkle install/update prompt behavior.
 - Initial logistics issue: first full bench failed because dependencies were
   missing/stale; `bash build-deps.sh --force` rebuilt them, and the retest
   passed.
