@@ -29,6 +29,10 @@ As of 2026-06-06, the repo has these automated layers:
   Transcripted app identity. It also prints the expected manual grant state and
   warns when duplicate or wrong running Transcripted app instances make UI
   targeting ambiguous.
+- `swift run --package-path Tools/TranscriptedQA transcripted-qa imported-audio-smoke`:
+  deterministic imported-audio artifact proof for single-file imported meeting
+  Markdown, retained audio, parser discovery, and TranscriptedQA validation. It
+  is not native picker or real media transcription proof.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
   reports for `quick`, `deep`, `full`, `ui`, `packaged`, `artifact`,
   `audio-synthetic`, `pasteback-synthetic`, `corpus`, `corpus-compare`,
@@ -49,6 +53,9 @@ As of 2026-06-06, the repo has these automated layers:
   mic, output ducking, route churn, stop timeout, stop/restart after route
   switch, and stop/save outcomes. Real Zoom/WebRTC/Bluetooth perceived-volume
   proof is still manual.
+- Imported audio: deterministic artifact proof now covers the repo-owned
+  saved-output contract. Native picker selection and real user media still need
+  explicit UI or manual proof.
 - Storage: current/default paths are covered, but relocated libraries,
   retention/compression invariants, and legacy fallback paths need broader
   automated fixtures.
