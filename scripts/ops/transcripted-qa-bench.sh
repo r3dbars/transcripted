@@ -31,7 +31,7 @@ PACKAGED_USER_NAME="${TRANSCRIPTED_QA_PACKAGED_USER_NAME:-${USER:-codex}}"
 
 usage() {
   cat <<'USAGE'
-Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|scorecard|live] [options]
+Usage: bash scripts/ops/transcripted-qa-bench.sh [--mode quick|deep|full|ui|sparkle-update|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|scorecard|live] [options]
 
 Runs a local Transcripted QA bench and writes:
   /tmp/transcripted-qa-bench/<run-id>/qa-report.md
@@ -41,6 +41,7 @@ Modes:
   deep             quick + integration, Core tests, QA CLI, synthetic audio
   full             deep + release-health and local Gemma summary dry-run gates
   ui               build + Accessibility-driven menu bar/Home/Settings smoke
+  sparkle-update   build + no-publish fake Sparkle available/downloading UI smoke
   packaged         no-publish build-beta smoke + packaged app/version/Sparkle/dSYM/log checks
   artifact         validate current saved Transcripted artifacts strictly
   audio-synthetic  run only the deterministic audio failure-shape matrix
@@ -185,7 +186,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|scorecard|live) ;;
+  quick|deep|full|ui|sparkle-update|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|scorecard|live) ;;
   *)
     echo "Unknown mode: $MODE" >&2
     usage >&2
@@ -832,6 +833,11 @@ run_ui_tail() {
     "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa ui-smoke --app build/Transcripted.app --report $(shell_quote "${RAW_DIR}/ui-automation-smoke.json")"
 }
 
+run_sparkle_update_tail() {
+  run_step "05-sparkle-update-smoke" "No-publish Sparkle update UI smoke" "yes" \
+    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa sparkle-update-smoke --app build/Transcripted.app --output $(shell_quote "${RAW_DIR}/sparkle-update-smoke")"
+}
+
 run_packaged_tail() {
   if [[ "${SKIP_BUILD}" -eq 1 ]]; then
     skip_step "69-build-beta-smoke" "No-publish build-beta package smoke"
@@ -951,6 +957,15 @@ case "${MODE}" in
       run_step "01-build" "Build app" "yes" "bash build.sh --no-open"
     fi
     run_ui_tail
+    ;;
+  sparkle-update)
+    run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
+    if [[ "${SKIP_BUILD}" -eq 1 ]]; then
+      skip_step "01-build" "Build app"
+    else
+      run_step "01-build" "Build app" "yes" "bash build.sh --no-open"
+    fi
+    run_sparkle_update_tail
     ;;
   packaged)
     run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"

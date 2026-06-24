@@ -180,6 +180,7 @@ struct TranscriptedQA: ParsableCommand {
             StressTest.self,
             ImportedAudioSmoke.self,
             UISmoke.self,
+            SparkleUpdateSmoke.self,
             PackagedAppSmoke.self,
         ],
         defaultSubcommand: ValidateAll.self
