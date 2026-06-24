@@ -75,6 +75,29 @@ This requires Accessibility permission for the terminal or Codex runner. If
 macOS blocks AX observation/control, the result is `INCOMPLETE` with exit code
 `3`. Do not treat that as product proof.
 
+## Imported Audio Native Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode imported-audio-native
+```
+
+This builds the app, then runs:
+
+```bash
+swift run --package-path Tools/TranscriptedQA transcripted-qa imported-audio-native-smoke --app build/Transcripted.app
+```
+
+The smoke launches the built app with an isolated home and capture library,
+opens the real Settings General import action, waits for the native `NSOpenPanel`,
+selects a spoken AIFF fixture through the picker, and waits for a saved imported
+meeting Markdown plus retained audio. It writes local JSON evidence and keeps
+the isolated capture library for inspection.
+
+This requires Accessibility plus keyboard event permission for the runner. If
+macOS blocks the picker automation, or if local speech/diarization models cannot
+finish the import on this Mac, the result is `INCOMPLETE` with exit code `3`.
+That is a real proof blocker, not a product pass.
+
 ## Deep Run
 
 ```bash
@@ -89,6 +112,8 @@ This adds:
 - `swift run --package-path Tools/TranscriptedQA transcripted-qa round-trip`
 - a small `TranscriptedQA` stress pass
 - `swift run --package-path Tools/TranscriptedQA transcripted-qa imported-audio-smoke`
+- native imported-audio picker proof remains opt-in via
+  `--mode imported-audio-native`
 - `TranscriptedQA` health and live artifact validation
 - `bash run-daily-audio-reliability.sh --synthetic`
 
