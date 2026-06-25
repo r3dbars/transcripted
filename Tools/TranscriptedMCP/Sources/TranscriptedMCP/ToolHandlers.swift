@@ -95,7 +95,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "search",
-                description: "Full-text search across all meeting transcripts. Returns matching utterances with speaker, timestamp, and meeting context. Optionally filter by speaker name (supports variants: Mike finds Michael) or date range.",
+                description: "Search meeting transcripts. Defaults to hybrid search: exact full-text matches PLUS on-device semantic matches, so paraphrases hit (e.g. 'pricing pushback' finds 'they balked at the cost'). Returns matching utterances with speaker, timestamp, and meeting context. Optionally filter by speaker name (supports variants: Mike finds Michael) or date range.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -106,6 +106,10 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         "speaker": .object([
                             "type": .string("string"),
                             "description": .string("Filter to utterances by this speaker")
+                        ]),
+                        "mode": .object([
+                            "type": .string("string"),
+                            "description": .string("Search strategy: 'hybrid' (default — FTS + semantic), 'lexical' (exact/stemmed only), or 'semantic' (paraphrase only). Semantic and hybrid fall back to lexical when the on-device embedding model is unavailable.")
                         ]),
                         "date_from": .object([
                             "type": .string("string"),
@@ -141,7 +145,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "search_context",
-                description: "Search across saved meetings, dictations, or both. Great for finding everything you captured about a topic, regardless of whether it came from a meeting or a quick dictated note.",
+                description: "Search across saved meetings, dictations, or both. Defaults to hybrid (full-text + on-device semantic), so paraphrases match, not just exact wording. Great for finding everything you captured about a topic, regardless of whether it came from a meeting or a quick dictated note.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -152,6 +156,10 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         "kind": .object([
                             "type": .string("string"),
                             "description": .string("Which context to search: 'all' (default), 'meeting', or 'dictation'")
+                        ]),
+                        "mode": .object([
+                            "type": .string("string"),
+                            "description": .string("Search strategy: 'hybrid' (default — FTS + semantic), 'lexical', or 'semantic'. Falls back to lexical when the embedding model is unavailable.")
                         ]),
                         "speaker": .object([
                             "type": .string("string"),
@@ -431,8 +439,9 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, m
     let speaker = params.arguments?["speaker"]?.stringValue
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
+    let mode = parseSearchMode(params.arguments?["mode"]?.stringValue)
 
-    var results = try index.searchUtterances(query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo)
+    var results = try index.searchUtterances(query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo, mode: mode)
     hydrateMeetingSearchTitles(in: &results, meetingDirs: meetingDirs)
 
     if results.results.isEmpty {
@@ -455,6 +464,7 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     let count = max(1, min(params.arguments?["count"]?.intValue ?? 10, 50))
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
+    let mode = parseSearchMode(params.arguments?["mode"]?.stringValue)
 
     var results = try index.searchContext(
         query: query,
@@ -462,7 +472,8 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
         kind: kind,
         dateFrom: dateFrom,
         dateTo: dateTo,
-        maxItems: count
+        maxItems: count,
+        mode: mode
     )
 
     hydrateMeetingTitles(in: &results.results, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
@@ -608,6 +619,15 @@ private func parseContextKind(_ raw: String?) -> ContextKind {
         return .all
     }
     return kind
+}
+
+/// Default to hybrid so paraphrase matches surface without the caller opting in.
+/// Falls back to lexical automatically when no embedding backend is available.
+private func parseSearchMode(_ raw: String?) -> SearchMode {
+    guard let raw, let mode = SearchMode(rawValue: raw.lowercased()) else {
+        return .hybrid
+    }
+    return mode
 }
 
 /// Frontmatter title for a meeting markdown file, or nil when the file is
