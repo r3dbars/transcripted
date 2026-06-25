@@ -179,6 +179,7 @@ struct TranscriptedQA: ParsableCommand {
             RoundTrip.self,
             StressTest.self,
             ImportedAudioSmoke.self,
+            ImportedAudioNativeSmoke.self,
             UISmoke.self,
             PackagedAppSmoke.self,
         ],

@@ -749,7 +749,7 @@ func testUIAutomationSurfaceContract() {
         }
 
         assertTrue(
-            contractSource("scripts/ops/transcripted-qa-bench.sh").contains("quick|deep|full|ui|packaged|artifact")
+            contractSource("scripts/ops/transcripted-qa-bench.sh").contains("quick|deep|full|ui|imported-audio-native|packaged|artifact")
                 && contractSource("scripts/ops/transcripted-qa-bench.sh").contains("run_ui_tail")
                 && contractSource("scripts/ops/transcripted-qa-bench.sh").contains("transcripted-qa ui-smoke")
                 && contractSource("scripts/ops/transcripted-qa-bench.sh").contains("ui-automation-smoke.json"),
