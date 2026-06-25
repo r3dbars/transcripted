@@ -317,6 +317,8 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Meeting/MeetingArtifactRenamer.swift"
     "Sources/Meeting/LocalMeetingSummarizer.swift"
+    "Sources/Meeting/MeetingQuickSummaryExtractor.swift"
+    "Sources/Meeting/MeetingQuickSummaryWriter.swift"
     "Sources/Meeting/LiveMeetingCodexSession.swift"
     "Sources/Meeting/LiveMeetingPreviewServer.swift"
     "Sources/Meeting/LiveMeetingStreamingUpdatePolicy.swift"
