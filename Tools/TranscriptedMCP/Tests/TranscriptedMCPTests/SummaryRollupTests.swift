@@ -1,0 +1,169 @@
+import XCTest
+@testable import transcripted_mcp
+
+/// End-to-end rollup coverage for saved meeting summaries:
+/// meeting markdown -> summary parser -> MCP index -> list_action_items /
+/// list_decisions / digest query layer.
+final class SummaryRollupTests: XCTestCase {
+    var index: TranscriptIndex!
+    var tempDir: URL!
+
+    override func setUp() {
+        super.setUp()
+        tempDir = makeTempDir()
+        index = try! TranscriptIndex(indexDir: tempDir)
+    }
+
+    override func tearDown() {
+        index = nil
+        removeTempDir(tempDir)
+        super.tearDown()
+    }
+
+    private func seedTwoMeetings() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                date: "2026-03-26",
+                time: "16:04:11",
+                decisions: ["Ship the beta on April 15"],
+                actionItems: [
+                    "Nate Smith: Draft the launch email",
+                    "Jenny Wen: Confirm the venue",
+                ],
+                openQuestions: ["Who signs off on pricing?"]
+            ),
+            filename: "Call_2026-03-26_16-04-11",
+            to: tempDir
+        )
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                date: "2026-04-02",
+                time: "09:30:00",
+                decisions: ["Adopt usage-based pricing"],
+                actionItems: [
+                    "Nate: Send the pricing model to finance",
+                    "Update the deck",
+                ],
+                openQuestions: []
+            ),
+            filename: "Call_2026-04-02_09-30-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+    }
+
+    func testEmptyIndexReturnsNoActionItems() throws {
+        let result = try index.listActionItems(owner: nil, query: nil, status: .all, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(result.count, 0)
+        XCTAssertTrue(result.items.isEmpty)
+    }
+
+    func testActionItemsFilteredByOwnerAcrossMeetings() throws {
+        try seedTwoMeetings()
+
+        let result = try index.listActionItems(owner: "Nate", query: nil, status: .open, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(Set(result.items.map(\.filename)), ["Call_2026-03-26_16-04-11", "Call_2026-04-02_09-30-00"])
+        XCTAssertTrue(result.items.allSatisfy { ($0.owner ?? "").localizedCaseInsensitiveContains("nate") })
+    }
+
+    func testActionItemsStatusFilterMatchesIndexedSummaryShape() throws {
+        try seedTwoMeetings()
+
+        let open = try index.listActionItems(owner: nil, query: nil, status: .open, dateFrom: nil, dateTo: nil)
+        let all = try index.listActionItems(owner: nil, query: nil, status: .all, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(open.count, 4)
+        XCTAssertEqual(all.count, 4)
+        XCTAssertTrue(open.items.allSatisfy { $0.status == nil && $0.due == nil })
+
+        let done = try index.listActionItems(owner: nil, query: nil, status: .done, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(done.count, 0)
+    }
+
+    func testActionItemsDateWindowFilter() throws {
+        try seedTwoMeetings()
+
+        let result = try index.listActionItems(
+            owner: nil, query: nil, status: .all,
+            dateFrom: "2026-04-01", dateTo: "2026-04-30"
+        )
+        XCTAssertTrue(result.items.allSatisfy { $0.filename == "Call_2026-04-02_09-30-00" })
+        XCTAssertEqual(result.count, 2)
+    }
+
+    func testActionItemsFullTextQuery() throws {
+        try seedTwoMeetings()
+
+        let result = try index.listActionItems(owner: nil, query: "pricing", status: .all, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(result.items.map(\.text), ["Send the pricing model to finance"])
+    }
+
+    func testDecisionsAcrossMeetings() throws {
+        try seedTwoMeetings()
+
+        let result = try index.listDecisions(query: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result.decisions.first?.text, "Adopt usage-based pricing")
+        XCTAssertTrue(result.decisions.contains { $0.text == "Ship the beta on April 15" })
+    }
+
+    func testDecisionsFullTextQuery() throws {
+        try seedTwoMeetings()
+
+        let result = try index.listDecisions(query: "pricing", dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(result.decisions.map(\.text), ["Adopt usage-based pricing"])
+    }
+
+    func testDigestRollsUpAcrossMeetings() throws {
+        try seedTwoMeetings()
+
+        let digest = try index.digest(dateFrom: "2026-01-01", dateTo: "2026-12-31")
+        XCTAssertEqual(digest.meetingCount, 2)
+        XCTAssertEqual(digest.actionItemCount, 4)
+        XCTAssertEqual(digest.openActionItemCount, 4)
+        XCTAssertEqual(digest.decisionCount, 2)
+        XCTAssertEqual(digest.openQuestionCount, 1)
+
+        let pricing = try XCTUnwrap(digest.meetings.first)
+        XCTAssertEqual(pricing.filename, "Call_2026-04-02_09-30-00")
+        XCTAssertEqual(pricing.decisions, ["Adopt usage-based pricing"])
+        XCTAssertEqual(pricing.actionItems.count, 2)
+        XCTAssertTrue(pricing.openQuestions.isEmpty)
+    }
+
+    func testDigestExcludesMeetingsWithoutFacts() throws {
+        try seedTwoMeetings()
+        try writeFixture(
+            makeFixtureJSON(title: "Standup", date: "2026-04-03T09:00:00-0500"),
+            filename: "Call_2026-04-03_09-00-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let digest = try index.digest(dateFrom: "2026-01-01", dateTo: "2026-12-31")
+        XCTAssertFalse(digest.meetings.contains { $0.filename == "Call_2026-04-03_09-00-00" })
+        XCTAssertEqual(digest.meetingCount, 2)
+    }
+
+    func testReindexReplacesSummaryFactsFromMarkdown() throws {
+        try seedTwoMeetings()
+
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                date: "2026-04-02",
+                time: "09:30:00",
+                decisions: ["Adopt usage-based pricing"],
+                actionItems: ["Nate: Send the pricing model to finance"],
+                openQuestions: []
+            ),
+            filename: "Call_2026-04-02_09-30-00",
+            to: tempDir
+        )
+        let url = tempDir.appendingPathComponent("Call_2026-04-02_09-30-00.md")
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: url.path)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let result = try index.listActionItems(owner: nil, query: nil, status: .all, dateFrom: "2026-04-01", dateTo: "2026-04-30")
+        XCTAssertEqual(result.count, 1)
+    }
+}

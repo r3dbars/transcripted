@@ -39,7 +39,7 @@ that mode the SQLite index also defaults to the shared root unless
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
 - `Sources/TranscriptedMCP/` — 9 source files for server startup, directory resolution, path validation, indexing, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 7 test files for directory resolution, index lifecycle, structured-summary indexing, markdown loading, logging, name variants, and shared fixtures
+- `Tests/TranscriptedMCPTests/` — 8 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, markdown loading, logging, name variants, and shared fixtures
 
 ## File Index
 
@@ -65,6 +65,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases, including path-safety checks |
 | `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
+| `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
 ## MCP Tools
@@ -82,6 +83,13 @@ All tools are read-only.
 | `recent_context` | Get a mixed recent feed of meetings and dictations |
 | `who_is` | Look up a speaker profile across saved meetings |
 | `recap` | Build a structured digest for a date range |
+| `list_action_items` | Roll up action items across meetings; filter by owner / status / query / date |
+| `list_decisions` | Roll up decisions across meetings; filter by query / date |
+| `digest` | Cross-meeting summary (decisions + action items + open questions) for a window |
+
+The last three are cross-meeting rollups over the structured summary fields and
+query the same `meeting_summary_items` index populated from saved meeting
+Markdown during reconcile.
 
 ## Common Agent Retrieval Shapes
 
@@ -112,7 +120,7 @@ The SQLite index keeps separate records for:
 - dictation day files
 - dictation entry search rows
 
-Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from each meeting's inline local summary (or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation; no MCP tool is wired to it yet (that is a separate thread).
+Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from each meeting's inline local summary (or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
 
 This lets the server answer both meeting-specific queries (`who_is`, `read_meeting`) and mixed-context queries (`search_context`, `recent_context`) without touching app-owned runtime state.
 
