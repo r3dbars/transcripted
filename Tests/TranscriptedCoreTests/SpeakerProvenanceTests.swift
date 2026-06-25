@@ -159,6 +159,25 @@ final class SpeakerProvenanceTests: XCTestCase {
         XCTAssertTrue(database.contributions(forProfileId: b.id).contains { $0.id == contribution.id })
     }
 
+    func testUnmergePreservesPostMergeTargetLearning() throws {
+        let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 30), existingId: nil)
+        let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 31), existingId: nil)
+
+        database.mergeProfiles(sourceId: source.id, into: target.id)
+
+        // The keeper picks up another recording AFTER the merge.
+        _ = database.addOrUpdateSpeaker(embedding: embedding(axis: 31), existingId: target.id)
+
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: target.id))
+
+        // Un-merge must not roll the keeper back to its single pre-merge recording —
+        // its own seed + the post-merge recording should both still count.
+        let restoredTarget = try XCTUnwrap(database.getSpeaker(id: target.id))
+        XCTAssertEqual(restoredTarget.callCount, 2, "post-merge learning must survive un-merge")
+        // The absorbed profile is back as its own distinct person.
+        XCTAssertNotNil(database.getSpeaker(id: source.id))
+    }
+
     func testUnmergeNonexistentEventIsNoop() {
         XCTAssertFalse(database.unmerge(mergeId: UUID()))
         XCTAssertFalse(database.unmergeMostRecent(forTargetId: UUID()))

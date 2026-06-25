@@ -248,10 +248,9 @@ extension SpeakerDatabase {
     }
 
     /// The most recent still-undoable merge whose keeper is `targetId`, if any.
+    /// Targeted indexed lookup — not capped by any recent-list limit.
     public func undoableMerge(forTargetId targetId: UUID) -> SpeakerMergeRecord? {
-        queue.sync {
-            recentUndoableMergesImpl(limit: 200).first { $0.targetId == targetId }
-        }
+        queue.sync { undoableMergeImpl(forTargetId: targetId) }
     }
 
     /// Audit trail of contributions that built a profile, newest first.
@@ -264,9 +263,7 @@ extension SpeakerDatabase {
     @discardableResult
     public func unmergeMostRecent(forTargetId targetId: UUID) -> Bool {
         queue.sync {
-            guard let record = recentUndoableMergesImpl(limit: 200).first(where: { $0.targetId == targetId }) else {
-                return false
-            }
+            guard let record = undoableMergeImpl(forTargetId: targetId) else { return false }
             return unmergeImpl(mergeId: record.id)
         }
     }
@@ -332,6 +329,44 @@ extension SpeakerDatabase {
         }
         sqlite3_finalize(statement)
         return records
+    }
+
+    private func undoableMergeImpl(forTargetId targetId: UUID) -> SpeakerMergeRecord? {
+        guard isDatabaseOpen else { return nil }
+        let sql = """
+        SELECT id, source_id, kind, source_snapshot, target_snapshot, merged_at
+        FROM speaker_merge_events
+        WHERE target_id = ? AND undone_at IS NULL
+        ORDER BY rowid DESC
+        LIMIT 1;
+        """
+        var statement: OpaquePointer?
+        var record: SpeakerMergeRecord?
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_text(statement, 1, (targetId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            if sqlite3_step(statement) == SQLITE_ROW,
+               let idStr = sqlite3_column_text(statement, 0).map(String.init(cString:)),
+               let id = UUID(uuidString: idStr),
+               let sourceStr = sqlite3_column_text(statement, 1).map(String.init(cString:)),
+               let sourceId = UUID(uuidString: sourceStr) {
+                let kind = sqlite3_column_text(statement, 2).map(String.init(cString:)) ?? SpeakerMergeKind.explicit
+                let sourceSnapshot = sqlite3_column_text(statement, 3).map(String.init(cString:))
+                let targetSnapshot = sqlite3_column_text(statement, 4).map(String.init(cString:))
+                let mergedAtStr = sqlite3_column_text(statement, 5).map(String.init(cString:)) ?? ""
+                record = SpeakerMergeRecord(
+                    id: id,
+                    sourceId: sourceId,
+                    targetId: targetId,
+                    sourceName: sourceSnapshot.flatMap { Self.decodeProfileSnapshot($0)?.displayName },
+                    targetName: targetSnapshot.flatMap { Self.decodeProfileSnapshot($0)?.displayName },
+                    kind: kind,
+                    mergedAt: ISO8601DateFormatter().date(from: mergedAtStr) ?? Date.distantPast,
+                    isUndone: false
+                )
+            }
+        }
+        sqlite3_finalize(statement)
+        return record
     }
 
     private func contributionsImpl(forProfileId profileId: UUID) -> [SpeakerContribution] {
@@ -411,9 +446,18 @@ extension SpeakerDatabase {
                 sqlite3_finalize(stmt)
             }
 
-            // Drop the fuse marker and mark the event undone.
+            // Drop the fuse marker so it doesn't linger on the keeper's audit trail.
             execBind("DELETE FROM speaker_provenance WHERE merge_event_id = ? AND kind = ?;",
                      [mergeId.uuidString, SpeakerProvenanceKind.merge], label: "delete merge marker")
+
+            // Re-derive both profiles from their (now disjoint) contribution embeddings.
+            // The snapshots above are exact pre-merge state, but the keeper may have
+            // gained recordings after the merge — re-deriving from contributions keeps
+            // that post-merge learning instead of silently discarding it. No-op (keeps
+            // the snapshot) for legacy profiles that have no stored contribution rows.
+            ok = rederiveProfileFromContributionsImpl(event.sourceId) && ok
+            ok = rederiveProfileFromContributionsImpl(event.targetId) && ok
+
             let now = ISO8601DateFormatter().string(from: Date())
             execBind("UPDATE speaker_merge_events SET undone_at = ? WHERE id = ?;",
                      [now, mergeId.uuidString], label: "mark event undone")

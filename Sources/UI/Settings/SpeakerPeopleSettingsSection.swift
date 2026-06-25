@@ -387,13 +387,17 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL
     ) -> Snapshot {
-        // Keep only the newest still-undoable merge per keeper (records arrive newest-first).
+        let profiles = sortedProfiles(from: speakerDatabase)
+        // Look up each visible speaker's newest still-undoable merge directly (indexed
+        // per-target query) so undo never disappears once merge history grows past a cap.
         var undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
-        for record in speakerDatabase.recentUndoableMerges() where undoableMergesByTargetID[record.targetId] == nil {
-            undoableMergesByTargetID[record.targetId] = record
+        for profile in profiles {
+            if let record = speakerDatabase.undoableMerge(forTargetId: profile.id) {
+                undoableMergesByTargetID[profile.id] = record
+            }
         }
         return snapshot(
-            from: sortedProfiles(from: speakerDatabase),
+            from: profiles,
             preferredClipsDirectory: preferredClipsDirectory,
             legacyClipsDirectory: legacyClipsDirectory,
             undoableMergesByTargetID: undoableMergesByTargetID
