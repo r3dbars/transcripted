@@ -15,7 +15,7 @@ Status key:
 
 ## App UI And File Pickers
 
-- [!] Row 6: Menu Bar / Import audio entry point - deterministic imported artifact smoke passed; native file picker and real audio import UX still need proof.
+- [x] Row 6: Menu Bar / Import audio entry point - native picker selected-audio import smoke passed on this Mac.
 - [!] Row 20: Home / Open and reveal saved artifacts - prove Finder/open behavior in app.
 - [!] Row 21: Home / Delete meeting confirmation - prove actual menu/alert interaction.
 - [!] Row 22: Home / Rename meeting artifact - prove real row title edit UX.
@@ -51,7 +51,7 @@ Status key:
 - [x] Row 26: Meetings / Start and stop live meeting recording - direct live mic plus system-audio capture smoke passed on this Mac.
 - [!] Row 27: Meetings / Cancel/discard recording - prove real overlay discard confirmation.
 - [!] Row 28: Meetings / Queued transcription state - prove real long transcription UI.
-- [!] Row 29: Meetings / Imported audio transcription - deterministic imported artifact smoke passed; real imported media files through UX still need proof.
+- [x] Row 29: Meetings / Imported audio transcription - native picker selected-audio import smoke passed on this Mac.
 - [!] Row 30: Meetings / Retained meeting audio - prove real playback from retained audio.
 - [!] Row 31: Meetings / Meeting transcript Markdown - prove real saved meeting from app capture.
 - [!] Row 32: Meetings / Failure and retry - prove real failed-transcription retry from app UI.
@@ -98,8 +98,15 @@ Status key:
 - 2026-06-21: Remaining unchecked rows were reclassified from `UNKNOWN` to
   `BLOCKED` with concrete blocker reasons. This removes ambiguity without
   counting manual/hardware/native-app proof as passed. Final matrix status:
-  `PASS` 29, `RETEST PASS` 3, `BLOCKED` 48, `UNKNOWN` 0.
+  `PASS` 31, `RETEST PASS` 3, `BLOCKED` 46, `UNKNOWN` 0.
 - 2026-06-22: `transcripted-qa imported-audio-smoke` passed 11/11 and was added
   to the deep QA bench. This proves deterministic imported meeting artifact
   shape and retained single-file audio, but native picker / real media UX remains
   blocked until directly proven.
+- 2026-06-24: Added and ran `transcripted-qa imported-audio-native-smoke`.
+  It passed 16/16 after a stale app instance was cleared and the generated
+  AIFF fixture path was fixed. Evidence:
+  `/tmp/transcripted-imported-audio-native-smoke.json`. The wrapper mode
+  `scripts/ops/transcripted-qa-bench.sh --mode imported-audio-native` also
+  passed 3/3 at `/tmp/transcripted-qa-bench/qa-20260624-055644/qa-report.md`.
+  This closes rows 6 and 29 for native picker selected-audio import on this Mac.
