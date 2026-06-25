@@ -216,30 +216,17 @@ enum DictationTranscriptWriter {
         return size > 0
     }
 
+    // Append by rewriting the whole day file atomically (write-temp-then-rename) rather
+    // than seeking to the end of the existing file and writing in place. A crash or
+    // interruption part way through an in-place `FileHandle` write would leave a half-written
+    // section glued onto the day's data and corrupt every earlier entry in the file. With an
+    // atomic write the prior content survives untouched until the new file is renamed into
+    // place, so a failed write can lose the in-flight section but never the existing day.
     private static func appendSection(_ section: String, to url: URL) throws {
-        guard let handle = FileHandle(forWritingAtPath: url.path) else {
-            throw NSError(
-                domain: "DictationTranscriptWriter",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Could not open dictation transcript for appending."]
-            )
-        }
-        defer { try? handle.close() }
-
-        let separator = fileEndsWithBlankLine(url) ? "" : "\n\n"
-        guard let data = (separator + section).data(using: .utf8) else { return }
-        handle.seekToEndOfFile()
-        handle.write(data)
-    }
-
-    private static func fileEndsWithBlankLine(_ url: URL) -> Bool {
-        guard let handle = FileHandle(forReadingAtPath: url.path) else { return false }
-        defer { try? handle.close() }
-
-        let fileLength = handle.seekToEndOfFile()
-        guard fileLength >= 2 else { return false }
-        handle.seek(toFileOffset: fileLength - 2)
-        return handle.readDataToEndOfFile() == Data([0x0A, 0x0A])
+        let existing = try String(contentsOf: url, encoding: .utf8)
+        let separator = existing.hasSuffix("\n\n") ? "" : "\n\n"
+        let combined = existing + separator + section
+        try combined.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private static func buildTitle(from text: String, createdAt: Date) -> String {
