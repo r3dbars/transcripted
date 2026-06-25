@@ -55,6 +55,7 @@ SWIFT_SOURCES=(
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
     "Sources/UI/Shared/HomeMeetingDeletion.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"
+    "Sources/UI/Shared/RecentMeetingMetadataCache.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
     "Sources/Observability/PayloadSanitizationCore.swift"

@@ -354,14 +354,20 @@ enum RecentMeetingsScanner {
     private static let excludedMarkdownFilenames: Set<String> = ["AGENT.md", "CLAUDE.md"]
     private static let summaryPreviewByteLimit = 64 * 1024
 
-    static func loadRecent(limit: Int = 3, directory: URL? = nil) -> [RecentMeetingItem] {
+    static func loadRecent(
+        limit: Int = 3,
+        directory: URL? = nil,
+        cache: RecentMeetingMetadataCache? = .shared
+    ) -> [RecentMeetingItem] {
         guard limit > 0 else { return [] }
 
         let dir = directory ?? MeetingStoragePaths.transcriptsFolder
         let fm = FileManager.default
         guard fm.fileExists(atPath: dir.path) else { return [] }
 
-        let keys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey, .isRegularFileKey]
+        let keys: [URLResourceKey] = [
+            .creationDateKey, .contentModificationDateKey, .isRegularFileKey, .fileSizeKey
+        ]
         let requestedKeys = Set(keys)
         guard let urls = try? fm.contentsOfDirectory(
             at: dir,
@@ -369,7 +375,7 @@ enum RecentMeetingsScanner {
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
-        var candidates: [(url: URL, date: Date)] = []
+        var candidates: [(url: URL, date: Date, modified: Double, size: Int64)] = []
         for url in urls {
             if Task.isCancelled { return [] }
             guard isMarkdownCandidate(url) else { continue }
@@ -378,12 +384,39 @@ enum RecentMeetingsScanner {
                 continue
             }
             let date = values?.creationDate ?? values?.contentModificationDate ?? .distantPast
-            candidates.append((url, date))
+            let modified = values?.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0
+            let size = Int64(values?.fileSize ?? 0)
+            candidates.append((url, date, modified, size))
         }
 
         var recentItems: [RecentMeetingItem] = []
         for entry in candidates.sorted(by: { $0.date > $1.date }) {
             if Task.isCancelled { return [] }
+
+            let stamp = cacheStamp(
+                transcriptModified: entry.modified,
+                transcriptSize: entry.size,
+                transcriptURL: entry.url
+            )
+
+            // Warm path: serve the row straight from the index, with no transcript
+            // or summary content read. Only the live audio attachment is resolved.
+            if let cache,
+               let cached = cache.lookup(path: entry.url.path, stamp: stamp) {
+                recentItems.append(
+                    cached.makeItem(
+                        transcriptURL: entry.url,
+                        audio: MeetingAudioArchiveResolver.attachment(forTranscript: entry.url)
+                    )
+                )
+                if recentItems.count >= limit {
+                    break
+                }
+                continue
+            }
+
+            // Cold path: parse the transcript (and any summary sidecar), then
+            // populate the index so the next refresh stays off disk.
             guard let styled = MeetingTranscriptStyler.displayTranscriptPreview(at: entry.url) else {
                 continue
             }
@@ -394,25 +427,51 @@ enum RecentMeetingsScanner {
                 fallbackDate: entry.date
             )
             let displayDate = timing.start ?? entry.date
-            recentItems.append(
-                RecentMeetingItem(
-                    title: styled.title,
-                    date: displayDate,
-                    startDate: timing.start,
-                    endDate: timing.end,
-                    transcriptURL: styled.url,
-                    audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
-                    speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown),
-                    summaryPreview: loadSummaryPreview(for: styled.url, markdown: markdown, frontmatter: frontmatter),
-                    audioHealth: RecentMeetingAudioHealth.detect(frontmatter: frontmatter)
-                )
+            let item = RecentMeetingItem(
+                title: styled.title,
+                date: displayDate,
+                startDate: timing.start,
+                endDate: timing.end,
+                transcriptURL: styled.url,
+                audio: MeetingAudioArchiveResolver.attachment(forTranscript: styled.url),
+                speakerStatus: RecentMeetingSpeakerStatus.detect(in: markdown),
+                summaryPreview: loadSummaryPreview(for: styled.url, markdown: markdown, frontmatter: frontmatter),
+                audioHealth: RecentMeetingAudioHealth.detect(frontmatter: frontmatter)
             )
+            cache?.store(
+                path: entry.url.path,
+                stamp: stamp,
+                metadata: CachedRecentMeetingMetadata(item: item)
+            )
+            recentItems.append(item)
             if recentItems.count >= limit {
                 break
             }
         }
 
         return recentItems
+    }
+
+    /// Build the cache validity stamp from cheap `stat` metadata only. The summary
+    /// sidecar is folded in so a sidecar that appears or changes without rewriting
+    /// the transcript still invalidates the cached row.
+    private static func cacheStamp(
+        transcriptModified: Double,
+        transcriptSize: Int64,
+        transcriptURL: URL
+    ) -> RecentMeetingCacheStamp {
+        let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+        let summaryValues = try? summaryURL.resourceValues(
+            forKeys: [.contentModificationDateKey, .fileSizeKey]
+        )
+        let summaryModified = summaryValues?.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0
+        let summarySize = summaryValues?.fileSize.map(Int64.init) ?? -1
+        return RecentMeetingCacheStamp(
+            transcriptModified: transcriptModified,
+            transcriptSize: transcriptSize,
+            summaryModified: summaryModified,
+            summarySize: summarySize
+        )
     }
 
     private static func isMarkdownCandidate(_ url: URL) -> Bool {
