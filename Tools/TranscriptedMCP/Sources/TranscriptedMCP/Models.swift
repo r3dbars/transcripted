@@ -300,7 +300,7 @@ struct RecentContextItem: Codable {
     let entryId: String?
     let date: String
     let datetime: String
-    let preview: String
+    var preview: String
     let wordCount: Int
     let speakers: [String]?
     let sourceAppName: String?
