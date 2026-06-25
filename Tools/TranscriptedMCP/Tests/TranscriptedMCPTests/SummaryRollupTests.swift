@@ -98,6 +98,33 @@ final class SummaryRollupTests: XCTestCase {
         XCTAssertEqual(result.items.map(\.text), ["Send the pricing model to finance"])
     }
 
+    func testAutoSummaryFrontmatterFeedsRollupTools() throws {
+        try writeFixture(
+            makeMeetingWithAutoSummary(
+                date: "2026-04-18",
+                time: "14:15:00",
+                decisions: ["Keep the launch date"],
+                actionItems: ["Nate: Send the recap"],
+                openQuestions: ["Who signs off on pricing?"]
+            ),
+            filename: "Call_2026-04-18_14-15-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let actions = try index.listActionItems(owner: "Nate", query: "recap", status: .open, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(actions.items.map(\.text), ["Send the recap"])
+        XCTAssertEqual(actions.items.first?.owner, "Nate")
+
+        let decisions = try index.listDecisions(query: "launch", dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(decisions.decisions.map(\.text), ["Keep the launch date"])
+
+        let digest = try index.digest(dateFrom: "2026-04-18", dateTo: "2026-04-18")
+        XCTAssertEqual(digest.meetingCount, 1)
+        XCTAssertEqual(digest.openQuestionCount, 1)
+        XCTAssertEqual(digest.meetings.first?.openQuestions, ["Who signs off on pricing?"])
+    }
+
     func testDecisionsAcrossMeetings() throws {
         try seedTwoMeetings()
 

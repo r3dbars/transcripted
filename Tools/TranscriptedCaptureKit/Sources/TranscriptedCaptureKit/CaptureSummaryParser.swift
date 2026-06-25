@@ -47,9 +47,10 @@ public struct ParsedMeetingSummary: Equatable {
 /// The app target's parser can't be imported by the standalone tools, so the
 /// proven string logic lives here in the shared kit. It understands both shapes:
 ///
-/// - inline summary written into the meeting transcript: frontmatter
+/// - inline local AI summary written into the meeting transcript: frontmatter
 ///   `local_summary_version` plus a `## Local Summary` body block with `###`
 ///   subsections (and a pipe-joined `local_summary_*` frontmatter fallback).
+/// - inline always-on quick summary written into `auto_summary_*` frontmatter.
 /// - a generated `meeting_summary` sidecar file with `#` sections.
 public enum CaptureSummaryParser {
     private static let startMarker = "<!-- transcripted:local-summary:start v=1 -->"
@@ -74,15 +75,28 @@ public enum CaptureSummaryParser {
             )
         }
 
-        guard values["local_summary_version"] != nil else { return nil }
+        if values["local_summary_version"] != nil {
+            let block = localSummaryBlock(in: body) ?? body
+            if let localSummary = assemble(
+                title: cleanTitle(values["local_summary_title"]),
+                decisions: inlineItems("### Decisions", in: block, fallback: values["local_summary_decisions"]),
+                actions: inlineItems("### Action Items", in: block, fallback: values["local_summary_action_items"]),
+                questions: inlineItems("### Open Questions", in: block, fallback: values["local_summary_open_questions"])
+            ) {
+                return localSummary
+            }
+        }
 
-        let block = localSummaryBlock(in: body) ?? body
-        return assemble(
-            title: cleanTitle(values["local_summary_title"]),
-            decisions: inlineItems("### Decisions", in: block, fallback: values["local_summary_decisions"]),
-            actions: inlineItems("### Action Items", in: block, fallback: values["local_summary_action_items"]),
-            questions: inlineItems("### Open Questions", in: block, fallback: values["local_summary_open_questions"])
-        )
+        if values["auto_summary_version"] != nil {
+            return assemble(
+                title: nil,
+                decisions: frontmatterItems(values["auto_summary_decisions"]),
+                actions: frontmatterItems(values["auto_summary_action_items"]),
+                questions: frontmatterItems(values["auto_summary_open_questions"])
+            )
+        }
+
+        return nil
     }
 
     // MARK: - Assembly

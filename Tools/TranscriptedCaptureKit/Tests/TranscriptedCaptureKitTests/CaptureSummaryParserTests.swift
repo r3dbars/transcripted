@@ -127,6 +127,64 @@ final class CaptureSummaryParserTests: XCTestCase {
         XCTAssertEqual(summary.actionItems.first?.text, "write the migration")
     }
 
+    func testParsesAutoSummaryFrontmatter() throws {
+        let markdown = """
+        ---
+        capture_type: meeting
+        date: 2026-04-18
+        time: 09:15:00
+        auto_summary_version: "1"
+        auto_summary_method: "heuristic-v1"
+        auto_summary_decisions: "Keep the launch date | Cut the old import path"
+        auto_summary_action_items: "Nate: send the recap | Follow up with legal"
+        auto_summary_open_questions: "Who signs off on pricing?"
+        ---
+
+        # Meeting
+
+        ## Full Transcript
+
+        [00:00] [System/Nate] Body has only the normal transcript.
+        """
+        let summary = try XCTUnwrap(CaptureSummaryParser.parse(from: markdown))
+        XCTAssertEqual(summary.decisions, ["Keep the launch date", "Cut the old import path"])
+        XCTAssertEqual(summary.openQuestions, ["Who signs off on pricing?"])
+        XCTAssertEqual(summary.actionItems.first?.owner, "Nate")
+        XCTAssertEqual(summary.actionItems.first?.text, "send the recap")
+        XCTAssertNil(summary.actionItems.last?.owner)
+        XCTAssertEqual(summary.actionItems.last?.text, "Follow up with legal")
+    }
+
+    func testFallsBackToAutoSummaryWhenLocalSummaryIsEmpty() throws {
+        let markdown = """
+        ---
+        capture_type: meeting
+        date: 2026-04-18
+        time: 09:15:00
+        local_summary_version: "1"
+        local_summary_decisions: "None found."
+        local_summary_action_items: "None found."
+        local_summary_open_questions: "None found."
+        auto_summary_version: "1"
+        auto_summary_method: "heuristic-v1"
+        auto_summary_decisions: "Keep the launch date"
+        auto_summary_action_items: "Nate: send the recap"
+        auto_summary_open_questions: "Who signs off on pricing?"
+        ---
+
+        # Meeting
+
+        ## Full Transcript
+
+        [00:00] [System/Nate] Body has only the normal transcript.
+        """
+        let summary = try XCTUnwrap(CaptureSummaryParser.parse(from: markdown))
+        XCTAssertEqual(summary.decisions, ["Keep the launch date"])
+        XCTAssertEqual(summary.openQuestions, ["Who signs off on pricing?"])
+        XCTAssertEqual(summary.actionItems.first?.owner, "Nate")
+        XCTAssertEqual(summary.actionItems.first?.text, "send the recap")
+    }
+
     func testParsesGeneratedSidecarSections() throws {
         let sidecar = """
         ---

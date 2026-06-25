@@ -190,6 +190,40 @@ func makeMeetingWithInlineSummary(
     """
 }
 
+func makeMeetingWithAutoSummary(
+    date: String = "2026-04-18",
+    time: String = "09:15:00",
+    decisions: [String] = ["Ship the beta on Friday"],
+    actionItems: [String] = ["Jenny: send the revised spec"],
+    openQuestions: [String] = ["Do we need a migration window?"]
+) -> String {
+    func frontmatter(_ items: [String]) -> String {
+        items.isEmpty ? "None found." : items.joined(separator: " | ")
+    }
+    return """
+    ---
+    capture_type: meeting
+    date: \(date)
+    time: \(time)
+    duration: "30:00"
+    transcription_engine: parakeet_local
+    diarization_engine: pyannote_offline
+    auto_summary_version: "1"
+    auto_summary_generated_at: "2026-04-18T14:15:00Z"
+    auto_summary_method: "heuristic-v1"
+    auto_summary_decisions: "\(frontmatter(decisions))"
+    auto_summary_action_items: "\(frontmatter(actionItems))"
+    auto_summary_open_questions: "\(frontmatter(openQuestions))"
+    ---
+
+    # Meeting
+
+    ## Full Transcript
+
+    [00:00] [System/Jenny] Let's lock the launch.
+    """
+}
+
 func makeDictationDayJSON(
     date: String = "2026-04-07",
     markdownFilename: String = "Dictations_2026-04-07.md",
