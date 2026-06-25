@@ -337,6 +337,126 @@ struct PersonMeetingEntry: Codable {
     let otherSpeakers: [String]
 }
 
+// MARK: - Summary-Fact Rollups (cross-meeting tools)
+
+/// One action item handed to the index write seam (`replaceSummaryFacts`).
+/// The summary-index PR builds these from parsed meeting markdown; tests build
+/// them directly.
+struct SummaryActionItem {
+    let text: String
+    let owner: String?
+    let status: String?
+    let due: String?
+
+    init(text: String, owner: String? = nil, status: String? = nil, due: String? = nil) {
+        self.text = text
+        self.owner = owner
+        self.status = status
+        self.due = due
+    }
+}
+
+/// Open/done/all filter for `list_action_items`.
+enum ActionItemStatusFilter: String {
+    case open
+    case done
+    case all
+
+    init(raw: String?) {
+        switch raw?.lowercased() {
+        case "done", "closed", "completed": self = .done
+        case "all", "any": self = .all
+        default: self = .open
+        }
+    }
+}
+
+struct ActionItemRecord: Codable {
+    let filename: String
+    var meetingTitle: String
+    let date: String
+    let datetime: String
+    let text: String
+    let owner: String?
+    let status: String?
+    let due: String?
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, datetime, text, owner, status, due
+        case meetingTitle = "meeting_title"
+    }
+}
+
+struct ActionItemsResult: Codable {
+    let owner: String?
+    let status: String
+    let count: Int
+    let truncated: Bool
+    var items: [ActionItemRecord]
+}
+
+struct DecisionRecord: Codable {
+    let filename: String
+    var meetingTitle: String
+    let date: String
+    let datetime: String
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, datetime, text
+        case meetingTitle = "meeting_title"
+    }
+}
+
+struct DecisionsResult: Codable {
+    let count: Int
+    let truncated: Bool
+    var decisions: [DecisionRecord]
+}
+
+struct DigestActionItem: Codable {
+    let text: String
+    let owner: String?
+    let status: String?
+    let due: String?
+}
+
+struct DigestMeeting: Codable {
+    let filename: String
+    var title: String
+    let date: String
+    let datetime: String
+    let decisions: [String]
+    let actionItems: [DigestActionItem]
+    let openQuestions: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, title, date, datetime, decisions
+        case actionItems = "action_items"
+        case openQuestions = "open_questions"
+    }
+}
+
+struct DigestResult: Codable {
+    let dateRange: String
+    let meetingCount: Int
+    let actionItemCount: Int
+    let openActionItemCount: Int
+    let decisionCount: Int
+    let openQuestionCount: Int
+    var meetings: [DigestMeeting]
+
+    enum CodingKeys: String, CodingKey {
+        case dateRange = "date_range"
+        case meetingCount = "meeting_count"
+        case actionItemCount = "action_item_count"
+        case openActionItemCount = "open_action_item_count"
+        case decisionCount = "decision_count"
+        case openQuestionCount = "open_question_count"
+        case meetings
+    }
+}
+
 // MARK: - Errors
 
 enum MCPIndexError: Error, LocalizedError {

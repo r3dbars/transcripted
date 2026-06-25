@@ -35,11 +35,11 @@ When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
-## Package Layout (16 Swift files)
+## Package Layout (17 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
 - `Sources/TranscriptedMCP/` — 9 source files for server startup, directory resolution, path validation, indexing, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 6 test files for directory resolution, index lifecycle, markdown loading, logging, name variants, and shared fixtures
+- `Tests/TranscriptedMCPTests/` — 7 test files for directory resolution, index lifecycle, markdown loading, logging, name variants, summary rollups, and shared fixtures
 
 ## File Index
 
@@ -64,6 +64,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases, including path-safety checks |
 | `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
+| `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
 ## MCP Tools
@@ -81,6 +82,14 @@ All tools are read-only.
 | `recent_context` | Get a mixed recent feed of meetings and dictations |
 | `who_is` | Look up a speaker profile across saved meetings |
 | `recap` | Build a structured digest for a date range |
+| `list_action_items` | Roll up action items across meetings; filter by owner / status / query / date |
+| `list_decisions` | Roll up decisions across meetings; filter by query / date |
+| `digest` | Cross-meeting summary (decisions + action items + open questions) for a window |
+
+The last three are cross-meeting rollups over the structured summary fields and
+depend on the summary-index PR ("Moat #1") to populate the
+`action_items` / `decisions` / `open_questions` tables. See
+`docs/cross-meeting-tools.md` for the dependency and merge sequencing.
 
 ## Common Agent Retrieval Shapes
 

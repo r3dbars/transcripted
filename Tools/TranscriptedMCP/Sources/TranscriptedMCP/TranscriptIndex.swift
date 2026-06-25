@@ -166,6 +166,94 @@ final class TranscriptIndex: @unchecked Sendable {
             END
         """)
 
+        // MARK: Summary-fact tables (cross-meeting rollups)
+        //
+        // PROVISIONAL SCHEMA — owned by the summary-index PR ("Moat #1: index
+        // summary fields"). These tables hold the structured summary fields the
+        // summarizer already writes to each meeting markdown (Decisions / Action
+        // Items / Open Questions), keyed to the meeting id (filename, the PK of
+        // `meetings`). The cross-meeting tools (list_action_items / list_decisions
+        // / digest) query them; the summary-index PR owns *populating* them by
+        // parsing meeting markdown during reconcile. They are defined here, with
+        // IF NOT EXISTS, only so the tools compile and test in isolation before
+        // that PR lands. When the two branches meet, the merge-room must reconcile
+        // this block against the summary-index PR's authoritative definition and
+        // keep a single copy. See docs/cross-meeting-tools.md.
+        exec("""
+            CREATE TABLE IF NOT EXISTS action_items (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                text TEXT NOT NULL,
+                owner TEXT,
+                status TEXT,
+                due TEXT
+            )
+        """)
+
+        exec("""
+            CREATE TABLE IF NOT EXISTS decisions (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                text TEXT NOT NULL
+            )
+        """)
+
+        exec("""
+            CREATE TABLE IF NOT EXISTS open_questions (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                text TEXT NOT NULL
+            )
+        """)
+
+        exec("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS action_items_fts USING fts5(
+                text, owner,
+                content='action_items', content_rowid='rowid',
+                tokenize='porter unicode61'
+            )
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS action_items_ai AFTER INSERT ON action_items BEGIN
+                INSERT INTO action_items_fts(rowid, text, owner)
+                VALUES (new.rowid, new.text, new.owner);
+            END
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS action_items_ad AFTER DELETE ON action_items BEGIN
+                INSERT INTO action_items_fts(action_items_fts, rowid, text, owner)
+                VALUES ('delete', old.rowid, old.text, old.owner);
+            END
+        """)
+
+        exec("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
+                text,
+                content='decisions', content_rowid='rowid',
+                tokenize='porter unicode61'
+            )
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS decisions_ai AFTER INSERT ON decisions BEGIN
+                INSERT INTO decisions_fts(rowid, text) VALUES (new.rowid, new.text);
+            END
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS decisions_ad AFTER DELETE ON decisions BEGIN
+                INSERT INTO decisions_fts(decisions_fts, rowid, text)
+                VALUES ('delete', old.rowid, old.text);
+            END
+        """)
+
+        exec("CREATE INDEX IF NOT EXISTS idx_action_items_filename ON action_items(filename)")
+        exec("CREATE INDEX IF NOT EXISTS idx_action_items_owner ON action_items(owner COLLATE NOCASE)")
+        exec("CREATE INDEX IF NOT EXISTS idx_decisions_filename ON decisions(filename)")
+        exec("CREATE INDEX IF NOT EXISTS idx_open_questions_filename ON open_questions(filename)")
+
         exec("CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(date)")
         exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_name ON meeting_speakers(speaker_name COLLATE NOCASE)")
         exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_persistent_id ON meeting_speakers(persistent_speaker_id)")
@@ -390,6 +478,11 @@ final class TranscriptIndex: @unchecked Sendable {
         try bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM dictation_entries WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM dictation_days WHERE filename = ?", bindings: [.text(filename)])
+        // Summary facts are keyed to the meeting id; clear them alongside the meeting
+        // so a reindex of the same file does not leave stale rollup rows behind.
+        try bindExec("DELETE FROM action_items WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM decisions WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM open_questions WHERE filename = ?", bindings: [.text(filename)])
         try execOrThrow("COMMIT")
         committed = true
     }
@@ -1057,6 +1150,351 @@ final class TranscriptIndex: @unchecked Sendable {
                 return colText(stmt, 0)
             }
             return ""
+        }
+    }
+
+    // MARK: - Summary-fact rollups (cross-meeting tools)
+
+    /// Replace the summary facts (Decisions / Action Items / Open Questions) for
+    /// one meeting. This is the write seam the summary-index PR ("Moat #1") calls
+    /// after it parses those fields out of the meeting markdown. It lives here,
+    /// separate from the markdown-indexing path, so the cross-meeting tools have a
+    /// populated store to query and so tests can seed facts without re-deriving the
+    /// markdown parser. The summary-index PR owns wiring this into reconcile.
+    func replaceSummaryFacts(
+        filename: String,
+        decisions: [String],
+        actionItems: [SummaryActionItem],
+        openQuestions: [String]
+    ) throws {
+        try queue.sync {
+            try execOrThrow("BEGIN EXCLUSIVE")
+            var committed = false
+            defer { if !committed { exec("ROLLBACK") } }
+
+            try bindExec("DELETE FROM action_items WHERE filename = ?", bindings: [.text(filename)])
+            try bindExec("DELETE FROM decisions WHERE filename = ?", bindings: [.text(filename)])
+            try bindExec("DELETE FROM open_questions WHERE filename = ?", bindings: [.text(filename)])
+
+            for item in actionItems {
+                let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+                try bindExec(
+                    "INSERT INTO action_items (filename, text, owner, status, due) VALUES (?,?,?,?,?)",
+                    bindings: [
+                        .text(filename), .text(text),
+                        normalizedOptional(item.owner).map { .text($0) } ?? .null,
+                        normalizedOptional(item.status).map { .text($0) } ?? .null,
+                        normalizedOptional(item.due).map { .text($0) } ?? .null
+                    ]
+                )
+            }
+            for decision in decisions {
+                let text = decision.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+                try bindExec("INSERT INTO decisions (filename, text) VALUES (?,?)", bindings: [.text(filename), .text(text)])
+            }
+            for question in openQuestions {
+                let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+                try bindExec("INSERT INTO open_questions (filename, text) VALUES (?,?)", bindings: [.text(filename), .text(text)])
+            }
+
+            try execOrThrow("COMMIT")
+            committed = true
+        }
+    }
+
+    func listActionItems(
+        owner: String?,
+        query: String?,
+        status: ActionItemStatusFilter,
+        dateFrom: String?,
+        dateTo: String?,
+        maxItems: Int = 50
+    ) throws -> ActionItemsResult {
+        try queue.sync {
+            let limit = max(1, min(maxItems, 200))
+            var sql = """
+                SELECT a.filename, a.text, a.owner, a.status, a.due, m.date, m.datetime
+                FROM action_items a
+                JOIN meetings m ON m.filename = a.filename
+                WHERE 1=1
+            """
+            var bindings: [SQLBinding] = []
+
+            if let owner, !owner.trimmingCharacters(in: .whitespaces).isEmpty {
+                let (clause, ownerBindings) = ownerMatchClause(owner, column: "a.owner")
+                sql += " AND \(clause)"
+                bindings.append(contentsOf: ownerBindings)
+            }
+
+            switch status {
+            case .open: sql += " AND \(openStatusClause(column: "a.status"))"
+            case .done: sql += " AND NOT \(openStatusClause(column: "a.status"))"
+            case .all: break
+            }
+
+            if let dateFrom { sql += " AND m.date >= ?"; bindings.append(.text(dateFrom)) }
+            if let dateTo { sql += " AND m.date <= ?"; bindings.append(.text(dateTo)) }
+
+            if let fts = ftsQuery(from: query) {
+                sql += " AND a.rowid IN (SELECT rowid FROM action_items_fts WHERE action_items_fts MATCH ?)"
+                bindings.append(.text(fts))
+            }
+
+            sql += " ORDER BY m.datetime DESC, a.rowid ASC LIMIT ?"
+            bindings.append(.int(limit + 1))
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+            for (i, binding) in bindings.enumerated() { bind(stmt: stmt, index: Int32(i + 1), value: binding) }
+
+            var rows: [ActionItemRecord] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let filename = colText(stmt, 0)
+                rows.append(ActionItemRecord(
+                    filename: filename,
+                    meetingTitle: filename,
+                    date: colText(stmt, 5),
+                    datetime: colText(stmt, 6),
+                    text: colText(stmt, 1),
+                    owner: colTextOptional(stmt, 2),
+                    status: colTextOptional(stmt, 3),
+                    due: colTextOptional(stmt, 4)
+                ))
+            }
+
+            let truncated = rows.count > limit
+            let items = Array(rows.prefix(limit))
+            return ActionItemsResult(
+                owner: owner,
+                status: status.rawValue,
+                count: items.count,
+                truncated: truncated,
+                items: items
+            )
+        }
+    }
+
+    func listDecisions(
+        query: String?,
+        dateFrom: String?,
+        dateTo: String?,
+        maxItems: Int = 50
+    ) throws -> DecisionsResult {
+        try queue.sync {
+            let limit = max(1, min(maxItems, 200))
+            var sql = """
+                SELECT d.filename, d.text, m.date, m.datetime
+                FROM decisions d
+                JOIN meetings m ON m.filename = d.filename
+                WHERE 1=1
+            """
+            var bindings: [SQLBinding] = []
+
+            if let dateFrom { sql += " AND m.date >= ?"; bindings.append(.text(dateFrom)) }
+            if let dateTo { sql += " AND m.date <= ?"; bindings.append(.text(dateTo)) }
+
+            if let fts = ftsQuery(from: query) {
+                sql += " AND d.rowid IN (SELECT rowid FROM decisions_fts WHERE decisions_fts MATCH ?)"
+                bindings.append(.text(fts))
+            }
+
+            sql += " ORDER BY m.datetime DESC, d.rowid ASC LIMIT ?"
+            bindings.append(.int(limit + 1))
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+            for (i, binding) in bindings.enumerated() { bind(stmt: stmt, index: Int32(i + 1), value: binding) }
+
+            var rows: [DecisionRecord] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let filename = colText(stmt, 0)
+                rows.append(DecisionRecord(
+                    filename: filename,
+                    meetingTitle: filename,
+                    date: colText(stmt, 2),
+                    datetime: colText(stmt, 3),
+                    text: colText(stmt, 1)
+                ))
+            }
+
+            let truncated = rows.count > limit
+            let decisions = Array(rows.prefix(limit))
+            return DecisionsResult(count: decisions.count, truncated: truncated, decisions: decisions)
+        }
+    }
+
+    /// Cross-meeting digest for a date window: every meeting in range that has any
+    /// summary facts, with its decisions, action items, and open questions, plus
+    /// rolled-up counts.
+    func digest(dateFrom: String?, dateTo: String?, maxMeetings: Int = 50) throws -> DigestResult {
+        try queue.sync {
+            let limit = max(1, min(maxMeetings, 100))
+
+            var meetingSQL = "SELECT filename, date, datetime FROM meetings WHERE 1=1"
+            var bindings: [SQLBinding] = []
+            if let dateFrom { meetingSQL += " AND date >= ?"; bindings.append(.text(dateFrom)) }
+            if let dateTo { meetingSQL += " AND date <= ?"; bindings.append(.text(dateTo)) }
+            meetingSQL += " ORDER BY datetime DESC"
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, meetingSQL, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+            for (i, binding) in bindings.enumerated() { bind(stmt: stmt, index: Int32(i + 1), value: binding) }
+
+            struct WindowMeeting { let filename: String; let date: String; let datetime: String }
+            var windowMeetings: [WindowMeeting] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                windowMeetings.append(WindowMeeting(
+                    filename: colText(stmt, 0), date: colText(stmt, 1), datetime: colText(stmt, 2)
+                ))
+            }
+
+            guard !windowMeetings.isEmpty else {
+                return DigestResult(
+                    dateRange: digestRangeLabel(dateFrom: dateFrom, dateTo: dateTo),
+                    meetingCount: 0, actionItemCount: 0, openActionItemCount: 0,
+                    decisionCount: 0, openQuestionCount: 0, meetings: []
+                )
+            }
+
+            let filenames = windowMeetings.map(\.filename)
+            let decisionsByMeeting = try fetchTextFacts(table: "decisions", filenames: filenames)
+            let questionsByMeeting = try fetchTextFacts(table: "open_questions", filenames: filenames)
+            let actionsByMeeting = try fetchActionFacts(filenames: filenames)
+
+            var digestMeetings: [DigestMeeting] = []
+            var totalActions = 0, totalOpenActions = 0, totalDecisions = 0, totalQuestions = 0
+
+            for meeting in windowMeetings {
+                let decisions = decisionsByMeeting[meeting.filename] ?? []
+                let questions = questionsByMeeting[meeting.filename] ?? []
+                let actions = actionsByMeeting[meeting.filename] ?? []
+                guard !decisions.isEmpty || !questions.isEmpty || !actions.isEmpty else { continue }
+
+                totalDecisions += decisions.count
+                totalQuestions += questions.count
+                totalActions += actions.count
+                totalOpenActions += actions.filter { Self.isOpenStatus($0.status) }.count
+
+                digestMeetings.append(DigestMeeting(
+                    filename: meeting.filename,
+                    title: meeting.filename,
+                    date: meeting.date,
+                    datetime: meeting.datetime,
+                    decisions: decisions,
+                    actionItems: actions,
+                    openQuestions: questions
+                ))
+                if digestMeetings.count >= limit { break }
+            }
+
+            return DigestResult(
+                dateRange: digestRangeLabel(dateFrom: dateFrom, dateTo: dateTo),
+                meetingCount: digestMeetings.count,
+                actionItemCount: totalActions,
+                openActionItemCount: totalOpenActions,
+                decisionCount: totalDecisions,
+                openQuestionCount: totalQuestions,
+                meetings: digestMeetings
+            )
+        }
+    }
+
+    // MARK: - Summary-fact helpers (run inside queue.sync)
+
+    private func fetchTextFacts(table: String, filenames: [String]) throws -> [String: [String]] {
+        let placeholders = filenames.map { _ in "?" }.joined(separator: ", ")
+        let sql = "SELECT filename, text FROM \(table) WHERE filename IN (\(placeholders)) ORDER BY rowid ASC"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw MCPIndexError.queryFailed(dbError())
+        }
+        defer { sqlite3_finalize(stmt) }
+        for (i, f) in filenames.enumerated() {
+            sqlite3_bind_text(stmt, Int32(i + 1), (f as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        }
+        var result: [String: [String]] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            result[colText(stmt, 0), default: []].append(colText(stmt, 1))
+        }
+        return result
+    }
+
+    private func fetchActionFacts(filenames: [String]) throws -> [String: [DigestActionItem]] {
+        let placeholders = filenames.map { _ in "?" }.joined(separator: ", ")
+        let sql = "SELECT filename, text, owner, status, due FROM action_items WHERE filename IN (\(placeholders)) ORDER BY rowid ASC"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw MCPIndexError.queryFailed(dbError())
+        }
+        defer { sqlite3_finalize(stmt) }
+        for (i, f) in filenames.enumerated() {
+            sqlite3_bind_text(stmt, Int32(i + 1), (f as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        }
+        var result: [String: [DigestActionItem]] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            result[colText(stmt, 0), default: []].append(DigestActionItem(
+                text: colText(stmt, 1),
+                owner: colTextOptional(stmt, 2),
+                status: colTextOptional(stmt, 3),
+                due: colTextOptional(stmt, 4)
+            ))
+        }
+        return result
+    }
+
+    private func ownerMatchClause(_ owner: String, column: String) -> (String, [SQLBinding]) {
+        let names = NameVariants.expandName(owner)
+        let exact = names.map { _ in "\(column) COLLATE NOCASE = ?" }
+        let like = names.map { _ in "\(column) COLLATE NOCASE LIKE ?" }
+        let clause = "(" + (exact + like).joined(separator: " OR ") + ")"
+        let bindings = names.map { SQLBinding.text($0) } + names.map { SQLBinding.text("%\($0)%") }
+        return (clause, bindings)
+    }
+
+    /// SQL predicate that is true for action items still considered open: an
+    /// unset status, or a status that is not one of the terminal markers.
+    private func openStatusClause(column: String) -> String {
+        "(\(column) IS NULL OR lower(trim(\(column))) NOT IN ('done','complete','completed','resolved','closed','cancelled','canceled'))"
+    }
+
+    /// Swift mirror of `openStatusClause` for in-memory rollup counting.
+    static func isOpenStatus(_ status: String?) -> Bool {
+        guard let status = status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !status.isEmpty else {
+            return true
+        }
+        return !["done", "complete", "completed", "resolved", "closed", "cancelled", "canceled"].contains(status)
+    }
+
+    private func ftsQuery(from query: String?) -> String? {
+        guard let query, !query.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        let tokens = query.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return nil }
+        return tokens.map { "\"\($0.replacingOccurrences(of: "\"", with: ""))\"" }.joined(separator: " ")
+    }
+
+    private func normalizedOptional(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private func digestRangeLabel(dateFrom: String?, dateTo: String?) -> String {
+        switch (dateFrom, dateTo) {
+        case let (from?, to?): return from == to ? from : "\(from) to \(to)"
+        case let (from?, nil): return "since \(from)"
+        case let (nil, to?): return "through \(to)"
+        case (nil, nil): return "all time"
         }
     }
 
