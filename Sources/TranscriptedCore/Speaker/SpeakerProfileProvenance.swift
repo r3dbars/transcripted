@@ -510,14 +510,23 @@ extension SpeakerDatabase {
         }
         let count = Float(embeddings.count)
         for i in 0..<dim { mean[i] /= count }
-        let normalized = l2Normalize(mean)
+
+        // L2-normalize in place (kept self-contained so this method has no cross-file
+        // type-inference dependency — the release WMO build choked resolving the shared
+        // l2Normalize helper from here).
+        var norm: Float = 0
+        for value in mean { norm += value * value }
+        norm = norm.squareRoot()
+        let normalized: [Float] = norm > 0 ? mean.map { $0 / norm } : mean
 
         let now = ISO8601DateFormatter().string(from: Date())
         let sql = "UPDATE speakers SET embedding = ?, call_count = ?, last_seen = ? WHERE id = ?;"
         var statement: OpaquePointer?
         var ok = false
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
+            let embeddingData = normalized.withUnsafeBufferPointer { buffer in
+                Data(bytes: buffer.baseAddress!, count: buffer.count * MemoryLayout<Float>.stride)
+            }
             sqlite3_bind_blob(statement, 1, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
             sqlite3_bind_int(statement, 2, Int32(embeddings.count))
             sqlite3_bind_text(statement, 3, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
