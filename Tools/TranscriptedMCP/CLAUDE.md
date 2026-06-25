@@ -35,11 +35,11 @@ When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
-## Package Layout (16 Swift files)
+## Package Layout (17 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
 - `Sources/TranscriptedMCP/` — 9 source files for server startup, directory resolution, path validation, indexing, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 6 test files for directory resolution, index lifecycle, markdown loading, logging, name variants, and shared fixtures
+- `Tests/TranscriptedMCPTests/` — 7 test files for directory resolution, index lifecycle, structured-summary indexing, markdown loading, logging, name variants, and shared fixtures
 
 ## File Index
 
@@ -61,6 +61,7 @@ that mode the SQLite index also defaults to the shared root unless
 |------|---------|
 | `DataDirectoriesTests.swift` | Directory-resolution coverage for current Transcripted captures vs legacy Draft fallback |
 | `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search, and mixed-context indexing |
+| `SummaryItemIndexTests.swift` | Structured summary parse→index→query: decisions/action-items/open-questions, owner + unassigned rollup, reindex/delete, sidecar-not-a-meeting |
 | `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases, including path-safety checks |
 | `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
@@ -107,8 +108,11 @@ The SQLite index keeps separate records for:
 
 - meetings
 - meeting speakers / utterance search rows
+- structured meeting-summary items (Decisions / Action Items with owner / Open Questions), one row per bullet in `meeting_summary_items` with a `kind` discriminator + FTS5, so cross-meeting tools can roll up across all meetings
 - dictation day files
 - dictation entry search rows
+
+Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from each meeting's inline local summary (or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation; no MCP tool is wired to it yet (that is a separate thread).
 
 This lets the server answer both meeting-specific queries (`who_is`, `read_meeting`) and mixed-context queries (`search_context`, `recent_context`) without touching app-owned runtime state.
 

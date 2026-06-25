@@ -59,6 +59,41 @@ enum TranscriptLoader {
         )
     }
 
+    /// Structured summary for a saved meeting. Prefers the inline summary written
+    /// into the transcript (`local_summary_version` frontmatter + `## Local
+    /// Summary` body block), then falls back to a generated `<stem>.summary.md`
+    /// sidecar if one exists. Returns nil when neither carries a summary.
+    ///
+    /// Note: the live summarizer writes the summary *into the transcript*, so a
+    /// (re)summarize bumps the transcript mtime and `reconcile` re-indexes it.
+    /// The sidecar branch is a legacy-compat fallback; a sidecar edited in
+    /// isolation does not bump the parent transcript's mtime, so its items only
+    /// refresh on the next reindex of the transcript itself.
+    static func loadMeetingSummary(forTranscript url: URL) -> ParsedMeetingSummary? {
+        if let content = try? String(contentsOf: url, encoding: .utf8),
+           let summary = CaptureSummaryParser.parse(from: content) {
+            return summary
+        }
+
+        let sidecarURL = summarySidecarURL(forTranscript: url)
+        if let content = try? String(contentsOf: sidecarURL, encoding: .utf8),
+           let summary = CaptureSummaryParser.parse(from: content) {
+            return summary
+        }
+
+        return nil
+    }
+
+    /// Mirrors `LocalMeetingSummaryStore.summaryURL(for:)` in the app target:
+    /// `<dir>/<stem>.summary.md` next to the transcript.
+    static func summarySidecarURL(forTranscript url: URL) -> URL {
+        let base = url.deletingPathExtension()
+        return base
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(base.lastPathComponent).summary")
+            .appendingPathExtension("md")
+    }
+
     static func loadDictationDay(_ url: URL) -> AgentDictationDay? {
         guard let content = try? String(contentsOf: url, encoding: .utf8),
               let parsed = CaptureMarkdownParser.parseDictationDay(from: content, markdownURL: url) else {
@@ -95,6 +130,13 @@ enum TranscriptLoader {
         let filename = url.deletingPathExtension().lastPathComponent
         if filename.hasPrefix("Dictations_") {
             return .dictationDay
+        }
+        // Generated `<stem>.summary.md` sidecars carry frontmatter too, but they
+        // are not meetings — they are read as a fallback summary source for their
+        // parent transcript (see loadMeetingSummary). Indexing them as meetings
+        // would create empty junk rows and double-index summary items.
+        if filename.hasSuffix(".summary") {
+            return nil
         }
         return .meeting
     }
