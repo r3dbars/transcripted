@@ -36,6 +36,8 @@ python3 scripts/ops/release-gate-report.py
 bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode full
 bash scripts/ops/transcripted-qa-bench.sh --mode ui
+bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update
+bash scripts/ops/transcripted-qa-bench.sh --mode packaged
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
 swift test
@@ -54,7 +56,7 @@ Command ownership:
 - `run-live-capture-smoke.sh` — thin root wrapper for local hardware/TCC capture smoke
 - `run-daily-audio-reliability.sh` — thin root wrapper for the interactive and synthetic daily audio reliability check
 - `scripts/ops/release-gate-report.py` — single pre-merge/release report covering QA bench, telemetry, release surfaces, and local log warnings
-- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output, including `--mode ui` for the Accessibility-driven onboarding/menu bar/Home/Settings smoke
+- `scripts/ops/transcripted-qa-bench.sh` — orchestrated QA tester pass with local report output, including `--mode ui` for the Accessibility-driven onboarding/menu bar/Home/Settings smoke, `--mode sparkle-update` for fake-state Sparkle update UI proof, and `--mode packaged` for no-publish package smoke
 - `scripts/ops/validate-meeting-corpus.py` — local-only meeting corpus validator for Downloads fixtures
 - `scripts/ops/compare-meeting-corpus.py` — local-only Transcripted-vs-Zoom corpus comparator for Downloads fixtures
 - `swift test` — `TranscriptedCore` package seam tests
@@ -117,7 +119,7 @@ Use these docs for these jobs:
 - `docs/retention-cohort-analytics.md` — privacy-safe PostHog habit and retention report for first/second artifact, next-day and 7-day return, repeat use, 3-days-this-week, and health-skill output
 - `docs/storage-paths.md` — canonical storage and fallback path map
 - `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop and evidence contract
-- `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, corpus, corpus-compare, live, artifact, and synthetic audio passes
+- `docs/qa-test-bench.md` — orchestrated QA tester bench for quick, deep, UI, Sparkle update, packaged, corpus, corpus-compare, live, artifact, and synthetic audio passes
 - `docs/test-automation-strategy.md` — agent-first QA coverage map, gate strategy, and automation roadmap
 - `docs/qa-issue-500-meeting-audio.md` — manual WebRTC / meeting-volume QA matrix for issue #500
 - `docs/release-packaging.md` — release packaging flow

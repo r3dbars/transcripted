@@ -115,6 +115,9 @@ full current map:
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
   Accessibility-driven smoke for menu bar, Home, Settings, buttons, and basic
   navigation. TCC blockers are `INCOMPLETE`, not green.
+- `bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update`
+  No-publish fake-state Sparkle update UI smoke for update-available and
+  downloading menu surfaces. Live feed/download/install proof is still separate.
 
 Rule of thumb:
 
