@@ -2,42 +2,55 @@
 // It asserts that menubar sources keep their stable AX identifiers and that
 // the smoke script still references them, so external UI automation stays in sync.
 // It runs no UI and exercises no runtime behavior; it only greps source text.
+//
+// Adding a new contract guard is purely additive: call `contractSource("Sources/.../X.swift")`
+// inline inside an assertion. Do NOT reintroduce a top-of-suite block of
+// `let xSource = readUIAutomationContractFile(...)` declarations — that append-only
+// hotspot is what made two concurrent UI PRs collide on a duplicate `let` declaration
+// (the same pattern that bit AnalyticsEventPolicy.swift). `contractSource` reads and
+// memoizes each file on demand, so repeated reads of the same path are free and two
+// PRs can add guards for the same file without redeclaring anything.
 
 import Foundation
 
+// On-demand, memoized source reader. Each path is read at most once per run.
+private var uiAutomationContractSourceCache: [String: String] = [:]
+
+private func contractSource(_ relativePath: String) -> String {
+    if let cached = uiAutomationContractSourceCache[relativePath] {
+        return cached
+    }
+    let contents = readUIAutomationContractFile(relativePath)
+    uiAutomationContractSourceCache[relativePath] = contents
+    return contents
+}
+
 func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
-        let appSource = readUIAutomationContractFile("Sources/TranscriptedApp.swift")
-        let actionRowSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarActionRowView.swift")
-        let menuTokensSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuTokens.swift")
-        let primarySource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift")
-        let utilitySource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarUtilityActionsView.swift")
-        let smokeScript = readUIAutomationContractFile("scripts/entrypoints/build.sh")
-
         assertTrue(
-            appSource.contains("transcripted.status-item.button")
-                && appSource.contains("setAccessibilityIdentifier(\"transcripted.status-item.button\")"),
+            contractSource("Sources/TranscriptedApp.swift").contains("transcripted.status-item.button")
+                && contractSource("Sources/TranscriptedApp.swift").contains("setAccessibilityIdentifier(\"transcripted.status-item.button\")"),
             "the real menu bar status item should expose a stable AX identifier for external UI automation"
         )
 
         assertTrue(
-            actionRowSource.contains("let automationIdentifier: String")
-                && actionRowSource.contains("setAutomationIdentifier(_ rawValue: String)")
-                && actionRowSource.contains("setAccessibilityIdentifier(rawValue)")
-                && actionRowSource.contains("setAccessibilityRole(.button)")
-                && actionRowSource.contains("setAccessibilityLabel(title)")
-                && actionRowSource.contains("override func accessibilityPerformPress()")
-                && actionRowSource.contains("guard isEnabled else { return false }")
-                && actionRowSource.contains("accessibilityIdentifier()"),
+            contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("let automationIdentifier: String")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAutomationIdentifier(_ rawValue: String)")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityIdentifier(rawValue)")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityRole(.button)")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("setAccessibilityLabel(title)")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("override func accessibilityPerformPress()")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("guard isEnabled else { return false }")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("accessibilityIdentifier()"),
             "menubar smoke snapshots should carry the same accessibility identifier and AXPress path AppKit automation sees"
         )
 
         assertTrue(
-            menuTokensSource.contains("static let minimumHitTargetSize: CGFloat = 40")
-                && menuTokensSource.contains("static let panelHeight: CGFloat = 480")
-                && actionRowSource.contains("MenuTokens.minimumHitTargetSize")
-                && actionRowSource.contains("MenuTokens.utilityActionRowHeight")
-                && actionRowSource.contains("MenuTokens.compactActionRowHeight"),
+            contractSource("Sources/UI/MenuBar/MenuTokens.swift").contains("static let minimumHitTargetSize: CGFloat = 40")
+                && contractSource("Sources/UI/MenuBar/MenuTokens.swift").contains("static let panelHeight: CGFloat = 480")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.minimumHitTargetSize")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.utilityActionRowHeight")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.compactActionRowHeight"),
             "menubar action rows should keep a real 40pt hit-target floor and a panel height that keeps default rows visible"
         )
 
@@ -49,7 +62,8 @@ func testUIAutomationSurfaceContract() {
             "transcripted.menubar.primary.recent-meetings",
         ] {
             assertTrue(
-                primarySource.contains(identifier) && smokeScript.contains(identifier),
+                contractSource("Sources/UI/MenuBar/MenuBarPrimaryActionsView.swift").contains(identifier)
+                    && contractSource("scripts/entrypoints/build.sh").contains(identifier),
                 "\(identifier) should be attached in source and enforced by launch smoke"
             )
         }
@@ -62,7 +76,8 @@ func testUIAutomationSurfaceContract() {
             "transcripted.menubar.utility.quit",
         ] {
             assertTrue(
-                utilitySource.contains(identifier) && smokeScript.contains(identifier),
+                contractSource("Sources/UI/MenuBar/MenuBarUtilityActionsView.swift").contains(identifier)
+                    && contractSource("scripts/entrypoints/build.sh").contains(identifier),
                 "\(identifier) should be attached in source and enforced by launch smoke"
             )
         }
@@ -70,19 +85,16 @@ func testUIAutomationSurfaceContract() {
     }
 
     runSuite("UI automation surface contract - menubar controls keep polished hit targets") {
-        let tokenSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuTokens.swift")
-        let actionRowSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarActionRowView.swift")
-        let iconButtonSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuIconButton.swift")
-        let outlineButtonSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuOutlineButton.swift")
-        let modelStatusSource = readUIAutomationContractFile("Sources/UI/MenuBar/MenuBarModelStatusView.swift")
-
         assertTrue(
-            tokenSource.contains("minimumHitTargetSize: CGFloat = 40")
-                && actionRowSource.contains("MenuTokens.minimumHitTargetSize"),
+            contractSource("Sources/UI/MenuBar/MenuTokens.swift").contains("minimumHitTargetSize: CGFloat = 40")
+                && contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift").contains("MenuTokens.minimumHitTargetSize"),
             "menubar rows should stay at or above the 40px minimum hit target"
         )
 
-        for source in [iconButtonSource, outlineButtonSource] {
+        for source in [
+            contractSource("Sources/UI/MenuBar/MenuIconButton.swift"),
+            contractSource("Sources/UI/MenuBar/MenuOutlineButton.swift"),
+        ] {
             assertTrue(
                 source.contains("override func hitTest(_ point: NSPoint)")
                     && source.contains("let localPoint = convert(point, from: superview)")
@@ -95,18 +107,16 @@ func testUIAutomationSurfaceContract() {
         }
 
         assertTrue(
-            modelStatusSource.contains("NSFont.monospacedDigitSystemFont")
-                && modelStatusSource.contains("setAccessibilityRole(.button)")
-                && modelStatusSource.contains("setAccessibilityValue(label.stringValue)")
-                && modelStatusSource.contains("override func resetCursorRects()")
-                && modelStatusSource.contains("override func accessibilityPerformPress()"),
+            contractSource("Sources/UI/MenuBar/MenuBarModelStatusView.swift").contains("NSFont.monospacedDigitSystemFont")
+                && contractSource("Sources/UI/MenuBar/MenuBarModelStatusView.swift").contains("setAccessibilityRole(.button)")
+                && contractSource("Sources/UI/MenuBar/MenuBarModelStatusView.swift").contains("setAccessibilityValue(label.stringValue)")
+                && contractSource("Sources/UI/MenuBar/MenuBarModelStatusView.swift").contains("override func resetCursorRects()")
+                && contractSource("Sources/UI/MenuBar/MenuBarModelStatusView.swift").contains("override func accessibilityPerformPress()"),
             "menubar model status should keep tabular progress digits and a real AX button contract"
         )
     }
 
     runSuite("UI automation surface contract - app commands expose capture shortcuts") {
-        let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
-
         for requiredCommandHook in [
             "CommandMenu(\"Capture\")",
             "Button(\"Start Dictation\")",
@@ -119,14 +129,11 @@ func testUIAutomationSurfaceContract() {
             "appDelegate.menuImportAudio()",
             ".keyboardShortcut(\"o\", modifiers: .command)",
         ] {
-            assertTrue(commandsSource.contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the app command menu")
+            assertTrue(contractSource("Sources/TranscriptedMenuCommands.swift").contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the app command menu")
         }
     }
 
     runSuite("UI automation surface contract - app commands expose primary Go shortcuts") {
-        let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
-        let pagesSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsPage.swift")
-
         for requiredCommandHook in [
             "CommandMenu(\"Go\")",
             "Button(\"Home\")",
@@ -145,7 +152,7 @@ func testUIAutomationSurfaceContract() {
             "appDelegate.menuFindSpeaker()",
             ".keyboardShortcut(\"f\", modifiers: .command)",
         ] {
-            assertTrue(commandsSource.contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the Go command menu")
+            assertTrue(contractSource("Sources/TranscriptedMenuCommands.swift").contains(requiredCommandHook), "\(requiredCommandHook) should stay pinned in the Go command menu")
         }
 
         for requiredPageHook in [
@@ -155,13 +162,11 @@ func testUIAutomationSurfaceContract() {
             "case .connectAgent: return \"4\"",
             "return \"\\(title)  ⌘\\(key)\"",
         ] {
-            assertTrue(pagesSource.contains(requiredPageHook), "\(requiredPageHook) should keep sidebar help aligned with Go shortcuts")
+            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(requiredPageHook), "\(requiredPageHook) should keep sidebar help aligned with Go shortcuts")
         }
     }
 
     runSuite("UI automation surface contract - app commands route through existing delegate entry points") {
-        let appSource = readUIAutomationContractFile("Sources/TranscriptedApp.swift")
-
         for requiredAppHook in [
             "TranscriptedMenuCommands(appDelegate: appDelegate)",
             "func menuStartDictation()",
@@ -175,13 +180,11 @@ func testUIAutomationSurfaceContract() {
             "func menuFindSpeaker()",
             "settingsWindowController.focusSpeakerSearch(source: \"menu_command\")",
         ] {
-            assertTrue(appSource.contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
+            assertTrue(contractSource("Sources/TranscriptedApp.swift").contains(requiredAppHook), "\(requiredAppHook) should keep app commands wired through existing app-delegate actions")
         }
     }
 
     runSuite("UI automation surface contract - app commands do not remap global trigger preferences") {
-        let commandsSource = readUIAutomationContractFile("Sources/TranscriptedMenuCommands.swift")
-
         for forbiddenTriggerHook in [
             "PhysicalDictationTriggerPreferences",
             "HotkeyPreferences",
@@ -195,27 +198,13 @@ func testUIAutomationSurfaceContract() {
             "modifiers: [.control",
         ] {
             assertFalse(
-                commandsSource.contains(forbiddenTriggerHook),
+                contractSource("Sources/TranscriptedMenuCommands.swift").contains(forbiddenTriggerHook),
                 "app-active commands must not remap or shadow global recordable trigger preferences (\(forbiddenTriggerHook))"
             )
         }
     }
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
-        let pagesSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsPage.swift")
-        let settingsSidebarSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsSidebar.swift")
-        let settingsComponentsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsComponents.swift")
-        let generalControlsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift")
-        let settingsRowsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsRows.swift")
-        let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
-        let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
-        let meetingAudioPlaybackSource = readUIAutomationContractFile("Sources/UI/Shared/MeetingAudioPlayback.swift")
-        let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
-        let speakerReviewSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerNamingSheet.swift")
-        let agentSettingsSource = readUIAutomationContractFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
-        let deletePolicySource = readUIAutomationContractFile("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift")
-        let failedMeetingRecoverySource = readUIAutomationContractFile("Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift")
-
         for pageCase in [
             "case home",
             "case dictations",
@@ -230,29 +219,29 @@ func testUIAutomationSurfaceContract() {
             "case support",
             "case about",
         ] {
-            assertTrue(pagesSource.contains(pageCase), "\(pageCase) should stay in the settings navigation surface map")
+            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains(pageCase), "\(pageCase) should stay in the settings navigation surface map")
         }
 
         assertTrue(
-            pagesSource.contains("var automationIdentifier: String")
-                && settingsSidebarSource.contains(".accessibilityIdentifier(page.automationIdentifier)"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsPage.swift").contains("var automationIdentifier: String")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsSidebar.swift").contains(".accessibilityIdentifier(page.automationIdentifier)"),
             "settings sidebar pages should expose stable automation identifiers"
         )
 
         assertTrue(
-            generalControlsSource.contains(".frame(width: 40, height: 40)")
-                && generalControlsSource.contains("accessibilityIdentifier(\"transcripted.settings.general.info.\\(automationSlug(info.title))\")"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains(".frame(width: 40, height: 40)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("accessibilityIdentifier(\"transcripted.settings.general.info.\\(automationSlug(info.title))\")"),
             "General settings info buttons should keep compact visuals with a 40pt hit target and stable AX identifiers"
         )
         assertTrue(
-            settingsRowsSource.contains(".frame(width: 40, height: 40)")
-                && settingsRowsSource.contains(".accessibilityLabel(Text(\"Remove correction\"))"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsRows.swift").contains(".frame(width: 40, height: 40)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsRows.swift").contains(".accessibilityLabel(Text(\"Remove correction\"))"),
             "custom dictionary remove controls should keep a 40pt destructive hit target with a clear AX label"
         )
         assertTrue(
-            settingsSource.contains("Label(\"Add correction\", systemImage: \"plus\")")
-                && settingsSource.contains(".frame(minHeight: 40)")
-                && settingsSource.contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Label(\"Add correction\", systemImage: \"plus\")")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".frame(minHeight: 40)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
             "custom dictionary add correction should keep a 40pt tactile action target"
         )
 
@@ -264,7 +253,7 @@ func testUIAutomationSurfaceContract() {
             "trackSettingsToggle(\"local_ai_meeting_summaries\"",
             "trackSettingsToggle(\"live_meeting_sidecar\"",
         ] {
-            assertTrue(settingsSource.contains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
+            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
         }
 
         for requiredHomeActionHook in [
@@ -274,10 +263,10 @@ func testUIAutomationSurfaceContract() {
             "HomeDeleteConfirmationPolicy.failedMeeting",
             "homeDeleteConfirmation = HomeDeleteConfirmation(",
         ] {
-            assertTrue(settingsSource.contains(requiredHomeActionHook), "\(requiredHomeActionHook) should keep Home action coverage visible")
+            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(requiredHomeActionHook), "\(requiredHomeActionHook) should keep Home action coverage visible")
         }
         assertFalse(
-            settingsSource.contains("presentFailedMeetingDeleteConfirmation("),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("presentFailedMeetingDeleteConfirmation("),
             "failed-meeting delete confirmation should use SwiftUI alert state instead of a hand-built NSAlert"
         )
 
@@ -291,12 +280,12 @@ func testUIAutomationSurfaceContract() {
             "ClosureMenuItem(menuItem: item)",
             "title: \"Copy for agent\"",
         ] {
-            assertTrue(homeSource.contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
+            assertTrue(contractSource("Sources/UI/Settings/HomeView.swift").contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
         assertTrue(
-            homeSource.contains("private enum HomeHitTarget")
-                && homeSource.contains("static let minimum: CGFloat = 40")
-                && homeSource.contains("HomeHitTarget.minimum"),
+            contractSource("Sources/UI/Settings/HomeView.swift").contains("private enum HomeHitTarget")
+                && contractSource("Sources/UI/Settings/HomeView.swift").contains("static let minimum: CGFloat = 40")
+                && contractSource("Sources/UI/Settings/HomeView.swift").contains("HomeHitTarget.minimum"),
             "Home icon buttons and compact row actions should keep a shared 40pt hit-target floor"
         )
         for requiredFailedMeetingPolicyHook in [
@@ -305,37 +294,37 @@ func testUIAutomationSurfaceContract() {
             "clearIsDestructive: hasRetainedAudioFiles",
             "return \"This meeting does not have enough saved audio to retry.\"",
         ] {
-            assertTrue(failedMeetingRecoverySource.contains(requiredFailedMeetingPolicyHook), "\(requiredFailedMeetingPolicyHook) should keep failed-meeting action policy visible")
+            assertTrue(contractSource("Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift").contains(requiredFailedMeetingPolicyHook), "\(requiredFailedMeetingPolicyHook) should keep failed-meeting action policy visible")
         }
         assertTrue(
-            settingsComponentsSource.contains(".frame(minHeight: 40)")
-                && settingsComponentsSource.contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".frame(minHeight: 40)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
             "shared inline settings actions should keep a 40pt hit floor for failed-meeting recovery controls"
         )
         assertTrue(
-            homeSource.contains(".frame(minHeight: 40, alignment: .leading)")
-                && homeSource.contains(".accessibilityIdentifier(\"transcripted.home.audio.inline-toggle\")"),
+            contractSource("Sources/UI/Settings/HomeView.swift").contains(".frame(minHeight: 40, alignment: .leading)")
+                && contractSource("Sources/UI/Settings/HomeView.swift").contains(".accessibilityIdentifier(\"transcripted.home.audio.inline-toggle\")"),
             "Home retained-audio play controls should keep a 40pt hit floor"
         )
         assertTrue(
-            settingsRowsSource.contains(".frame(minHeight: 40, alignment: .leading)")
-                && settingsRowsSource.contains("struct SettingsRecentMeetingAudioControl"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsRows.swift").contains(".frame(minHeight: 40, alignment: .leading)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsRows.swift").contains("struct SettingsRecentMeetingAudioControl"),
             "Settings retained-audio play controls should keep a 40pt hit floor"
         )
         assertTrue(
-            meetingAudioPlaybackSource.contains(".frame(minHeight: 40)")
-                && meetingAudioPlaybackSource.contains("struct MeetingAudioSourceMenu"),
+            contractSource("Sources/UI/Shared/MeetingAudioPlayback.swift").contains(".frame(minHeight: 40)")
+                && contractSource("Sources/UI/Shared/MeetingAudioPlayback.swift").contains("struct MeetingAudioSourceMenu"),
             "retained-audio source menus should keep a 40pt hit floor"
         )
         assertFalse(
-            homeSource.contains("representedObject = item.id"),
+            contractSource("Sources/UI/Settings/HomeView.swift").contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
         )
         assertTrue(
-            settingsComponentsSource.contains(".frame(width: 40, height: 40)")
-                && settingsComponentsSource.contains(".accessibilityIdentifier(\"transcripted.settings.activity-card.dismiss\")")
-                && settingsComponentsSource.contains(".frame(minHeight: 40)")
-                && settingsComponentsSource.contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".frame(width: 40, height: 40)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".accessibilityIdentifier(\"transcripted.settings.activity-card.dismiss\")")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".frame(minHeight: 40)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
             "activity cards should keep 40pt action and dismiss hit targets for Home progress/notice cards"
         )
 
@@ -349,21 +338,21 @@ func testUIAutomationSurfaceContract() {
         //      root view; SwiftUI keeps only the last, shadowing the (first)
         //      delete confirmation. The three states must share one presenter.
         assertTrue(
-            homeSource.contains("DispatchQueue.main.async { [handler] in handler() }"),
+            contractSource("Sources/UI/Settings/HomeView.swift").contains("DispatchQueue.main.async { [handler] in handler() }"),
             "ClosureMenuItem should defer its handler off the NSMenu.popUp tracking loop so menu-triggered SwiftUI alerts/sheets present"
         )
         assertTrue(
-            settingsSource.contains(".alert(item: rootAlertBinding)")
-                && settingsSource.contains("enum RootAlert")
-                && settingsSource.contains("case deleteConfirmation")
-                && settingsSource.contains("case deleteFailure")
-                && settingsSource.contains("case audioRetention"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: rootAlertBinding)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("enum RootAlert")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("case deleteConfirmation")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("case deleteFailure")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("case audioRetention"),
             "the Home delete, delete-failure, and audio-retention alerts should present through one rootAlertBinding so none is shadowed"
         )
         assertFalse(
-            settingsSource.contains(".alert(item: $homeDeleteConfirmation)")
-                || settingsSource.contains(".alert(item: $homeDeleteFailure)")
-                || settingsSource.contains(".alert(item: $pendingAudioRetentionWindow)"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: $homeDeleteConfirmation)")
+                || contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: $homeDeleteFailure)")
+                || contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(".alert(item: $pendingAudioRetentionWindow)"),
             "Home alerts must not be re-stacked as separate `.alert(item:)` modifiers — stacked legacy alerts shadow all but the last"
         )
         // The shared binding must dismiss only the active alert via
@@ -372,8 +361,8 @@ func testUIAutomationSurfaceContract() {
         // everything would wipe it before it presents. (HomeRootAlertPolicyTests
         // covers the priority/dismissal behavior directly.)
         assertTrue(
-            settingsSource.contains("HomeRootAlertPolicy.activeSlot")
-                && settingsSource.contains("switch activeRootAlert"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("HomeRootAlertPolicy.activeSlot")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("switch activeRootAlert"),
             "the shared alert binding should clear only the dismissed alert through HomeRootAlertPolicy, not reset all three states"
         )
 
@@ -384,23 +373,20 @@ func testUIAutomationSurfaceContract() {
         // an error instead of a silent dead click. Behavior is covered by
         // OwnFileResolverTests; these guard the wiring so a regression that re-adds a
         // raw stale-path call (the #1126/#1131/#1134 whack-a-mole) fails CI.
-        let ownFileResolverSource = readUIAutomationContractFile("Sources/UI/Shared/OwnFileResolver.swift")
-        let playbackSource = readUIAutomationContractFile("Sources/UI/Shared/MeetingAudioPlayback.swift")
-
         assertTrue(
-            ownFileResolverSource.contains("static func resolveForReveal(")
-                && ownFileResolverSource.contains("static func resolveExistingFile(")
-                && ownFileResolverSource.contains("static func resolveExistingFiles(")
-                && ownFileResolverSource.contains("case reveal([URL])")
-                && ownFileResolverSource.contains("case unavailable"),
+            contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("static func resolveForReveal(")
+                && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("static func resolveExistingFile(")
+                && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("static func resolveExistingFiles(")
+                && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("case reveal([URL])")
+                && contractSource("Sources/UI/Shared/OwnFileResolver.swift").contains("case unavailable"),
             "OwnFileResolver must keep both reveal (with enclosing-folder fallback) and open/play (regular-file-only) resolution modes"
         )
 
         assertTrue(
-            settingsSource.contains("private func revealOwnFile(")
-                && settingsSource.contains("OwnFileResolver.resolveForReveal(candidateURLs:")
-                && settingsSource.contains("private func openOwnFile(")
-                && settingsSource.contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("private func revealOwnFile(")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("OwnFileResolver.resolveForReveal(candidateURLs:")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("private func openOwnFile(")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
             "Home reveal/open should route through OwnFileResolver helpers, surfacing presentHomeActionFailure on .unavailable instead of a dead click"
         )
 
@@ -417,7 +403,7 @@ func testUIAutomationSurfaceContract() {
             "NSWorkspace.shared.open(transcriptURL)",
         ] {
             assertFalse(
-                settingsSource.contains(staleRawCall),
+                contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(staleRawCall),
                 "Home own-file action must not call NSWorkspace on a raw scan-time URL (\(staleRawCall)) — route it through OwnFileResolver"
             )
         }
@@ -425,19 +411,19 @@ func testUIAutomationSurfaceContract() {
         // Copy/export and re-transcribe must surface a failure, not a silent beep,
         // when the source file cannot be resolved.
         assertFalse(
-            settingsSource.contains("NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("NSWorkspace.shared.activateFileViewerSelecting(audioRevealURLs)"),
             "failed-meeting reveal audio must route through OwnFileResolver, not beep-or-reveal on raw URLs"
         )
         assertTrue(
-            settingsSource.contains("Could not copy meeting")
-                && settingsSource.contains("Could not re-transcribe meeting"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Could not copy meeting")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("Could not re-transcribe meeting"),
             "copy-for-agent and re-transcribe should surface a failure alert when the own file is missing, instead of NSSound.beep()"
         )
 
         // Retained-audio playback follows recompressed/moved files instead of going
         // silently Unavailable on a stale path.
         assertTrue(
-            playbackSource.contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
+            contractSource("Sources/UI/Shared/MeetingAudioPlayback.swift").contains("OwnFileResolver.resolveExistingFile(candidateURLs:"),
             "meeting audio playback should resolve each source URL through OwnFileResolver so WAV→M4A recompression still plays"
         )
 
@@ -445,9 +431,9 @@ func testUIAutomationSurfaceContract() {
         // still on disk (stale path), instead of letting the row reappear
         // unexplained. Deletion intentionally does not use the lenient resolver.
         assertTrue(
-            settingsSource.contains("result.removedTranscriptURLs.isEmpty")
-                && settingsSource.contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
-                && settingsSource.contains("presentHomeActionFailure("),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("result.removedTranscriptURLs.isEmpty")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("presentHomeActionFailure("),
             "deleteMeeting should detect a no-op delete (stale path) and surface a failure rather than silently re-showing the row"
         )
 
@@ -457,11 +443,11 @@ func testUIAutomationSurfaceContract() {
         // full-width hit shape (its idle background is Color.clear) and the
         // canvas-header action button must not draw a focus ring.
         assertTrue(
-            homeSource.contains(".focusEffectDisabled()"),
+            contractSource("Sources/UI/Settings/HomeView.swift").contains(".focusEffectDisabled()"),
             "the Home canvas-header action button should keep .focusEffectDisabled() so it draws no focus ring"
         )
         assertTrue(
-            homeSource.contains("across the full row.\n        .contentShape(Rectangle())"),
+            contractSource("Sources/UI/Settings/HomeView.swift").contains("across the full row.\n        .contentShape(Rectangle())"),
             "recent-capture rows should keep their full-width .contentShape(Rectangle()) so hover reveals row actions everywhere, not only over the title text"
         )
 
@@ -470,7 +456,7 @@ func testUIAutomationSurfaceContract() {
             "Allow calendar access",
             "Skip for now",
         ] {
-            assertTrue(onboardingSource.contains(requiredOnboardingHook), "\(requiredOnboardingHook) should stay in onboarding automation scope")
+            assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(requiredOnboardingHook), "\(requiredOnboardingHook) should stay in onboarding automation scope")
         }
 
         for identifier in [
@@ -483,21 +469,21 @@ func testUIAutomationSurfaceContract() {
             "transcripted.speaker-review.row.discard-voice",
         ] {
             assertTrue(
-                speakerReviewSource.contains(identifier),
+                contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains(identifier),
                 "\(identifier) should keep speaker review scriptable without using speaker names"
             )
         }
         assertTrue(
-            speakerReviewSource.contains("static let minimum: CGFloat = 40")
-                && speakerReviewSource.contains("let btnH = SpeakerNamingHitTargets.minimum")
-                && speakerReviewSource.contains("let fieldH = SpeakerNamingHitTargets.minimum")
-                && speakerReviewSource.contains("let hitTarget = SpeakerNamingHitTargets.minimum"),
+            contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("static let minimum: CGFloat = 40")
+                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let btnH = SpeakerNamingHitTargets.minimum")
+                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let fieldH = SpeakerNamingHitTargets.minimum")
+                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let hitTarget = SpeakerNamingHitTargets.minimum"),
             "speaker review save/cancel/name/play/confirm/discard controls should keep a 40pt hit floor"
         )
         assertTrue(
-            speakerReviewSource.contains("static let sectionHeaderHeight: CGFloat = 40")
-                && speakerReviewSource.contains("let headerHeight = SpeakerNamingHitTargets.sectionHeaderHeight")
-                && speakerReviewSource.contains("keepAsYouButton.frame = NSRect("),
+            contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("static let sectionHeaderHeight: CGFloat = 40")
+                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("let headerHeight = SpeakerNamingHitTargets.sectionHeaderHeight")
+                && contractSource("Sources/UI/Settings/SpeakerNamingSheet.swift").contains("keepAsYouButton.frame = NSRect("),
             "speaker review Keep Local Mic as You should keep a 40pt section-header hit floor"
         )
 
@@ -510,77 +496,67 @@ func testUIAutomationSurfaceContract() {
             "Copy Paths",
             "Live meetings",
         ] {
-            assertTrue(agentSettingsSource.contains(requiredAgentHook), "\(requiredAgentHook) should stay in agent/connect automation scope")
+            assertTrue(contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift").contains(requiredAgentHook), "\(requiredAgentHook) should stay in agent/connect automation scope")
         }
 
-        let meetingOverlaySource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingOverlayController.swift")
-        let liveViewPolicySource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift")
         assertTrue(
-            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view")
-                && meetingOverlaySource.contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)"),
+            contractSource("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift").contains("transcripted.meeting-overlay.live-view")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("setAccessibilityIdentifier(MeetingLiveViewAffordancePolicy.automationIdentifier)"),
             "the recording pill body should keep a stable automation identifier for the transcript toggle"
         )
-        let transcriptDrawerSource = readUIAutomationContractFile("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift")
         assertTrue(
-            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.copy")
-                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.copyAutomationIdentifier"),
+            contractSource("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift").contains("transcripted.meeting-overlay.live-view.copy")
+                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("MeetingLiveViewAffordancePolicy.copyAutomationIdentifier"),
             "the transcript drawer's copy action should keep a stable automation identifier"
         )
         assertTrue(
-            liveViewPolicySource.contains("transcripted.meeting-overlay.live-view.more")
-                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.moreAutomationIdentifier"),
+            contractSource("Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift").contains("transcripted.meeting-overlay.live-view.more")
+                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("MeetingLiveViewAffordancePolicy.moreAutomationIdentifier"),
             "the transcript drawer's overflow menu should keep a stable automation identifier"
         )
         assertTrue(
-            meetingOverlaySource.contains("MeetingLiveViewAffordancePolicy.discardRecordingMenuTitle")
-                && meetingOverlaySource.contains("MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle")
-                && transcriptDrawerSource.contains("MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle"),
+            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("MeetingLiveViewAffordancePolicy.discardRecordingMenuTitle")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("MeetingLiveViewAffordancePolicy.keepControlsVisibleMenuTitle")
+                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("MeetingLiveViewAffordancePolicy.openInBrowserMenuTitle"),
             "pill context-menu and drawer overflow actions should keep policy-pinned titles for automation"
         )
         assertTrue(
-            transcriptDrawerSource.contains("transientStatusText ?? statusText")
-                && transcriptDrawerSource.contains("openInBrowserFailedStatus")
-                && transcriptDrawerSource.contains(".announcement: MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus"),
+            contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("transientStatusText ?? statusText")
+                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains("openInBrowserFailedStatus")
+                && contractSource("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift").contains(".announcement: MeetingLiveViewAffordancePolicy.openInBrowserFailedStatus"),
             "browser-open failures should remain visible and announced even while transcript updates continue"
         )
         assertTrue(
-            meetingOverlaySource.contains("showLiveViewBrowserOpenFailure")
-                && meetingOverlaySource.contains("isTranscriptExpanded = true")
-                && meetingOverlaySource.contains("rootView?.flashTranscriptBrowserOpenFailure()"),
+            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("showLiveViewBrowserOpenFailure")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("isTranscriptExpanded = true")
+                && contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("rootView?.flashTranscriptBrowserOpenFailure()"),
             "browser-open failures from the collapsed pill menu should reveal the drawer before showing feedback"
         )
 
         assertTrue(
-            deletePolicySource.contains("Delete this meeting?")
-                && deletePolicySource.contains("Delete Meeting")
-                && deletePolicySource.contains("Delete this failed meeting?")
-                && deletePolicySource.contains("Delete Failed Meeting"),
+            contractSource("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift").contains("Delete this meeting?")
+                && contractSource("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift").contains("Delete Meeting")
+                && contractSource("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift").contains("Delete this failed meeting?")
+                && contractSource("Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift").contains("Delete Failed Meeting"),
             "delete confirmation copy should stay pinned for destructive-flow automation"
         )
 
         assertTrue(
-            settingsComponentsSource.contains("settingsAutomationIdentifier")
-                && settingsComponentsSource.contains("transcripted.settings.permissions.\\(kind.rawValue).action"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains("settingsAutomationIdentifier")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains("transcripted.settings.permissions.\\(kind.rawValue).action"),
             "settings shared controls should support stable automation IDs"
         )
 
         assertTrue(
-            generalControlsSource.contains("generalAutomationIdentifier")
-                && generalControlsSource.contains("transcripted.settings.general.dictation-window.options")
-                && generalControlsSource.contains("transcripted.settings.general.dictation-window.\\(mode.rawValue)")
-                && generalControlsSource.contains("transcripted.settings.general.info.\\(automationSlug(info.title))"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("generalAutomationIdentifier")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("transcripted.settings.general.dictation-window.options")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("transcripted.settings.general.dictation-window.\\(mode.rawValue)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("transcripted.settings.general.info.\\(automationSlug(info.title))"),
             "general settings controls should keep scriptable row and choice IDs"
         )
     }
 
     runSuite("UI automation surface contract - deterministic click-flow identifiers stay mapped") {
-        let settingsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
-        let homeSource = readUIAutomationContractFile("Sources/UI/Settings/HomeView.swift")
-        let speakerPeopleSource = readUIAutomationContractFile("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
-        let settingsComponentsSource = readUIAutomationContractFile("Sources/UI/Settings/TranscriptedSettingsComponents.swift")
-        let onboardingSource = readUIAutomationContractFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
-        let firstRunSource = readUIAutomationContractFile("Sources/UI/Shared/FirstRunExperience.swift")
-
         for identifier in [
             "transcripted.home.stats.view",
             "transcripted.home.stats.done",
@@ -607,7 +583,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.home.load-more",
             "transcripted.home.needs-attention.review.",
         ] {
-            assertTrue(homeSource.contains(identifier), "\(identifier) should stay attached to Home click-flow controls")
+            assertTrue(contractSource("Sources/UI/Settings/HomeView.swift").contains(identifier), "\(identifier) should stay attached to Home click-flow controls")
         }
 
         for identifier in [
@@ -630,27 +606,27 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.beta.local-summary.install-uv",
             "transcripted.settings.beta.open-agent-setup",
         ] {
-            assertTrue(settingsSource.contains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
+            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
         }
 
         assertTrue(
-            speakerPeopleSource.contains("transcripted.speakers.inbox")
-                && speakerPeopleSource.contains(".id(ScrollTarget.reviewQueue)")
-                && settingsSource.contains("proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue"),
+            contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("transcripted.speakers.inbox")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(".id(ScrollTarget.reviewQueue)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue"),
             "The voices-to-name section should keep a stable automation anchor that review deep-links can scroll to"
         )
 
         assertTrue(
-            speakerPeopleSource.contains("enum SpeakerPeopleSettingsPolishContract")
-                && speakerPeopleSource.contains("struct SpeakerCompactIconLabel")
-                && speakerPeopleSource.contains("static let minimumHitTarget: CGFloat = 40")
-                && speakerPeopleSource.contains("static let playButtonVisibleDiameter: CGFloat = 36")
-                && speakerPeopleSource.contains("static let compactIconVisibleDiameter: CGFloat = 28")
-                && speakerPeopleSource.contains(".contentShape(Rectangle())"),
+            contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("enum SpeakerPeopleSettingsPolishContract")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerCompactIconLabel")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let minimumHitTarget: CGFloat = 40")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let playButtonVisibleDiameter: CGFloat = 36")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let compactIconVisibleDiameter: CGFloat = 28")
+                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(".contentShape(Rectangle())"),
             "speaker settings should pin compact icon chrome separately from the 40pt hit shape"
         )
 
-        let speakerCompactIconLabelApplications = speakerPeopleSource
+        let speakerCompactIconLabelApplications = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
             .components(separatedBy: "SpeakerCompactIconLabel(")
             .count - 1
         assertTrue(
@@ -666,23 +642,23 @@ func testUIAutomationSurfaceContract() {
             "transcripted.speakers.person.menu",
         ] {
             assertTrue(
-                speakerPeopleSource.contains(identifier),
+                contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(identifier),
                 "\(identifier) should keep the speakers surface's icon-only controls scriptable without using speaker names"
             )
         }
 
         assertTrue(
-            homeSource.contains("HomeAttentionPillsRow")
-                && homeSource.contains(".accessibilityHint(issue.detail)")
-                && homeSource.contains("transcripted.home.needs-attention.review."),
+            contractSource("Sources/UI/Settings/HomeView.swift").contains("HomeAttentionPillsRow")
+                && contractSource("Sources/UI/Settings/HomeView.swift").contains(".accessibilityHint(issue.detail)")
+                && contractSource("Sources/UI/Settings/HomeView.swift").contains("transcripted.home.needs-attention.review."),
             "Home attention pills should stay labeled and scriptable"
         )
 
         assertTrue(
-            settingsSource.contains("HomeRowMenuItem(title: \"Review speakers\"")
-                && settingsSource.contains("let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)")
-                && settingsSource.contains("if !audioRevealURLs.isEmpty")
-                && settingsSource.contains("title: \"Re-transcribe with speaker ID\""),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("HomeRowMenuItem(title: \"Review speakers\"")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("if !audioRevealURLs.isEmpty")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("title: \"Re-transcribe with speaker ID\""),
             "meeting speaker review and re-transcribe actions should stay reachable from the row menu when retained audio has a Finder target"
         )
 
@@ -704,46 +680,42 @@ func testUIAutomationSurfaceContract() {
             "transcripted.onboarding.agent.connect-claude-desktop",
             "transcripted.onboarding.agent.copy-local-agent-prompt",
         ] {
-            assertTrue(onboardingSource.contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
+            assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(identifier), "\(identifier) should stay attached to onboarding click-flow controls")
         }
 
         assertTrue(
-            onboardingSource.contains("UseCaseChoiceCard(")
-                && onboardingSource.contains("transcripted.onboarding.use-case.meetings")
-                && onboardingSource.contains("transcripted.onboarding.use-case.dictation")
-                && onboardingSource.contains("selectedStateStrokeWidth")
-                && onboardingSource.contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"),
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("UseCaseChoiceCard(")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.use-case.meetings")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.use-case.dictation")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("selectedStateStrokeWidth")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"),
             "onboarding use-case cards should keep their scriptable card-button and selected-state hooks"
         )
 
         assertTrue(
-            firstRunSource.contains("static let minimumHitTarget: Double = 44")
-                && firstRunSource.contains("static let modelProgressLabelMinimumWidth: Double = 104")
-                && firstRunSource.contains("static let selectedStateStrokeWidth: Double = 2")
-                && onboardingSource.contains("transcripted.onboarding.nav.skip")
-                && onboardingSource.contains("transcripted.onboarding.nav.primary")
-                && onboardingSource.contains("FirstRunOnboardingPolishContract.minimumHitTarget")
-                && onboardingSource.contains(".contentShape(Rectangle())")
-                && onboardingSource.contains(".contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))"),
+            contractSource("Sources/UI/Shared/FirstRunExperience.swift").contains("static let minimumHitTarget: Double = 44")
+                && contractSource("Sources/UI/Shared/FirstRunExperience.swift").contains("static let modelProgressLabelMinimumWidth: Double = 104")
+                && contractSource("Sources/UI/Shared/FirstRunExperience.swift").contains("static let selectedStateStrokeWidth: Double = 2")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.skip")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.nav.primary")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("FirstRunOnboardingPolishContract.minimumHitTarget")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(Rectangle())")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))"),
             "onboarding nav and compact controls should keep pinned polish constants and hit-shape hooks"
         )
 
         assertTrue(
-            settingsComponentsSource.contains(".monospacedDigit()")
-                && settingsComponentsSource.contains("modelProgressLabelMinimumWidth")
-                && settingsComponentsSource.contains(".accessibilityLabel(Text(status))"),
+            contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".monospacedDigit()")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains("modelProgressLabelMinimumWidth")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".accessibilityLabel(Text(status))"),
             "onboarding/local-model progress labels should stay stable, tabular, and accessible"
         )
     }
 
     runSuite("UI automation surface contract - QA CLI exposes a real AX smoke") {
-        let qaEntrySource = readUIAutomationContractFile("Tools/TranscriptedQA/Sources/TranscriptedQA/TranscriptedQA.swift")
-        let uiSmokeSource = readUIAutomationContractFile("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift")
-        let qaBenchSource = readUIAutomationContractFile("scripts/ops/transcripted-qa-bench.sh")
-
         assertTrue(
-            qaEntrySource.contains("UISmoke.self")
-                && uiSmokeSource.contains("commandName: \"ui-smoke\""),
+            contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/TranscriptedQA.swift").contains("UISmoke.self")
+                && contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift").contains("commandName: \"ui-smoke\""),
             "TranscriptedQA should expose a ui-smoke command for repo-owned UI automation"
         )
 
@@ -773,14 +745,14 @@ func testUIAutomationSurfaceContract() {
             "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.system-audio",
         ] {
-            assertTrue(uiSmokeSource.contains(requiredHarnessHook), "\(requiredHarnessHook) should stay pinned in the UI smoke harness")
+            assertTrue(contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift").contains(requiredHarnessHook), "\(requiredHarnessHook) should stay pinned in the UI smoke harness")
         }
 
         assertTrue(
-            qaBenchSource.contains("quick|deep|full|ui|imported-audio-native|sparkle-update|packaged|artifact")
-                && qaBenchSource.contains("run_ui_tail")
-                && qaBenchSource.contains("transcripted-qa ui-smoke")
-                && qaBenchSource.contains("ui-automation-smoke.json"),
+            contractSource("scripts/ops/transcripted-qa-bench.sh").contains("quick|deep|full|ui|imported-audio-native|sparkle-update|packaged|artifact")
+                && contractSource("scripts/ops/transcripted-qa-bench.sh").contains("run_ui_tail")
+                && contractSource("scripts/ops/transcripted-qa-bench.sh").contains("transcripted-qa ui-smoke")
+                && contractSource("scripts/ops/transcripted-qa-bench.sh").contains("ui-automation-smoke.json"),
             "QA bench should keep a callable ui mode with local JSON evidence"
         )
     }
