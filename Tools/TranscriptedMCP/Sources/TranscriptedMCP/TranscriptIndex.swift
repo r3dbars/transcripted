@@ -46,7 +46,39 @@ final class TranscriptIndex: @unchecked Sendable {
             sqlite3_finalize(stmt)
         }
 
+        try applySchemaVersionGate()
         createTables()
+        exec("PRAGMA user_version=\(Self.schemaVersion)")
+    }
+
+    /// Bump when the derived index shape changes so existing on-disk indexes are
+    /// rebuilt from disk on next open. v2 added `meeting_summary_items`.
+    private static let schemaVersion: Int32 = 2
+
+    /// An already-indexed meeting whose transcript mtime is unchanged is skipped
+    /// by `reconcile`, so a schema addition (new table/column) would never
+    /// populate for it. When the stored `user_version` is older than the current
+    /// schema, wipe and reopen the index so the next reconcile rebuilds every
+    /// derived table from disk. Mirrors the corruption-recovery path above.
+    /// (Old/unversioned indexes report 0, indistinguishable from a fresh DB —
+    /// rebuilding an empty fresh DB is a harmless no-op.)
+    private func applySchemaVersionGate() throws {
+        guard storedUserVersion() < Self.schemaVersion else { return }
+        sqlite3_close(db)
+        db = nil
+        try? FileManager.default.removeItem(at: indexPath)
+        log("Index schema older than v\(Self.schemaVersion), rebuilding from disk")
+        if sqlite3_open(indexPath.path, &db) != SQLITE_OK {
+            throw MCPIndexError.databaseOpenFailed(dbError())
+        }
+        configureDatabase()
+    }
+
+    private func storedUserVersion() -> Int32 {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int(stmt, 0) : 0
     }
 
     /// Apply owner-only file permissions and WAL pragmas to an already-opened database handle.
@@ -166,6 +198,45 @@ final class TranscriptIndex: @unchecked Sendable {
             END
         """)
 
+        // Structured summary fields (Decisions / Action Items / Open Questions)
+        // parsed from each meeting's local summary. One row per bullet, keyed to
+        // the meeting filename, with a `kind` discriminator so cross-meeting tools
+        // (list_action_items, open_questions roll-ups) can aggregate over all
+        // meetings without a per-category table. Mirrors the utterances + FTS5 +
+        // triggers pattern above.
+        exec("""
+            CREATE TABLE IF NOT EXISTS meeting_summary_items (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                owner TEXT,
+                text TEXT NOT NULL
+            )
+        """)
+
+        exec("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS meeting_summary_items_fts USING fts5(
+                text, owner,
+                content='meeting_summary_items', content_rowid='rowid',
+                tokenize='porter unicode61'
+            )
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ai AFTER INSERT ON meeting_summary_items BEGIN
+                INSERT INTO meeting_summary_items_fts(rowid, text, owner)
+                VALUES (new.rowid, new.text, new.owner);
+            END
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ad AFTER DELETE ON meeting_summary_items BEGIN
+                INSERT INTO meeting_summary_items_fts(meeting_summary_items_fts, rowid, text, owner)
+                VALUES ('delete', old.rowid, old.text, old.owner);
+            END
+        """)
+
         exec("CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(date)")
         exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_name ON meeting_speakers(speaker_name COLLATE NOCASE)")
         exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_persistent_id ON meeting_speakers(persistent_speaker_id)")
@@ -173,6 +244,9 @@ final class TranscriptIndex: @unchecked Sendable {
         exec("CREATE INDEX IF NOT EXISTS idx_dictation_days_date ON dictation_days(date)")
         exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_filename ON dictation_entries(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_created_at ON dictation_entries(created_at)")
+        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_filename ON meeting_summary_items(filename)")
+        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON meeting_summary_items(kind)")
+        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_owner ON meeting_summary_items(owner COLLATE NOCASE)")
     }
 
     // MARK: - Reconciliation
@@ -324,9 +398,41 @@ final class TranscriptIndex: @unchecked Sendable {
             )
         }
 
+        try insertSummaryItems(forMeeting: url, filename: filename)
+
         try execOrThrow("COMMIT")
         committed = true
         log("Indexed: \(filename) (\(transcript.utterances.count) utterances)")
+    }
+
+    /// Parse the meeting's structured summary (inline transcript summary, then a
+    /// generated sidecar) and write one row per Decision / Action Item / Open
+    /// Question. Called inside the meeting index transaction. A meeting with no
+    /// summary inserts nothing.
+    private func insertSummaryItems(forMeeting url: URL, filename: String) throws {
+        guard let summary = TranscriptLoader.loadMeetingSummary(forTranscript: url) else { return }
+
+        for (position, text) in summary.decisions.enumerated() {
+            try bindExec(
+                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
+                bindings: [.text(filename), .text(SummaryItemKind.decision), .int(position), .null, .text(text)]
+            )
+        }
+        for (position, item) in summary.actionItems.enumerated() {
+            try bindExec(
+                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
+                bindings: [
+                    .text(filename), .text(SummaryItemKind.actionItem), .int(position),
+                    item.owner.map { .text($0) } ?? .null, .text(item.text)
+                ]
+            )
+        }
+        for (position, text) in summary.openQuestions.enumerated() {
+            try bindExec(
+                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
+                bindings: [.text(filename), .text(SummaryItemKind.openQuestion), .int(position), .null, .text(text)]
+            )
+        }
     }
 
     private func indexDictationDay(file url: URL, filename: String, modDate: TimeInterval) throws {
@@ -386,12 +492,107 @@ final class TranscriptIndex: @unchecked Sendable {
         var committed = false
         defer { if !committed { exec("ROLLBACK") } }
         try bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM meeting_summary_items WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_speakers WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM dictation_entries WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM dictation_days WHERE filename = ?", bindings: [.text(filename)])
         try execOrThrow("COMMIT")
         committed = true
+    }
+
+    // MARK: - Structured summary queries
+
+    /// Stable `kind` discriminator values for `meeting_summary_items`.
+    enum SummaryItemKind {
+        static let decision = "decision"
+        static let actionItem = "action_item"
+        static let openQuestion = "open_question"
+    }
+
+    /// One indexed structured-summary row joined to its meeting's date metadata.
+    /// This is the foundation the separate cross-meeting tools thread (e.g.
+    /// `list_action_items`) builds on; no MCP tool is wired here yet.
+    struct IndexedSummaryItem {
+        let filename: String
+        let kind: String
+        let position: Int
+        let owner: String?
+        let text: String
+        let meetingDate: String
+        let meetingDateTime: String
+    }
+
+    /// Roll up structured summary items across meetings, newest meeting first.
+    /// `kind` and `owner` are optional filters; `owner == ""` selects unassigned
+    /// (NULL-owner) items, which is meaningful only for action items.
+    func listSummaryItems(
+        kind: String? = nil,
+        owner: String? = nil,
+        dateFrom: String? = nil,
+        dateTo: String? = nil,
+        limit: Int = 200
+    ) throws -> [IndexedSummaryItem] {
+        return try queue.sync {
+            let cappedLimit = max(1, min(limit, 1000))
+            var sql = """
+                SELECT s.filename, s.kind, s.position, s.owner, s.text, m.date, m.datetime
+                FROM meeting_summary_items s
+                JOIN meetings m ON m.filename = s.filename
+            """
+            var bindings: [SQLBinding] = []
+            var conditions: [String] = []
+
+            if let kind = kind {
+                conditions.append("s.kind = ?")
+                bindings.append(.text(kind))
+            }
+            if let owner = owner {
+                if owner.isEmpty {
+                    conditions.append("s.owner IS NULL")
+                } else {
+                    conditions.append("s.owner COLLATE NOCASE = ?")
+                    bindings.append(.text(owner))
+                }
+            }
+            if let dateFrom = dateFrom {
+                conditions.append("m.date >= ?")
+                bindings.append(.text(dateFrom))
+            }
+            if let dateTo = dateTo {
+                conditions.append("m.date <= ?")
+                bindings.append(.text(dateTo))
+            }
+
+            if !conditions.isEmpty {
+                sql += " WHERE " + conditions.joined(separator: " AND ")
+            }
+            sql += " ORDER BY m.datetime DESC, s.filename, s.kind, s.position LIMIT ?"
+            bindings.append(.int(cappedLimit))
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+            for (i, binding) in bindings.enumerated() {
+                bind(stmt: stmt, index: Int32(i + 1), value: binding)
+            }
+
+            var items: [IndexedSummaryItem] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                items.append(IndexedSummaryItem(
+                    filename: colText(stmt, 0),
+                    kind: colText(stmt, 1),
+                    position: Int(sqlite3_column_int64(stmt, 2)),
+                    owner: colTextOptional(stmt, 3),
+                    text: colText(stmt, 4),
+                    meetingDate: colText(stmt, 5),
+                    meetingDateTime: colText(stmt, 6)
+                ))
+            }
+            return items
+        }
     }
 
     // MARK: - Queries
