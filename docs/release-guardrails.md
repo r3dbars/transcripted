@@ -64,4 +64,3 @@ Keep those boundaries explicit in closeouts:
 - `Homebrew`: cask version and checksum state
 - `website/download`: live route state
 - `manual QA`: human/hardware proof state
-
