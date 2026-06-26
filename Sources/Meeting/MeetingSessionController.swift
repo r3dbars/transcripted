@@ -1840,7 +1840,13 @@ final class MeetingSessionController: ObservableObject {
         let previousRestyle = savedTranscriptRestyleTask
         let restyle = Task.detached(priority: .userInitiated) { () -> StyledMeetingTranscript in
             _ = await previousRestyle?.value
-            return MeetingTranscriptStyler.restyleTranscript(at: url)
+            let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
+            // Always-on cheap field extraction so the search index covers every
+            // meeting, not just the heavy local-summary beta opt-in. Runs after
+            // restyle (the body is now in canonical styled form) on this chained
+            // background task, and is idempotent + frontmatter-only.
+            MeetingQuickSummaryWriter.ensureQuickSummary(at: styled.url)
+            return styled
         }
         savedTranscriptRestyleTask = restyle
 

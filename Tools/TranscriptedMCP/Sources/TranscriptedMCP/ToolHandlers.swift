@@ -233,6 +233,84 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 ]),
                 annotations: .init(readOnlyHint: true)
             ),
+            Tool(
+                name: "list_action_items",
+                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status (open by default, or 'done'/'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Depends on the meeting summary index.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "owner": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter to action items assigned to this person (e.g. 'Nate')")
+                        ]),
+                        "status": .object([
+                            "type": .string("string"),
+                            "description": .string("Which items to return: 'open' (default), 'done', or 'all'")
+                        ]),
+                        "query": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional full-text filter on the action item text")
+                        ]),
+                        "date_from": .object([
+                            "type": .string("string"),
+                            "description": .string("Start date filter (YYYY-MM-DD)")
+                        ]),
+                        "date_to": .object([
+                            "type": .string("string"),
+                            "description": .string("End date filter (YYYY-MM-DD)")
+                        ]),
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum items to return (default: 50, max: 200)")
+                        ]),
+                    ]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
+                name: "list_decisions",
+                description: "Roll up decisions across every meeting. Optionally filter by a free-text query or date range. Use this for 'what did we decide about pricing' or 'all decisions this quarter'. Depends on the meeting summary index.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional full-text filter on the decision text")
+                        ]),
+                        "date_from": .object([
+                            "type": .string("string"),
+                            "description": .string("Start date filter (YYYY-MM-DD)")
+                        ]),
+                        "date_to": .object([
+                            "type": .string("string"),
+                            "description": .string("End date filter (YYYY-MM-DD)")
+                        ]),
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum decisions to return (default: 50, max: 200)")
+                        ]),
+                    ]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
+                name: "digest",
+                description: "Cross-meeting summary for a time window: every meeting in range that has structured summary facts, with its decisions, action items, and open questions, plus rolled-up counts. Use for 'what happened across all my meetings this week'. Depends on the meeting summary index.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "date_from": .object([
+                            "type": .string("string"),
+                            "description": .string("Start date (YYYY-MM-DD). Defaults to today.")
+                        ]),
+                        "date_to": .object([
+                            "type": .string("string"),
+                            "description": .string("End date (YYYY-MM-DD). Defaults to same as date_from.")
+                        ]),
+                    ]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
         ])
     }
 
@@ -257,6 +335,12 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 return try handleWhoIs(params: params, index: index)
             case "recap":
                 return try handleRecap(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "list_action_items":
+                return try handleListActionItems(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "list_decisions":
+                return try handleListDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "digest":
+                return try handleDigest(params: params, index: index, meetingDirs: directories.meetingDirs)
             default:
                 return textResult("Unknown tool: \(params.name)", isError: true)
             }
@@ -629,6 +713,76 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
 
     let json = try JSONEncoder.pretty.encode(result)
     return textResult(String(data: json, encoding: .utf8) ?? "[]")
+}
+
+// MARK: - list_action_items / list_decisions / digest (cross-meeting rollups)
+
+private func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+    let owner = params.arguments?["owner"]?.stringValue
+    let query = params.arguments?["query"]?.stringValue
+    let status = ActionItemStatusFilter(raw: params.arguments?["status"]?.stringValue)
+    let dateFrom = params.arguments?["date_from"]?.stringValue
+    let dateTo = params.arguments?["date_to"]?.stringValue
+    let count = params.arguments?["count"]?.intValue ?? 50
+
+    var result = try index.listActionItems(
+        owner: owner, query: query, status: status,
+        dateFrom: dateFrom, dateTo: dateTo, maxItems: count
+    )
+
+    for i in result.items.indices {
+        result.items[i].meetingTitle = meetingTitle(for: result.items[i].filename, meetingDirs: meetingDirs)
+    }
+
+    if result.items.isEmpty {
+        var msg = "No \(status == .all ? "" : status.rawValue + " ")action items found"
+        if let owner, !owner.isEmpty { msg += " for \(owner)" }
+        msg += ". Action items come from the meeting summary index; if summaries have not been indexed yet, this will be empty."
+        return textResult(msg)
+    }
+
+    let json = try JSONEncoder.pretty.encode(result)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
+private func handleListDecisions(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+    let query = params.arguments?["query"]?.stringValue
+    let dateFrom = params.arguments?["date_from"]?.stringValue
+    let dateTo = params.arguments?["date_to"]?.stringValue
+    let count = params.arguments?["count"]?.intValue ?? 50
+
+    var result = try index.listDecisions(query: query, dateFrom: dateFrom, dateTo: dateTo, maxItems: count)
+
+    for i in result.decisions.indices {
+        result.decisions[i].meetingTitle = meetingTitle(for: result.decisions[i].filename, meetingDirs: meetingDirs)
+    }
+
+    if result.decisions.isEmpty {
+        return textResult("No decisions found. Decisions come from the meeting summary index; if summaries have not been indexed yet, this will be empty.")
+    }
+
+    let json = try JSONEncoder.pretty.encode(result)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
+private func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+    // Default to today when no window is given, matching recap's behavior.
+    let today = DateFormatter.localYYYYMMDD.string(from: Date())
+    let dateFrom = params.arguments?["date_from"]?.stringValue ?? today
+    let dateTo = params.arguments?["date_to"]?.stringValue ?? dateFrom
+
+    var result = try index.digest(dateFrom: dateFrom, dateTo: dateTo)
+
+    for i in result.meetings.indices {
+        result.meetings[i].title = meetingTitle(for: result.meetings[i].filename, meetingDirs: meetingDirs)
+    }
+
+    if result.meetings.isEmpty {
+        return textResult("No summarized meetings found for \(result.dateRange). Digest reads the meeting summary index; if summaries have not been indexed yet, this will be empty.")
+    }
+
+    let json = try JSONEncoder.pretty.encode(result)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
 // MARK: - Output Types
