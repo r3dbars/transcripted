@@ -70,6 +70,28 @@ change so the inventory stays complete.
 - `deps-tools/sparkle/bin/sign_update`
 - `deps-tools/sparkle/bin/generate_keys`
 
+For a no-publish UI smoke of the native Transcripted update surfaces, build the
+app and run:
+
+```bash
+bash build.sh --no-open
+swift run --package-path Tools/TranscriptedQA transcripted-qa sparkle-update-smoke --app build/Transcripted.app --output /tmp/transcripted-sparkle-update-smoke
+```
+
+Or through the QA bench:
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update
+```
+
+This launches the built app in the existing launch-smoke harness with a fake
+Sparkle `updateAvailable` state and a fake `downloading` state. It verifies the
+menu update-available callout and the download-progress row from the app's own
+menu snapshot, and writes local JSON evidence plus a fake appcast fixture under
+the output directory. It does not contact the live feed, download an update,
+verify a signature, install, relaunch, publish, update Homebrew, or prove an
+existing installed app can upgrade.
+
 ## Release flow
 
 1. Build a signed/notarized Transcripted archive, typically with `build-beta.sh`.

@@ -75,6 +75,26 @@ This requires Accessibility permission for the terminal or Codex runner. If
 macOS blocks AX observation/control, the result is `INCOMPLETE` with exit code
 `3`. Do not treat that as product proof.
 
+## Sparkle Update UI Run
+
+```bash
+bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update
+```
+
+This builds the app, then runs:
+
+```bash
+swift run --package-path Tools/TranscriptedQA transcripted-qa sparkle-update-smoke --app build/Transcripted.app
+```
+
+The smoke uses the app's launch-smoke harness with a fake Sparkle update
+available state and a fake downloading state. It checks the real menu
+presentation snapshot for `Update available: <version>`, `Install`, and the
+disabled `Preparing Update` progress row. It writes local JSON evidence and a
+fake appcast fixture. This is no-publish UI proof only; it does not prove the
+live appcast, download, signature, install, relaunch, existing-install upgrade,
+or Homebrew path.
+
 ## Imported Audio Native Run
 
 ```bash
@@ -97,7 +117,6 @@ This requires Accessibility plus keyboard event permission for the runner. If
 macOS blocks the picker automation, or if local speech/diarization models cannot
 finish the import on this Mac, the result is `INCOMPLETE` with exit code `3`.
 That is a real proof blocker, not a product pass.
-
 ## Deep Run
 
 ```bash

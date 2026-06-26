@@ -181,6 +181,7 @@ struct TranscriptedQA: ParsableCommand {
             ImportedAudioSmoke.self,
             ImportedAudioNativeSmoke.self,
             UISmoke.self,
+            SparkleUpdateSmoke.self,
             PackagedAppSmoke.self,
         ],
         defaultSubcommand: ValidateAll.self

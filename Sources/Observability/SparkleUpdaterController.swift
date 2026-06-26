@@ -82,10 +82,47 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        guard !Self.isLaunchUISmoke else { return }
+        guard !Self.isLaunchUISmoke else {
+            applyLaunchUISmokeUpdateStateIfPresent()
+            return
+        }
         trackInstalledUpdateIfNeeded()
         observeUpdaterReadiness()
         observeUpdaterSettings()
+    }
+
+    private func applyLaunchUISmokeUpdateStateIfPresent() {
+        guard let state = Self.launchUISmokeUpdateState() else { return }
+        updateStatus = UpdateStatus(state: state, canCheckForUpdates: true)
+        automaticUpdateSettings = AutomaticUpdateSettings(
+            automaticChecksEnabled: true,
+            automaticDownloadsAllowed: true,
+            automaticDownloadsEnabled: false
+        )
+    }
+
+    nonisolated private static func launchUISmokeUpdateState() -> UpdateStatus.State? {
+        let environment = ProcessInfo.processInfo.environment
+        guard let rawState = environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_UPDATE_STATE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+            !rawState.isEmpty else {
+            return nil
+        }
+        let version = environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_UPDATE_VERSION"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayVersion = version?.isEmpty == false ? version! : "9.9.9"
+
+        switch rawState {
+        case "available", "update-available":
+            return .updateAvailable(version: displayVersion)
+        case "downloading", "download-progress":
+            return .downloading(version: displayVersion)
+        case "ready", "ready-to-install":
+            return .readyToInstall(version: displayVersion)
+        default:
+            return nil
+        }
     }
 
     func performStartupUpdateCheckIfNeeded() {

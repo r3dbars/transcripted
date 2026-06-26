@@ -53,6 +53,7 @@ test_layers:
       deep: "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
       full: "bash scripts/ops/transcripted-qa-bench.sh --mode full"
       ui: "bash scripts/ops/transcripted-qa-bench.sh --mode ui"
+      sparkle_update: "bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update"
       packaged: "bash scripts/ops/transcripted-qa-bench.sh --mode packaged"
       artifact: "bash scripts/ops/transcripted-qa-bench.sh --mode artifact"
       audio_synthetic: "bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic"
@@ -60,7 +61,7 @@ test_layers:
       corpus_compare: "bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare"
       live: "bash scripts/ops/transcripted-qa-bench.sh --mode live"
     proves:
-      - "one local QA report can combine build, fast tests, E2E, integration, QA CLI, synthetic audio, release-health, packaged-app, optional Gemma planning, corpus, and live capture proof"
+      - "one local QA report can combine build, fast tests, E2E, integration, QA CLI, Sparkle update UI smoke, synthetic audio, release-health, packaged-app, optional Gemma planning, corpus, and live capture proof"
     agent_notes:
       - "Reports live under /tmp/transcripted-qa-bench/<run-id>/qa-report.md."
       - "Corpus and live modes depend on private local data, permissions, and hardware. Permission blockers are INCOMPLETE, not green."
@@ -107,6 +108,7 @@ test_layers:
       release_candidate_report: "python3 scripts/ops/release-gate-report.py --release-candidate"
       packaging_smoke: "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
       packaged_app_smoke: "bash scripts/ops/transcripted-qa-bench.sh --mode packaged"
+      sparkle_update_smoke: "bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update"
       sparkle_verify: "bash scripts/release/verify-sparkle-release.sh <version>"
       sentry_register: "SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>"
       cask_update: "bash scripts/release/update-cask.sh <version>"
@@ -171,6 +173,7 @@ recommended_gates:
       - "swift test"
       - "SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"
       - "bash scripts/ops/transcripted-qa-bench.sh --mode packaged"
+      - "bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update"
     add_when_shipping_to_users:
       - "bash scripts/ops/transcripted-qa-bench.sh --mode deep --strict-artifacts when fixture or private artifact roots are available"
       - "full notarized build-beta.sh"
