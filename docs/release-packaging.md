@@ -1,5 +1,9 @@
 # Release Packaging
 
+Vacation/absence release hold: see `docs/release-guardrails.md` before doing
+anything that could publish, notarize for shipment, update Sparkle/appcast,
+update Homebrew, or move the live download surface.
+
 `build.sh` is the local developer build.
 
 Use `build-beta.sh` for anything you intend to hand to another machine. That is
