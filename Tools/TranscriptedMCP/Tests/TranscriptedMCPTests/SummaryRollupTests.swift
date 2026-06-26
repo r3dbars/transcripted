@@ -172,6 +172,36 @@ final class SummaryRollupTests: XCTestCase {
         XCTAssertEqual(digest.meetingCount, 2)
     }
 
+    func testDigestLimitAppliesAfterFilteringSummarizedMeetings() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                date: "2026-01-01",
+                time: "09:00:00",
+                decisions: ["Keep the summarized launch plan"],
+                actionItems: [],
+                openQuestions: []
+            ),
+            filename: "Call_2026-01-01_09-00-00",
+            to: tempDir
+        )
+
+        for day in 1...120 {
+            let date = String(format: "2026-04-%02dT09:00:00-0500", ((day - 1) % 28) + 1)
+            try writeFixture(
+                makeFixtureJSON(title: "Empty \(day)", date: date),
+                filename: String(format: "Call_2026-04-%02d_09-00-00_%03d", ((day - 1) % 28) + 1, day),
+                to: tempDir
+            )
+        }
+
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        let digest = try index.digest(dateFrom: "2026-01-01", dateTo: "2026-12-31", maxMeetings: 1)
+
+        XCTAssertEqual(digest.meetingCount, 1)
+        XCTAssertEqual(digest.meetings.first?.filename, "Call_2026-01-01_09-00-00")
+        XCTAssertEqual(digest.decisionCount, 1)
+    }
+
     func testReindexReplacesSummaryFactsFromMarkdown() throws {
         try seedTwoMeetings()
 

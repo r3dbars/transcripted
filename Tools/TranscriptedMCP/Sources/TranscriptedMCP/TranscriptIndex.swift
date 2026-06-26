@@ -1398,11 +1398,18 @@ final class TranscriptIndex: @unchecked Sendable {
         try queue.sync {
             let limit = max(1, min(maxMeetings, 100))
 
-            var meetingSQL = "SELECT filename, date, datetime FROM meetings WHERE 1=1"
+            var meetingSQL = """
+                SELECT m.filename, m.date, m.datetime
+                FROM meetings m
+                WHERE EXISTS (
+                    SELECT 1 FROM meeting_summary_items s WHERE s.filename = m.filename
+                )
+            """
             var bindings: [SQLBinding] = []
-            if let dateFrom { meetingSQL += " AND date >= ?"; bindings.append(.text(dateFrom)) }
-            if let dateTo { meetingSQL += " AND date <= ?"; bindings.append(.text(dateTo)) }
-            meetingSQL += " ORDER BY datetime DESC"
+            if let dateFrom { meetingSQL += " AND m.date >= ?"; bindings.append(.text(dateFrom)) }
+            if let dateTo { meetingSQL += " AND m.date <= ?"; bindings.append(.text(dateTo)) }
+            meetingSQL += " ORDER BY m.datetime DESC LIMIT ?"
+            bindings.append(.int(limit))
 
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, meetingSQL, -1, &stmt, nil) == SQLITE_OK else {
@@ -1455,7 +1462,6 @@ final class TranscriptIndex: @unchecked Sendable {
                     actionItems: actions,
                     openQuestions: questions
                 ))
-                if digestMeetings.count >= limit { break }
             }
 
             return DigestResult(
