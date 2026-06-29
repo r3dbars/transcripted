@@ -45,7 +45,11 @@ final class FileLogger: @unchecked Sendable {
 
         // Create file if it doesn't exist
         if !FileManager.default.fileExists(atPath: logFileURL.path) {
-            FileManager.default.createFile(atPath: logFileURL.path, contents: nil)
+            FileManager.default.createFile(
+                atPath: logFileURL.path,
+                contents: nil,
+                attributes: [.posixPermissions: 0o600]
+            )
         }
 
         FileManager.default.restrictToOwnerOnly(atPath: logFileURL.path)
@@ -144,7 +148,11 @@ final class FileLogger: @unchecked Sendable {
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
         if fileHandle == nil {
             // File may have been deleted during atomic write — recreate and retry
-            FileManager.default.createFile(atPath: logFileURL.path, contents: nil)
+            FileManager.default.createFile(
+                atPath: logFileURL.path,
+                contents: nil,
+                attributes: [.posixPermissions: 0o600]
+            )
             FileManager.default.restrictToOwnerOnly(atPath: logFileURL.path)
             fileHandle = try? FileHandle(forWritingTo: logFileURL)
         }

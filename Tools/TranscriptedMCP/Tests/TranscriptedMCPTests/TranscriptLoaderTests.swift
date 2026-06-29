@@ -1,4 +1,5 @@
 import XCTest
+import TranscriptedCaptureKit
 @testable import transcripted_mcp
 
 final class TranscriptLoaderTests: XCTestCase {
@@ -108,6 +109,31 @@ final class TranscriptLoaderTests: XCTestCase {
     func testLoadMissingFileReturnsNil() {
         let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_missing.md"))
         XCTAssertNil(transcript)
+    }
+
+    func testLoadMeetingRefusesOversizedFile() throws {
+        // Otherwise-valid meeting markdown padded past the byte cap. The loader
+        // must skip it (local-DoS guard) and return nil rather than reading it.
+        let url = tempDir.appendingPathComponent("Call_oversized.md")
+        let padded = makeFixtureJSON() + "\n" + String(repeating: "x", count: CaptureFileLimits.maxTranscriptBytes)
+        try padded.write(to: url, atomically: true, encoding: .utf8)
+
+        XCTAssertNil(TranscriptLoader.loadMeeting(url))
+
+        // A normal-sized meeting still loads.
+        try writeFixture(makeFixtureJSON(), filename: "Call_normal", to: tempDir)
+        XCTAssertNotNil(TranscriptLoader.loadMeeting(tempDir.appendingPathComponent("Call_normal.md")))
+    }
+
+    func testLoadDictationDayRefusesOversizedFile() throws {
+        let url = tempDir.appendingPathComponent("Dictations_2026-04-07.md")
+        let padded = makeDictationDayJSON() + "\n" + String(repeating: "x", count: CaptureFileLimits.maxTranscriptBytes)
+        try padded.write(to: url, atomically: true, encoding: .utf8)
+
+        XCTAssertNil(TranscriptLoader.loadDictationDay(url))
+
+        try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-08", to: tempDir)
+        XCTAssertNotNil(TranscriptLoader.loadDictationDay(tempDir.appendingPathComponent("Dictations_2026-04-08.md")))
     }
 
     func testEnumerateArtifacts() throws {

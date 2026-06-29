@@ -29,11 +29,20 @@ reproduced verbatim from the pinned upstream revision.
 - **License:** GNU General Public License v3.0 or later (GPL-3.0-or-later)
 
 eSpeak NG is released under the GPL version 3 or later. The complete GPL-3.0 text below is
-reproduced from the upstream `COPYING` file at release 1.52.0. Corresponding source code for
-eSpeak NG is available from the upstream repository at https://github.com/espeak-ng/espeak-ng,
-and the prebuilt framework artifact is distributed with FluidAudio's releases and package
-checkouts at https://github.com/FluidInference/FluidAudio. (Upstream also notes that
-`getopt.c` carries a 2-clause BSD license for Windows compatibility.)
+reproduced from the upstream `COPYING` file at release 1.52.0. `ESpeakNG.framework` is a
+dynamic library loaded at runtime by the otherwise proprietary Transcripted binary; it is not
+statically linked, and the app remains a separate work that links to it.
+
+**Written offer / corresponding source.** The complete corresponding source for the bundled
+eSpeak NG (version 1.52.3) is available at no charge from the upstream repository:
+https://github.com/espeak-ng/espeak-ng (tag/release `1.52.3`). The prebuilt framework artifact
+Transcripted bundles is taken unmodified from FluidAudio v0.7.9, which vendors it under
+`Sources/FluidAudio/Frameworks/ESpeakNG.xcframework`
+(https://github.com/FluidInference/FluidAudio). For three years from the date you received this
+build, the maintainer will, on request via the contact path in `SECURITY.md`, provide a copy of
+the corresponding source for the bundled version on a durable medium for no more than the cost
+of physically performing the conveyance. (Upstream also notes that `getopt.c` carries a 2-clause
+BSD license for Windows compatibility.)
 
 ### License text
 

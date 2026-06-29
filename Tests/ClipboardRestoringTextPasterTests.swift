@@ -106,6 +106,118 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — clears resident dictation text when restore guard fails") {
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
+            let paster = ClipboardRestoringTextPaster()
+            let original = "original clipboard"
+            let temporary = "temporary dictation"
+
+            pasteboard.clearContents()
+            pasteboard.setString(original, forType: .string)
+            let snapshot = paster.snapshotPasteboardItems(from: pasteboard)
+
+            pasteboard.clearContents()
+            pasteboard.setString(temporary, forType: .string)
+            let temporaryChangeCount = pasteboard.changeCount
+
+            // Simulate another process (e.g. a clipboard manager) bumping the changeCount
+            // while leaving the borrowed dictation string resident: re-write the same text
+            // so the string still equals the temporary but the changeCount no longer matches.
+            pasteboard.clearContents()
+            pasteboard.setString(temporary, forType: .string)
+            assertFalse(
+                pasteboard.changeCount == temporaryChangeCount,
+                "test setup should advance the changeCount past the recorded temporary value"
+            )
+
+            paster.restorePasteboardItems(
+                snapshot,
+                temporaryString: temporary,
+                temporaryChangeCount: temporaryChangeCount,
+                to: pasteboard
+            )
+
+            assertNil(
+                pasteboard.string(forType: .string),
+                "a failed restore guard should still clear resident dictation text from the clipboard"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — failed guard preserves unrelated new clipboard content") {
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
+            let paster = ClipboardRestoringTextPaster()
+            let original = "original clipboard"
+            let temporary = "temporary dictation"
+            let userCopy = "user copied something new"
+
+            pasteboard.clearContents()
+            pasteboard.setString(original, forType: .string)
+            let snapshot = paster.snapshotPasteboardItems(from: pasteboard)
+
+            pasteboard.clearContents()
+            pasteboard.setString(temporary, forType: .string)
+            let temporaryChangeCount = pasteboard.changeCount
+
+            // The user copied unrelated content after paste started: the guard fails and the
+            // best-effort clear must NOT clobber it, because it is no longer the dictation text.
+            pasteboard.clearContents()
+            pasteboard.setString(userCopy, forType: .string)
+
+            paster.restorePasteboardItems(
+                snapshot,
+                temporaryString: temporary,
+                temporaryChangeCount: temporaryChangeCount,
+                to: pasteboard
+            )
+
+            assertEqual(
+                pasteboard.string(forType: .string),
+                userCopy,
+                "a failed restore guard should never clear content the user copied after paste started"
+            )
+        }
+
+        runSuite("MeetingArtifactRenamer.sanitizedTitleStem — keeps normal titles unchanged") {
+            assertEqual(
+                MeetingArtifactRenamer.sanitizedTitleStem(for: "Weekly Sync", fallback: "Meeting"),
+                "Weekly Sync",
+                "a normal title should pass through unchanged"
+            )
+            assertEqual(
+                MeetingArtifactRenamer.sanitizedTitleStem(for: "Budget / Q3 review", fallback: "Meeting"),
+                "Budget Q3 review",
+                "invalid path characters should be collapsed into spaces"
+            )
+        }
+
+        runSuite("MeetingArtifactRenamer.sanitizedTitleStem — strips leading dots and rejects all-dots") {
+            assertEqual(
+                MeetingArtifactRenamer.sanitizedTitleStem(for: "...hidden", fallback: "Meeting"),
+                "hidden",
+                "leading dots should be stripped so the fragment is never dot-prefixed"
+            )
+            assertEqual(
+                MeetingArtifactRenamer.sanitizedTitleStem(for: "..", fallback: "Meeting"),
+                "Meeting",
+                "an all-dots title should fall back instead of producing a traversal-like fragment"
+            )
+            assertEqual(
+                MeetingArtifactRenamer.sanitizedTitleStem(for: ".", fallback: "Meeting"),
+                "Meeting",
+                "a single dot should fall back to the provided default"
+            )
+            assertEqual(
+                MeetingArtifactRenamer.sanitizedTitleStem(for: "", fallback: "Meeting"),
+                "Meeting",
+                "an empty title should fall back to the provided default"
+            )
+            assertEqual(
+                MeetingArtifactRenamer.sanitizedTitleStem(for: ". leading dot then text", fallback: "Meeting"),
+                "leading dot then text",
+                "leading dot plus whitespace should be stripped down to the visible text"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster.paste — dispatches after dictation text is on the pasteboard") {
             let pasteboard = FakeClipboardPasteboard(initialString: "synthetic existing clipboard")
             let paster = ClipboardRestoringTextPaster()

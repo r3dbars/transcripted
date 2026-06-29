@@ -1,5 +1,6 @@
 import XCTest
 import Darwin
+import TranscriptedCaptureKit
 @testable import transcripted_cli
 
 final class ContextStoreTests: XCTestCase {
@@ -532,6 +533,39 @@ final class ContextStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(content, markdown)
+    }
+
+    func testReadMeetingRefusesOversizedFile() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+
+        // Otherwise-valid meeting padded past the byte cap. readMeeting must
+        // refuse it (local-DoS guard) with the same "not found" contract.
+        let body = String(repeating: "x", count: CaptureFileLimits.maxTranscriptBytes)
+        let markdown = makeMeetingMarkdown(title: "Oversized", date: "2026-04-18", body: body)
+        try markdown.write(
+            to: meetingsDir.appendingPathComponent("Oversized.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let dirs = CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir)
+        XCTAssertThrowsError(try CLIContextStore.readMeeting(filename: "Oversized", in: dirs))
+
+        // The oversized meeting is also skipped from the recent feed.
+        let items = CLIContextStore.recent(in: dirs, kind: .meeting, count: 5, dateFrom: nil, dateTo: nil)
+        XCTAssertTrue(items.isEmpty)
+
+        // A normal-sized meeting still reads back unchanged.
+        let normal = makeMeetingMarkdown(title: "Normal", date: "2026-04-18", body: "[00:03] [Mic/You] Hi.")
+        try normal.write(
+            to: meetingsDir.appendingPathComponent("Normal.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        XCTAssertEqual(try CLIContextStore.readMeeting(filename: "Normal", in: dirs), normal)
     }
 
     func testReadMeetingCommandAcceptsJSONFlag() throws {

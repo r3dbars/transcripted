@@ -1604,6 +1604,28 @@ class DictationSessionController: ObservableObject {
             await textPaster.waitForClipboardReadyForAutoEnter()
         }
         guard !Task.isCancelled else { return .disabled }
+
+        // The Cmd+V paste verified the target was frontmost, but the auto-enter delay and
+        // clipboard-readiness wait above give focus a chance to drift. Re-verify the paste
+        // target is still frontmost so a stray Return is never submitted into whatever app
+        // is now in front. Skip and log (char-count / bundle-id only, never the text).
+        if let sessionPasteTarget, !sessionPasteTarget.matchesCurrentFrontmostApp() {
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "overlay",
+                event: "dictation_auto_enter_target_changed",
+                message: "Focus changed before dictation auto-enter",
+                context: dictationContext(
+                    extra: [
+                        "char_count": "\(text.count)",
+                        "frontmost_bundle_id": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+                    ]
+                )
+            )
+            appState?.logger.log("DICTATION | focus changed before auto-enter, skipping Return")
+            return .disabled
+        }
+
         return autoSender.send(DictationAutoSendPreferences.sendKey())
     }
 

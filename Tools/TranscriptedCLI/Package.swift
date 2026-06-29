@@ -67,7 +67,10 @@ let package = Package(
         ),
         .testTarget(
             name: "TranscriptedCLITests",
-            dependencies: ["transcripted-cli"],
+            dependencies: [
+                "transcripted-cli",
+                .product(name: "TranscriptedCaptureKit", package: "TranscriptedCaptureKit"),
+            ],
             path: "Tests/TranscriptedCLITests",
             swiftSettings: hasDiarizationDeps ? [
                 .define("TRANSCRIPTEDCLI_WITH_DIARIZATION"),

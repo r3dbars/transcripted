@@ -95,6 +95,40 @@ Practical implications for users:
 If a future version of the ML stack supports team-id-consistent signing for all
 embedded dylibs, the `disable-library-validation` entitlement will be removed.
 
+`com.apple.security.cs.disable-library-validation` is also enabled in the shipped
+distribution entitlements for the same reason — the bundled ML stack
+(MLX, WhisperKit, CoreML) is not Team-ID-consistent, so strict library validation
+refuses to load it. In the shipped build this is mitigated by Developer-ID signing
+plus notarization of the whole app bundle, and it is tracked for removal once the ML
+stack signs consistently.
+
+## Permissions and TCC prompts
+
+Screen Recording (`NSScreenCaptureUsageDescription`) is requested **only** to capture
+system audio through ScreenCaptureKit during meeting capture. macOS conflates system-audio
+capture and screen capture under a single Screen Recording TCC prompt, so the permission
+dialog mentions screen recording even though the app does not capture screen pixels. No
+screenshots or screen frames are read, stored, or transmitted.
+
+## Companion MCP server trust model
+
+The companion MCP server (`Tools/TranscriptedMCP`) is a read-only stdio binary. It performs
+no per-caller authentication: any local process that can launch the binary gets full READ
+access to every saved transcript, dictation, and sidecar under the capture library. There is
+no separate authorization step. Treat launching the MCP server (for example, wiring it into
+an agent or editor) as equivalent to granting that caller read access to all saved
+transcripts, and only configure it for clients you trust with that data.
+
+## Update feed (Sparkle appcast) integrity
+
+The Sparkle appcast is hosted on a raw GitHub branch
+(`raw.githubusercontent.com/.../main/docs/appcast.xml`). Update integrity does not rest on
+that hosting path: each update is verified by EdDSA signature against the public key embedded
+in the app, so a tampered feed cannot deliver an unsigned or wrong-key build. The trust roots
+are therefore the private signing key and the GitHub account/branch that backs the feed. Keep
+hardware-key 2FA and branch protection enabled on the account hosting the feed so the
+published appcast and signed artifacts cannot be silently replaced.
+
 ## Supported Versions
 
 | Version | Supported |

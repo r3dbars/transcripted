@@ -72,8 +72,12 @@ extension NSPasteboard: ClipboardPasteboard {
 }
 
 private func postClipboardPasteShortcut() -> Bool {
-    guard let vDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: true),
-          let vUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x09, keyDown: false) else {
+    // Use a private event source so the synthetic Cmd+V does not inherit ambient
+    // modifier state (e.g. a physically held push-to-talk modifier) that could
+    // otherwise combine with the synthetic Command flag.
+    let source = CGEventSource(stateID: .privateState)
+    guard let vDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
+          let vUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false) else {
         return false
     }
 
@@ -437,6 +441,17 @@ final class ClipboardRestoringTextPaster {
     ) {
         guard pasteboard.changeCount == temporaryChangeCount,
               pasteboard.string(forType: .string) == temporaryString else {
+            // The normal restore path is gated on the pasteboard still being the exact
+            // dictation string we borrowed it for. If another process (e.g. a clipboard
+            // manager) bumped the changeCount, that guard fails and we cannot safely
+            // restore the user's original clipboard. But if the borrowed dictation text
+            // is still resident, leaving it there leaks possibly-sensitive dictation onto
+            // the clipboard. Best-effort clear it — but only when the current string still
+            // equals the dictated text, so we never clobber unrelated content the user
+            // copied after us.
+            if pasteboard.string(forType: .string) == temporaryString {
+                pasteboard.clearContents()
+            }
             return
         }
 

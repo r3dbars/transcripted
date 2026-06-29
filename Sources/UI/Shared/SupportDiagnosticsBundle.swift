@@ -128,6 +128,55 @@ enum SupportDiagnosticsBundle {
         return context
     }
 
+    /// Static positive key allowlist for the support-diagnostic extras that
+    /// reach Sentry. `sentryContext` builds a fixed set of coarse keys plus
+    /// interpolated `route_*` / `runtime_*` / `storage_*` keys and (previously)
+    /// a free-text `latest_reliability_packet` blob. The off-device contract is
+    /// allowlist-gated, not just key-drop + redaction, so anything not on this
+    /// allowlist or matching a bucketed prefix is dropped before send. The
+    /// free-text `latest_reliability_packet` is intentionally excluded —
+    /// `reliability_packet_count` already carries the coarse signal. Surviving
+    /// values still pass through `SentryPayloadSanitizer` (fragment drop + text
+    /// redaction) at the call site as defense-in-depth, so a prefixed key whose
+    /// suffix is sensitive (e.g. `runtime_file_path`, `route_raw_url`) is also
+    /// dropped downstream. Keep in sync with `sentryContext` above.
+    static let sentryContextAllowedKeys: Set<String> = [
+        "analytics_available",
+        "analytics_enabled",
+        "app_version",
+        "build_version",
+        "calendar_granted",
+        "crash_reporting_available",
+        "crash_reporting_enabled",
+        "meeting_display_status",
+        "meeting_duration_bucket",
+        "meeting_recording",
+        "meeting_review_pending",
+        "meeting_shortcut",
+        "meeting_state",
+        "microphone_status",
+        "pasteback_granted",
+        "queued_meeting_count",
+        "reliability_packet_count",
+        "system_recording_granted",
+    ]
+
+    static let sentryContextAllowedKeyPrefixes: [String] = [
+        "route_",
+        "runtime_",
+        "storage_",
+    ]
+
+    /// Apply the positive key allowlist to a `sentryContext` dictionary,
+    /// dropping any key (notably the free-text `latest_reliability_packet`)
+    /// that is neither explicitly allowlisted nor a bucketed prefix key.
+    static func allowlistedSentryContext(_ context: [String: String]) -> [String: String] {
+        context.filter { key, _ in
+            sentryContextAllowedKeys.contains(key)
+                || sentryContextAllowedKeyPrefixes.contains(where: { key.hasPrefix($0) })
+        }
+    }
+
     private static func render(_ values: [String: String]) -> String {
         let sanitized = AnalyticsPayloadSanitizer.sanitizeDiagnosticContextForDisplay(values)
         guard !sanitized.isEmpty else { return "Unavailable" }

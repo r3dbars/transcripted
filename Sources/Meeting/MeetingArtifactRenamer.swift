@@ -50,7 +50,14 @@ enum MeetingArtifactRenamer {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         let limited = String(collapsedWhitespace.prefix(80)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return limited.isEmpty ? fallback : limited
+
+        // Strip leading dots so a title can never produce a hidden/dot-prefixed fragment,
+        // and treat an all-dots (or now-empty) result as needing the fallback. The final
+        // stem is always date-prefixed today, so this is defense-in-depth rather than a
+        // live exploit, but it keeps the fragment a plain, visible name.
+        let stripped = String(limited.drop(while: { $0 == "." }))
+        let safe = stripped.trimmingCharacters(in: .whitespacesAndNewlines)
+        return safe.isEmpty ? fallback : safe
     }
 
     // MARK: - Artifact paths

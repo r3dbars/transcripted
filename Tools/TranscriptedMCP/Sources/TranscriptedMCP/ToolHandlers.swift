@@ -367,7 +367,7 @@ func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, mee
             appendingExtension: "md",
             in: meetingDirs
         ) else { continue }
-        if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
+        if let content = CaptureMarkdown.readBoundedContents(of: mdURL) {
             results[i].title = extractTitle(from: content) ?? results[i].filename
         }
     }
@@ -443,7 +443,7 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) 
         return textResult("Invalid filename: \(filename)", isError: true)
     }
 
-    guard let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
+    guard let content = CaptureMarkdown.readBoundedContents(of: mdURL) else {
         return textResult("Meeting not found: \(filename). Use list_meetings to see available meetings.", isError: true)
     }
 
@@ -532,7 +532,7 @@ private func handleReadDictation(params: CallTool.Parameters, dictationDirs: [UR
         sourceCount: day.entries.count
     )
 
-    guard let content = try? String(contentsOf: markdownURL, encoding: .utf8) else {
+    guard let content = CaptureMarkdown.readBoundedContents(of: markdownURL) else {
         let json = try JSONEncoder.pretty.encode(day)
         return textResult(String(data: json, encoding: .utf8) ?? "{}")
     }
@@ -681,7 +681,7 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
         ) else { continue }
         var preview = ""
         var title = meeting.filename
-        if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
+        if let content = CaptureMarkdown.readBoundedContents(of: mdURL) {
             title = extractTitle(from: content) ?? meeting.filename
             preview = extractDialogueLines(from: content).prefix(15).joined(separator: "\n")
         }
@@ -842,7 +842,7 @@ private func frontmatterMeetingTitle(for filename: String, meetingDirs: [URL]) -
         appendingExtension: "md",
         in: meetingDirs
     ),
-    let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
+    let content = CaptureMarkdown.readBoundedContents(of: mdURL) else {
         return nil
     }
     return extractTitle(from: content)

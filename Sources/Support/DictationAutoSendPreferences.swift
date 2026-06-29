@@ -127,8 +127,12 @@ final class DictationAutoSender {
             return .failed("Accessibility is off, so Transcripted could not send automatically.")
         }
 
-        guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: true),
-              let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: false) else {
+        // Use a private event source so the synthetic Return (optionally Cmd+Return)
+        // does not inherit ambient modifier state from a physically held key such as
+        // a push-to-talk modifier.
+        let source = CGEventSource(stateID: .privateState)
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Return), keyDown: false) else {
             return .failed("Transcripted could not create the auto-send key event.")
         }
 

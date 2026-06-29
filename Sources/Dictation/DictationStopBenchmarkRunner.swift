@@ -306,7 +306,11 @@ enum DictationStopBenchmarkRunner {
     private static func appendJSONLine(_ payload: [String: Any], to url: URL) throws {
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: nil)
+            FileManager.default.createFile(
+                atPath: url.path,
+                contents: nil,
+                attributes: [.posixPermissions: 0o600]
+            )
         }
         let handle = try FileHandle(forWritingTo: url)
         try handle.seekToEnd()

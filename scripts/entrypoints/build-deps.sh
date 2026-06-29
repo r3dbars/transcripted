@@ -254,6 +254,61 @@ fetch_argmax_whisperkit_sources() {
     done
 }
 
+assert_mlx_swift_lm_revision() {
+    # mlx-swift-lm is pinned to a bare commit (MLX_SWIFT_LM_REVISION). Unlike the
+    # vendored WhisperKit clone, SwiftPM resolves it transparently, so nothing
+    # otherwise verifies that the revision SwiftPM actually checked out matches
+    # the pin. Assert it post-resolve, the same way fetch_argmax_whisperkit_sources
+    # asserts the WhisperKit clone revision. Prefer Package.resolved (the
+    # authoritative record SwiftPM just wrote); fall back to git rev-parse on the
+    # checkout if for some reason it is absent.
+    local resolved_file="Package.resolved"
+    local checkout="$DEPS_BUILD/.build/checkouts/mlx-swift-lm"
+    local resolved_revision=""
+    local source=""
+
+    if [ -f "$resolved_file" ]; then
+        # Find the mlx-swift-lm pin block and pull its "revision" field. Matches
+        # both Package.resolved v1 ("repositoryURL"/"identity") and v2 ("location").
+        resolved_revision="$(awk '
+            /mlx-swift-lm/ { in_pin = 1 }
+            in_pin && /"revision"[[:space:]]*:/ {
+                line = $0
+                sub(/.*"revision"[[:space:]]*:[[:space:]]*"/, "", line)
+                sub(/".*/, "", line)
+                print line
+                exit
+            }
+        ' "$resolved_file")"
+        [ -n "$resolved_revision" ] && source="$resolved_file"
+    fi
+
+    if [ -z "$resolved_revision" ] && [ -d "$checkout/.git" ]; then
+        resolved_revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
+        [ -n "$resolved_revision" ] && source="git -C $checkout rev-parse HEAD"
+    fi
+
+    if [ -z "$resolved_revision" ]; then
+        echo "[build-deps] ERROR: could not determine resolved mlx-swift-lm revision"
+        echo "[build-deps]        checked Package.resolved and $checkout"
+        echo "[build-deps]        expected: $MLX_SWIFT_LM_REVISION"
+        exit 1
+    fi
+
+    # The pin is an abbreviated commit (e.g. 25b00d4); the resolved revision is a
+    # full SHA. Match by prefix so the short pin verifies against the full hash.
+    case "$resolved_revision" in
+        "$MLX_SWIFT_LM_REVISION"*) ;;
+        *)
+            echo "[build-deps] ERROR: mlx-swift-lm revision mismatch (from $source)"
+            echo "[build-deps]   expected (pin): $MLX_SWIFT_LM_REVISION"
+            echo "[build-deps]   resolved:       $resolved_revision"
+            exit 1
+            ;;
+    esac
+    echo "[build-deps] Verified mlx-swift-lm resolved revision $resolved_revision matches pin $MLX_SWIFT_LM_REVISION (from $source)"
+}
+
 resolve_package_graph() {
     local resolve_cmd=("swift" "package" "resolve" "--disable-dependency-cache")
 
@@ -264,12 +319,14 @@ resolve_package_graph() {
     echo "  Argmax WhisperKit:  $ARGMAX_OSS_SWIFT_VERSION ($ARGMAX_OSS_SWIFT_REVISION)"
 
     if "${resolve_cmd[@]}"; then
+        assert_mlx_swift_lm_revision
         return 0
     fi
 
     echo "[build-deps] WARNING: initial resolve failed; retrying from a clean SwiftPM state"
     rm -rf .build Package.resolved
     "${resolve_cmd[@]}"
+    assert_mlx_swift_lm_revision
 }
 
 ensure_mlx_swift_submodules() {

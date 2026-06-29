@@ -393,7 +393,13 @@ enum MeetingImportedAudioPreparer {
         let readHandle = try FileHandle(forReadingFrom: sourceURL)
         defer { try? readHandle.close() }
 
-        guard fileManager.createFile(atPath: destinationURL.path, contents: nil) else {
+        // Create the scratch copy owner-only from the start so imported audio
+        // never exists at the umask default before chunks are streamed in.
+        guard fileManager.createFile(
+            atPath: destinationURL.path,
+            contents: nil,
+            attributes: [.posixPermissions: 0o600]
+        ) else {
             throw MeetingImportedAudioPreparationError.copyFailed
         }
 

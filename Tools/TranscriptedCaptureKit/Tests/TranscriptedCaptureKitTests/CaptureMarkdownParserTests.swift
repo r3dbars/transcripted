@@ -599,4 +599,27 @@ final class CaptureMarkdownParserTests: XCTestCase {
 
         XCTAssertTrue(CaptureMarkdown.directoryHasCaptureMarkdownFiles(tempDir))
     }
+
+    func testLooksLikeCaptureMarkdownRefusesOversizedFile() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // Valid capture frontmatter, but padded past the byte cap. Detection must
+        // refuse it without loading the bytes (local-DoS guard), so a non
+        // Dictations_ filename forces the content-read branch.
+        let oversized = tempDir.appendingPathComponent("Call_oversized.md")
+        let header = "---\ndate: 2026-04-18\n---\n\n"
+        let padding = String(repeating: "x", count: CaptureFileLimits.maxTranscriptBytes + 1)
+        try (header + padding).write(to: oversized, atomically: true, encoding: .utf8)
+
+        XCTAssertFalse(CaptureMarkdown.looksLikeCaptureMarkdown(oversized))
+        XCTAssertNil(CaptureMarkdown.readBoundedContents(of: oversized))
+
+        // A normal-sized capture file still reads and is detected.
+        let normal = tempDir.appendingPathComponent("Call_normal.md")
+        try (header + "body").write(to: normal, atomically: true, encoding: .utf8)
+        XCTAssertTrue(CaptureMarkdown.looksLikeCaptureMarkdown(normal))
+        XCTAssertNotNil(CaptureMarkdown.readBoundedContents(of: normal))
+    }
 }

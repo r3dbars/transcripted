@@ -212,7 +212,7 @@ enum CLIContextStore {
         }
 
         guard let markdownURL,
-              let content = try? String(contentsOf: markdownURL, encoding: .utf8),
+              let content = CaptureMarkdown.readBoundedContents(of: markdownURL),
               CaptureMarkdown.looksLikeCaptureMarkdown(markdownURL),
               !markdownURL.deletingPathExtension().lastPathComponent.hasPrefix("Dictations_") else {
             throw ValidationError("Meeting not found: \(filename)")
@@ -266,7 +266,7 @@ enum CLIContextStore {
             """
         }
 
-        if let content = try? String(contentsOf: markdownURL, encoding: .utf8) {
+        if let content = CaptureMarkdown.readBoundedContents(of: markdownURL) {
             return content
         }
 
@@ -386,7 +386,7 @@ enum CLIContextStore {
     }
 
     private static func loadMeeting(at url: URL) -> CLIAgentTranscript? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8),
+        guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseMeeting(from: content) else { return nil }
 
         return CLIAgentTranscript(
@@ -415,7 +415,7 @@ enum CLIContextStore {
     }
 
     private static func loadDictationDay(at url: URL) -> (payload: CLIAgentDictationDay, entries: [CLIClientDictationEntry])? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8),
+        guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseDictationDay(from: content, markdownURL: url) else { return nil }
 
         let entries = parsed.entries.map { entry in
@@ -446,7 +446,7 @@ enum CLIContextStore {
 
     private static func readMeetingTitle(filename: String, from directory: URL) -> String {
         let mdURL = directory.appendingPathComponent(filename + ".md")
-        guard let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
+        guard let content = CaptureMarkdown.readBoundedContents(of: mdURL) else {
             return filename
         }
         return CaptureMarkdown.extractTitle(from: content) ?? filename

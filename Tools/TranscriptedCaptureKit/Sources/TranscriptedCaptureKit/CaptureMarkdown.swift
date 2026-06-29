@@ -1,8 +1,34 @@
 import Foundation
 
+/// Shared size guards for reading capture Markdown from disk. The standalone
+/// tools (CLI, MCP) and this kit all read transcript files into memory with
+/// `String(contentsOf:)`, and the parser then builds several derived copies, so
+/// an oversized file dropped into a watched capture directory could exhaust
+/// memory (local availability concern). All read/detection paths stat the file
+/// first and refuse anything larger than this cap.
+public enum CaptureFileLimits {
+    /// Maximum byte size for a capture Markdown file we will read into memory.
+    /// 16 MB is far larger than any realistic transcript or dictation day file
+    /// (a multi-hour meeting transcript is well under 1 MB of text) while still
+    /// bounding worst-case allocation from a hostile or corrupt file.
+    public static let maxTranscriptBytes = 16 * 1024 * 1024
+}
+
 /// Detection helpers for Transcripted capture Markdown artifacts (meetings and
 /// dictation day files). Shared by TranscriptedCLI and TranscriptedMCP.
 public enum CaptureMarkdown {
+    /// Read a capture Markdown file as UTF-8, refusing files larger than
+    /// `CaptureFileLimits.maxTranscriptBytes`. Returns nil on a missing file, a
+    /// read error, or an over-cap file so callers can fall back to their normal
+    /// "not found"/"not a capture" contract without ever loading the bytes.
+    public static func readBoundedContents(of url: URL) -> String? {
+        guard let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int,
+              size <= CaptureFileLimits.maxTranscriptBytes else {
+            return nil
+        }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
     /// Whether a Markdown file looks like a Transcripted capture artifact:
     /// either a dictation day file by name, or a file with YAML frontmatter.
     public static func looksLikeCaptureMarkdown(_ url: URL) -> Bool {
@@ -11,7 +37,7 @@ public enum CaptureMarkdown {
             return true
         }
 
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+        guard let content = readBoundedContents(of: url) else {
             return false
         }
 

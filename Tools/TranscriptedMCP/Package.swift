@@ -20,7 +20,10 @@ let package = Package(
         ),
         .testTarget(
             name: "TranscriptedMCPTests",
-            dependencies: ["transcripted-mcp"],
+            dependencies: [
+                "transcripted-mcp",
+                .product(name: "TranscriptedCaptureKit", package: "TranscriptedCaptureKit"),
+            ],
             path: "Tests/TranscriptedMCPTests",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),

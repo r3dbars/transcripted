@@ -14,6 +14,19 @@ import UniformTypeIdentifiers
 struct TranscriptedApp: App {
     @NSApplicationDelegateAdaptor(TranscriptedAppDelegate.self) var appDelegate
 
+    init() {
+        // Security: set the process file-creation mask as early as possible so
+        // every file the app creates is owner-only (0600) by default, with no
+        // brief window at the umask default (often 0644) between creation and a
+        // later chmod. This closes the file-permission TOCTOU window for the
+        // `Data.write(.atomic)` temp files too, which we cannot pass explicit
+        // attributes to. The existing explicit `restrictToOwnerOnly`/chmod and
+        // `createFile(attributes:)` calls remain as belt-and-suspenders. App
+        // struct `init` runs before `applicationDidFinishLaunching`, so this is
+        // the earliest deterministic point in startup. `umask` comes from Darwin.
+        umask(0o077)
+    }
+
     var body: some Scene {
         Settings { EmptyView() }
             .commands {
