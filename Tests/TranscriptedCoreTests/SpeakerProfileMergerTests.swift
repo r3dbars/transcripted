@@ -116,6 +116,59 @@ final class SpeakerProfileMergerTests: XCTestCase {
             "deferred unnamed profiles with review samples should survive pruning"
         )
     }
+
+    // MARK: - Explicit merge outcomes
+
+    func testMergeProfilesSumsCallCountsTransfersNameAndDeletesSource() throws {
+        let target = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.30, count: 256),
+            existingId: nil
+        )
+        let source = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.31, count: 256),
+            existingId: nil
+        )
+        database.setDisplayName(id: source.id, name: "Jenny Wen", source: NameSource.userManual)
+
+        let targetBefore = try XCTUnwrap(database.getSpeaker(id: target.id))
+        let sourceBefore = try XCTUnwrap(database.getSpeaker(id: source.id))
+
+        database.mergeProfiles(sourceId: source.id, into: target.id)
+
+        XCTAssertNil(database.getSpeaker(id: source.id), "source profile is deleted after merge")
+
+        let merged = try XCTUnwrap(database.getSpeaker(id: target.id))
+        XCTAssertEqual(merged.callCount, targetBefore.callCount + sourceBefore.callCount, "call counts sum")
+        XCTAssertEqual(merged.displayName, "Jenny Wen", "name transfers when the target is unnamed")
+        XCTAssertEqual(merged.confidence, min(1.0, targetBefore.confidence + 0.15), accuracy: 0.0001, "confidence bumps")
+    }
+
+    func testMergeProfilesByNameCollapsesSameNameProfiles() throws {
+        // Distinct embeddings on purpose: same-name merge ignores similarity, so
+        // four "Jenny Wen" profiles must still collapse into one.
+        let a = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.20, count: 256), existingId: nil)
+        let b = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.90, count: 256), existingId: nil)
+        let c = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.50, count: 256), existingId: nil)
+        for id in [a.id, b.id, c.id] {
+            database.setDisplayName(id: id, name: "Jenny Wen", source: NameSource.userManual)
+        }
+
+        database.mergeProfilesByName()
+
+        let survivors = [a.id, b.id, c.id].compactMap { database.getSpeaker(id: $0) }
+        XCTAssertEqual(survivors.count, 1, "same-name profiles collapse into a single profile")
+        XCTAssertEqual(survivors.first?.displayName, "Jenny Wen")
+    }
+
+    func testMergeDuplicatesMergesIdenticalUnnamedProfiles() throws {
+        let a = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.25, count: 256), existingId: nil)
+        let b = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.25, count: 256), existingId: nil)
+
+        database.mergeDuplicates(threshold: 0.6)
+
+        let survivors = [a.id, b.id].compactMap { database.getSpeaker(id: $0) }
+        XCTAssertEqual(survivors.count, 1, "identical unnamed embeddings above threshold merge into one")
+    }
 }
 
 @available(macOS 14.0, *)
