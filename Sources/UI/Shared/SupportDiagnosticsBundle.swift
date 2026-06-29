@@ -109,9 +109,11 @@ enum SupportDiagnosticsBundle {
             "reliability_packet_count": "\(min(snapshot.reliabilityPackets.count, maxReliabilityPackets))",
             "system_recording_granted": bool(snapshot.systemAudioRecordingGranted),
         ]
-        if let latest = snapshot.reliabilityPackets.last {
-            context["latest_reliability_packet"] = latest
-        }
+        // The free-text `latest_reliability_packet` blob is intentionally not
+        // emitted here: it can carry paths / free text, and
+        // `reliability_packet_count` already gives the coarse signal that reaches
+        // Sentry. (The human-readable diagnostics text, built separately, still
+        // summarizes recent reliability packets for copied support bundles.)
 
         for (key, value) in snapshot.audioRoute {
             context["route_\(key)"] = value
