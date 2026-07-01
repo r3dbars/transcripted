@@ -10,7 +10,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
 
     init(appState: TranscriptedAppState, actions: TranscriptedSettingsActions) {
         let speakerDatabase = (appState.meetingSession.services.speakerStore as? SpeakerDatabase)
-            ?? SpeakerDatabase(path: MeetingStoragePaths.speakersDatabase.path)
+            ?? SpeakerDatabase(path: SpeakerEmbedderFactory.activeSpeakerDBURL().path)
         let speakerPeopleModel = SpeakerPeopleSettingsViewModel(
             speakerDatabase: speakerDatabase,
             preferredClipsDirectory: MeetingStoragePaths.speakerClipsFolder

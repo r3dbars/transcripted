@@ -459,6 +459,22 @@ if [ "$BUNDLE_PARAKEET_MODELS" != "0" ] && [ "$bundled_parakeet_models" = false 
     echo "Parakeet models not found — Parakeet engine will attempt runtime download"
 fi
 
+# Bundle the ERes2Net speaker-embedding CoreML model — OFF by default.
+# The weights derive from VoxCeleb2 (research-only license), so distribution builds
+# must NOT redistribute them. Local/dev testing still works without bundling because
+# the app resolves the model from the FluidAudio Models cache at runtime. To make a
+# self-contained local build that bundles the model, set TRANSCRIPTED_BUNDLE_ERES2NET=1.
+ERES2NET_SRC="$HOME/Library/Application Support/FluidAudio/Models/eres2net-embedding"
+ERES2NET_DEST="$APP_BUNDLE/Contents/Resources/eres2net-embedding"
+if [ "${TRANSCRIPTED_BUNDLE_ERES2NET:-0}" = "1" ] && [ -d "$ERES2NET_SRC/Model.mlmodelc" ]; then
+    echo "Bundling ERes2Net speaker-embedding model (TRANSCRIPTED_BUNDLE_ERES2NET=1)..."
+    mkdir -p "$ERES2NET_DEST"
+    rm -rf "$ERES2NET_DEST/Model.mlmodelc"
+    ditto "$ERES2NET_SRC/Model.mlmodelc" "$ERES2NET_DEST/Model.mlmodelc"
+else
+    echo "ERes2Net model not bundled (default; VoxCeleb2 license) — runtime uses the local cache. Set TRANSCRIPTED_BUNDLE_ERES2NET=1 to bundle for a local build."
+fi
+
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
 /usr/libexec/PlistBuddy -c "Set :TranscriptedBuildChannel local" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \

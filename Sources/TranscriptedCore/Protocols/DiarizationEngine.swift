@@ -26,4 +26,14 @@ public protocol DiarizationEngine: ObservableObject {
 
     /// Release model resources to free memory
     func cleanup()
+
+    /// Cosine thresholds for the active embedding model, used by the speaker
+    /// identity stack. `nonisolated` so the off-main-actor pipeline can read it.
+    nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds { get }
+}
+
+@available(macOS 14.0, *)
+public extension DiarizationEngine {
+    /// Default: the diarizer's native (WeSpeaker) thresholds.
+    nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds { .weSpeaker }
 }

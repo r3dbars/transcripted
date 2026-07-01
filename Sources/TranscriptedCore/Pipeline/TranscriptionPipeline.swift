@@ -148,10 +148,13 @@ extension Transcription {
             // consolidation (collapses one over-segmented voice so the user names
             // each person once), and DB-informed split still run.
             let existingProfiles = speakerDB.allSpeakers()
+            let speakerThresholds = diarization.activeSpeakerThresholds
             let speakerSegments = EmbeddingClusterer.postProcess(
                 segments: rawSegments,
                 existingProfiles: existingProfiles,
-                pairwiseMergeThreshold: nil
+                pairwiseMergeThreshold: nil,
+                consolidationThreshold: speakerThresholds.consolidation,
+                thresholds: speakerThresholds
             )
 
             let rawSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
@@ -273,20 +276,20 @@ extension Transcription {
                         for: meanEmbedding,
                         nonGhostMeans: nonGhostMeans
                     )
-                    if let candidate = mergeCandidate, candidate.similarity >= Self.ghostSpeakerMergeSimilarityFloor {
+                    if let candidate = mergeCandidate, candidate.similarity >= speakerThresholds.ghostMergeFloor {
                         speakerIdRemap[speakerId] = candidate.speakerId
                         AppLogger.transcription.info("Ghost speaker force-merged", [
                             "ghostSpk": "\(speakerId)",
                             "into": "\(candidate.speakerId)",
                             "similarity": String(format: "%.3f", candidate.similarity),
-                            "threshold": String(format: "%.2f", Self.ghostSpeakerMergeSimilarityFloor)
+                            "threshold": String(format: "%.2f", speakerThresholds.ghostMergeFloor)
                         ])
                     } else {
                         let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
                         speakerNewProfiles[speakerId] = newProfile.id
                         var context = [
                             "speakerId": "\(speakerId)",
-                            "threshold": String(format: "%.2f", Self.ghostSpeakerMergeSimilarityFloor)
+                            "threshold": String(format: "%.2f", speakerThresholds.ghostMergeFloor)
                         ]
                         if let candidate = mergeCandidate {
                             context["bestNonGhostSpk"] = "\(candidate.speakerId)"
@@ -302,11 +305,7 @@ extension Transcription {
 
                 // Adaptive threshold: require higher similarity when we have fewer segments.
                 // A single 2s segment can false-match at 0.79; 4+ segments give a reliable mean.
-                let adaptiveThreshold: Double = switch embeddings.count {
-                    case 1: 0.85       // single segment — need near-certainty
-                    case 2...3: 0.78   // few segments — still cautious
-                    default: 0.70      // 4+ segments — reliable mean embedding
-                }
+                let adaptiveThreshold = speakerThresholds.adaptiveMatch(forSegmentCount: embeddings.count)
 
                 // Match only against profiles that existed BEFORE this recording.
                 // Write-back is DEFERRED until after the cross-cluster link/merge decision below,
@@ -699,10 +698,13 @@ extension Transcription {
         AppLogger.transcription.info("Running offline diarization on mic audio")
         let rawSegments = try await diarization.diarizeOffline(samples: samples, sampleRate: 16000)
 
+        let speakerThresholds = diarization.activeSpeakerThresholds
         let speakerSegments = EmbeddingClusterer.postProcess(
             segments: rawSegments,
             existingProfiles: existingProfiles,
-            pairwiseMergeThreshold: nil
+            pairwiseMergeThreshold: nil,
+            consolidationThreshold: speakerThresholds.consolidation,
+            thresholds: speakerThresholds
         )
 
         let rawSpeakerCount = Set(rawSegments.map { $0.speakerId }).count
@@ -769,7 +771,7 @@ extension Transcription {
                     for: meanEmbedding,
                     nonGhostMeans: nonGhostMeans
                 )
-                if let candidate = mergeCandidate, candidate.similarity >= Self.ghostSpeakerMergeSimilarityFloor {
+                if let candidate = mergeCandidate, candidate.similarity >= speakerThresholds.ghostMergeFloor {
                     speakerIdRemap[speakerId] = candidate.speakerId
                 } else {
                     let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
@@ -779,11 +781,7 @@ extension Transcription {
                 continue
             }
 
-            let adaptiveThreshold: Double = switch embeddings.count {
-                case 1: 0.85
-                case 2...3: 0.78
-                default: 0.70
-            }
+            let adaptiveThreshold = speakerThresholds.adaptiveMatch(forSegmentCount: embeddings.count)
 
             // Write-back is DEFERRED until after the cross-cluster decision below (#6/#8 — same
             // rationale as the system path: matching reads only the existingProfiles snapshot, so

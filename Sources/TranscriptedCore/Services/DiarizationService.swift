@@ -60,8 +60,26 @@ public class DiarizationService: ObservableObject {
     /// from the provider falls through to HuggingFace download via `ModelDownloadService`.
     private let bundleProvider: ModelBundleProvider
 
-    public init(bundleProvider: @escaping ModelBundleProvider = defaultModelBundleProvider) {
+    /// Optional override that re-derives each diarized segment's speaker embedding
+    /// with a different model (e.g. ERes2Net) after diarization. When nil, the
+    /// diarizer's native WeSpeaker embedding is used unchanged. `nonisolated` so the
+    /// off-main-actor `diarizeOffline` path can read it without an actor hop.
+    private nonisolated let segmentEmbedder: (any SpeakerSegmentEmbedder)?
+
+    public init(
+        bundleProvider: @escaping ModelBundleProvider = defaultModelBundleProvider,
+        segmentEmbedder: (any SpeakerSegmentEmbedder)? = nil
+    ) {
         self.bundleProvider = bundleProvider
+        self.segmentEmbedder = segmentEmbedder
+    }
+
+    /// Cosine thresholds for the active embedding model: the injected embedder's
+    /// calibrated set, or the WeSpeaker defaults when the diarizer's native
+    /// embedding is in use. `nonisolated` so the off-main-actor pipeline reads it
+    /// without an actor hop.
+    public nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds {
+        segmentEmbedder?.thresholds ?? .weSpeaker
     }
 
     public var isReady: Bool { modelState == .ready && offlineDiarizerManager != nil }
@@ -213,11 +231,57 @@ public class DiarizationService: ObservableObject {
             }
         }
 
-        let speakerIds = Set(segments.map { $0.speakerId })
-        AppLogger.transcription.info("Offline diarization complete", ["segments": "\(segments.count)", "speakers": "\(speakerIds.count)"])
-        logSpeakerSummaries(segments)
+        let finalSegments = reembedIfNeeded(segments: segments, samples: samples, sampleRate: sampleRate)
 
-        return segments
+        let speakerIds = Set(finalSegments.map { $0.speakerId })
+        AppLogger.transcription.info("Offline diarization complete", ["segments": "\(finalSegments.count)", "speakers": "\(speakerIds.count)"])
+        logSpeakerSummaries(finalSegments)
+
+        return finalSegments
+    }
+
+    /// Re-derive each segment's embedding with `segmentEmbedder` when present.
+    /// Slices the original 16 kHz samples by segment time and replaces the
+    /// embedding; segments where re-embedding fails are kept for diarization but
+    /// lose their native vector so model-specific speaker databases do not mix
+    /// embedding dimensions.
+    /// No-op (returns input untouched) when no embedder is injected.
+    /// `internal` (not `private`) so unit tests can exercise the bounds/slicing
+    /// logic directly with a stub embedder, without standing up the real diarizer.
+    nonisolated func reembedIfNeeded(segments: [SpeakerSegment], samples: [Float], sampleRate: Int) -> [SpeakerSegment] {
+        guard let embedder = segmentEmbedder, !segments.isEmpty else { return segments }
+        let total = samples.count
+        var replaced = 0
+        func withoutEmbedding(_ segment: SpeakerSegment) -> SpeakerSegment {
+            SpeakerSegment(
+                speakerId: segment.speakerId,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                embedding: nil,
+                qualityScore: segment.qualityScore
+            )
+        }
+        let result = segments.map { segment -> SpeakerSegment in
+            let a = max(0, Int(segment.startTime * Double(sampleRate)))
+            let b = min(total, Int(segment.endTime * Double(sampleRate)))
+            guard b > a else { return withoutEmbedding(segment) }
+            let slice = Array(samples[a..<b])
+            guard let emb = embedder.embed(samples: slice, sampleRate: sampleRate) else {
+                return withoutEmbedding(segment)
+            }
+            replaced += 1
+            return SpeakerSegment(
+                speakerId: segment.speakerId,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                embedding: emb,
+                qualityScore: segment.qualityScore
+            )
+        }
+        AppLogger.transcription.info("Re-embedded segments with \(embedder.identifier)", [
+            "replaced": "\(replaced)", "total": "\(segments.count)", "dim": "\(embedder.dimension)"
+        ])
+        return result
     }
 
     /// Run offline speaker diarization on a WAV file.
