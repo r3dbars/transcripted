@@ -8,7 +8,7 @@ struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @ObservedObject private var sttRouter: STTRouter
+    @ObservedObject var sttRouter: STTRouter
     @ObservedObject var meetingSession: MeetingSessionController
     @ObservedObject var sparkleUpdater: SparkleUpdaterController
     @ObservedObject private var statsService: StatsService = .shared
@@ -16,36 +16,36 @@ struct TranscriptedSettingsView: View {
     let actions: TranscriptedSettingsActions
     private let appLogger: AppLogger
 
-    @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+    @State var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
     )
-    @State private var dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
-    @State private var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
-    @State private var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
-    @State private var launchAtLoginStatus = LaunchAtLoginController.statusDescription
-    @State private var showGeneralModelSettings = false
-    @State private var showGeneralShortcutSettings = false
-    @State private var showGeneralPrivacySettings = false
-    @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
-    @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
-    @State private var customDictionaryPreviewInput = ""
-    @State private var showGeneralCorrections = false
-    @State private var showCorrectionPreview = false
-    @State private var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
-    @State private var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
-    @State private var showAdvancedCorrectionsText = false
+    @State var dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
+    @State var showTranscriptedInDock = DockVisibilityPreferences.isVisible()
+    @State var launchAtLoginEnabled = LaunchAtLoginController.isEnabled
+    @State var launchAtLoginStatus = LaunchAtLoginController.statusDescription
+    @State var showGeneralModelSettings = false
+    @State var showGeneralShortcutSettings = false
+    @State var showGeneralPrivacySettings = false
+    @State var customDictionaryText = CustomDictionaryPreferences.rawText()
+    @State var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
+    @State var customDictionaryPreviewInput = ""
+    @State var showGeneralCorrections = false
+    @State var showCorrectionPreview = false
+    @State var dictationCleanupEnabled = DictationCleanupPreferences.isEnabled()
+    @State var dictationOverlayMode = DictationOverlayPresentationPreferences.mode()
+    @State var showAdvancedCorrectionsText = false
     @State var preferredTranscriptionModel = TranscriptionModelPreferences.preferredModel()
     @State var showAdvancedModelControls = false
-    @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
-    @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
-    @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
-    @State private var autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
-    @State private var autoEnterAppCandidates: [AutoEnterAppCandidate] = []
+    @State var uiSoundsEnabled = UISoundPreferences.isEnabled()
+    @State var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
+    @State var autoEnterKey = DictationAutoSendPreferences.sendKey()
+    @State var autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
+    @State var autoEnterAppCandidates: [AutoEnterAppCandidate] = []
     @State var crashReportingEnabled = CrashReportingPreferences.isEnabled()
-    @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
-    @State private var sentryTestStatus: String?
+    @State var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
+    @State var sentryTestStatus: String?
     @State var diagnosticsActionStatus: String?
-    @State private var permissionStates = PermissionSnapshot.current()
+    @State var permissionStates = PermissionSnapshot.current()
     @State var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     @State private var homeDashboardRefreshTask: Task<Void, Never>?
     @State private var homeDashboardRefreshInFlight = false
@@ -59,10 +59,10 @@ struct TranscriptedSettingsView: View {
     @State var showModelCacheCleanupConfirmation = false
     @State var showWhisperCacheCleanupConfirmation = false
     @State var showReclaimableCacheCleanupConfirmation = false
-    @State private var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
-    @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
-    @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
-    @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
+    @State var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
+    @State var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+    @State var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
+    @State var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
     @State var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
@@ -1948,7 +1948,6 @@ struct TranscriptedSettingsView: View {
         return nil
     }
 
-
     func handleBetaLiveMeetingSidecarToggle(_ enabled: Bool) {
         betaFeatureStatus = nil
 
@@ -2362,7 +2361,7 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var missingRequiredPermissions: [TranscriptedPermissionKind] {
+    var missingRequiredPermissions: [TranscriptedPermissionKind] {
         TranscriptedPermissionKind.allCases.filter { kind in
             kind.isRequiredOnFirstLaunch && !(permissionStates[kind] ?? false)
         }
@@ -2382,7 +2381,7 @@ struct TranscriptedSettingsView: View {
         return "Turn on \(missingRequiredPermissions.map(\.title).joined(separator: " and ")) to record and paste back."
     }
 
-    private var crashReportingFootnote: String {
+    var crashReportingFootnote: String {
         if CrashReporter.isAvailable {
             return crashReportingEnabled
                 ? "On. Sends scrubbed crash and error data to Sentry."
@@ -2391,7 +2390,7 @@ struct TranscriptedSettingsView: View {
         return "Sentry is not configured in this build. Reports stay local."
     }
 
-    private var analyticsFootnote: String {
+    var analyticsFootnote: String {
         if AnalyticsReporter.isAvailable {
             return anonymousAnalyticsEnabled
                 ? "On. Sends only allowlisted anonymous product events."
@@ -2525,7 +2524,7 @@ struct TranscriptedSettingsView: View {
         )
     }
 
-    private func trackPermissionCTA(_ kind: TranscriptedPermissionKind) {
+    func trackPermissionCTA(_ kind: TranscriptedPermissionKind) {
         AnalyticsReporter.track(
             "settings_permission_cta_clicked",
             properties: [
@@ -2569,7 +2568,7 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func refreshPermissions() {
+    func refreshPermissions() {
         permissionStates = PermissionSnapshot.current()
     }
 
@@ -2661,7 +2660,7 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func sendTestSentryEvent() {
+    func sendTestSentryEvent() {
         guard CrashReporter.isAvailable else {
             sentryTestStatus = "Sentry is not configured in this build yet."
             return
@@ -2679,7 +2678,6 @@ struct TranscriptedSettingsView: View {
 
         sentryTestStatus = "Queued test event \(eventID.prefix(8)). Check Sentry in a few seconds."
     }
-
 
     var sortedAutoEnterAllowedBundleIDs: [String] {
         autoEnterAllowedBundleIDs.sorted { lhs, rhs in
