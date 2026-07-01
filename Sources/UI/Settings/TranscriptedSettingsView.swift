@@ -9,7 +9,7 @@ struct TranscriptedSettingsView: View {
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject private var sttRouter: STTRouter
-    @ObservedObject private var meetingSession: MeetingSessionController
+    @ObservedObject var meetingSession: MeetingSessionController
     @ObservedObject private var sparkleUpdater: SparkleUpdaterController
     @ObservedObject private var statsService: StatsService = .shared
 
@@ -2860,18 +2860,6 @@ struct TranscriptedSettingsView: View {
         .accessibilityIdentifier("transcripted.settings.page.general")
     }
 
-    private var peoplePage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Speakers",
-                summary: "Name new voices and manage the people in your meetings."
-            )
-
-            SpeakerPeopleSettingsSection(model: speakerPeopleModel)
-        }
-        .accessibilityIdentifier("transcripted.settings.page.people")
-    }
-
     private var storagePage: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
@@ -3107,10 +3095,6 @@ struct TranscriptedSettingsView: View {
             }
         }
         .accessibilityIdentifier("transcripted.settings.page.storage")
-    }
-
-    private var connectAgentPage: some View {
-        AgentConnectionSettingsPage(meetingSession: meetingSession)
     }
 
     private var betaPage: some View {
