@@ -3,6 +3,7 @@
 Status: proposed (2026-07-01)
 Owner: app/speech
 Related: `Sources/Speech/CLAUDE.md`, `docs/qa-test-bench.md`, `.agents/test-matrix.yml`
+In-flight speaker work this must sequence around: #1330 (reversible speaker merges), #1175 (ERes2Net voiceprint)
 
 ## TL;DR
 
@@ -95,6 +96,37 @@ Also unlocked by the 0.15.x upgrade even without Nemotron:
   transcript text. Any payload-shape change updates
   `SentryPayloadSanitizer.swift` / `AnalyticsPayloadSanitizer.swift` in
   the same PR, per repo policy.
+
+## Sequencing with in-flight speaker-identity work
+
+This plan covers the *transcription* axis (what was said). Two open PRs
+cover the *speaker identity* axis (who said it), and they collide with
+phase 1 in one specific place, so ordering matters:
+
+- **#1330 — reversible speaker merges (provenance + un-merge).** Safety
+  net for wrong auto-merges. Self-contained on the concrete
+  `SpeakerDatabase`; no overlap with this plan. Its own description says
+  it should land before ERes2Net goes GA. **Land it first.**
+- **#1175 — optional ERes2Net voiceprint.** Swaps the identity/matcher
+  embedding (WeSpeaker 256-d → ERes2Net 192-d) for cross-call speaker
+  matching; much more robust on compressed Zoom/phone audio. It injects
+  a `SpeakerSegmentEmbedder` seam into
+  `DiarizationService.diarizeOffline` — the same file phase 1's
+  FluidAudio bump has to touch. It is currently conflicted against main
+  and still needs threshold recalibration plus a model download path.
+
+Order: **#1330 → #1175 (rebased) → phase 1 here.** Whichever of #1175
+and phase 1 lands second eats a rebase in `DiarizationService`; doing
+the dep bump last means the ERes2Net seam is already in place and the
+bump validates against it (its golden-parity test gates regressions).
+Do not run both in flight at once.
+
+One more reason not to reorder: FluidAudio 0.15.x ships newer
+diarization backends (Pyannote Community-1 with VBx, LS-EEND
+streaming). Those may loosen the "WeSpeaker is baked into the diarizer
+binary" constraint #1175 works around — worth a quick re-check during
+phase 1, but it does not block #1175 landing on today's terms since the
+embedder seam is dimension-agnostic either way.
 
 ## Phases
 
@@ -232,5 +264,7 @@ distribution.
 - Removing Parakeet v3 or the Whisper choices.
 - Diarization backend swap (LS-EEND / Pyannote Community-1) — separate
   follow-up once phase 1's FluidAudio bump makes them reachable.
+- Speaker-identity embedding changes — that axis is owned by #1175
+  (ERes2Net) and #1330 (reversible merges); see sequencing above.
 - TTS/read-back features (FluidAudio 0.15.x ships Kokoro/PocketTTS; the
   app is transcription-only and stays that way for now).
