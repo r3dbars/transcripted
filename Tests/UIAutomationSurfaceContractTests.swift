@@ -759,5 +759,8 @@ func testUIAutomationSurfaceContract() {
 }
 
 private func readUIAutomationContractFile(_ relativePath: String) -> String {
-    (try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8)) ?? ""
+    if relativePath == "Sources/UI/Settings/TranscriptedSettingsView.swift" {
+        return settingsSurfaceContents()
+    }
+    return (try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8)) ?? ""
 }

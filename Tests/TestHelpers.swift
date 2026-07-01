@@ -88,6 +88,25 @@ func repoFixtureURL(_ relativePath: String) -> URL {
         .appendingPathComponent(relativePath)
 }
 
+/// TranscriptedSettingsView.swift's pages are split across sibling
+/// `TranscriptedSettingsView+*.swift` extension files. Contract tests that
+/// check for wiring somewhere on the Settings surface should not care which
+/// physical file a given page's code lives in, so this concatenates the main
+/// file with all of its sibling extension files.
+func settingsSurfaceContents() -> String {
+    let mainURL = repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift")
+    let mainContents = (try? String(contentsOf: mainURL, encoding: .utf8)) ?? ""
+    let dirURL = repoFixtureURL("Sources/UI/Settings")
+    guard let entries = try? FileManager.default.contentsOfDirectory(at: dirURL, includingPropertiesForKeys: nil) else {
+        return mainContents
+    }
+    let extensionContents = entries
+        .filter { $0.lastPathComponent.hasPrefix("TranscriptedSettingsView+") && $0.pathExtension == "swift" }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+    return ([mainContents] + extensionContents).joined(separator: "\n")
+}
+
 func loadJSONFixture<T: Decodable>(_ relativePath: String, as type: T.Type = T.self, file: String = #file, line: Int = #line) -> T {
     let url = repoFixtureURL(relativePath)
 

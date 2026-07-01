@@ -2,10 +2,7 @@ import Foundation
 
 func testHomeImportAudioAction() {
     runSuite("General settings exposes imported-audio transcription") {
-        let settingsSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
-            encoding: .utf8
-        )) ?? ""
+        let settingsSource = settingsSurfaceContents()
         let homeSource = (try? String(
             contentsOf: repoFixtureURL("Sources/UI/Settings/HomeView.swift"),
             encoding: .utf8
