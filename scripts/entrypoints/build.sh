@@ -438,19 +438,29 @@ mkdir -p "$APP_BUNDLE/Contents/Helpers"
 # Bundle the Parakeet model directory used by the runtime loader.
 PARAKEET_MODELS_ROOT="$HOME/Library/Application Support/FluidAudio/Models"
 PARAKEET_BUNDLE_DIR="$APP_BUNDLE/Contents/Resources/parakeet-models"
-PARAKEET_MODEL_DIR="parakeet-tdt-0.6b-v3-coreml"
+# FluidAudio 0.15.x cache folder name (no -coreml suffix); AsrModels.load(from:)
+# resolves <parent>/<folderName>, so the bundled dir must use this exact name.
+PARAKEET_MODEL_DIR="parakeet-tdt-0.6b-v3"
 
 bundled_parakeet_models=false
 model_src="$PARAKEET_MODELS_ROOT/$PARAKEET_MODEL_DIR"
+if [ ! -d "$model_src" ]; then
+    # Dev machine still on a pre-0.15 cache layout.
+    model_src="$PARAKEET_MODELS_ROOT/parakeet-tdt-0.6b-v3-coreml"
+fi
 if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
     echo "Skipping bundled Parakeet models (--thin); runtime download will occur on first use."
 else
     mkdir -p "$PARAKEET_BUNDLE_DIR"
-    if [ -d "$model_src/Encoder.mlmodelc" ]; then
-        echo "Bundling Parakeet models from $PARAKEET_MODEL_DIR..."
+    # JointDecisionv3.mlmodelc is required by FluidAudio 0.15.x; bundling without it
+    # would make the runtime loader try to download into the signed app bundle.
+    if [ -d "$model_src/Encoder.mlmodelc" ] && [ -d "$model_src/JointDecisionv3.mlmodelc" ]; then
+        echo "Bundling Parakeet models from $model_src..."
         rm -rf "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
         ditto "$model_src" "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
         bundled_parakeet_models=true
+    elif [ -d "$model_src/Encoder.mlmodelc" ]; then
+        echo "Parakeet cache at $model_src predates FluidAudio 0.15 (missing JointDecisionv3.mlmodelc) — skipping bundling"
     fi
 fi
 
