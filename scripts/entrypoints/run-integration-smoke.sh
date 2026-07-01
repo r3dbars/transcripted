@@ -120,13 +120,11 @@ swiftc \
     -framework Combine \
     -framework CoreML \
     -framework CoreAudio \
-    -framework ESpeakNG \
     -framework Metal \
     -framework MetalKit \
     -framework Accelerate \
     -framework Network \
     -framework UserNotifications \
-    -framework ESpeakNG \
     -lc++ \
     $DEPS_MODULE_FLAGS \
     $DEPS_FRAMEWORK_FLAGS \

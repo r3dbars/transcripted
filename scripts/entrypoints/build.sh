@@ -109,7 +109,7 @@ ensure_deps_ready() {
     local current_digest
     local stamp_digest
 
-    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
+    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
         newest_input="$(newest_dependency_input)"
         build_stamp="$(deps_build_stamp_info)"
 
@@ -150,7 +150,6 @@ ensure_deps_ready() {
     echo "  $TRANSCRIPTED_CORE_MODULE"
     echo "  $ARGMAX_CORE_MODULE"
     echo "  $WHISPERKIT_MODULE"
-    echo "  $ESPEAK_FRAMEWORK"
     echo "  $SENTRY_FRAMEWORK"
     echo "  $SPARKLE_FRAMEWORK"
     echo ""
@@ -504,8 +503,8 @@ for metallib in deps-libs/*.metallib; do
     [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
 done
 
-# Bundle FluidAudio's binary framework dependency.
-cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+# ESpeakNG.framework is only present on FluidAudio < 0.15 deps builds.
+[ -d "$ESPEAK_FRAMEWORK" ] && cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 

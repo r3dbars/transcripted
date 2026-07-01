@@ -19,7 +19,6 @@ let fluidAudioModuleCandidates = [
 let hasDiarizationDeps = enableDiarization
     && fluidAudioModuleCandidates.contains(where: { fileManager.fileExists(atPath: $0) })
     && fileManager.fileExists(atPath: "\(depsLibsRoot)/libDraftDeps.a")
-    && fileManager.fileExists(atPath: "\(depsFrameworksRoot)/ESpeakNG.framework")
 
 let package = Package(
     name: "TranscriptedCLI",
@@ -55,7 +54,6 @@ let package = Package(
                     "-lDraftDeps",
                     "-lc++",
                 ]),
-                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),

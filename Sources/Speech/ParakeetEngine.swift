@@ -407,9 +407,9 @@ class ParakeetEngine: ObservableObject {
 
             failureStage = .managerInitialize
             let manager = AsrManager(config: .default)
-            try await manager.initialize(models: models)
+            try await manager.loadModels(models)
             guard !Task.isCancelled, !isShuttingDown else {
-                Task { manager.cleanup() }
+                Task { await manager.cleanup() }
                 return
             }
 
@@ -3141,7 +3141,7 @@ class ParakeetEngine: ObservableObject {
         eouManager = nil
         modelDownloadState = .notLoaded
         if cleanupDecision == .cleanupNow {
-            Task { mgr?.cleanup() }
+            Task { await mgr?.cleanup() }
         } else {
             print("ℹ️ PARAKEET | deferring ASR manager cleanup while transcription is active")
         }
@@ -3163,7 +3163,7 @@ class ParakeetEngine: ObservableObject {
         }
         ParakeetRetiredAudioEngineStore.shared.retire(audioEngine, reason: "deinit")
         let mgr = asrManager
-        Task { mgr?.cleanup() }
+        Task { await mgr?.cleanup() }
         eouManager = nil
     }
 }
