@@ -24,14 +24,24 @@ In-flight speaker work this must sequence around: #1330 (reversible speaker merg
 
 ### Phase 1 exit checklist (before #1347 merges)
 
+Cache-continuity finding (source-verified against both FluidAudio tags):
+0.15.x renames the v3 cache folder (`parakeet-tdt-0.6b-v3-coreml` →
+`parakeet-tdt-0.6b-v3`) and adds one required file
+(`JointDecisionv3.mlmodelc`). Without mitigation that means a silent full
+~600MB re-download. #1347 ships the mitigation: ParakeetEngine renames the
+legacy cache folder in place on first init (so only the new joint file
+downloads), `ModelCacheInventory` swaps active/stale names so storage
+cleanup can't delete the live cache, and `build.sh` bundles under the new
+folder name gated on the new file.
+
 Needs a real Mac with an existing Parakeet install:
 
 ```bash
-# 1. Snapshot the model cache, then build+launch the PR branch and confirm
-#    no re-download is triggered (menubar shouldn't show a download card):
-ls -R "$HOME/Library/Application Support/Transcripted/FluidAudio/Models" > /tmp/models-before.txt
-bash build-deps.sh --force && bash build.sh
-diff <(ls -R "$HOME/Library/Application Support/Transcripted/FluidAudio/Models") /tmp/models-before.txt
+# 1. Confirm the cache migration: after launching the PR build once, the
+#    Models dir should show parakeet-tdt-0.6b-v3 (renamed, not re-downloaded)
+#    plus a newly fetched JointDecisionv3.mlmodelc — and no -coreml folder:
+ls "$HOME/Library/Application Support/Transcripted/FluidAudio/Models"
+ls "$HOME/Library/Application Support/Transcripted/FluidAudio/Models/parakeet-tdt-0.6b-v3"
 
 # 2. Quality gate vs the pre-upgrade baseline:
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
