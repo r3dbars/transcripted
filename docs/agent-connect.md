@@ -100,6 +100,41 @@ connected, otherwise read the saved Markdown folders:
 ~/Library/Application Support/Transcripted/captures/dictations
 ```
 
+## Transcribe Files From an Agent
+
+Coding agents (Claude Code, Codex, or anything that can run shell commands)
+can also use Transcripted's on-device Parakeet model to turn arbitrary audio
+or video files into plain text — downloaded talks, screen recordings, voice
+memos — without creating a meeting in the app.
+
+This is a contributor/source-build surface for now. From a repo checkout:
+
+```bash
+bash build-deps.sh
+cd Tools/TranscriptedCLI
+TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift build -c release
+```
+
+Then point the agent at the built binary:
+
+```bash
+# plain text to stdout — "just give me the words"
+./.build/release/transcripted-cli transcribe ~/Downloads/talk.mp4
+
+# a folder of downloaded videos, one .txt per file
+./.build/release/transcripted-cli transcribe ~/Downloads/videos/*.mp4 --output-dir ~/Downloads/transcripts
+
+# JSON with timestamped segments, or SRT subtitles
+./.build/release/transcripted-cli transcribe interview.m4a --json
+./.build/release/transcripted-cli transcribe talk.mov --srt --output talk.srt
+```
+
+Everything runs locally. The CLI reuses the Parakeet models the Transcripted
+app already has — the installed app bundle first, then the shared
+`~/Library/Application Support/FluidAudio/Models/` cache — and only downloads
+them (~600MB, one time) when neither exists. See
+`Tools/TranscriptedCLI/CLAUDE.md` for the full command reference.
+
 ## Live Meeting Sidecar
 
 This is an opt-in sidecar for Codex or Claude Cowork while a meeting is still recording.
