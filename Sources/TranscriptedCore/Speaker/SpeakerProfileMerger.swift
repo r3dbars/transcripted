@@ -158,7 +158,7 @@ extension SpeakerDatabase {
         }
     }
 
-    func mergeProfilesImpl(sourceId: UUID, into targetId: UUID) {
+    func mergeProfilesImpl(sourceId: UUID, into targetId: UUID, kind: String = SpeakerMergeKind.explicit) {
         guard let source = getSpeakerImpl(id: sourceId),
               let target = getSpeakerImpl(id: targetId) else {
             AppLogger.speakers.warning("Merge failed — profile not found", [
@@ -200,6 +200,11 @@ extension SpeakerDatabase {
 
         // Wrap UPDATE + DELETE in a transaction so a crash between them can't orphan data
         transaction {
+            // Safety net: snapshot both profiles + re-point provenance BEFORE the blend
+            // overwrites the target and the source row is deleted, so a wrong merge can
+            // be reconstructed into two distinct profiles later. Same transaction → atomic.
+            recordMergeEventImpl(source: source, target: target, kind: kind)
+
             let sql = """
             UPDATE speakers SET embedding = ?, last_seen = ?, call_count = ?, confidence = ?
             WHERE id = ?;
@@ -300,7 +305,7 @@ extension SpeakerDatabase {
                 }
 
                 // Merge via mergeProfilesImpl (blends embeddings, transfers name, deletes source)
-                mergeProfilesImpl(sourceId: absorbed.id, into: keeper.id)
+                mergeProfilesImpl(sourceId: absorbed.id, into: keeper.id, kind: SpeakerMergeKind.duplicate)
 
                 mergedIds.insert(absorbed.id)
                 mergeCount += 1
@@ -369,7 +374,7 @@ extension SpeakerDatabase {
             let keeper = sorted[0]
 
             for source in sorted.dropFirst() {
-                mergeProfilesImpl(sourceId: source.id, into: keeper.id)
+                mergeProfilesImpl(sourceId: source.id, into: keeper.id, kind: SpeakerMergeKind.byName)
                 mergeCount += 1
             }
 

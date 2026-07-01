@@ -145,6 +145,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         executeSQL(sql)
         FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         migrateSchema()
+        createProvenanceTablesImpl()
     }
 
     /// Add columns that may be missing from older databases.
@@ -296,6 +297,8 @@ public final class SpeakerDatabase: @unchecked Sendable {
 
             if !sqlSucceeded {
                 AppLogger.speakers.error("CRITICAL: speaker update was NOT persisted to database — returning stale profile", ["id": existingId.uuidString])
+            } else {
+                recordContributionImpl(profileId: existingId, embedding: embedding, kind: SpeakerProvenanceKind.contribution)
             }
 
             return SpeakerProfile(
@@ -338,6 +341,8 @@ public final class SpeakerDatabase: @unchecked Sendable {
 
             if !sqlSucceeded {
                 AppLogger.speakers.error("CRITICAL: new speaker was NOT persisted to database — profile exists only in memory", ["id": newId.uuidString])
+            } else {
+                recordContributionImpl(profileId: newId, embedding: embedding, kind: SpeakerProvenanceKind.seed)
             }
 
             AppLogger.speakers.info("Created new speaker", ["id": "\(newId)"])

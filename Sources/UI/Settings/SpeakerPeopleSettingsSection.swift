@@ -136,6 +136,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var duplicateCountsByProfileID: [UUID: Int] = [:]
     private var mergeTargetsByProfileID: [UUID: [SpeakerProfile]] = [:]
     private var clipURLsByProfileID: [UUID: URL] = [:]
+    private var undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
     private var refreshGeneration = 0
 
     private struct Snapshot {
@@ -146,6 +147,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let mergeTargetsByProfileID: [UUID: [SpeakerProfile]]
         let clipURLsByProfileID: [UUID: URL]
         let reviewQueueItems: [SpeakerPendingReviewItem]
+        let undoableMergesByTargetID: [UUID: SpeakerMergeRecord]
     }
 
     init(
@@ -398,6 +400,34 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         mergeTargetsByProfileID[profile.id] ?? []
     }
 
+    /// The most recent merge into this profile that can still be undone, if any.
+    func undoableMerge(for profile: SpeakerProfile) -> SpeakerMergeRecord? {
+        undoableMergesByTargetID[profile.id]
+    }
+
+    /// Reverse the most recent merge into `profile`, reconstructing the two distinct
+    /// voice profiles from the embeddings retained at merge time. Past transcripts keep
+    /// the merged name — un-merge restores future voice matching, not transcript text.
+    func unmerge(into profile: SpeakerProfile, completion: ((Bool) -> Void)? = nil) {
+        let targetId = profile.id
+        let speakerDatabase = self.speakerDatabase
+        let preferredClipsDirectory = self.preferredClipsDirectory
+        let legacyClipsDirectory = self.legacyClipsDirectory
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let didUnmerge = speakerDatabase.unmergeMostRecent(forTargetId: targetId)
+            let snapshot = Self.snapshot(
+                from: speakerDatabase,
+                preferredClipsDirectory: preferredClipsDirectory,
+                legacyClipsDirectory: legacyClipsDirectory
+            )
+            DispatchQueue.main.async {
+                self?.applySnapshot(snapshot)
+                completion?(didUnmerge)
+            }
+        }
+    }
+
     private func applySnapshot(_ snapshot: Snapshot) {
         duplicateCandidates = snapshot.duplicateCandidates
         duplicateProfileIDs = snapshot.duplicateProfileIDs
@@ -405,6 +435,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         mergeTargetsByProfileID = snapshot.mergeTargetsByProfileID
         clipURLsByProfileID = snapshot.clipURLsByProfileID
         reviewQueueItems = snapshot.reviewQueueItems
+        undoableMergesByTargetID = snapshot.undoableMergesByTargetID
         hasLoadedProfiles = true
         profiles = snapshot.profiles
     }
@@ -414,17 +445,28 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL
     ) -> Snapshot {
-        snapshot(
-            from: sortedProfiles(from: speakerDatabase),
+        let profiles = sortedProfiles(from: speakerDatabase)
+        // Look up each visible speaker's newest still-undoable merge directly (indexed
+        // per-target query) so undo never disappears once merge history grows past a cap.
+        var undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
+        for profile in profiles {
+            if let record = speakerDatabase.undoableMerge(forTargetId: profile.id) {
+                undoableMergesByTargetID[profile.id] = record
+            }
+        }
+        return snapshot(
+            from: profiles,
             preferredClipsDirectory: preferredClipsDirectory,
-            legacyClipsDirectory: legacyClipsDirectory
+            legacyClipsDirectory: legacyClipsDirectory,
+            undoableMergesByTargetID: undoableMergesByTargetID
         )
     }
 
     nonisolated private static func snapshot(
         from profiles: [SpeakerProfile],
         preferredClipsDirectory: URL,
-        legacyClipsDirectory: URL
+        legacyClipsDirectory: URL,
+        undoableMergesByTargetID: [UUID: SpeakerMergeRecord] = [:]
     ) -> Snapshot {
         let duplicateCandidates = duplicateCandidates(from: profiles)
         var duplicateCountsByProfileID: [UUID: Int] = [:]
@@ -476,7 +518,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             duplicateCountsByProfileID: duplicateCountsByProfileID,
             mergeTargetsByProfileID: mergeTargetsByProfileID,
             clipURLsByProfileID: clipURLsByProfileID,
-            reviewQueueItems: reviewQueueItems
+            reviewQueueItems: reviewQueueItems,
+            undoableMergesByTargetID: undoableMergesByTargetID
         )
     }
 
@@ -1099,7 +1142,7 @@ private struct SpeakerDuplicateCandidateRow: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This combines their history and can't be undone. Past transcripts are updated.")
+            Text("This combines their voices into one. You can undo it later from the speaker's ••• menu. Past transcripts are updated.")
         }
     }
 
@@ -1210,6 +1253,7 @@ private struct SpeakerPersonRow: View {
     @State private var showDeleteConfirmation = false
     @State private var pendingMergeTarget: SpeakerProfile?
     @State private var showMergeConfirmation = false
+    @State private var showUnmergeConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1284,7 +1328,15 @@ private struct SpeakerPersonRow: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("This combines their history and can't be undone. Past transcripts are updated.")
+            Text("This combines their voices into one. You can undo it later from this speaker's ••• menu. Past transcripts are updated.")
+        }
+        .alert(unmergeConfirmationTitle, isPresented: $showUnmergeConfirmation) {
+            Button("Undo Merge") {
+                model.unmerge(into: profile)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This splits the merged voice back into two separate profiles so future recordings match the right person. Past transcripts keep the merged name.")
         }
     }
 
@@ -1304,6 +1356,12 @@ private struct SpeakerPersonRow: View {
                             showMergeConfirmation = true
                         }
                     }
+                }
+            }
+
+            if model.undoableMerge(for: profile) != nil {
+                Button("Undo Last Merge…") {
+                    showUnmergeConfirmation = true
                 }
             }
 
@@ -1338,6 +1396,14 @@ private struct SpeakerPersonRow: View {
             return "Merge “\(source)” into another speaker?"
         }
         return "Merge “\(source)” into “\(SpeakerDuplicateCandidate.displayName(for: pendingMergeTarget))”?"
+    }
+
+    private var unmergeConfirmationTitle: String {
+        let name = SpeakerDuplicateCandidate.displayName(for: profile)
+        if let merge = model.undoableMerge(for: profile), let sourceName = merge.sourceName {
+            return "Undo merge of “\(sourceName)” into “\(name)”?"
+        }
+        return "Undo the last merge into “\(name)”?"
     }
 
     private var metadataLine: String {
