@@ -615,11 +615,13 @@ if [ -z "$ESPEAK_FRAMEWORK_SRC" ]; then
     )"
 fi
 if [ -z "$ESPEAK_FRAMEWORK_SRC" ]; then
-    echo "[build-deps] ERROR: ESpeakNG.framework not found in resolved dependencies"
-    exit 1
+    # FluidAudio dropped the vendored ESpeakNG binary target in 0.15.x; nothing to copy.
+    echo "[build-deps] WARNING: ESpeakNG.framework not in resolved dependencies; skipping copy"
+    rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
+else
+    rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
+    ditto "$ESPEAK_FRAMEWORK_SRC" "$DEPS_FRAMEWORKS/ESpeakNG.framework"
 fi
-rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
-ditto "$ESPEAK_FRAMEWORK_SRC" "$DEPS_FRAMEWORKS/ESpeakNG.framework"
 
 download_sentry_distribution
 download_sparkle_distribution

@@ -59,7 +59,7 @@ let package = Package(
                     "-Xlinker", "-rpath",
                     "-Xlinker", "\(repoRoot)/deps-frameworks",
                 ]),
-                .linkedFramework("ESpeakNG"),
+                // ESpeakNG intentionally not linked: FluidAudio 0.15.x no longer vendors it.
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),
@@ -97,7 +97,7 @@ let package = Package(
                     "-Xlinker", "-rpath",
                     "-Xlinker", "\(repoRoot)/deps-frameworks",
                 ]),
-                .linkedFramework("ESpeakNG"),
+                // ESpeakNG intentionally not linked: FluidAudio 0.15.x no longer vendors it.
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),
