@@ -2690,13 +2690,18 @@ class ParakeetEngine: ObservableObject {
 
     private func runASRInference(
         manager: AsrManager,
-        samples: [Float],
-        source: AudioSource
+        samples: [Float]
     ) async throws -> String {
         await beginASRInference()
         do {
             try Task.checkCancellation()
-            let result = try await manager.transcribe(samples, source: source)
+            // FluidAudio 0.15.x hands decoder-state ownership to the caller. Every batch
+            // segment gets a fresh state so concurrent mic/system segments can never
+            // contaminate each other's decoder context (0.7.9 kept per-source state
+            // internally, keyed by the removed `source:` parameter).
+            let decoderLayers = await manager.decoderLayerCount
+            var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
+            let result = try await manager.transcribe(samples, decoderState: &decoderState)
             let text = withExtendedLifetime(result) {
                 String(result.text)
             }
@@ -2759,8 +2764,7 @@ class ParakeetEngine: ObservableObject {
         do {
             let resultText = try await runASRInference(
                 manager: manager,
-                samples: resampled,
-                source: .microphone
+                samples: resampled
             )
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             let trimmed = resultText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2798,8 +2802,7 @@ class ParakeetEngine: ObservableObject {
                     do {
                         let retryResultText = try await runASRInference(
                             manager: manager,
-                            samples: retrySamples,
-                            source: .microphone
+                            samples: retrySamples
                         )
                         let retryElapsed = CFAbsoluteTimeGetCurrent() - retryStarted
                         let retryTrimmed = retryResultText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2936,8 +2939,7 @@ class ParakeetEngine: ObservableObject {
         do {
             resultText = try await runASRInference(
                 manager: manager,
-                samples: samples,
-                source: source
+                samples: samples
             )
         } catch {
             if let fallbackDecision = ParakeetShortAudioGate.meetingSegmentFallback(
