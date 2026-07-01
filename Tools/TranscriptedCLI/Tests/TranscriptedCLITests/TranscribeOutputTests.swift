@@ -142,6 +142,14 @@ final class TranscribeOutputTests: XCTestCase {
         XCTAssertTrue(srt.contains("00:00:01,000 --> 00:00:01,100"), srt)
     }
 
+    func testSRTRenderMinimumDurationDoesNotOverlapNextCaption() {
+        let srt = TranscribeOutputBuilder.srt(from: [
+            TranscribeSegment(text: "blip", startSeconds: 1.0, endSeconds: 1.0),
+            TranscribeSegment(text: "next", startSeconds: 1.05, endSeconds: 2.0),
+        ])
+        XCTAssertTrue(srt.contains("00:00:01,000 --> 00:00:01,050"), srt)
+    }
+
     // MARK: - Output paths
 
     func testOutputURLSwapsExtensionPerFormat() {
@@ -171,13 +179,31 @@ final class TranscribeOutputTests: XCTestCase {
         )
     }
 
+    func testBatchOutputURLsDisambiguateCollidingStems() {
+        let outputDir = URL(fileURLWithPath: "/tmp/out", isDirectory: true)
+        let urls = TranscribeOutputBuilder.outputURLs(
+            for: [
+                URL(fileURLWithPath: "/a/talk.mp4"),
+                URL(fileURLWithPath: "/b/talk.mov"),
+                URL(fileURLWithPath: "/c/unique.m4a"),
+            ],
+            outputDirectory: outputDir,
+            format: .text
+        )
+        XCTAssertEqual(urls.map(\.path), [
+            "/tmp/out/talk.mp4.txt",
+            "/tmp/out/talk.mov.txt",
+            "/tmp/out/unique.txt",
+        ])
+    }
+
     // MARK: - JSON encoding
 
     func testEncodeJSONSingleOutputIsObject() throws {
         let data = try TranscribeOutputBuilder.encodeJSON([
             TranscribeFileOutput(
                 file: "/a.wav", text: "hi", durationSeconds: 1, processingSeconds: 0.5,
-                realTimeFactor: 2, confidence: 0.9,
+                speedFactor: 2, confidence: 0.9,
                 segments: [TranscribeSegment(text: "hi", startSeconds: 0, endSeconds: 1)]
             )
         ])
@@ -191,11 +217,11 @@ final class TranscribeOutputTests: XCTestCase {
     func testEncodeJSONMultipleOutputsIsArray() throws {
         let one = TranscribeFileOutput(
             file: "/a.wav", text: "a", durationSeconds: 1, processingSeconds: 1,
-            realTimeFactor: 1, confidence: 1, segments: []
+            speedFactor: 1, confidence: 1, segments: []
         )
         let two = TranscribeFileOutput(
             file: "/b.wav", text: "b", durationSeconds: 2, processingSeconds: 1,
-            realTimeFactor: 2, confidence: 1, segments: []
+            speedFactor: 2, confidence: 1, segments: []
         )
         let data = try TranscribeOutputBuilder.encodeJSON([one, two])
         let object = try JSONSerialization.jsonObject(with: data)

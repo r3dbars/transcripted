@@ -12,7 +12,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe (WAV, MP3, M4A, AAC, AIFF, CAF, MP4, MOV, M4V, ...).")
     var mediaPaths: [String]
 
-    @Option(name: .long, help: "Path to a directory containing the Parakeet TDT v3 CoreML model bundle.")
+    @Option(name: .long, help: "Path to a Parakeet TDT v3 CoreML model directory (must be named parakeet-tdt-0.6b-v3-coreml, matching FluidAudio's layout).")
     var modelsDir: String?
 
     @Flag(name: .long, help: "Fail instead of downloading models when no local copy exists.")
@@ -57,11 +57,15 @@ struct Transcribe: AsyncParsableCommand {
             return url
         }
 
-        var outputDirectoryURL: URL?
+        var batchOutputURLs: [URL]?
         if let outputDir {
             let url = URL(fileURLWithPath: outputDir, isDirectory: true).standardizedFileURL
             try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
-            outputDirectoryURL = url
+            batchOutputURLs = TranscribeOutputBuilder.outputURLs(
+                for: mediaURLs,
+                outputDirectory: url,
+                format: format
+            )
         }
 
         let manager = try await TranscribeModelResolver.loadManager(
@@ -111,7 +115,7 @@ struct Transcribe: AsyncParsableCommand {
                 text: text,
                 durationSeconds: decoded.durationSeconds,
                 processingSeconds: elapsed,
-                realTimeFactor: elapsed > 0 ? decoded.durationSeconds / elapsed : 0,
+                speedFactor: elapsed > 0 ? decoded.durationSeconds / elapsed : 0,
                 confidence: Double(result.confidence),
                 segments: segments
             )
@@ -135,12 +139,8 @@ struct Transcribe: AsyncParsableCommand {
                 let outputURL = URL(fileURLWithPath: output).standardizedFileURL
                 try Data(rendered.utf8).write(to: outputURL)
                 Self.logProgress("Wrote \(outputURL.path)")
-            } else if let outputDirectoryURL {
-                let outputURL = TranscribeOutputBuilder.outputURL(
-                    for: mediaURL,
-                    outputDirectory: outputDirectoryURL,
-                    format: format
-                )
+            } else if let batchOutputURLs {
+                let outputURL = batchOutputURLs[index]
                 try Data(rendered.utf8).write(to: outputURL)
                 Self.logProgress("Wrote \(outputURL.path)")
             } else {
@@ -212,7 +212,11 @@ enum TranscribeModelResolver {
         if let modelsDir {
             let directory = URL(fileURLWithPath: modelsDir, isDirectory: true).standardizedFileURL
             guard AsrModels.modelsExist(at: directory, version: .v3) else {
-                throw ValidationError("No complete Parakeet TDT v3 model bundle at \(directory.path).")
+                throw ValidationError(
+                    "No complete Parakeet TDT v3 model bundle at \(directory.path)."
+                        + " FluidAudio resolves models from a directory named parakeet-tdt-0.6b-v3-coreml;"
+                        + " point --models-dir at that folder."
+                )
             }
             log("Loading Parakeet models from \(directory.path)")
             models = try await AsrModels.load(from: directory, version: .v3)
@@ -251,7 +255,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe (WAV, MP3, M4A, AAC, AIFF, CAF, MP4, MOV, M4V, ...).")
     var mediaPaths: [String]
 
-    @Option(name: .long, help: "Path to a directory containing the Parakeet TDT v3 CoreML model bundle.")
+    @Option(name: .long, help: "Path to a Parakeet TDT v3 CoreML model directory (must be named parakeet-tdt-0.6b-v3-coreml, matching FluidAudio's layout).")
     var modelsDir: String?
 
     @Flag(name: .long, help: "Fail instead of downloading models when no local copy exists.")

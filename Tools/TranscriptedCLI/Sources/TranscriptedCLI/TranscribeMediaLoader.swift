@@ -45,11 +45,12 @@ enum TranscribeMediaLoader {
     }
 
     static func loadSamples(from url: URL) async throws -> DecodedAudio {
+        // Always give the asset-reader path a chance: even oddities the
+        // AVAudioFile path rejects (unusual formats, containers it half-opens)
+        // can still decode through AVAssetReader.
         let audioFileFailure: Error
         do {
             return try loadWithAudioFile(url: url)
-        } catch let error as TranscribeMediaLoaderError {
-            throw error
         } catch {
             audioFileFailure = error
         }
@@ -62,7 +63,8 @@ enum TranscribeMediaLoader {
             throw TranscribeMediaLoaderError.unreadableMedia(
                 fileName: url.lastPathComponent,
                 fileExtension: url.pathExtension,
-                detail: audioFileFailure.localizedDescription
+                detail: "audio decode failed (\(audioFileFailure.localizedDescription));"
+                    + " video decode failed (\(error.localizedDescription))"
             )
         }
     }

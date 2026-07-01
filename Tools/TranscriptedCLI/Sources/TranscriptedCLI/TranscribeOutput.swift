@@ -21,7 +21,9 @@ struct TranscribeFileOutput: Encodable {
     let text: String
     let durationSeconds: Double
     let processingSeconds: Double
-    let realTimeFactor: Double
+    /// Audio duration divided by processing time — higher is faster
+    /// (FluidAudio's "rtfx" speedup, not the conventional RTF ratio).
+    let speedFactor: Double
     let confidence: Double
     let segments: [TranscribeSegment]
 }
@@ -115,7 +117,14 @@ enum TranscribeOutputBuilder {
 
     static func srt(from segments: [TranscribeSegment]) -> String {
         segments.enumerated().map { index, segment in
-            let end = max(segment.endSeconds, segment.startSeconds + minimumCaptionSeconds)
+            var end = max(segment.endSeconds, segment.startSeconds + minimumCaptionSeconds)
+            // The minimum-duration clamp must not push a caption into the next one.
+            if index + 1 < segments.count {
+                let nextStart = segments[index + 1].startSeconds
+                if nextStart > segment.startSeconds {
+                    end = min(end, nextStart)
+                }
+            }
             return "\(index + 1)\n"
                 + "\(srtTimestamp(segment.startSeconds)) --> \(srtTimestamp(end))\n"
                 + "\(segment.text)\n"
@@ -141,6 +150,30 @@ enum TranscribeOutputBuilder {
         outputDirectory
             .appendingPathComponent(input.deletingPathExtension().lastPathComponent, isDirectory: false)
             .appendingPathExtension(format.fileExtension)
+    }
+
+    /// Derived output URLs for a whole batch. Inputs that share a stem
+    /// (talk.mp4 + talk.mov) keep their original extension in the output name
+    /// (talk.mp4.txt, talk.mov.txt) so one transcript never silently
+    /// overwrites another.
+    static func outputURLs(
+        for inputs: [URL],
+        outputDirectory: URL,
+        format: TranscribeOutputFormat
+    ) -> [URL] {
+        var stemCounts: [String: Int] = [:]
+        for input in inputs {
+            stemCounts[input.deletingPathExtension().lastPathComponent, default: 0] += 1
+        }
+        return inputs.map { input in
+            let stem = input.deletingPathExtension().lastPathComponent
+            guard stemCounts[stem, default: 0] > 1 else {
+                return outputURL(for: input, outputDirectory: outputDirectory, format: format)
+            }
+            return outputDirectory
+                .appendingPathComponent(input.lastPathComponent, isDirectory: false)
+                .appendingPathExtension(format.fileExtension)
+        }
     }
 
     static func encodeJSON(_ outputs: [TranscribeFileOutput]) throws -> Data {

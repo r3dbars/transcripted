@@ -71,7 +71,10 @@ let package = Package(
         ),
         .testTarget(
             name: "TranscriptedCLITests",
-            dependencies: ["transcripted-cli"],
+            dependencies: [
+                "transcripted-cli",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Tests/TranscriptedCLITests",
             swiftSettings: hasAudioPipelineDeps ? [
                 .define("TRANSCRIPTEDCLI_WITH_DIARIZATION"),
