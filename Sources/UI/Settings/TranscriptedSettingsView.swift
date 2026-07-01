@@ -10,10 +10,10 @@ struct TranscriptedSettingsView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject private var sttRouter: STTRouter
     @ObservedObject var meetingSession: MeetingSessionController
-    @ObservedObject private var sparkleUpdater: SparkleUpdaterController
+    @ObservedObject var sparkleUpdater: SparkleUpdaterController
     @ObservedObject private var statsService: StatsService = .shared
 
-    private let actions: TranscriptedSettingsActions
+    let actions: TranscriptedSettingsActions
     private let appLogger: AppLogger
 
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
@@ -41,30 +41,30 @@ struct TranscriptedSettingsView: View {
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
     @State private var autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
     @State private var autoEnterAppCandidates: [AutoEnterAppCandidate] = []
-    @State private var crashReportingEnabled = CrashReportingPreferences.isEnabled()
+    @State var crashReportingEnabled = CrashReportingPreferences.isEnabled()
     @State private var anonymousAnalyticsEnabled = AnalyticsPreferences.isEnabled()
     @State private var sentryTestStatus: String?
-    @State private var diagnosticsActionStatus: String?
+    @State var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
-    @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    @State var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     @State private var homeDashboardRefreshTask: Task<Void, Never>?
     @State private var homeDashboardRefreshInFlight = false
     @State private var homeDashboardRefreshGeneration = 0
     @State private var lastHomeDashboardRefreshStartedAt: Date?
-    @State private var showSupportFolders = false
-    @State private var modelCacheSnapshot: ModelCacheSnapshot?
-    @State private var modelCacheLoading = false
-    @State private var modelCacheCleanupInProgress = false
-    @State private var modelCacheCleanupStatus: String?
-    @State private var showModelCacheCleanupConfirmation = false
-    @State private var showWhisperCacheCleanupConfirmation = false
-    @State private var showReclaimableCacheCleanupConfirmation = false
+    @State var showSupportFolders = false
+    @State var modelCacheSnapshot: ModelCacheSnapshot?
+    @State var modelCacheLoading = false
+    @State var modelCacheCleanupInProgress = false
+    @State var modelCacheCleanupStatus: String?
+    @State var showModelCacheCleanupConfirmation = false
+    @State var showWhisperCacheCleanupConfirmation = false
+    @State var showReclaimableCacheCleanupConfirmation = false
     @State private var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
-    @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
-    @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
+    @State var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
+    @State var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
@@ -80,17 +80,17 @@ struct TranscriptedSettingsView: View {
     @State private var homeLocalSummaryTaskTokens: [String: UUID] = [:]
     @State private var homeLocalSummaryNotice: HomeLocalSummaryNotice?
     @State private var homeLocalSummaryNoticeDismissTask: Task<Void, Never>?
-    @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
-    @AppStorage(LocalMeetingSummaryPreferences.providerKey) private var localMeetingSummaryProviderRawValue = LocalMeetingSummaryProvider.defaultProvider.rawValue
-    @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
-    @State private var betaFeatureStatus: String?
-    @State private var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
-    @State private var appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
-    @State private var showLocalSummarySetupDetails = false
-    @State private var localSummaryModelPreparationStatus: String?
+    @AppStorage(LocalMeetingSummaryPreferences.enabledKey) var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
+    @AppStorage(LocalMeetingSummaryPreferences.providerKey) var localMeetingSummaryProviderRawValue = LocalMeetingSummaryProvider.defaultProvider.rawValue
+    @AppStorage(LiveMeetingCodexPreferences.enabledKey) var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
+    @State var betaFeatureStatus: String?
+    @State var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
+    @State var appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
+    @State var showLocalSummarySetupDetails = false
+    @State var localSummaryModelPreparationStatus: String?
     @State private var localSummaryModelPreparationTask: Task<String, Error>?
     @State private var localSummaryModelPreparationToken: UUID?
-    @State private var isLocalSummaryModelPreparing = false
+    @State var isLocalSummaryModelPreparing = false
     @State private var settingsColumnVisibility: NavigationSplitViewVisibility = .all
     @State private var speakerInboxScrollRequest = 0
     @State private var speakerInboxScrollAwaitingQueue = false
@@ -1892,12 +1892,6 @@ struct TranscriptedSettingsView: View {
         savedMeetingRetranscriptionUnavailableReason == nil
     }
 
-    private var modelCacheBusyHelp: String {
-        modelCacheCleanupInProgress
-            ? "A cache cleanup is already running."
-            : "Wait for the storage scan to finish."
-    }
-
     private var failedMeetingRetryUnavailableReason: String? {
         if sttRouter.isRecording || sttRouter.isTranscribing {
             return "Wait for the current dictation to finish before retrying a failed meeting."
@@ -1952,142 +1946,6 @@ struct TranscriptedSettingsView: View {
         }
 
         return nil
-    }
-
-    private var shortcutsPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Shortcuts",
-                summary: "Keyboard triggers and send-after-paste rules."
-            )
-
-            SettingsSection(
-                title: "Keys",
-                detail: "Set push-to-talk, hands-free, paste-last-dictation, and meeting shortcuts."
-            ) {
-                SettingsToggleRow(
-                    title: "Enable dictation shortcuts",
-                    detail: dictationShortcutsEnabled
-                        ? "Push-to-talk and hands-free keys can start dictation."
-                        : "Off. You can still start dictation from the app, and meeting controls still work.",
-                    isOn: Binding(
-                        get: { dictationShortcutsEnabled },
-                        set: { newValue in
-                            dictationShortcutsEnabled = newValue
-                            trackSettingsToggle("dictation_shortcuts", enabled: newValue, page: .shortcuts)
-                            HotkeyPreferences.setDictationShortcutsEnabled(newValue)
-                        }
-                    )
-                )
-
-                HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                    .frame(height: HotkeyRecorderContainer.preferredHeight)
-
-                if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-
-                        Text(dictationTriggerSystemWarning)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .font(.caption)
-                }
-            }
-
-            SettingsSection(
-                title: "Send After Paste",
-                detail: "Press Enter only in the apps you choose."
-            ) {
-                SettingsToggleRow(
-                    title: "Send after dictation",
-                    detail: autoEnterEnabled
-                        ? "Transcripted sends \(autoEnterKey.title) after it pastes, only in selected apps."
-                        : "Off. Dictation only pastes text.",
-                    isOn: Binding(
-                        get: { autoEnterEnabled },
-                        set: { newValue in
-                            autoEnterEnabled = newValue
-                            trackSettingsToggle("auto_send", enabled: newValue, page: .shortcuts)
-                            DictationAutoSendPreferences.setEnabled(newValue)
-                        }
-                    )
-                )
-
-                Picker("Send key", selection: Binding(
-                    get: { autoEnterKey },
-                    set: { newValue in
-                        autoEnterKey = newValue
-                        trackSettingsAction("change_auto_send_key", page: .shortcuts)
-                        DictationAutoSendPreferences.setSendKey(newValue)
-                    }
-                )) {
-                    ForEach(DictationAutoSendKey.allCases) { key in
-                        Text(key.title).tag(key)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .disabled(!autoEnterEnabled)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Allowed Apps")
-                            .font(.subheadline.weight(.semibold))
-
-                        Spacer()
-
-                        SettingsInlineActionButton(title: "Refresh") {
-                            trackSettingsAction("refresh_auto_send_apps", page: .shortcuts)
-                            refreshAutoEnterAppCandidates()
-                        }
-
-                        SettingsInlineActionButton(title: "Add App...", symbolName: "plus") {
-                            trackSettingsAction("add_auto_send_app", page: .shortcuts)
-                            chooseAutoEnterApp()
-                        }
-                    }
-
-                    if autoEnterAllowedBundleIDs.isEmpty {
-                        Text("Add an app before Transcripted can send.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(sortedAutoEnterAllowedBundleIDs, id: \.self) { bundleID in
-                            AutoEnterAllowedAppRow(
-                                title: autoEnterDisplayName(for: bundleID),
-                                bundleID: bundleID
-                            ) {
-                                setAutoEnterApp(bundleID, isAllowed: false)
-                            }
-                        }
-                    }
-                }
-                .disabled(!autoEnterEnabled)
-
-                if !autoEnterAppCandidates.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Running Apps")
-                            .font(.subheadline.weight(.semibold))
-
-                        ForEach(autoEnterAppCandidates) { app in
-                            SettingsToggleRow(
-                                title: app.name,
-                                detail: app.bundleID,
-                                isOn: Binding(
-                                    get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
-                                    set: { isAllowed in
-                                        setAutoEnterApp(app.bundleID, isAllowed: isAllowed)
-                                    }
-                                ),
-                                help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name)."
-                            )
-                        }
-                    }
-                    .disabled(!autoEnterEnabled)
-                }
-            }
-        }
     }
 
     private var generalPage: some View {
@@ -2860,478 +2718,7 @@ struct TranscriptedSettingsView: View {
         .accessibilityIdentifier("transcripted.settings.page.general")
     }
 
-    private var storagePage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Storage",
-                summary: "Choose where saved Markdown files live."
-            )
-
-            SettingsSection(
-                title: "Capture Library",
-                detail: "Your meeting and dictation Markdown files."
-            ) {
-                StorageRow(title: "Capture library", url: captureLibraryURL)
-                StorageRow(title: "Meeting captures", url: MeetingStoragePaths.transcriptsFolder)
-                StorageRow(title: "Dictation captures", url: DictationStoragePaths.transcriptsFolder)
-
-                HStack {
-                    SettingsInlineActionButton(title: "Choose Folder", symbolName: "folder") {
-                        trackSettingsAction("choose_capture_library", page: .storage)
-                        chooseCaptureLibrary()
-                    }
-
-                    SettingsInlineActionButton(title: "Reset to Default") {
-                        trackSettingsAction("reset_capture_library", page: .storage)
-                        TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
-                        refreshStoragePaths()
-                        AnalyticsReporter.track(
-                            "settings_capture_library_changed",
-                            properties: [
-                                "location_type": "default",
-                                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
-                            ]
-                        )
-                    }
-                }
-
-                Text("Pick an Obsidian vault or any folder you want agents to read.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsSection(
-                title: "Audio Storage",
-                detail: "Transcripted keeps transcripts and shrinks retained meeting audio."
-            ) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "waveform.badge.magnifyingglass")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Compress WAV to M4A automatically")
-                            .font(.subheadline.weight(.medium))
-                        Text("After a transcript is saved, Transcripted keeps replay audio in a smaller format and removes the original WAV only after conversion succeeds.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                Picker("Delete audio after", selection: Binding(
-                    get: { audioRetentionWindow },
-                    set: { updateAudioRetentionWindow($0) }
-                )) {
-                    ForEach(AudioRetentionWindow.allCases) { window in
-                        Text(window.title).tag(window)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 320)
-
-                Text(audioRetentionWindow.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("Choosing 7 or 30 days asks before deleting old replay audio.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsSection(
-                title: "Local Model Storage",
-                detail: "On-device models and optional transcription caches."
-            ) {
-                if modelCacheLoading, modelCacheSnapshot == nil {
-                    ProgressView("Scanning model storage...")
-                        .controlSize(.small)
-                }
-
-                if let snapshot = modelCacheSnapshot {
-                    let includeWhisperInReclaimableCleanup = !effectiveTranscriptionModel.isWhisper
-                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInReclaimableCleanup)
-                    ModelCacheMetricRow(
-                        title: "Known model and cache footprint",
-                        value: snapshot.formattedTotalKnownSize,
-                        detail: "FluidAudio models plus Transcripted's app cache."
-                    )
-                    ModelCacheMetricRow(
-                        title: "Reclaimable cache",
-                        value: snapshot.formattedReclaimableSize(includeWhisper: includeWhisperInReclaimableCleanup),
-                        detail: includeWhisperInReclaimableCleanup
-                            ? "Known stale models plus optional Whisper files."
-                            : "Known stale models. Whisper is preserved while selected."
-                    )
-                    if reclaimableBytes > 0 {
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Reclaimable Cache",
-                            tone: .destructive
-                        ) {
-                            showReclaimableCacheCleanupConfirmation = true
-                        }
-                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
-                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
-                    }
-                    ModelCacheMetricRow(
-                        title: "FluidAudio models",
-                        value: snapshot.formattedFluidAudioModelsSize,
-                        detail: "Parakeet, diarization, and related local model files."
-                    )
-                    ModelCacheMetricRow(
-                        title: "Whisper cache",
-                        value: snapshot.formattedWhisperModelsSize,
-                        detail: "Optional Whisper models stored by Transcripted."
-                    )
-                    if snapshot.whisperModelsBytes > 0 {
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Whisper Cache",
-                            tone: .destructive
-                        ) {
-                            showWhisperCacheCleanupConfirmation = true
-                        }
-                        .disabled(effectiveTranscriptionModel.isWhisper || modelCacheCleanupInProgress || modelCacheLoading)
-                        .help(effectiveTranscriptionModel.isWhisper
-                            ? "Switch back to Parakeet before removing the Whisper cache."
-                            : (modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : ""))
-
-                        if effectiveTranscriptionModel.isWhisper {
-                            Text("Switch back to Parakeet before removing the Whisper cache.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if snapshot.staleFluidAudioModelBytes > 0 {
-                        ModelCacheMetricRow(
-                            title: "Known stale candidates",
-                            value: snapshot.formattedStaleFluidAudioModelSize,
-                            detail: snapshot.staleModelSummary
-                        )
-
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Known Stale Models",
-                            tone: .destructive
-                        ) {
-                            showModelCacheCleanupConfirmation = true
-                        }
-                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
-                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
-                    } else {
-                        Text("No known stale Parakeet model folders found.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let modelCacheCleanupStatus {
-                        Text(modelCacheCleanupStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } else if !modelCacheLoading {
-                    Text("Model storage has not been scanned yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                SettingsInlineActionButton(title: modelCacheLoading ? "Scanning..." : "Refresh Storage Sizes") {
-                    trackSettingsAction("refresh_model_cache_storage", page: .storage)
-                    refreshModelCacheSnapshot()
-                }
-                .disabled(modelCacheLoading)
-                .help(modelCacheLoading ? "Storage sizes are being scanned." : "")
-            }
-            .onAppear {
-                if modelCacheSnapshot == nil, !modelCacheLoading {
-                    refreshModelCacheSnapshot()
-                }
-            }
-            .alert("Remove reclaimable cache?", isPresented: $showReclaimableCacheCleanupConfirmation) {
-                Button("Remove", role: .destructive) {
-                    removeReclaimableModelCaches()
-                }
-                Button("Cancel", role: .cancel) {}
-                    .keyboardShortcut(.defaultAction)
-            } message: {
-                let includeWhisper = !effectiveTranscriptionModel.isWhisper
-                Text(includeWhisper
-                    ? "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. Active Parakeet CoreML stays."
-                    : "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected.")
-            }
-            .alert("Remove stale local models?", isPresented: $showModelCacheCleanupConfirmation) {
-                Button("Remove", role: .destructive) {
-                    removeStaleModelCaches()
-                }
-                Button("Cancel", role: .cancel) {}
-                    .keyboardShortcut(.defaultAction)
-            } message: {
-                Text("Transcripted will remove only known old Parakeet folders: \(modelCacheSnapshot?.staleModelSummary ?? "none"). Active Parakeet CoreML and Whisper caches stay.")
-            }
-            .alert("Remove Whisper cache?", isPresented: $showWhisperCacheCleanupConfirmation) {
-                Button("Remove", role: .destructive) {
-                    removeWhisperModelCache()
-                }
-                Button("Cancel", role: .cancel) {}
-                    .keyboardShortcut(.defaultAction)
-            } message: {
-                Text("Transcripted will remove downloaded Whisper model files. Parakeet stays available, and Whisper can download again later if you choose it.")
-            }
-
-            SettingsSection(
-                title: "Support Folders",
-                detail: "Logs, cache, app state, and temporary audio."
-            ) {
-                DisclosureGroup("Show support folders", isExpanded: $showSupportFolders) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        StorageRow(title: "App state", url: appStateFolder)
-                        StorageRow(title: "App cache", url: cacheFolder)
-                        StorageRow(title: "App logs", url: logsFolder)
-                        StorageRow(title: "Temporary recordings", url: recordingsFolder)
-                    }
-                    .padding(.top, 12)
-                }
-            }
-        }
-        .accessibilityIdentifier("transcripted.settings.page.storage")
-    }
-
-    private var betaPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Beta",
-                summary: "Turn on experimental local features when you want to test them."
-            )
-
-            SettingsSection(
-                title: "Experimental Features",
-                detail: "These are off by default. Nothing runs automatically unless you turn it on here."
-            ) {
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsToggleRow(
-                        title: "AI meeting summaries",
-                        detail: localMeetingSummariesEnabled
-                            ? "On. Transcripted may prepare Gemma now; meeting summaries still run only when you choose Run AI summary."
-                            : "Create private meeting summaries on this Mac. Turning this on may download or warm Gemma before your first summary.",
-                        isOn: Binding(
-                            get: { localMeetingSummariesEnabled },
-                            set: { enabled in
-                                localMeetingSummariesEnabled = enabled
-                                LocalMeetingSummaryPreferences.setEnabled(enabled)
-                                trackSettingsToggle("local_ai_meeting_summaries", enabled: enabled, page: .beta)
-                                handleLocalMeetingSummaryToggle(enabled)
-                            }
-                        ),
-                        help: "Opt in to local meeting summaries on Home.",
-                        automationIdentifier: "transcripted.settings.beta.ai-meeting-summaries"
-                    )
-
-                    Picker("Summary provider", selection: Binding(
-                        get: { localMeetingSummaryProvider },
-                        set: { provider in
-                            localMeetingSummaryProviderRawValue = provider.rawValue
-                            LocalMeetingSummaryPreferences.setProvider(provider)
-                            trackSettingsToggle("local_ai_meeting_summary_provider_\(provider.rawValue)", enabled: true, page: .beta)
-                            refreshLocalSummarySetupStatus()
-                            if localMeetingSummariesEnabled {
-                                cancelLocalSummaryJobs()
-                                clearHomeLocalSummaryNotice()
-                                cancelLocalSummaryModelPreparation()
-                                localSummaryModelPreparationStatus = nil
-                                prepareLocalSummaryModelFromBeta()
-                            }
-                        }
-                    )) {
-                        ForEach(LocalMeetingSummaryProvider.allCases, id: \.self) { provider in
-                            Text(provider.title).tag(provider)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(isLocalSummaryModelPreparing)
-                    .help(isLocalSummaryModelPreparing
-                        ? "Finish or cancel the current model setup before switching providers."
-                        : "")
-
-                    Text(localMeetingSummaryProvider.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    betaLocalSummarySetupStatus
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsToggleRow(
-                        title: "Live meeting sidecar",
-                        detail: betaLiveMeetingCodexEnabled
-                            ? "On. Transcripted prepares a local folder that Codex or Claude Cowork can watch during active meetings."
-                            : "Let Codex or Claude Cowork follow an active meeting through a local sidecar folder.",
-                        isOn: Binding(
-                            get: { betaLiveMeetingCodexEnabled },
-                            set: { enabled in
-                                betaLiveMeetingCodexEnabled = enabled
-                                LiveMeetingCodexPreferences.setEnabled(enabled)
-                                trackSettingsToggle("live_meeting_sidecar", enabled: enabled, page: .beta)
-                                handleBetaLiveMeetingSidecarToggle(enabled)
-                            }
-                        ),
-                        help: "Opt in to the live meeting sidecar workspace.",
-                        automationIdentifier: "transcripted.settings.beta.live-meeting-sidecar"
-                    )
-
-                    betaLiveSidecarSetupStatus
-                }
-            }
-        }
-        .accessibilityIdentifier("transcripted.settings.page.beta")
-    }
-
-    private var betaLocalSummarySetupStatus: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: localSummarySetupStatusSymbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(localSummarySetupStatusColor)
-                    .frame(width: 22)
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(localSummarySetupStatusTitle)
-                        .font(.subheadline.weight(.semibold))
-                    Text(localSummarySetupStatusDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                SettingsInlineActionButton(
-                    title: "Check setup",
-                    symbolName: "arrow.clockwise",
-                    automationIdentifier: "transcripted.settings.beta.local-summary.check-setup"
-                ) {
-                    trackSettingsAction("check_local_summary_setup", page: .beta)
-                    refreshLocalSummarySetupStatus()
-                }
-
-                if localMeetingSummariesEnabled, selectedLocalSummaryProviderIsReady {
-                    SettingsInlineActionButton(
-                        title: isLocalSummaryModelPreparing ? "Cancel setup" : localSummaryPrepareButtonTitle,
-                        symbolName: isLocalSummaryModelPreparing ? "xmark.circle" : "tray.and.arrow.down",
-                        tone: isLocalSummaryModelPreparing ? .warning : .neutral,
-                        automationIdentifier: "transcripted.settings.beta.local-summary.prepare-model"
-                    ) {
-                        if isLocalSummaryModelPreparing {
-                            trackSettingsAction("cancel_local_summary_model_prepare", page: .beta)
-                            cancelLocalSummaryModelPreparation()
-                            localSummaryModelPreparationStatus = "\(localMeetingSummaryProvider.title) setup cancelled. You can try again when this Mac is idle."
-                        } else {
-                            trackSettingsAction("prepare_local_summary_model", page: .beta)
-                            prepareLocalSummaryModelFromBeta()
-                        }
-                    }
-                }
-            }
-
-            if localMeetingSummaryProvider == .gemmaMLX, !localSummarySetupStatus.hasRuntime {
-                SettingsInlineActionButton(
-                    title: "Install uv",
-                    symbolName: "arrow.down.circle",
-                    tone: .warning,
-                    automationIdentifier: "transcripted.settings.beta.local-summary.install-uv"
-                ) {
-                    trackSettingsAction("open_uv_install_guide", page: .beta)
-                    openUVInstallGuide()
-                }
-            }
-
-            if let localSummaryModelPreparationStatus {
-                Text(localSummaryModelPreparationStatus)
-                    .font(.caption)
-                    .foregroundStyle(isLocalSummaryModelPreparing ? Color.accentColor : .secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            DisclosureGroup("Setup details", isExpanded: $showLocalSummarySetupDetails) {
-                VStack(alignment: .leading, spacing: 8) {
-                    betaSetupDetailLine(
-                        title: "Provider",
-                        value: localMeetingSummaryProvider.title
-                    )
-                    ForEach(localSummarySetupDetails, id: \.title) { detail in
-                        betaSetupDetailLine(title: detail.title, value: detail.value)
-                    }
-                }
-                .padding(.top, 6)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.top, 2)
-    }
-
-    private var betaLiveSidecarSetupStatus: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: betaLiveMeetingCodexEnabled ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(betaLiveMeetingCodexEnabled ? Color.green : Color.secondary)
-                    .frame(width: 22)
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(betaLiveMeetingCodexEnabled ? "Sidecar workspace is on" : "Sidecar workspace is off")
-                        .font(.subheadline.weight(.semibold))
-                    Text(betaLiveSidecarDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            HStack(spacing: 10) {
-                SettingsInlineActionButton(
-                    title: "Open Agent setup",
-                    symbolName: "sparkles",
-                    tone: .accent,
-                    automationIdentifier: "transcripted.settings.beta.open-agent-setup"
-                ) {
-                    trackSettingsAction("open_agent_setup_from_beta", page: .beta)
-                    navigation.selectedPage = .connectAgent
-                }
-
-                if let betaFeatureStatus {
-                    Label(
-                        betaFeatureStatus,
-                        systemImage: betaFeatureStatus.hasPrefix("Could not") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(betaFeatureStatus.hasPrefix("Could not") ? Color.orange : Color.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    private func betaSetupDetailLine(title: String, value: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 70, alignment: .leading)
-            Text(value)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func handleBetaLiveMeetingSidecarToggle(_ enabled: Bool) {
+    func handleBetaLiveMeetingSidecarToggle(_ enabled: Bool) {
         betaFeatureStatus = nil
 
         if enabled {
@@ -3351,7 +2738,7 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func handleLocalMeetingSummaryToggle(_ enabled: Bool) {
+    func handleLocalMeetingSummaryToggle(_ enabled: Bool) {
         refreshLocalSummarySetupStatus()
         if enabled {
             prepareLocalSummaryModelFromBeta()
@@ -3363,7 +2750,7 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func prepareLocalSummaryModelFromBeta() {
+    func prepareLocalSummaryModelFromBeta() {
         refreshLocalSummarySetupStatus()
         localSummaryModelPreparationTask?.cancel()
 
@@ -3465,7 +2852,7 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func cancelLocalSummaryModelPreparation() {
+    func cancelLocalSummaryModelPreparation() {
         if localSummaryModelPreparationTask != nil {
             trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
         }
@@ -3489,12 +2876,12 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func refreshLocalSummarySetupStatus() {
+    func refreshLocalSummarySetupStatus() {
         localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
         appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
     }
 
-    private func cancelLocalSummaryJobs() {
+    func cancelLocalSummaryJobs() {
         if !homeLocalSummaryTasks.isEmpty {
             trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
         }
@@ -3528,7 +2915,7 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func clearHomeLocalSummaryNotice(id: UUID? = nil) {
+    func clearHomeLocalSummaryNotice(id: UUID? = nil) {
         if let id, homeLocalSummaryNotice?.id != id { return }
         homeLocalSummaryNoticeDismissTask?.cancel()
         homeLocalSummaryNoticeDismissTask = nil
@@ -3625,17 +3012,12 @@ struct TranscriptedSettingsView: View {
         )
     }
 
-    private func openUVInstallGuide() {
-        guard let url = URL(string: "https://docs.astral.sh/uv/getting-started/installation/") else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    private var localMeetingSummaryProvider: LocalMeetingSummaryProvider {
+    var localMeetingSummaryProvider: LocalMeetingSummaryProvider {
         LocalMeetingSummaryProvider(rawValue: localMeetingSummaryProviderRawValue)
             ?? LocalMeetingSummaryProvider.defaultProvider
     }
 
-    private var selectedLocalSummaryProviderIsReady: Bool {
+    var selectedLocalSummaryProviderIsReady: Bool {
         switch localMeetingSummaryProvider {
         case .gemmaMLX:
             return localSummarySetupStatus.isReady
@@ -3653,15 +3035,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var localSummaryPrepareButtonTitle: String {
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            return "Prepare Gemma"
-        case .appleFoundation:
-            return "Check Apple model"
-        }
-    }
-
     private var localSummaryPreparationStartedStatus: String {
         switch localMeetingSummaryProvider {
         case .gemmaMLX:
@@ -3669,106 +3042,6 @@ struct TranscriptedSettingsView: View {
         case .appleFoundation:
             return "Checking Apple's on-device Foundation Model locally. Transcripted will use the best Apple model this Mac exposes, including Core Advanced when available."
         }
-    }
-
-    private var localSummarySetupDetails: [(title: String, value: String)] {
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            return [
-                ("Model", "Gemma 4 12B 4-bit MLX"),
-                ("Download", "First summary may download several GB into your local Hugging Face cache."),
-                ("Runtime", localSummarySetupStatus.hasRuntime
-                    ? "uv found at \(localSummarySetupStatus.uvPath ?? "")"
-                    : "Install uv so Transcripted can run the local MLX package."),
-                ("Hardware", "Recommended: Apple Silicon with 16 GB memory. 8 GB Macs are not supported yet."),
-                ("Privacy", "Transcript text stays on this Mac. The model download comes from Hugging Face if it is not cached.")
-            ]
-        case .appleFoundation:
-            return [
-                ("Model", "Apple Foundation Models system model"),
-                ("Context", appleSummarySetupStatus.contextSize > 0
-                    ? "\(appleSummarySetupStatus.contextSize) tokens reported by this Mac."
-                    : "Context size unavailable."),
-                ("Runtime", appleSummarySetupStatus.isReady
-                    ? "Apple Intelligence model is available."
-                    : (appleSummarySetupStatus.unavailableReason ?? "Apple model unavailable.")),
-                ("Hardware", "Uses the best Apple on-device model this Mac exposes. Core Advanced is used only when the system provides it."),
-                ("Privacy", "Transcript text stays on this Mac and uses Apple's local model path.")
-            ]
-        }
-    }
-
-    private var localSummarySetupStatusTitle: String {
-        if isLocalSummaryModelPreparing {
-            return "Preparing \(localMeetingSummaryProvider.title)"
-        }
-
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            if !localSummarySetupStatus.hasEnoughMemory {
-                return "Not supported on this Mac"
-            }
-            if !localSummarySetupStatus.hasRuntime {
-                return "Setup needed"
-            }
-        case .appleFoundation:
-            if !appleSummarySetupStatus.isFrameworkAvailable {
-                return "Framework unavailable"
-            }
-            if !appleSummarySetupStatus.isModelAvailable {
-                return "Apple model unavailable"
-            }
-        }
-        return "Runtime ready"
-    }
-
-    private var localSummarySetupStatusDetail: String {
-        if isLocalSummaryModelPreparing {
-            return "Transcripted is preparing \(localMeetingSummaryProvider.title). Home summaries stay paused so this Mac only runs one local summary job at a time."
-        }
-
-        switch localMeetingSummaryProvider {
-        case .gemmaMLX:
-            if !localSummarySetupStatus.hasEnoughMemory {
-                return "This Mac reports \(localSummarySetupStatus.physicalMemoryGB) GB memory. Local Gemma summaries need at least \(localSummarySetupStatus.minimumMemoryGB) GB to avoid heavy swapping."
-            }
-            if !localSummarySetupStatus.hasRuntime {
-                return "Install uv first. The first summary may download a large local Gemma model, then future summaries reuse the local cache."
-            }
-            return "uv is installed. Use Prepare Gemma to download or warm the local model before running a meeting summary."
-        case .appleFoundation:
-            if !appleSummarySetupStatus.isReady {
-                return appleSummarySetupStatus.unavailableReason ?? "Apple on-device summaries are unavailable on this Mac right now."
-            }
-            return "Apple's on-device model is available with a \(appleSummarySetupStatus.contextSize)-token context. Transcripted will chunk long meetings before merging."
-        }
-    }
-
-    private var localSummarySetupStatusSymbol: String {
-        if isLocalSummaryModelPreparing {
-            return "arrow.triangle.2.circlepath"
-        }
-        if selectedLocalSummaryProviderIsReady {
-            return "checkmark.circle.fill"
-        }
-        return "exclamationmark.circle.fill"
-    }
-
-    private var localSummarySetupStatusColor: Color {
-        if isLocalSummaryModelPreparing {
-            return Color.accentColor
-        }
-        if selectedLocalSummaryProviderIsReady {
-            return .green
-        }
-        return .orange
-    }
-
-    private var betaLiveSidecarDetail: String {
-        if betaLiveMeetingCodexEnabled {
-            return "Transcripted prepares the local workspace. Use Agent setup to open Codex, copy Cowork setup, or open the live preview."
-        }
-        return "Normal meeting transcripts still save as usual. Turn this on only when you want a local agent to watch active meetings."
     }
 
     private var privacyPage: some View {
@@ -3900,123 +3173,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var aboutPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "About",
-                summary: "Version and updates."
-            )
-
-            SettingsSection(
-                title: "Version",
-                detail: "Build info and update controls."
-            ) {
-                SettingsStatusCard(
-                    title: "Transcripted",
-                    status: TranscriptedSupportActions.appVersionDescription,
-                    detail: "Local-first dictation and meeting notes.",
-                    tone: .ready
-                )
-
-                SettingsStatusCard(
-                    title: "Updates",
-                    status: aboutUpdateStatusTitle,
-                    detail: aboutUpdateStatusDetail,
-                    tone: aboutUpdateStatusTone
-                )
-
-                VStack(alignment: .leading, spacing: 8) {
-                    SettingsToggleRow(
-                        title: "Check automatically",
-                        detail: sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled
-                            ? "Transcripted checks for updates in the background."
-                            : "Transcripted only checks when you ask.",
-                        isOn: Binding(
-                            get: { sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled },
-                            set: { newValue in
-                                trackSettingsToggle("automatic_update_checks", enabled: newValue, page: .about)
-                                sparkleUpdater.setAutomaticallyChecksForUpdates(newValue)
-                            }
-                        )
-                    )
-
-                    SettingsToggleRow(
-                        title: "Download automatically",
-                        detail: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
-                            ? "Transcripted downloads available updates in the background."
-                            : "Transcripted waits before downloading updates.",
-                        isOn: Binding(
-                            get: { sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled },
-                            set: { newValue in
-                                trackSettingsToggle("automatic_update_downloads", enabled: newValue, page: .about)
-                                sparkleUpdater.setAutomaticallyDownloadsUpdates(newValue)
-                            }
-                        )
-                    )
-                        .disabled(!sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed)
-
-                    Text(automaticUpdatesDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack {
-                    SettingsInlineActionButton(
-                        title: aboutUpdateButtonTitle,
-                        tone: .accent
-                    ) {
-                        guard aboutUpdateButtonEnabled else { return }
-                        trackSettingsAction(settingsUpdateActionID, page: .about)
-                        sparkleUpdater.performUserUpdateAction(surface: "settings_about")
-                    }
-                    .disabled(!aboutUpdateButtonEnabled)
-                }
-            }
-        }
-        .accessibilityIdentifier("transcripted.settings.page.about")
-    }
-
-    private var supportPage: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            SettingsPageIntro(
-                title: "Support",
-                summary: "Need help, found a bug, or want to send feedback? Email is the best way to reach the team building Transcripted."
-            )
-
-            SupportActionCard(
-                symbolName: "envelope.fill",
-                title: "Email support",
-                detail: "Send feedback, ask for help, or tell us what felt broken. This opens a prefilled email to help@transcripted.app.",
-                buttonTitle: "Email support",
-                buttonSymbolName: "paperplane.fill",
-                tone: .primary,
-                status: nil,
-                isEnabled: true
-            ) {
-                trackSettingsAction("submit_feedback", page: .support)
-                actions.sendFeedback()
-            }
-
-            SupportActionCard(
-                symbolName: "waveform.path.ecg",
-                title: "Send diagnostics",
-                detail: "Had an error or something felt broken? Send a privacy-safe diagnostic event so we can investigate and try to fix it.",
-                buttonTitle: "One-click send diagnostics",
-                buttonSymbolName: "bolt.fill",
-                tone: .secondary,
-                status: diagnosticsActionStatus,
-                isEnabled: CrashReporter.isAvailable && crashReportingEnabled
-            ) {
-                trackSettingsAction("send_diagnostic_event", page: .support)
-                sendDiagnosticEvent()
-            }
-
-            SupportPrivacyNote()
-        }
-        .accessibilityIdentifier("transcripted.settings.page.support")
-    }
-
     private var settingsFooterShowsUpdateBadge: Bool {
         sparkleUpdater.updateStatus.readyToInstallVersion != nil
     }
@@ -4069,23 +3225,7 @@ struct TranscriptedSettingsView: View {
         return "Check for updates."
     }
 
-    private var appStateFolder: URL {
-        FileManager.default.transcriptedStateDir
-    }
-
-    private var cacheFolder: URL {
-        FileManager.default.transcriptedCacheDir
-    }
-
-    private var logsFolder: URL {
-        FileManager.default.transcriptedLogsDir
-    }
-
-    private var recordingsFolder: URL {
-        FileManager.default.transcriptedRecordingsDir
-    }
-
-    private var effectiveTranscriptionModel: TranscriptionModelChoice {
+    var effectiveTranscriptionModel: TranscriptionModelChoice {
         TranscriptionModelPreferences.effectiveModel()
     }
 
@@ -4138,10 +3278,6 @@ struct TranscriptedSettingsView: View {
             return "Required permissions are on. Meeting permissions are optional."
         }
         return "Turn on \(missingRequiredPermissions.map(\.title).joined(separator: " and ")) to record and paste back."
-    }
-
-    private var isUsingDefaultCaptureLibrary: Bool {
-        captureLibraryURL.standardizedFileURL == FileManager.default.transcriptedDefaultCaptureLibraryDir.standardizedFileURL
     }
 
     private var crashReportingFootnote: String {
@@ -4266,7 +3402,7 @@ struct TranscriptedSettingsView: View {
         trackSettingsFeatureDiscovery(for: discoveredPage ?? page, source: source)
     }
 
-    private func trackSettingsAction(_ actionID: String, page: TranscriptedSettingsPage? = nil) {
+    func trackSettingsAction(_ actionID: String, page: TranscriptedSettingsPage? = nil) {
         AnalyticsReporter.track(
             "settings_action_clicked",
             properties: [
@@ -4276,7 +3412,7 @@ struct TranscriptedSettingsView: View {
         )
     }
 
-    private func trackSettingsToggle(_ settingID: String, enabled: Bool, page: TranscriptedSettingsPage? = nil) {
+    func trackSettingsToggle(_ settingID: String, enabled: Bool, page: TranscriptedSettingsPage? = nil) {
         AnalyticsReporter.track(
             "settings_toggle_changed",
             properties: [
@@ -4335,119 +3471,11 @@ struct TranscriptedSettingsView: View {
         permissionStates = PermissionSnapshot.current()
     }
 
-    private func refreshStoragePaths() {
+    func refreshStoragePaths() {
         captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     }
 
-    private func refreshModelCacheSnapshot() {
-        guard !modelCacheLoading else { return }
-        modelCacheLoading = true
-
-        Task.detached(priority: .utility) {
-            let snapshot = ModelCacheInventory.snapshot()
-            await MainActor.run {
-                modelCacheSnapshot = snapshot
-                modelCacheLoading = false
-            }
-        }
-    }
-
-    private func removeStaleModelCaches() {
-        guard !modelCacheCleanupInProgress else { return }
-        modelCacheCleanupInProgress = true
-        modelCacheCleanupStatus = nil
-
-        Task.detached(priority: .utility) {
-            do {
-                let result = try ModelCacheInventory.removeKnownStaleFluidAudioModels()
-                let snapshot = ModelCacheInventory.snapshot()
-                await MainActor.run {
-                    modelCacheSnapshot = snapshot
-                    modelCacheCleanupInProgress = false
-                    if result.removedNames.isEmpty {
-                        modelCacheCleanupStatus = "No stale model folders needed removal."
-                    } else {
-                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
-                        modelCacheCleanupStatus = "Removed \(size) from \(result.removedNames.joined(separator: ", "))."
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = "Could not remove stale models: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func removeReclaimableModelCaches() {
-        guard !modelCacheCleanupInProgress else { return }
-        let includeWhisper = !effectiveTranscriptionModel.isWhisper
-        modelCacheCleanupInProgress = true
-        modelCacheCleanupStatus = nil
-
-        Task.detached(priority: .utility) {
-            do {
-                let result = try ModelCacheInventory.removeReclaimableCaches(includeWhisper: includeWhisper)
-                let snapshot = ModelCacheInventory.snapshot()
-                await MainActor.run {
-                    modelCacheSnapshot = snapshot
-                    modelCacheCleanupInProgress = false
-                    if result.removedNames.isEmpty {
-                        modelCacheCleanupStatus = "No reclaimable model cache needed removal."
-                    } else {
-                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
-                        modelCacheCleanupStatus = "Removed \(size) from \(result.removedNames.joined(separator: ", "))."
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = "Could not remove reclaimable cache: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func removeWhisperModelCache() {
-        guard !modelCacheCleanupInProgress, !effectiveTranscriptionModel.isWhisper else { return }
-        modelCacheCleanupInProgress = true
-        modelCacheCleanupStatus = nil
-
-        Task.detached(priority: .utility) {
-            do {
-                let result = try ModelCacheInventory.removeWhisperModels()
-                let snapshot = ModelCacheInventory.snapshot()
-                await MainActor.run {
-                    modelCacheSnapshot = snapshot
-                    modelCacheCleanupInProgress = false
-                    if result.removedBytes > 0 {
-                        let size = ModelCacheInventory.formattedByteCount(result.removedBytes)
-                        modelCacheCleanupStatus = "Removed \(size) from the Whisper cache."
-                    } else {
-                        modelCacheCleanupStatus = "No Whisper model files needed removal."
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = "Could not remove Whisper cache: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func updateAudioRetentionWindow(_ window: AudioRetentionWindow) {
-        guard window != audioRetentionWindow else { return }
-        guard window.days == nil else {
-            pendingAudioRetentionWindow = window
-            return
-        }
-
-        applyAudioRetentionWindow(window)
-    }
-
-    private func applyAudioRetentionWindow(_ window: AudioRetentionWindow) {
+    func applyAudioRetentionWindow(_ window: AudioRetentionWindow) {
         audioRetentionWindow = window
         trackSettingsAction("audio_retention_changed", page: .storage)
         AudioStoragePreferences.setDeleteAudioAfter(window)
@@ -4644,59 +3672,6 @@ struct TranscriptedSettingsView: View {
         sentryTestStatus = "Queued test event \(eventID.prefix(8)). Check Sentry in a few seconds."
     }
 
-    private func sendDiagnosticEvent() {
-        guard CrashReporter.isAvailable else {
-            diagnosticsActionStatus = "Sentry is not configured in this build yet."
-            return
-        }
-
-        guard crashReportingEnabled else {
-            diagnosticsActionStatus = "Turn on crash and error reports first."
-            return
-        }
-
-        guard let eventID = actions.sendDiagnosticEvent() else {
-            diagnosticsActionStatus = "Diagnostic event could not be queued."
-            return
-        }
-
-        diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
-    }
-
-    private func chooseCaptureLibrary() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Choose"
-        panel.message = "Choose where Transcripted saves meeting and dictation Markdown files."
-        panel.directoryURL = captureLibraryURL
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard TranscriptedStoragePreferences.setCaptureLibraryURL(url) else {
-            refreshStoragePaths()
-            showCaptureLibrarySelectionError()
-            return
-        }
-        refreshStoragePaths()
-        AnalyticsReporter.track(
-            "settings_capture_library_changed",
-            properties: [
-                "location_type": isUsingDefaultCaptureLibrary ? "default" : "custom",
-                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
-            ]
-        )
-    }
-
-    private func showCaptureLibrarySelectionError() {
-        let alert = NSAlert()
-        alert.messageText = "Transcripted can't use that folder."
-        alert.informativeText = "Choose a folder where Transcripted can create meeting and dictation files, or reset to the default capture library."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
 
     private var sortedAutoEnterAllowedBundleIDs: [String] {
         autoEnterAllowedBundleIDs.sorted { lhs, rhs in
@@ -4769,97 +3744,7 @@ struct TranscriptedSettingsView: View {
         )
     }
 
-    private var aboutUpdateStatusTitle: String {
-        switch sparkleUpdater.updateStatus.state {
-        case .unknown, .readyToCheck:
-            return "Ready to check"
-        case .checking:
-            return "Checking for updates"
-        case .noUpdateAvailable:
-            return "Up to date"
-        case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
-                return "Preparing update (\(version))"
-            }
-            return "Update available (\(version))"
-        case .downloading(let version):
-            return "Downloading update (\(version))"
-        case .readyToInstall(let version):
-            return "Ready to restart (\(version))"
-        }
-    }
-
-    private var aboutUpdateStatusDetail: String {
-        switch sparkleUpdater.updateStatus.state {
-        case .unknown, .readyToCheck:
-            return "Check for a newer release."
-        case .checking:
-            return "Looking for updates now."
-        case .noUpdateAvailable:
-            return "This Mac is on the newest visible version."
-        case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
-                return "Transcripted is preparing version \(version). You only need to restart when it is ready."
-            }
-            return "Version \(version) is ready to install."
-        case .downloading(let version):
-            return "Version \(version) is downloading."
-        case .readyToInstall(let version):
-            return "Version \(version) is downloaded."
-        }
-    }
-
-    private var aboutUpdateStatusTone: SettingsStatusCard.Tone {
-        switch sparkleUpdater.updateStatus.state {
-        case .unknown, .readyToCheck:
-            return .working
-        case .checking:
-            return .working
-        case .noUpdateAvailable:
-            return .ready
-        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
-            return .working
-        case .downloading:
-            return .working
-        case .updateAvailable, .readyToInstall:
-            return .caution
-        }
-    }
-
-    private var aboutUpdateButtonTitle: String {
-        switch sparkleUpdater.updateStatus.state {
-        case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
-                return "Preparing Update…"
-            }
-            return "Install \(version)"
-        case .downloading:
-            return "Downloading…"
-        case .readyToInstall:
-            return "Restart to Update"
-        case .checking:
-            return "Checking for Updates…"
-        case .unknown, .readyToCheck, .noUpdateAvailable:
-            return "Check for Updates"
-        }
-    }
-
-    private var aboutUpdateButtonEnabled: Bool {
-        updateActionEnabled(for: sparkleUpdater.updateStatus)
-    }
-
-    private var automaticUpdatesDetail: String {
-        let settings = sparkleUpdater.automaticUpdateSettings
-        if settings.automaticDownloadsEnabled {
-            return "Transcripted will download updates in the background. When one is ready, you only need to restart."
-        }
-        if settings.automaticChecksEnabled {
-            return "Transcripted will check in the background and show an update badge when one is ready."
-        }
-        return "Turn on automatic checks to see updates sooner."
-    }
-
-    private var settingsUpdateActionID: String {
+    var settingsUpdateActionID: String {
         switch sparkleUpdater.updateStatus.state {
         case .updateAvailable:
             return "install_update"
@@ -4880,7 +3765,7 @@ struct TranscriptedSettingsView: View {
             || meetingSession.isSpeakerReviewPending
     }
 
-    private func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {
+    func updateActionEnabled(for status: SparkleUpdaterController.UpdateStatus) -> Bool {
         UpdateActionSafetyPolicy.canRunUserAction(
             state: updateActionSafetyState(for: status.state),
             sparkleCanRunUserAction: status.canRunUserUpdateAction,

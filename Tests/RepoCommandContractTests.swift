@@ -2627,7 +2627,7 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - Home attention summary includes failed meetings") {
-        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let settingsContents = readSettingsSurfaceContents()
         let needsAttentionBlock = sourceSlice(
             settingsContents,
             from: "private var homeAttentionIssues: [HomeAttentionIssue] {",
@@ -2789,7 +2789,7 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - replacement retranscription clears stale local summaries") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let managerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
-        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let settingsContents = readSettingsSurfaceContents()
         let summaryContents = readRepoTextFile("Sources/Meeting/LocalMeetingSummarizer.swift")
 
         assertTrue(
@@ -2817,7 +2817,7 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - Home failed meeting actions surface failures") {
-        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let settingsContents = readSettingsSurfaceContents()
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let managerContents = readRepoTextFile("Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift")
 
@@ -2905,7 +2905,7 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - consolidated settings deep links expand their General section") {
         let windowControllerContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
         let navigationContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsNavigationModel.swift")
-        let viewContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let viewContents = readSettingsSurfaceContents()
 
         assertTrue(
             navigationContents.contains("var presentedPage: TranscriptedSettingsPage")
@@ -3171,7 +3171,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - home stats action uses parent presenter") {
         let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
-        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let settingsContents = readSettingsSurfaceContents()
         assertTrue(
             homeContents.contains("transcripted.home.stats.view")
                 && homeContents.contains(".help(\"View all stats\")"),
@@ -3244,7 +3244,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - Home meeting deletion runs off the Settings UI path") {
         let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
-        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let settingsContents = readSettingsSurfaceContents()
         let deleteBlock = sourceSlice(
             settingsContents,
             from: "private func deleteMeeting(_ item: RecentMeetingItem)",
@@ -3304,7 +3304,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - live sidecar toggle owns preview server lifecycle") {
         let contents = readRepoTextFile("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
-        let settingsViewContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let settingsViewContents = readSettingsSurfaceContents()
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let sessionContents = readRepoTextFile("Sources/Meeting/LiveMeetingCodexSession.swift")
         let transcriberContents = readRepoTextFile("Sources/Meeting/LiveMeetingTranscriber.swift")
@@ -3374,7 +3374,7 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - settings permissions refresh after async grants") {
-        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let settingsContents = readSettingsSurfaceContents()
         let permissionAccessContents = readRepoTextFile("Sources/Support/TranscriptedPermissionAccess.swift")
 
         assertTrue(
@@ -3404,6 +3404,24 @@ private func repoRootURL() -> URL {
 private func readRepoTextFile(_ relativePath: String) -> String {
     let url = repoRootURL().appendingPathComponent(relativePath)
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+}
+
+/// TranscriptedSettingsView.swift is being decomposed into per-page
+/// `TranscriptedSettingsView+*.swift` extension files. Contract tests that
+/// check for wiring somewhere in the Settings surface should not care which
+/// physical file a given page's code lives in, so this concatenates the main
+/// file with all of its sibling extension files.
+private func readSettingsSurfaceContents() -> String {
+    let mainContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+    let dirURL = repoRootURL().appendingPathComponent("Sources/UI/Settings")
+    guard let entries = try? FileManager.default.contentsOfDirectory(at: dirURL, includingPropertiesForKeys: nil) else {
+        return mainContents
+    }
+    let extensionContents = entries
+        .filter { $0.lastPathComponent.hasPrefix("TranscriptedSettingsView+") && $0.pathExtension == "swift" }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+    return ([mainContents] + extensionContents).joined(separator: "\n")
 }
 
 private func fileExists(_ relativePath: String) -> Bool {
