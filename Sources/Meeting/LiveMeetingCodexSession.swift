@@ -99,6 +99,17 @@ final class LiveMeetingCodexSession {
     private let fileManager: FileManager
     private let sessionLock = NSRecursiveLock()
     private var state: LiveMeetingCodexState
+    // In-memory mirror of the last known text per workspace file. Without it,
+    // every accepted transcript entry re-reads the growing transcript and
+    // preview from disk just to compare, so total I/O grows quadratically
+    // with meeting length. Guarded by sessionLock like the rest of the state.
+    private var knownFileText: [String: String] = [:]
+    private var lastPreviewWriteAt = Date.distantPast
+    // Rendering preview.html is O(transcript length), so per-entry appends
+    // only refresh it every few seconds; lifecycle transitions force a fresh
+    // snapshot. The served page polls live_transcript.md directly, so the
+    // live view stays current regardless.
+    private static let previewRewriteInterval: TimeInterval = 2.0
 
     init(
         workspaceRoot: URL = LiveMeetingCodexSession.defaultWorkspaceRoot,
@@ -170,7 +181,7 @@ final class LiveMeetingCodexSession {
         }
     }
 
-    private func ensureWorkspaceFilesLocked(createdAt: Date = Date()) throws {
+    private func ensureWorkspaceFilesLocked(createdAt: Date = Date(), forcePreviewRewrite: Bool = true) throws {
         try fileManager.createPrivateDirectory(at: workspaceRoot)
         _ = try ensurePreviewAuthTokenLocked()
         try writeTextIfChanged(readmeText(), to: workspaceRoot.appendingPathComponent("README.md", isDirectory: false))
@@ -193,7 +204,7 @@ final class LiveMeetingCodexSession {
         try rewriteLiveTranscriptStatus(state.status.rawValue)
 
         try syncHandoffWithState(fallbackDate: createdAt)
-        try writePreview()
+        try writePreview(force: forcePreviewRewrite)
     }
 
     private func ensurePreviewAuthTokenLocked() throws -> String {
@@ -244,13 +255,13 @@ final class LiveMeetingCodexSession {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
 
-            try ensureWorkspaceFilesLocked()
+            try ensureWorkspaceFilesLocked(forcePreviewRewrite: false)
             let marker = entry.isFinal ? "" : " [partial]"
             let line = "**\(Self.timestamp(entry.timestampSeconds))** \(entry.source.markdownTag)\(marker) \(text)\n"
             try appendText(line, to: liveTranscriptURL)
             state.updatedAt = entry.createdAt
             try writeState()
-            try writePreview()
+            try writePreview(force: false)
         }
     }
 
@@ -395,15 +406,34 @@ final class LiveMeetingCodexSession {
         }
     }
 
+    private func textCacheKey(for url: URL) -> String {
+        url.standardizedFileURL.path
+    }
+
+    // Returns the last text this session wrote to `url`, falling back to one
+    // disk read per file per session so identical rewrites are still skipped
+    // across app restarts.
+    private func knownText(at url: URL) -> String? {
+        let key = textCacheKey(for: url)
+        if let cached = knownFileText[key] {
+            return cached
+        }
+        guard let existing = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+        knownFileText[key] = existing
+        return existing
+    }
+
     private func writeTextIfChanged(_ text: String, to url: URL) throws {
-        if let existing = try? String(contentsOf: url, encoding: .utf8),
-           existing == text {
+        if knownText(at: url) == text, fileManager.fileExists(atPath: url.path) {
             fileManager.restrictFileToOwnerOnly(at: url)
             return
         }
 
         try text.write(to: url, atomically: true, encoding: .utf8)
         fileManager.restrictFileToOwnerOnly(at: url)
+        knownFileText[textCacheKey(for: url)] = text
     }
 
     private func appendText(_ text: String, to url: URL) throws {
@@ -417,10 +447,17 @@ final class LiveMeetingCodexSession {
         try handle.seekToEnd()
         try handle.write(contentsOf: data)
         fileManager.restrictFileToOwnerOnly(at: url)
+
+        let key = textCacheKey(for: url)
+        if let known = knownFileText[key] {
+            knownFileText[key] = known + text
+        } else {
+            knownFileText[key] = try? String(contentsOf: url, encoding: .utf8)
+        }
     }
 
     private func rewriteLiveTranscriptStatus(_ status: String) throws {
-        let existing = (try? String(contentsOf: liveTranscriptURL, encoding: .utf8)) ?? idleTranscriptText()
+        let existing = knownText(at: liveTranscriptURL) ?? idleTranscriptText()
         var lines = existing
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map(String.init)
@@ -434,10 +471,15 @@ final class LiveMeetingCodexSession {
         try writeTextIfChanged(lines.joined(separator: "\n"), to: liveTranscriptURL)
     }
 
-    private func writePreview() throws {
-        let transcript = (try? String(contentsOf: liveTranscriptURL, encoding: .utf8))
-            ?? idleTranscriptText()
+    private func writePreview(force: Bool = true) throws {
+        let now = Date()
+        if !force, now.timeIntervalSince(lastPreviewWriteAt) < Self.previewRewriteInterval {
+            return
+        }
+
+        let transcript = knownText(at: liveTranscriptURL) ?? idleTranscriptText()
         try writeTextIfChanged(previewHTML(transcript: transcript), to: previewURL)
+        lastPreviewWriteAt = now
     }
 
     private static func timestamp(_ seconds: TimeInterval) -> String {
