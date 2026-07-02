@@ -238,8 +238,8 @@ func testMeetingPromptDetector() async {
             reason: .audioOutput
         )
         assertEqual(output.analyticsCalendarConfidence, "none", "ad-hoc output prompts should not imply calendar evidence")
-        assertEqual(output.analyticsCallState, "speaker_active", "output prompts should record the listen-only call state")
-        assertEqual(output.analyticsAppSignal, "native_speaker", "output attribution is native-only and stays family-level")
+        assertEqual(output.analyticsCallState, "output_active", "output prompts should record the listen-only call state")
+        assertEqual(output.analyticsAppSignal, "native_output", "output attribution is native-only and stays family-level")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — a browser holding the mic prompts an ad-hoc call") {

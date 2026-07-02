@@ -32,9 +32,12 @@ enum MeetingPromptTelemetry {
         }
         // Which sensors were live at the moment of the decision, so accepts and
         // "Not now"s can be sliced by the evidence behind them. Booleans only.
+        // Named "output", not "speaker": property keys containing "speaker" are
+        // reserved for the sensitive speaker-name taxonomy guard and are
+        // dropped by the sanitizer.
         if let signals {
             properties["mic_signal"] = signals.micActive ? "true" : "false"
-            properties["speaker_signal"] = signals.speakerActive ? "true" : "false"
+            properties["output_signal"] = signals.speakerActive ? "true" : "false"
             properties["camera_signal"] = signals.cameraActive ? "true" : "false"
         }
         if let dismissStreak {

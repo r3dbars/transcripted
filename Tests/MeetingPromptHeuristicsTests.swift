@@ -532,13 +532,13 @@ func testMeetingPromptHeuristics() {
 
         assertEqual(
             MeetingPromptCallTelemetry.signalKinds(micSeen: true, speakerSeen: true, cameraSeen: true),
-            "camera+mic+speaker",
+            "camera+mic+output",
             "signal kinds join sorted so dashboards get stable enum values"
         )
         assertEqual(
             MeetingPromptCallTelemetry.signalKinds(micSeen: false, speakerSeen: true, cameraSeen: false),
-            "speaker",
-            "a listen-only call reports the speaker signal alone"
+            "output",
+            "a listen-only call reports the output signal alone"
         )
         assertEqual(
             MeetingPromptCallTelemetry.signalKinds(micSeen: false, speakerSeen: false, cameraSeen: false),

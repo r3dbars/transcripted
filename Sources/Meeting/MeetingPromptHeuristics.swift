@@ -317,11 +317,13 @@ enum MeetingPromptCallTelemetry {
         }
     }
 
+    // "output", not "speaker", in analytics values too — the speaker word is
+    // reserved for the sensitive speaker-name taxonomy.
     static func signalKinds(micSeen: Bool, speakerSeen: Bool, cameraSeen: Bool) -> String {
         var kinds: [String] = []
         if cameraSeen { kinds.append("camera") }
         if micSeen { kinds.append("mic") }
-        if speakerSeen { kinds.append("speaker") }
+        if speakerSeen { kinds.append("output") }
         return kinds.isEmpty ? "none" : kinds.joined(separator: "+")
     }
 
@@ -701,7 +703,7 @@ extension MeetingPromptDetector.Candidate {
         case .cameraInput:
             return "camera_active"
         case .audioOutput:
-            return "speaker_active"
+            return "output_active"
         case .calendarPlusRuntimeMatch, .runtimeOnly:
             return "app_active"
         case .calendarNearby:
@@ -717,7 +719,7 @@ extension MeetingPromptDetector.Candidate {
             return provider == .googleMeet ? "browser_camera" : "native_camera"
         case .audioOutput:
             // Output attribution is native-only by construction.
-            return "native_speaker"
+            return "native_output"
         case .runtimeOnly:
             return "native_runtime"
         case .calendarPlusRuntimeMatch:

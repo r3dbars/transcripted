@@ -530,12 +530,12 @@ the rest leak?" Three additions make that queryable (all coarse, allowlisted):
 1. **`meeting_detected_call_ended` — the denominator.** One event per detected
    call (≥1 min) at its end: `duration_bucket`, `was_recorded`,
    `prompt_outcome` (`recorded` / `declined` / `ignored` / `no_prompt`),
-   `signal_kinds` (which sensors saw the call: `mic` / `speaker` / `camera`
+   `signal_kinds` (which sensors saw the call: `mic` / `output` / `camera`
    combos), `provider`. Capture rate = `was_recorded` share of long-bucket
    calls; the `prompt_outcome` split says whether misses are UX (ignored),
    intent (declined), or detection (no_prompt).
 2. **Decision-time signal snapshot** on `meeting_prompt_shown` / `_dismissed` /
-   `_record_selected` / `_suppressed`: `mic_signal` / `speaker_signal` /
+   `_record_selected` / `_suppressed`: `mic_signal` / `output_signal` /
    `camera_signal` booleans, so accepts and "Not now"s can be sliced by the
    evidence behind them (e.g. do camera-corroborated prompts convert better?).
 3. **`dismiss_streak_bucket`** (`1` / `2` / `3_plus`, reset on accept) on

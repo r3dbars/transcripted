@@ -145,8 +145,9 @@ func testMeetingPromptTelemetry() async {
         )
 
         assertEqual(properties["mic_signal"], "true", "the mic sensor state at decision time should be a boolean")
-        assertEqual(properties["speaker_signal"], "true", "the speaker sensor state at decision time should be a boolean")
+        assertEqual(properties["output_signal"], "true", "the output sensor state at decision time should be a boolean")
         assertEqual(properties["camera_signal"], "false", "the camera sensor state at decision time should be a boolean")
+        assertEqual(properties["speaker_signal"], nil, "no property key may contain 'speaker' — the sanitizer drops such keys")
         assertEqual(properties["dismiss_streak_bucket"], "3_plus", "dismiss streaks should be bucketed, never raw counts")
 
         let withoutSignals = MeetingPromptTelemetry.properties(
@@ -169,7 +170,7 @@ func testMeetingPromptTelemetry() async {
                 duration: 42 * 60,
                 wasRecorded: false,
                 promptOutcome: .ignored,
-                signalKinds: "mic+speaker"
+                signalKinds: "mic+output"
             )
         )
 
@@ -177,7 +178,7 @@ func testMeetingPromptTelemetry() async {
         assertEqual(properties["duration_bucket"], "40m_plus", "funnel duration should be bucketed, never raw")
         assertEqual(properties["was_recorded"], "false", "capture outcome should be a boolean")
         assertEqual(properties["prompt_outcome"], "ignored", "prompt outcome should separate 'said no' from 'never saw it'")
-        assertEqual(properties["signal_kinds"], "mic+speaker", "signal kinds should pass through as the stable enum string")
+        assertEqual(properties["signal_kinds"], "mic+output", "signal kinds should pass through as the stable enum string")
         assertEqual(properties.count, 5, "the funnel event must carry exactly its five coarse properties")
     }
 }
