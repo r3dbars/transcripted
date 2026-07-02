@@ -33,8 +33,14 @@ extension Audio {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.audioLevel = level
-            self.audioLevelHistory.removeFirst()
-            self.audioLevelHistory.append(level)
+            // Build the shifted history locally and assign once: each
+            // in-place mutation of a @Published array is its own set, so
+            // removeFirst + append would emit two objectWillChange fires
+            // per gated buffer.
+            var history = self.audioLevelHistory
+            history.removeFirst()
+            history.append(level)
+            self.audioLevelHistory = history
 
             // Silence detection - track how long we've been below threshold
             self.updateSilenceTracking(currentLevel: level)
@@ -155,8 +161,12 @@ extension Audio {
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.systemAudioLevelHistory.removeFirst()
-            self.systemAudioLevelHistory.append(level)
+            // Single assignment for one publish per gated buffer (see the
+            // mic-history comment above).
+            var history = self.systemAudioLevelHistory
+            history.removeFirst()
+            history.append(level)
+            self.systemAudioLevelHistory = history
         }
     }
 
