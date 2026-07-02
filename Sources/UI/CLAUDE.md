@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (80 Swift files)
+## Files (81 Swift files)
 
 ### Overlay/
 
@@ -53,15 +53,10 @@ into a taller loading or error state.
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
 - `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
-- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status
-- `MenuBar/MenuBarModelStatusView.swift` — persistent local-model status badge with download progress, error state, and settings shortcut
-- `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar
+- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status, including the red "Recording" state while a meeting records
+- `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut
 - `MenuBar/MenuBarPrimaryActionsView.swift` — groups the dictation, meeting, paste, and recent-meetings action rows at the top of the popover
-- `MenuBar/MenuBarSettingsView.swift` — settings actions in the popover footer, including imported-audio transcription entry points
-- `MenuBar/MenuBarShortcutsView.swift` — keyboard shortcut hints in the popover
 - `MenuBar/MenuBarUtilityActionsView.swift` — groups the connect-agent, feedback, updates, settings, and quit action rows at the bottom of the popover
-- `MenuBar/MenuIconButton.swift` — icon-only button style for menubar items
-- `MenuBar/MenuOutlineButton.swift` — outlined button style for menubar actions
 - `MenuBar/MenuTokens.swift` — design tokens for menubar views
 
 The agent-connect surface is the Settings window's Agent page plus the

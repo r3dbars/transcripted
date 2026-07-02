@@ -45,8 +45,8 @@ final class MenuBarPrimaryActionsView: NSView {
     }
 
     func update(
-        dictationKey: String,
-        meetingKey: String,
+        dictationTrailing: String,
+        meetingTrailing: String,
         dictationState: MenuBarPrimaryActionState,
         meetingState: MenuBarPrimaryActionState,
         pasteDetail: String,
@@ -69,7 +69,7 @@ final class MenuBarPrimaryActionsView: NSView {
             symbolName: dictationState.symbolName,
             title: dictationState.title,
             detail: dictationState.subtitle,
-            trailingText: dictationKey,
+            trailingText: dictationTrailing,
             tone: .accent,
             size: .primary,
             isEnabled: dictationState.isEnabled
@@ -80,7 +80,7 @@ final class MenuBarPrimaryActionsView: NSView {
             symbolName: meetingState.symbolName,
             title: meetingState.title,
             detail: meetingState.subtitle,
-            trailingText: meetingKey,
+            trailingText: meetingTrailing,
             tone: .accent,
             size: .primary,
             isEnabled: meetingState.isEnabled

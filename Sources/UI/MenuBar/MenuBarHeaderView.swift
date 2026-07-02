@@ -112,13 +112,22 @@ final class MenuBarHeaderView: NSView {
         }
     }
 
-    func update(warmupStatus: MeetingSessionController.ModelWarmupStatus, hotkeyError: String?) {
+    func update(
+        warmupStatus: MeetingSessionController.ModelWarmupStatus,
+        hotkeyError: String?,
+        isMeetingRecording: Bool = false
+    ) {
         currentWarmupStatus = warmupStatus
         currentHotkeyError = hotkeyError
 
         let isReady = warmupStatus.isReadyForMenuHeader
-        statusDot.layer?.backgroundColor = (isReady ? MenuTokens.statusGreenNS : MenuTokens.statusOrangeNS).cgColor
-        statusLabel.stringValue = isReady ? "Ready" : warmupStatus.subtitle
+        if isMeetingRecording {
+            statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
+            statusLabel.stringValue = "Recording"
+        } else {
+            statusDot.layer?.backgroundColor = (isReady ? MenuTokens.statusGreenNS : MenuTokens.statusOrangeNS).cgColor
+            statusLabel.stringValue = isReady ? "Ready" : warmupStatus.subtitle
+        }
         progressBar.doubleValue = warmupStatus.progress
         detailLabel.stringValue = isReady ? "" : warmupStatus.detail
         warningLabel.stringValue = hotkeyError ?? ""

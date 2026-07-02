@@ -81,12 +81,13 @@ final class MenuBarPanelController: NSViewController {
         appState.contextCapture.refreshShortcutStatus()
 
         let warmupStatus = appState.meetingSession.warmupStatus
+        let isMeetingRecording = appState.meetingSession.isRecording
         let modelState = FirstRunLocalModelState(appState.sttRouter.modelDownloadState)
         let dictationState = FirstRunExperience.dictationAction(for: modelState)
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
             meetingsStatus: warmupStatus.meetingsStatus,
-            isRecording: appState.meetingSession.isRecording
+            isRecording: isMeetingRecording
         )
         let updatePresentation = menuUpdatePresentation(
             for: appState.sparkleUpdater.updateStatus,
@@ -97,12 +98,17 @@ final class MenuBarPanelController: NSViewController {
 
         content.headerView.update(
             warmupStatus: warmupStatus,
-            hotkeyError: appState.contextCapture.hotkeyError
+            hotkeyError: appState.contextCapture.hotkeyError,
+            isMeetingRecording: isMeetingRecording
         )
 
+        // While a meeting records, the row's trailing slot shows the live
+        // elapsed timer instead of the start shortcut.
         content.primaryActionsView.update(
-            dictationKey: appState.contextCapture.dictationShortcutDisplay,
-            meetingKey: appState.contextCapture.meetingShortcutDisplay,
+            dictationTrailing: appState.contextCapture.dictationShortcutDisplay,
+            meetingTrailing: isMeetingRecording
+                ? MeetingDurationFormatter.formatDuration(appState.meetingSession.recordingDuration)
+                : appState.contextCapture.meetingShortcutDisplay,
             dictationState: dictationState,
             meetingState: meetingState,
             pasteDetail: pasteDetail(for: latestDictation),
@@ -189,6 +195,21 @@ final class MenuBarPanelController: NSViewController {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.scheduleRefresh()
+            }
+            .store(in: &subscriptions)
+
+        // Keeps the meeting row's elapsed timer live while the popover is on
+        // screen. Duration ticks arrive several times a second, so collapse
+        // them to whole seconds and skip entirely when the popover is closed —
+        // `refresh()` runs on every open, so the timer is current by the time
+        // the user sees it.
+        appState.meetingSession.$recordingDuration
+            .map { Int($0) }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.isViewLoaded, self.view.window != nil else { return }
+                self.scheduleRefresh()
             }
             .store(in: &subscriptions)
 

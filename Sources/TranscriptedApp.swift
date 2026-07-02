@@ -31,7 +31,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var lastExternalApplication: NSRunningApplication?
     private var hasPresentedInitialOnboarding = false
     private let statusItemUpdateBadge = NSView(frame: .zero)
-    private var statusItemUpdateSubscription: AnyCancellable?
+    private var statusItemSubscriptions: Set<AnyCancellable> = []
+    private var statusItemMeetingRecording = false
+    private var statusItemDictationRecording = false
+    private var statusItemUpdateVersion: String?
     private let settingsTextPaster = ClipboardRestoringTextPaster()
     private lazy var settingsActions = TranscriptedSettingsActions(
         startDictation: { [weak self] in self?.startDictationFromSettings() },
@@ -283,6 +286,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             configureStatusItemButton(button)
         }
         bindStatusItemUpdateBadge()
+        bindStatusItemRecordingIndicator()
         installSettingsMenuHandler()
 
         // Set up popover (pure AppKit — no NSHostingController, no AttributeGraph)
@@ -616,22 +620,80 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func bindStatusItemUpdateBadge() {
-        statusItemUpdateSubscription = appState.sparkleUpdater.$updateStatus
+        appState.sparkleUpdater.$updateStatus
             .receive(on: RunLoop.main)
             .sink { [weak self] status in
                 self?.updateStatusItemBadge(for: status)
             }
+            .store(in: &statusItemSubscriptions)
         updateStatusItemBadge(for: appState.sparkleUpdater.updateStatus)
+    }
+
+    /// Keeps the status-item glyph in sync with active capture so the menu bar
+    /// itself answers "am I recording?" without opening the popover.
+    private func bindStatusItemRecordingIndicator() {
+        appState.sttRouter.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRecording in
+                guard let self, self.statusItemDictationRecording != isRecording else { return }
+                self.statusItemDictationRecording = isRecording
+                self.refreshStatusItemPresentation()
+            }
+            .store(in: &statusItemSubscriptions)
+
+        if #available(macOS 14.0, *) {
+            appState.meetingSession.$isRecording
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] isRecording in
+                    guard let self, self.statusItemMeetingRecording != isRecording else { return }
+                    self.statusItemMeetingRecording = isRecording
+                    self.refreshStatusItemPresentation()
+                }
+                .store(in: &statusItemSubscriptions)
+        }
     }
 
     private func updateStatusItemBadge(for status: SparkleUpdaterController.UpdateStatus) {
         let updateVersion = status.readyToInstallVersion
         statusItemUpdateBadge.isHidden = updateVersion == nil
+        statusItemUpdateVersion = updateVersion
+        refreshStatusItemPresentation()
+    }
 
-        if let updateVersion {
-            statusItem?.button?.toolTip = "Transcripted - restart to update to \(updateVersion)"
+    /// Single writer for the status-item button's image, tint, tooltip, and
+    /// accessibility label so the recording indicator and the update badge
+    /// cannot fight over shared button state.
+    private func refreshStatusItemPresentation() {
+        guard let button = statusItem?.button else { return }
+
+        let symbolName: String
+        let tint: NSColor?
+        let label: String
+        if statusItemMeetingRecording {
+            symbolName = "record.circle"
+            tint = .systemRed
+            label = "Transcripted — recording meeting"
+        } else if statusItemDictationRecording {
+            symbolName = "mic.fill"
+            tint = .systemRed
+            label = "Transcripted — dictating"
         } else {
-            statusItem?.button?.toolTip = "Transcripted"
+            symbolName = "mic.and.signal.meter"
+            tint = nil
+            label = "Transcripted"
+        }
+
+        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label) {
+            image.isTemplate = true
+            button.image = image
+        }
+        button.contentTintColor = tint
+        button.setAccessibilityLabel(label)
+
+        if let statusItemUpdateVersion {
+            button.toolTip = "\(label) - restart to update to \(statusItemUpdateVersion)"
+        } else {
+            button.toolTip = label
         }
     }
 
