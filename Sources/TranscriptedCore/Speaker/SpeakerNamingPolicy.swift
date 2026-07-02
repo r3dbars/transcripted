@@ -44,6 +44,30 @@ public enum SpeakerNamingPolicy {
             && marginOK
     }
 
+    /// Health-aware auto-accept: same gates as above, plus per-profile demotion.
+    /// A profile whose recent lifeline outcomes show corrections is put on
+    /// probation and routed to confirm — it must earn back one explicit
+    /// confirmation before silent recognition resumes. `recentOutcomes` is
+    /// most-recent-first (see `SpeakerDatabase.recentMatchOutcomes`).
+    public static func shouldAutoAccept(
+        profile: SpeakerProfile,
+        similarity: Double,
+        secondBestSimilarity: Double?,
+        recentOutcomes: [SpeakerMatchOutcomeKind]
+    ) -> Bool {
+        guard SpeakerProfileHealth.assess(
+            disputeCount: profile.disputeCount,
+            recentOutcomes: recentOutcomes
+        ) == .trusted else {
+            return false
+        }
+        return shouldAutoAccept(
+            profile: profile,
+            similarity: similarity,
+            secondBestSimilarity: secondBestSimilarity
+        )
+    }
+
     public static func confidence(similarity: Double, callCount: Int) -> SpeakerConfidence {
         similarity > 0.85 && callCount > 3 ? .high : .medium
     }
@@ -52,9 +76,15 @@ public enum SpeakerNamingPolicy {
         speakerId: String,
         profile: SpeakerProfile,
         similarity: Double,
-        secondBestSimilarity: Double?
+        secondBestSimilarity: Double?,
+        recentOutcomes: [SpeakerMatchOutcomeKind] = []
     ) -> SpeakerMapping {
-        guard shouldAutoAccept(profile: profile, similarity: similarity, secondBestSimilarity: secondBestSimilarity),
+        guard shouldAutoAccept(
+            profile: profile,
+            similarity: similarity,
+            secondBestSimilarity: secondBestSimilarity,
+            recentOutcomes: recentOutcomes
+        ),
               let name = profile.displayName,
               !name.isEmpty else {
             return SpeakerMapping(speakerId: speakerId)

@@ -164,6 +164,13 @@ extension TranscriptionTaskManager {
                 if let deferredReviewPlan {
                     Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
                 }
+                for outcome in Self.plannedMatchOutcomes(
+                    for: plannedChanges.resolvedUpdates,
+                    clipsBySpeakerId: clipsBySpeakerId,
+                    transcriptId: transcriptId
+                ) {
+                    speakerDB.recordMatchOutcome(outcome)
+                }
                 for update in collapsedUpdates where newlyCreatedMicProfileIds.contains(update.persistentSpeakerId) {
                     speakerDB.deleteSpeaker(id: update.persistentSpeakerId)
                     SpeakerClipExtractor.deletePersistedClip(
@@ -410,6 +417,51 @@ extension TranscriptionTaskManager {
             resolvedUpdates: resolvedUpdates,
             mutations: mutations
         )
+    }
+
+    /// Map submitted review verdicts onto the recognition lifeline.
+    ///
+    /// Corrections attribute to the profile that was wrongly suggested (the
+    /// pre-meeting matched snapshot) so the mistake lands on the profile that
+    /// made it; everything else attributes to the resolved profile. Collapse
+    /// and discard rows are user bookkeeping, not match verdicts, and are
+    /// intentionally not recorded.
+    nonisolated static func plannedMatchOutcomes(
+        for updates: [SpeakerNameUpdate],
+        clipsBySpeakerId: [String: SpeakerNamingEntry],
+        transcriptId: UUID
+    ) -> [SpeakerMatchOutcome] {
+        updates.compactMap { update in
+            let kind: SpeakerMatchOutcomeKind
+            switch update.action {
+            case .confirmed: kind = .confirmed
+            case .corrected: kind = .corrected
+            case .named: kind = .named
+            case .merged: kind = .merged
+            case .collapsedToMe, .discardedFromDatabase: return nil
+            }
+
+            let entry = clipsBySpeakerId[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
+            let profileId: UUID
+            switch update.action {
+            case .corrected:
+                profileId = entry?.matchedProfileSnapshot?.id ?? update.persistentSpeakerId
+            case .merged(let targetProfileId):
+                profileId = targetProfileId
+            default:
+                profileId = update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId
+            }
+
+            return SpeakerMatchOutcome(
+                profileId: profileId,
+                kind: kind,
+                similarity: entry?.matchSimilarity,
+                secondSimilarity: entry?.matchSecondSimilarity,
+                callCountAtMatch: entry?.matchedProfileSnapshot?.callCount,
+                channel: update.channel.rawValue,
+                transcriptId: transcriptId
+            )
+        }
     }
 
     nonisolated private static func shouldCoalesceManualName(_ action: SpeakerNameUpdate.NamingAction) -> Bool {

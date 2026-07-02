@@ -183,16 +183,25 @@ extension TranscriptionTaskManager {
         )
 
         // Per-speaker classification: auto-accept high-confidence known speakers,
-        // track which ones need naming or confirmation
+        // track which ones need naming or confirmation. Recent lifeline outcomes
+        // feed the health demotion — a profile with fresh corrections is routed
+        // back to confirm even if similarity clears the auto-accept bar.
         var autoAcceptedIds: Set<String> = []
         var needsActionIds: Set<String> = []
+        var recentOutcomeKinds: [String: [SpeakerMatchOutcomeKind]] = [:]
 
         for sid in speakerIds {
             if let entry = dbKnowledge.first(where: { $0.speakerId == sid }) {
+                let recent = speakerDB.recentMatchOutcomes(
+                    profileId: entry.profile.id,
+                    limit: SpeakerProfileHealth.recentOutcomeWindow
+                ).map(\.kind)
+                recentOutcomeKinds[sid] = recent
                 let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                     profile: entry.profile,
                     similarity: entry.similarity,
-                    secondBestSimilarity: entry.secondSimilarity
+                    secondBestSimilarity: entry.secondSimilarity,
+                    recentOutcomes: recent
                 )
                 if canAutoAccept {
                     autoAcceptedIds.insert(sid)
@@ -218,7 +227,8 @@ extension TranscriptionTaskManager {
                 speakerId: entry.speakerId,
                 profile: entry.profile,
                 similarity: entry.similarity,
-                secondBestSimilarity: entry.secondSimilarity
+                secondBestSimilarity: entry.secondSimilarity,
+                recentOutcomes: recentOutcomeKinds[entry.speakerId] ?? []
             )
             speakerMappings[key] = mapping
             speakerSources[key] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
@@ -248,9 +258,11 @@ extension TranscriptionTaskManager {
         // Mirrors the system-speaker block above but scoped to mic utterances.
         var micNeedsActionIds: Set<String> = []
         var micAutoAcceptedIds: Set<String> = []
+        var micDbKnowledge: [SpeakerClassificationKnowledge] = []
+        var micRecentOutcomeKinds: [String: [SpeakerMatchOutcomeKind]] = [:]
         if splitLocalSpeakers && result.micPersistentSpeakerIds.count > 0 {
             let micSpeakerIds = Array(result.micSpeakerIds).sorted()
-            let micDbKnowledge = Self.speakerClassificationKnowledge(
+            micDbKnowledge = Self.speakerClassificationKnowledge(
                 speakerIds: micSpeakerIds,
                 utterances: result.micUtterances,
                 contexts: result.micSpeakerContexts,
@@ -259,10 +271,16 @@ extension TranscriptionTaskManager {
 
             for sid in micSpeakerIds {
                 if let entry = micDbKnowledge.first(where: { $0.speakerId == sid }) {
+                    let recent = speakerDB.recentMatchOutcomes(
+                        profileId: entry.profile.id,
+                        limit: SpeakerProfileHealth.recentOutcomeWindow
+                    ).map(\.kind)
+                    micRecentOutcomeKinds[sid] = recent
                     let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                         profile: entry.profile,
                         similarity: entry.similarity,
-                        secondBestSimilarity: entry.secondSimilarity
+                        secondBestSimilarity: entry.secondSimilarity,
+                        recentOutcomes: recent
                     )
                     if canAutoAccept {
                         micAutoAcceptedIds.insert(sid)
@@ -285,7 +303,8 @@ extension TranscriptionTaskManager {
                     speakerId: entry.speakerId,
                     profile: entry.profile,
                     similarity: entry.similarity,
-                    secondBestSimilarity: entry.secondSimilarity
+                    secondBestSimilarity: entry.secondSimilarity,
+                    recentOutcomes: micRecentOutcomeKinds[entry.speakerId] ?? []
                 )
                 speakerMappings[key] = mapping
                 speakerSources["mic_\(entry.speakerId)"] = micAutoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
@@ -383,6 +402,33 @@ extension TranscriptionTaskManager {
 
         AppLogger.pipeline.info("Phase 2 complete: Transcript saved", ["file": savedURL.lastPathComponent])
 
+        // Record the silent auto-recognitions in the lifeline store so
+        // speaker-stats, health demotion, and the app's bucketed analytics can
+        // see them. Review verdicts are recorded separately by the naming
+        // coordinator when the review sheet is submitted.
+        for entry in dbKnowledge where autoAcceptedIds.contains(entry.speakerId) {
+            speakerDB.recordMatchOutcome(SpeakerMatchOutcome(
+                profileId: entry.profile.id,
+                kind: .autoAccepted,
+                similarity: entry.similarity,
+                secondSimilarity: entry.secondSimilarity,
+                callCountAtMatch: entry.profile.callCount,
+                channel: UtteranceChannel.system.rawValue,
+                transcriptId: transcriptId
+            ))
+        }
+        for entry in micDbKnowledge where micAutoAcceptedIds.contains(entry.speakerId) {
+            speakerDB.recordMatchOutcome(SpeakerMatchOutcome(
+                profileId: entry.profile.id,
+                kind: .autoAccepted,
+                similarity: entry.similarity,
+                secondSimilarity: entry.secondSimilarity,
+                callCountAtMatch: entry.profile.callCount,
+                channel: UtteranceChannel.mic.rawValue,
+                transcriptId: transcriptId
+            ))
+        }
+
         let archiveOutcome = archiveRecordingAudio
             ? await archiveRecordingAudioIfConfigured(
                 micURL: micURL,
@@ -421,6 +467,7 @@ extension TranscriptionTaskManager {
                     clipsDirectory: transcription.speakerClipsDirectory
                 )
                 for clip in clips {
+                    let context = result.systemSpeakerContexts[clip.diarizerSpeakerId]
                     namingEntries.append(SpeakerNamingEntry(
                         id: clip.persistentSpeakerId,
                         diarizerSpeakerId: clip.diarizerSpeakerId,
@@ -429,10 +476,12 @@ extension TranscriptionTaskManager {
                         sampleText: clip.sampleText,
                         currentName: clip.currentName,
                         matchSimilarity: clip.matchSimilarity,
+                        matchSecondSimilarity: context?.matchSecondSimilarity,
+                        callCount: context?.matchedProfileSnapshot?.callCount ?? 0,
                         needsNaming: clip.currentName == nil,
                         needsConfirmation: clip.currentName != nil,
-                        sessionEmbedding: result.systemSpeakerContexts[clip.diarizerSpeakerId]?.sessionEmbedding,
-                        matchedProfileSnapshot: result.systemSpeakerContexts[clip.diarizerSpeakerId]?.matchedProfileSnapshot
+                        sessionEmbedding: context?.sessionEmbedding,
+                        matchedProfileSnapshot: context?.matchedProfileSnapshot
                     ))
                 }
             } catch {
@@ -465,6 +514,7 @@ extension TranscriptionTaskManager {
                     clipsDirectory: transcription.speakerClipsDirectory
                 )
                 for clip in micClips {
+                    let context = result.micSpeakerContexts[clip.diarizerSpeakerId]
                     namingEntries.append(SpeakerNamingEntry(
                         id: clip.persistentSpeakerId,
                         diarizerSpeakerId: clip.diarizerSpeakerId,
@@ -473,10 +523,12 @@ extension TranscriptionTaskManager {
                         sampleText: clip.sampleText,
                         currentName: clip.currentName,
                         matchSimilarity: clip.matchSimilarity,
+                        matchSecondSimilarity: context?.matchSecondSimilarity,
+                        callCount: context?.matchedProfileSnapshot?.callCount ?? 0,
                         needsNaming: clip.currentName == nil,
                         needsConfirmation: clip.currentName != nil,
-                        sessionEmbedding: result.micSpeakerContexts[clip.diarizerSpeakerId]?.sessionEmbedding,
-                        matchedProfileSnapshot: result.micSpeakerContexts[clip.diarizerSpeakerId]?.matchedProfileSnapshot
+                        sessionEmbedding: context?.sessionEmbedding,
+                        matchedProfileSnapshot: context?.matchedProfileSnapshot
                     ))
                 }
             } catch {
@@ -495,7 +547,8 @@ extension TranscriptionTaskManager {
         if !namingEntries.isEmpty {
             // Seed knownPeople with existing named DB profiles so the sheet's combobox has
             // suggestions. Previously this was always empty — users typed blind.
-            let knownPeople: [SpeakerIdentityOption] = speakerDB.allSpeakers()
+            let allProfiles = speakerDB.allSpeakers()
+            let knownPeople: [SpeakerIdentityOption] = allProfiles
                 .compactMap { profile in
                     guard let name = profile.displayName, !name.isEmpty else { return nil }
                     return SpeakerIdentityOption(
@@ -504,6 +557,13 @@ extension TranscriptionTaskManager {
                         callCount: profile.callCount
                     )
                 }
+            // Named, mature, undisputed profiles are the auto-recognition roster —
+            // the review sheet shows this as the payoff for confirming voices.
+            let recognizedPeopleCount = allProfiles.filter { profile in
+                profile.displayName?.isEmpty == false
+                    && profile.callCount > 4
+                    && profile.disputeCount == 0
+            }.count
 
             let capturedEntries = namingEntries
             try await checkCancellationAfterTranscriptSideEffects(
@@ -518,6 +578,7 @@ extension TranscriptionTaskManager {
                 self.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
                     speakers: capturedEntries,
                     knownPeople: knownPeople,
+                    recognizedPeopleCount: recognizedPeopleCount,
                     transcriptURL: savedURL,
                     transcriptId: transcriptId,
                     systemAudioURL: systemURL,

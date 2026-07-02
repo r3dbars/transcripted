@@ -3042,6 +3042,7 @@ final class MeetingSessionController: ObservableObject {
     private func trackSavedTranscriptAnalyticsInBackground(baseProperties: [String: String]) {
         let restyle = savedTranscriptRestyleTask
         let fallbackTranscriptURL = taskManager.lastSavedTranscriptURL ?? lastSavedTranscriptURL
+        let speakerDatabase = self.speakerDatabase
         Task.detached(priority: .utility) {
             let transcriptURL: URL?
             if let restyle {
@@ -3050,6 +3051,10 @@ final class MeetingSessionController: ObservableObject {
                 transcriptURL = fallbackTranscriptURL
             }
             let transcriptProperties = Self.savedTranscriptAnalyticsProperties(transcriptURL: transcriptURL)
+            let autoRecognitionEvents = Self.autoRecognitionAnalyticsProperties(
+                transcriptURL: transcriptURL,
+                speakerDatabase: speakerDatabase
+            )
             await MainActor.run {
                 let properties = transcriptProperties.merging(
                     baseProperties,
@@ -3066,8 +3071,48 @@ final class MeetingSessionController: ObservableObject {
                     "meeting_transcript_saved",
                     properties: properties
                 )
+                for eventProperties in autoRecognitionEvents {
+                    AnalyticsReporter.track(
+                        "meeting_speaker_auto_recognized",
+                        properties: eventProperties
+                    )
+                }
             }
         }
+    }
+
+    /// One bucketed event per silent auto-recognition in the saved meeting,
+    /// read back from the local lifeline store keyed by the transcript id in
+    /// frontmatter. `graduated` marks a profile's first-ever auto-recognition —
+    /// the "how many meetings until the app just knows them" milestone. Only
+    /// enum buckets leave the device; no names, ids, or raw scores.
+    nonisolated private static func autoRecognitionAnalyticsProperties(
+        transcriptURL: URL?,
+        speakerDatabase: SpeakerDatabase
+    ) -> [[String: String]] {
+        guard let transcriptURL,
+              let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
+              let idString = values["transcript_id"] ?? values["capture_id"],
+              let transcriptId = UUID(uuidString: idString) else {
+            return []
+        }
+
+        return speakerDatabase.matchOutcomes(transcriptId: transcriptId)
+            .filter { $0.kind == .autoAccepted }
+            .map { outcome in
+                let graduated = speakerDatabase.autoAcceptedOutcomeCount(profileId: outcome.profileId) == 1
+                return [
+                    "similarity_bucket": SpeakerRecognitionTelemetry.similarityBucket(outcome.similarity),
+                    "margin_bucket": SpeakerRecognitionTelemetry.marginBucket(
+                        similarity: outcome.similarity,
+                        secondSimilarity: outcome.secondSimilarity
+                    ),
+                    "call_count_bucket": AnalyticsReporter.countBucket(outcome.callCountAtMatch ?? 0),
+                    "channel": outcome.channel ?? "unknown",
+                    "graduated": graduated ? "true" : "false",
+                    "surface": "meeting_save",
+                ]
+            }
     }
 
     nonisolated private static func savedTranscriptAnalyticsProperties(transcriptURL: URL?) -> [String: String] {

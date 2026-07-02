@@ -35,6 +35,7 @@ captured_input_volume_before
 captured_input_volume_changed
 captured_input_volume_dropped
 captured_input_volume_during
+channel
 cleanup_changed
 cleanup_enabled
 completion_flow
@@ -74,6 +75,8 @@ first_artifact_kind
 first_dictation_saved
 format_ready
 from_status
+graduated
+had_suggestion
 has_target
 hfp_suspected
 import_stage
@@ -125,6 +128,7 @@ reporting_kind
 required
 result
 retry_source
+review_action
 review_reason
 route_ready
 route_shape

@@ -253,6 +253,9 @@ public struct SpeakerIdentityOption: Identifiable, Hashable {
 public struct SpeakerNamingRequest {
     public let speakers: [SpeakerNamingEntry]
     public let knownPeople: [SpeakerIdentityOption]
+    /// Named, mature, undisputed profiles at request time — the sheet's
+    /// "Transcripted recognizes N people automatically" payoff line.
+    public let recognizedPeopleCount: Int
     public let transcriptURL: URL
     public let systemAudioURL: URL
     public let micAudioURL: URL?
@@ -263,6 +266,7 @@ public struct SpeakerNamingRequest {
     public init(
         speakers: [SpeakerNamingEntry],
         knownPeople: [SpeakerIdentityOption] = [],
+        recognizedPeopleCount: Int = 0,
         transcriptURL: URL,
         transcriptId: UUID,
         systemAudioURL: URL,
@@ -273,6 +277,7 @@ public struct SpeakerNamingRequest {
     ) {
         self.speakers = speakers
         self.knownPeople = knownPeople
+        self.recognizedPeopleCount = recognizedPeopleCount
         self.transcriptURL = transcriptURL
         self.transcriptId = transcriptId
         self.systemAudioURL = systemAudioURL
@@ -295,6 +300,7 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
     public let sampleText: String           // representative quote from transcript
     public let currentName: String?         // nil if unknown speaker
     public let matchSimilarity: Double?     // cosine similarity score
+    public let matchSecondSimilarity: Double? // runner-up similarity, for margin metrics
     public let callCount: Int               // how many times this profile has been seen
     public let needsNaming: Bool            // true = unknown speaker (show text field)
     public let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
@@ -310,6 +316,7 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
         sampleText: String,
         currentName: String?,
         matchSimilarity: Double?,
+        matchSecondSimilarity: Double? = nil,
         callCount: Int = 0,
         needsNaming: Bool,
         needsConfirmation: Bool,
@@ -324,6 +331,7 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
         self.sampleText = sampleText
         self.currentName = currentName
         self.matchSimilarity = matchSimilarity
+        self.matchSecondSimilarity = matchSecondSimilarity
         self.callCount = callCount
         self.needsNaming = needsNaming
         self.needsConfirmation = needsConfirmation
