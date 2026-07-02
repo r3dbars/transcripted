@@ -57,8 +57,13 @@ struct SpeakerStats: ParsableCommand {
         reader: SQLiteReader,
         now: Date
     ) throws -> SpeakerLifelineReport {
+        // dispute_count is a migration-added column and the reader is
+        // read-only, so a legacy DB the current app has never opened may
+        // lack it — degrade to zero disputes instead of failing the report.
+        let speakerColumns = Set((try reader.tableColumns("speakers")).map(\.name))
+        let disputeSelect = speakerColumns.contains("dispute_count") ? "dispute_count" : "0 AS dispute_count"
         let profileRows = try reader.query(
-            "SELECT display_name, call_count, dispute_count FROM speakers;"
+            "SELECT display_name, call_count, \(disputeSelect) FROM speakers;"
         )
         let totalProfiles = profileRows.count
         let namedProfiles = profileRows.filter {
@@ -69,7 +74,10 @@ struct SpeakerStats: ParsableCommand {
             (($0["dispute_count"] as? Int64) ?? 0) > 0
         }.count
 
-        let hasOutcomeTable = (try? reader.count("speaker_match_outcomes")) != nil
+        let tableProbe = try reader.query(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='speaker_match_outcomes' LIMIT 1;"
+        )
+        let hasOutcomeTable = !tableProbe.isEmpty
         let outcomes: [SpeakerLifelineOutcome]
         if hasOutcomeTable {
             let rows = try reader.query("""
@@ -162,10 +170,12 @@ struct SpeakerLifelineMetrics {
     }
 
     static func compute(outcomes: [SpeakerLifelineOutcome], now: Date) -> SpeakerLifelineMetrics {
+        // call_count_at_match is the profile's pre-meeting call count, so the
+        // appearance number of the graduation meeting itself is count + 1.
         var firstAutoByProfile: [String: Int?] = [:]
         for outcome in outcomes where outcome.isAutoAccepted {
             if firstAutoByProfile[outcome.profileId] == nil {
-                firstAutoByProfile[outcome.profileId] = outcome.callCountAtMatch
+                firstAutoByProfile[outcome.profileId] = outcome.callCountAtMatch.map { $0 + 1 }
             }
         }
 
@@ -210,7 +220,7 @@ struct SpeakerLifelineReport {
     func renderText() -> String {
         var lines: [String] = []
         lines.append("Speaker recognition lifeline — \(embedder) (\(databasePath))")
-        lines.append("Profiles: \(totalProfiles) total · \(namedProfiles) named · \(metrics.graduatedProfiles) auto-recognized · \(disputedProfiles) on probation")
+        lines.append("Profiles: \(totalProfiles) total · \(namedProfiles) named · \(metrics.graduatedProfiles) auto-recognized · \(disputedProfiles) disputed")
 
         guard hasOutcomeTable else {
             lines.append("No lifeline data yet — the speaker_match_outcomes table appears after the first meeting on this app version.")
@@ -218,7 +228,7 @@ struct SpeakerLifelineReport {
         }
 
         if let median = metrics.medianAppearancesToGraduation {
-            lines.append("Graduation: median \(median) appearances to first auto-recognition (policy floor is 6)")
+            lines.append("Graduation: median \(median) appearances to first auto-recognition")
         } else {
             lines.append("Graduation: no profile has been auto-recognized yet")
         }

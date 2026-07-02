@@ -60,6 +60,9 @@ public protocol SpeakerStore: Sendable {
     /// Record one auto-accept or review verdict in the speaker's recognition lifeline
     func recordMatchOutcome(_ outcome: SpeakerMatchOutcome)
 
+    /// Record a batch of lifeline outcomes (one review submit / one saved meeting)
+    func recordMatchOutcomes(_ outcomes: [SpeakerMatchOutcome])
+
     /// Most-recent-first lifeline outcomes for a profile, for health/demotion decisions
     func recentMatchOutcomes(profileId: UUID, limit: Int) -> [SpeakerMatchOutcome]
 }
@@ -79,8 +82,12 @@ public extension SpeakerStore {
 
     /// Back-compat defaults: stores that don't persist the recognition lifeline (test doubles,
     /// simple stores) drop outcomes and report none, which keeps health assessment permissive.
-    /// `SpeakerDatabase` provides the real SQLite-backed implementation.
+    /// `SpeakerDatabase` provides the real SQLite-backed implementations.
     func recordMatchOutcome(_ outcome: SpeakerMatchOutcome) {}
+
+    func recordMatchOutcomes(_ outcomes: [SpeakerMatchOutcome]) {
+        for outcome in outcomes { recordMatchOutcome(outcome) }
+    }
 
     func recentMatchOutcomes(profileId: UUID, limit: Int) -> [SpeakerMatchOutcome] { [] }
 }

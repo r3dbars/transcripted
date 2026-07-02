@@ -10,6 +10,11 @@ import SQLite3
 @available(macOS 14.0, *)
 extension SpeakerDatabase {
 
+    /// ISO8601DateFormatter is documented thread-safe, and all users below run
+    /// on the database queue anyway — one shared instance avoids paying its
+    /// construction cost on every insert/read.
+    private static let matchOutcomeDateFormatter = ISO8601DateFormatter()
+
     /// Create the match-outcome table. Idempotent; called from createTables().
     func createMatchOutcomeTablesImpl() {
         let sql = """
@@ -38,6 +43,20 @@ extension SpeakerDatabase {
         queue.sync { recordMatchOutcomeImpl(outcome) }
     }
 
+    /// Append a batch of outcomes in one queue hop and one transaction —
+    /// used by the pipeline (all auto-accepts of a meeting) and the naming
+    /// coordinator (all verdicts of one review submit).
+    public func recordMatchOutcomes(_ outcomes: [SpeakerMatchOutcome]) {
+        guard !outcomes.isEmpty else { return }
+        queue.sync {
+            transaction {
+                for outcome in outcomes {
+                    recordMatchOutcomeImpl(outcome)
+                }
+            }
+        }
+    }
+
     private func recordMatchOutcomeImpl(_ outcome: SpeakerMatchOutcome) {
         guard isDatabaseOpen else {
             AppLogger.speakers.error("recordMatchOutcome skipped — database not open", [
@@ -59,7 +78,7 @@ extension SpeakerDatabase {
         }
         defer { sqlite3_finalize(statement) }
 
-        let recordedAt = ISO8601DateFormatter().string(from: outcome.recordedAt)
+        let recordedAt = Self.matchOutcomeDateFormatter.string(from: outcome.recordedAt)
         sqlite3_bind_text(statement, 1, (UUID().uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 2, (outcome.profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 3, (outcome.kind.rawValue as NSString).utf8String, -1, SQLITE_TRANSIENT)
@@ -124,8 +143,10 @@ extension SpeakerDatabase {
         }
     }
 
-    /// How many times this profile has been silently auto-recognized. A count
-    /// of exactly 1 right after a save marks the profile's graduation meeting.
+    /// How many times this profile has been silently auto-recognized. The app
+    /// derives the graduation milestone by comparing this total against the
+    /// rows belonging to the just-saved meeting (a single save can record more
+    /// than one row for a profile).
     public func autoAcceptedOutcomeCount(profileId: UUID) -> Int {
         queue.sync {
             guard isDatabaseOpen else { return 0 }
@@ -173,7 +194,6 @@ extension SpeakerDatabase {
             sqlite3_bind_int(statement, 2, Int32(max(0, limit)))
         }
 
-        let isoFormatter = ISO8601DateFormatter()
         var outcomes: [SpeakerMatchOutcome] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             let profileIdStr = sqlite3_column_text(statement, 0).map(String.init(cString:)) ?? ""
@@ -203,7 +223,7 @@ extension SpeakerDatabase {
                 callCountAtMatch: callCount,
                 channel: channel,
                 transcriptId: transcriptId,
-                recordedAt: isoFormatter.date(from: recordedAtStr) ?? Date()
+                recordedAt: Self.matchOutcomeDateFormatter.date(from: recordedAtStr) ?? Date()
             ))
         }
         return outcomes

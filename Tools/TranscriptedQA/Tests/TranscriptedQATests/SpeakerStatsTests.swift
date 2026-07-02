@@ -37,7 +37,11 @@ final class SpeakerStatsTests: XCTestCase {
         let metrics = SpeakerLifelineMetrics.compute(outcomes: outcomes, now: now)
 
         XCTAssertEqual(metrics.graduatedProfiles, 1)
-        XCTAssertEqual(metrics.appearancesToGraduation, [6], "first auto-recognition appearance number, not later ones")
+        XCTAssertEqual(
+            metrics.appearancesToGraduation,
+            [7],
+            "call_count_at_match is the pre-meeting count, so appearance number is 6 + 1, from the first auto-recognition only"
+        )
 
         XCTAssertEqual(metrics.allTime.autoRecognitions, 2)
         XCTAssertEqual(metrics.allTime.questions, 4)

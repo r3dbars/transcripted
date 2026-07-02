@@ -164,13 +164,11 @@ extension TranscriptionTaskManager {
                 if let deferredReviewPlan {
                     Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
                 }
-                for outcome in Self.plannedMatchOutcomes(
+                speakerDB.recordMatchOutcomes(Self.plannedMatchOutcomes(
                     for: plannedChanges.resolvedUpdates,
                     clipsBySpeakerId: clipsBySpeakerId,
                     transcriptId: transcriptId
-                ) {
-                    speakerDB.recordMatchOutcome(outcome)
-                }
+                ))
                 for update in collapsedUpdates where newlyCreatedMicProfileIds.contains(update.persistentSpeakerId) {
                     speakerDB.deleteSpeaker(id: update.persistentSpeakerId)
                     SpeakerClipExtractor.deletePersistedClip(
@@ -432,13 +430,8 @@ extension TranscriptionTaskManager {
         transcriptId: UUID
     ) -> [SpeakerMatchOutcome] {
         updates.compactMap { update in
-            let kind: SpeakerMatchOutcomeKind
-            switch update.action {
-            case .confirmed: kind = .confirmed
-            case .corrected: kind = .corrected
-            case .named: kind = .named
-            case .merged: kind = .merged
-            case .collapsedToMe, .discardedFromDatabase: return nil
+            guard let kind = SpeakerMatchOutcomeKind(reviewAction: update.action) else {
+                return nil
             }
 
             let entry = clipsBySpeakerId[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]

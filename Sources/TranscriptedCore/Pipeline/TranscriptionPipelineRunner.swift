@@ -188,23 +188,35 @@ extension TranscriptionTaskManager {
         // back to confirm even if similarity clears the auto-accept bar.
         var autoAcceptedIds: Set<String> = []
         var needsActionIds: Set<String> = []
-        var recentOutcomeKinds: [String: [SpeakerMatchOutcomeKind]] = [:]
+        // One indexed LIMIT-N query per profile per run, shared across the
+        // system and mic classification passes (the same person can appear on
+        // both channels under different diarizer ids).
+        var recentOutcomesByProfile: [UUID: [SpeakerMatchOutcomeKind]] = [:]
+        func cachedRecentOutcomes(_ profile: SpeakerProfile) -> [SpeakerMatchOutcomeKind] {
+            if let cached = recentOutcomesByProfile[profile.id] { return cached }
+            let recent = speakerDB.recentMatchOutcomes(
+                profileId: profile.id,
+                limit: SpeakerProfileHealth.recentOutcomeWindow
+            ).map(\.kind)
+            recentOutcomesByProfile[profile.id] = recent
+            return recent
+        }
+        // Auto-accepts collected here are written to the lifeline store only
+        // after the saved-transcript side effects commit, so a cancelled run
+        // (whose transcript gets rolled back) leaves no orphan outcome rows.
+        var pendingAutoAccepts: [(knowledge: SpeakerClassificationKnowledge, channel: UtteranceChannel)] = []
 
         for sid in speakerIds {
             if let entry = dbKnowledge.first(where: { $0.speakerId == sid }) {
-                let recent = speakerDB.recentMatchOutcomes(
-                    profileId: entry.profile.id,
-                    limit: SpeakerProfileHealth.recentOutcomeWindow
-                ).map(\.kind)
-                recentOutcomeKinds[sid] = recent
                 let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                     profile: entry.profile,
                     similarity: entry.similarity,
                     secondBestSimilarity: entry.secondSimilarity,
-                    recentOutcomes: recent
+                    recentOutcomes: cachedRecentOutcomes(entry.profile)
                 )
                 if canAutoAccept {
                     autoAcceptedIds.insert(sid)
+                    pendingAutoAccepts.append((entry, .system))
                 } else {
                     needsActionIds.insert(sid)
                 }
@@ -228,7 +240,7 @@ extension TranscriptionTaskManager {
                 profile: entry.profile,
                 similarity: entry.similarity,
                 secondBestSimilarity: entry.secondSimilarity,
-                recentOutcomes: recentOutcomeKinds[entry.speakerId] ?? []
+                recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? []
             )
             speakerMappings[key] = mapping
             speakerSources[key] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
@@ -258,11 +270,9 @@ extension TranscriptionTaskManager {
         // Mirrors the system-speaker block above but scoped to mic utterances.
         var micNeedsActionIds: Set<String> = []
         var micAutoAcceptedIds: Set<String> = []
-        var micDbKnowledge: [SpeakerClassificationKnowledge] = []
-        var micRecentOutcomeKinds: [String: [SpeakerMatchOutcomeKind]] = [:]
         if splitLocalSpeakers && result.micPersistentSpeakerIds.count > 0 {
             let micSpeakerIds = Array(result.micSpeakerIds).sorted()
-            micDbKnowledge = Self.speakerClassificationKnowledge(
+            let micDbKnowledge = Self.speakerClassificationKnowledge(
                 speakerIds: micSpeakerIds,
                 utterances: result.micUtterances,
                 contexts: result.micSpeakerContexts,
@@ -271,19 +281,22 @@ extension TranscriptionTaskManager {
 
             for sid in micSpeakerIds {
                 if let entry = micDbKnowledge.first(where: { $0.speakerId == sid }) {
-                    let recent = speakerDB.recentMatchOutcomes(
-                        profileId: entry.profile.id,
-                        limit: SpeakerProfileHealth.recentOutcomeWindow
-                    ).map(\.kind)
-                    micRecentOutcomeKinds[sid] = recent
                     let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                         profile: entry.profile,
                         similarity: entry.similarity,
                         secondBestSimilarity: entry.secondSimilarity,
-                        recentOutcomes: recent
+                        recentOutcomes: cachedRecentOutcomes(entry.profile)
                     )
                     if canAutoAccept {
                         micAutoAcceptedIds.insert(sid)
+                        // Mic speakers still flow through the review sheet when
+                        // local split ran with audio (the section shows every mic
+                        // voice), so their verdicts arrive from the coordinator —
+                        // recording an auto-accept row too would double-count the
+                        // same match. Only record when no mic review will happen.
+                        if micURL == nil {
+                            pendingAutoAccepts.append((entry, .mic))
+                        }
                     } else {
                         micNeedsActionIds.insert(sid)
                     }
@@ -304,7 +317,7 @@ extension TranscriptionTaskManager {
                     profile: entry.profile,
                     similarity: entry.similarity,
                     secondBestSimilarity: entry.secondSimilarity,
-                    recentOutcomes: micRecentOutcomeKinds[entry.speakerId] ?? []
+                    recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? []
                 )
                 speakerMappings[key] = mapping
                 speakerSources["mic_\(entry.speakerId)"] = micAutoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
@@ -404,29 +417,22 @@ extension TranscriptionTaskManager {
 
         // Record the silent auto-recognitions in the lifeline store so
         // speaker-stats, health demotion, and the app's bucketed analytics can
-        // see them. Review verdicts are recorded separately by the naming
+        // see them. Deferred until the saved-transcript side effects commit so
+        // a cancelled run cannot leave outcome rows for a rolled-back
+        // transcript. Review verdicts are recorded separately by the naming
         // coordinator when the review sheet is submitted.
-        for entry in dbKnowledge where autoAcceptedIds.contains(entry.speakerId) {
-            speakerDB.recordMatchOutcome(SpeakerMatchOutcome(
-                profileId: entry.profile.id,
-                kind: .autoAccepted,
-                similarity: entry.similarity,
-                secondSimilarity: entry.secondSimilarity,
-                callCountAtMatch: entry.profile.callCount,
-                channel: UtteranceChannel.system.rawValue,
-                transcriptId: transcriptId
-            ))
-        }
-        for entry in micDbKnowledge where micAutoAcceptedIds.contains(entry.speakerId) {
-            speakerDB.recordMatchOutcome(SpeakerMatchOutcome(
-                profileId: entry.profile.id,
-                kind: .autoAccepted,
-                similarity: entry.similarity,
-                secondSimilarity: entry.secondSimilarity,
-                callCountAtMatch: entry.profile.callCount,
-                channel: UtteranceChannel.mic.rawValue,
-                transcriptId: transcriptId
-            ))
+        func recordPendingAutoAcceptOutcomes() {
+            speakerDB.recordMatchOutcomes(pendingAutoAccepts.map { pending in
+                SpeakerMatchOutcome(
+                    profileId: pending.knowledge.profile.id,
+                    kind: .autoAccepted,
+                    similarity: pending.knowledge.similarity,
+                    secondSimilarity: pending.knowledge.secondSimilarity,
+                    callCountAtMatch: pending.knowledge.profile.callCount,
+                    channel: pending.channel.rawValue,
+                    transcriptId: transcriptId
+                )
+            })
         }
 
         let archiveOutcome = archiveRecordingAudio
@@ -557,12 +563,18 @@ extension TranscriptionTaskManager {
                         callCount: profile.callCount
                     )
                 }
-            // Named, mature, undisputed profiles are the auto-recognition roster —
-            // the review sheet shows this as the payoff for confirming voices.
+            // The auto-recognition roster shown as the review sheet's payoff
+            // line. Shares the exact policy predicate (including lifeline
+            // health) with the auto-accept gate so the sheet never promises
+            // recognition the pipeline would refuse.
             let recognizedPeopleCount = allProfiles.filter { profile in
-                profile.displayName?.isEmpty == false
-                    && profile.callCount > 4
-                    && profile.disputeCount == 0
+                guard profile.displayName?.isEmpty == false, profile.callCount > 4 else {
+                    return false
+                }
+                return SpeakerNamingPolicy.isAutoRecognizable(
+                    profile: profile,
+                    recentOutcomes: cachedRecentOutcomes(profile)
+                )
             }.count
 
             let capturedEntries = namingEntries
@@ -624,6 +636,7 @@ extension TranscriptionTaskManager {
                 deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
                 replacementTranscriptRollback: replacementTranscriptRollback
             )
+            recordPendingAutoAcceptOutcomes()
 
             AppLogger.pipeline.info("Speaker naming requested", [
                 "total": "\(namingEntries.count)",
@@ -646,6 +659,7 @@ extension TranscriptionTaskManager {
             deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
             replacementTranscriptRollback: replacementTranscriptRollback
         )
+        recordPendingAutoAcceptOutcomes()
 
         // No naming needed — clean up scratch audio after the saved outcome has
         // committed, so a late cancellation cannot delete transcript + retained
@@ -739,15 +753,7 @@ extension TranscriptionTaskManager {
         }
 
         private static func replacementTranscriptId(from values: [String: String]?) -> UUID? {
-            if let transcriptId = values?["transcript_id"],
-               let uuid = UUID(uuidString: transcriptId) {
-                return uuid
-            }
-            if let captureId = values?["capture_id"],
-               let uuid = UUID(uuidString: captureId) {
-                return uuid
-            }
-            return nil
+            values.flatMap(TranscriptFrontmatter.captureID(in:))
         }
     }
 

@@ -477,12 +477,15 @@ final class SpeakerNamingContentView: NSView {
             uniquingKeysWith: { first, _ in first }
         )
         for update in updates {
-            guard let action = Self.reviewActionName(update.action) else { continue }
+            // Shared Core mapping — the same one the coordinator uses for the
+            // local lifeline store — so PostHog and speaker-stats can never
+            // classify one verdict differently.
+            guard let kind = SpeakerMatchOutcomeKind(reviewAction: update.action) else { continue }
             let entry = entriesByKey[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
             AnalyticsReporter.track(
                 "meeting_speaker_match_reviewed",
                 properties: [
-                    "review_action": action,
+                    "review_action": kind.rawValue,
                     "similarity_bucket": SpeakerRecognitionTelemetry.similarityBucket(entry?.matchSimilarity),
                     "margin_bucket": SpeakerRecognitionTelemetry.marginBucket(
                         similarity: entry?.matchSimilarity,
@@ -494,16 +497,6 @@ final class SpeakerNamingContentView: NSView {
                     "surface": "speaker_review_sheet",
                 ]
             )
-        }
-    }
-
-    private static func reviewActionName(_ action: SpeakerNameUpdate.NamingAction) -> String? {
-        switch action {
-        case .named: return "named"
-        case .confirmed: return "confirmed"
-        case .corrected: return "corrected"
-        case .merged: return "merged"
-        case .collapsedToMe, .discardedFromDatabase: return nil
         }
     }
 

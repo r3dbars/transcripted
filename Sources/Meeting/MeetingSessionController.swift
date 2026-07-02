@@ -3050,9 +3050,12 @@ final class MeetingSessionController: ObservableObject {
             } else {
                 transcriptURL = fallbackTranscriptURL
             }
-            let transcriptProperties = Self.savedTranscriptAnalyticsProperties(transcriptURL: transcriptURL)
+            let frontmatterValues = transcriptURL.flatMap {
+                (try? TranscriptFrontmatter.readValues(from: $0)) ?? nil
+            }
+            let transcriptProperties = Self.savedTranscriptAnalyticsProperties(values: frontmatterValues)
             let autoRecognitionEvents = Self.autoRecognitionAnalyticsProperties(
-                transcriptURL: transcriptURL,
+                frontmatterValues: frontmatterValues,
                 speakerDatabase: speakerDatabase
             )
             await MainActor.run {
@@ -3081,43 +3084,59 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    /// One bucketed event per silent auto-recognition in the saved meeting,
+    /// One bucketed event per auto-recognized *person* in the saved meeting,
     /// read back from the local lifeline store keyed by the transcript id in
-    /// frontmatter. `graduated` marks a profile's first-ever auto-recognition —
-    /// the "how many meetings until the app just knows them" milestone. Only
-    /// enum buckets leave the device; no names, ids, or raw scores.
+    /// frontmatter. Outcomes are deduplicated by profile (the pipeline can
+    /// record one row per channel, and a retranscription of the same meeting
+    /// appends rows for its transcript id again), so one save emits at most
+    /// one event per speaker. `graduated` marks a profile whose only
+    /// auto-recognitions belong to this meeting — the "how many meetings
+    /// until the app just knows them" milestone. Only enum buckets leave the
+    /// device; no names, ids, or raw scores.
     nonisolated private static func autoRecognitionAnalyticsProperties(
-        transcriptURL: URL?,
+        frontmatterValues: [String: String]?,
         speakerDatabase: SpeakerDatabase
     ) -> [[String: String]] {
-        guard let transcriptURL,
-              let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
-              let idString = values["transcript_id"] ?? values["capture_id"],
-              let transcriptId = UUID(uuidString: idString) else {
+        guard let frontmatterValues,
+              let transcriptId = TranscriptFrontmatter.captureID(in: frontmatterValues) else {
             return []
         }
 
-        return speakerDatabase.matchOutcomes(transcriptId: transcriptId)
+        let autoOutcomes = speakerDatabase.matchOutcomes(transcriptId: transcriptId)
             .filter { $0.kind == .autoAccepted }
-            .map { outcome in
-                let graduated = speakerDatabase.autoAcceptedOutcomeCount(profileId: outcome.profileId) == 1
-                return [
-                    "similarity_bucket": SpeakerRecognitionTelemetry.similarityBucket(outcome.similarity),
-                    "margin_bucket": SpeakerRecognitionTelemetry.marginBucket(
-                        similarity: outcome.similarity,
-                        secondSimilarity: outcome.secondSimilarity
-                    ),
-                    "call_count_bucket": AnalyticsReporter.countBucket(outcome.callCountAtMatch ?? 0),
-                    "channel": outcome.channel ?? "unknown",
-                    "graduated": graduated ? "true" : "false",
-                    "surface": "meeting_save",
-                ]
+        // Rows arrive most-recent-first; keep the newest row per profile so a
+        // retranscription reports the latest run, not every historical run.
+        var newestByProfile: [UUID: SpeakerMatchOutcome] = [:]
+        var rowsPerProfile: [UUID: Int] = [:]
+        for outcome in autoOutcomes {
+            rowsPerProfile[outcome.profileId, default: 0] += 1
+            if newestByProfile[outcome.profileId] == nil {
+                newestByProfile[outcome.profileId] = outcome
             }
+        }
+
+        return newestByProfile.values.map { outcome in
+            // Graduated when every auto-recognition this profile has ever had
+            // belongs to this meeting — robust to multi-channel rows within
+            // one save, unlike a bare count == 1 check.
+            let totalCount = speakerDatabase.autoAcceptedOutcomeCount(profileId: outcome.profileId)
+            let graduated = totalCount <= (rowsPerProfile[outcome.profileId] ?? 0)
+            return [
+                "similarity_bucket": SpeakerRecognitionTelemetry.similarityBucket(outcome.similarity),
+                "margin_bucket": SpeakerRecognitionTelemetry.marginBucket(
+                    similarity: outcome.similarity,
+                    secondSimilarity: outcome.secondSimilarity
+                ),
+                "call_count_bucket": AnalyticsReporter.countBucket(outcome.callCountAtMatch ?? 0),
+                "channel": outcome.channel ?? "unknown",
+                "graduated": graduated ? "true" : "false",
+                "surface": "meeting_save",
+            ]
+        }
     }
 
-    nonisolated private static func savedTranscriptAnalyticsProperties(transcriptURL: URL?) -> [String: String] {
-        guard let transcriptURL,
-              let values = try? TranscriptFrontmatter.readValues(from: transcriptURL) else {
+    nonisolated private static func savedTranscriptAnalyticsProperties(values: [String: String]?) -> [String: String] {
+        guard let values else {
             return [:]
         }
 

@@ -36,13 +36,17 @@ other half of the signal. Both are recorded as rows in the append-only
 
 | written by | kind | when |
 | --- | --- | --- |
-| `TranscriptionPipelineRunner` | `auto_accepted` | a returning speaker is silently named after transcript save |
+| `TranscriptionPipelineRunner` | `auto_accepted` | a returning speaker is silently named, recorded after the saved-transcript side effects commit (so cancelled runs leave no rows) |
 | `SpeakerNamingCoordinator` | `confirmed` / `corrected` / `named` / `merged` | the review sheet is submitted and the transcript finalizes |
 
 Each row stores only: profile UUID, kind, similarity, runner-up similarity,
-call count at match, channel, transcript UUID, timestamp. Corrections
+pre-meeting call count, channel, transcript UUID, timestamp. Corrections
 attribute to the profile that was *wrongly suggested*, so mistakes land on the
-profile that made them.
+profile that made them. Two disjointness rules keep one match = one row: mic
+speakers that will flow through the review sheet anyway (local split with
+audio) do not get an `auto_accepted` row — their verdict arrives from the
+coordinator instead — and the shared `SpeakerMatchOutcomeKind(reviewAction:)`
+mapping is the single verdict classifier for both the store and analytics.
 
 ## The three loops
 
@@ -113,6 +117,10 @@ Fleet-wide, in PostHog, the recommended standing insights:
 - Auto-recognition errors only surface when a user later reviews or corrects,
   so precision measured from verdicts is slightly optimistic. Track the
   review-skip rate next to it.
+- `meeting_speaker_match_reviewed` fires at review submit (user intent), while
+  the local lifeline rows are written only when the transcript finalizes. In
+  the rare finalization-failure case PostHog counts a verdict the local store
+  never recorded — an accepted intent-vs-applied gap, not a bug to chase.
 - The lifeline table starts empty on upgrade; trends need a few weeks of real
   meetings before they mean anything.
 - Voiceprint drift (seed vs blended embedding divergence) is visible in

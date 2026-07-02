@@ -21,6 +21,24 @@ public enum SpeakerNamingPolicy {
     /// cleared the match floor) is treated as unambiguous and passes.
     public static let autoAcceptMarginMin: Double = 0.12
 
+    /// Profile-level eligibility for silent recognition, shared by the
+    /// auto-accept gate and the review sheet's "recognizes N people" roster so
+    /// the promise and the behavior can never drift apart: named, mature
+    /// (`callCount > 4`), and healthy per the lifeline (no disputes, no recent
+    /// corrections). Match-level gates (similarity, margin) live in
+    /// `shouldAutoAccept`.
+    public static func isAutoRecognizable(
+        profile: SpeakerProfile,
+        recentOutcomes: [SpeakerMatchOutcomeKind]
+    ) -> Bool {
+        profile.displayName?.isEmpty == false
+            && profile.callCount > 4
+            && SpeakerProfileHealth.assess(
+                disputeCount: profile.disputeCount,
+                recentOutcomes: recentOutcomes
+            ) == .trusted
+    }
+
     public static func shouldAutoAccept(
         profile: SpeakerProfile,
         similarity: Double,
@@ -37,10 +55,8 @@ public enum SpeakerNamingPolicy {
         case .some(let second):
             marginOK = (similarity - second) >= autoAcceptMarginMin
         }
-        return profile.displayName != nil
-            && profile.disputeCount == 0
+        return isAutoRecognizable(profile: profile, recentOutcomes: [])
             && similarity > autoAcceptSimilarityThreshold
-            && profile.callCount > 4
             && marginOK
     }
 
@@ -55,10 +71,7 @@ public enum SpeakerNamingPolicy {
         secondBestSimilarity: Double?,
         recentOutcomes: [SpeakerMatchOutcomeKind]
     ) -> Bool {
-        guard SpeakerProfileHealth.assess(
-            disputeCount: profile.disputeCount,
-            recentOutcomes: recentOutcomes
-        ) == .trusted else {
+        guard isAutoRecognizable(profile: profile, recentOutcomes: recentOutcomes) else {
             return false
         }
         return shouldAutoAccept(

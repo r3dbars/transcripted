@@ -76,8 +76,11 @@ final class SpeakerMatchOutcomeTests: XCTestCase {
         let meetingOne = UUID()
         let meetingTwo = UUID()
 
-        database.recordMatchOutcome(SpeakerMatchOutcome(profileId: profileA, kind: .autoAccepted, transcriptId: meetingOne))
-        database.recordMatchOutcome(SpeakerMatchOutcome(profileId: profileB, kind: .corrected, transcriptId: meetingOne))
+        // Batch write path — one transaction, same rows as individual records.
+        database.recordMatchOutcomes([
+            SpeakerMatchOutcome(profileId: profileA, kind: .autoAccepted, transcriptId: meetingOne),
+            SpeakerMatchOutcome(profileId: profileB, kind: .corrected, transcriptId: meetingOne),
+        ])
         database.recordMatchOutcome(SpeakerMatchOutcome(profileId: profileA, kind: .autoAccepted, transcriptId: meetingTwo))
 
         let meetingOneOutcomes = database.matchOutcomes(transcriptId: meetingOne)

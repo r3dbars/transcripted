@@ -231,7 +231,8 @@ public enum UtteranceChannel: String, Sendable, Hashable {
     case system
 
     /// Canonical key for speaker maps keyed by channel + diarizer ID (e.g. "system_0", "mic_2").
-    func speakerKey(diarizerSpeakerId: String) -> String {
+    /// Public so app-side review surfaces can join updates back to entries with the same key.
+    public func speakerKey(diarizerSpeakerId: String) -> String {
         "\(rawValue)_\(diarizerSpeakerId)"
     }
 }

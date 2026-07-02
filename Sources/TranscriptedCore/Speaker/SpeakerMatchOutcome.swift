@@ -28,6 +28,22 @@ public enum SpeakerMatchOutcomeKind: String, Sendable, CaseIterable {
     case merged
 }
 
+extension SpeakerMatchOutcomeKind {
+    /// The lifeline kind for a submitted review verdict, shared by the naming
+    /// coordinator's store writes and the review sheet's analytics so the two
+    /// surfaces can never classify the same verdict differently. Collapse and
+    /// discard rows are user bookkeeping, not match verdicts, and map to nil.
+    public init?(reviewAction: SpeakerNameUpdate.NamingAction) {
+        switch reviewAction {
+        case .named: self = .named
+        case .confirmed: self = .confirmed
+        case .corrected: self = .corrected
+        case .merged: self = .merged
+        case .collapsedToMe, .discardedFromDatabase: return nil
+        }
+    }
+}
+
 public struct SpeakerMatchOutcome: Sendable {
     public let profileId: UUID
     public let kind: SpeakerMatchOutcomeKind
