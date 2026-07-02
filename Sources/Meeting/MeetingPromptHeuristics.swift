@@ -266,6 +266,89 @@ struct MeetingPromptUnrecordedCall: Equatable {
     let duration: TimeInterval
 }
 
+/// What the ad-hoc sensors see at one moment, attached to prompt telemetry so
+/// accepts/dismissals/ignores can be sliced by the evidence behind them.
+/// Booleans only — never bundle IDs or device names.
+struct MeetingPromptSignalSnapshot: Equatable {
+    let micActive: Bool
+    let speakerActive: Bool
+    let cameraActive: Bool
+}
+
+/// One detected call summarized at its end — the capture-funnel denominator.
+/// Every real call this long becomes exactly one `meeting_detected_call_ended`
+/// event, so capture rate is measurable against calls that actually happened,
+/// not just prompts that fired.
+struct MeetingPromptDetectedCallSummary: Equatable {
+    enum PromptOutcome: String, Equatable {
+        case recorded
+        case declined
+        case ignored
+        case noPrompt = "no_prompt"
+    }
+
+    let provider: MeetingPromptProvider
+    let duration: TimeInterval
+    let wasRecorded: Bool
+    let promptOutcome: PromptOutcome
+    /// Sorted "+"-joined sensor kinds seen during the call (e.g. "camera+mic").
+    let signalKinds: String
+}
+
+/// Pure helpers for the detected-call funnel event and prompt-decision
+/// telemetry. Everything stays coarse: buckets and small enums only.
+enum MeetingPromptCallTelemetry {
+    /// Calls shorter than this never emit the funnel event — a seconds-long
+    /// mic blip that survived the sustain gate is not a meeting.
+    static let minimumReportableCallDuration: TimeInterval = 60
+
+    static func durationBucket(for duration: TimeInterval) -> String {
+        switch duration {
+        case ..<(5 * 60):
+            return "1_to_5m"
+        case ..<(10 * 60):
+            return "5_to_10m"
+        case ..<(20 * 60):
+            return "10_to_20m"
+        case ..<(40 * 60):
+            return "20_to_40m"
+        default:
+            return "40m_plus"
+        }
+    }
+
+    static func signalKinds(micSeen: Bool, speakerSeen: Bool, cameraSeen: Bool) -> String {
+        var kinds: [String] = []
+        if cameraSeen { kinds.append("camera") }
+        if micSeen { kinds.append("mic") }
+        if speakerSeen { kinds.append("speaker") }
+        return kinds.isEmpty ? "none" : kinds.joined(separator: "+")
+    }
+
+    static func promptOutcome(
+        promptShown: Bool,
+        wasRecorded: Bool,
+        userDeclined: Bool
+    ) -> MeetingPromptDetectedCallSummary.PromptOutcome {
+        if wasRecorded { return .recorded }
+        if userDeclined { return .declined }
+        return promptShown ? .ignored : .noPrompt
+    }
+
+    /// "Keeps hitting Not now" bucket: 1, 2, or 3_plus consecutive explicit
+    /// dismissals for a provider since the last accepted recording.
+    static func dismissStreakBucket(_ count: Int) -> String {
+        switch count {
+        case ..<2:
+            return "1"
+        case 2:
+            return "2"
+        default:
+            return "3_plus"
+        }
+    }
+}
+
 /// How the missed-call nudge was resolved, for coarse analytics.
 enum MissedCallNudgeOutcome: String, Equatable {
     case acknowledged

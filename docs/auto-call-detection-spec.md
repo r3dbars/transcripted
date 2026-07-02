@@ -522,6 +522,32 @@ Three more layers on the same funnel, in trust order:
    exist" into "I should tap Record next time." Analytics:
    `meeting_missed_call_nudge` with `action` / `duration_bucket` / `provider`.
 
+### Phase 4 telemetry — measuring the funnel instead of guessing
+
+The product question is "what fraction of real calls get captured, and where do
+the rest leak?" Three additions make that queryable (all coarse, allowlisted):
+
+1. **`meeting_detected_call_ended` — the denominator.** One event per detected
+   call (≥1 min) at its end: `duration_bucket`, `was_recorded`,
+   `prompt_outcome` (`recorded` / `declined` / `ignored` / `no_prompt`),
+   `signal_kinds` (which sensors saw the call: `mic` / `speaker` / `camera`
+   combos), `provider`. Capture rate = `was_recorded` share of long-bucket
+   calls; the `prompt_outcome` split says whether misses are UX (ignored),
+   intent (declined), or detection (no_prompt).
+2. **Decision-time signal snapshot** on `meeting_prompt_shown` / `_dismissed` /
+   `_record_selected` / `_suppressed`: `mic_signal` / `speaker_signal` /
+   `camera_signal` booleans, so accepts and "Not now"s can be sliced by the
+   evidence behind them (e.g. do camera-corroborated prompts convert better?).
+3. **`dismiss_streak_bucket`** (`1` / `2` / `3_plus`, reset on accept) on
+   dismissals — the "keeps hitting not now" cohort, which is the population
+   that should *not* get more aggressive prompting.
+
+Accept-quality joins through existing events: a recording started from the
+prompt carries its trigger, and `meeting_recording_stopped` /
+`meeting_capture_health_snapshot` carry `duration_bucket` — so "yes → long
+meeting" is `prompt_outcome=recorded` on long `duration_bucket`s, corroborated
+by recording-side durations.
+
 **Deliberately not built: default auto-record.** A visible countdown that
 auto-starts recording (Notion-style) remains the documented *opt-in* design in
 `docs/MEETING_CAPTURE_PROMPTING.md` — short countdown (~8s, with the prompt

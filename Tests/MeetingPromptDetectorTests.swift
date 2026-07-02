@@ -664,6 +664,23 @@ func testMeetingPromptDetector() async {
 
         assertEqual(box.unrecordedCallCount, 0, "a call shorter than the minimum duration must not raise the missed-call nudge")
     }
+
+    runSuite("MeetingPromptDetector.dismissStreak — counts consecutive 'not now's and resets on accept") {
+        let detector = MeetingPromptDetector()
+        let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
+
+        assertEqual(detector.dismissStreak(for: .zoom), 0, "a fresh detector has no dismissal history")
+
+        _ = detector.dismiss(candidate: candidate)
+        assertEqual(detector.dismissStreak(for: .zoom), 1, "an explicit dismissal starts the streak")
+
+        _ = detector.dismiss(candidate: candidate)
+        assertEqual(detector.dismissStreak(for: .zoom), 2, "consecutive dismissals grow the streak")
+        assertEqual(detector.dismissStreak(for: .teams), 0, "streaks are per provider")
+
+        detector.markAccepted(candidate: candidate)
+        assertEqual(detector.dismissStreak(for: .zoom), 0, "an accepted recording resets the provider's streak")
+    }
 }
 
 @available(macOS 14.0, *)

@@ -139,6 +139,7 @@ allowlist.
 - `dictation_audio_route_recovery_timeout`
 - `meeting_recording_started`
 - `meeting_recording_start_failed`
+- `meeting_detected_call_ended`
 - `meeting_prompt_shown`
 - `meeting_prompt_dismissed`
 - `meeting_prompt_record_selected`

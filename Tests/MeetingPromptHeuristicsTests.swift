@@ -522,4 +522,57 @@ func testMeetingPromptHeuristics() {
         assertEqual(MissedCallNudgePolicy.durationBucket(for: 25 * 60), "20_to_40m", "25 minutes lands in the middle bucket")
         assertEqual(MissedCallNudgePolicy.durationBucket(for: 70 * 60), "40m_plus", "long calls collapse into the open-ended bucket")
     }
+
+    runSuite("MeetingPromptCallTelemetry — funnel buckets and signal kinds stay coarse and deterministic") {
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 3 * 60), "1_to_5m", "short calls get the smallest bucket")
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 7 * 60), "5_to_10m", "mid-short calls bucket correctly")
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 15 * 60), "10_to_20m", "standard meetings bucket correctly")
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 30 * 60), "20_to_40m", "half-hour meetings bucket correctly")
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 90 * 60), "40m_plus", "long meetings collapse into the open bucket")
+
+        assertEqual(
+            MeetingPromptCallTelemetry.signalKinds(micSeen: true, speakerSeen: true, cameraSeen: true),
+            "camera+mic+speaker",
+            "signal kinds join sorted so dashboards get stable enum values"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.signalKinds(micSeen: false, speakerSeen: true, cameraSeen: false),
+            "speaker",
+            "a listen-only call reports the speaker signal alone"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.signalKinds(micSeen: false, speakerSeen: false, cameraSeen: false),
+            "none",
+            "an empty signal set stays an explicit enum value"
+        )
+    }
+
+    runSuite("MeetingPromptCallTelemetry.promptOutcome — recorded beats declined beats ignored beats no_prompt") {
+        assertEqual(
+            MeetingPromptCallTelemetry.promptOutcome(promptShown: true, wasRecorded: true, userDeclined: true),
+            .recorded,
+            "a recording is the terminal success no matter what happened before"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.promptOutcome(promptShown: true, wasRecorded: false, userDeclined: true),
+            .declined,
+            "an explicit 'not now' is a decision, not a miss"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.promptOutcome(promptShown: true, wasRecorded: false, userDeclined: false),
+            .ignored,
+            "a prompt that fired but got no interaction is the 'never saw it' bucket"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.promptOutcome(promptShown: false, wasRecorded: false, userDeclined: false),
+            .noPrompt,
+            "a call we detected but never prompted for is a product gap, not a user choice"
+        )
+    }
+
+    runSuite("MeetingPromptCallTelemetry.dismissStreakBucket — 'keeps hitting not now' stays a coarse bucket") {
+        assertEqual(MeetingPromptCallTelemetry.dismissStreakBucket(1), "1", "a first dismissal is its own bucket")
+        assertEqual(MeetingPromptCallTelemetry.dismissStreakBucket(2), "2", "a second dismissal is its own bucket")
+        assertEqual(MeetingPromptCallTelemetry.dismissStreakBucket(5), "3_plus", "streaks collapse past three")
+    }
 }

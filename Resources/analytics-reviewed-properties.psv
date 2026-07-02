@@ -29,6 +29,7 @@ build_version
 calendar_confidence
 calendar_status
 call_state
+camera_signal
 capture_activity
 capture_quality
 captured_input_volume_before
@@ -90,6 +91,7 @@ mic_processed_peak
 mic_processing
 mic_raw_peak
 mic_recovering
+mic_signal
 mic_status
 mic_stream_present
 missing_permission
@@ -110,6 +112,7 @@ prior_artifact_kind
 prior_ready_state
 prior_status
 prompt_kind
+prompt_outcome
 prompt_reason
 provider
 proxy_kind
@@ -141,7 +144,9 @@ session_stage
 setting_id
 setup_kind
 setup_ready
+signal_kinds
 source
+speaker_signal
 stage
 stall_kind
 stall_stage
@@ -167,5 +172,6 @@ update_state
 version
 voice_processing
 voice_processing_active
+was_recorded
 was_recording
 workflow_kind

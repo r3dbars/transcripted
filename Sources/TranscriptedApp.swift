@@ -146,7 +146,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     "meeting_prompt_record_selected",
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: self.meetingPromptTelemetryReadiness(),
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 Task { @MainActor [weak self] in
@@ -168,7 +169,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
                         readiness: self.meetingPromptTelemetryReadiness(),
-                        backoffKind: backoffDecision.kind
+                        backoffKind: backoffDecision.kind,
+                        signals: self.meetingPromptDetector.currentSignalSnapshot(),
+                        dismissStreak: self.meetingPromptDetector.dismissStreak(for: candidate.provider)
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
@@ -189,7 +192,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
                         readiness: self.meetingPromptTelemetryReadiness(),
-                        backoffKind: backoffDecision.kind
+                        backoffKind: backoffDecision.kind,
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
@@ -210,7 +214,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
                         readiness: self.meetingPromptTelemetryReadiness(),
-                        backoffKind: backoffDecision.kind
+                        backoffKind: backoffDecision.kind,
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
@@ -229,7 +234,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     "meeting_prompt_suppressed",
                     properties: MeetingPromptTelemetry.properties(
                         for: suppression,
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: self.meetingPromptTelemetryReadiness(),
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
@@ -251,11 +257,21 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         "meeting_prompt_shown",
                         properties: MeetingPromptTelemetry.properties(
                             for: candidate,
-                            readiness: self.meetingPromptTelemetryReadiness()
+                            readiness: self.meetingPromptTelemetryReadiness(),
+                            signals: self.meetingPromptDetector.currentSignalSnapshot()
                         )
                     )
                 }
                 return presented
+            }
+            // Capture-funnel denominator: one event per detected call at its
+            // end, recorded or not, so capture rate is measured against calls
+            // that actually happened instead of prompts that fired.
+            meetingPromptDetector.onDetectedCallEnded = { summary in
+                AnalyticsReporter.track(
+                    "meeting_detected_call_ended",
+                    properties: MeetingPromptTelemetry.properties(for: summary)
+                )
             }
             // Post-call awareness nudge: a long detected call ended with no
             // recording (and no explicit decline). Policy gates live in the
