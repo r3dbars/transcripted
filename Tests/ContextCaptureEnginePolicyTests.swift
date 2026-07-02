@@ -1,8 +1,9 @@
 // ContextCaptureEnginePolicyTests.swift
 // Tests for the externally-observable policy that ContextCaptureEngine relies on:
 // the hotkey-action debounce constant, the hotkeys-changed notification name,
-// the default binding set that feeds bindingProvider, and the conflict-warning
-// text that flows into the engine's hotkeyError pipeline.
+// the default binding set that feeds the detector's cached binding snapshot,
+// and the conflict-warning text that flows into the engine's hotkeyError
+// pipeline.
 //
 // NOTE: ContextCaptureEngine itself is @MainActor and wired to AppKit,
 // NSWorkspace, DictationSessionController, FloatingOverlayController,
@@ -90,7 +91,9 @@ func testContextCaptureEnginePolicy() {
     // MARK: - Notification.Name.hotkeysDidChange
     // The engine subscribes to this notification to re-register hotkeys when
     // HotkeyRecorderView writes new bindings. Renaming the notification would
-    // silently break preference live-updates.
+    // silently break preference live-updates — and, since the detector caches
+    // its binding snapshot, would also leave the CGEventTap matching stale
+    // shortcuts.
 
     runSuite("Notification.Name.hotkeysDidChange — stable raw value") {
         assertEqual(
@@ -100,12 +103,32 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    // MARK: - Binding provider default set
-    // The engine's bindingProvider always emits the meeting binding and,
-    // when dictation shortcuts are enabled, prepends push-to-talk and
-    // hands-free. Pin the defaults a fresh install hands the provider.
+    // MARK: - Cached binding snapshot
+    // The CGEventTap callback runs on the main run loop for every system-wide
+    // keyDown/keyUp/flagsChanged. It must read a cached binding snapshot —
+    // rebuilt on .hotkeysDidChange — instead of hitting UserDefaults (4 binding
+    // lookups plus migration fallbacks) per keystroke, which added latency to
+    // all typing on the machine and raised the tapDisabledByTimeout risk.
 
-    runSuite("PhysicalDictationTriggerPreferences fresh install — engine bindingProvider sees Fn / Right Option / Option-M / Option-Shift-V") {
+    runSuite("ContextCaptureEngine binding snapshot — tap callback reads cached bindings, not per-event UserDefaults") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("physicalShortcutDetector.shortcutBindings = Self.currentShortcutBindings()"),
+            "engine should rebuild the detector's cached binding snapshot when it (re)configures the detector"
+        )
+        assertFalse(
+            source.contains("bindingProvider"),
+            "per-event binding provider closure must stay removed — the tap callback reads the cached snapshot instead of resolving preferences per keystroke"
+        )
+    }
+
+    // MARK: - Binding snapshot default set
+    // The engine's binding snapshot always includes the meeting binding and,
+    // when dictation shortcuts are enabled, prepends push-to-talk and
+    // hands-free. Pin the defaults a fresh install hands the snapshot.
+
+    runSuite("PhysicalDictationTriggerPreferences fresh install — engine binding snapshot sees Fn / Right Option / Option-M / Option-Shift-V") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
@@ -129,7 +152,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     runSuite("PhysicalDictationTriggerPreferences fresh install — meeting and paste bindings are independent of dictation shortcuts toggle") {
-        // The engine's bindingProvider always includes the meeting and paste bindings,
+        // The engine's binding snapshot always includes the meeting and paste bindings,
         // even when dictation shortcuts are off. The meeting default must
         // therefore survive in the absence of any saved dictation preference,
         // and paste-last-dictation stays available as a recovery action.
@@ -157,9 +180,9 @@ func testContextCaptureEnginePolicy() {
     }
 
     // MARK: - dictationShortcutsEnabled default
-    // The engine's bindingProvider checks this preference inside the closure
-    // it hands the PhysicalShortcutDetector. A fresh install must default to
-    // enabled so dictation shortcuts work out of the box.
+    // The engine checks this preference when it rebuilds the detector's cached
+    // binding snapshot. A fresh install must default to enabled so dictation
+    // shortcuts work out of the box.
 
     runSuite("HotkeyPreferences.dictationShortcutsEnabled — defaults to enabled for fresh installs") {
         let (defaults, suiteName) = makeContextCaptureDefaults()
