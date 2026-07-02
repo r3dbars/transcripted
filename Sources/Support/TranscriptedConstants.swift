@@ -12,9 +12,16 @@ enum TranscriptedConstants {
 
     // MARK: - Audio & Speech
 
-    /// Audio buffer capacity in seconds — sized well above the session timeout
-    /// so batch dictation never silently drops older audio.
-    static let audioBufferCapacitySeconds = 1800
+    /// Max duration for a dictation listening session before the auto-save cap
+    /// fires. Shared by the session timeout and audio buffer sizing so the two
+    /// cannot drift apart.
+    static let dictationSessionMaxDuration: TimeInterval = 5 * 60
+
+    /// Audio buffer capacity in seconds — the dictation session cap plus
+    /// headroom for the stop path, so the cap never truncates audio without
+    /// reserving a half-hour worst case (~345MB of Float samples at 48kHz)
+    /// that persists for the process lifetime.
+    static let audioBufferCapacitySeconds = Int(dictationSessionMaxDuration) + 60
 
     /// Audio tap buffer size (AVAudioEngine installTap)
     static let audioTapBufferSize: UInt32 = 1024
@@ -154,6 +161,11 @@ enum TranscriptedConstants {
 
     /// Max polling iterations for model load (600 * 200ms = 120s timeout)
     static let modelLoadMaxIterations = 600
+
+    /// Total time budget for waiting on a voice-model load. Derived from the
+    /// poll parameters so joined (non-polling) waits keep the same ceiling.
+    static let modelLoadWaitBudget: TimeInterval =
+        Double(modelLoadMaxIterations) * Double(modelLoadPollInterval) / 1_000_000_000
 
     // MARK: - Clipboard
 

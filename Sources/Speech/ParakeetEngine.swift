@@ -85,6 +85,10 @@ class ParakeetEngine: ObservableObject {
     private var asrManagerReady = false
     private nonisolated(unsafe) var didReceiveAudioSamples = false
     private var cachedInputDeviceName = "Unknown"
+    /// Last known dictation input selection, refreshed on start, prewarm,
+    /// route/device-change notifications, and background refreshes. Serves
+    /// analytics callers without a live CoreAudio device enumeration.
+    private var cachedInputDeviceSelection: DictationInputDeviceSelection?
     private var lastAudioStartFailureReportAt: TimeInterval?
     private var lastInputSelectionReportKey: String?
     private var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
@@ -93,8 +97,30 @@ class ParakeetEngine: ObservableObject {
     var inputDeviceName: String { cachedInputDeviceName }
 
     var currentAudioRouteAnalyticsContext: [String: String] {
-        dictationRouteAnalyticsContext(selection: Self.loadDictationInputDeviceSelection())
+        // Served from the cached selection: a live lookup enumerates every
+        // CoreAudio device (blocking coreaudiod IPC) on the main actor, and
+        // analytics tolerates slightly stale route data.
+        dictationRouteAnalyticsContext(selection: cachedInputDeviceSelection)
     }
+
+    /// True when the Parakeet model files are already local (bundled,
+    /// prefetched, or cached), so initialization is an in-memory load rather
+    /// than a network download. Dictation uses this to open the microphone
+    /// immediately and load the model concurrently.
+    var modelFilesAvailableLocally: Bool {
+        if asrManagerReady { return true }
+        switch modelDownloadState {
+        case .downloading, .failed:
+            return false
+        case .notLoaded, .cached, .loading, .ready:
+            return prefetchedModelPath != nil || hasBundledParakeetModel
+        }
+    }
+
+    private lazy var hasBundledParakeetModel: Bool = bundledModelPath(
+        subdirectory: "parakeet-tdt-0.6b-v3-coreml",
+        checkFile: "Encoder.mlmodelc"
+    ) != nil
 
     init() {
         markCachedRuntimeModelIfAvailable()
@@ -278,10 +304,12 @@ class ParakeetEngine: ObservableObject {
 
     private func updateCachedInputDeviceSelection(_ selection: DictationInputDeviceSelection) {
         cachedInputDeviceName = selection.selectedInput.name
+        cachedInputDeviceSelection = selection
     }
 
     private func handleDefaultInputDeviceChange(selection: DictationInputDeviceSelection) {
         cachedInputDeviceName = selection.selectedInput.name
+        cachedInputDeviceSelection = selection
         print("🎤 PARAKEET | default input changed → \(selection.defaultInput.name); dictation input → \(selection.selectedInput.name)")
         EventReporter.shared.capture(
             level: .info,
@@ -313,6 +341,15 @@ class ParakeetEngine: ObservableObject {
         }
         modelInitializationTask = task
         await task.value
+    }
+
+    /// Await the in-flight model initialization task, if any. Returns true
+    /// when a task was joined. Unlike polling `modelDownloadState`, this
+    /// resumes the moment initialization settles (ready or failed).
+    func joinModelInitialization() async -> Bool {
+        guard let modelInitializationTask else { return false }
+        await modelInitializationTask.value
+        return true
     }
 
     private func performInitialize() async {
@@ -860,15 +897,16 @@ class ParakeetEngine: ObservableObject {
         cancelConfigRecoveryTimeout()
         let recoveryGeneration = recoveryState.beginConfigChange()
         publishRecoveryState()
-        AnalyticsReporter.track(
-            "dictation_audio_route_changed",
-            properties: dictationRouteAnalyticsContext(
-                selection: Self.loadDictationInputDeviceSelection(),
-                extra: [
-                    "was_recording": "\(configChangeWasRecording)"
-                ]
+        // Load the new route off the main actor — the enumeration is blocking
+        // coreaudiod IPC — then refresh the analytics cache and report.
+        let wasRecordingForAnalytics = configChangeWasRecording
+        Task.detached(priority: .utility) { [weak self] in
+            let selection = Self.loadDictationInputDeviceSelection()
+            await self?.recordRouteChangeAnalytics(
+                selection: selection,
+                wasRecording: wasRecordingForAnalytics
             )
-        )
+        }
         scheduleConfigRecoveryTimeout(
             generation: recoveryGeneration,
             wasRecording: configChangeWasRecording
@@ -910,6 +948,24 @@ class ParakeetEngine: ObservableObject {
             guard !Task.isCancelled, let self = self else { return }
             self.attemptDeviceRecovery()
         }
+    }
+
+    private func recordRouteChangeAnalytics(
+        selection: DictationInputDeviceSelection?,
+        wasRecording: Bool
+    ) {
+        if let selection {
+            updateCachedInputDeviceSelection(selection)
+        }
+        AnalyticsReporter.track(
+            "dictation_audio_route_changed",
+            properties: dictationRouteAnalyticsContext(
+                selection: selection,
+                extra: [
+                    "was_recording": "\(wasRecording)"
+                ]
+            )
+        )
     }
 
     private func attemptDeviceRecovery() {
@@ -1845,6 +1901,11 @@ class ParakeetEngine: ObservableObject {
     ) {
         guard let application else { return }
         let selection = application.selection
+        // Keep the analytics cache fresh from the selection just applied. When
+        // the override failed the cache is slightly optimistic about the
+        // selected input; analytics tolerates that, and the failure event
+        // below records the truth.
+        cachedInputDeviceSelection = selection
 
         guard selection.didOverrideDefault else {
             cachedInputDeviceName = selection.selectedInput.name
