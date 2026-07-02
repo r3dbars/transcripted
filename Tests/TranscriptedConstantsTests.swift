@@ -78,6 +78,36 @@ func testTranscriptedConstants() async {
         )
     }
 
+    runSuite("TranscriptedConstants sizes the dictation audio buffer to the session cap") {
+        assertTrue(
+            Double(TranscriptedConstants.audioBufferCapacitySeconds) > TranscriptedConstants.dictationSessionMaxDuration,
+            "buffer capacity should cover the full session cap plus stop-path headroom"
+        )
+        assertTrue(
+            Double(TranscriptedConstants.audioBufferCapacitySeconds) <= TranscriptedConstants.dictationSessionMaxDuration + 120,
+            "buffer capacity should stay near the session cap instead of reserving a half-hour worst case for the process lifetime"
+        )
+        assertEqual(
+            TranscriptedConstants.dictationSessionMaxDuration,
+            5 * 60,
+            "the dictation session cap should stay at 5 minutes"
+        )
+    }
+
+    runSuite("TranscriptedConstants keeps the model load wait budget aligned with the poll parameters") {
+        assertEqual(
+            TranscriptedConstants.modelLoadWaitBudget,
+            Double(TranscriptedConstants.modelLoadMaxIterations)
+                * Double(TranscriptedConstants.modelLoadPollInterval) / 1_000_000_000,
+            "joined model-load waits should keep the same overall ceiling as the legacy poll loop"
+        )
+        assertEqual(
+            TranscriptedConstants.modelLoadWaitBudget,
+            120,
+            "model load waits should keep the 120s ceiling users already rely on"
+        )
+    }
+
     runSuite("TranscriptedConstants keeps failed meeting audio cleanup conservative") {
         assertTrue(
             TranscriptedConstants.failedMeetingAudioRetentionDays >= 30,

@@ -2661,8 +2661,19 @@ func testRepoCommandContract() {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
         assertTrue(
-            overlayContents.contains("case .notLoaded, .downloading, .cached, .failed:"),
-            "dictation start should join an in-progress model file prefetch instead of waiting forever for ready"
+            overlayContents.contains("case .notLoaded, .cached:")
+                && overlayContents.contains("await appState.sttRouter.initializeSelectedModel()")
+                && overlayContents.contains("await appState.sttRouter.waitForModelLoadProgress()"),
+            "dictation start should join an in-progress model load/prefetch instead of waiting forever for ready"
+        )
+        assertTrue(
+            overlayContents.contains("if appState.sttRouter.selectedModelFilesAvailableLocally {")
+                && overlayContents.contains("beginDictationRecording(sourceApp: sourceApp)"),
+            "dictation with model files already on disk should open the microphone immediately and load concurrently"
+        )
+        assertTrue(
+            overlayContents.contains("break modelWait"),
+            "the post-stop model wait should fail fast when the concurrent load reports failure instead of polling out the budget"
         )
         assertTrue(
             engineContents.contains("private var modelInitializationTask: Task<Void, Never>?")

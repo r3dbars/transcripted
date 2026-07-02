@@ -894,7 +894,13 @@ class DictationSessionController: ObservableObject {
                         // Nothing is loading the model; kick (or join) the
                         // deduped initialization instead of waiting for
                         // another caller to do it.
+                        let stateBefore = appState.sttRouter.modelDownloadState.diagnosticName
                         await appState.sttRouter.initializeSelectedModel()
+                        // If initialization bailed without progressing (e.g.
+                        // mid-shutdown), sleep so this loop can't spin hot.
+                        if appState.sttRouter.modelDownloadState.diagnosticName == stateBefore {
+                            try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
+                        }
                     case .downloading, .loading, .ready:
                         await appState.sttRouter.waitForModelLoadProgress()
                     }
@@ -1323,7 +1329,13 @@ class DictationSessionController: ObservableObject {
                     )
                     return
                 case .notLoaded, .cached:
+                    let stateBefore = appState.sttRouter.modelDownloadState.diagnosticName
                     await appState.sttRouter.initializeSelectedModel()
+                    // If initialization bailed without progressing (e.g.
+                    // mid-shutdown), sleep so this loop can't spin hot.
+                    if appState.sttRouter.modelDownloadState.diagnosticName == stateBefore {
+                        try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
+                    }
                 case .downloading, .loading:
                     // Downloads publish progress the overlay refreshes on a
                     // short poll; an in-flight load is joined directly so
