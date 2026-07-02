@@ -173,11 +173,15 @@ enum DictationTranscriptWriter {
         let escapedTitle = "Dictations for \(dayTitleFormatter.string(from: date))"
             .replacingOccurrences(of: "\"", with: "'")
 
+        // `format_version: 1` is the capture-format contract from
+        // docs/capture-format.md — absent means the day file predates
+        // versioning and parses the same way. Keep frontmatter keys flat.
         return """
         ---
         title: "\(escapedTitle)"
         date: \(dayFilenameFormatter.string(from: date))
         capture_type: dictation_day
+        format_version: 1
         ---
 
         # Dictations for \(dayTitleFormatter.string(from: date))

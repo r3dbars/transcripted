@@ -103,6 +103,8 @@ final class CaptureMarkdownParserTests: XCTestCase {
         XCTAssertEqual(parsed.droppedSegments, 2)
         XCTAssertEqual(parsed.sttEngine, "parakeet_local")
         XCTAssertEqual(parsed.diarizationEngine, "pyannote_offline")
+        XCTAssertNil(parsed.formatVersion, "pre-versioning files carry no format_version")
+        XCTAssertNil(parsed.transcriptStyle, "pre-versioning files carry no transcript_style")
         XCTAssertEqual(parsed.utterances.count, 2)
         XCTAssertEqual(parsed.utterances.map(\.speakerId), ["mic_0", "system_0"])
 
@@ -123,6 +125,8 @@ final class CaptureMarkdownParserTests: XCTestCase {
         ---
         capture_id: "2C356828-221B-43E8-B1BB-93E0C3360E2F"
         capture_type: meeting
+        format_version: 1
+        transcript_style: raw
         transcript_id: "2C356828-221B-43E8-B1BB-93E0C3360E2F"
         date: 2026-06-12
         time: 09:30:00
@@ -192,6 +196,8 @@ final class CaptureMarkdownParserTests: XCTestCase {
 
         let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
 
+        XCTAssertEqual(parsed.formatVersion, 1)
+        XCTAssertEqual(parsed.transcriptStyle, "raw")
         XCTAssertEqual(parsed.utterances.map(\.speakerId), ["mic_0", "system_1"])
 
         let mic = try XCTUnwrap(parsed.speakers.first(where: { $0.id == "mic_0" }))
@@ -385,10 +391,13 @@ final class CaptureMarkdownParserTests: XCTestCase {
     func testParseMeetingStyledTranscriptSection() throws {
         let markdown = """
         ---
+        title: "Meeting with Alex"
         capture_type: meeting
+        format_version: 1
         date: 2026-04-18
         time: 09:15:00
         duration: "0:18"
+        transcript_style: styled
         ---
 
         ## Transcript
@@ -402,6 +411,8 @@ final class CaptureMarkdownParserTests: XCTestCase {
 
         let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
 
+        XCTAssertEqual(parsed.formatVersion, 1)
+        XCTAssertEqual(parsed.transcriptStyle, "styled")
         XCTAssertEqual(parsed.utterances.count, 2)
         XCTAssertEqual(parsed.utterances.first?.text, "Styled entry text here.")
         XCTAssertEqual(parsed.utterances.first?.start, 3)
@@ -486,6 +497,7 @@ final class CaptureMarkdownParserTests: XCTestCase {
         title: "Dictations for 2026-04-07"
         date: 2026-04-07
         capture_type: dictation_day
+        format_version: 1
         ---
 
         # Dictations for 2026-04-07
@@ -517,6 +529,7 @@ final class CaptureMarkdownParserTests: XCTestCase {
 
         XCTAssertEqual(parsed.captureType, "dictation_day")
         XCTAssertEqual(parsed.date, "2026-04-07")
+        XCTAssertEqual(parsed.formatVersion, 1)
         XCTAssertEqual(parsed.markdownFilename, "Dictations_2026-04-07.md")
         XCTAssertEqual(parsed.entryCount, 2)
         XCTAssertEqual(parsed.entries.map(\.id), ["dictation-1", "dictation-2"])
@@ -546,6 +559,7 @@ final class CaptureMarkdownParserTests: XCTestCase {
         let url = URL(fileURLWithPath: "/tmp/Dictations_2026-04-08.md")
         let parsed = try XCTUnwrap(CaptureMarkdownParser.parseDictationDay(from: markdown, markdownURL: url))
         XCTAssertEqual(parsed.date, "2026-04-08")
+        XCTAssertNil(parsed.formatVersion, "pre-versioning day files carry no format_version")
     }
 
     func testExtractTitleTrimsQuotes() {
