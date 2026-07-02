@@ -11,6 +11,7 @@
 - `AutoCallDetectionPreferences.swift` — persisted (default-on) toggle for ad-hoc call detection via mic activity; gates `MicActivityMonitor` and the General-page "Auto-detect calls" setting (see `docs/auto-call-detection-spec.md`)
 - `AgentMCPConnector.swift` — per-agent MCP connect seam: detection, connection state, and config writers for Claude Code (via the `claude` CLI), Codex (`~/.codex/config.toml`), and Cursor (`~/.cursor/mcp.json`), all pointing at the shared installed helper
 - `CaptureLibraryChangeBroadcaster.swift` — single source of truth for the debounced `.meetingCaptureArtifactsDidChange` notification; coalesces background WAV→M4A recompression and transcript-rename file mutations so Home can re-resolve its cached transcript/audio URLs (empty id set means a library-wide change of unknown scope)
+- `CaptureLibraryMigrationPlanner.swift` — copy-only planning and execution for relocating the capture library from Settings: detects whether the old folder still holds captures, enumerates meeting Markdown + retained `audio/*_audio/` directories + dictation day files, skips name collisions instead of overwriting, and never deletes originals
 - `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges `mcpServers` JSON configs, runs the helper self-test, and silently refreshes a stale installed helper at app launch
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
@@ -75,6 +76,7 @@ Relevant direct coverage includes:
 
 - `Tests/AgentMCPConnectorTests.swift`
 - `Tests/CaptureLibraryChangeBroadcasterTests.swift`
+- `Tests/CaptureLibraryMigrationPlannerTests.swift`
 - `Tests/ClaudeDesktopIntegrationInstallerTests.swift`
 - `Tests/ActivationPolicyControllerTests.swift`
 - `Tests/AudioStoragePreferencesTests.swift`

@@ -49,6 +49,9 @@ struct TranscriptedSettingsView: View {
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    @State private var pendingCaptureLibraryChoice: PendingCaptureLibraryChoice?
+    @State private var captureLibraryMigrationInProgress = false
+    @State private var captureLibraryMigrationStatus: String?
     @State private var homeDashboardRefreshTask: Task<Void, Never>?
     @State private var homeDashboardRefreshInFlight = false
     @State private var homeDashboardRefreshGeneration = 0
@@ -2963,11 +2966,14 @@ struct TranscriptedSettingsView: View {
                         trackSettingsAction("choose_capture_library", page: .storage)
                         chooseCaptureLibrary()
                     }
+                    .disabled(captureLibraryMigrationInProgress)
+                    .help(captureLibraryMigrationInProgress ? captureLibraryMigrationBusyHelp : "")
 
                     SettingsInlineActionButton(title: "Reset to Default") {
                         trackSettingsAction("reset_capture_library", page: .storage)
                         TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
                         refreshStoragePaths()
+                        CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
                         AnalyticsReporter.track(
                             "settings_capture_library_changed",
                             properties: [
@@ -2976,11 +2982,44 @@ struct TranscriptedSettingsView: View {
                             ]
                         )
                     }
+                    .disabled(captureLibraryMigrationInProgress)
+                    .help(captureLibraryMigrationInProgress ? captureLibraryMigrationBusyHelp : "")
+                }
+
+                if captureLibraryMigrationInProgress {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(captureLibraryMigrationStatus ?? "Copying captures…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let captureLibraryMigrationStatus {
+                    Text(captureLibraryMigrationStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text("Pick an Obsidian vault or any folder you want agents to read.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            .alert(
+                "Copy existing captures?",
+                isPresented: captureLibraryChoicePromptBinding,
+                presenting: pendingCaptureLibraryChoice
+            ) { choice in
+                Button("Copy to New Folder") {
+                    copyCapturesThenSwitchLibrary(choice)
+                }
+                .keyboardShortcut(.defaultAction)
+                Button("Just Switch") {
+                    switchLibraryWithoutCopying(choice)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { choice in
+                Text("Your current library still has saved meetings or dictations. Copy puts a copy of them in the new folder and never deletes the originals. Just Switch leaves everything in \(choice.currentLibrary.path) — Transcripted and connected agents will only see the new folder.")
             }
 
             SettingsSection(
@@ -4789,6 +4828,21 @@ struct TranscriptedSettingsView: View {
         diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
     }
 
+    private var captureLibraryChoicePromptBinding: Binding<Bool> {
+        Binding(
+            get: { pendingCaptureLibraryChoice != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingCaptureLibraryChoice = nil
+                }
+            }
+        )
+    }
+
+    private var captureLibraryMigrationBusyHelp: String {
+        "Captures are still being copied to the new folder."
+    }
+
     private func chooseCaptureLibrary() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -4800,12 +4854,83 @@ struct TranscriptedSettingsView: View {
         panel.directoryURL = captureLibraryURL
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // Validate the destination up front so a bad folder fails here instead
+        // of after a multi-gigabyte copy.
+        guard TranscriptedStoragePreferences.prepareCaptureLibraryURL(url) else {
+            refreshStoragePaths()
+            showCaptureLibrarySelectionError()
+            return
+        }
+
+        let currentLibrary = FileManager.default.transcriptedCaptureLibraryDir
+        let isSameFolder = url.standardizedFileURL.path == currentLibrary.standardizedFileURL.path
+        if !isSameFolder, CaptureLibraryMigrationPlanner().libraryHasCaptures(at: currentLibrary) {
+            // The old folder still has captures: ask before switching so they
+            // are not silently stranded where the app no longer looks.
+            pendingCaptureLibraryChoice = PendingCaptureLibraryChoice(
+                currentLibrary: currentLibrary,
+                newLibrary: url
+            )
+            return
+        }
+
+        captureLibraryMigrationStatus = nil
+        applyCaptureLibraryChoice(url)
+    }
+
+    private func switchLibraryWithoutCopying(_ choice: PendingCaptureLibraryChoice) {
+        captureLibraryMigrationStatus = "Existing captures stayed in \(choice.currentLibrary.path)."
+        applyCaptureLibraryChoice(choice.newLibrary)
+    }
+
+    private func copyCapturesThenSwitchLibrary(_ choice: PendingCaptureLibraryChoice) {
+        guard !captureLibraryMigrationInProgress else { return }
+        captureLibraryMigrationInProgress = true
+        captureLibraryMigrationStatus = "Copying captures…"
+
+        Task.detached(priority: .utility) {
+            let planner = CaptureLibraryMigrationPlanner()
+            let plan = planner.makePlan(from: choice.currentLibrary, to: choice.newLibrary)
+            do {
+                let result = try planner.copy(plan) { copied, total in
+                    Task { @MainActor in
+                        captureLibraryMigrationStatus = "Copying captures… \(copied) of \(total)"
+                    }
+                }
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = captureLibraryCopySummary(result)
+                    applyCaptureLibraryChoice(choice.newLibrary)
+                }
+            } catch {
+                // Copy failed: keep the current library so nothing points at a
+                // half-copied folder, and tell the user where their files are.
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = "Copy stopped: \(error.localizedDescription) "
+                        + "Your captures are still in \(choice.currentLibrary.path) and the library was not switched."
+                }
+            }
+        }
+    }
+
+    private func captureLibraryCopySummary(_ result: CaptureLibraryMigrationResult) -> String {
+        var summary = "Copied \(result.copiedCount) item\(result.copiedCount == 1 ? "" : "s") to the new folder. Originals stay in the old folder."
+        if result.skippedExistingCount > 0 {
+            summary += " Skipped \(result.skippedExistingCount) that already existed at the destination."
+        }
+        return summary
+    }
+
+    private func applyCaptureLibraryChoice(_ url: URL) {
         guard TranscriptedStoragePreferences.setCaptureLibraryURL(url) else {
             refreshStoragePaths()
             showCaptureLibrarySelectionError()
             return
         }
         refreshStoragePaths()
+        CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
         AnalyticsReporter.track(
             "settings_capture_library_changed",
             properties: [
@@ -5067,4 +5192,11 @@ private enum SettingsArtifactMessage {
         "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
     static let meetingRetainedAudioNotFound =
         "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+}
+
+/// A capture-library folder choice waiting on the copy-vs-switch confirmation
+/// because the current library still holds captures.
+private struct PendingCaptureLibraryChoice: Equatable {
+    let currentLibrary: URL
+    let newLibrary: URL
 }
