@@ -595,6 +595,43 @@ final class TranscriptIndex: @unchecked Sendable {
         }
     }
 
+    // MARK: - Index counts (status tool + self-describing empty results)
+
+    /// Row counts across the derived tables so agents can tell an unindexed
+    /// library apart from a query that matched nothing.
+    struct IndexCounts {
+        let meetings: Int
+        let dictationDays: Int
+        let dictationEntries: Int
+        let summaryItems: Int
+        let summarizedMeetings: Int
+    }
+
+    func counts() throws -> IndexCounts {
+        try queue.sync {
+            IndexCounts(
+                meetings: try scalarCount("SELECT COUNT(*) FROM meetings"),
+                dictationDays: try scalarCount("SELECT COUNT(*) FROM dictation_days"),
+                dictationEntries: try scalarCount("SELECT COUNT(*) FROM dictation_entries"),
+                summaryItems: try scalarCount("SELECT COUNT(*) FROM meeting_summary_items"),
+                summarizedMeetings: try scalarCount("SELECT COUNT(DISTINCT filename) FROM meeting_summary_items")
+            )
+        }
+    }
+
+    /// Single-value COUNT query. Must run inside `queue.sync`.
+    private func scalarCount(_ sql: String) throws -> Int {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw MCPIndexError.queryFailed(dbError())
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            throw MCPIndexError.queryFailed(dbError())
+        }
+        return Int(sqlite3_column_int64(stmt, 0))
+    }
+
     // MARK: - Queries
 
     func searchUtterances(query: String, speaker: String?, dateFrom: String?, dateTo: String?, maxMeetings: Int = 10, snippetsPerMeeting: Int = 3) throws -> GroupedSearchResult {
