@@ -491,3 +491,43 @@ needs to be louder.
 `SyntheticMeetingPromptTests` (output prompts, mic-wins de-dupe, tier order,
 media-app quiet, gates), and `MeetingPromptDetectorTests` (listen-only prompt,
 one-prompt de-dupe, expire re-offer + cap + cooldown shape).
+
+### Phase 4 follow-on — always running, longer live prompts, missed-call awareness
+
+Three more layers on the same funnel, in trust order:
+
+1. **Launch-at-login defaults on (one-time, post-onboarding).** The whole
+   detection stack is dead while the app is closed — the worst-case failure is
+   "the human never launched the app." `LaunchAtLoginController
+   .applyDefaultEnableIfNeeded` registers the login item once per install, only
+   after onboarding completes (so the macOS "added to Login Items" notice has
+   context), never over an explicit Settings choice, and never re-applied after
+   the user removes the item in System Settings (the applied-marker in
+   `LaunchAtLoginPreferences` guarantees at-most-once).
+2. **Live-call prompts last 60s instead of 30s**
+   (`MeetingPromptHeuristics.promptTimeoutSeconds`). An ad-hoc call prompt's
+   moment doesn't age out the way a calendar reminder does — the call is
+   happening *now* — so it waits longer before the expiry/re-offer machinery
+   takes over. Combined with Phase 4's re-offers, an unrecorded 10-minute call
+   now sees up to 3 minutes of cumulative prompt time instead of 30 seconds.
+3. **Missed-call nudge (awareness loop).** When a detected call session ends
+   unrecorded (`MeetingPromptDetector` folds the ad-hoc signals into a session
+   across evaluate() passes), a one-line overlay nudge says what was missed —
+   "That Zoom call wasn't recorded · About 42 minutes" — with Got It / Don't
+   show again. `MissedCallNudgePolicy` keeps it rare: ≥10-minute calls only,
+   never after an explicit prompt dismissal, never when a recording overlapped,
+   4-hour cooldown. Preference-gated (`MissedCallNudgePreferences`, default on,
+   Settings toggle). The nudge cannot recover the meeting; its job is to make
+   the invisible miss visible, which is what converts "the feature doesn't
+   exist" into "I should tap Record next time." Analytics:
+   `meeting_missed_call_nudge` with `action` / `duration_bucket` / `provider`.
+
+**Deliberately not built: default auto-record.** A visible countdown that
+auto-starts recording (Notion-style) remains the documented *opt-in* design in
+`docs/MEETING_CAPTURE_PROMPTING.md` — short countdown (~8s, with the prompt
+already visible ~60s), never silent at t=0, default OFF. The gentle default
+keeps the product invariant "no file is ever written without a human signal,"
+which is the line that keeps false positives from ever becoming privacy
+incidents. Revisit once `meeting_prompt_dismissed` telemetry separates
+`expired_reoffer` (never saw it) from explicit dismissals (said no): if misses
+dominate, the aggressive tier earns its switch.

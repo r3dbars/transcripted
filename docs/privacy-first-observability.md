@@ -145,6 +145,7 @@ allowlist.
 - `meeting_prompt_suppressed`
 - `meeting_mic_boost_prompt_shown`
 - `meeting_mic_boost_prompt_actioned`
+- `meeting_missed_call_nudge`
 - `meeting_recording_stopped`
 - `meeting_capture_health_snapshot`
 - `meeting_recording_cancelled`

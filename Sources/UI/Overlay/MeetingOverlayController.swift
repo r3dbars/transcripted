@@ -1327,6 +1327,7 @@ enum MeetingOverlayTokens {
     static let tooltipScreenInset: CGFloat = 6
     static let tooltipDelayNanoseconds: UInt64 = 80_000_000
     static let defaultDetectedMeetingPromptTimeoutSeconds = 30
+    static let missedCallNudgeTimeoutSeconds = 30
 }
 
 // MARK: - Controller
@@ -1400,7 +1401,13 @@ final class MeetingOverlayController: NSObject {
         case detectedMeeting
         case audioInactivity
         case micBoost
+        // Post-call "that call wasn't recorded" awareness nudge. No candidate,
+        // no detector callbacks — Got It / Don't show again only.
+        case missedCall
     }
+
+    // Kept for the countdown-refresh pass, which rebuilds the display each tick.
+    private var missedCallPrompt: MeetingPromptUnrecordedCall?
 
     deinit {
         autoHideTask?.cancel()
@@ -1420,6 +1427,10 @@ final class MeetingOverlayController: NSObject {
     /// `onPromptDismiss` so an unattended prompt gets the detector's short
     /// re-offer backoff instead of an explicit-dismissal suppression.
     var onPromptExpired: ((MeetingPromptDetector.Candidate) -> Void)?
+    /// How the missed-call nudge resolved (acknowledged / disabled / expired).
+    /// "Disabled" means the user tapped "Don't show again" — the wiring in
+    /// `TranscriptedApp` persists the opt-out.
+    var onMissedCallNudgeResolved: ((MissedCallNudgeOutcome) -> Void)?
 
     // MARK: - Setup
 
@@ -1486,7 +1497,7 @@ final class MeetingOverlayController: NSObject {
     @discardableResult
     func presentDetectedMeetingPrompt(
         _ candidate: MeetingPromptDetector.Candidate,
-        timeout seconds: Int = MeetingOverlayTokens.defaultDetectedMeetingPromptTimeoutSeconds
+        timeout seconds: Int? = nil
     ) -> Bool {
         guard let session = meetingSession else { return false }
 
@@ -1503,8 +1514,41 @@ final class MeetingOverlayController: NSObject {
 
         promptCandidate = candidate
         promptKind = .detectedMeeting
-        promptSecondsRemaining = max(1, seconds)
+        promptSecondsRemaining = max(1, seconds ?? MeetingPromptHeuristics.promptTimeoutSeconds(
+            for: candidate.reason,
+            calendarDefault: MeetingOverlayTokens.defaultDetectedMeetingPromptTimeoutSeconds
+        ))
         currentPrompt = detectedMeetingPromptDisplay(countdownSeconds: promptSecondsRemaining)
+        state = .prompt
+        showPanel()
+        pushToView()
+        schedulePromptCountdown()
+        return true
+    }
+
+    /// Post-call awareness nudge: a detected call just ended without a
+    /// recording. Same non-activating prompt panel; no candidate, no detector
+    /// backoff — resolution is reported through `onMissedCallNudgeResolved`.
+    @discardableResult
+    func presentMissedCallNudge(_ call: MeetingPromptUnrecordedCall) -> Bool {
+        guard let session = meetingSession else { return false }
+
+        let presentationSnapshot = MeetingPromptPresentationSnapshot(
+            sessionState: MeetingPromptSessionPromptState(session.state),
+            overlayState: MeetingPromptOverlayPromptState(state)
+        )
+        guard MeetingPromptPresentationGate.allowsDetectedMeetingPrompt(presentationSnapshot) else {
+            return false
+        }
+
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+
+        promptCandidate = nil
+        missedCallPrompt = call
+        promptKind = .missedCall
+        promptSecondsRemaining = MeetingOverlayTokens.missedCallNudgeTimeoutSeconds
+        currentPrompt = missedCallPromptDisplay(call: call)
         state = .prompt
         showPanel()
         pushToView()
@@ -1957,6 +2001,10 @@ final class MeetingOverlayController: NSObject {
                 meetingSession?.dismissAudioInactivityWarning()
             case .micBoost:
                 meetingSession?.declineMicBoostPrompt()
+            case .missedCall:
+                // "Don't show again" — the wiring persists the opt-out.
+                onMissedCallNudgeResolved?(.disabled)
+                dismissPrompt(notifyDetector: false)
             case .detectedMeeting, .none:
                 dismissPrompt(notifyDetector: true)
             }
@@ -1981,6 +2029,9 @@ final class MeetingOverlayController: NSObject {
             // Session clears the published flag, which routes back through
             // applyMicBoostPrompt(false) -> clearMicBoostPrompt -> .recording.
             meetingSession?.acceptMicBoostPrompt()
+        case .missedCall:
+            onMissedCallNudgeResolved?(.acknowledged)
+            dismissPrompt(notifyDetector: false)
         case .detectedMeeting, .none:
             guard let candidate = promptCandidate else { return }
             onPromptRecord?(candidate)
@@ -2333,6 +2384,7 @@ final class MeetingOverlayController: NSObject {
         }
 
         promptCandidate = nil
+        missedCallPrompt = nil
         promptKind = nil
         currentPrompt = nil
         state = .idle
@@ -2401,6 +2453,10 @@ final class MeetingOverlayController: NSObject {
             )
         case .micBoost:
             currentPrompt = micBoostPromptDisplay()
+        case .missedCall:
+            if let call = missedCallPrompt {
+                currentPrompt = missedCallPromptDisplay(call: call)
+            }
         case .detectedMeeting, .none:
             currentPrompt = detectedMeetingPromptDisplay(countdownSeconds: promptSecondsRemaining)
         }
@@ -2420,6 +2476,9 @@ final class MeetingOverlayController: NSObject {
                 guard let session = self?.meetingSession else { return }
                 await session.endRecordingFromAudioInactivityPrompt(automatic: true)
             }
+        case .missedCall:
+            onMissedCallNudgeResolved?(.expired)
+            dismissPrompt(notifyDetector: false)
         case .detectedMeeting, .none:
             // An unattended countdown is not an explicit "no": route it through
             // the expiry path (short re-offer while the call evidence persists)
@@ -2494,6 +2553,27 @@ final class MeetingOverlayController: NSObject {
             remindAccessibilityLabel: nil,
             primaryTitle: "Boost Mic",
             primaryAccessibilityLabel: "Boost microphone with Apple voice processing"
+        )
+    }
+
+    // Awareness, not blame: name the call surface and length, then point at the
+    // two ways to capture next time. The panel renders `detail` as one
+    // truncating line, so the copy stays short.
+    private func missedCallPromptDisplay(call: MeetingPromptUnrecordedCall) -> PromptDisplay {
+        let surface = call.provider == .googleMeet
+            ? "That browser call"
+            : "That \(call.provider.displayName) call"
+        let length = formatInactiveDuration(call.duration)
+        return PromptDisplay(
+            title: "\(surface) wasn't recorded",
+            detail: "About \(length). Tap Record on the prompt or press Option-M next time.",
+            countdownText: "",
+            secondaryTitle: "Don't show again",
+            secondaryAccessibilityLabel: "Disable missed-call reminders",
+            remindTitle: nil,
+            remindAccessibilityLabel: nil,
+            primaryTitle: "Got It",
+            primaryAccessibilityLabel: "Dismiss missed-call reminder"
         )
     }
 

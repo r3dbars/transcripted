@@ -257,6 +257,33 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 }
                 return presented
             }
+            // Post-call awareness nudge: a long detected call ended with no
+            // recording (and no explicit decline). Policy gates live in the
+            // detector; the preference gate and opt-out live here.
+            meetingPromptDetector.onUnrecordedCallEnded = { [weak self] call in
+                guard let self else { return }
+                guard MissedCallNudgePreferences.isEnabled() else { return }
+                let presented = self.meetingOverlayController.presentMissedCallNudge(call)
+                if presented {
+                    AnalyticsReporter.track(
+                        "meeting_missed_call_nudge",
+                        properties: [
+                            "action": "shown",
+                            "duration_bucket": MissedCallNudgePolicy.durationBucket(for: call.duration),
+                            "provider": call.provider.rawValue,
+                        ]
+                    )
+                }
+            }
+            meetingOverlayController.onMissedCallNudgeResolved = { outcome in
+                if outcome == .disabled {
+                    MissedCallNudgePreferences.setEnabled(false)
+                }
+                AnalyticsReporter.track(
+                    "meeting_missed_call_nudge",
+                    properties: ["action": outcome.rawValue]
+                )
+            }
             // Ad-hoc call detection: never prompt while we already hold the mic
             // (meeting recording or dictation), and feed mic-activity into the
             // same prompt pipeline. See docs/auto-call-detection-spec.md.
@@ -705,6 +732,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func finishOnboarding() {
         PermissionsOnboardingPreferences.markCompleted()
+        // Meeting detection only works while the app runs; register the login
+        // item by default now that onboarding gives the macOS notice context.
+        // One-time, and an explicit Settings choice always wins.
+        try? LaunchAtLoginController.applyDefaultEnableIfNeeded(onboardingCompleted: true)
         appState.recoverHotkeysAfterPermissionChange()
         onboardingWindowController.dismiss()
         closePopover()

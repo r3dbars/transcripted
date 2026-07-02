@@ -21,8 +21,9 @@
 - `DictationOverlayPresentationPreferences.swift` — persisted overlay presentation mode for normal vs cursor-mini dictation UI
 - `ExistingInstallModelPrefetchPolicy.swift` — protects existing Parakeet users by deciding when model files should be prefetched after app updates
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
-- `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior
-- `LaunchAtLoginPreferences.swift` — persisted first-run preference state around launch-at-login UX
+- `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior, including the one-time post-onboarding default-enable (meeting detection is dead while the app is closed)
+- `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy
+- `MissedCallNudgePreferences.swift` — persisted (default-on) toggle for the post-call "that call wasn't recorded" nudge; written by the nudge's "Don't show again" action and the Settings General toggle
 - `LiveMeetingCodexPreferences.swift` — persisted opt-in toggle for the live-meeting sidecar, plus the meeting overlay transcript drawer's remembered open state and clamped height
 - `LocalMeetingSummaryPreferences.swift` — persisted beta opt-in toggle and provider selection for local AI meeting summaries on Home
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review

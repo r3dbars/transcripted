@@ -449,4 +449,77 @@ func testMeetingPromptHeuristics() {
             "the re-offer interval must be meaningfully shorter than a dismissal, or the expiry path is pointless"
         )
     }
+
+    runSuite("MeetingPromptHeuristics.promptTimeoutSeconds — live call prompts outlast calendar reminders") {
+        assertEqual(
+            MeetingPromptHeuristics.promptTimeoutSeconds(for: .micInput, calendarDefault: 30),
+            MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds,
+            "an ad-hoc mic call prompt should use the longer live-call lifetime"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.promptTimeoutSeconds(for: .audioOutput, calendarDefault: 30),
+            MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds,
+            "an output-led call prompt should use the longer live-call lifetime"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.promptTimeoutSeconds(for: .calendarNearby, calendarDefault: 30),
+            30,
+            "calendar reminders keep the shorter default because their moment ages out"
+        )
+        assertTrue(
+            MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds > 30,
+            "the live-call prompt lifetime should actually be longer than the calendar default"
+        )
+    }
+
+    runSuite("MissedCallNudgePolicy.shouldNudge — nudges long unrecorded calls, respects every gate") {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let longCall = MissedCallNudgePolicy.minimumCallDuration + 60
+
+        assertTrue(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: false, userDeclined: false, lastNudgeAt: nil, now: now
+            ),
+            "a long unrecorded call with no decline should nudge"
+        )
+        assertFalse(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: true, userDeclined: false, lastNudgeAt: nil, now: now
+            ),
+            "a call that was recorded needs no nudge"
+        )
+        assertFalse(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: false, userDeclined: true, lastNudgeAt: nil, now: now
+            ),
+            "an explicit 'not now' on the prompt means the nudge must stay quiet"
+        )
+        assertFalse(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: MissedCallNudgePolicy.minimumCallDuration - 1,
+                sawMeetingRecording: false, userDeclined: false, lastNudgeAt: nil, now: now
+            ),
+            "short calls are not worth interrupting for"
+        )
+        assertFalse(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: false, userDeclined: false,
+                lastNudgeAt: now.addingTimeInterval(-MissedCallNudgePolicy.nudgeCooldown + 60), now: now
+            ),
+            "back-to-back calls must not stack nudges inside the cooldown"
+        )
+        assertTrue(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: false, userDeclined: false,
+                lastNudgeAt: now.addingTimeInterval(-MissedCallNudgePolicy.nudgeCooldown - 60), now: now
+            ),
+            "once the cooldown passes a fresh missed call can nudge again"
+        )
+    }
+
+    runSuite("MissedCallNudgePolicy.durationBucket — analytics stay coarse") {
+        assertEqual(MissedCallNudgePolicy.durationBucket(for: 12 * 60), "10_to_20m", "12 minutes lands in the shortest bucket")
+        assertEqual(MissedCallNudgePolicy.durationBucket(for: 25 * 60), "20_to_40m", "25 minutes lands in the middle bucket")
+        assertEqual(MissedCallNudgePolicy.durationBucket(for: 70 * 60), "40m_plus", "long calls collapse into the open-ended bucket")
+    }
 }

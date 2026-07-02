@@ -258,6 +258,59 @@ struct MeetingPromptBackoffDecision: Equatable {
     let until: Date
 }
 
+/// A detected call that ended without a Transcripted meeting recording.
+/// Emitted by `MeetingPromptDetector.onUnrecordedCallEnded` once the call's
+/// ad-hoc signals go quiet; consumed by the missed-call nudge.
+struct MeetingPromptUnrecordedCall: Equatable {
+    let provider: MeetingPromptProvider
+    let duration: TimeInterval
+}
+
+/// How the missed-call nudge was resolved, for coarse analytics.
+enum MissedCallNudgeOutcome: String, Equatable {
+    case acknowledged
+    case disabled
+    case expired
+}
+
+/// Pure policy for the post-call "that call wasn't recorded" nudge. The nudge
+/// cannot recover the meeting — its job is to close the awareness loop (most
+/// users never realize a prompt fired and vanished) and train the record habit.
+/// So it must stay rare and respectful: long calls only, never after the user
+/// explicitly declined to record, never when a recording actually happened, and
+/// rate-limited so back-to-back calls do not stack nudges.
+enum MissedCallNudgePolicy {
+    static let minimumCallDuration: TimeInterval = 10 * 60
+    static let nudgeCooldown: TimeInterval = 4 * 60 * 60
+
+    static func shouldNudge(
+        duration: TimeInterval,
+        sawMeetingRecording: Bool,
+        userDeclined: Bool,
+        lastNudgeAt: Date?,
+        now: Date
+    ) -> Bool {
+        guard !sawMeetingRecording, !userDeclined else { return false }
+        guard duration >= minimumCallDuration else { return false }
+        if let lastNudgeAt, now.timeIntervalSince(lastNudgeAt) < nudgeCooldown {
+            return false
+        }
+        return true
+    }
+
+    /// Coarse duration bucket for analytics — never the raw duration.
+    static func durationBucket(for duration: TimeInterval) -> String {
+        switch duration {
+        case ..<(20 * 60):
+            return "10_to_20m"
+        case ..<(40 * 60):
+            return "20_to_40m"
+        default:
+            return "40m_plus"
+        }
+    }
+}
+
 enum MeetingPromptWindowPolicy {
     static func shouldOfferCalendarPrompt(startsIn: TimeInterval, endsIn: TimeInterval) -> Bool {
         guard endsIn > 0 else { return false }
@@ -298,6 +351,16 @@ enum MeetingPromptHeuristics {
     /// schedule a short re-offer (`true`) or fall back to a full dismissal.
     static func shouldReofferAfterExpiry(expiryCount: Int) -> Bool {
         expiryCount <= maxPromptExpiryReoffers
+    }
+
+    /// Ad-hoc call prompts stay up longer than calendar reminders: the call is
+    /// happening *right now*, and the first minute of a join is exactly when
+    /// the user is not looking at overlays. Calendar prompts keep the shorter
+    /// default because their moment ("starts in 1 min") ages out quickly.
+    static let adHocCallPromptTimeoutSeconds = 60
+
+    static func promptTimeoutSeconds(for reason: MeetingPromptReason, calendarDefault: Int) -> Int {
+        reason.isAdHocCallSignal ? adHocCallPromptTimeoutSeconds : calendarDefault
     }
 
     static func snoozeInterval(

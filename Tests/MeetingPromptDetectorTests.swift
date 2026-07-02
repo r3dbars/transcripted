@@ -645,6 +645,25 @@ func testMeetingPromptDetector() async {
 
         assertEqual(box.promptCount, 1, "during the re-offer cooldown the same call must stay quiet, not re-prompt instantly")
     }
+
+    await runSuite("MeetingPromptDetector.onUnrecordedCallEnded — a short call ending never nudges") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.onPromptRequest = { _ in true }
+        let box = CandidateBox()
+        detector.onUnrecordedCallEnded = { _ in
+            box.unrecordedCallCount += 1
+        }
+
+        // Start and immediately end a detected call. The session ends, but a
+        // seconds-long call is far below MissedCallNudgePolicy.minimumCallDuration.
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.unrecordedCallCount, 0, "a call shorter than the minimum duration must not raise the missed-call nudge")
+    }
 }
 
 @available(macOS 14.0, *)
@@ -654,6 +673,7 @@ private final class CandidateBox {
     var suppression: MeetingPromptSuppression?
     var promptCount = 0
     var suppressionCount = 0
+    var unrecordedCallCount = 0
 }
 
 // updateMicInputUsers re-evaluates on a detached @MainActor Task; yield/sleep a

@@ -26,6 +26,10 @@ final class MeetingPromptDetector {
     var onPromptRequest: ((Candidate) -> Bool)?
     var onPromptSuppressed: ((MeetingPromptSuppression) -> Void)?
     var shouldSkipPromptEvaluation: (() -> Bool)?
+    /// A detected ad-hoc call ended without a meeting recording and passed the
+    /// `MissedCallNudgePolicy` gates (long enough, not declined, rate-limited).
+    /// Wired in `TranscriptedApp` to the overlay's missed-call nudge.
+    var onUnrecordedCallEnded: ((MeetingPromptUnrecordedCall) -> Void)?
 
     /// Returns true while Transcripted itself holds the mic (meeting recording or
     /// dictation). Gates the mic-activity path so we never prompt to record our
@@ -65,6 +69,19 @@ final class MeetingPromptDetector {
     // Consecutive unattended-countdown expiries per candidate id, so an ignored
     // prompt re-offers a couple of times before inheriting the full dismissal.
     private var promptExpiryHistory: [String: (count: Int, lastExpiredAt: Date)] = [:]
+
+    // The live detected-call session assembled from the ad-hoc signals (mic /
+    // output / camera). Tracked across evaluate() passes so a call that ends
+    // unrecorded can raise the missed-call nudge.
+    private struct DetectedCallSession {
+        var providers: Set<MeetingPromptProvider>
+        let startedAt: Date
+        var sawMeetingRecording: Bool
+        var userDeclined: Bool
+    }
+
+    private var detectedCallSession: DetectedCallSession?
+    private var lastMissedCallNudgeAt: Date?
 
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
@@ -112,6 +129,9 @@ final class MeetingPromptDetector {
 
     @discardableResult
     func dismiss(candidate: Candidate) -> MeetingPromptBackoffDecision {
+        // An explicit dismissal during a live call means the user chose not to
+        // record it — the missed-call nudge must respect that and stay quiet.
+        detectedCallSession?.userDeclined = true
         return dismiss(candidate: candidate, interval: nil)
     }
 
@@ -132,6 +152,7 @@ final class MeetingPromptDetector {
 
     @discardableResult
     func snooze(candidate: Candidate, interval: TimeInterval? = nil) -> MeetingPromptBackoffDecision {
+        detectedCallSession?.userDeclined = true
         return dismiss(candidate: candidate, interval: interval)
     }
 
@@ -217,6 +238,9 @@ final class MeetingPromptDetector {
     }
 
     func markAccepted(candidate: Candidate) {
+        // Recording is starting; the session is covered even if the recording
+        // begins after the next evaluate() pass samples own-capture state.
+        detectedCallSession?.sawMeetingRecording = true
         let now = Date()
         let until: Date
         switch candidate.source {
@@ -258,6 +282,10 @@ final class MeetingPromptDetector {
         let frontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         pruneExpiredEntries(now: now)
         seedNativeActivityIfNeeded(frontmostBundleID: frontmostBundleID, now: now)
+        updateDetectedCallSession(
+            providers: Set(callSignals(frontmostBundleID: frontmostBundleID).map(\.provider)),
+            now: now
+        )
 
         var candidates: [ScoredCandidate] = []
         if calendarAccessGranted() {
@@ -447,6 +475,59 @@ final class MeetingPromptDetector {
         Task { @MainActor [weak self] in
             await self?.evaluate()
         }
+    }
+
+    // MARK: - Detected-call session (missed-call nudge)
+
+    /// Folds the current ad-hoc call signals into the running session. A
+    /// nonempty→empty transition ends the call; if it was long enough,
+    /// unrecorded, and not explicitly declined, `onUnrecordedCallEnded` fires.
+    /// Runs every evaluate() pass, so signal-inactive edges from the monitors
+    /// end the session promptly and the 20s poll bounds recording-overlap
+    /// sampling. Meeting recordings keep the underlying app's signals alive
+    /// (only our own bundle is filtered), so recording never splits a session.
+    private func updateDetectedCallSession(providers: Set<MeetingPromptProvider>, now: Date) {
+        let isMeetingRecording = currentOwnCaptureActivity() == .meetingRecording
+
+        guard var session = detectedCallSession else {
+            if !providers.isEmpty {
+                detectedCallSession = DetectedCallSession(
+                    providers: providers,
+                    startedAt: now,
+                    sawMeetingRecording: isMeetingRecording,
+                    userDeclined: false
+                )
+            }
+            return
+        }
+
+        if providers.isEmpty {
+            detectedCallSession = nil
+            finishDetectedCallSession(session, endedAt: now)
+        } else {
+            session.providers.formUnion(providers)
+            session.sawMeetingRecording = session.sawMeetingRecording || isMeetingRecording
+            detectedCallSession = session
+        }
+    }
+
+    private func finishDetectedCallSession(_ session: DetectedCallSession, endedAt: Date) {
+        // A disabled auto-detect toggle empties the signals artificially —
+        // never nudge off the back of the user turning detection off.
+        guard isMicInputPromptEnabled?() != false else { return }
+
+        let duration = endedAt.timeIntervalSince(session.startedAt)
+        guard MissedCallNudgePolicy.shouldNudge(
+            duration: duration,
+            sawMeetingRecording: session.sawMeetingRecording,
+            userDeclined: session.userDeclined,
+            lastNudgeAt: lastMissedCallNudgeAt,
+            now: endedAt
+        ) else { return }
+
+        lastMissedCallNudgeAt = endedAt
+        let provider = session.providers.sorted { $0.rawValue < $1.rawValue }.first ?? .googleMeet
+        onUnrecordedCallEnded?(MeetingPromptUnrecordedCall(provider: provider, duration: duration))
     }
 
     private func micInputCandidates(now: Date, frontmostBundleID: String?) -> [ScoredCandidate] {
