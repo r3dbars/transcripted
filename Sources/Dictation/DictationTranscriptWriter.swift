@@ -221,11 +221,21 @@ enum DictationTranscriptWriter {
     }
 
     private static func appendSection(_ section: String, to url: URL) throws {
-        var data = try Data(contentsOf: url)
-        let separator = data.suffix(2) == Data([0x0A, 0x0A]) ? "" : "\n\n"
-        guard let appended = (separator + section).data(using: .utf8) else { return }
-        data.append(appended)
-        try data.write(to: url, options: .atomic)
+        // O(1) append: day files grow all day, so never read/rewrite the whole file.
+        // Only the last two bytes matter — they decide the blank-line separator.
+        let handle = try FileHandle(forUpdating: url)
+        defer { try? handle.close() }
+
+        let size = try handle.seekToEnd()
+        var separator = "\n\n"
+        if size >= 2 {
+            try handle.seek(toOffset: size - 2)
+            if try handle.read(upToCount: 2) == Data([0x0A, 0x0A]) {
+                separator = ""
+            }
+            try handle.seekToEnd()
+        }
+        try handle.write(contentsOf: Data((separator + section).utf8))
     }
 
     private static func buildTitle(from text: String, createdAt: Date) -> String {
