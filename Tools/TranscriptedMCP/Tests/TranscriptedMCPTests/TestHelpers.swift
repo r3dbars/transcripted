@@ -1,6 +1,22 @@
 import Foundation
 @testable import transcripted_mcp
 
+/// Sequential system-channel utterances for pagination fixtures. Built with a
+/// loop: mapping to labeled tuples with inline Double math makes the type
+/// checker time out on CI.
+func makeSequentialUtterances(
+    count: Int,
+    text: (Int) -> String
+) -> [(speakerId: String, start: Double, end: Double, text: String)] {
+    var utterances: [(speakerId: String, start: Double, end: Double, text: String)] = []
+    for index in 0..<count {
+        let start = Double(index * 10)
+        let end = Double(index * 10 + 5)
+        utterances.append((speakerId: "system_0", start: start, end: end, text: text(index)))
+    }
+    return utterances
+}
+
 func makeFixtureJSON(
     title: String? = nil,
     date: String = "2026-03-29T10:00:00-0500",

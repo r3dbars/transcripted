@@ -283,9 +283,7 @@ final class ToolHandlersTests: XCTestCase {
     }
 
     func testReadMeetingWindowedReadReturnsRequestedUtterances() throws {
-        let utterances: [(speakerId: String, start: Double, end: Double, text: String)] = (0..<6).map {
-            ("system_0", Double($0 * 10), Double($0 * 10 + 5), "Utterance number \($0)")
-        }
+        let utterances = makeSequentialUtterances(count: 6) { "Utterance number \($0)" }
         try writeFixture(
             makeFixtureJSON(title: "Roadmap Sync", date: "2026-03-26T16:04:11-0500", utterances: utterances),
             filename: "Call_2026-03-26_16-04-11",
@@ -317,9 +315,7 @@ final class ToolHandlersTests: XCTestCase {
     }
 
     func testReadMeetingTranscriptSectionWindowOmitsFrontmatter() throws {
-        let utterances: [(speakerId: String, start: Double, end: Double, text: String)] = (0..<6).map {
-            ("system_0", Double($0 * 10), Double($0 * 10 + 5), "Utterance number \($0)")
-        }
+        let utterances = makeSequentialUtterances(count: 6) { "Utterance number \($0)" }
         try writeFixture(
             makeFixtureJSON(date: "2026-03-26T16:04:11-0500", utterances: utterances),
             filename: "Call_2026-03-26_16-04-11",
@@ -373,9 +369,7 @@ final class ToolHandlersTests: XCTestCase {
 
     func testReadMeetingOversizedTranscriptAutoTruncatesWithNextOffset() throws {
         let filler = String(repeating: "budget planning detail ", count: 14)
-        let utterances: [(speakerId: String, start: Double, end: Double, text: String)] = (0..<200).map {
-            ("system_0", Double($0 * 10), Double($0 * 10 + 5), "Utterance \($0): \(filler)")
-        }
+        let utterances = makeSequentialUtterances(count: 200) { "Utterance \($0): \(filler)" }
         try writeFixture(
             makeFixtureJSON(date: "2026-03-26T16:04:11-0500", utterances: utterances),
             filename: "Call_2026-03-26_16-04-11",
