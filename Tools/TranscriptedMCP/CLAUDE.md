@@ -35,20 +35,23 @@ When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
-## Package Layout (17 Swift files)
+## Package Layout (20 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
-- `Sources/TranscriptedMCP/` — 9 source files for server startup, directory resolution, path validation, indexing, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 8 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, markdown loading, logging, name variants, and shared fixtures
+- `Sources/TranscriptedMCP/` — 12 source files for server startup, directory resolution, path validation, indexing, structured summaries, semantic search, and tool handlers
+- `Tests/TranscriptedMCPTests/` — 9 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, markdown loading, logging, name variants, semantic search, and shared fixtures
 
 ## File Index
 
 | File | Purpose |
 |------|---------|
-| `Main.swift` | `@main` entry point; resolves directories, builds the index, starts file watchers, then starts the MCP stdio server |
+| `Main.swift` | `@main` entry point; resolves directories, builds the index (with an `NLEmbeddingProvider` for semantic search), starts file watchers, then starts the MCP stdio server |
 | `DataDirectories.swift` | Index-dir resolution plus a thin wrapper over `TranscriptedCaptureKit`'s shared capture-library resolver |
 | `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct loader or index method |
-| `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations |
+| `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations; routes `lexical`/`semantic`/`hybrid` search modes |
+| `EmbeddingProvider.swift` | `EmbeddingProvider` protocol, the default `NLEmbeddingProvider` (Apple NaturalLanguage, zero-bundle on-device), `SearchMode`, and `VectorMath` helpers |
+| `EmbeddingStore.swift` | Vector store on its own SQLite connection; embeds rows, stores Float32 vectors, and runs cosine semantic search over utterances and dictation entries |
+| `SemanticSearchFusion.swift` | Reciprocal-rank fusion that merges lexical (FTS) and semantic result lists for hybrid search |
 | `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files from disk; parsing delegates to `TranscriptedCaptureKit` |
 | `Models.swift` | Codable input/output models and `MCPIndexError` |
 | `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
@@ -66,6 +69,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
 | `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
+| `SemanticSearchTests.swift` | Semantic + hybrid search via a deterministic stub provider, graceful fallback, model-change re-embed, vector-math, and RRF fusion |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
 ## MCP Tools
@@ -78,8 +82,8 @@ All tools are read-only.
 | `read_meeting` | Read one meeting transcript by filename |
 | `list_dictations` | List saved dictation day files with counts, source apps, and titles |
 | `read_dictation` | Read one dictation day or one specific dictation entry |
-| `search` | Search meeting transcript content |
-| `search_context` | Search across meetings, dictations, or both |
+| `search` | Search meeting transcript content (lexical / semantic / hybrid via `mode`, default hybrid) |
+| `search_context` | Search across meetings, dictations, or both (same `mode` options) |
 | `recent_context` | Get a mixed recent feed of meetings and dictations |
 | `who_is` | Look up a speaker profile across saved meetings |
 | `recap` | Build a structured digest for a date range |
@@ -123,6 +127,18 @@ The SQLite index keeps separate records for:
 Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from each meeting's inline local summary (or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
 
 This lets the server answer both meeting-specific queries (`who_is`, `read_meeting`) and mixed-context queries (`search_context`, `recent_context`) without touching app-owned runtime state.
+
+The semantic layer adds three additive tables on a separate connection: `embedding_meta` (model id + dimension), `utterance_vectors`, and `dictation_entry_vectors` (Float32 BLOBs keyed by the lexical rows' `rowid`). They never alter the lexical write path.
+
+## Semantic Search
+
+Local, on-device semantic search complements FTS so paraphrase queries hit (e.g. "pricing pushback" finds "they balked at the cost").
+
+- Embeddings come from Apple's `NaturalLanguage` `NLEmbedding.sentenceEmbedding` — **no bundled model, no download, negligible app-size impact**. Backend is pluggable via `EmbeddingProvider`, so a bundled CoreML model can replace it later without touching the store or search path.
+- `EmbeddingStore` embeds new/changed rows after each reconcile (lazily, keyed by `rowid`), re-embeds everything on a model-id/dimension change, and runs a streaming cosine scan with the same speaker/date filters as FTS.
+- `search` / `search_context` accept `mode`: `hybrid` (default — FTS + semantic fused with reciprocal-rank fusion, a strict superset of FTS recall), `lexical`, or `semantic`.
+- All modes degrade gracefully: if the embedding backend is unavailable (e.g. missing OS language assets), the store is never created and every mode runs lexical-only.
+- NLEmbedding's similarity floor is high, so `semantic` alone is best-effort; `hybrid` is rank-based and stays robust because exact FTS hits anchor precision.
 
 ## Build And Test
 
