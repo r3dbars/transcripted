@@ -357,6 +357,26 @@ class TranscriptedAppState: ObservableObject {
                     CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
                 }
             }
+
+            // Post-maintenance size snapshot: retention defaults to never, so
+            // this event is the only place library growth is visible before the
+            // disk fills. Bucketed, never exact bytes.
+            if let libraryBytes = CaptureLibrarySize.measureBytes(at: MeetingStoragePaths.transcriptsFolder) {
+                let bucket = CaptureLibrarySize.bucketLabel(forBytes: libraryBytes)
+                let retention = AudioStoragePreferences.deleteAudioAfter().rawValue
+                await MainActor.run {
+                    EventReporter.shared.capture(
+                        level: .info,
+                        engine: "meeting",
+                        event: "capture_library_size",
+                        message: "Capture library size measured after audio maintenance",
+                        context: [
+                            "size_bucket": bucket,
+                            "audio_retention": retention,
+                        ]
+                    )
+                }
+            }
         }
     }
 

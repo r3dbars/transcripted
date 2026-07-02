@@ -272,6 +272,7 @@ APP_SOURCES=(
     "Sources/Support/AutoCallDetectionPreferences.swift"
     "Sources/Support/AudioStoragePreferences.swift"
     "Sources/Support/CaptureLibraryChangeBroadcaster.swift"
+    "Sources/Support/CaptureLibrarySize.swift"
     "Sources/Support/LiveMeetingCodexPreferences.swift"
     "Sources/Support/LocalMeetingSummaryPreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"

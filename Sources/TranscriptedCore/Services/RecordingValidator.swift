@@ -4,8 +4,14 @@ import AVFoundation
 /// Validates system conditions before starting a recording to prevent data loss
 public enum RecordingValidator {
 
-    /// Minimum required disk space in bytes (100MB)
-    public static let minimumDiskSpace: Int64 = 100 * 1024 * 1024
+    /// Minimum free disk space required to *start* a recording (1GB).
+    ///
+    /// Meeting capture writes dual WAV streams at roughly 1.4GB/hour, and the
+    /// in-recording watchdog only hard-stops at 50MB free — so a start floor
+    /// near the watchdog threshold let recordings begin that were doomed to die
+    /// minutes in. 1GB buys ~40 minutes of headroom; anything tighter trades a
+    /// clear upfront error for silent mid-meeting data loss.
+    public static let minimumDiskSpace: Int64 = 1024 * 1024 * 1024
 
     /// Result of validation check
     public enum ValidationResult {
@@ -70,7 +76,8 @@ public enum RecordingValidator {
 
             if Int64(availableCapacity) < minimumDiskSpace {
                 let availableMB = Int64(availableCapacity) / (1024 * 1024)
-                return .failure("Not enough disk space (\(availableMB)MB free, need 100MB). Free up space and try again.")
+                let requiredMB = minimumDiskSpace / (1024 * 1024)
+                return .failure("Not enough disk space (\(availableMB)MB free, need \(requiredMB)MB). Free up space and try again.")
             }
 
             return .success
