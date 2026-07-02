@@ -65,6 +65,9 @@ SWIFT_SOURCES=(
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/NameVariants.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/PathSecurity.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptLoader.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingProvider.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingStore.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/SemanticSearchFusion.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift"
 )
 

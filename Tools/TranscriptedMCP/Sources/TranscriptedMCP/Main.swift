@@ -38,7 +38,16 @@ struct TranscriptedMCP {
         // Create and populate index
         let index: TranscriptIndex
         do {
-            index = try TranscriptIndex(indexDir: directories.indexDir)
+            // On-device semantic search. NLEmbedding ships with macOS (no bundled
+            // model, no download); when its language assets are missing the
+            // provider reports unavailable and search stays lexical-only.
+            let embeddingProvider = NLEmbeddingProvider()
+            if embeddingProvider.isAvailable {
+                log("Semantic search enabled (\(embeddingProvider.modelID), dim \(embeddingProvider.dimension))")
+            } else {
+                log("Semantic search unavailable on this host; using lexical search only")
+            }
+            index = try TranscriptIndex(indexDir: directories.indexDir, embeddingProvider: embeddingProvider)
             try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
         } catch {
             log("Failed to initialize index: \(error.localizedDescription)")

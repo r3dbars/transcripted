@@ -8,9 +8,18 @@ final class TranscriptIndex: @unchecked Sendable {
     private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let indexPath: URL
 
-    init(indexDir: URL) throws {
+    /// Optional semantic-search sidecar. Nil when no embedding provider was
+    /// supplied or the provider is unavailable on this host; in that case every
+    /// search transparently runs lexical-only. Additive: it manages its own
+    /// vector tables on a separate connection to the same database file.
+    private(set) var embeddingStore: EmbeddingStore?
+
+    init(indexDir: URL, embeddingProvider: EmbeddingProvider? = nil) throws {
         self.indexPath = indexDir.appendingPathComponent("mcp_index.sqlite")
         try queue.sync { try self.openAndSetup() }
+        if let provider = embeddingProvider, provider.isAvailable {
+            self.embeddingStore = try EmbeddingStore(dbPath: indexPath, provider: provider)
+        }
     }
 
     deinit {
@@ -328,6 +337,10 @@ final class TranscriptIndex: @unchecked Sendable {
                 try removeFromIndex(filename: filename)
             }
         }
+
+        // Best-effort: embed any newly indexed rows. Never fails the reconcile —
+        // lexical search must keep working even if embedding hits a snag.
+        embeddingStore?.reconcileEmbeddings()
     }
 
     func indexSingleFile(_ url: URL, allowedRoots: [URL]) throws {
@@ -362,6 +375,8 @@ final class TranscriptIndex: @unchecked Sendable {
 
             try removeFromIndex(filename: filename)
         }
+
+        embeddingStore?.reconcileEmbeddings()
     }
 
     private func getIndexedModDates() throws -> [String: TimeInterval] {
@@ -691,7 +706,26 @@ final class TranscriptIndex: @unchecked Sendable {
 
     // MARK: - Queries
 
-    func searchUtterances(query: String, speaker: String?, dateFrom: String?, dateTo: String?, maxMeetings: Int = 10, snippetsPerMeeting: Int = 3) throws -> GroupedSearchResult {
+    func searchUtterances(query: String, speaker: String?, dateFrom: String?, dateTo: String?, maxMeetings: Int = 10, snippetsPerMeeting: Int = 3, mode: SearchMode = .lexical) throws -> GroupedSearchResult {
+        // Semantic / hybrid routing. Falls through to lexical when no vector store
+        // is available, so these modes degrade gracefully rather than returning
+        // nothing. The lexical branch below is unchanged.
+        if mode != .lexical, let store = embeddingStore, store.isAvailable {
+            let semantic = store.semanticSearchUtterances(
+                query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo,
+                maxMeetings: maxMeetings, snippetsPerMeeting: snippetsPerMeeting
+            )
+            if mode == .semantic { return semantic }
+            let lexical = try searchUtterances(
+                query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo,
+                maxMeetings: maxMeetings, snippetsPerMeeting: snippetsPerMeeting, mode: .lexical
+            )
+            return SemanticSearchFusion.fuseGrouped(
+                lexical: lexical, semantic: semantic,
+                maxMeetings: maxMeetings, snippetsPerMeeting: snippetsPerMeeting
+            )
+        }
+
         return try queue.sync {
             guard let ftsQuery = ftsQuery(from: query) else {
                 return GroupedSearchResult(results: [], totalMeetingsMatched: 0, truncated: false)
@@ -1036,7 +1070,20 @@ final class TranscriptIndex: @unchecked Sendable {
         }
     }
 
-    func searchDictationEntries(query: String, dateFrom: String?, dateTo: String?, maxItems: Int = 10) throws -> [ContextSearchGroup] {
+    func searchDictationEntries(query: String, dateFrom: String?, dateTo: String?, maxItems: Int = 10, mode: SearchMode = .lexical) throws -> [ContextSearchGroup] {
+        if mode != .lexical, let store = embeddingStore, store.isAvailable {
+            let semantic = store.semanticSearchDictationEntries(
+                query: query, dateFrom: dateFrom, dateTo: dateTo, maxItems: maxItems
+            )
+            if mode == .semantic { return semantic }
+            let lexical = try searchDictationEntries(
+                query: query, dateFrom: dateFrom, dateTo: dateTo, maxItems: maxItems, mode: .lexical
+            )
+            return SemanticSearchFusion.fuseContextGroups(
+                lexical: lexical, semantic: semantic, maxItems: maxItems
+            )
+        }
+
         return try queue.sync {
             let tokens = query.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
             let ftsQuery = tokens.map { "\"\($0.replacingOccurrences(of: "\"", with: ""))\"" }.joined(separator: " ")
@@ -1154,7 +1201,7 @@ final class TranscriptIndex: @unchecked Sendable {
         }
     }
 
-    func searchContext(query: String, speaker: String?, kind: ContextKind, dateFrom: String?, dateTo: String?, maxItems: Int = 10) throws -> ContextSearchResult {
+    func searchContext(query: String, speaker: String?, kind: ContextKind, dateFrom: String?, dateTo: String?, maxItems: Int = 10, mode: SearchMode = .lexical) throws -> ContextSearchResult {
         var combined: [ContextSearchGroup] = []
 
         if kind != .dictation {
@@ -1164,7 +1211,8 @@ final class TranscriptIndex: @unchecked Sendable {
                 dateFrom: dateFrom,
                 dateTo: dateTo,
                 maxMeetings: maxItems,
-                snippetsPerMeeting: 3
+                snippetsPerMeeting: 3,
+                mode: mode
             )
             combined.append(contentsOf: meetings.results.map {
                 ContextSearchGroup(
@@ -1193,7 +1241,8 @@ final class TranscriptIndex: @unchecked Sendable {
                 query: query,
                 dateFrom: dateFrom,
                 dateTo: dateTo,
-                maxItems: maxItems
+                maxItems: maxItems,
+                mode: mode
             ))
         }
 
