@@ -216,7 +216,15 @@ class STTRouter: ObservableObject {
         model: TranscriptionModelChoice? = nil
     ) async throws -> String {
         let resolvedModel = model ?? selectedModel
-        await initialize(model: resolvedModel)
+        // The meeting pipeline calls this once per diarized segment (hundreds
+        // of times for a long recording). Models are loaded once before the
+        // pipeline starts (Transcription.ensureModelsReadyForPipeline via
+        // MeetingSTTAdapter.prepare), so skip the per-segment initialize
+        // round-trip when the engine is already ready; keep it as a safety
+        // net for cold callers.
+        if !isModelLoaded(for: resolvedModel) {
+            await initialize(model: resolvedModel)
+        }
 
         switch resolvedModel {
         case .parakeetTDTv3:
@@ -241,11 +249,41 @@ class STTRouter: ObservableObject {
     }
 
     private func refreshModelDownloadState() {
+        let refreshed: ParakeetModelState
         switch selectedModel {
         case .parakeetTDTv3:
-            modelDownloadState = parakeetEngine.modelDownloadState
+            refreshed = parakeetEngine.modelDownloadState
         case .whisperLargeV3Turbo, .whisperLargeV3:
-            modelDownloadState = whisperEngine.modelDownloadState
+            refreshed = whisperEngine.modelDownloadState
+        }
+        // Skip the redundant @Published reassignment when nothing changed.
+        // Background meeting transcription refreshes this state repeatedly
+        // (per segment / per wait tick), and every reassignment fires
+        // objectWillChange into the menubar, warmup-status, and settings
+        // subscribers even when the value is identical — thousands of
+        // pointless main-actor invalidations across a long meeting.
+        guard !Self.modelStatesEqual(refreshed, modelDownloadState) else { return }
+        modelDownloadState = refreshed
+    }
+
+    /// `ParakeetModelState` is not `Equatable` (it lives with the engine
+    /// support types), so compare cases plus associated values manually.
+    /// Any pair this switch does not recognize falls through to `false`,
+    /// which fails safe by re-publishing.
+    private static func modelStatesEqual(
+        _ lhs: ParakeetModelState,
+        _ rhs: ParakeetModelState
+    ) -> Bool {
+        switch (lhs, rhs) {
+        case (.notLoaded, .notLoaded), (.cached, .cached),
+             (.loading, .loading), (.ready, .ready):
+            return true
+        case let (.downloading(lhsProgress), .downloading(rhsProgress)):
+            return lhsProgress == rhsProgress
+        case let (.failed(lhsMessage), .failed(rhsMessage)):
+            return lhsMessage == rhsMessage
+        default:
+            return false
         }
     }
 }
