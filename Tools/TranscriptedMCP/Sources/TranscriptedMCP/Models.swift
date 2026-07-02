@@ -390,6 +390,63 @@ struct EmptyQueryResult: Codable {
     }
 }
 
+// MARK: - Bounded Reads (read_meeting / read_dictation pagination)
+
+/// Paginated window over a meeting transcript, returned when the caller asks
+/// for one (offset/limit) or when the raw markdown would exceed the read
+/// character budget. Frontmatter metadata is preserved; the dialogue is
+/// bounded to the requested utterance window.
+struct MeetingTranscriptPage: Codable {
+    let filename: String
+    let frontmatter: String?
+    let totalUtterances: Int
+    let offset: Int
+    let returned: Int
+    let truncated: Bool
+    let nextOffset: Int?
+    let hint: String
+    let utterances: [MeetingTranscriptPageUtterance]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, frontmatter, offset, returned, truncated, hint, utterances
+        case totalUtterances = "total_utterances"
+        case nextOffset = "next_offset"
+    }
+}
+
+struct MeetingTranscriptPageUtterance: Codable {
+    let start: Double
+    let end: Double
+    let speaker: String
+    let speakerId: String
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case start, end, speaker, text
+        case speakerId = "speaker_id"
+    }
+}
+
+/// Paginated window over a dictation day's entries, mirroring
+/// `MeetingTranscriptPage` for `read_dictation` reads without an entry_id.
+struct DictationDayPage: Codable {
+    let filename: String
+    let date: String
+    let totalEntries: Int
+    let offset: Int
+    let returned: Int
+    let truncated: Bool
+    let nextOffset: Int?
+    let hint: String
+    let entries: [AgentDictationEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, offset, returned, truncated, hint, entries
+        case totalEntries = "total_entries"
+        case nextOffset = "next_offset"
+    }
+}
+
 // MARK: - Summary-Fact Rollups (cross-meeting tools)
 
 /// Open/all filter for `list_action_items`.

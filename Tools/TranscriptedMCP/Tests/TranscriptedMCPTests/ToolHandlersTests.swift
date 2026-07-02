@@ -269,6 +269,198 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertTrue(payload.hint.contains("No structured summaries are indexed"))
     }
 
+    func testReadMeetingSmallFullReadStaysByteIdenticalRawMarkdown() throws {
+        let content = makeFixtureJSON(title: "Roadmap Sync", date: "2026-03-26T16:04:11-0500")
+        try writeFixture(content, filename: "Call_2026-03-26_16-04-11", to: tempDir)
+
+        let result = try handleReadMeeting(
+            params: CallTool.Parameters(name: "read_meeting", arguments: ["filename": .string("Call_2026-03-26_16-04-11")]),
+            meetingDirs: [tempDir]
+        )
+
+        XCTAssertNotEqual(result.isError, true)
+        XCTAssertEqual(try resultText(result), content)
+    }
+
+    func testReadMeetingWindowedReadReturnsRequestedUtterances() throws {
+        let utterances: [(speakerId: String, start: Double, end: Double, text: String)] = (0..<6).map {
+            ("system_0", Double($0 * 10), Double($0 * 10 + 5), "Utterance number \($0)")
+        }
+        try writeFixture(
+            makeFixtureJSON(title: "Roadmap Sync", date: "2026-03-26T16:04:11-0500", utterances: utterances),
+            filename: "Call_2026-03-26_16-04-11",
+            to: tempDir
+        )
+
+        let result = try handleReadMeeting(
+            params: CallTool.Parameters(name: "read_meeting", arguments: [
+                "filename": .string("Call_2026-03-26_16-04-11"),
+                "offset": .int(2),
+                "limit": .int(2),
+            ]),
+            meetingDirs: [tempDir]
+        )
+
+        XCTAssertNotEqual(result.isError, true)
+        let page = try JSONDecoder().decode(MeetingTranscriptPage.self, from: Data(resultText(result).utf8))
+        XCTAssertEqual(page.totalUtterances, 6)
+        XCTAssertEqual(page.offset, 2)
+        XCTAssertEqual(page.returned, 2)
+        XCTAssertTrue(page.truncated)
+        XCTAssertEqual(page.nextOffset, 4)
+        XCTAssertEqual(page.utterances.map(\.text), ["Utterance number 2", "Utterance number 3"])
+        XCTAssertEqual(page.utterances.first?.speaker, "Jenny Wen")
+        // Full-section pages keep the frontmatter metadata.
+        let frontmatter = try XCTUnwrap(page.frontmatter)
+        XCTAssertTrue(frontmatter.contains("title: \"Roadmap Sync\""))
+        XCTAssertTrue(page.hint.contains("offset=4"))
+    }
+
+    func testReadMeetingTranscriptSectionWindowOmitsFrontmatter() throws {
+        let utterances: [(speakerId: String, start: Double, end: Double, text: String)] = (0..<6).map {
+            ("system_0", Double($0 * 10), Double($0 * 10 + 5), "Utterance number \($0)")
+        }
+        try writeFixture(
+            makeFixtureJSON(date: "2026-03-26T16:04:11-0500", utterances: utterances),
+            filename: "Call_2026-03-26_16-04-11",
+            to: tempDir
+        )
+
+        let result = try handleReadMeeting(
+            params: CallTool.Parameters(name: "read_meeting", arguments: [
+                "filename": .string("Call_2026-03-26_16-04-11"),
+                "section": .string("transcript"),
+                "limit": .int(3),
+            ]),
+            meetingDirs: [tempDir]
+        )
+
+        let page = try JSONDecoder().decode(MeetingTranscriptPage.self, from: Data(resultText(result).utf8))
+        XCTAssertNil(page.frontmatter)
+        XCTAssertEqual(page.totalUtterances, 6)
+        XCTAssertEqual(page.offset, 0)
+        XCTAssertEqual(page.returned, 3)
+        XCTAssertEqual(page.nextOffset, 3)
+    }
+
+    func testReadMeetingOffsetBeyondEndReturnsEmptyWindowWithTotals() throws {
+        try writeFixture(
+            makeFixtureJSON(date: "2026-03-26T16:04:11-0500"),
+            filename: "Call_2026-03-26_16-04-11",
+            to: tempDir
+        )
+
+        let result = try handleReadMeeting(
+            params: CallTool.Parameters(name: "read_meeting", arguments: [
+                "filename": .string("Call_2026-03-26_16-04-11"),
+                "offset": .int(50),
+                "limit": .int(5),
+            ]),
+            meetingDirs: [tempDir]
+        )
+
+        XCTAssertNotEqual(result.isError, true)
+        let page = try JSONDecoder().decode(MeetingTranscriptPage.self, from: Data(resultText(result).utf8))
+        // Default fixture has 2 utterances.
+        XCTAssertEqual(page.totalUtterances, 2)
+        XCTAssertEqual(page.offset, 50)
+        XCTAssertEqual(page.returned, 0)
+        XCTAssertTrue(page.utterances.isEmpty)
+        XCTAssertFalse(page.truncated)
+        XCTAssertNil(page.nextOffset)
+        XCTAssertTrue(page.hint.contains("past the end"))
+    }
+
+    func testReadMeetingOversizedTranscriptAutoTruncatesWithNextOffset() throws {
+        let filler = String(repeating: "budget planning detail ", count: 14)
+        let utterances: [(speakerId: String, start: Double, end: Double, text: String)] = (0..<200).map {
+            ("system_0", Double($0 * 10), Double($0 * 10 + 5), "Utterance \($0): \(filler)")
+        }
+        try writeFixture(
+            makeFixtureJSON(date: "2026-03-26T16:04:11-0500", utterances: utterances),
+            filename: "Call_2026-03-26_16-04-11",
+            to: tempDir
+        )
+
+        // No offset/limit — the size guard alone must trigger pagination.
+        let result = try handleReadMeeting(
+            params: CallTool.Parameters(name: "read_meeting", arguments: ["filename": .string("Call_2026-03-26_16-04-11")]),
+            meetingDirs: [tempDir]
+        )
+
+        XCTAssertNotEqual(result.isError, true)
+        let page = try JSONDecoder().decode(MeetingTranscriptPage.self, from: Data(resultText(result).utf8))
+        XCTAssertEqual(page.totalUtterances, 200)
+        XCTAssertEqual(page.offset, 0)
+        XCTAssertTrue(page.truncated)
+        XCTAssertGreaterThan(page.returned, 0)
+        XCTAssertLessThan(page.returned, 200)
+        let nextOffset = try XCTUnwrap(page.nextOffset)
+        XCTAssertEqual(nextOffset, page.returned)
+        XCTAssertTrue(page.hint.contains("offset=\(nextOffset)"))
+    }
+
+    func testReadDictationSmallDayFullReadStaysByteIdenticalRawMarkdown() throws {
+        let content = makeDictationDayJSON()
+        try writeFixture(content, filename: "Dictations_2026-04-07", to: tempDir)
+
+        let result = try handleReadDictation(
+            params: CallTool.Parameters(name: "read_dictation", arguments: ["filename": .string("Dictations_2026-04-07")]),
+            dictationDirs: [tempDir]
+        )
+
+        XCTAssertNotEqual(result.isError, true)
+        XCTAssertEqual(try resultText(result), content)
+    }
+
+    func testReadDictationEntryWindowing() throws {
+        let entries: [(id: String, createdAt: String, title: String, text: String, sourceAppName: String, delivery: String)] = [
+            ("dictation-20260407-091500-000", "2026-04-07T09:15:00-0500", "First note", "Alpha text for the morning", "Slack", "copied"),
+            ("dictation-20260407-120000-000", "2026-04-07T12:00:00-0500", "Second note", "Beta text for midday", "Mail", "pasted"),
+            ("dictation-20260407-183000-000", "2026-04-07T18:30:00-0500", "Third note", "Gamma text for the evening", "Notes", "copied"),
+        ]
+        try writeFixture(makeDictationDayJSON(entries: entries), filename: "Dictations_2026-04-07", to: tempDir)
+
+        let result = try handleReadDictation(
+            params: CallTool.Parameters(name: "read_dictation", arguments: [
+                "filename": .string("Dictations_2026-04-07"),
+                "offset": .int(1),
+                "limit": .int(1),
+            ]),
+            dictationDirs: [tempDir]
+        )
+
+        XCTAssertNotEqual(result.isError, true)
+        let page = try JSONDecoder().decode(DictationDayPage.self, from: Data(resultText(result).utf8))
+        XCTAssertEqual(page.totalEntries, 3)
+        XCTAssertEqual(page.offset, 1)
+        XCTAssertEqual(page.returned, 1)
+        XCTAssertTrue(page.truncated)
+        XCTAssertEqual(page.nextOffset, 2)
+        XCTAssertEqual(page.entries.map(\.title), ["Second note"])
+        XCTAssertTrue(page.hint.contains("offset=2"))
+    }
+
+    func testReadDictationEntryIdBehaviorUnchangedByPaginationParams() throws {
+        try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
+
+        let result = try handleReadDictation(
+            params: CallTool.Parameters(name: "read_dictation", arguments: [
+                "filename": .string("Dictations_2026-04-07"),
+                "entry_id": .string("dictation-20260407-091500-000"),
+                "offset": .int(1),
+                "limit": .int(1),
+            ]),
+            dictationDirs: [tempDir]
+        )
+
+        XCTAssertNotEqual(result.isError, true)
+        let text = try resultText(result)
+        XCTAssertTrue(text.hasPrefix("# Morning note"))
+        XCTAssertTrue(text.contains("Ship the follow-up note to product today"))
+        XCTAssertFalse(text.contains("total_entries"))
+    }
+
     func testListActionItemsDoneStatusReturnsExplicitError() throws {
         let result = try handleListActionItems(
             params: CallTool.Parameters(name: "list_action_items", arguments: ["status": .string("done")]),
