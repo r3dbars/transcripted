@@ -186,6 +186,7 @@ The in-app Claude Desktop installer copies that helper into:
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
 - `recent_context` is intentionally mixed; for the latest meeting specifically, prefer `list_meetings` or `recent_context` with `kind: "meeting"`
+- `recap` and `recent_context` previews prefer the meeting's structured summary (decisions / action items) and only fall back to opening dialogue when a meeting has no summary — the first lines of a real call are greetings and audio checks
 - `semantic_search` embeds with Apple's on-device `NLEmbedding` sentence model (English-optimized, nothing leaves the machine). When the model asset is unavailable the tool says so and lexical `search`/`search_context` keep working; indexing simply skips semantic rows. Embedding happens at index time, so the first rebuild after upgrading pays a one-time cost proportional to library size
 - `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
 - source builds can run the server standalone, but shipped app builds bundle the helper for the one-click Claude Desktop installer

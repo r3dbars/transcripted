@@ -196,6 +196,59 @@ final class SummaryRollupTests: XCTestCase {
         XCTAssertEqual(digestActions.compactMap(\.due), ["Friday"])
     }
 
+    func testRecentContextPrefersSummaryFactsOverFirstUtterance() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                date: "2026-05-02",
+                time: "10:00:00",
+                decisions: ["Ship the beta on Friday"],
+                actionItems: ["Jenny: send the revised spec"],
+                openQuestions: []
+            ),
+            filename: "Call_2026-05-02_10-00-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let result = try index.listRecentContext(kind: .meeting, count: 5)
+        let meeting = try XCTUnwrap(result.items.first)
+        XCTAssertTrue(meeting.preview.contains("Ship the beta on Friday"), "preview should carry summary facts, got: \(meeting.preview)")
+        XCTAssertTrue(meeting.preview.contains("Jenny: send the revised spec"))
+        XCTAssertFalse(meeting.preview.contains("lock the launch"), "preview should not be the opening utterance")
+    }
+
+    func testRecentContextFallsBackToFirstUtteranceWithoutSummary() throws {
+        try writeFixture(
+            makeFixtureJSON(
+                date: "2026-05-03T10:00:00-0500",
+                utterances: [("mic_0", 0.0, 5.0, "Good morning everyone")]
+            ),
+            filename: "Call_2026-05-03_10-00-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let result = try index.listRecentContext(kind: .meeting, count: 5)
+        XCTAssertEqual(result.items.first?.preview, "Good morning everyone")
+    }
+
+    func testMeetingSummaryPreviewBuildsFromMarkdownAndFallsBackToNil() throws {
+        let withSummary = makeMeetingWithInlineSummary(
+            date: "2026-05-02",
+            time: "10:00:00",
+            decisions: ["Adopt usage-based pricing"],
+            actionItems: ["Nate: send the pricing model (due: Friday)"],
+            openQuestions: ["Who signs off?"]
+        )
+        let preview = try XCTUnwrap(meetingSummaryPreview(from: withSummary))
+        XCTAssertTrue(preview.contains("Decisions: Adopt usage-based pricing"))
+        XCTAssertTrue(preview.contains("Nate: send the pricing model"))
+        XCTAssertTrue(preview.contains("Open questions: Who signs off?"))
+
+        let withoutSummary = makeFixtureJSON()
+        XCTAssertNil(meetingSummaryPreview(from: withoutSummary))
+    }
+
     func testDigestExcludesMeetingsWithoutFacts() throws {
         try seedTwoMeetings()
         try writeFixture(

@@ -1096,8 +1096,16 @@ final class TranscriptIndex: @unchecked Sendable {
         if kind != .dictation {
             let meetings = try listMeetings(count: count, dateFrom: dateFrom, dateTo: dateTo)
             items.append(contentsOf: meetings.map {
-                let firstUtterance = getFirstMeetingUtterance(filename: $0.filename)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                // Prefer indexed summary facts; the first utterance of a real
+                // call is a greeting, not what the meeting was about.
+                let preview: String
+                if let summaryPreview = getMeetingSummaryPreview(filename: $0.filename) {
+                    preview = summaryPreview
+                } else {
+                    let firstUtterance = getFirstMeetingUtterance(filename: $0.filename)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    preview = firstUtterance.isEmpty ? "No transcript captured." : firstUtterance
+                }
                 return RecentContextItem(
                     kind: .meeting,
                     title: $0.title ?? $0.filename,
@@ -1105,7 +1113,7 @@ final class TranscriptIndex: @unchecked Sendable {
                     entryId: nil,
                     date: $0.date,
                     datetime: $0.datetime,
-                    preview: firstUtterance.isEmpty ? "No transcript captured." : String(firstUtterance.prefix(220)),
+                    preview: String(preview.prefix(320)),
                     wordCount: $0.wordCount,
                     speakers: uniqueSpeakerNames(from: $0.speakers.map(\.name)),
                     sourceAppName: nil,
@@ -1377,6 +1385,45 @@ final class TranscriptIndex: @unchecked Sendable {
                 return colText(stmt, 0)
             }
             return ""
+        }
+    }
+
+    /// One-line summary preview for a meeting built from its indexed summary
+    /// facts (decisions first, then action items). Returns nil when the meeting
+    /// has no summary rows, so callers fall back to the first utterance. The
+    /// first utterance of a real call is a greeting or an audio check — the
+    /// summary facts are what "what was this meeting" actually means.
+    private func getMeetingSummaryPreview(filename: String) -> String? {
+        queue.sync {
+            var stmt: OpaquePointer?
+            let sql = """
+                SELECT kind, owner, text FROM meeting_summary_items
+                WHERE filename = ? AND kind IN ('decision', 'action_item')
+                ORDER BY CASE kind WHEN 'decision' THEN 0 ELSE 1 END, position ASC
+                LIMIT 4
+            """
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, (filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
+
+            var decisions: [String] = []
+            var actions: [String] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let text = colText(stmt, 2)
+                if colText(stmt, 0) == SummaryItemKind.decision {
+                    decisions.append(text)
+                } else if let owner = colTextOptional(stmt, 1) {
+                    actions.append("\(owner): \(text)")
+                } else {
+                    actions.append(text)
+                }
+            }
+
+            var parts: [String] = []
+            if !decisions.isEmpty { parts.append("Decisions: " + decisions.joined(separator: " | ")) }
+            if !actions.isEmpty { parts.append("Action items: " + actions.joined(separator: " | ")) }
+            guard !parts.isEmpty else { return nil }
+            return parts.joined(separator: ". ")
         }
     }
 
