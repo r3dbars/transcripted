@@ -157,7 +157,7 @@ final class MenuBarActionRowView: NSControl {
             trailingColor = MenuTokens.textMutedNS
         }
 
-        layer?.backgroundColor = backgroundColor.cgColor
+        layer?.backgroundColor = menuResolvedCGColor(backgroundColor)
         layer?.borderWidth = 0
         symbolView.contentTintColor = iconTint
         titleLabel.textColor = titleColor
@@ -239,6 +239,11 @@ final class MenuBarActionRowView: NSControl {
         case .utility:
             return hasDetail ? MenuTokens.utilityActionRowHeight : MenuTokens.minimumHitTargetSize
         }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
     }
 
     override func updateTrackingAreas() {

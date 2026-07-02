@@ -48,6 +48,7 @@ final class MenuBarUtilityActionsView: NSView {
     }
 
     func update(
+        updateSymbolName: String,
         updateTitle: String,
         updateDetail: String,
         updateVersion: String?,
@@ -72,7 +73,7 @@ final class MenuBarUtilityActionsView: NSView {
         )
 
         updatesRow.update(
-            symbolName: "arrow.triangle.2.circlepath.circle",
+            symbolName: updateSymbolName,
             title: updateTitle,
             detail: updateDetail,
             trailingText: updateVersion,

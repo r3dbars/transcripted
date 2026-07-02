@@ -39,9 +39,19 @@ final class MenuBarPrimaryActionsView: NSView {
         recentMeetingsRow.setAutomationIdentifier("transcripted.menubar.primary.recent-meetings")
 
         homeDivider.wantsLayer = true
-        homeDivider.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
 
         [homeRow, homeDivider, dictationRow, meetingRow, pasteRow, recentMeetingsRow].forEach(addSubview(_:))
+
+        applyLayerColors()
+    }
+
+    private func applyLayerColors() {
+        homeDivider.layer?.backgroundColor = menuResolvedCGColor(MenuTokens.sectionDividerNS)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyLayerColors()
     }
 
     func update(

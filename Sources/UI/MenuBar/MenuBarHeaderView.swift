@@ -22,6 +22,7 @@ final class MenuBarHeaderView: NSView {
 
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentHotkeyError: String?
+    private var currentStatusTone: MenuBarHeaderStatusPresentation.Tone = .ready
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -121,19 +122,38 @@ final class MenuBarHeaderView: NSView {
         currentHotkeyError = hotkeyError
 
         let isReady = warmupStatus.isReadyForMenuHeader
-        if isMeetingRecording {
-            statusDot.layer?.backgroundColor = NSColor.systemRed.cgColor
-            statusLabel.stringValue = "Recording"
-        } else {
-            statusDot.layer?.backgroundColor = (isReady ? MenuTokens.statusGreenNS : MenuTokens.statusOrangeNS).cgColor
-            statusLabel.stringValue = isReady ? "Ready" : warmupStatus.subtitle
-        }
+        let status = MenuBarHeaderStatusPresentation.resolve(
+            isReady: isReady,
+            isMeetingRecording: isMeetingRecording,
+            warmupSubtitle: warmupStatus.subtitle
+        )
+        currentStatusTone = status.tone
+        statusLabel.stringValue = status.text
+        applyStatusDotColor()
         progressBar.doubleValue = warmupStatus.progress
         detailLabel.stringValue = isReady ? "" : warmupStatus.detail
         warningLabel.stringValue = hotkeyError ?? ""
 
         needsLayout = true
         invalidateIntrinsicContentSize()
+    }
+
+    private func applyStatusDotColor() {
+        let color: NSColor
+        switch currentStatusTone {
+        case .recording:
+            color = MenuTokens.statusRedNS
+        case .ready:
+            color = MenuTokens.statusGreenNS
+        case .working:
+            color = MenuTokens.statusOrangeNS
+        }
+        statusDot.layer?.backgroundColor = menuResolvedCGColor(color)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyStatusDotColor()
     }
 
     var intrinsicHeight: CGFloat {

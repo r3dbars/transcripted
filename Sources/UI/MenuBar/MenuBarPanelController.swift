@@ -63,7 +63,6 @@ final class MenuBarPanelController: NSViewController {
         content.onUpdateAction = { [weak self] in self?.performUpdateActionFromMenu() }
         view = content
         contentView = content
-        view.appearance = NSAppearance(named: .darkAqua)
 
         refresh()
         setupSubscriptions()
@@ -131,6 +130,7 @@ final class MenuBarPanelController: NSViewController {
 
         content.utilityActionsView.pasteAvailable = latestDictationLoaded ? (latestDictation != nil) : nil
         content.utilityActionsView.update(
+            updateSymbolName: updatePresentation.symbolName,
             updateTitle: updatePresentation.title,
             updateDetail: updatePresentation.detail,
             updateVersion: updatePresentation.trailingText,

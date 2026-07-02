@@ -46,13 +46,10 @@ final class MenuBarContentView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
-        appearance = NSAppearance(named: .darkAqua)
         wantsLayer = true
         layer?.cornerRadius = MenuTokens.surfaceCornerRadius
         layer?.masksToBounds = true
-        layer?.backgroundColor = MenuTokens.surfaceBackgroundNS.cgColor
         layer?.borderWidth = 1
-        layer?.borderColor = MenuTokens.surfaceStrokeNS.cgColor
 
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
@@ -64,12 +61,28 @@ final class MenuBarContentView: NSView {
 
         [headerDivider, sectionDivider].forEach {
             $0.wantsLayer = true
-            $0.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
             documentView.addSubview($0)
         }
 
         updateCalloutRow.isHidden = true
         [headerView, updateCalloutRow, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
+
+        applyLayerColors()
+    }
+
+    // Layer colors are appearance-resolved snapshots, so they must be
+    // re-applied whenever the popover's effective appearance flips.
+    private func applyLayerColors() {
+        layer?.backgroundColor = menuResolvedCGColor(MenuTokens.surfaceBackgroundNS)
+        layer?.borderColor = menuResolvedCGColor(MenuTokens.surfaceStrokeNS)
+        [headerDivider, sectionDivider].forEach {
+            $0.layer?.backgroundColor = menuResolvedCGColor(MenuTokens.sectionDividerNS)
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyLayerColors()
     }
 
     override func layout() {
