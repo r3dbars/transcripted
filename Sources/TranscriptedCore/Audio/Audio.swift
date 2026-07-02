@@ -475,9 +475,20 @@ public class Audio: ObservableObject, @unchecked Sendable {
         set { formatLock.lock(); defer { formatLock.unlock() }; _inputChannelCount = newValue }
     }
 
-    // Throttle system audio visualizer updates (skip every other callback)
-    // Protected by systemLevelLock — accessed from I/O callback thread
-    var systemLevelUpdateCounter: Int = 0
+    // Time-gate for @Published level updates. Mic buffers land ~12x/s and
+    // system buffers faster still; every main-thread publish fans out through
+    // the capture bridge into SwiftUI observers, so levels only publish when
+    // at least `levelPublishInterval` has passed since the last publish. The
+    // next gated buffer always carries the freshest level, and stop/reset
+    // paths write the published properties directly on main (bypassing the
+    // gate), so a final level of 0 still lands when capture ends.
+    // Timestamps use monotonic CACurrentMediaTime — a wall-clock jump must
+    // not wedge the gate shut. Protected by their locks — accessed from
+    // tap and I/O callback threads.
+    static let levelPublishInterval: CFTimeInterval = 0.15
+    var lastMicLevelPublishTime: CFTimeInterval = 0
+    let micLevelPublishLock = NSLock()
+    var lastSystemLevelPublishTime: CFTimeInterval = 0
     let systemLevelLock = NSLock()
 
     // Debug: Track system audio buffer count

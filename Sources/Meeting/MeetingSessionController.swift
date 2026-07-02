@@ -1750,7 +1750,16 @@ final class MeetingSessionController: ObservableObject {
         capture.$recordingDuration
             .sink { [weak self] duration in
                 guard let self else { return }
-                self.recordingDuration = duration
+                // The capture timer ticks every 0.2s, but every @Published
+                // mutation here re-renders any SwiftUI view observing this
+                // controller (Home observes it directly). UI consumers only
+                // display whole seconds, so republish the mirror on second
+                // boundaries plus resets; diagnostics reads tolerate the
+                // sub-second staleness. The inactivity tick below stays on
+                // the raw 0.2s cadence.
+                if Int(duration) != Int(self.recordingDuration) || duration < self.recordingDuration {
+                    self.recordingDuration = duration
+                }
                 guard self.isRecording else { return }
                 self.applyAudioInactivityEvent(
                     self.audioInactivityDetector.tick(at: duration)

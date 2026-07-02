@@ -1,6 +1,7 @@
 import Foundation
 import Accelerate
 @preconcurrency import AVFoundation
+import QuartzCore
 
 // MARK: - Audio Level Processing & Silence Detection
 
@@ -11,6 +12,22 @@ extension Audio {
     // MARK: - Mic Audio Level
 
     func calculateLevel(buffer: AVAudioPCMBuffer) {
+        // Mic buffers arrive ~12x/s; publishing each one fans two @Published
+        // mutations out through the capture bridge into SwiftUI observers, so
+        // gate publishes to `Audio.levelPublishInterval`. Buffers keep
+        // flowing while capture runs, so the next gated publish always
+        // carries the freshest level; stop paths reset `audioLevel` to 0
+        // directly on main, bypassing this gate. Called on the AVAudioEngine
+        // tap thread (not the HAL real-time thread — the tap path already
+        // locks and dispatches), so the NSLock is safe here.
+        let shouldPublish: Bool = micLevelPublishLock.withLock {
+            let now = CACurrentMediaTime()
+            guard now - lastMicLevelPublishTime >= Audio.levelPublishInterval else { return false }
+            lastMicLevelPublishTime = now
+            return true
+        }
+        guard shouldPublish else { return }
+
         let level = normalizedRMSLevel(buffer: buffer)
 
         DispatchQueue.main.async { [weak self] in
@@ -119,14 +136,15 @@ extension Audio {
     func calculateSystemLevel(buffer: AVAudioPCMBuffer) {
         recordSystemSignalPeak(linearPeak(buffer: buffer))
 
-        // Throttle updates: only update every 4th callback (~2x faster than mic instead of ~8x)
+        // System buffers land far more often than mic buffers. Same time-gate
+        // as the mic path so the visualizer history publishes on a fixed
+        // cadence instead of per callback (the old every-4th-callback counter
+        // still updated ~24x/s).
         let shouldProcess: Bool = systemLevelLock.withLock {
-            systemLevelUpdateCounter += 1
-            if systemLevelUpdateCounter >= 4 {
-                systemLevelUpdateCounter = 0
-                return true
-            }
-            return false
+            let now = CACurrentMediaTime()
+            guard now - lastSystemLevelPublishTime >= Audio.levelPublishInterval else { return false }
+            lastSystemLevelPublishTime = now
+            return true
         }
         guard shouldProcess else { return }
 
