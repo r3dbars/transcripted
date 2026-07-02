@@ -14,7 +14,6 @@ struct MenuBarContentSmokeSnapshot: Codable, Equatable {
 final class MenuBarContentView: NSView {
     private let scrollView = NSScrollView()
     private let documentView = FlippedMenuDocumentView()
-    private let headerDivider = NSView()
     private let sectionDivider = NSView()
     private var documentHeight: CGFloat = MenuTokens.panelHeight
 
@@ -46,11 +45,9 @@ final class MenuBarContentView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
-        wantsLayer = true
-        layer?.cornerRadius = MenuTokens.surfaceCornerRadius
-        layer?.masksToBounds = true
-        layer?.borderWidth = 1
-
+        // No painted surface: the content stays transparent so NSPopover's
+        // native material provides the background, corner chrome, and the
+        // Reduce Transparency behavior — the popover blends like system menus.
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.hasHorizontalScroller = false
@@ -59,10 +56,8 @@ final class MenuBarContentView: NSView {
         scrollView.documentView = documentView
         addSubview(scrollView)
 
-        [headerDivider, sectionDivider].forEach {
-            $0.wantsLayer = true
-            documentView.addSubview($0)
-        }
+        sectionDivider.wantsLayer = true
+        documentView.addSubview(sectionDivider)
 
         updateCalloutRow.isHidden = true
         [headerView, updateCalloutRow, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
@@ -73,11 +68,7 @@ final class MenuBarContentView: NSView {
     // Layer colors are appearance-resolved snapshots, so they must be
     // re-applied whenever the popover's effective appearance flips.
     private func applyLayerColors() {
-        layer?.backgroundColor = menuResolvedCGColor(MenuTokens.surfaceBackgroundNS)
-        layer?.borderColor = menuResolvedCGColor(MenuTokens.surfaceStrokeNS)
-        [headerDivider, sectionDivider].forEach {
-            $0.layer?.backgroundColor = menuResolvedCGColor(MenuTokens.sectionDividerNS)
-        }
+        sectionDivider.layer?.backgroundColor = menuResolvedCGColor(MenuTokens.sectionDividerNS)
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -96,16 +87,11 @@ final class MenuBarContentView: NSView {
 
         let headerHeight = headerView.intrinsicHeight
         headerView.isHidden = headerHeight <= 0
-        headerDivider.isHidden = headerHeight <= 0
         if headerHeight > 0 {
             headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
-            y += headerHeight + 8
-
-            headerDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
-            y += 7
+            y += headerHeight + 10
         } else {
             headerView.frame = .zero
-            headerDivider.frame = .zero
         }
 
         if !updateCalloutRow.isHidden {

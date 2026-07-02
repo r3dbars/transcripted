@@ -669,16 +669,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         statusItemUpdateBadge.translatesAutoresizingMaskIntoConstraints = false
         statusItemUpdateBadge.wantsLayer = true
         statusItemUpdateBadge.layer?.backgroundColor = NSColor.systemOrange.cgColor
-        statusItemUpdateBadge.layer?.borderColor = NSColor.black.withAlphaComponent(0.45).cgColor
-        statusItemUpdateBadge.layer?.borderWidth = 1
-        statusItemUpdateBadge.layer?.cornerRadius = 4
+        statusItemUpdateBadge.layer?.cornerRadius = 3.5
         statusItemUpdateBadge.layer?.masksToBounds = true
         statusItemUpdateBadge.isHidden = true
 
         button.addSubview(statusItemUpdateBadge)
         NSLayoutConstraint.activate([
-            statusItemUpdateBadge.widthAnchor.constraint(equalToConstant: 8),
-            statusItemUpdateBadge.heightAnchor.constraint(equalToConstant: 8),
+            statusItemUpdateBadge.widthAnchor.constraint(equalToConstant: 7),
+            statusItemUpdateBadge.heightAnchor.constraint(equalToConstant: 7),
             statusItemUpdateBadge.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
             statusItemUpdateBadge.topAnchor.constraint(equalTo: button.topAnchor, constant: 3),
         ])

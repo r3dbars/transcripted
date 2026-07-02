@@ -112,9 +112,14 @@ final class MenuBarPanelController: NSViewController {
             meetingState: meetingState,
             pasteDetail: pasteDetail(for: latestDictation),
             pasteEnabled: latestDictation != nil,
+            isMeetingRecording: isMeetingRecording,
             showStartDictation: menuVisibility[.startDictation] ?? true,
             showStartMeeting: menuVisibility[.startMeeting] ?? true,
-            showPasteLastDictation: menuVisibility[.pasteLastDictation] ?? true,
+            // A disabled "no saved dictation yet" row is an empty state
+            // advertising itself — hide paste until it has content. The smoke
+            // override forces it visible so launch automation can assert on it.
+            showPasteLastDictation: (menuVisibility[.pasteLastDictation] ?? true)
+                && (menuVisibilityOverride != nil || latestDictation != nil),
             showRecentMeetings: menuVisibility[.recentMeetings] ?? true
         )
 
@@ -413,13 +418,16 @@ final class MenuBarPanelController: NSViewController {
                 )
             }
 
+            // Available-but-not-downloaded stays in the quiet utility row;
+            // the loud callout is reserved for the one state that actually
+            // needs the user (restart to finish installing).
             return (
-                "arrow.down.circle.fill",
+                "arrow.down.circle",
                 "Update available: \(version)",
                 "A new version is ready to install",
                 "Install",
-                .warning,
-                true
+                .standard,
+                false
             )
         case .downloading(let version):
             return (

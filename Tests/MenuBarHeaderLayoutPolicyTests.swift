@@ -16,6 +16,24 @@ func testMenuBarHeaderLayoutPolicy() {
         )
     }
 
+    runSuite("MenuBarHeaderLayoutPolicy shows the header only when it has something to say") {
+        assertEqual(
+            MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: true, hasWarning: false),
+            0,
+            "a ready, quiet, idle header should take no space"
+        )
+        assertEqual(
+            MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: true, hasWarning: false, isRecording: true),
+            MenuBarHeaderLayoutPolicy.recordingIntrinsicHeight,
+            "an active meeting recording must make the header visible"
+        )
+        assertEqual(
+            MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: true, hasWarning: true, isRecording: true),
+            MenuBarHeaderLayoutPolicy.readyWarningIntrinsicHeight,
+            "a warning while recording should keep the taller warning layout"
+        )
+    }
+
     runSuite("MenuBarHeaderLayoutPolicy preserves existing non-ready heights") {
         assertEqual(
             MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: false, hasWarning: false),

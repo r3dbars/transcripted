@@ -66,7 +66,7 @@ final class MenuBarUtilityActionsView: NSView {
 
         feedbackRow.update(
             symbolName: "bubble.left",
-            title: "Submit feedback",
+            title: "Submit Feedback",
             detail: "",
             tone: .standard,
             size: .utility
@@ -91,12 +91,13 @@ final class MenuBarUtilityActionsView: NSView {
             size: .utility
         )
 
+        // Quitting isn't dangerous — no warning tone.
         quitRow.update(
             symbolName: "power",
             title: "Quit",
             detail: "",
             trailingText: "⌘Q",
-            tone: .warning,
+            tone: .standard,
             size: .utility
         )
 

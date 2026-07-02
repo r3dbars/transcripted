@@ -310,7 +310,7 @@ for key in ("home", "startDictation", "startMeeting"):
 utility_actions = report.get("content", {}).get("utilityActions", {})
 for key, expected in {
     "connectAgent": ("Connect Agent", "transcripted.menubar.utility.connect-agent"),
-    "submitFeedback": ("Submit feedback", "transcripted.menubar.utility.submit-feedback"),
+    "submitFeedback": ("Submit Feedback", "transcripted.menubar.utility.submit-feedback"),
     "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
     "settings": ("Settings", "transcripted.menubar.utility.settings"),
     "quit": ("Quit", "transcripted.menubar.utility.quit"),

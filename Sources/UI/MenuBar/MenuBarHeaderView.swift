@@ -159,7 +159,11 @@ final class MenuBarHeaderView: NSView {
     var intrinsicHeight: CGFloat {
         let isReady = currentWarmupStatus.isReadyForMenuHeader
         let hasWarning = currentHotkeyError?.isEmpty == false
-        return MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: isReady, hasWarning: hasWarning)
+        return MenuBarHeaderLayoutPolicy.intrinsicHeight(
+            isReady: isReady,
+            hasWarning: hasWarning,
+            isRecording: currentStatusTone == .recording
+        )
     }
 
     var smokeSnapshot: MenuBarHeaderSmokeSnapshot {

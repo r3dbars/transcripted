@@ -18,15 +18,8 @@ enum MenuTokens {
         }
     }
 
-    // Surface
-    static let surfaceBackgroundNS = dynamic(
-        dark: NSColor(calibratedWhite: 0.11, alpha: 0.98),
-        light: NSColor(calibratedWhite: 0.97, alpha: 0.98)
-    )
-    static let surfaceStrokeNS = dynamic(
-        dark: NSColor.white.withAlphaComponent(0.08),
-        light: NSColor.black.withAlphaComponent(0.10)
-    )
+    // Surface — NSPopover's native material provides the background; only the
+    // section divider is drawn by the popover itself.
     static let sectionDividerNS = dynamic(
         dark: NSColor.white.withAlphaComponent(0.12),
         light: NSColor.black.withAlphaComponent(0.12)
@@ -72,7 +65,6 @@ enum MenuTokens {
     static let panelHeight: CGFloat = 480
     static let innerPadding: CGFloat = 10
     static let sectionSpacing: CGFloat = 7
-    static let surfaceCornerRadius: CGFloat = 14
     static let cardCornerRadius: CGFloat = 8
     static let minimumHitTargetSize: CGFloat = 40
     static let compactActionRowHeight: CGFloat = 42

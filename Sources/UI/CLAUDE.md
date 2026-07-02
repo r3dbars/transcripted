@@ -51,10 +51,10 @@ into a taller loading or error state.
 ### MenuBar/
 
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
-- `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
+- `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover; transparent so NSPopover's native material provides the surface
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
 - `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup)
-- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status, including the red "Recording" state while a meeting records
+- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status; hidden entirely when idle and ready, visible for warmup, hotkey warnings, and the red "Recording" state while a meeting records
 - `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut
 - `MenuBar/MenuBarPrimaryActionsView.swift` — groups the dictation, meeting, paste, and recent-meetings action rows at the top of the popover
 - `MenuBar/MenuBarUtilityActionsView.swift` — groups the connect-agent, feedback, updates, settings, and quit action rows at the bottom of the popover
