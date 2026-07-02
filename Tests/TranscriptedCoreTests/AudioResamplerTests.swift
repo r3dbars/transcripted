@@ -64,9 +64,8 @@ final class AudioResamplerTests: XCTestCase {
     // MARK: - loadAndResample (convertToMono)
 
     func testLoadAndResampleDownmixesStereoAndResamplesToTargetRate() throws {
-        // 1s of constant 48 kHz stereo -> 16 kHz mono. Exercises the
-        // AVAudioConverter path that now writes directly into the returned
-        // Array's storage (no intermediate full-length PCM buffer copy).
+        // 1s of constant 48 kHz stereo -> 16 kHz mono through the chunked
+        // AVAudioConverter path.
         let url = try writeWAV(sampleRate: 48_000, channels: 2, frames: 48_000, value: 0.5)
         defer { try? FileManager.default.removeItem(at: url) }
 
