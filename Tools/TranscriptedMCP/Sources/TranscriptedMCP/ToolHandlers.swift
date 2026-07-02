@@ -121,6 +121,37 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
+                name: "semantic_search",
+                description: "Meaning-based search across meetings and dictations using an on-device sentence embedding — finds paraphrases lexical search misses ('pricing pushback' finds 'they balked at the cost'). Use when `search`/`search_context` come up empty or the query is conceptual rather than exact words. English-optimized. Results carry a cosine similarity score; treat low scores (< ~0.4) as weak matches.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object([
+                            "type": .string("string"),
+                            "description": .string("What you're looking for, phrased naturally (e.g. 'concerns about pricing')")
+                        ]),
+                        "kind": .object([
+                            "type": .string("string"),
+                            "description": .string("Which context to search: 'all' (default), 'meeting', or 'dictation'")
+                        ]),
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Max results (default 10, max 50)")
+                        ]),
+                        "date_from": .object([
+                            "type": .string("string"),
+                            "description": .string("Start date filter (YYYY-MM-DD)")
+                        ]),
+                        "date_to": .object([
+                            "type": .string("string"),
+                            "description": .string("End date filter (YYYY-MM-DD)")
+                        ]),
+                    ]),
+                    "required": .array([.string("query")]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
                 name: "read_dictation",
                 description: "Read a saved dictation day or one specific dictation entry by ID. Use list_dictations or recent_context first to find the filename or entry_id you need.",
                 inputSchema: .object([
@@ -329,6 +360,8 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 return try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "search_context":
                 return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "semantic_search":
+                return try handleSemanticSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "recent_context":
                 return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "who_is":
@@ -569,6 +602,62 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, m
 
     let json = try JSONEncoder.pretty.encode(results)
     return textResult(String(data: json, encoding: .utf8) ?? "[]")
+}
+
+private func handleSemanticSearch(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+    guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
+        return textResult("Missing required parameter: query", isError: true)
+    }
+
+    let kind = params.arguments?["kind"]?.stringValue
+    let count = params.arguments?["count"]?.intValue ?? 10
+    let dateFrom = params.arguments?["date_from"]?.stringValue
+    let dateTo = params.arguments?["date_to"]?.stringValue
+
+    guard var hits = try index.semanticSearch(
+        query: query,
+        kind: kind,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        maxResults: count
+    ) else {
+        return textResult(
+            "Semantic search is unavailable on this system (the on-device sentence-embedding model could not be loaded). Use `search` or `search_context` instead."
+        )
+    }
+
+    if hits.isEmpty {
+        return textResult("No semantic matches found for \"\(query)\". Try `search_context` for exact-word matching.")
+    }
+
+    for i in hits.indices where hits[i].kind == "meeting" {
+        guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
+            named: hits[i].filename,
+            appendingExtension: "md",
+            in: meetingDirs
+        ) else { continue }
+        if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
+            hits[i].meetingTitle = extractTitle(from: content) ?? hits[i].filename
+        }
+    }
+
+    trackAgentCaptureQueryObserved(
+        queryKind: "search",
+        artifactKind: semanticArtifactKind(for: hits),
+        captureDate: hits.compactMap { parseCaptureDate($0.date) }.max(),
+        sourceCount: hits.count
+    )
+
+    let json = try JSONEncoder.pretty.encode(SemanticSearchResult(query: query, count: hits.count, items: hits))
+    return textResult(String(data: json, encoding: .utf8) ?? "[]")
+}
+
+private func semanticArtifactKind(for hits: [SemanticSearchHit]) -> String {
+    let kinds = Set(hits.map(\.kind))
+    if kinds.count == 1, let only = kinds.first, only == "meeting" || only == "dictation" {
+        return only
+    }
+    return "mixed"
 }
 
 private func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {

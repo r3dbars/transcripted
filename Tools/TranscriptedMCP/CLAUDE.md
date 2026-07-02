@@ -35,11 +35,11 @@ When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
-## Package Layout (17 Swift files)
+## Package Layout (19 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
-- `Sources/TranscriptedMCP/` — 9 source files for server startup, directory resolution, path validation, indexing, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 8 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, markdown loading, logging, name variants, and shared fixtures
+- `Sources/TranscriptedMCP/` — 10 source files for server startup, directory resolution, path validation, indexing, semantic embedding, and tool handlers
+- `Tests/TranscriptedMCPTests/` — 9 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, semantic search, markdown loading, logging, name variants, and shared fixtures
 
 ## File Index
 
@@ -51,6 +51,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations |
 | `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files from disk; parsing delegates to `TranscriptedCaptureKit` |
 | `Models.swift` | Codable input/output models and `MCPIndexError` |
+| `SemanticEmbedding.swift` | On-device sentence-embedding seam (Apple `NLEmbedding`), vector blob codec, and utterance chunker behind `semantic_search` |
 | `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
 | `PathSecurity.swift` | Guards direct file reads against traversal, symlinks, and out-of-root paths |
 | `FileWatcher.swift` | Watches the local transcript directories and incrementally reindexes changed files |
@@ -66,6 +67,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
 | `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
+| `SemanticSearchTests.swift` | Semantic retrieval mechanics: chunking, cosine ranking, kind/date filters, reindex cleanup, model-unavailable fallback (deterministic fake embedding) |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
 ## MCP Tools
@@ -80,6 +82,7 @@ All tools are read-only.
 | `read_dictation` | Read one dictation day or one specific dictation entry |
 | `search` | Search meeting transcript content |
 | `search_context` | Search across meetings, dictations, or both |
+| `semantic_search` | Meaning-based (embedding) search across meetings and dictations; finds paraphrases lexical search misses |
 | `recent_context` | Get a mixed recent feed of meetings and dictations |
 | `who_is` | Look up a speaker profile across saved meetings |
 | `recap` | Build a structured digest for a date range |
@@ -119,6 +122,7 @@ The SQLite index keeps separate records for:
 - structured meeting-summary items (Decisions / Action Items with owner / Open Questions), one row per bullet in `meeting_summary_items` with a `kind` discriminator + FTS5, so cross-meeting tools can roll up across all meetings
 - dictation day files
 - dictation entry search rows
+- semantic chunks (one normalized on-device sentence embedding per chunk of consecutive meeting utterances or per dictation entry) behind `semantic_search`
 
 Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from each meeting's inline local summary (or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
 
@@ -182,5 +186,6 @@ The in-app Claude Desktop installer copies that helper into:
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
 - `recent_context` is intentionally mixed; for the latest meeting specifically, prefer `list_meetings` or `recent_context` with `kind: "meeting"`
+- `semantic_search` embeds with Apple's on-device `NLEmbedding` sentence model (English-optimized, nothing leaves the machine). When the model asset is unavailable the tool says so and lexical `search`/`search_context` keep working; indexing simply skips semantic rows. Embedding happens at index time, so the first rebuild after upgrading pays a one-time cost proportional to library size
 - `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
 - source builds can run the server standalone, but shipped app builds bundle the helper for the one-click Claude Desktop installer

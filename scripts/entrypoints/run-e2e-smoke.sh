@@ -62,6 +62,7 @@ SWIFT_SOURCES=(
     "Sources/UI/Shared/SupportDiagnosticsBundle.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/DataDirectories.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/Models.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/SemanticEmbedding.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/NameVariants.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/PathSecurity.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptLoader.swift"

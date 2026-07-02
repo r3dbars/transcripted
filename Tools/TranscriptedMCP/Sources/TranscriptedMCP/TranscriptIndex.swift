@@ -6,9 +6,11 @@ final class TranscriptIndex: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.transcripted.mcp.index", qos: .utility)
     private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let indexPath: URL
+    private let embedding: SemanticTextEmbedding
 
-    init(indexDir: URL) throws {
+    init(indexDir: URL, embedding: SemanticTextEmbedding = AppleSentenceEmbedding()) throws {
         self.indexPath = indexDir.appendingPathComponent("mcp_index.sqlite")
+        self.embedding = embedding
         try queue.sync { try self.openAndSetup() }
     }
 
@@ -53,8 +55,8 @@ final class TranscriptIndex: @unchecked Sendable {
 
     /// Bump when the derived index shape changes so existing on-disk indexes are
     /// rebuilt from disk on next open. v2 added `meeting_summary_items`; v3 added
-    /// `status` + `due` columns to it.
-    private static let schemaVersion: Int32 = 3
+    /// `status` + `due` columns to it; v4 added `semantic_chunks`.
+    private static let schemaVersion: Int32 = 4
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
@@ -250,6 +252,25 @@ final class TranscriptIndex: @unchecked Sendable {
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_filename ON meeting_summary_items(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON meeting_summary_items(kind)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_owner ON meeting_summary_items(owner COLLATE NOCASE)")
+
+        // Semantic retrieval rows: one normalized Float32 embedding per chunk of
+        // consecutive utterances (meetings) or per entry (dictations), embedded
+        // on-device via NLEmbedding at index time. `date` is denormalized so
+        // semantic_search can window by date without a per-kind join. Queries
+        // brute-force cosine over the blobs — fine at personal-library scale.
+        exec("""
+            CREATE TABLE IF NOT EXISTS semantic_chunks (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                text TEXT NOT NULL,
+                embedding BLOB NOT NULL
+            )
+        """)
+        exec("CREATE INDEX IF NOT EXISTS idx_semantic_chunks_filename ON semantic_chunks(filename)")
+        exec("CREATE INDEX IF NOT EXISTS idx_semantic_chunks_kind_date ON semantic_chunks(kind, date)")
     }
 
     // MARK: - Reconciliation
@@ -402,6 +423,12 @@ final class TranscriptIndex: @unchecked Sendable {
         }
 
         try insertSummaryItems(forMeeting: url, filename: filename)
+        try insertSemanticChunks(
+            filename: filename,
+            kind: "meeting",
+            date: dateOnly,
+            texts: SemanticChunker.chunks(from: transcript.utterances.map(\.text))
+        )
 
         try execOrThrow("COMMIT")
         committed = true
@@ -437,6 +464,85 @@ final class TranscriptIndex: @unchecked Sendable {
                 "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
                 bindings: [.text(filename), .text(SummaryItemKind.openQuestion), .int(position), .null, .text(text)]
             )
+        }
+    }
+
+    /// Embed and insert semantic chunks for one artifact. Called inside the
+    /// meeting/dictation index transaction. Silently a no-op when the embedding
+    /// model is unavailable — lexical search keeps working either way.
+    private func insertSemanticChunks(
+        filename: String,
+        kind: String,
+        date: String,
+        texts: [String]
+    ) throws {
+        guard embedding.isAvailable else { return }
+        for (position, text) in texts.enumerated() {
+            guard let vector = embedding.normalizedVector(for: text) else { continue }
+            try bindExec(
+                "INSERT INTO semantic_chunks (filename, kind, position, date, text, embedding) VALUES (?,?,?,?,?,?)",
+                bindings: [
+                    .text(filename), .text(kind), .int(position), .text(date),
+                    .text(text), .blob(SemanticVectorCodec.encode(vector))
+                ]
+            )
+        }
+    }
+
+    /// Cosine-ranked semantic retrieval across meeting chunks and dictation
+    /// entries. Brute-force scan over stored normalized vectors — a personal
+    /// library is tens of thousands of chunks at most, which a single pass
+    /// handles comfortably. Returns nil when the embedding model is unavailable
+    /// (distinct from an empty result).
+    func semanticSearch(
+        query: String,
+        kind: String?,
+        dateFrom: String?,
+        dateTo: String?,
+        maxResults: Int = 10
+    ) throws -> [SemanticSearchHit]? {
+        guard embedding.isAvailable else { return nil }
+
+        return try queue.sync { () throws -> [SemanticSearchHit]? in
+            // Embed inside the index queue so the model is only ever used from
+            // one serial queue (indexing embeds on this queue too).
+            guard let queryVector = embedding.normalizedVector(for: query) else { return nil }
+
+            var sql = "SELECT filename, kind, date, text, embedding FROM semantic_chunks WHERE 1=1"
+            var bindings: [SQLBinding] = []
+            if let kind, kind != "all" {
+                sql += " AND kind = ?"
+                bindings.append(.text(kind))
+            }
+            if let dateFrom { sql += " AND date >= ?"; bindings.append(.text(dateFrom)) }
+            if let dateTo { sql += " AND date <= ?"; bindings.append(.text(dateTo)) }
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+            for (i, binding) in bindings.enumerated() { bind(stmt: stmt, index: Int32(i + 1), value: binding) }
+
+            var hits: [SemanticSearchHit] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let blobPointer = sqlite3_column_blob(stmt, 4) else { continue }
+                let blobLength = Int(sqlite3_column_bytes(stmt, 4))
+                let vector = SemanticVectorCodec.decode(Data(bytes: blobPointer, count: blobLength))
+                guard vector.count == queryVector.count else { continue }
+
+                hits.append(SemanticSearchHit(
+                    filename: colText(stmt, 0),
+                    meetingTitle: nil,
+                    kind: colText(stmt, 1),
+                    date: colText(stmt, 2),
+                    text: colText(stmt, 3),
+                    score: Double(SemanticVectorCodec.cosine(queryVector, vector))
+                ))
+            }
+
+            let limit = max(1, min(maxResults, 50))
+            return Array(hits.sorted { $0.score > $1.score }.prefix(limit))
         }
     }
 
@@ -480,6 +586,13 @@ final class TranscriptIndex: @unchecked Sendable {
             )
         }
 
+        try insertSemanticChunks(
+            filename: filename,
+            kind: "dictation",
+            date: day.date,
+            texts: day.entries.flatMap { SemanticChunker.chunks(from: [$0.text]) }
+        )
+
         try execOrThrow("COMMIT")
         committed = true
         log("Indexed dictation day: \(filename) (\(day.entries.count) entries)")
@@ -497,6 +610,7 @@ final class TranscriptIndex: @unchecked Sendable {
         var committed = false
         defer { if !committed { exec("ROLLBACK") } }
         try bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM semantic_chunks WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_summary_items WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_speakers WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
@@ -1587,6 +1701,7 @@ final class TranscriptIndex: @unchecked Sendable {
         case text(String)
         case int(Int)
         case double(Double)
+        case blob(Data)
         case null
     }
 
@@ -1598,6 +1713,10 @@ final class TranscriptIndex: @unchecked Sendable {
             sqlite3_bind_int64(stmt, index, Int64(i))
         case .double(let d):
             sqlite3_bind_double(stmt, index, d)
+        case .blob(let data):
+            data.withUnsafeBytes { bytes in
+                _ = sqlite3_bind_blob(stmt, index, bytes.baseAddress, Int32(data.count), SQLITE_TRANSIENT)
+            }
         case .null:
             sqlite3_bind_null(stmt, index)
         }

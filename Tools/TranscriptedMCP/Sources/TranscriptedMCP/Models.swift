@@ -406,6 +406,30 @@ struct DigestActionItem: Codable {
     let due: String?
 }
 
+// MARK: - Semantic Search
+
+/// One semantically-matched chunk. `score` is cosine similarity in [-1, 1];
+/// higher is closer.
+struct SemanticSearchHit: Codable {
+    let filename: String
+    var meetingTitle: String?
+    let kind: String
+    let date: String
+    let text: String
+    let score: Double
+
+    enum CodingKeys: String, CodingKey {
+        case filename, kind, date, text, score
+        case meetingTitle = "meeting_title"
+    }
+}
+
+struct SemanticSearchResult: Codable {
+    let query: String
+    let count: Int
+    let items: [SemanticSearchHit]
+}
+
 struct DigestMeeting: Codable {
     let filename: String
     var title: String
