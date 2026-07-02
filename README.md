@@ -124,26 +124,36 @@ A meeting:
 ```md
 # Product Review
 
-Recorded Apr 10 at 3:01 PM  -  32:14  -  4,230 words
+Recorded Apr 10, 2026 at 3:01 PM  •  32 min, 14 sec  •  4230 words  •  18 turns
 
 ## Transcript
 
-**00:00** [Sarah]
+**00:00**  [System/Sarah]
 Keep annual pricing manual for now.
 
-**00:04** [Michael]
+**00:04**  [Mic/You]
 Onboarding friction is still the blocker.
 ```
+
+(Each file also starts with a small metadata header — date, duration,
+speakers — that agents can parse. Speaker labels carry the audio channel, so
+`[Mic/You]` is you on the microphone and `[System/Sarah]` is a remote voice.)
 
 A day of dictations:
 
 ```md
 # Dictations for April 10, 2026
 
-## 9:15 AM
+## 9:15 AM - Need to test the onboarding changes
+
+Source app: Notes
+Words: 11
 
 Need to test the onboarding changes before touching pricing.
 ```
+
+(Trimmed for the README — each entry also records an entry ID, exact
+timestamp, and delivery outcome.)
 
 Everything lives in normal folders:
 
