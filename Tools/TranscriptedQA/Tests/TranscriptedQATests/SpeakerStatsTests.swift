@@ -53,8 +53,10 @@ final class SpeakerStatsTests: XCTestCase {
         XCTAssertEqual(metrics.last30Days.suggestionPrecision ?? -1, 1.0, accuracy: 0.0001)
         XCTAssertEqual(metrics.last30Days.questionsPerMeeting ?? -1, 1.0, accuracy: 0.0001)
 
-        XCTAssertEqual(metrics.prior30Days.questions, 1)
-        XCTAssertEqual(metrics.prior30Days.suggestionPrecision ?? -1, 0.0, accuracy: 0.0001)
+        // Prior window (30–60 days ago) holds two verdicts: A's confirmed at
+        // day 45 and B's corrected at day 40 → precision 1/2.
+        XCTAssertEqual(metrics.prior30Days.questions, 2)
+        XCTAssertEqual(metrics.prior30Days.suggestionPrecision ?? -1, 0.5, accuracy: 0.0001)
     }
 
     func testMetricsWithNoOutcomes() {
