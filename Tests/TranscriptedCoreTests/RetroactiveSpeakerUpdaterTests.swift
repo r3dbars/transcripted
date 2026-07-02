@@ -238,6 +238,43 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains(#"name: "Speaker 1""#))
     }
 
+    func testRetroactivelyUpdateSpeakerFindsDbIdDeepInLargeFrontmatter() throws {
+        // Guards the frontmatter pre-scan in the retroactive paths: the db_id row
+        // must still be found when a large frontmatter (e.g. many gap_events)
+        // pushes the speakers block far past the first read chunk.
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("large-frontmatter.md")
+        let gapEvents = (0..<3000)
+            .map { "  - \"Audio gap \($0) detected while the capture device was switching routes\"" }
+            .joined(separator: "\n")
+        try """
+        ---
+        gap_events:
+        \(gapEvents)
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        [00:00] [System/Speaker 1] hello there
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: speakerId,
+            newName: "Jamie",
+            in: temporaryDirectory
+        )
+
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Jamie""#))
+        XCTAssertTrue(updated.contains("[System/Jamie]"))
+        XCTAssertFalse(updated.contains("[System/Speaker 1]"))
+    }
+
     func testUpdateDeferredSpeakerNameOnlyRenamesQueuedChannelSpeaker() throws {
         let micId = UUID()
         let systemId = UUID()
@@ -503,6 +540,40 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         updated = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(updated.contains(#"name: "Alicia""#))
         XCTAssertTrue(updated.contains("[System/Alicia]"))
+    }
+
+    func testRetroactivelyMergeSpeakerIgnoresDbIdMentionedOnlyInBodyText() throws {
+        // db_id references only ever live in the YAML frontmatter speakers block,
+        // so a literal mention in spoken transcript text is not a profile link and
+        // must not be rewritten by a merge.
+        let sourceId = UUID()
+        let targetId = UUID()
+        let unrelatedId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("body-mention.md")
+        let original = """
+        ---
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(unrelatedId.uuidString)"
+            name: "Speaker 1"
+            confidence: unknown
+            source: db_pending
+        ---
+
+        [00:00] [System/Speaker 1] the yaml row read db_id: "\(sourceId.uuidString)" out loud
+        """
+        try original.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        TranscriptSaver.retroactivelyMergeSpeaker(
+            sourceDbId: sourceId,
+            targetDbId: targetId,
+            targetName: "Alex",
+            in: temporaryDirectory
+        )
+
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertEqual(updated, original)
     }
 
     func testUpdateSpeakerNamesInsertsDbIdWhenTranscriptStartedGeneric() throws {
