@@ -27,6 +27,20 @@ class STTRouter: ObservableObject {
         isModelLoaded(for: selectedModel)
     }
 
+    /// True when the selected model's files are already on disk, so dictation
+    /// can open the microphone immediately and load the model concurrently
+    /// instead of blocking recording on the load.
+    var selectedModelFilesAvailableLocally: Bool {
+        switch selectedModel {
+        case .parakeetTDTv3:
+            return parakeetEngine.modelFilesAvailableLocally
+        case .whisperLargeV3Turbo, .whisperLargeV3:
+            // Whisper does not expose a files-on-disk signal; keep the
+            // conservative wait-for-load start path.
+            return false
+        }
+    }
+
     var inputDeviceName: String { parakeetEngine.inputDeviceName }
     var dictationAudioRouteAnalyticsContext: [String: String] {
         parakeetEngine.currentAudioRouteAnalyticsContext
@@ -99,6 +113,24 @@ class STTRouter: ObservableObject {
             await whisperEngine.initialize(model: model)
         }
         refreshModelDownloadState()
+    }
+
+    /// Wait for the next observable model-load transition. Joins the engine's
+    /// in-flight initialization when one exists — resuming the moment the load
+    /// settles instead of on a polling interval — and falls back to a short
+    /// poll sleep while a download is publishing progress or no
+    /// initialization handle exists (Whisper). Callers own the overall
+    /// timeout and must re-check `isModelLoaded` after each wait.
+    func waitForModelLoadProgress() async {
+        defer { refreshModelDownloadState() }
+        if selectedModel == .parakeetTDTv3 {
+            var isDownloading = false
+            if case .downloading = modelDownloadState { isDownloading = true }
+            if !isDownloading, await parakeetEngine.joinModelInitialization() {
+                return
+            }
+        }
+        try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
     }
 
     func startRecording() async -> Bool {

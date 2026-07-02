@@ -1316,12 +1316,17 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func reserveNativeSampleBufferCapacity() {
-        sampleBuffer.reserveCapacity(
-            ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
-                sampleRate: safeNativeSampleRate(),
-                seconds: TranscriptedConstants.audioBufferCapacitySeconds
-            )
+        let capacity = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
+            sampleRate: safeNativeSampleRate(),
+            seconds: TranscriptedConstants.audioBufferCapacitySeconds
         )
+        sampleBuffer.reserveCapacity(capacity)
+        // The tap thread appends into pendingSamples for the whole session
+        // (drain happens at stop), so reserve the same capacity up front to
+        // avoid growth reallocations while audio is flowing.
+        pendingSamplesLock.withLock {
+            pendingSamples.reserveCapacity(capacity)
+        }
     }
 
     private func audioFormatReadiness(
