@@ -988,6 +988,124 @@ func testRecentCaptureLoader() async {
         }
     }
 
+    await runSuite("RecentMeetingsScanner serves a warm metadata index without re-reading transcripts") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let meetingURL = meetingsRoot.appendingPathComponent("indexed.md", isDirectory: false)
+
+            // Generic speaker labels + an audio-health key so non-trivial derived
+            // fields (needs-review count, audio health) must round-trip through the
+            // index, not just the title.
+            try? writeRecentLoaderMeeting(
+                title: "Indexed Sync",
+                date: recentLoaderDate("2026-06-06T14:00:00Z"),
+                to: meetingURL,
+                micLabel: "Speaker 1",
+                systemLabel: "Speaker 2",
+                extraFrontmatterLines: [
+                    "audio_health: mic_attenuated_by_call_app",
+                    "mic_boost_prompt: shown",
+                ]
+            )
+
+            let cache = RecentMeetingMetadataCache(databaseURL: nil)
+
+            // Cold load parses the file and populates the index.
+            let cold = RecentMeetingsScanner.loadRecent(limit: 1, cache: cache)
+            assertEqual(cold.count, 1, "cold load should return the meeting row")
+            let coldItem = cold.first
+            assertEqual(coldItem?.title, "Indexed Sync", "cold load should read the title from the file")
+            assertEqual(
+                coldItem?.speakerStatus,
+                .needsReview(2),
+                "cold load should flag the two generic speaker labels"
+            )
+            assertEqual(
+                coldItem?.audioHealth,
+                RecentMeetingAudioHealth(micBoostPromptOutcome: "shown"),
+                "cold load should surface the audio-health hint"
+            )
+
+            // Make the transcript content unreadable. Any code path that opens the
+            // file for reading would now fail and drop the row; `stat` metadata
+            // (mtime/size) the index validity check relies on is unaffected.
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o000],
+                ofItemAtPath: meetingURL.path
+            )
+            defer {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o644],
+                    ofItemAtPath: meetingURL.path
+                )
+            }
+
+            // Control: with a fresh empty index the unreadable file produces no row,
+            // proving the warm hit below genuinely avoided reading the file.
+            let control = RecentMeetingsScanner.loadRecent(
+                limit: 1,
+                cache: RecentMeetingMetadataCache(databaseURL: nil)
+            )
+            assertEqual(
+                control.count,
+                0,
+                "an unreadable transcript should yield no row when the index is cold"
+            )
+
+            // Warm load serves the row straight from the index — no transcript read.
+            let warm = RecentMeetingsScanner.loadRecent(limit: 1, cache: cache)
+            assertEqual(warm.count, 1, "warm load should still return the row from the index")
+            let warmItem = warm.first
+            assertEqual(warmItem?.title, coldItem?.title, "warm title should match the indexed value")
+            assertEqual(warmItem?.date, coldItem?.date, "warm display date should match the indexed value")
+            assertEqual(warmItem?.startDate, coldItem?.startDate, "warm start date should match the indexed value")
+            assertEqual(warmItem?.endDate, coldItem?.endDate, "warm end date should match the indexed value")
+            assertEqual(
+                warmItem?.speakerStatus,
+                coldItem?.speakerStatus,
+                "warm speaker status should match the indexed value"
+            )
+            assertEqual(
+                warmItem?.audioHealth,
+                coldItem?.audioHealth,
+                "warm audio health should match the indexed value"
+            )
+        }
+    }
+
+    await runSuite("RecentMeetingsScanner re-parses when the transcript changes under a warm index") {
+        await withTemporaryRecentCaptureLibrary { captureRoot in
+            let meetingsRoot = captureRoot.appendingPathComponent("meetings", isDirectory: true)
+            let meetingURL = meetingsRoot.appendingPathComponent("mutating.md", isDirectory: false)
+
+            try? writeRecentLoaderMeeting(
+                title: "Before Edit",
+                date: recentLoaderDate("2026-06-06T14:00:00Z"),
+                to: meetingURL
+            )
+
+            let cache = RecentMeetingMetadataCache(databaseURL: nil)
+            let first = RecentMeetingsScanner.loadRecent(limit: 1, cache: cache)
+            assertEqual(first.first?.title, "Before Edit", "first load should read the original title")
+
+            // Rewrite with a new title and a fresh modification stamp; the stamp
+            // change must invalidate the cached row so the new title is reflected.
+            try? writeRecentLoaderMeeting(
+                title: "After Edit",
+                date: recentLoaderDate("2026-06-06T14:00:00Z"),
+                to: meetingURL,
+                fileDate: recentLoaderDate("2026-06-07T09:00:00Z")
+            )
+
+            let second = RecentMeetingsScanner.loadRecent(limit: 1, cache: cache)
+            assertEqual(
+                second.first?.title,
+                "After Edit",
+                "a changed transcript should invalidate the index and re-parse"
+            )
+        }
+    }
+
     runSuite("RecentMeetingMicBoostHintPolicy offers the enable action only while it can still help") {
         let unprompted = RecentMeetingAudioHealth(micBoostPromptOutcome: nil)
         let shown = RecentMeetingAudioHealth(micBoostPromptOutcome: "shown")
