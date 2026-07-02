@@ -1,123 +1,42 @@
 import Foundation
 
 func testFirstRunExperience() {
-    runSuite("FirstRunExperience.onboardingSteps — follows the approved first-value journey") {
-        let steps = FirstRunExperience.onboardingSteps()
-
+    runSuite("FirstRunLocalModelState.analyticsValue — stays coarse and never leaks failure detail") {
+        assertEqual(FirstRunLocalModelState.notLoaded.analyticsValue, "not_loaded", "not-loaded state should map to a stable analytics value")
+        assertEqual(FirstRunLocalModelState.downloading(progress: 0.4).analyticsValue, "downloading", "download progress should not appear in the analytics value")
+        assertEqual(FirstRunLocalModelState.cached.analyticsValue, "cached", "cached state should map to a stable analytics value")
+        assertEqual(FirstRunLocalModelState.loading.analyticsValue, "loading", "loading state should map to a stable analytics value")
+        assertEqual(FirstRunLocalModelState.ready.analyticsValue, "ready", "ready state should map to a stable analytics value")
         assertEqual(
-            steps,
-            [.hero, .value, .dictationSetup, .testDictation, .dictationResult, .meetingsIntro, .meetingSetup, .agentPayoff],
-            "onboarding should teach value, prove dictation, introduce meetings, then explain agent payoff"
-        )
-        assertEqual(
-            FirstRunOnboardingStep.hero.screenTitle,
-            "Speak and get clean local Markdown your agents can use.",
-            "hero should use the approved value proposition"
-        )
-        assertEqual(
-            FirstRunOnboardingStep.value.screenTitle,
-            "What Transcripted does",
-            "second screen should explain the product instead of asking users to choose a path"
+            FirstRunLocalModelState.failed("CoreML failed at /Users/example/private-path").analyticsValue,
+            "failed",
+            "failed state should drop the raw error message from analytics"
         )
     }
 
-    runSuite("FirstRunExperience step navigation stays bounded") {
-        assertNil(FirstRunExperience.previousStep(before: .hero), "hero should be the first onboarding step")
-        assertEqual(FirstRunExperience.nextStep(after: .hero), .value, "hero should advance into value copy")
-        assertEqual(FirstRunExperience.previousStep(before: .agentPayoff), .meetingSetup, "final step should have a back target")
-        assertNil(FirstRunExperience.nextStep(after: .agentPayoff), "agent payoff should be the terminal onboarding step")
-    }
+    runSuite("FirstRunExperience.onboardingModelStatusLine — keeps the background prefetch visible") {
+        let starting = FirstRunExperience.onboardingModelStatusLine(for: .notLoaded)
+        assertEqual(starting.tone, .working, "a not-yet-started prefetch should read as in-progress, not missing")
+        assertFalse(starting.showsRetry, "the initial state should not offer retry")
 
-    runSuite("FirstRunExperience.onboardingAction — gates first dictation on microphone plus paste-back") {
-        let blocked = FirstRunExperience.onboardingAction(
-            for: .dictationSetup,
-            microphoneGranted: true,
-            accessibilityGranted: false,
-            hasFirstDictation: false
-        )
-        let ready = FirstRunExperience.onboardingAction(
-            for: .dictationSetup,
-            microphoneGranted: true,
-            accessibilityGranted: true,
-            hasFirstDictation: false
-        )
+        let downloading = FirstRunExperience.onboardingModelStatusLine(for: .downloading(progress: 0.5))
+        assertTrue(downloading.text.contains("50%"), "download progress should surface as a percentage")
+        assertEqual(downloading.tone, .working, "downloads should keep the working tone")
 
-        assertEqual(blocked.primaryTitle, "Turn on Microphone and Paste-back", "blocked setup should name both required dictation capabilities")
-        assertFalse(blocked.isPrimaryEnabled, "dictation setup should block until paste-back is ready")
-        assertEqual(ready.primaryTitle, "Continue", "ready setup should let users reach the first dictation test")
-        assertTrue(ready.isPrimaryEnabled, "ready setup should unlock")
-    }
+        let clamped = FirstRunExperience.onboardingModelStatusLine(for: .downloading(progress: 1.4))
+        assertTrue(clamped.text.contains("100%"), "over-complete progress should stay bounded")
 
-    runSuite("FirstRunExperience.onboardingAction — blocks the dictation test until setup is complete") {
-        let blocked = FirstRunExperience.onboardingAction(
-            for: .testDictation,
-            microphoneGranted: false,
-            accessibilityGranted: true,
-            hasFirstDictation: false
-        )
+        let ready = FirstRunExperience.onboardingModelStatusLine(for: .ready)
+        assertEqual(ready.tone, .ready, "ready state should read as done")
+        assertFalse(ready.showsRetry, "ready state should not offer retry")
 
-        assertEqual(blocked.primaryTitle, "Start Dictation", "the test step should keep the same CTA")
-        assertFalse(blocked.isPrimaryEnabled, "the first dictation test should stay disabled until required permissions are ready")
-        assertTrue(blocked.detail.contains("Finish dictation setup first"), "blocked copy should point back to setup")
-    }
+        let cached = FirstRunExperience.onboardingModelStatusLine(for: .cached)
+        assertEqual(cached.tone, .ready, "cached files should not look like a missing download")
 
-    runSuite("FirstRunExperience.onboardingAction — presents meetings and agent payoff after first dictation") {
-        let result = FirstRunExperience.onboardingAction(
-            for: .dictationResult,
-            microphoneGranted: true,
-            accessibilityGranted: true,
-            hasFirstDictation: true
-        )
-        let meetings = FirstRunExperience.onboardingAction(
-            for: .meetingsIntro,
-            microphoneGranted: true,
-            accessibilityGranted: true,
-            hasFirstDictation: true
-        )
-        let agent = FirstRunExperience.onboardingAction(
-            for: .agentPayoff,
-            microphoneGranted: true,
-            accessibilityGranted: true,
-            hasFirstDictation: true
-        )
-
-        assertEqual(result.primaryTitle, "Continue", "saved first dictation should move into meetings")
-        assertTrue(
-            result.detail.contains("saved local Markdown file"),
-            "saved first dictation should prove the local Markdown artifact"
-        )
-        assertEqual(meetings.primaryTitle, "Set up meetings", "meeting intro should offer setup")
-        assertEqual(meetings.secondaryTitle, "Skip for now", "meeting intro should not trap dictation-first users")
-        assertEqual(agent.primaryTitle, "Open Transcripted", "last step should land users in the app")
-    }
-
-    runSuite("FirstRunExperience.onboardingAction — missing first dictation offers retry") {
-        let result = FirstRunExperience.onboardingAction(
-            for: .dictationResult,
-            microphoneGranted: true,
-            accessibilityGranted: true,
-            hasFirstDictation: false
-        )
-
-        assertEqual(result.primaryTitle, "Try Again", "missing proof should return users to the dictation attempt")
-        assertTrue(result.detail.contains("No dictation has been saved yet"), "retry copy should be explicit")
-        assertTrue(result.isPrimaryEnabled, "retry should stay available")
-    }
-
-    runSuite("FirstRunExperience.onboardingPermissions — keeps dictation setup separate from later meeting permissions") {
-        let required = FirstRunExperience.onboardingRequiredPermissions()
-        let optional = FirstRunExperience.onboardingOptionalPermissions()
-
-        assertEqual(
-            required,
-            [.microphone, .accessibility],
-            "first-run onboarding should only require dictation-critical permissions"
-        )
-        assertEqual(
-            optional,
-            [.systemAudioRecording, .calendar],
-            "system audio and calendar should stay in the later optional group"
-        )
+        let failed = FirstRunExperience.onboardingModelStatusLine(for: .failed("network down"))
+        assertEqual(failed.tone, .failed, "failed downloads should be visible")
+        assertTrue(failed.showsRetry, "failed downloads should offer retry")
+        assertFalse(failed.text.contains("network down"), "the status line should use plain copy, not the raw error")
     }
 
     runSuite("FirstRunExperience.onboardingCompletionAnalyticsProperties — keeps completion payload coarse") {
@@ -129,10 +48,12 @@ func testFirstRunExperience() {
             firstDictationSaved: true,
             anonymousUsageEnabled: true,
             crashReportingEnabled: false,
+            modelState: "ready",
             elapsedSeconds: 75
         )
 
         assertEqual(properties["completion_flow"], "meetings", "completion flow should stay a coarse enum")
+        assertEqual(properties["model_state"], "ready", "completion should preserve the coarse local-model state")
         assertEqual(properties["meeting_recording_ready"], "true", "completion should preserve meeting readiness")
         assertEqual(properties["calendar_status"], "not_granted", "calendar status should avoid raw event details")
         assertEqual(properties["anonymous_usage_enabled"], "true", "completion should preserve analytics preference state")

@@ -669,23 +669,14 @@ final class UIAutomationSmokeRunner {
             observed: welcomeObserved
         ))
 
+        // The welcome step now carries the privacy pills inline, so one press
+        // lands directly on the use-case choice.
         guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-navigation",
                 "Onboarding primary navigation advances to use-case choice",
                 target: navPrimaryID,
                 detail: "Could not press the onboarding primary button on the welcome step."
-            ))
-            return false
-        }
-        pauseForUITransition()
-
-        guard appInspector.performPressOrClick(identifier: navPrimaryID, maxDepth: onboardingMaxDepth) else {
-            builder.add(.fail(
-                "onboarding-navigation",
-                "Onboarding primary navigation advances to use-case choice",
-                target: navPrimaryID,
-                detail: "Could not press the onboarding primary button on the privacy step."
             ))
             return false
         }

@@ -65,6 +65,7 @@ struct TranscriptedSettingsView: View {
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
+    @State private var meetingRemindersEnabled = MeetingReminderPreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
@@ -334,6 +335,8 @@ struct TranscriptedSettingsView: View {
             refreshPermissions()
             refreshRecentCaptures()
             refreshShortcutState()
+            // Onboarding's calendar step writes this preference outside Settings.
+            meetingRemindersEnabled = MeetingReminderPreferences.isEnabled()
         }
         .onDisappear {
             homeDashboardRefreshTask?.cancel()
@@ -2222,6 +2225,26 @@ struct TranscriptedSettingsView: View {
                         message: "When this is on, Transcripted notices when an app or browser starts using your microphone, or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
+                )
+
+                GeneralToggleRow(
+                    title: "Meeting reminders",
+                    isOn: Binding(
+                        get: { meetingRemindersEnabled },
+                        set: { newValue in
+                            meetingRemindersEnabled = newValue
+                            trackSettingsToggle("meeting_reminders", enabled: newValue, page: .general)
+                            MeetingReminderPreferences.setEnabled(newValue)
+                        }
+                    ),
+                    help: meetingRemindersEnabled
+                        ? "Offer to record shortly before a calendar call starts."
+                        : "Stay quiet about upcoming calendar calls.",
+                    info: GeneralInfo(
+                        title: "Meeting reminders",
+                        message: "When this is on and calendar access is granted, Transcripted reads upcoming events with meeting links and offers a quiet record prompt shortly before a call starts. Events stay on your Mac and are never sent anywhere."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.meeting-reminders"
                 )
             }
 

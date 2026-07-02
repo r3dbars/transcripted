@@ -89,6 +89,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     lazy var cameraActivityMonitor = CameraActivityMonitor()
     private var workspaceObservers: [NSObjectProtocol] = []
     private var micPreferenceObserver: NSObjectProtocol?
+    private var accessibilityPermissionObserver: NSObjectProtocol?
     private var terminationCleanupStarted = false
     private var terminationCleanupFinished = false
     private var pendingTerminationReplyCount = 0
@@ -309,6 +310,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
         workspaceObservers.append(wakeRecoveryObserver)
 
+        observeAccessibilityPermissionChanges()
+
         presentInitialOnboardingIfNeeded()
 
         // Initialize engines
@@ -350,6 +353,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if let observer = micPreferenceObserver {
             NotificationCenter.default.removeObserver(observer)
             micPreferenceObserver = nil
+        }
+        if let observer = accessibilityPermissionObserver {
+            NotificationCenter.default.removeObserver(observer)
+            accessibilityPermissionObserver = nil
         }
         if #available(macOS 14.0, *) {
             meetingPromptDetector.stop()
@@ -661,8 +668,39 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func makeOnboardingView() -> PermissionsOnboardingView {
-        PermissionsOnboardingView { [weak self] in
+        PermissionsOnboardingView(
+            modelState: { [weak self] in
+                guard let self else { return .notLoaded }
+                return FirstRunLocalModelState(self.appState.sttRouter.modelDownloadState)
+            },
+            startModelPrefetch: { [weak self] in
+                // Warm the one-time model download while the user reads the
+                // flow so the first dictation or meeting does not stall on it.
+                Task { @MainActor [weak self] in
+                    await self?.appState.sttRouter.prefetchSelectedModelFiles()
+                }
+            }
+        ) { [weak self] in
             self?.finishOnboarding()
+        }
+    }
+
+    /// The dictation event tap can only be created once Accessibility is
+    /// granted. Onboarding's permission poll (and the shared permission
+    /// helpers) broadcast grant transitions, so re-register explicitly here
+    /// instead of relying on a preference-write side effect to reinstall it —
+    /// this is what makes the mid-onboarding try-dictation step work.
+    private func observeAccessibilityPermissionChanges() {
+        guard accessibilityPermissionObserver == nil else { return }
+        accessibilityPermissionObserver = NotificationCenter.default.addObserver(
+            forName: .transcriptedPermissionsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let kind = notification.object as? TranscriptedPermissionKind, kind == .accessibility else { return }
+            Task { @MainActor [weak self] in
+                self?.appState.recoverHotkeysAfterPermissionChange()
+            }
         }
     }
 

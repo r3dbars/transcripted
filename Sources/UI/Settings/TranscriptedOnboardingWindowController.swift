@@ -36,7 +36,11 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
         window.minSize = PermissionsOnboardingView.preferredSize
         window.contentViewController = hostingController
         window.center()
+        // Close stays available as the abandon path; minimize and zoom make no
+        // sense for a fixed-size first-run window and would clutter the
+        // transparent titlebar over the content.
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
 
         super.init(window: window)
     }

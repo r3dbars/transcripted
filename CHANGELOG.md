@@ -20,6 +20,25 @@ force-installed by Sparkle so existing users recover from a regression.
   (⌘O), jump to Home/Dictations/Speakers/Agent (⌘1–⌘4), and Find Speaker (⌘F,
   focuses the speaker search). Sidebar rows now show their shortcut as a
   tooltip. Existing recordable dictation/meeting triggers are unchanged.
+- Onboarding now downloads the local voice model in the background while you
+  read the flow, and shows its progress on the try-dictation and final steps,
+  so the first dictation or meeting no longer stalls on a surprise download.
+- A "Meeting reminders" toggle in Settings > General controls calendar-based
+  meeting prompts; the onboarding calendar toggle now actually persists there
+  instead of being cosmetic.
+
+### Changed
+- First-run onboarding is shorter: 9 screens for the meetings path and 10 for
+  the dictation path (down from 12 and 14). Privacy details moved onto the
+  welcome screen, the dictation intro and live try-it merged, the two agent
+  value screens merged, and the diagnostics toggle now lives on the final
+  screen.
+- The required-permissions step can now be skipped, so a Mac that cannot grant
+  Screen Recording no longer dead-ends onboarding; the final screen points to
+  Settings for granting later.
+- Granting Accessibility mid-onboarding now re-registers the dictation
+  shortcut immediately, so the try-dictation step works without finishing the
+  flow first.
 
 ## [1.1.47] - 2026-06-08
 

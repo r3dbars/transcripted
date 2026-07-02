@@ -270,6 +270,7 @@ APP_SOURCES=(
     "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/QuitConfirmationPreferences.swift"
     "Sources/Support/AutoCallDetectionPreferences.swift"
+    "Sources/Support/MeetingReminderPreferences.swift"
     "Sources/Support/AudioStoragePreferences.swift"
     "Sources/Support/CaptureLibraryChangeBroadcaster.swift"
     "Sources/Support/LiveMeetingCodexPreferences.swift"

@@ -28,6 +28,8 @@ extension FirstRunLocalModelState {
 @MainActor
 struct PermissionsOnboardingView: View {
     var onComplete: () -> Void
+    private let modelStateProvider: () -> FirstRunLocalModelState
+    private let startModelPrefetch: () -> Void
 
     static let preferredSize = NSSize(width: 960, height: 680)
     private static let defaultDictationShortcut = "Right Option"
@@ -39,7 +41,9 @@ struct PermissionsOnboardingView: View {
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
     @State private var calendarGranted = false
-    @State private var meetingPromptsEnabled = true
+    @State private var meetingPromptsEnabled = MeetingReminderPreferences.isEnabled()
+    @State private var localModelState: FirstRunLocalModelState = .notLoaded
+    @State private var didStartModelPrefetch = false
     @State private var selectedUseCase: OnboardingUseCase = .meetings
     @State private var leaveDictationShortcutsOff = true
     @State private var diagnosticsEnabled = CrashReportingPreferences.isEnabled() && AnalyticsPreferences.isEnabled()
@@ -55,7 +59,13 @@ struct PermissionsOnboardingView: View {
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
     @FocusState private var demoEditorFocused: Bool
 
-    init(onComplete: @escaping () -> Void) {
+    init(
+        modelState: @escaping () -> FirstRunLocalModelState = { .notLoaded },
+        startModelPrefetch: @escaping () -> Void = {},
+        onComplete: @escaping () -> Void
+    ) {
+        self.modelStateProvider = modelState
+        self.startModelPrefetch = startModelPrefetch
         self.onComplete = onComplete
     }
 
@@ -85,8 +95,11 @@ struct PermissionsOnboardingView: View {
         return "Continue"
     }
 
+    // Only the permissions step gates on the required grants, and it can be
+    // skipped: a user who cannot grant Screen Recording (e.g. a managed Mac)
+    // must still be able to finish onboarding and reach the app.
     private var primaryButtonDisabled: Bool {
-        (currentStep.kind == .permissions || currentStep.kind == .done) && !hasRequiredPermissions
+        currentStep.kind == .permissions && !hasRequiredPermissions
     }
 
     var body: some View {
@@ -99,7 +112,7 @@ struct PermissionsOnboardingView: View {
             primaryTitle: primaryButtonTitle,
             primaryDisabled: primaryButtonDisabled,
             onBack: goBack,
-            onSkip: goNext,
+            onSkip: skipCurrentStep,
             onNext: goNextOrComplete
         ) {
             stepContent
@@ -112,6 +125,8 @@ struct PermissionsOnboardingView: View {
                 flowStartedAt = CFAbsoluteTimeGetCurrent()
             }
             checkAllPermissions(trackChanges: false)
+            refreshLocalModelState(trackChanges: false)
+            startModelPrefetchIfNeeded()
             trackCurrentStepViewed()
             startPolling()
         }
@@ -132,21 +147,15 @@ struct PermissionsOnboardingView: View {
             CenterStage {
                 Kicker("Transcripted")
                 Headline(primary: "Your spoken work becomes text.", emphasis: "Meetings first, if you want.")
-                Lede("Record a meeting. Dictate a thought. Ask your agent what happened.")
+                Lede("Record a meeting. Dictate a thought. Ask your agent what happened — no accounts, no cloud, everything stays on this Mac.", maxWidth: 580)
                 HeroWaveCircle()
-                    .padding(.top, 14)
-            }
-        case .privacy:
-            CenterStage {
-                Kicker("Before we start")
-                Headline(primary: "Your conversations.\nYour files.", emphasis: "Stays on your Mac.")
-                Lede("No accounts. No sign-in. Your audio and Markdown stay on this computer.", maxWidth: 500)
+                    .padding(.top, 10)
                 HStack(spacing: 14) {
                     PrivacyPill("On-device transcription")
                     PrivacyPill("Stored as markdown")
                     PrivacyPill("No cloud, no sync")
                 }
-                .padding(.top, 18)
+                .padding(.top, 12)
             }
         case .useCase:
             CenterStage {
@@ -214,23 +223,20 @@ struct PermissionsOnboardingView: View {
                     .foregroundStyle(OnboardingTheme.muted)
                     .padding(.top, 4)
             }
-        case .dictation:
-            SplitStage {
-                Kicker("Dictation")
-                Headline(primary: "Talk to type.", emphasis: "In any app.", size: 42, alignment: .leading)
-                BodyCopy("Tap Right Option once to start. Tap it again to stop. Your words land where your cursor is.")
-                BulletList(["Mail, docs, Slack, code, anywhere", "On-device. Fast.", "Never leaves your Mac"])
-            } right: {
-                DictationDemoCard()
-            }
         case .shortcut:
             CenterStage {
-                Kicker("Your turn")
-                Headline(primary: "Try dictation\nright now.", size: 42)
-                BodyCopy("Tap Right Option, say what you want, then tap Right Option again. Transcripted will paste it here.", maxWidth: 540)
+                Kicker("Dictation")
+                Headline(primary: "Talk to type.", emphasis: "Try it right now.", size: 42)
+                BodyCopy("Tap Right Option, say what you want, then tap it again. Your words land where your cursor is — Mail, docs, Slack, code. Here, they'll paste below.", maxWidth: 560)
+                    .multilineTextAlignment(.center)
                 DemoPasteTarget(text: $demoDictationText)
                     .focused($demoEditorFocused)
                     .padding(.top, 6)
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            demoEditorFocused = true
+                        }
+                    }
                 HStack(spacing: 12) {
                     DictationPill(label: Self.defaultDictationShortcut)
                     Text("You can change it anytime in Settings.")
@@ -239,11 +245,7 @@ struct PermissionsOnboardingView: View {
                         .foregroundStyle(OnboardingTheme.muted)
                 }
                 .padding(.top, 6)
-                .onAppear {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        demoEditorFocused = true
-                    }
-                }
+                OnboardingModelStatusLineView(state: localModelState, onRetry: startModelPrefetch)
             }
         case .meetingStart:
             SplitStage {
@@ -300,9 +302,7 @@ struct PermissionsOnboardingView: View {
                 .frame(maxWidth: 440)
                 .padding(.top, 4)
                 .onChange(of: meetingPromptsEnabled) { _, newValue in
-                    if !newValue {
-                        calendarGranted = false
-                    }
+                    MeetingReminderPreferences.setEnabled(newValue)
                 }
                 Button(calendarGranted ? "Calendar connected" : "Allow calendar access") {
                     requestPermission(.calendar, required: false)
@@ -317,7 +317,7 @@ struct PermissionsOnboardingView: View {
             } right: {
                 CalendarMock(connected: calendarGranted && meetingPromptsEnabled)
             }
-        case .memory:
+        case .payoff:
             CenterStage {
                 Kicker("The payoff")
                 Headline(
@@ -326,21 +326,11 @@ struct PermissionsOnboardingView: View {
                     size: 52
                 )
                 Lede(
-                    selectedUseCase == .meetings
-                        ? "Meetings become local Markdown your agent can search, summarize, and reason over."
-                        : "Dictations and meetings flow into one place on your Mac. Your second brain, for your agent to reason over.",
-                    maxWidth: 560
+                    "Everything you capture becomes local Markdown your agent can search, summarize, and cite. Ask about last Tuesday — answers come back from your own words.",
+                    maxWidth: 580
                 )
                 MemoryFlowVisual()
                     .padding(.top, 16)
-            }
-        case .agentDemo:
-            SplitStage {
-                Kicker("Your agent")
-                Headline(primary: "Ask about", emphasis: "last Tuesday.", size: 42, alignment: .leading)
-                BodyCopy("Your agent gets a new skill: your voice history. Answers come back with citations from your own words.")
-            } right: {
-                AgentDemoCard()
             }
         case .connectAgent:
             ConnectAgentStage(
@@ -349,24 +339,6 @@ struct PermissionsOnboardingView: View {
                 onCopy: copyAgentItem,
                 onConnectClaudeDesktop: connectClaudeDesktop
             )
-        case .diagnostics:
-            CenterStage {
-                Kicker("One last thing")
-                Headline(primary: "Help us make it better?", size: 42)
-                BodyCopy("Anonymous diagnostics help us find bugs and fix them fast.", maxWidth: 480)
-                    ToggleCard(
-                        title: "Share anonymous diagnostics",
-                        detail: "Crash reports, feature counts, app version, and macOS version. Never audio, transcripts, or anything you type or say.",
-                        isOn: $diagnosticsEnabled,
-                        automationIdentifier: "transcripted.onboarding.diagnostics.share"
-                    )
-                .frame(width: 480)
-                .padding(.top, 10)
-                .onChange(of: diagnosticsEnabled) { _, newValue in
-                    CrashReportingPreferences.setEnabled(newValue)
-                    AnalyticsPreferences.setEnabled(newValue)
-                }
-            }
         case .done:
             CenterStage {
                 Kicker("You're set")
@@ -381,7 +353,26 @@ struct PermissionsOnboardingView: View {
                     maxWidth: 560
                 )
                 ThreeActionsRecap(useCase: selectedUseCase)
-                    .padding(.top, 22)
+                    .padding(.top, 16)
+                ToggleCard(
+                    title: "Share anonymous diagnostics",
+                    detail: "Crash reports and feature counts. Never audio, transcripts, or anything you type or say.",
+                    isOn: $diagnosticsEnabled,
+                    automationIdentifier: "transcripted.onboarding.diagnostics.share"
+                )
+                .frame(width: 480)
+                .padding(.top, 12)
+                .onChange(of: diagnosticsEnabled) { _, newValue in
+                    CrashReportingPreferences.setEnabled(newValue)
+                    AnalyticsPreferences.setEnabled(newValue)
+                }
+                if hasRequiredPermissions {
+                    OnboardingModelStatusLineView(state: localModelState, onRetry: startModelPrefetch)
+                } else {
+                    Text(missingPermissionsReminderText)
+                        .font(.system(size: 12))
+                        .foregroundStyle(OnboardingTheme.muted)
+                }
             }
         }
     }
@@ -435,8 +426,14 @@ struct PermissionsOnboardingView: View {
         }
 
         return selectedUseCase == .meetings
-            ? "Allow Microphone and System Audio to continue."
-            : "Allow Microphone and Accessibility to continue."
+            ? "Allow Microphone and System Audio to record meetings, or skip and grant them later in Settings."
+            : "Allow Microphone and Accessibility to dictate, or skip and grant them later in Settings."
+    }
+
+    private var missingPermissionsReminderText: String {
+        selectedUseCase == .meetings
+            ? "Meeting recording still needs Microphone and System Audio. Grant them anytime in Settings."
+            : "Dictation still needs Microphone and Accessibility. Grant them anytime in Settings."
     }
 
     private func goBack() {
@@ -466,6 +463,16 @@ struct PermissionsOnboardingView: View {
             }
             goNext()
         }
+    }
+
+    private func skipCurrentStep() {
+        // Skipping the permissions step still applies the chosen shortcut
+        // policy so the meetings path lands with dictation shortcuts in the
+        // state the toggle promised.
+        if currentStep.kind == .permissions {
+            applySelectedUseCasePreferences()
+        }
+        goNext()
     }
 
     private func applySelectedUseCasePreferences() {
@@ -566,10 +573,55 @@ struct PermissionsOnboardingView: View {
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
 
         let updatedStatuses = currentPermissionStatuses()
-        if trackChanges && !previousStatuses.isEmpty {
-            trackPermissionStatusChanges(from: previousStatuses, to: updatedStatuses)
+        if !previousStatuses.isEmpty {
+            notifyPermissionTransitions(from: previousStatuses, to: updatedStatuses)
+            if trackChanges {
+                trackPermissionStatusChanges(from: previousStatuses, to: updatedStatuses)
+            }
         }
         lastPermissionStatuses = updatedStatuses
+    }
+
+    /// TCC has no grant callback, so this poll is the only place that sees a
+    /// mid-onboarding permission flip. Rebroadcast it app-wide: the app
+    /// delegate re-registers the dictation event tap when Accessibility turns
+    /// on, which is what makes the try-dictation step work right away.
+    private func notifyPermissionTransitions(
+        from previousStatuses: [TranscriptedPermissionKind: String],
+        to updatedStatuses: [TranscriptedPermissionKind: String]
+    ) {
+        for kind in TranscriptedPermissionKind.allCases {
+            guard let previous = previousStatuses[kind],
+                  let updated = updatedStatuses[kind],
+                  previous != updated else {
+                continue
+            }
+            NotificationCenter.default.post(name: .transcriptedPermissionsDidChange, object: kind)
+        }
+    }
+
+    private func startModelPrefetchIfNeeded() {
+        guard !didStartModelPrefetch else { return }
+        didStartModelPrefetch = true
+        startModelPrefetch()
+    }
+
+    private func refreshLocalModelState(trackChanges: Bool) {
+        let previous = localModelState
+        let updated = modelStateProvider()
+        guard previous != updated else { return }
+        localModelState = updated
+
+        if trackChanges, previous.analyticsValue != updated.analyticsValue {
+            AnalyticsReporter.track(
+                "onboarding_model_state_changed",
+                properties: [
+                    "from_status": previous.analyticsValue,
+                    "step_id": currentStep.kind.analyticsID,
+                    "to_status": updated.analyticsValue,
+                ]
+            )
+        }
     }
 
     private func startPolling() {
@@ -581,6 +633,7 @@ struct PermissionsOnboardingView: View {
             // polling regardless and dies cleanly when onDisappear cancels it.
             while !Task.isCancelled {
                 checkAllPermissions(trackChanges: true)
+                refreshLocalModelState(trackChanges: true)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -592,7 +645,6 @@ struct PermissionsOnboardingView: View {
     }
 
     private func completeOnboarding() {
-        guard hasRequiredPermissions else { return }
         stopPolling()
         trackCompletionIfNeeded()
         onComplete()
@@ -612,6 +664,7 @@ struct PermissionsOnboardingView: View {
                 firstDictationSaved: PermissionsOnboardingPreferences.hasTrackedFirstDictationSaved(),
                 anonymousUsageEnabled: AnalyticsPreferences.isEnabled(),
                 crashReportingEnabled: CrashReportingPreferences.isEnabled(),
+                modelState: localModelState.analyticsValue,
                 elapsedSeconds: flowStartedAt.map { CFAbsoluteTimeGetCurrent() - $0 }
             )
         )
@@ -654,6 +707,7 @@ struct PermissionsOnboardingView: View {
             "onboarding_step_viewed",
             properties: [
                 "flow_elapsed_bucket": flowElapsedBucket(now: now),
+                "model_state": localModelState.analyticsValue,
                 "step_id": currentStep.kind.analyticsID,
                 "step_index": String(currentStepIndex),
             ]
@@ -668,6 +722,7 @@ struct PermissionsOnboardingView: View {
                 "cta": primaryCTAAnalyticsID,
                 "cta_type": "primary",
                 "flow_elapsed_bucket": flowElapsedBucket(now: now),
+                "model_state": localModelState.analyticsValue,
                 "step_elapsed_bucket": stepElapsedBucket(now: now),
                 "step_id": currentStep.kind.analyticsID,
             ]
@@ -732,33 +787,26 @@ struct PermissionsOnboardingView: View {
         case .meetings:
             return [
                 .init(kind: .welcome),
-                .init(kind: .privacy),
                 .init(kind: .useCase),
-                .init(kind: .permissions),
+                .init(kind: .permissions, canSkip: true),
                 .init(kind: .meetingStart),
                 .init(kind: .meeting),
                 .init(kind: .calendar, canSkip: true),
-                .init(kind: .memory),
-                .init(kind: .agentDemo),
+                .init(kind: .payoff),
                 .init(kind: .connectAgent, canSkip: true),
-                .init(kind: .diagnostics, canSkip: true),
                 .init(kind: .done),
             ]
         case .dictation:
             return [
                 .init(kind: .welcome),
-                .init(kind: .privacy),
                 .init(kind: .useCase),
-                .init(kind: .permissions),
-                .init(kind: .dictation),
+                .init(kind: .permissions, canSkip: true),
                 .init(kind: .shortcut),
                 .init(kind: .systemAudio, canSkip: true),
                 .init(kind: .meeting),
                 .init(kind: .calendar, canSkip: true),
-                .init(kind: .memory),
-                .init(kind: .agentDemo),
+                .init(kind: .payoff),
                 .init(kind: .connectAgent, canSkip: true),
-                .init(kind: .diagnostics, canSkip: true),
                 .init(kind: .done),
             ]
         }
@@ -772,33 +820,25 @@ private struct OnboardingStepSpec {
 
 private enum OnboardingStepKind: Hashable {
     case welcome
-    case privacy
     case useCase
     case permissions
-    case dictation
     case shortcut
     case meetingStart
     case systemAudio
     case meeting
     case calendar
-    case memory
-    case agentDemo
+    case payoff
     case connectAgent
-    case diagnostics
     case done
 
     var analyticsID: String {
         switch self {
         case .welcome:
             return "welcome"
-        case .privacy:
-            return "privacy"
         case .useCase:
             return "use_case"
         case .permissions:
             return "permissions"
-        case .dictation:
-            return "dictation_intro"
         case .shortcut:
             return "dictation_test"
         case .meetingStart:
@@ -809,14 +849,12 @@ private enum OnboardingStepKind: Hashable {
             return "meeting_value"
         case .calendar:
             return "calendar"
-        case .memory:
+        case .payoff:
+            // Keeps the pre-merge "memory" step id so funnels stay comparable
+            // across releases; this screen absorbed the old agent_demo step.
             return "memory"
-        case .agentDemo:
-            return "agent_demo"
         case .connectAgent:
             return "connect_agent"
-        case .diagnostics:
-            return "diagnostics"
         case .done:
             return "done"
         }
@@ -937,8 +975,9 @@ private struct OnboardingWindowShell<Content: View>: View {
             OnboardingTheme.window
 
             VStack(spacing: 0) {
+                // Leading space stays clear for the window's real traffic-light
+                // buttons (transparent titlebar + full-size content view).
                 HStack(alignment: .center) {
-                    TrafficLights()
                     Spacer()
                     ProgressCounter(current: current, total: total)
                 }
@@ -969,17 +1008,6 @@ private struct OnboardingWindowShell<Content: View>: View {
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.22), radius: 45, y: 24)
-    }
-}
-
-private struct TrafficLights: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.34))
-            Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18))
-            Circle().fill(OnboardingTheme.success)
-        }
-        .frame(width: 52, height: 12)
     }
 }
 
@@ -1435,28 +1463,40 @@ private struct BulletList: View {
     }
 }
 
-private struct DictationDemoCard: View {
-    private let phrase = "I think we should ship the pricing change before the board meeting."
+private struct OnboardingModelStatusLineView: View {
+    let state: FirstRunLocalModelState
+    let onRetry: () -> Void
 
     var body: some View {
-        VStack(spacing: 18) {
-            MiniWindow(title: "Mail - Reply") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(phrase)
-                        .font(.system(size: 15))
-                        .lineSpacing(4)
-                        .foregroundStyle(OnboardingTheme.ink)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Rectangle()
-                        .fill(OnboardingTheme.ink)
-                        .frame(width: 2, height: 18)
-                        .opacity(0.7)
+        let line = FirstRunExperience.onboardingModelStatusLine(for: state)
+        HStack(spacing: 8) {
+            Circle()
+                .fill(toneColor(line.tone))
+                .frame(width: 7, height: 7)
+            Text(line.text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(OnboardingTheme.muted)
+            if line.showsRetry {
+                Button("Try again") {
+                    onRetry()
                 }
-                .padding(18)
+                .buttonStyle(.plain)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(OnboardingTheme.ink)
+                .underline()
+                .accessibilityIdentifier("transcripted.onboarding.model.retry")
             }
-            .frame(width: 360, height: 170)
+        }
+    }
 
-            DictationPill(label: "Listening")
+    private func toneColor(_ tone: FirstRunModelStatusLine.Tone) -> Color {
+        switch tone {
+        case .ready:
+            return OnboardingTheme.success
+        case .working:
+            return OnboardingTheme.muted.opacity(0.7)
+        case .failed:
+            return OnboardingTheme.recording
         }
     }
 }
@@ -2052,54 +2092,6 @@ private struct MemoryQuestionCard: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-    }
-}
-
-private struct AgentDemoCard: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ChatBubble(role: "You", text: "What did Alex say last Tuesday?")
-            ChatBubble(role: "Agent", text: "Alex wanted the rollout staged in three regions. Source: Design review transcript.", accent: OnboardingTheme.codex)
-            HStack(spacing: 8) {
-                Image(systemName: "quote.bubble")
-                Text("Cited from your local transcript")
-            }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(OnboardingTheme.muted)
-        }
-        .padding(18)
-        .frame(width: 380)
-        .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(OnboardingTheme.border, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.06), radius: 20, y: 10)
-    }
-}
-
-private struct ChatBubble: View {
-    let role: String
-    let text: String
-    var accent: Color = OnboardingTheme.ink
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(role)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .kerning(1.2)
-                .foregroundStyle(OnboardingTheme.muted)
-                .textCase(.uppercase)
-            Text(text)
-                .font(.system(size: 13))
-                .lineSpacing(2)
-                .foregroundStyle(OnboardingTheme.body)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(accent.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 

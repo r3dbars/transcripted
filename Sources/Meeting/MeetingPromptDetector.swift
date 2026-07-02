@@ -69,7 +69,11 @@ final class MeetingPromptDetector {
     private let calendarLookaheadInterval: TimeInterval = 12 * 60 * 60
 
     init(
-        calendarAccessGranted: @escaping () -> Bool = { TranscriptedPermissionAccess.calendarAccessGranted() },
+        calendarAccessGranted: @escaping () -> Bool = {
+            // The Settings/onboarding "Meeting reminders" toggle gates the
+            // calendar source; TCC access alone is not consent to prompt.
+            MeetingReminderPreferences.isEnabled() && TranscriptedPermissionAccess.calendarAccessGranted()
+        },
         calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = [],
         refreshesCalendarEventSnapshots: Bool = true
     ) {

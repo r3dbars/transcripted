@@ -80,10 +80,16 @@ class STTRouter: ObservableObject {
         await initialize(model: selectedModel)
     }
 
-    func prefetchSelectedModelFilesForExistingInstall() async {
+    /// Downloads the selected model's files without loading them into memory.
+    /// Safe to call repeatedly; in-flight and completed downloads are no-ops.
+    func prefetchSelectedModelFiles() async {
         guard selectedModel == .parakeetTDTv3 else { return }
         await parakeetEngine.prefetchModelFilesIfNeeded()
         refreshModelDownloadState()
+    }
+
+    func prefetchSelectedModelFilesForExistingInstall() async {
+        await prefetchSelectedModelFiles()
     }
 
     func initialize(model: TranscriptionModelChoice) async {

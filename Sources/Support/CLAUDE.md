@@ -27,6 +27,7 @@
 - `LocalMeetingSummaryPreferences.swift` — persisted beta opt-in toggle and provider selection for local AI meeting summaries on Home
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
+- `MeetingReminderPreferences.swift` — persisted (default-on) toggle for calendar-based meeting reminders; gates the calendar source in `MeetingPromptDetector` and backs the onboarding calendar step plus the General-page "Meeting reminders" setting
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
 - `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
 - `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls
@@ -87,6 +88,7 @@ Relevant direct coverage includes:
 - `Tests/MeetingOverlayPillPreferencesTests.swift`
 - `Tests/MenuBarVisibilityPreferencesTests.swift`
 - `Tests/MicrophoneProcessingPreferencesTests.swift`
+- `Tests/MeetingReminderPreferencesTests.swift`
 - `Tests/PermissionsOnboardingPreferencesTests.swift`
 - `Tests/PhysicalDictationTriggerPreferencesTests.swift`
 - `Tests/QuitConfirmationPreferencesTests.swift`
