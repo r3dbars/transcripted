@@ -158,6 +158,44 @@ final class SummaryRollupTests: XCTestCase {
         XCTAssertTrue(pricing.openQuestions.isEmpty)
     }
 
+    func testDoneAndDueMarkersDriveStatusFilterAndDigestCounts() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                date: "2026-05-01",
+                time: "10:00:00",
+                decisions: [],
+                actionItems: [
+                    "Nate Smith: Draft the launch email (due: Friday)",
+                    "Jenny Wen: Confirm the venue (done)",
+                    "Send the recap (status: completed)",
+                ],
+                openQuestions: []
+            ),
+            filename: "Call_2026-05-01_10-00-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let open = try index.listActionItems(owner: nil, query: nil, status: .open, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(open.items.map(\.text), ["Draft the launch email"])
+        XCTAssertEqual(open.items.first?.due, "Friday")
+        XCTAssertNil(open.items.first?.status)
+
+        let done = try index.listActionItems(owner: nil, query: nil, status: .done, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(done.count, 2)
+        XCTAssertEqual(Set(done.items.map(\.text)), ["Confirm the venue", "Send the recap"])
+        XCTAssertEqual(Set(done.items.compactMap(\.status)), ["done", "completed"])
+
+        let all = try index.listActionItems(owner: nil, query: nil, status: .all, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(all.count, 3)
+
+        let digest = try index.digest(dateFrom: "2026-05-01", dateTo: "2026-05-01")
+        XCTAssertEqual(digest.actionItemCount, 3)
+        XCTAssertEqual(digest.openActionItemCount, 1)
+        let digestActions = try XCTUnwrap(digest.meetings.first?.actionItems)
+        XCTAssertEqual(digestActions.compactMap(\.due), ["Friday"])
+    }
+
     func testDigestExcludesMeetingsWithoutFacts() throws {
         try seedTwoMeetings()
         try writeFixture(

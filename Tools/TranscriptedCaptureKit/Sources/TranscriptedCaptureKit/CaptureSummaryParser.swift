@@ -10,10 +10,19 @@ public struct ParsedMeetingSummary: Equatable {
         /// to nil so rollups don't treat them as a person.
         public let owner: String?
         public let text: String
+        /// Lowercased status token from a trailing `(status: done)` / `(done)`
+        /// marker; nil means open. Editing the marker in the saved Markdown is
+        /// the supported way to close an item, so rollup filters stay in sync
+        /// with what the user (or an agent) wrote back to the file.
+        public let status: String?
+        /// Free-text due hint from a trailing `(due: Friday)` marker.
+        public let due: String?
 
-        public init(owner: String?, text: String) {
+        public init(owner: String?, text: String, status: String? = nil, due: String? = nil) {
             self.owner = owner
             self.text = text
+            self.status = status
+            self.due = due
         }
     }
 
@@ -130,20 +139,69 @@ public enum CaptureSummaryParser {
     ]
 
     private static func actionItem(from text: String) -> ParsedMeetingSummary.ActionItem {
+        let (stripped, status, due) = extractTrailingMarkers(from: text)
         // The summarizer prompts action bullets as "<Owner if named: follow-up>".
         // Treat a short leading segment before the first ": " as the owner only
         // when it reads like a name/team — a Title-Case noun phrase. Sentence
         // fragments ("Discuss the new API: ...") carry lowercase function words,
         // so we keep them as plain text instead of shredding a fake owner out.
-        if let colon = text.range(of: ": ") {
-            let owner = String(text[..<colon.lowerBound]).trimmingCharacters(in: .whitespaces)
-            let rest = String(text[colon.upperBound...]).trimmingCharacters(in: .whitespaces)
+        if let colon = stripped.range(of: ": ") {
+            let owner = String(stripped[..<colon.lowerBound]).trimmingCharacters(in: .whitespaces)
+            let rest = String(stripped[colon.upperBound...]).trimmingCharacters(in: .whitespaces)
             if !rest.isEmpty, looksLikeOwner(owner) {
                 let normalized = placeholderOwners.contains(owner.lowercased()) ? nil : owner
-                return ParsedMeetingSummary.ActionItem(owner: normalized, text: rest)
+                return ParsedMeetingSummary.ActionItem(owner: normalized, text: rest, status: status, due: due)
             }
         }
-        return ParsedMeetingSummary.ActionItem(owner: nil, text: text)
+        return ParsedMeetingSummary.ActionItem(owner: nil, text: stripped, status: status, due: due)
+    }
+
+    /// Status tokens a bare trailing `(<token>)` marker is allowed to carry.
+    /// Anything else in parentheses is treated as normal bullet text, so real
+    /// parenthetical content ("call Bob (the vendor)") is never shredded. Keep
+    /// the closed-state subset aligned with the MCP index's open/done rollup
+    /// predicate.
+    private static let bareStatusTokens: Set<String> = [
+        "open", "done", "complete", "completed", "resolved", "closed",
+        "cancelled", "canceled",
+    ]
+
+    /// Pull optional trailing `(due: ...)` / `(status: ...)` / `(done)` markers
+    /// off an action bullet. Markers may appear in either order; the first
+    /// occurrence of each kind wins. Returns the bullet with markers removed.
+    private static func extractTrailingMarkers(
+        from raw: String
+    ) -> (text: String, status: String?, due: String?) {
+        var text = raw.trimmingCharacters(in: .whitespaces)
+        var status: String?
+        var due: String?
+
+        // At most one status and one due marker, so two passes bound the loop.
+        for _ in 0..<2 {
+            guard text.hasSuffix(")"), let open = text.lastIndex(of: "(") else { break }
+            let inner = String(text[text.index(after: open)..<text.index(before: text.endIndex)])
+                .trimmingCharacters(in: .whitespaces)
+            let lowered = inner.lowercased()
+
+            let marker: (String) -> String? = { prefix in
+                guard lowered.hasPrefix(prefix) else { return nil }
+                let value = String(inner.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                return value.isEmpty ? nil : value
+            }
+
+            if status == nil, let value = marker("status:") {
+                status = value.lowercased()
+            } else if due == nil, let value = marker("due:") {
+                due = value
+            } else if status == nil, bareStatusTokens.contains(lowered) {
+                status = lowered
+            } else {
+                break
+            }
+            text = String(text[..<open]).trimmingCharacters(in: .whitespaces)
+        }
+
+        return (text, status, due)
     }
 
     private static func looksLikeOwner(_ candidate: String) -> Bool {

@@ -235,7 +235,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "list_action_items",
-                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status (open by default, or 'done'/'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Depends on the meeting summary index.",
+                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status (open by default, or 'done'/'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Status and due come from trailing markers on the bullet in the saved meeting Markdown — '(done)', '(status: done)', '(due: Friday)' — so an item can be closed by editing its bullet in the transcript file; unmarked items are open. Depends on the meeting summary index.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([

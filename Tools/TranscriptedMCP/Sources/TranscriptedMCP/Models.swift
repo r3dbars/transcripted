@@ -339,9 +339,9 @@ struct PersonMeetingEntry: Codable {
 
 // MARK: - Summary-Fact Rollups (cross-meeting tools)
 
-/// Open/done/all filter for `list_action_items`.
-/// Current saved meeting summaries do not carry done/due metadata; done is
-/// accepted as a forward-compatible filter but returns no derived rows today.
+/// Open/done/all filter for `list_action_items`. Status comes from trailing
+/// `(status: done)` / `(done)` markers on action bullets in the saved summary
+/// Markdown (parsed by `CaptureSummaryParser`); items without a marker are open.
 enum ActionItemStatusFilter: String {
     case open
     case done

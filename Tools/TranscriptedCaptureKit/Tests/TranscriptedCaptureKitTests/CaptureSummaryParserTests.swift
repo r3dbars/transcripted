@@ -75,6 +75,47 @@ final class CaptureSummaryParserTests: XCTestCase {
         XCTAssertEqual(summary.actionItems[1].text, "Follow up with legal")
     }
 
+    func testParsesTrailingDueAndStatusMarkers() throws {
+        let markdown = inlineMeeting(
+            actionItems: """
+            ### Action Items
+            - Jenny: send the revised spec (due: Friday)
+            - Nate: draft the launch email (status: done)
+            - Confirm the venue (done) (due: next week)
+            - Follow up with legal
+            """
+        )
+        let summary = try XCTUnwrap(CaptureSummaryParser.parse(from: markdown))
+        XCTAssertEqual(summary.actionItems.count, 4)
+
+        XCTAssertEqual(summary.actionItems[0].owner, "Jenny")
+        XCTAssertEqual(summary.actionItems[0].text, "send the revised spec")
+        XCTAssertNil(summary.actionItems[0].status)
+        XCTAssertEqual(summary.actionItems[0].due, "Friday")
+
+        XCTAssertEqual(summary.actionItems[1].owner, "Nate")
+        XCTAssertEqual(summary.actionItems[1].text, "draft the launch email")
+        XCTAssertEqual(summary.actionItems[1].status, "done")
+        XCTAssertNil(summary.actionItems[1].due)
+
+        XCTAssertEqual(summary.actionItems[2].text, "Confirm the venue")
+        XCTAssertEqual(summary.actionItems[2].status, "done")
+        XCTAssertEqual(summary.actionItems[2].due, "next week")
+
+        XCTAssertNil(summary.actionItems[3].status)
+        XCTAssertNil(summary.actionItems[3].due)
+    }
+
+    func testKeepsRealParentheticalsOutOfMarkers() throws {
+        let markdown = inlineMeeting(
+            actionItems: "### Action Items\n- Jenny: call the vendor (the new one)"
+        )
+        let summary = try XCTUnwrap(CaptureSummaryParser.parse(from: markdown))
+        XCTAssertEqual(summary.actionItems[0].text, "call the vendor (the new one)")
+        XCTAssertNil(summary.actionItems[0].status)
+        XCTAssertNil(summary.actionItems[0].due)
+    }
+
     func testDoesNotShredSentenceColonsIntoOwner() throws {
         let markdown = inlineMeeting(
             actionItems: "### Action Items\n- Discuss the new API: review the public endpoints and document them"

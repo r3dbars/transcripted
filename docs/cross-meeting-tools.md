@@ -26,9 +26,20 @@ Markdown.
    `meeting_summary_items` with a `kind` discriminator.
 4. The rollup tools query those rows and join `meetings` for dates.
 
-Today, saved summaries carry action item `text` and optional `owner`. They do
-not carry reliable `done` or `due` metadata, so `status: "done"` is accepted for
-forward compatibility but returns no derived rows until that metadata exists.
+Action items carry `text`, optional `owner`, and optional `status` / `due`
+metadata from trailing markers on the bullet:
+
+- `- Nate: draft the launch email (due: Friday)`
+- `- Jenny: confirm the venue (done)` or `(status: done)`
+
+The always-on quick extraction writes `(due: ...)` markers when a commitment
+sentence carries a recognizable deadline cue ("by Friday", "by end of week").
+Nothing is ever extracted as `done` — closing an item happens by editing the
+marker in the saved Markdown, which the file watcher reindexes on save. That is
+the supported write-back path for users and agents alike: mark a bullet
+`(done)` and `list_action_items` with `status: "open"` stops returning it. Items
+with no marker (including everything written before markers existed) count as
+open.
 
 ## Verification
 

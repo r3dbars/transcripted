@@ -25,6 +25,30 @@ func testMeetingQuickSummaryExtractor() {
         )
     }
 
+    runSuite("appends a due marker when an action sentence carries a deadline cue") {
+        let transcript = """
+        **00:01**  [Mic/Justin]
+        I'll send the updated pricing deck to the team by Friday.
+
+        **00:15**  [System/Maya]
+        I'll take care of the vendor follow-up.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.actionItems.contains("(due: Friday)"),
+            "deadline cue should produce a due marker, got: \(sections.actionItems)"
+        )
+        assertTrue(
+            sections.actionItems.contains("vendor follow-up"),
+            "action without a deadline should still be extracted, got: \(sections.actionItems)"
+        )
+        assertFalse(
+            sections.actionItems.contains("vendor follow-up. (due"),
+            "action without a deadline cue must not get a due marker"
+        )
+    }
+
     runSuite("extracts decisions and keeps them out of action items") {
         let transcript = """
         **00:01**  [System/Maya]

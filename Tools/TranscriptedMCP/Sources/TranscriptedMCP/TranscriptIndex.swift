@@ -52,8 +52,9 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     /// Bump when the derived index shape changes so existing on-disk indexes are
-    /// rebuilt from disk on next open. v2 added `meeting_summary_items`.
-    private static let schemaVersion: Int32 = 2
+    /// rebuilt from disk on next open. v2 added `meeting_summary_items`; v3 added
+    /// `status` + `due` columns to it.
+    private static let schemaVersion: Int32 = 3
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
@@ -211,7 +212,9 @@ final class TranscriptIndex: @unchecked Sendable {
                 kind TEXT NOT NULL,
                 position INTEGER NOT NULL,
                 owner TEXT,
-                text TEXT NOT NULL
+                text TEXT NOT NULL,
+                status TEXT,
+                due TEXT
             )
         """)
 
@@ -420,10 +423,12 @@ final class TranscriptIndex: @unchecked Sendable {
         }
         for (position, item) in summary.actionItems.enumerated() {
             try bindExec(
-                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
+                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text, status, due) VALUES (?,?,?,?,?,?,?)",
                 bindings: [
                     .text(filename), .text(SummaryItemKind.actionItem), .int(position),
-                    item.owner.map { .text($0) } ?? .null, .text(item.text)
+                    item.owner.map { .text($0) } ?? .null, .text(item.text),
+                    item.status.map { .text($0) } ?? .null,
+                    item.due.map { .text($0) } ?? .null
                 ]
             )
         }
@@ -1274,7 +1279,7 @@ final class TranscriptIndex: @unchecked Sendable {
         try queue.sync {
             let limit = max(1, min(maxItems, 200))
             var sql = """
-                SELECT s.filename, s.text, s.owner, m.date, m.datetime
+                SELECT s.filename, s.text, s.owner, m.date, m.datetime, s.status, s.due
                 FROM meeting_summary_items s
                 JOIN meetings m ON m.filename = s.filename
                 WHERE s.kind = ?
@@ -1288,10 +1293,12 @@ final class TranscriptIndex: @unchecked Sendable {
             }
 
             switch status {
-            case .open, .all:
+            case .all:
                 break
+            case .open:
+                sql += " AND (s.status IS NULL OR lower(s.status) NOT IN \(Self.closedStatusSQLList))"
             case .done:
-                sql += " AND 1=0"
+                sql += " AND lower(s.status) IN \(Self.closedStatusSQLList)"
             }
 
             if let dateFrom { sql += " AND m.date >= ?"; bindings.append(.text(dateFrom)) }
@@ -1322,8 +1329,8 @@ final class TranscriptIndex: @unchecked Sendable {
                     datetime: colText(stmt, 4),
                     text: colText(stmt, 1),
                     owner: colTextOptional(stmt, 2),
-                    status: nil,
-                    due: nil
+                    status: colTextOptional(stmt, 5),
+                    due: colTextOptional(stmt, 6)
                 ))
             }
 
@@ -1504,7 +1511,7 @@ final class TranscriptIndex: @unchecked Sendable {
     private func fetchActionSummaryItems(filenames: [String]) throws -> [String: [DigestActionItem]] {
         let placeholders = filenames.map { _ in "?" }.joined(separator: ", ")
         let sql = """
-            SELECT filename, text, owner FROM meeting_summary_items
+            SELECT filename, text, owner, status, due FROM meeting_summary_items
             WHERE kind = ? AND filename IN (\(placeholders))
             ORDER BY filename, position ASC
         """
@@ -1522,8 +1529,8 @@ final class TranscriptIndex: @unchecked Sendable {
             result[colText(stmt, 0), default: []].append(DigestActionItem(
                 text: colText(stmt, 1),
                 owner: colTextOptional(stmt, 2),
-                status: nil,
-                due: nil
+                status: colTextOptional(stmt, 3),
+                due: colTextOptional(stmt, 4)
             ))
         }
         return result
@@ -1538,13 +1545,24 @@ final class TranscriptIndex: @unchecked Sendable {
         return (clause, bindings)
     }
 
-    /// Swift predicate for in-memory rollup counting. Current saved summaries do
-    /// not carry status, so nil means open.
+    /// Status tokens that count as closed. Must stay aligned with the bare-marker
+    /// tokens `CaptureSummaryParser` accepts on action bullets; nil/unknown means
+    /// open.
+    static let closedStatuses: [String] = [
+        "done", "complete", "completed", "resolved", "closed", "cancelled", "canceled"
+    ]
+
+    /// SQL literal list for status filters, e.g. `('done', 'complete', ...)`.
+    /// Safe to inline: the tokens are a compile-time constant.
+    private static let closedStatusSQLList =
+        "(" + closedStatuses.map { "'\($0)'" }.joined(separator: ", ") + ")"
+
+    /// Swift predicate for in-memory rollup counting (digest open counts).
     static func isOpenStatus(_ status: String?) -> Bool {
         guard let status = status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !status.isEmpty else {
             return true
         }
-        return !["done", "complete", "completed", "resolved", "closed", "cancelled", "canceled"].contains(status)
+        return !closedStatuses.contains(status)
     }
 
     private func ftsQuery(from query: String?) -> String? {
