@@ -397,10 +397,56 @@ func testMeetingPromptHeuristics() {
         )
     }
 
-    runSuite("MeetingPromptReason.isAdHocCallSignal — mic and camera are ad-hoc signals; calendar/runtime are not") {
+    runSuite("MeetingPromptReason.isAdHocCallSignal — mic, camera, and speaker are ad-hoc signals; calendar/runtime are not") {
         assertTrue(MeetingPromptReason.micInput.isAdHocCallSignal, "mic input is an ad-hoc call signal")
         assertTrue(MeetingPromptReason.cameraInput.isAdHocCallSignal, "camera input is an ad-hoc call signal")
+        assertTrue(MeetingPromptReason.audioOutput.isAdHocCallSignal, "native-app audio output is an ad-hoc call signal")
         assertFalse(MeetingPromptReason.runtimeOnly.isAdHocCallSignal, "runtime-app is not an ad-hoc mic/camera signal")
         assertFalse(MeetingPromptReason.calendarNearby.isAdHocCallSignal, "calendar is not an ad-hoc mic/camera signal")
+    }
+
+    runSuite("MeetingPromptProvider.audioOutputProvider — output attributes to native conferencing apps only") {
+        assertEqual(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "us.zoom.xos"),
+            .zoom,
+            "Zoom playing audio output maps to the Zoom provider"
+        )
+        assertEqual(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "us.zoom.xos.helper"),
+            .zoom,
+            "conferencing helper processes attribute to the parent app by family prefix"
+        )
+        assertEqual(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "com.microsoft.teams2"),
+            .teams,
+            "Teams playing audio output maps to the Teams provider"
+        )
+        assertNil(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "com.google.Chrome.helper"),
+            "browser output is dominated by non-call playback and must never count as a call signal"
+        )
+        assertNil(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "com.spotify.client"),
+            "media apps playing audio must never count as a call signal"
+        )
+    }
+
+    runSuite("MeetingPromptHeuristics.shouldReofferAfterExpiry — unattended prompts re-offer a bounded number of times") {
+        assertTrue(
+            MeetingPromptHeuristics.shouldReofferAfterExpiry(expiryCount: 1),
+            "the first unattended expiry should schedule a short re-offer, not a dismissal"
+        )
+        assertTrue(
+            MeetingPromptHeuristics.shouldReofferAfterExpiry(expiryCount: MeetingPromptHeuristics.maxPromptExpiryReoffers),
+            "expiries up to the cap should still re-offer"
+        )
+        assertFalse(
+            MeetingPromptHeuristics.shouldReofferAfterExpiry(expiryCount: MeetingPromptHeuristics.maxPromptExpiryReoffers + 1),
+            "past the cap an ignored call must fall back to the normal dismissal backoff"
+        )
+        assertTrue(
+            MeetingPromptHeuristics.promptExpiryReofferInterval < MeetingPromptHeuristics.defaultRuntimeDismissFallbackInterval,
+            "the re-offer interval must be meaningfully shorter than a dismissal, or the expiry path is pointless"
+        )
     }
 }

@@ -181,6 +181,27 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
+            meetingOverlayController.onPromptExpired = { [weak self] candidate in
+                guard let self else { return }
+                let backoffDecision = self.meetingPromptDetector.expire(candidate: candidate)
+                AnalyticsReporter.track(
+                    "meeting_prompt_dismissed",
+                    properties: MeetingPromptTelemetry.properties(
+                        for: candidate,
+                        readiness: self.meetingPromptTelemetryReadiness(),
+                        backoffKind: backoffDecision.kind
+                    )
+                )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "prompt_shown",
+                    reasonKind: .expired,
+                    surface: .meetingOverlay,
+                    priorReadyState: MeetingPromptTelemetry.readyState(
+                        readiness: self.meetingPromptTelemetryReadiness()
+                    )
+                )
+            }
             meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
                 guard let self else { return }
                 let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
@@ -258,6 +279,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             micActivityMonitor.onChange = { [weak self] micUsers in
                 self?.meetingPromptDetector.updateMicInputUsers(micUsers)
+            }
+            // Native-app audio output is the listen-only call signal (remote
+            // people talking, nothing holding the mic here). Same prompt pipe;
+            // the detector de-dupes it against the mic and camera signals.
+            micActivityMonitor.onOutputChange = { [weak self] outputUsers in
+                self?.meetingPromptDetector.updateAudioOutputUsers(outputUsers)
             }
             // Camera-on is a second, complementary call sensor (e.g. a camera-on,
             // mic-muted Meet join). It feeds the same prompt; the detector de-dupes
@@ -884,8 +911,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         } else {
             micActivityMonitor.stop()
             cameraActivityMonitor.stop()
-            // Drop any in-flight mic/camera candidates so a stale call can't prompt.
+            // Drop any in-flight mic/output/camera candidates so a stale call can't prompt.
             meetingPromptDetector.updateMicInputUsers([])
+            meetingPromptDetector.updateAudioOutputUsers([])
             meetingPromptDetector.updateCameraInUse(false)
         }
     }

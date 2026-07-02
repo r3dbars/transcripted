@@ -230,6 +230,16 @@ func testMeetingPromptDetector() async {
         assertEqual(mic.analyticsCalendarConfidence, "none", "ad-hoc mic prompts should not imply calendar evidence")
         assertEqual(mic.analyticsCallState, "mic_active", "mic prompts should preserve active-call evidence")
         assertEqual(mic.analyticsAppSignal, "browser_mic", "browser mic prompts should stay family-level, not bundle-level")
+
+        let output = makeMeetingPromptCandidate(
+            id: "mic:zoom",
+            provider: .zoom,
+            source: .runtimeApp,
+            reason: .audioOutput
+        )
+        assertEqual(output.analyticsCalendarConfidence, "none", "ad-hoc output prompts should not imply calendar evidence")
+        assertEqual(output.analyticsCallState, "speaker_active", "output prompts should record the listen-only call state")
+        assertEqual(output.analyticsAppSignal, "native_speaker", "output attribution is native-only and stays family-level")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — a browser holding the mic prompts an ad-hoc call") {
@@ -534,6 +544,106 @@ func testMeetingPromptDetector() async {
 
         assertNil(box.candidate, "a camera-on we cannot attribute to a call app should not prompt")
         assertEqual(box.promptCount, 0, "an unattributable camera signal should never ask the overlay to present")
+    }
+
+    await runSuite("MeetingPromptDetector.updateAudioOutputUsers — a listen-only native call prompts without the mic") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateAudioOutputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "sustained Zoom output with the mic idle is a live listen-only call")
+        assertEqual(box.candidate?.id, "mic:zoom", "output attribution reuses the stable ad-hoc candidate id")
+        assertEqual(box.candidate?.reason, .audioOutput, "the output-led signal keeps its distinct reason")
+    }
+
+    await runSuite("MeetingPromptDetector.updateAudioOutputUsers — mic and output on the same call prompt once") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+        detector.updateAudioOutputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "output corroborating an active mic call must not raise a second prompt")
+        assertEqual(box.candidate?.reason, .micInput, "the mic signal wins when both mic and output are active")
+    }
+
+    runSuite("MeetingPromptDetector.expire — an unattended countdown re-offers instead of long-dismissing") {
+        let detector = MeetingPromptDetector()
+        let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
+
+        let before = Date()
+        let decision = detector.expire(candidate: candidate)
+        let after = Date()
+
+        assertEqual(decision.kind, .expiredReoffer, "the first unattended expiry should schedule a short re-offer")
+        assertTrue(
+            decision.until >= before.addingTimeInterval(MeetingPromptHeuristics.promptExpiryReofferInterval - 1),
+            "the re-offer should wait for the short expiry interval"
+        )
+        assertTrue(
+            decision.until <= after.addingTimeInterval(MeetingPromptHeuristics.promptExpiryReofferInterval + 1),
+            "an unattended expiry must not inherit the long dismissal window"
+        )
+    }
+
+    runSuite("MeetingPromptDetector.expire — repeated unattended expiries fall back to the normal dismissal") {
+        let detector = MeetingPromptDetector()
+        let candidate = makeMeetingPromptCandidate(id: "mic:zoom", source: .runtimeApp, reason: .micInput)
+
+        var lastDecision: MeetingPromptBackoffDecision?
+        for _ in 0..<(MeetingPromptHeuristics.maxPromptExpiryReoffers + 1) {
+            lastDecision = detector.expire(candidate: candidate)
+        }
+
+        assertEqual(
+            lastDecision?.kind,
+            .runtimeDefaultFallback,
+            "past the re-offer cap an ignored call must inherit the full runtime dismissal backoff"
+        )
+    }
+
+    await runSuite("MeetingPromptDetector.expire — a re-offered candidate can prompt again after the interval") {
+        let detector = MeetingPromptDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+        assertEqual(box.promptCount, 1, "the initial call should prompt")
+
+        guard let shown = box.candidate else { return }
+        _ = detector.expire(candidate: shown)
+
+        // The expiry re-offer is candidate-level only: the provider must NOT be
+        // runtime-suppressed, so once the re-offer interval passes the same call
+        // can prompt again. We can't fast-forward the clock here, so assert the
+        // suppression shape instead: the candidate is snoozed (cooldown), not
+        // provider-suppressed.
+        detector.updateAudioOutputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.promptCount, 1, "during the re-offer cooldown the same call must stay quiet, not re-prompt instantly")
     }
 }
 

@@ -1416,6 +1416,10 @@ final class MeetingOverlayController: NSObject {
     var onPromptRecord: ((MeetingPromptDetector.Candidate) -> Void)?
     var onPromptDismiss: ((MeetingPromptDetector.Candidate) -> Void)?
     var onPromptRemindSoon: ((MeetingPromptDetector.Candidate) -> Void)?
+    /// The countdown ran out with nobody clicking anything. Distinct from
+    /// `onPromptDismiss` so an unattended prompt gets the detector's short
+    /// re-offer backoff instead of an explicit-dismissal suppression.
+    var onPromptExpired: ((MeetingPromptDetector.Candidate) -> Void)?
 
     // MARK: - Setup
 
@@ -2417,7 +2421,15 @@ final class MeetingOverlayController: NSObject {
                 await session.endRecordingFromAudioInactivityPrompt(automatic: true)
             }
         case .detectedMeeting, .none:
-            dismissPrompt(notifyDetector: true)
+            // An unattended countdown is not an explicit "no": route it through
+            // the expiry path (short re-offer while the call evidence persists)
+            // instead of the dismissal backoff that clicking the × takes.
+            if let candidate = promptCandidate, let onPromptExpired {
+                onPromptExpired(candidate)
+                dismissPrompt(notifyDetector: false)
+            } else {
+                dismissPrompt(notifyDetector: true)
+            }
         }
     }
 

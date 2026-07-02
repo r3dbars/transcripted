@@ -59,6 +59,12 @@ final class MeetingPromptDetector {
     private var micActiveBundleIDs: Set<String> = []
     // Whether a camera is confirmed in use, pushed by CameraActivityMonitor.
     private var cameraInUse = false
+    // Native conferencing bundle IDs confirmed playing audio output, pushed by
+    // MicActivityMonitor's output side (listen-only / hard-muted call detection).
+    private var audioOutputActiveBundleIDs: Set<String> = []
+    // Consecutive unattended-countdown expiries per candidate id, so an ignored
+    // prompt re-offers a couple of times before inheriting the full dismissal.
+    private var promptExpiryHistory: [String: (count: Int, lastExpiredAt: Date)] = [:]
 
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
@@ -127,6 +133,37 @@ final class MeetingPromptDetector {
     @discardableResult
     func snooze(candidate: Candidate, interval: TimeInterval? = nil) -> MeetingPromptBackoffDecision {
         return dismiss(candidate: candidate, interval: interval)
+    }
+
+    /// The prompt countdown ran out with no interaction. That is weaker evidence
+    /// of "don't record" than an explicit dismissal — the user may be heads-down
+    /// in the call or on another Space — so schedule a short candidate-level
+    /// re-offer instead of the provider-wide dismissal backoff. Capped at
+    /// `MeetingPromptHeuristics.maxPromptExpiryReoffers` consecutive expiries;
+    /// past the cap the candidate inherits the normal dismissal so an ignored
+    /// call eventually goes quiet.
+    @discardableResult
+    func expire(candidate: Candidate) -> MeetingPromptBackoffDecision {
+        let now = Date()
+        var expiryCount = 1
+        if let history = promptExpiryHistory[candidate.id],
+           now.timeIntervalSince(history.lastExpiredAt) <= MeetingPromptHeuristics.promptExpiryStreakResetInterval {
+            expiryCount = history.count + 1
+        }
+        promptExpiryHistory[candidate.id] = (expiryCount, now)
+
+        guard MeetingPromptHeuristics.shouldReofferAfterExpiry(expiryCount: expiryCount) else {
+            return dismiss(candidate: candidate)
+        }
+
+        // Candidate-level cooldown only — no `suppressRuntimePrompts` — so the
+        // same call can re-offer once the interval passes.
+        let until = now.addingTimeInterval(MeetingPromptHeuristics.promptExpiryReofferInterval)
+        let decision = MeetingPromptBackoffDecision(kind: .expiredReoffer, until: until)
+        snoozedUntil[candidate.id] = until
+        pendingUntil[candidate.id] = until
+        cooldownReasons[candidate.id] = decision.kind.rawValue
+        return decision
     }
 
     private func dismiss(candidate: Candidate, interval: TimeInterval?) -> MeetingPromptBackoffDecision {
@@ -400,6 +437,18 @@ final class MeetingPromptDetector {
         }
     }
 
+    /// Pushed by `MicActivityMonitor`'s output side with the set of native
+    /// conferencing bundle IDs confirmed to be playing audio output. Catches the
+    /// listen-only / hard-muted join where nothing holds the mic; de-dupes with
+    /// the mic and camera signals in `callSignals`.
+    func updateAudioOutputUsers(_ bundleIDs: Set<String>) {
+        guard bundleIDs != audioOutputActiveBundleIDs else { return }
+        audioOutputActiveBundleIDs = bundleIDs
+        Task { @MainActor [weak self] in
+            await self?.evaluate()
+        }
+    }
+
     private func micInputCandidates(now: Date, frontmostBundleID: String?) -> [ScoredCandidate] {
         let signals = callSignals(frontmostBundleID: frontmostBundleID)
         guard !signals.isEmpty else { return [] }
@@ -444,17 +493,25 @@ final class MeetingPromptDetector {
         return candidates
     }
 
-    /// Ad-hoc call signals. The mic is the primary signal; the camera is only a
-    /// standalone signal when nothing holds the mic (the mic-muted join), so a
+    /// Ad-hoc call signals, tiered by attribution strength: the mic is the
+    /// primary signal; native-app audio output is the standalone fallback when
+    /// nothing holds the mic (the listen-only / hard-muted join, with real
+    /// process attribution); the camera is the last standalone signal, so a
     /// normal mic-and-camera call is a single mic prompt and the camera's
-    /// frontmost-based attribution never overrides or duplicates a live mic call.
-    /// Mirrors `MeetingPromptHeuristics.callSignals` used by the synthetic evaluator.
+    /// frontmost-based attribution never overrides or duplicates a stronger
+    /// signal. Mirrors `MeetingPromptSyntheticEvaluator.callSignals` — keep both
+    /// in lockstep.
     private func callSignals(
         frontmostBundleID: String?
     ) -> [(provider: MeetingPromptProvider, reason: MeetingPromptReason)] {
         let micProviders = micInputProviders()
         if !micProviders.isEmpty {
             return micProviders.map { ($0, .micInput) }
+        }
+
+        let outputProviders = audioOutputProviders()
+        if !outputProviders.isEmpty {
+            return outputProviders.map { ($0, .audioOutput) }
         }
 
         if cameraInUse,
@@ -467,6 +524,11 @@ final class MeetingPromptDetector {
 
     private func micInputProviders() -> [MeetingPromptProvider] {
         Set(micActiveBundleIDs.compactMap(MeetingPromptProvider.micInputProvider(forBundleID:)))
+            .sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private func audioOutputProviders() -> [MeetingPromptProvider] {
+        Set(audioOutputActiveBundleIDs.compactMap(MeetingPromptProvider.audioOutputProvider(forBundleID:)))
             .sorted { $0.rawValue < $1.rawValue }
     }
 
@@ -636,6 +698,9 @@ final class MeetingPromptDetector {
         suppressionTelemetryUntil = suppressionTelemetryUntil.filter { $0.value > now }
         recentNativeActivity = recentNativeActivity.filter {
             now.timeIntervalSince($0.value) <= MeetingPromptHeuristics.runtimeActivityFreshness
+        }
+        promptExpiryHistory = promptExpiryHistory.filter {
+            now.timeIntervalSince($0.value.lastExpiredAt) <= MeetingPromptHeuristics.promptExpiryStreakResetInterval
         }
     }
 

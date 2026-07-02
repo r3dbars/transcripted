@@ -140,6 +140,22 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
         return nil
     }
 
+    /// Maps a process bundle ID that is *currently playing audio output* to a
+    /// meeting provider, or `nil` if it is not a recognized call source.
+    ///
+    /// Deliberately narrower than the mic-input mapping: only native conferencing
+    /// app families count. Browsers are excluded because browser output is
+    /// dominated by non-call playback (YouTube, music, videos), while a native
+    /// conferencing app emitting sustained output is almost always a live call.
+    /// This is the signal that catches the listen-only or hard-muted join the mic
+    /// and camera both miss: remote participants are talking, so the app plays
+    /// output, but nothing on this Mac holds the mic.
+    static func audioOutputProvider(forBundleID bundleID: String) -> MeetingPromptProvider? {
+        allCases.first { provider in
+            provider.activeBundleIdentifiers.contains { bundleID.matchesBundleFamily($0) }
+        }
+    }
+
     /// Attributes a "camera is on, nothing is holding the mic" signal to a meeting
     /// provider using only the *frontmost* app, or `nil` if the frontmost app is
     /// not a known call surface.
@@ -193,12 +209,17 @@ enum MeetingPromptReason: String, Equatable {
     // apart. When the mic is also active the mic candidate wins, so this reason
     // marks the camera-only case.
     case cameraInput = "camera_input"
+    // A native conferencing app is playing sustained audio output while nothing
+    // holds the mic (a listen-only or hard-muted join: remote people are talking,
+    // you are not). Same prompt + backoff as `.micInput`; distinct for analytics.
+    // Native apps only — browser output is far too noisy to be a call signal.
+    case audioOutput = "audio_output"
 
-    /// Mic- or camera-driven ad-hoc call detection (as opposed to calendar- or
-    /// runtime-app-driven). Both feed the same prompt and the same browser-call
-    /// vs calendar preference logic.
+    /// Mic-, camera-, or speaker-driven ad-hoc call detection (as opposed to
+    /// calendar- or runtime-app-driven). All feed the same prompt and the same
+    /// browser-call vs calendar preference logic.
     var isAdHocCallSignal: Bool {
-        self == .micInput || self == .cameraInput
+        self == .micInput || self == .cameraInput || self == .audioOutput
     }
 }
 
@@ -210,6 +231,10 @@ enum MeetingPromptBackoffKind: String, Equatable {
     case runtimeDefaultFallback = "runtime_default_fallback"
     case runtimeTeamsExtended = "runtime_teams_extended"
     case runtimeShortReminder = "runtime_short_reminder"
+    // The prompt countdown ran out with no interaction. Not an explicit "no",
+    // so the candidate re-offers after a short interval instead of inheriting
+    // the full dismissal backoff (capped — see `MeetingPromptHeuristics`).
+    case expiredReoffer = "expired_reoffer"
 }
 
 enum MeetingPromptSuppressionReason: String, Equatable {
@@ -255,6 +280,25 @@ enum MeetingPromptHeuristics {
     static let runtimeActivityFreshness: TimeInterval = 5 * 60
     static let calendarReminderLeadTime: TimeInterval = 60
     static let calendarReminderPostStartGrace: TimeInterval = 5 * 60
+
+    // MARK: Unattended prompt expiry (countdown ran out, nobody clicked)
+    //
+    // An unattended countdown is weaker evidence of "don't record" than an
+    // explicit dismissal — the user may be heads-down in the call, on another
+    // Space, or away from the screen for the first minute. Re-offer a short
+    // while later while the call evidence persists, capped so an ignored call
+    // eventually falls back to the normal dismissal backoff instead of nagging.
+    static let promptExpiryReofferInterval: TimeInterval = 3 * 60
+    static let maxPromptExpiryReoffers = 2
+    /// How long an expiry streak is remembered. Past this window (matches the
+    /// default runtime dismissal) a fresh call starts a fresh re-offer budget.
+    static let promptExpiryStreakResetInterval: TimeInterval = defaultRuntimeDismissFallbackInterval
+
+    /// Whether the `expiryCount`-th consecutive unattended expiry should
+    /// schedule a short re-offer (`true`) or fall back to a full dismissal.
+    static func shouldReofferAfterExpiry(expiryCount: Int) -> Bool {
+        expiryCount <= maxPromptExpiryReoffers
+    }
 
     static func snoozeInterval(
         for source: MeetingPromptSource,
@@ -437,6 +481,10 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
     /// only — CoreMediaIO gives no process attribution — so it is attributed to a
     /// provider via the frontmost app when nothing holds the mic.
     let cameraInUse: Bool
+    /// Bundle IDs of native conferencing apps confirmed to be playing audio
+    /// output (MicActivityMonitor's output side). Catches the listen-only /
+    /// hard-muted join where nothing holds the mic and the camera stays off.
+    let audioOutputActiveBundleIDs: Set<String>
     let isOwnCaptureActive: Bool
     let isMicInputPromptEnabled: Bool
 
@@ -447,6 +495,7 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
         runtimeSuppressedUntil: [MeetingPromptProvider: Date],
         micActiveBundleIDs: Set<String> = [],
         cameraInUse: Bool = false,
+        audioOutputActiveBundleIDs: Set<String> = [],
         isOwnCaptureActive: Bool = false,
         isMicInputPromptEnabled: Bool = true
     ) {
@@ -456,6 +505,7 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
         self.runtimeSuppressedUntil = runtimeSuppressedUntil
         self.micActiveBundleIDs = micActiveBundleIDs
         self.cameraInUse = cameraInUse
+        self.audioOutputActiveBundleIDs = audioOutputActiveBundleIDs
         self.isOwnCaptureActive = isOwnCaptureActive
         self.isMicInputPromptEnabled = isMicInputPromptEnabled
     }
@@ -493,7 +543,7 @@ extension MeetingPromptDetector.Candidate {
             return "linked_event_runtime_match"
         case .calendarNearby:
             return "linked_event"
-        case .micInput, .cameraInput, .runtimeOnly:
+        case .micInput, .cameraInput, .audioOutput, .runtimeOnly:
             return "none"
         }
     }
@@ -504,6 +554,8 @@ extension MeetingPromptDetector.Candidate {
             return "mic_active"
         case .cameraInput:
             return "camera_active"
+        case .audioOutput:
+            return "speaker_active"
         case .calendarPlusRuntimeMatch, .runtimeOnly:
             return "app_active"
         case .calendarNearby:
@@ -517,6 +569,9 @@ extension MeetingPromptDetector.Candidate {
             return provider == .googleMeet ? "browser_mic" : "native_mic"
         case .cameraInput:
             return provider == .googleMeet ? "browser_camera" : "native_camera"
+        case .audioOutput:
+            // Output attribution is native-only by construction.
+            return "native_speaker"
         case .runtimeOnly:
             return "native_runtime"
         case .calendarPlusRuntimeMatch:
@@ -668,19 +723,26 @@ enum MeetingPromptSyntheticEvaluator {
     }
 
     /// The ad-hoc call signals from this snapshot, de-duped to one entry per
-    /// provider so mic-and-camera on the same call surface a single prompt. Mic
-    /// activity is the primary signal (`.micInput`). The camera is only a
-    /// *standalone* signal when **nothing holds the mic** — the camera-on,
-    /// mic-muted join — because the camera boolean has no process attribution, so
-    /// attributing it to the frontmost app while the mic already identifies a call
-    /// could point at a different (wrong) app or double-prompt. When the mic is
-    /// active it already names the call and the camera adds nothing.
+    /// provider so multiple sensors on the same call surface a single prompt.
+    /// Tiered: mic activity is the primary signal (`.micInput`); native-app audio
+    /// output is the standalone fallback when nothing holds the mic (the
+    /// listen-only / hard-muted join, with real process attribution); the camera
+    /// is the last standalone signal (the camera-on, mic-muted join) because the
+    /// camera boolean has no process attribution — attributing it to the
+    /// frontmost app while a stronger signal already identifies a call could
+    /// point at a different (wrong) app or double-prompt. When a higher tier is
+    /// active it already names the call and the lower tiers add nothing.
     static func callSignals(
         from snapshot: MeetingPromptRuntimeSnapshot
     ) -> [(provider: MeetingPromptProvider, reason: MeetingPromptReason)] {
         let micProviders = micInputProviders(from: snapshot)
         if !micProviders.isEmpty {
             return micProviders.map { ($0, .micInput) }
+        }
+
+        let outputProviders = audioOutputProviders(from: snapshot)
+        if !outputProviders.isEmpty {
+            return outputProviders.map { ($0, .audioOutput) }
         }
 
         if snapshot.cameraInUse,
@@ -695,6 +757,13 @@ enum MeetingPromptSyntheticEvaluator {
         from snapshot: MeetingPromptRuntimeSnapshot
     ) -> [MeetingPromptProvider] {
         Set(snapshot.micActiveBundleIDs.compactMap(MeetingPromptProvider.micInputProvider(forBundleID:)))
+            .sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private static func audioOutputProviders(
+        from snapshot: MeetingPromptRuntimeSnapshot
+    ) -> [MeetingPromptProvider] {
+        Set(snapshot.audioOutputActiveBundleIDs.compactMap(MeetingPromptProvider.audioOutputProvider(forBundleID:)))
             .sorted { $0.rawValue < $1.rawValue }
     }
 
