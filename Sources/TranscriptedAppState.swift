@@ -120,6 +120,26 @@ class TranscriptedAppState: ObservableObject {
                 "meeting_state": meetingStateSummary,
             ]
         }
+
+        // Retained-audio maintenance loops skip individual failures so one stuck
+        // file can't block the rest; forward each skip here so failed conversions
+        // and unpruned audio show up in the event log instead of vanishing. The
+        // failure record carries only operation + error domain/code (no paths).
+        MeetingAudioStorageManager.setMaintenanceFailureHandler { failure in
+            Task { @MainActor in
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "meeting",
+                    event: "audio_maintenance_failure",
+                    message: "Retained-audio maintenance skipped a file",
+                    context: [
+                        "operation": failure.operation,
+                        "error_domain": failure.errorDomain,
+                        "error_code": "\(failure.errorCode)",
+                    ]
+                )
+            }
+        }
         EventReporter.shared.capture(level: .info, engine: "app", event: "app_launched",
             message: "Transcripted initialized for dictation and meetings")
     }

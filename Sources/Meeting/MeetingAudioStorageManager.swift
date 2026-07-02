@@ -470,10 +470,49 @@ struct FailedMeetingAudioCompressionResult: Equatable {
     let updatedEntries: Int
 }
 
+/// Coarse, privacy-safe record of a retained-audio maintenance failure. Carries
+/// only the operation name and the NSError domain/code — never a path, filename,
+/// or meeting title — so forwarding it into the observability pipeline needs no
+/// extra sanitization.
+struct MeetingAudioMaintenanceFailure: Equatable {
+    let operation: String
+    let errorDomain: String
+    let errorCode: Int
+}
+
 enum MeetingAudioStorageManager {
     private static let frontmatterPreviewByteLimit = 64 * 1024
     private static let staleTemporaryAudioAge: TimeInterval = 6 * 60 * 60
     private static let managedAudioStems = ["microphone", "system_audio", "recording", "playback"]
+
+    // MARK: - Maintenance failure reporting
+
+    /// Maintenance loops deliberately keep going when one file fails (a stuck
+    /// conversion must not block retention for every other meeting), but the
+    /// failures used to vanish into `catch { continue }` — orphaned WAVs and
+    /// unpruned audio accumulated with no signal anywhere. Each swallowed error
+    /// now also reports here. The app wires this to `EventReporter` at startup;
+    /// tests inject a recorder. The hook must be safe to call from any queue.
+    private static let maintenanceFailureLock = NSLock()
+    private static var maintenanceFailureHandler: ((MeetingAudioMaintenanceFailure) -> Void)?
+
+    static func setMaintenanceFailureHandler(_ handler: ((MeetingAudioMaintenanceFailure) -> Void)?) {
+        maintenanceFailureLock.lock()
+        maintenanceFailureHandler = handler
+        maintenanceFailureLock.unlock()
+    }
+
+    private static func reportMaintenanceFailure(_ operation: String, _ error: Error) {
+        maintenanceFailureLock.lock()
+        let handler = maintenanceFailureHandler
+        maintenanceFailureLock.unlock()
+        let nsError = error as NSError
+        handler?(MeetingAudioMaintenanceFailure(
+            operation: operation,
+            errorDomain: nsError.domain,
+            errorCode: nsError.code
+        ))
+    }
 
     @discardableResult
     static func processExistingRetainedAudio(
@@ -621,6 +660,7 @@ enum MeetingAudioStorageManager {
                 try fileManager.removeItem(at: file)
                 removedAny = true
             } catch {
+                reportMaintenanceFailure("retention_prune", error)
                 continue
             }
         }
@@ -692,6 +732,7 @@ enum MeetingAudioStorageManager {
             fileManager.restrictFileToOwnerOnly(at: playbackWAVURL)
             return true
         } catch {
+            reportMaintenanceFailure("playback_mix", error)
             try? fileManager.removeItem(at: tempURL)
             return false
         }
@@ -746,6 +787,7 @@ enum MeetingAudioStorageManager {
                 try fileManager.removeItem(at: sourceURL)
                 convertedCount += 1
             } catch {
+                reportMaintenanceFailure("wav_to_m4a", error)
                 try? fileManager.removeItem(at: tempURL)
                 continue
             }
@@ -876,6 +918,7 @@ enum MeetingAudioStorageManager {
                 try fileManager.removeItem(at: file)
                 removedCount += 1
             } catch {
+                reportMaintenanceFailure("stale_temp_cleanup", error)
                 continue
             }
         }
@@ -1120,6 +1163,7 @@ enum MeetingAudioStorageManager {
                 )
             )
         } catch {
+            reportMaintenanceFailure("failed_audio_compress", error)
             try? fileManager.removeItem(at: tempURL)
             return FailedAudioCompressionResolution(updatedURL: sourceURL, promotedFile: nil)
         }
