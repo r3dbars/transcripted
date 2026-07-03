@@ -1099,7 +1099,15 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
-            case .copied(let message, reason: _), .failed(let message):
+            case .copied(let message, reason: _):
+                if let saveFailureMessage {
+                    overlayController.showError("\(message) \(saveFailureMessage)")
+                } else {
+                    // The text is safe on the clipboard — present it as a calm
+                    // "press ⌘V" notice, not a warning-triangle error.
+                    overlayController.showClipboardNotice(message)
+                }
+            case .failed(let message):
                 let combinedMessage: String
                 if let saveFailureMessage {
                     combinedMessage = "\(message) \(saveFailureMessage)"

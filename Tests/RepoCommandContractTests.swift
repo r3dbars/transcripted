@@ -1888,7 +1888,7 @@ func testRepoCommandContract() {
 
         let headerContents = readRepoTextFile("Sources/UI/Overlay/OverlayHeaderView.swift")
         assertTrue(
-            headerContents.contains("state == .starting || state == .listening || (state == .drafting && !isError) || state == .success"),
+            headerContents.contains("state == .starting || state == .listening || (state == .drafting && !showsMessage) || state == .success"),
             "mini cursor dictation should use the tiny centered header layout during startup"
         )
         assertTrue(

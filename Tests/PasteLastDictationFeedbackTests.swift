@@ -13,14 +13,14 @@ func testPasteLastDictationFeedback() {
 
     runSuite("PasteLastDictationFeedback maps copied and failed outcomes to visible caution copy") {
         let copied = PasteLastDictationFeedback.presentation(
-            for: .copied("Couldn't paste automatically. The text was copied instead.", reason: .pasteEventCreationFailed)
+            for: .copied("Couldn't paste automatically. Your text is on the clipboard — press ⌘V.", reason: .pasteEventCreationFailed)
         )
         let failed = PasteLastDictationFeedback.presentation(
             for: .failed("Couldn't prepare the clipboard for automatic paste.")
         )
 
         assertEqual(copied.title, "Copied instead", "copied title")
-        assertEqual(copied.detail, "Couldn't paste automatically. The text was copied instead.", "copied detail")
+        assertEqual(copied.detail, "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.", "copied detail")
         assertEqual(copied.tone, .caution, "copied tone")
         assertEqual(failed.title, "Paste Last failed", "failed title")
         assertEqual(failed.detail, "Couldn't prepare the clipboard for automatic paste.", "failed detail")

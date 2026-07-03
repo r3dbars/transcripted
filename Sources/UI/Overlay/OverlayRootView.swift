@@ -120,6 +120,7 @@ final class OverlayRootView: NSView {
         errorMessage: String,
         errorActionTitle: String?,
         onErrorAction: (() -> Void)?,
+        messageTone: FloatingOverlayController.MessageTone,
         loadingPresentation: FloatingOverlayController.LoadingPresentation,
         loadingElapsedSeconds: Int,
         successTitle: String,
@@ -133,8 +134,9 @@ final class OverlayRootView: NSView {
         currentErrorMessage = errorMessage
 
         let showLoading = state == .loading
-        let showError = state == .drafting && !errorMessage.isEmpty
-        let showContent = showLoading || showError
+        let showMessage = state == .drafting && !errorMessage.isEmpty
+        let isNotice = showMessage && messageTone == .notice
+        let showContent = showLoading || showMessage
 
         // Update header
         headerView.update(
@@ -142,7 +144,8 @@ final class OverlayRootView: NSView {
             dictationShortcutHint: dictationShortcutHint,
             loadingTitle: state == .loading ? "Dictation" : nil,
             successTitle: successTitle,
-            isError: showError,
+            isError: showMessage && !isNotice,
+            isNotice: isNotice,
             isMiniCursorMode: isMiniCursorMode,
             meterPresentation: DictationMeterPolicy.presentation(
                 isListening: state == .listening,
@@ -165,13 +168,14 @@ final class OverlayRootView: NSView {
             )
         }
 
-        if showError {
+        if showMessage {
             draftingView.isHidden = false
             let statusText = isTranscribing ? "Transcribing..." : "Processing..."
             draftingView.update(
                 error: errorMessage.isEmpty ? nil : errorMessage,
                 errorActionTitle: errorActionTitle,
                 onErrorAction: onErrorAction,
+                isNotice: isNotice,
                 isTranscribing: isTranscribing,
                 transcriptText: liveTranscript,
                 statusText: statusText
