@@ -60,7 +60,6 @@ let package = Package(
                     "-Xlinker", "-rpath",
                     "-Xlinker", depsFrameworks,
                 ]),
-                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),

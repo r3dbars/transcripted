@@ -109,7 +109,7 @@ ensure_deps_ready() {
     local current_digest
     local stamp_digest
 
-    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$ESPEAK_FRAMEWORK" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
+    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
         newest_input="$(newest_dependency_input)"
         build_stamp="$(deps_build_stamp_info)"
 
@@ -150,7 +150,6 @@ ensure_deps_ready() {
     echo "  $TRANSCRIPTED_CORE_MODULE"
     echo "  $ARGMAX_CORE_MODULE"
     echo "  $WHISPERKIT_MODULE"
-    echo "  $ESPEAK_FRAMEWORK"
     echo "  $SENTRY_FRAMEWORK"
     echo "  $SPARKLE_FRAMEWORK"
     echo ""
@@ -439,19 +438,29 @@ mkdir -p "$APP_BUNDLE/Contents/Helpers"
 # Bundle the Parakeet model directory used by the runtime loader.
 PARAKEET_MODELS_ROOT="$HOME/Library/Application Support/FluidAudio/Models"
 PARAKEET_BUNDLE_DIR="$APP_BUNDLE/Contents/Resources/parakeet-models"
-PARAKEET_MODEL_DIR="parakeet-tdt-0.6b-v3-coreml"
+# FluidAudio 0.15.x cache folder name (no -coreml suffix); AsrModels.load(from:)
+# resolves <parent>/<folderName>, so the bundled dir must use this exact name.
+PARAKEET_MODEL_DIR="parakeet-tdt-0.6b-v3"
 
 bundled_parakeet_models=false
 model_src="$PARAKEET_MODELS_ROOT/$PARAKEET_MODEL_DIR"
+if [ ! -d "$model_src" ]; then
+    # Dev machine still on a pre-0.15 cache layout.
+    model_src="$PARAKEET_MODELS_ROOT/parakeet-tdt-0.6b-v3-coreml"
+fi
 if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
     echo "Skipping bundled Parakeet models (--thin); runtime download will occur on first use."
 else
     mkdir -p "$PARAKEET_BUNDLE_DIR"
-    if [ -d "$model_src/Encoder.mlmodelc" ]; then
-        echo "Bundling Parakeet models from $PARAKEET_MODEL_DIR..."
+    # JointDecisionv3.mlmodelc is required by FluidAudio 0.15.x; bundling without it
+    # would make the runtime loader try to download into the signed app bundle.
+    if [ -d "$model_src/Encoder.mlmodelc" ] && [ -d "$model_src/JointDecisionv3.mlmodelc" ]; then
+        echo "Bundling Parakeet models from $model_src..."
         rm -rf "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
         ditto "$model_src" "$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR"
         bundled_parakeet_models=true
+    elif [ -d "$model_src/Encoder.mlmodelc" ]; then
+        echo "Parakeet cache at $model_src predates FluidAudio 0.15 (missing JointDecisionv3.mlmodelc) — skipping bundling"
     fi
 fi
 
@@ -504,8 +513,8 @@ for metallib in deps-libs/*.metallib; do
     [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
 done
 
-# Bundle FluidAudio's binary framework dependency.
-cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+# ESpeakNG.framework is only present on FluidAudio < 0.15 deps builds.
+[ -d "$ESPEAK_FRAMEWORK" ] && cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 
