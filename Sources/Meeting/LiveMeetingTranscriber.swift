@@ -80,6 +80,8 @@ final class LiveMeetingTranscriber {
 
 @available(macOS 14.0, *)
 private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
+    private static let sidecarAppendFailureThreshold = 3
+
     private let source: LiveMeetingCodexSource
     private let audioSource: AudioSource
     private let streamingSession: SlidingWindowAsrSession
@@ -97,9 +99,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private var lastFeedText = ""
     private var lastFeedWasFinal = false
     private var consecutiveSidecarAppendFailures = 0
-    private var reportedSidecarAppendFailure = false
-
-    private static let sidecarAppendFailureThreshold = 3
+    private var didSurfaceSidecarAppendFailure = false
 
     init(
         source: LiveMeetingCodexSource,
@@ -291,28 +291,68 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
 
         do {
             try codexSession.append(entry)
-            lock.withLock {
+            let shouldRecoverSidecarFailure = lock.withLock {
+                let shouldRecover = didSurfaceSidecarAppendFailure
                 consecutiveSidecarAppendFailures = 0
+                didSurfaceSidecarAppendFailure = false
+                return shouldRecover
+            }
+            if shouldRecoverSidecarFailure {
+                try? codexSession.markAppendRecovered(at: now)
+                awaitFeedRecovery(note: sidecarAppendFailureNote)
             }
         } catch {
-            let shouldReport = lock.withLock { () -> Bool in
+            let failureState = lock.withLock { () -> (count: Int, shouldSurface: Bool) in
                 consecutiveSidecarAppendFailures += 1
-                guard consecutiveSidecarAppendFailures >= Self.sidecarAppendFailureThreshold,
-                      !reportedSidecarAppendFailure else {
-                    return false
+                let count = consecutiveSidecarAppendFailures
+                let shouldSurface = count >= Self.sidecarAppendFailureThreshold
+                    && !didSurfaceSidecarAppendFailure
+                if shouldSurface {
+                    didSurfaceSidecarAppendFailure = true
                 }
-                reportedSidecarAppendFailure = true
-                return true
+                return (count, shouldSurface)
             }
-            guard shouldReport else { return }
+            guard failureState.shouldSurface else { return }
 
-            let note = "Live sidecar stopped updating after repeated write failures. The final Transcripted transcript still saves normally."
-            try? codexSession.markSidecarAppendFailed(note: note)
-            if let feed {
-                Task { @MainActor in
-                    feed.markFailed(note: note)
-                }
+            let note = sidecarAppendFailureNote
+            try? codexSession.markAppendFailed(
+                consecutiveFailures: failureState.count,
+                error: error,
+                at: now
+            )
+            awaitFeedFailure(note)
+            let source = source.rawValue
+            let consecutiveFailures = "\(failureState.count)"
+            let errorDescription = error.localizedDescription
+            Task { @MainActor in
+                DiagnosticsTrail.record(
+                    level: .warning,
+                    engine: "meeting",
+                    event: "live_sidecar_append_failed",
+                    message: "Live meeting sidecar append failed repeatedly",
+                    context: [
+                        "source": source,
+                        "consecutive_failures": consecutiveFailures,
+                        "error": errorDescription
+                    ]
+                )
             }
+        }
+    }
+
+    private func awaitFeedFailure(_ note: String) {
+        Task { @MainActor [weak feed] in
+            feed?.markFailed(note: note)
+        }
+    }
+
+    private var sidecarAppendFailureNote: String {
+        "\(source.displayName) live sidecar stopped updating. The final transcript still saves normally."
+    }
+
+    private func awaitFeedRecovery(note: String) {
+        Task { @MainActor [weak feed] in
+            feed?.recoverFromSidecarAppendFailure(note: note)
         }
     }
 

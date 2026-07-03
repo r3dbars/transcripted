@@ -912,12 +912,14 @@ final class MeetingOverlayRootView: NSView {
     /// Separate push channel for live transcript content so per-entry updates
     /// do not re-run the full state update path.
     func updateLiveTranscript(
-        _ attributed: NSAttributedString,
+        finals: [LiveMeetingCodexTranscriptEntry],
+        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry],
         statusText: String?,
         hasEntries: Bool
     ) {
         transcriptDrawer.update(
-            transcript: attributed,
+            finals: finals,
+            partials: partials,
             statusText: statusText,
             hasEntries: hasEntries
         )
@@ -1651,10 +1653,8 @@ final class MeetingOverlayController: NSObject {
 
         let hasEntries = !latestTranscriptFinals.isEmpty || !latestTranscriptPartials.isEmpty
         rootView?.updateLiveTranscript(
-            makeTranscriptAttributedText(
-                finals: latestTranscriptFinals,
-                partials: latestTranscriptPartials
-            ),
+            finals: latestTranscriptFinals,
+            partials: latestTranscriptPartials,
             statusText: MeetingLiveViewAffordancePolicy.drawerStatus(
                 phase: latestTranscriptPhase,
                 hasEntries: hasEntries
@@ -1666,55 +1666,6 @@ final class MeetingOverlayController: NSObject {
     private func flushPendingTranscriptIfNeeded() {
         guard transcriptPushPending else { return }
         pushTranscriptToView()
-    }
-
-    private func makeTranscriptAttributedText(
-        finals: [LiveMeetingCodexTranscriptEntry],
-        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry]
-    ) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 2
-        paragraph.paragraphSpacing = 7
-
-        func append(_ entry: LiveMeetingCodexTranscriptEntry, isPartial: Bool) {
-            if result.length > 0 {
-                result.append(NSAttributedString(string: "\n"))
-            }
-            let isMic = entry.source == .microphone
-            let tag = isMic ? "You" : "Them"
-            let tagColor = isMic
-                ? MeetingOverlayTokens.waveformMicTint
-                : MeetingOverlayTokens.waveformSystemTint
-            result.append(NSAttributedString(
-                string: "\(tag)  ",
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                    .foregroundColor: isPartial ? tagColor.withAlphaComponent(0.55) : tagColor,
-                    .paragraphStyle: paragraph,
-                ]
-            ))
-            result.append(NSAttributedString(
-                string: entry.text,
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 12, weight: .regular),
-                    .foregroundColor: isPartial
-                        ? MeetingOverlayTokens.textSecondary
-                        : MeetingOverlayTokens.textPrimary,
-                    .paragraphStyle: paragraph,
-                ]
-            ))
-        }
-
-        for entry in finals {
-            append(entry, isPartial: false)
-        }
-        for source in [LiveMeetingCodexSource.microphone, .system] {
-            if let partial = partials[source] {
-                append(partial, isPartial: true)
-            }
-        }
-        return result
     }
 
     private func applyAudioInactivityWarning(_ warning: MeetingAudioInactivityWarning?) {

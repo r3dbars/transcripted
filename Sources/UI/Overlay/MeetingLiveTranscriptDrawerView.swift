@@ -32,6 +32,8 @@ final class MeetingLiveTranscriptDrawerView: NSView {
     private var copyFeedbackTask: Task<Void, Never>?
     private var transientStatusTask: Task<Void, Never>?
     private var hoverTrackingArea: NSTrackingArea?
+    private var renderedFinalEntries: [LiveMeetingCodexTranscriptEntry] = []
+    private var renderedPartialRange: NSRange?
 
     var onOpenInBrowser: (() -> Void)?
     var onCopyTranscript: (() -> Void)?
@@ -188,7 +190,12 @@ final class MeetingLiveTranscriptDrawerView: NSView {
         }
     }
 
-    func update(transcript: NSAttributedString, statusText: String?, hasEntries: Bool) {
+    func update(
+        finals: [LiveMeetingCodexTranscriptEntry],
+        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry],
+        statusText: String?,
+        hasEntries: Bool
+    ) {
         self.statusText = statusText
         self.hasEntries = hasEntries
         refreshStatusLabel()
@@ -200,11 +207,120 @@ final class MeetingLiveTranscriptDrawerView: NSView {
             let visible = scrollView.contentView.documentVisibleRect
             return visible.maxY >= documentView.frame.height - 28
         }()
-        textView.textStorage?.setAttributedString(transcript)
+        updateTranscriptStorage(finals: finals, partials: partials)
         if wasPinnedToBottom {
             textView.scrollToEndOfDocument(nil)
         }
         needsLayout = true
+    }
+
+    private func updateTranscriptStorage(
+        finals: [LiveMeetingCodexTranscriptEntry],
+        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry]
+    ) {
+        guard let textStorage = textView.textStorage else { return }
+
+        if needsFullTranscriptRebuild(for: finals) {
+            textStorage.setAttributedString(makeTranscriptAttributedText(finals: finals, partials: partials))
+            renderedFinalEntries = finals
+            renderedPartialRange = partialRange(in: textStorage)
+            return
+        }
+
+        if let renderedPartialRange {
+            textStorage.replaceCharacters(in: renderedPartialRange, with: "")
+            self.renderedPartialRange = nil
+        }
+
+        if renderedFinalEntries.count < finals.count {
+            for entry in finals[renderedFinalEntries.count...] {
+                appendEntry(entry, isPartial: false, to: textStorage)
+            }
+            renderedFinalEntries = finals
+        }
+
+        let partialStart = textStorage.length
+        for source in [LiveMeetingCodexSource.microphone, .system] {
+            if let partial = partials[source] {
+                appendEntry(partial, isPartial: true, to: textStorage)
+            }
+        }
+        if textStorage.length > partialStart {
+            renderedPartialRange = NSRange(location: partialStart, length: textStorage.length - partialStart)
+        }
+    }
+
+    private func needsFullTranscriptRebuild(for finals: [LiveMeetingCodexTranscriptEntry]) -> Bool {
+        if renderedFinalEntries.count > finals.count {
+            return true
+        }
+        return Array(finals.prefix(renderedFinalEntries.count)) != renderedFinalEntries
+    }
+
+    private func makeTranscriptAttributedText(
+        finals: [LiveMeetingCodexTranscriptEntry],
+        partials: [LiveMeetingCodexSource: LiveMeetingCodexTranscriptEntry]
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for entry in finals {
+            appendEntry(entry, isPartial: false, to: result)
+        }
+        for source in [LiveMeetingCodexSource.microphone, .system] {
+            if let partial = partials[source] {
+                appendEntry(partial, isPartial: true, to: result)
+            }
+        }
+        return result
+    }
+
+    private func appendEntry(
+        _ entry: LiveMeetingCodexTranscriptEntry,
+        isPartial: Bool,
+        to result: NSMutableAttributedString
+    ) {
+        if result.length > 0 {
+            result.append(NSAttributedString(string: "\n"))
+        }
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 2
+        paragraph.paragraphSpacing = 7
+
+        let isMic = entry.source == .microphone
+        let tag = isMic ? "You" : "Them"
+        let tagColor = isMic
+            ? MeetingOverlayTokens.waveformMicTint
+            : MeetingOverlayTokens.waveformSystemTint
+        result.append(NSAttributedString(
+            string: "\(tag)  ",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: isPartial ? tagColor.withAlphaComponent(0.55) : tagColor,
+                .paragraphStyle: paragraph,
+            ]
+        ))
+        result.append(NSAttributedString(
+            string: entry.text,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+                .foregroundColor: isPartial
+                    ? MeetingOverlayTokens.textSecondary
+                    : MeetingOverlayTokens.textPrimary,
+                .paragraphStyle: paragraph,
+            ]
+        ))
+    }
+
+    private func partialRange(in textStorage: NSTextStorage) -> NSRange? {
+        let fullLength = textStorage.length
+        guard fullLength > 0 else { return nil }
+
+        let finalsOnly = NSMutableAttributedString()
+        for entry in renderedFinalEntries {
+            appendEntry(entry, isPartial: false, to: finalsOnly)
+        }
+        guard finalsOnly.length < fullLength else { return nil }
+        return NSRange(location: finalsOnly.length, length: fullLength - finalsOnly.length)
     }
 
     /// Called right before the drawer becomes visible so the latest lines
