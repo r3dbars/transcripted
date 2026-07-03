@@ -1362,7 +1362,7 @@ class DictationSessionController: ObservableObject {
             )
             appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_load_timeout")
             overlayController.showError(
-                "Dictation is still loading. Please try again in a moment.",
+                "The voice model is still warming up. Try again in a moment.",
                 actionTitle: "Retry Dictation",
                 action: { [weak self] in
                     self?.startDictation(
@@ -1375,17 +1375,10 @@ class DictationSessionController: ObservableObject {
         }
     }
 
-    /// Distinguishes the pre-recording model warmup overlay from the post-stop
-    /// wait, where audio is already captured and only transcription is pending.
-    private enum ModelLoadingPhase {
-        case beforeRecording
-        case afterRecording
-    }
-
     private func updateLoadingOverlay(
         sourceApp: NSRunningApplication?,
         modelState: ParakeetModelState? = nil,
-        phase: ModelLoadingPhase = .beforeRecording
+        phase: DictationWarmupPresentationPolicy.Phase = .beforeRecording
     ) {
         guard let appState = appState else { return }
         let presentation = loadingPresentation(
@@ -1401,56 +1394,34 @@ class DictationSessionController: ObservableObject {
 
     private func loadingPresentation(
         for modelState: ParakeetModelState,
-        phase: ModelLoadingPhase = .beforeRecording
+        phase: DictationWarmupPresentationPolicy.Phase = .beforeRecording
     ) -> FloatingOverlayController.LoadingPresentation {
-        let pendingDetail = phase == .afterRecording
-            ? "Your recording is captured and will be transcribed when it's ready."
-            : "Recording starts automatically when it's ready."
+        let copy = DictationWarmupPresentationPolicy.copy(
+            modelState: warmupModelState(for: modelState),
+            phase: phase
+        )
+        return .init(
+            title: copy.title,
+            detail: copy.detail,
+            progress: copy.progress,
+            status: copy.status
+        )
+    }
+
+    private func warmupModelState(for modelState: ParakeetModelState) -> DictationWarmupPresentationPolicy.ModelState {
         switch modelState {
         case .notLoaded:
-            return .init(
-                title: "Starting voice model",
-                detail: pendingDetail,
-                progress: 0.08,
-                status: "Preparing local model"
-            )
+            return .notLoaded
         case .downloading(let progress):
-            return .init(
-                title: "Downloading voice model",
-                detail: phase == .afterRecording
-                    ? "Keep Transcripted open. Your recording will be transcribed when it's ready."
-                    : "Keep Transcripted open. Dictation will start when it's ready.",
-                progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
-                status: "\(Int(progress * 100))% complete"
-            )
+            return .downloading(progress: progress)
         case .cached:
-            return .init(
-                title: "Loading voice model",
-                detail: pendingDetail,
-                progress: 0.88,
-                status: "Loading cached model"
-            )
+            return .cached
         case .loading:
-            return .init(
-                title: "Loading voice model",
-                detail: pendingDetail,
-                progress: 0.92,
-                status: "Almost ready"
-            )
+            return .loading
         case .ready:
-            return .init(
-                title: "Starting dictation",
-                detail: "The local voice model is ready. Opening the microphone now.",
-                progress: 1.0,
-                status: "Starting microphone"
-            )
+            return .ready
         case .failed(let message):
-            return .init(
-                title: "Dictation couldn't start",
-                detail: message,
-                progress: 0,
-                status: "Model load failed"
-            )
+            return .failed(message)
         }
     }
 
