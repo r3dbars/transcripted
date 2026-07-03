@@ -172,6 +172,47 @@ struct DictationPasteTarget: Equatable {
     }
 }
 
+private struct FocusedTextPasteConfirmation {
+    private let focusedElement: AXUIElement
+    private let initialValue: String?
+
+    static func capture() -> FocusedTextPasteConfirmation? {
+        let systemWideElement = AXUIElementCreateSystemWide()
+        var focusedElementValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            systemWideElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElementValue
+        ) == .success,
+            let focusedElement = focusedElementValue else {
+            return nil
+        }
+
+        let element = focusedElement as! AXUIElement
+        return FocusedTextPasteConfirmation(
+            focusedElement: element,
+            initialValue: stringAttribute(kAXValueAttribute as CFString, from: element)
+        )
+    }
+
+    func containsPastedText(_ text: String) -> Bool {
+        guard !text.isEmpty,
+              let currentValue = Self.stringAttribute(kAXValueAttribute as CFString, from: focusedElement),
+              currentValue != initialValue else {
+            return false
+        }
+        return currentValue.contains(text)
+    }
+
+    private static func stringAttribute(_ attribute: CFString, from element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+            return nil
+        }
+        return value as? String
+    }
+}
+
 @MainActor
 final class ClipboardRestoringTextPaster {
     struct PasteboardSnapshot {
@@ -254,7 +295,7 @@ final class ClipboardRestoringTextPaster {
             _ = AXIsProcessTrustedWithOptions(options)
         },
         pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
-        pasteConfirmed: @MainActor () -> Bool = { false },
+        pasteConfirmed: (@MainActor () -> Bool)? = nil,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
@@ -278,6 +319,11 @@ final class ClipboardRestoringTextPaster {
                 "Couldn't paste automatically. Accessibility is off, so the text was copied.",
                 reason: .accessibilityMissing
             )
+        }
+
+        let accessibilityConfirmation = FocusedTextPasteConfirmation.capture()
+        let confirmPasteReceived = pasteConfirmed ?? {
+            accessibilityConfirmation?.containsPastedText(text) == true
         }
 
         let savedItems = snapshotPasteboardItems(from: pasteboard)
@@ -322,7 +368,7 @@ final class ClipboardRestoringTextPaster {
 
         guard waitForPasteConfirmation(
             target: target,
-            pasteConfirmed: pasteConfirmed,
+            pasteConfirmed: confirmPasteReceived,
             timeout: pasteConfirmationWait
         ) else {
             leaveTemporaryClipboardAvailable()
