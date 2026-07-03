@@ -172,6 +172,93 @@ func testDictationTranscriptStore() {
         assertEqual(counts.totalWords, 5, "total dictated word count")
     }
 
+    runSuite("DictationTranscriptStore.savedDictationCounts — caches unchanged day-file stats") {
+        let fm = FileManager.default
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+        defer { DictationTranscriptStore.resetSavedDictationCountsCacheForTesting() }
+
+        let today = isoDate("2026-04-11T12:00:00-0500")
+        _ = try? DictationTranscriptStore.save(
+            text: "one two three",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: isoDate("2026-04-10T11:20:00-0500"),
+            directory: outputDir
+        )
+        _ = try? DictationTranscriptStore.save(
+            text: "four five",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: today,
+            directory: outputDir
+        )
+
+        DictationTranscriptStore.resetSavedDictationCountsCacheForTesting()
+        let first = DictationTranscriptStore.savedDictationCounts(directory: outputDir, today: today)
+        let firstMisses = DictationTranscriptStore.savedDictationCountsCacheMissesForTesting()
+        let second = DictationTranscriptStore.savedDictationCounts(directory: outputDir, today: today)
+        let secondMisses = DictationTranscriptStore.savedDictationCountsCacheMissesForTesting()
+
+        assertEqual(first.total, 2, "first cached count total")
+        assertEqual(second.total, 2, "second cached count total")
+        assertEqual(firstMisses, 2, "first scan should parse each day file once")
+        assertEqual(secondMisses, firstMisses, "unchanged second scan should not reparse day files")
+    }
+
+    runSuite("DictationTranscriptStore.savedDictationCounts — invalidates changed files and prunes deleted files") {
+        let fm = FileManager.default
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+        defer { DictationTranscriptStore.resetSavedDictationCountsCacheForTesting() }
+
+        let olderDay = isoDate("2026-04-10T11:20:00-0500")
+        let today = isoDate("2026-04-11T12:00:00-0500")
+        _ = try? DictationTranscriptStore.save(
+            text: "one two three",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: olderDay,
+            directory: outputDir
+        )
+        _ = try? DictationTranscriptStore.save(
+            text: "four five",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: today,
+            directory: outputDir
+        )
+
+        DictationTranscriptStore.resetSavedDictationCountsCacheForTesting()
+        _ = DictationTranscriptStore.savedDictationCounts(directory: outputDir, today: today)
+        let initialMisses = DictationTranscriptStore.savedDictationCountsCacheMissesForTesting()
+
+        _ = try? DictationTranscriptStore.save(
+            text: "six seven eight nine",
+            sourceApp: nil,
+            delivery: .copied,
+            createdAt: today.addingTimeInterval(60),
+            directory: outputDir
+        )
+        let changed = DictationTranscriptStore.savedDictationCounts(directory: outputDir, today: today)
+        let changedMisses = DictationTranscriptStore.savedDictationCountsCacheMissesForTesting()
+        let olderURL = DictationTranscriptWriter.dailyFileURL(for: olderDay, in: outputDir)
+        try? fm.removeItem(at: olderURL)
+        let pruned = DictationTranscriptStore.savedDictationCounts(directory: outputDir, today: today)
+
+        assertEqual(initialMisses, 2, "initial scan should parse both day files")
+        assertEqual(changed.total, 3, "changed scan should include appended dictation")
+        assertEqual(changed.today, 2, "changed scan should refresh today's count")
+        assertEqual(changed.totalWords, 9, "changed scan should refresh today's word total")
+        assertEqual(changedMisses, initialMisses + 1, "changed scan should only reparse the touched day file")
+        assertEqual(pruned.total, 2, "deleted day files should be removed from totals")
+        assertEqual(pruned.totalWords, 6, "deleted day files should be removed from word totals")
+    }
+
     runSuite("DictationTranscriptStore.deleteEntry — removes only the matching entry ID") {
         let fm = FileManager.default
         let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
