@@ -1078,8 +1078,13 @@ func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDir
                 decisions = summary.decisions
                 actionItems = summary.actionItems.map { RecapActionItem(owner: $0.owner, text: $0.text) }
                 openQuestions = summary.openQuestions
-                preview = summaryPreview(decisions: decisions, actionItems: actionItems, openQuestions: openQuestions)
-                summarySource = "summary"
+                let hasStructuredFacts = !decisions.isEmpty || !actionItems.isEmpty || !openQuestions.isEmpty
+                if hasStructuredFacts {
+                    preview = summaryPreview(decisions: decisions, actionItems: actionItems, openQuestions: openQuestions)
+                    summarySource = "summary"
+                } else {
+                    preview = extractDialogueLines(from: content).prefix(15).joined(separator: "\n")
+                }
             } else {
                 preview = extractDialogueLines(from: content).prefix(15).joined(separator: "\n")
             }
