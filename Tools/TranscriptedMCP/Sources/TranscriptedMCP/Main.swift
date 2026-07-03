@@ -3,6 +3,8 @@ import MCP
 
 @main
 struct TranscriptedMCP {
+    static let serverVersion = "1.0.0"
+
     static func main() async throws {
         if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-h") {
             print(Self.helpText)
@@ -10,7 +12,7 @@ struct TranscriptedMCP {
         }
 
         if CommandLine.arguments.contains("--version") {
-            print("transcripted-mcp 1.0.0")
+            print("transcripted-mcp \(serverVersion)")
             return
         }
 
@@ -21,7 +23,7 @@ struct TranscriptedMCP {
 
         let directories = TranscriptedDataDirectories.resolve()
 
-        log("Starting transcripted-mcp v1.0.0")
+        log("Starting transcripted-mcp v\(serverVersion)")
         log("Meetings directories: \(directories.meetingDirs.map(\.path).joined(separator: ", "))")
         log("Dictations directories: \(directories.dictationDirs.map(\.path).joined(separator: ", "))")
         log("Index directory: \(directories.indexDir.path)")
@@ -57,7 +59,7 @@ struct TranscriptedMCP {
         // Create MCP server
         let server = Server(
             name: "transcripted",
-            version: "1.0.0",
+            version: serverVersion,
             capabilities: .init(tools: .init(listChanged: false))
         )
 

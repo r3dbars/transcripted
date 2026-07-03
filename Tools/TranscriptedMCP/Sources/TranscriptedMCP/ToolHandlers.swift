@@ -19,6 +19,84 @@ private func textResult(_ text: String, isError: Bool = false) -> CallTool.Resul
     .init(content: [.text(text: text, annotations: nil, _meta: nil)], isError: isError)
 }
 
+/// Which artifact population a tool reads; drives which indexed counts and
+/// hint an empty response carries.
+private enum EmptyResultScope {
+    case meetings
+    case dictations
+    case mixed
+    case summaries
+}
+
+/// Self-describing zero-result response: where the server looked, what is
+/// indexed, and what to try next — so agents can tell an unindexed library
+/// apart from a query that matched nothing.
+private func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: TranscriptIndex) throws -> CallTool.Result {
+    let counts = try index.counts()
+    let directories = uniquePaths(searchedDirectories)
+
+    let payload: EmptyQueryResult
+    switch scope {
+    case .meetings:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: counts.meetings,
+            indexedDictationDays: nil,
+            indexedDictationEntries: nil,
+            indexedSummaryItems: nil,
+            hint: counts.meetings == 0
+                ? "No meetings are indexed — check that the directories above contain capture Markdown, or call the status tool."
+                : "No meetings matched these filters — try widening the date range or changing the query."
+        )
+    case .dictations:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: nil,
+            indexedDictationDays: counts.dictationDays,
+            indexedDictationEntries: counts.dictationEntries,
+            indexedSummaryItems: nil,
+            hint: counts.dictationDays == 0
+                ? "No dictations are indexed — check that the directories above contain capture Markdown, or call the status tool."
+                : "No dictations matched these filters — try widening the date range or changing the query."
+        )
+    case .mixed:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: counts.meetings,
+            indexedDictationDays: counts.dictationDays,
+            indexedDictationEntries: nil,
+            indexedSummaryItems: nil,
+            hint: counts.meetings == 0 && counts.dictationDays == 0
+                ? "Nothing is indexed — check that the directories above contain capture Markdown, or call the status tool."
+                : "No items matched these filters — try widening the date range or changing the query."
+        )
+    case .summaries:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: counts.meetings,
+            indexedDictationDays: nil,
+            indexedDictationEntries: nil,
+            indexedSummaryItems: counts.summaryItems,
+            hint: counts.summaryItems == 0
+                ? "No structured summaries are indexed. Rollups only cover meetings with a saved summary (Settings → Meetings → local summaries)."
+                : "No summary items matched these filters — try widening the date range or removing filters."
+        )
+    }
+
+    let json = try JSONEncoder.pretty.encode(payload)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
+private func uniquePaths(_ directories: [URL]) -> [String] {
+    var seen: Set<String> = []
+    var paths: [String] = []
+    for url in directories {
+        guard seen.insert(url.standardizedFileURL.path).inserted else { continue }
+        paths.append(url.path)
+    }
+    return paths
+}
+
 func registerToolHandlers(server: Server, index: TranscriptIndex, directories: TranscriptedDataDirectories) async {
     await server.withMethodHandler(ListTools.self) { _ in
         .init(tools: [
@@ -235,7 +313,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "list_action_items",
-                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status (open by default, or 'done'/'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Depends on the meeting summary index.",
+                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status ('open' by default, or 'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Depends on the meeting summary index.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -245,7 +323,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         ]),
                         "status": .object([
                             "type": .string("string"),
-                            "description": .string("Which items to return: 'open' (default), 'done', or 'all'")
+                            "description": .string("Which items to return: 'open' (default) or 'all'. 'done' is not supported — saved summaries do not track completion state yet.")
                         ]),
                         "query": .object([
                             "type": .string("string"),
@@ -311,6 +389,15 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 ]),
                 annotations: .init(readOnlyHint: true)
             ),
+            Tool(
+                name: "status",
+                description: "Server status and configuration: version, resolved capture directories, which resolution rule selected them, index location, and indexed counts. Call this when other tools return empty results to see whether anything is indexed at all.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([:]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
         ])
     }
 
@@ -320,7 +407,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             case "list_meetings":
                 return try handleListMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "list_dictations":
-                return try handleListDictations(params: params, index: index)
+                return try handleListDictations(params: params, index: index, dictationDirs: directories.dictationDirs)
             case "read_meeting":
                 return try handleReadMeeting(params: params, meetingDirs: directories.meetingDirs)
             case "read_dictation":
@@ -328,9 +415,9 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             case "search":
                 return try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "search_context":
-                return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs)
+                return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
             case "recent_context":
-                return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs)
+                return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
             case "who_is":
                 return try handleWhoIs(params: params, index: index)
             case "recap":
@@ -341,6 +428,8 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 return try handleListDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "digest":
                 return try handleDigest(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "status":
+                return try handleStatus(index: index, directories: directories)
             default:
                 return textResult("Unknown tool: \(params.name)", isError: true)
             }
@@ -373,7 +462,7 @@ func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, mee
     }
 
     if results.isEmpty {
-        return textResult("No meetings found.")
+        return try emptyResult(scope: .meetings, searchedDirectories: meetingDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -387,7 +476,7 @@ func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, mee
     return textResult(String(data: json, encoding: .utf8) ?? "[]")
 }
 
-func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
+func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex, dictationDirs: [URL]) throws -> CallTool.Result {
     let count = params.arguments?["count"]?.intValue ?? 10
     let date = params.arguments?["date"]?.stringValue
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? date
@@ -396,7 +485,7 @@ func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex) t
     let results = try index.listDictationDays(count: count, dateFrom: dateFrom, dateTo: dateTo)
 
     if results.isEmpty {
-        return textResult("No dictations found.")
+        return try emptyResult(scope: .dictations, searchedDirectories: dictationDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -555,9 +644,7 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, m
     hydrateMeetingSearchTitles(in: &results, meetingDirs: meetingDirs)
 
     if results.results.isEmpty {
-        var msg = "No results found for \"\(query)\""
-        if let s = speaker { msg += " by \(s)" }
-        return textResult(msg)
+        return try emptyResult(scope: .meetings, searchedDirectories: meetingDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -571,7 +658,7 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, m
     return textResult(String(data: json, encoding: .utf8) ?? "[]")
 }
 
-private func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+private func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], dictationDirs: [URL]) throws -> CallTool.Result {
     guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
         return textResult("Missing required parameter: query", isError: true)
     }
@@ -594,7 +681,7 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     hydrateMeetingTitles(in: &results.results, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
 
     if results.results.isEmpty {
-        return textResult("No context found for \"\(query)\".")
+        return try emptyResult(scope: .mixed, searchedDirectories: meetingDirs + dictationDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -608,7 +695,7 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
-func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], dictationDirs: [URL]) throws -> CallTool.Result {
     let kind = parseContextKind(params.arguments?["kind"]?.stringValue)
     let count = max(1, min(params.arguments?["count"]?.intValue ?? 10, 50))
     let dateFrom = params.arguments?["date_from"]?.stringValue
@@ -618,7 +705,7 @@ func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, me
     hydrateMeetingTitles(in: &result.items, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
 
     if result.items.isEmpty {
-        return textResult("No recent context found.")
+        return try emptyResult(scope: .mixed, searchedDirectories: meetingDirs + dictationDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -667,7 +754,7 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
     let meetings = try index.listMeetings(count: 50, dateFrom: dateFrom, dateTo: dateTo)
 
     if meetings.isEmpty {
-        return textResult("No meetings found from \(dateFrom) to \(dateTo).")
+        return try emptyResult(scope: .meetings, searchedDirectories: meetingDirs, index: index)
     }
 
     var recapParts: [RecapEntry] = []
@@ -717,13 +804,23 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
 
 // MARK: - list_action_items / list_decisions / digest (cross-meeting rollups)
 
-private func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     let owner = params.arguments?["owner"]?.stringValue
     let query = params.arguments?["query"]?.stringValue
-    let status = ActionItemStatusFilter(raw: params.arguments?["status"]?.stringValue)
+    let rawStatus = params.arguments?["status"]?.stringValue
+    let status = ActionItemStatusFilter(raw: rawStatus)
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
     let count = params.arguments?["count"]?.intValue ?? 50
+
+    // Saved summaries do not track completion state, so a done filter would
+    // always be a silent empty set — fail loudly instead.
+    if status == .done {
+        return textResult(
+            "Unsupported status filter: \"\(rawStatus ?? "done")\". Saved meeting summaries do not track done/completed state yet, so this filter would always return nothing. Use status \"open\" (the default) or \"all\".",
+            isError: true
+        )
+    }
 
     var result = try index.listActionItems(
         owner: owner, query: query, status: status,
@@ -735,10 +832,7 @@ private func handleListActionItems(params: CallTool.Parameters, index: Transcrip
     }
 
     if result.items.isEmpty {
-        var msg = "No \(status == .all ? "" : status.rawValue + " ")action items found"
-        if let owner, !owner.isEmpty { msg += " for \(owner)" }
-        msg += ". Action items come from the meeting summary index; if summaries have not been indexed yet, this will be empty."
-        return textResult(msg)
+        return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
     }
 
     let json = try JSONEncoder.pretty.encode(result)
@@ -758,7 +852,7 @@ private func handleListDecisions(params: CallTool.Parameters, index: TranscriptI
     }
 
     if result.decisions.isEmpty {
-        return textResult("No decisions found. Decisions come from the meeting summary index; if summaries have not been indexed yet, this will be empty.")
+        return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
     }
 
     let json = try JSONEncoder.pretty.encode(result)
@@ -778,8 +872,31 @@ private func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, m
     }
 
     if result.meetings.isEmpty {
-        return textResult("No summarized meetings found for \(result.dateRange). Digest reads the meeting summary index; if summaries have not been indexed yet, this will be empty.")
+        return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
     }
+
+    let json = try JSONEncoder.pretty.encode(result)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
+// MARK: - status
+
+func handleStatus(index: TranscriptIndex, directories: TranscriptedDataDirectories) throws -> CallTool.Result {
+    let counts = try index.counts()
+    let result = StatusResult(
+        serverVersion: TranscriptedMCP.serverVersion,
+        meetingDirectories: directories.meetingDirs.map(\.path),
+        dictationDirectories: directories.dictationDirs.map(\.path),
+        resolutionSource: directories.resolutionSource.rawValue,
+        legacyFallbackAppended: directories.legacyFallbackAppended,
+        indexDirectory: directories.indexDir.path,
+        indexedMeetings: counts.meetings,
+        indexedDictationDays: counts.dictationDays,
+        indexedDictationEntries: counts.dictationEntries,
+        indexedSummaryItems: counts.summaryItems,
+        summarizedMeetings: counts.summarizedMeetings,
+        summariesIndexed: counts.summaryItems > 0
+    )
 
     let json = try JSONEncoder.pretty.encode(result)
     return textResult(String(data: json, encoding: .utf8) ?? "{}")

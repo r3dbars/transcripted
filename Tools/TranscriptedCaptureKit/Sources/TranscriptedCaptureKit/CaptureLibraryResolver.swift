@@ -10,6 +10,18 @@ private struct CaptureDirectoryManifest: Decodable {
 private struct ConfiguredCaptureDirectories {
     let meetings: URL
     let dictations: URL
+    let source: CaptureLibraryResolutionSource
+}
+
+/// Which resolution rule selected the capture directories. Explicit
+/// `--data-dir` / `--meetings-dir` style arguments report the same tier as
+/// their environment-variable equivalents.
+public enum CaptureLibraryResolutionSource: String, Codable, Sendable {
+    case envDataDir = "env_data_dir"
+    case envKindDirs = "env_kind_dirs"
+    case appManifest = "app_manifest"
+    case appPreference = "app_preference"
+    case defaultCaptures = "default"
 }
 
 /// Resolved capture-library locations for meetings and dictations.
@@ -19,11 +31,24 @@ public struct ResolvedCaptureDirectories {
     /// Set when resolution used an explicit shared data directory
     /// (a `--data-dir` style argument or `TRANSCRIPTED_DATA_DIR`).
     public let sharedDataRoot: URL?
+    /// Which resolution rule selected the directories above.
+    public let resolutionSource: CaptureLibraryResolutionSource
+    /// True when legacy fallback directories (Draft exports,
+    /// `~/Documents/Transcripted`) were appended after the primary directory.
+    public let legacyFallbackAppended: Bool
 
-    public init(meetingDirs: [URL], dictationDirs: [URL], sharedDataRoot: URL? = nil) {
+    public init(
+        meetingDirs: [URL],
+        dictationDirs: [URL],
+        sharedDataRoot: URL? = nil,
+        resolutionSource: CaptureLibraryResolutionSource = .defaultCaptures,
+        legacyFallbackAppended: Bool = false
+    ) {
         self.meetingDirs = meetingDirs
         self.dictationDirs = dictationDirs
         self.sharedDataRoot = sharedDataRoot
+        self.resolutionSource = resolutionSource
+        self.legacyFallbackAppended = legacyFallbackAppended
     }
 }
 
@@ -59,13 +84,15 @@ public enum CaptureLibraryResolver {
                 return ResolvedCaptureDirectories(
                     meetingDirs: [sharedMeetings],
                     dictationDirs: [sharedDictations],
-                    sharedDataRoot: sharedURL
+                    sharedDataRoot: sharedURL,
+                    resolutionSource: .envDataDir
                 )
             }
             return ResolvedCaptureDirectories(
                 meetingDirs: [sharedURL],
                 dictationDirs: [sharedURL],
-                sharedDataRoot: sharedURL
+                sharedDataRoot: sharedURL,
+                resolutionSource: .envDataDir
             )
         }
 
@@ -128,10 +155,28 @@ public enum CaptureLibraryResolver {
                 fileManager: fileManager
             )
 
+        // When only one kind is overridden, the other still resolves through
+        // the manifest/preference/default chain; report the override tier as
+        // the winning rule since it took precedence for the kind it covers.
+        let resolutionSource: CaptureLibraryResolutionSource
+        if meetingsOverride != nil || dictationsOverride != nil {
+            resolutionSource = .envKindDirs
+        } else if let appConfigured {
+            resolutionSource = appConfigured.source
+        } else {
+            resolutionSource = .defaultCaptures
+        }
+
+        // Primary resolution always yields one directory per kind; anything
+        // extra came from the legacy candidates.
+        let legacyFallbackAppended = meetingDirs.count > 1 || dictationDirs.count > 1
+
         return ResolvedCaptureDirectories(
             meetingDirs: meetingDirs,
             dictationDirs: dictationDirs,
-            sharedDataRoot: nil
+            sharedDataRoot: nil,
+            resolutionSource: resolutionSource,
+            legacyFallbackAppended: legacyFallbackAppended
         )
     }
 
@@ -180,7 +225,7 @@ public enum CaptureLibraryResolver {
             return nil
         }
 
-        return ConfiguredCaptureDirectories(meetings: meetings, dictations: dictations)
+        return ConfiguredCaptureDirectories(meetings: meetings, dictations: dictations, source: .appManifest)
     }
 
     private static func appPreferenceCaptureDirectories(homeDirectory home: URL) -> ConfiguredCaptureDirectories? {
@@ -200,7 +245,8 @@ public enum CaptureLibraryResolver {
 
             return ConfiguredCaptureDirectories(
                 meetings: captureLibrary.appendingPathComponent("meetings", isDirectory: true),
-                dictations: captureLibrary.appendingPathComponent("dictations", isDirectory: true)
+                dictations: captureLibrary.appendingPathComponent("dictations", isDirectory: true),
+                source: .appPreference
             )
         }
 

@@ -337,11 +337,65 @@ struct PersonMeetingEntry: Codable {
     let otherSpeakers: [String]
 }
 
+// MARK: - Status / Empty Results
+
+struct StatusResult: Codable {
+    let serverVersion: String
+    let meetingDirectories: [String]
+    let dictationDirectories: [String]
+    let resolutionSource: String
+    let legacyFallbackAppended: Bool
+    let indexDirectory: String
+    let indexedMeetings: Int
+    let indexedDictationDays: Int
+    let indexedDictationEntries: Int
+    let indexedSummaryItems: Int
+    let summarizedMeetings: Int
+    let summariesIndexed: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case serverVersion = "server_version"
+        case meetingDirectories = "meeting_directories"
+        case dictationDirectories = "dictation_directories"
+        case resolutionSource = "resolution_source"
+        case legacyFallbackAppended = "legacy_fallback_appended"
+        case indexDirectory = "index_directory"
+        case indexedMeetings = "indexed_meetings"
+        case indexedDictationDays = "indexed_dictation_days"
+        case indexedDictationEntries = "indexed_dictation_entries"
+        case indexedSummaryItems = "indexed_summary_items"
+        case summarizedMeetings = "summarized_meetings"
+        case summariesIndexed = "summaries_indexed"
+    }
+}
+
+/// Payload returned when a query tool matches nothing: where the server
+/// looked, what is indexed, and what to try next. Only the counts relevant to
+/// the tool are populated; nil fields are omitted from the JSON.
+struct EmptyQueryResult: Codable {
+    let searchedDirectories: [String]
+    let indexedMeetings: Int?
+    let indexedDictationDays: Int?
+    let indexedDictationEntries: Int?
+    let indexedSummaryItems: Int?
+    let hint: String
+
+    enum CodingKeys: String, CodingKey {
+        case searchedDirectories = "searched_directories"
+        case indexedMeetings = "indexed_meetings"
+        case indexedDictationDays = "indexed_dictation_days"
+        case indexedDictationEntries = "indexed_dictation_entries"
+        case indexedSummaryItems = "indexed_summary_items"
+        case hint
+    }
+}
+
 // MARK: - Summary-Fact Rollups (cross-meeting tools)
 
-/// Open/done/all filter for `list_action_items`.
-/// Current saved meeting summaries do not carry done/due metadata; done is
-/// accepted as a forward-compatible filter but returns no derived rows today.
+/// Open/all filter for `list_action_items`.
+/// Current saved meeting summaries do not carry done/due metadata; the tool
+/// handler rejects "done" with an explicit error instead of returning a
+/// silent empty set.
 enum ActionItemStatusFilter: String {
     case open
     case done
