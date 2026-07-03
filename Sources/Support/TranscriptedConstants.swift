@@ -182,6 +182,15 @@ enum TranscriptedConstants {
     /// back to copying. This covers menu/settings flows where activation is async.
     static let clipboardTargetActivationWait: TimeInterval = 0.35
 
+    /// Max time to wait for the target app to request the borrowed clipboard
+    /// string before treating paste-back as unconfirmed.
+    static let clipboardPasteConfirmationWait: TimeInterval = 0.35
+
+    /// Maximum eager data copied per pasteboard type when snapshotting the
+    /// user's clipboard before paste-back. Larger/heavy representations are
+    /// skipped so stop-to-paste stays responsive.
+    static let clipboardSnapshotMaxTypeBytes: Int = 2 * 1024 * 1024
+
     // MARK: - Dictation Auto Enter
 
     /// Small pause after paste-back before optionally pressing Enter.

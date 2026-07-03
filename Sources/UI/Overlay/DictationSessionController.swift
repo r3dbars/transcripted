@@ -1559,7 +1559,7 @@ class DictationSessionController: ObservableObject {
             streamingTask?.cancel()
             streamingTask = nil
         }
-        textPaster.cancelPendingClipboardRestore()
+        textPaster.restorePendingClipboardNow()
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
@@ -1645,6 +1645,10 @@ class DictationSessionController: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_target_changed",
                 message: "Focus changed before dictation paste")
             appState?.logger.log("DICTATION | focus changed, copying text instead")
+        case .pasteNotConfirmed:
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_not_confirmed",
+                message: "Paste-back was dispatched but the target did not confirm reading the borrowed clipboard")
+            appState?.logger.log("DICTATION | paste not confirmed, keeping text on clipboard")
         case nil:
             break
         }
@@ -1674,7 +1678,7 @@ class DictationSessionController: ObservableObject {
             await textPaster.waitForClipboardReadyForAutoEnter()
         }
         guard !Task.isCancelled else { return .disabled }
-        return autoSender.send(DictationAutoSendPreferences.sendKey())
+        return autoSender.send(DictationAutoSendPreferences.sendKey(), target: sessionPasteTarget)
     }
 
     @discardableResult
@@ -2064,6 +2068,8 @@ private extension TextPasteCopyReason {
             return "paste_event_creation_failed"
         case .focusChanged:
             return "focus_changed"
+        case .pasteNotConfirmed:
+            return "paste_not_confirmed"
         }
     }
 }

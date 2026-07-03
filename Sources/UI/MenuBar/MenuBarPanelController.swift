@@ -275,7 +275,7 @@ final class MenuBarPanelController: NSViewController {
     }
 
     func prepareForClose() {
-        textPaster.cancelPendingClipboardRestore()
+        textPaster.restorePendingClipboardNow()
         contentView?.utilityActionsView.dismissTransientUI()
         contentView?.scrollToTop()
     }

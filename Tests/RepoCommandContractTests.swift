@@ -1731,7 +1731,7 @@ func testRepoCommandContract() {
         )
         let delayRange = autoEnterBlock.range(of: "Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)")
         let readinessRange = autoEnterBlock.range(of: "await textPaster.waitForClipboardReadyForAutoEnter()")
-        let sendRange = autoEnterBlock.range(of: "return autoSender.send(DictationAutoSendPreferences.sendKey())")
+        let sendRange = autoEnterBlock.range(of: "return autoSender.send(DictationAutoSendPreferences.sendKey(), target: sessionPasteTarget)")
 
         assertTrue(
             contents.contains("overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? \"Pasted\")")

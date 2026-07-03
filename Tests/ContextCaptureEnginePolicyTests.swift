@@ -50,7 +50,7 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    runSuite("ContextCaptureEngine hotkey debounce — tracks independent actions separately") {
+    runSuite("ContextCaptureEngine hotkey debounce — tracks toggle actions and exempts push-to-talk press") {
         let source = readContextCaptureEngineSource()
 
         assertTrue(
@@ -61,9 +61,9 @@ func testContextCaptureEnginePolicy() {
             source.contains("shouldAcceptHotkeyAction(\"dictation_hands_free\")"),
             "hands-free dictation should have its own debounce key"
         )
-        assertTrue(
+        assertFalse(
             source.contains("shouldAcceptHotkeyAction(\"dictation_push_to_talk\")"),
-            "push-to-talk dictation should have its own debounce key"
+            "push-to-talk press should not use toggle debounce because release is paired to the physical key hold"
         )
         assertTrue(
             source.contains("shouldAcceptHotkeyAction(\"meeting_physical_trigger\")"),

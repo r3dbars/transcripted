@@ -581,22 +581,6 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func handlePhysicalDictationPushToTalkPress() {
-        guard shouldAcceptHotkeyAction("dictation_push_to_talk") else {
-            DiagnosticsTrail.record(
-                logger: sessionController?.appState?.logger,
-                level: .info,
-                engine: "capture",
-                event: "hotkey_repeat_ignored",
-                message: "Ignored rapid repeat push-to-talk dictation trigger",
-                context: [
-                    "hotkey_id": "dictation_push_to_talk",
-                    "session_state": dictationSessionStateName(sessionController),
-                    "overlay_state": overlayStateName(sessionController?.overlayController?.state)
-                ]
-            )
-            return
-        }
-
         let frontApp = NSWorkspace.shared.frontmostApplication
         guard let session = sessionController else { return }
         DiagnosticsTrail.record(
