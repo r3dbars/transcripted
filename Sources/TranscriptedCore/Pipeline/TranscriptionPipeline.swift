@@ -59,8 +59,13 @@ extension Transcription {
             // Load sequentially to avoid both resampling buffers in memory simultaneously.
             // async let forces concurrent resampling (~460MB peak for long recordings);
             // sequential means only one resampling buffer exists at a time.
-            let systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
-            let micSamples: [Float]
+            //
+            // Both are whole-meeting 16kHz buffers (~460MB per channel for a
+            // 2h recording), declared `var` so each can be cleared (`= []`)
+            // right after its last use below instead of staying alive for the
+            // entire diarize → transcribe → merge run.
+            var systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
+            var micSamples: [Float]
             if let micURL {
                 micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
             } else {
@@ -486,6 +491,11 @@ extension Transcription {
                 onProgress?(segmentProgress)
             }
 
+            // Segment slicing above was the last use of the whole-meeting
+            // system buffer — release it before the mic phase so both
+            // channels are never held through the rest of the pipeline.
+            systemSamples = []
+
             AppLogger.transcription.info("System audio transcribed", ["utterances": "\(systemUtterances.count)", "speakers": "\(Set(systemUtterances.map { $0.speakerId }).count)"])
 
             var micUtterances: [TranscriptionUtterance] = []
@@ -509,6 +519,12 @@ extension Transcription {
                         sampleRate: 16000,
                         analysis: micSignalAnalysis
                     ).samples
+                    // Normalization above was the last use of the raw mic
+                    // buffer in this mode — release it so only the normalized
+                    // copy stays alive during mic diarization + transcription.
+                    // (`diarizationMicSamples` itself dies at the end of this
+                    // branch scope.)
+                    micSamples = []
                     let micResult = try await Self.processMicChannelWithDiarization(
                         samples: diarizationMicSamples,
                         diarization: diarization,
@@ -573,6 +589,11 @@ extension Transcription {
                         let micProgress = 0.65 + (Double(index + 1) / Double(max(1, micSegments.count))) * 0.25
                         onProgress?(micProgress)
                     }
+
+                    // Segment slicing above was the last use of the
+                    // whole-meeting mic buffer — release it before the
+                    // merge/save phase.
+                    micSamples = []
 
                     AppLogger.transcription.info("Mic audio transcribed", ["utterances": "\(micUtterances.count)"])
                 }

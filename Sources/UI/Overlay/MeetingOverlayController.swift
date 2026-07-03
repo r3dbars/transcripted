@@ -1569,8 +1569,17 @@ final class MeetingOverlayController: NSObject {
         session.$recordingDuration
             .receive(on: RunLoop.main)
             .sink { [weak self] duration in
-                self?.currentDuration = duration
-                self?.pushToView()
+                guard let self else { return }
+                let previousDisplay = MeetingDurationFormatter.formatDuration(self.currentDuration)
+                self.currentDuration = duration
+                // The strip timer renders whole seconds (mm:ss). The full
+                // push rebuilds attributed titles, accessibility labels, and
+                // runs the resize check, so skip it while the displayed
+                // duration is unchanged — every other state change keeps its
+                // own pushToView() call, and any of those pushes picks up
+                // the exact currentDuration stored above.
+                guard MeetingDurationFormatter.formatDuration(duration) != previousDisplay else { return }
+                self.pushToView()
             }
             .store(in: &subscriptions)
 
@@ -1615,6 +1624,12 @@ final class MeetingOverlayController: NSObject {
         let feed = session.liveTranscriptFeed
         feed.$finalEntries
             .combineLatest(feed.$partialEntries, feed.$phase)
+            // Live ASR emits at word rate for the whole meeting, and each
+            // visible push rebuilds the drawer's attributed transcript and
+            // relayouts the text view. Throttling with `latest: true` caps
+            // that at ~5Hz while guaranteeing the newest finals/partials and
+            // phase still land after the last emission in a window.
+            .throttle(for: .milliseconds(200), scheduler: RunLoop.main, latest: true)
             .receive(on: RunLoop.main)
             .sink { [weak self] finals, partials, phase in
                 self?.latestTranscriptFinals = finals

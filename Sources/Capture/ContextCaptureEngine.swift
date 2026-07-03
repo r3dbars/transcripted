@@ -80,7 +80,14 @@ private enum PhysicalShortcutPhase {
 }
 
 private final class PhysicalShortcutDetector {
-    var bindingProvider: (() -> [PhysicalShortcutBinding])?
+    /// Cached binding snapshot, rebuilt by ContextCaptureEngine on
+    /// .hotkeysDidChange. The tap callback runs on the main run loop for every
+    /// system-wide keyDown/keyUp/flagsChanged, so it must read this cache
+    /// instead of hitting UserDefaults per keystroke — per-event preference
+    /// reads add latency to all typing on the machine and raise the
+    /// tapDisabledByTimeout risk. Both the tap callback and the engine's
+    /// configure path run on the main thread, so a plain property is safe.
+    var shortcutBindings: [PhysicalShortcutBinding] = []
     var onShortcut: ((PhysicalShortcutAction, PhysicalShortcutPhase) -> Void)?
 
     private var eventTap: CFMachPort?
@@ -169,7 +176,8 @@ private final class PhysicalShortcutDetector {
             return Unmanaged.passUnretained(event)
         }
 
-        guard let shortcutBindings = bindingProvider?(), !shortcutBindings.isEmpty else {
+        let shortcutBindings = self.shortcutBindings
+        guard !shortcutBindings.isEmpty else {
             return Unmanaged.passUnretained(event)
         }
 
@@ -458,38 +466,12 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func configurePhysicalShortcutDetector() {
-        physicalShortcutDetector.bindingProvider = {
-            var bindings = [
-                PhysicalShortcutBinding(
-                    action: .meeting,
-                    binding: PhysicalDictationTriggerPreferences.meetingBinding()
-                ),
-                PhysicalShortcutBinding(
-                    action: .pasteLastDictation,
-                    binding: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
-                )
-            ]
-
-            guard HotkeyPreferences.dictationShortcutsEnabled() else {
-                return bindings
-            }
-
-            bindings.insert(
-                PhysicalShortcutBinding(
-                    action: .dictationPushToTalk,
-                    binding: PhysicalDictationTriggerPreferences.pushToTalkBinding()
-                ),
-                at: 0
-            )
-            bindings.insert(
-                PhysicalShortcutBinding(
-                    action: .dictationHandsFree,
-                    binding: PhysicalDictationTriggerPreferences.handsFreeBinding()
-                ),
-                at: 1
-            )
-            return bindings
-        }
+        // Snapshot the bindings once per (re)configure. Every preference write
+        // that changes a binding posts .hotkeysDidChange, which routes back
+        // here through reRegisterHotkeys(), so the detector's cache never goes
+        // stale — and the per-keystroke tap callback stays free of
+        // UserDefaults reads and migration-fallback work.
+        physicalShortcutDetector.shortcutBindings = Self.currentShortcutBindings()
         physicalShortcutDetector.onShortcut = { [weak self] action, phase in
             Task { @MainActor [weak self] in
                 self?.handlePhysicalShortcut(action, phase: phase)
@@ -510,6 +492,39 @@ class ContextCaptureEngine: ObservableObject {
             )
         }
         updateHotkeyError()
+    }
+
+    private static func currentShortcutBindings() -> [PhysicalShortcutBinding] {
+        var bindings = [
+            PhysicalShortcutBinding(
+                action: .meeting,
+                binding: PhysicalDictationTriggerPreferences.meetingBinding()
+            ),
+            PhysicalShortcutBinding(
+                action: .pasteLastDictation,
+                binding: PhysicalDictationTriggerPreferences.pasteLastDictationBinding()
+            )
+        ]
+
+        guard HotkeyPreferences.dictationShortcutsEnabled() else {
+            return bindings
+        }
+
+        bindings.insert(
+            PhysicalShortcutBinding(
+                action: .dictationPushToTalk,
+                binding: PhysicalDictationTriggerPreferences.pushToTalkBinding()
+            ),
+            at: 0
+        )
+        bindings.insert(
+            PhysicalShortcutBinding(
+                action: .dictationHandsFree,
+                binding: PhysicalDictationTriggerPreferences.handsFreeBinding()
+            ),
+            at: 1
+        )
+        return bindings
     }
 
     private func updateHotkeyError() {

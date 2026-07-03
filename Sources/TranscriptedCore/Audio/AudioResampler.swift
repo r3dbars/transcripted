@@ -147,13 +147,18 @@ public enum AudioResampler {
         let totalDstFrameCount = Double(srcFrames) * ratio + 64
         guard totalDstFrameCount.isFinite,
               totalDstFrameCount > 0,
-              totalDstFrameCount <= Double(AVAudioFrameCount.max) else {
+              totalDstFrameCount <= Double(AVAudioFrameCount.max),
+              totalDstFrameCount * Double(MemoryLayout<Float>.stride) <= Double(UInt32.max) else {
             throw NSError(domain: "AudioResampler", code: 9, userInfo: [
                 NSLocalizedDescriptionKey: "Converted audio frame count is unsafe"
             ])
         }
 
-        // Allocate output buffer for the entire converted result
+        // Allocate output buffer for the entire converted result. A no-copy
+        // destination (bufferListNoCopy wrapping the returned Array's storage)
+        // aborted inside AVAudioConverter on CI, so the converted result is
+        // copied into the Array once at return — one transient extra buffer,
+        // freed as soon as this function returns.
         let totalDstFrames = AVAudioFrameCount(totalDstFrameCount)
         guard let dstBuffer = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: totalDstFrames) else {
             throw NSError(domain: "AudioResampler", code: 1, userInfo: [

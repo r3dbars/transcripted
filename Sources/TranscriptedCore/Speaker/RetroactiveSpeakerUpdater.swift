@@ -78,11 +78,13 @@ extension TranscriptSaver {
         directory: URL
     ) {
         let dbIdString = dbId.uuidString
+        let dbIdNeedle = "db_id: \"\(dbIdString)\""
         var updatedCount = 0
 
         for fileURL in transcriptMarkdownFiles(under: directory) {
+            guard scanFrontmatter(at: fileURL, for: dbIdNeedle) != .notMatched else { continue }
             guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
-                  content.contains("db_id: \"\(dbIdString)\"") else { continue }
+                  content.contains(dbIdNeedle) else { continue }
 
             guard applyRetroactiveRename(
                 in: &content,
@@ -171,11 +173,13 @@ extension TranscriptSaver {
     ) {
         let sourceIdString = sourceDbId.uuidString
         let targetIdString = targetDbId.uuidString
+        let sourceIdNeedle = "db_id: \"\(sourceIdString)\""
         var updatedCount = 0
 
         for fileURL in transcriptMarkdownFiles(under: directory) {
+            guard scanFrontmatter(at: fileURL, for: sourceIdNeedle) != .notMatched else { continue }
             guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
-                  content.contains("db_id: \"\(sourceIdString)\"") else { continue }
+                  content.contains(sourceIdNeedle) else { continue }
 
             applyRetroactiveRename(
                 in: &content,
@@ -232,6 +236,56 @@ extension TranscriptSaver {
             }
         }
         return files.sorted { $0.path < $1.path }
+    }
+
+    /// Verdict from the cheap frontmatter pre-scan that gates retroactive rewrites.
+    private enum FrontmatterScanResult {
+        case matched
+        case notMatched
+        case needsFullRead
+    }
+
+    /// Cheap pre-filter for the library-wide rename/merge scans. `db_id` lines are
+    /// only ever written inside the YAML frontmatter `speakers:` block
+    /// (`TranscriptFormatter.formatTranscriptMarkdown` and
+    /// `writeFrontmatterSpeakerMetadata`), so reading a file only up to its closing
+    /// `---` decides whether it can reference the profile at all — without loading
+    /// whole transcript bodies into memory. The search is byte-level so chunk
+    /// boundaries can't split UTF-8 sequences or the needle, and anything that does
+    /// not look like a well-formed frontmatter block (no leading `---`, no closing
+    /// `\n---\n` within the scan cap) falls back to the historical full read so no
+    /// file is ever silently skipped on ambiguity.
+    private static func scanFrontmatter(at url: URL, for needle: String) -> FrontmatterScanResult {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return .needsFullRead }
+        defer { try? handle.close() }
+
+        let needleBytes = Data(needle.utf8)
+        let openDelimiter = Data("---\n".utf8)
+        let closeDelimiter = Data("\n---\n".utf8)
+        let chunkSize = 64 * 1024
+        let maxScanBytes = 1024 * 1024
+        var buffer = Data()
+
+        while buffer.count < maxScanBytes {
+            guard let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty else {
+                return .needsFullRead
+            }
+            buffer.append(chunk)
+
+            if buffer.count >= openDelimiter.count, !buffer.starts(with: openDelimiter) {
+                return .needsFullRead
+            }
+
+            // Mirrors frontmatterContentRange: the frontmatter ends at the first
+            // "\n---\n" after the opening "---\n".
+            if buffer.count > openDelimiter.count,
+               let closeRange = buffer.range(of: closeDelimiter, in: openDelimiter.count..<buffer.count) {
+                return buffer[..<closeRange.lowerBound].range(of: needleBytes) != nil
+                    ? .matched
+                    : .notMatched
+            }
+        }
+        return .needsFullRead
     }
 
     private struct FrontmatterSpeakerRow {

@@ -2665,13 +2665,80 @@ func testRepoCommandContract() {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
         assertTrue(
-            overlayContents.contains("case .notLoaded, .downloading, .cached, .failed:"),
-            "dictation start should join an in-progress model file prefetch instead of waiting forever for ready"
+            overlayContents.contains("case .notLoaded, .cached:")
+                && overlayContents.contains("await appState.sttRouter.initializeSelectedModel()")
+                && overlayContents.contains("await appState.sttRouter.waitForModelLoadProgress()"),
+            "dictation start should join an in-progress model load/prefetch instead of waiting forever for ready"
+        )
+        assertTrue(
+            overlayContents.contains("if appState.sttRouter.selectedModelFilesAvailableLocally {")
+                && overlayContents.contains("beginDictationRecording(sourceApp: sourceApp)"),
+            "dictation with model files already on disk should open the microphone immediately and load concurrently"
+        )
+        assertTrue(
+            overlayContents.contains("break modelWait"),
+            "the post-stop model wait should fail fast when the concurrent load reports failure instead of polling out the budget"
         )
         assertTrue(
             engineContents.contains("private var modelInitializationTask: Task<Void, Never>?")
                 && engineContents.contains("await modelInitializationTask.value"),
             "Parakeet initialization should join an in-progress direct first-use download/load"
+        )
+    }
+
+    runSuite("Repo command contract - background meeting transcription avoids per-segment main-actor churn") {
+        let routerContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
+
+        // Per-segment initialize round-trips contend with any live meeting or
+        // dictation the user is in; segments must skip initialize when the
+        // model is already loaded.
+        guard
+            let segmentStart = routerContents.range(of: "func transcribeSegment("),
+            let segmentEnd = routerContents.range(of: "func cancel()", range: segmentStart.upperBound..<routerContents.endIndex)
+        else {
+            assertionFailure("STTRouter should keep a transcribeSegment entry point ahead of cancel()")
+            return
+        }
+        let segmentBody = String(routerContents[segmentStart.lowerBound..<segmentEnd.lowerBound])
+        assertTrue(
+            segmentBody.contains("if !isModelLoaded(for: resolvedModel) {"),
+            "segment transcription should only initialize when the model is not already loaded"
+        )
+
+        // Redundant @Published reassignments fan objectWillChange into the
+        // menubar, warmup-status, and settings subscribers once per segment.
+        guard
+            let refreshStart = routerContents.range(of: "private func refreshModelDownloadState()"),
+            let refreshEnd = routerContents.range(of: "private static func modelStatesEqual(", range: refreshStart.upperBound..<routerContents.endIndex)
+        else {
+            assertionFailure("STTRouter should keep refreshModelDownloadState and its state-equality helper")
+            return
+        }
+        let refreshBody = String(routerContents[refreshStart.lowerBound..<refreshEnd.lowerBound])
+        assertTrue(
+            refreshBody.contains("guard !Self.modelStatesEqual(refreshed, modelDownloadState) else { return }"),
+            "model-state refresh should skip the @Published reassignment when the state is unchanged"
+        )
+    }
+
+    runSuite("Repo command contract - meeting pipeline releases whole-meeting sample buffers after last use") {
+        let pipelineContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift")
+
+        // Whole-meeting 16kHz buffers are ~460MB per channel for a 2h
+        // recording. Each must be cleared once its channel's segment slicing
+        // is done instead of living for the entire pipeline run.
+        assertTrue(
+            pipelineContents.contains("var systemSamples = try AudioResampler.loadAndResample")
+                && pipelineContents.contains("systemSamples = []"),
+            "the system-audio buffer should be released after the system segment loop"
+        )
+        assertTrue(
+            pipelineContents.contains("var micSamples: [Float]"),
+            "the mic buffer should stay mutable so it can be released after its last use"
+        )
+        assertTrue(
+            pipelineContents.components(separatedBy: "micSamples = []").count >= 4,
+            "the mic buffer should be cleared in the no-mic, split-speakers, and silence-split paths"
         )
     }
 

@@ -105,6 +105,34 @@ func testCustomDictionaryPreferences() {
         )
     }
 
+    runSuite("CustomDictionaryTextProcessor picks up dictionary changes between calls") {
+        let original = [CustomDictionaryEntry(spoken: "post hog", replacement: "PostHog")]
+
+        assertEqual(
+            CustomDictionaryTextProcessor.apply(to: "post hog events", entries: original),
+            "PostHog events",
+            "first call should apply the original replacement"
+        )
+        assertEqual(
+            CustomDictionaryTextProcessor.apply(to: "post hog events", entries: original),
+            "PostHog events",
+            "repeated calls with unchanged entries should keep applying the same replacement"
+        )
+
+        let updated = [CustomDictionaryEntry(spoken: "post hog", replacement: "Post Hog Inc")]
+
+        assertEqual(
+            CustomDictionaryTextProcessor.apply(to: "post hog events", entries: updated),
+            "Post Hog Inc events",
+            "changed entries must take effect immediately, not serve a stale replacement"
+        )
+        assertEqual(
+            CustomDictionaryTextProcessor.apply(to: "post hog events", entries: []),
+            "post hog events",
+            "clearing the dictionary must stop replacements immediately"
+        )
+    }
+
     runSuite("CustomDictionaryTextProcessor escapes replacement templates") {
         let entries = [
             CustomDictionaryEntry(spoken: "home bin", replacement: "$HOME\\bin")
