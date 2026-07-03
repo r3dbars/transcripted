@@ -174,7 +174,10 @@ struct DictationPasteTarget: Equatable {
 
 @MainActor
 final class ClipboardRestoringTextPaster {
-    typealias PasteboardSnapshot = [[NSPasteboard.PasteboardType: Data]]
+    struct PasteboardSnapshot {
+        let items: [[NSPasteboard.PasteboardType: Data]]
+        let isComplete: Bool
+    }
 
     private static let eagerlySnapshottedPasteboardTypes: Set<NSPasteboard.PasteboardType> = [
         .string,
@@ -277,6 +280,9 @@ final class ClipboardRestoringTextPaster {
         }
 
         let savedItems = snapshotPasteboardItems(from: pasteboard)
+        guard savedItems.isComplete else {
+            return .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.")
+        }
         pasteGeneration += 1
         let generation = pasteGeneration
         var temporaryChangeCount = 0
@@ -533,12 +539,17 @@ final class ClipboardRestoringTextPaster {
     }
 
     func snapshotPasteboardItems(from pasteboard: any ClipboardPasteboard) -> PasteboardSnapshot {
-        pasteboard.pasteboardItems?.map { item in
+        var isComplete = true
+        let items: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
             for type in item.types {
-                guard Self.eagerlySnapshottedPasteboardTypes.contains(type),
-                      let data = item.data(forType: type),
+                guard Self.eagerlySnapshottedPasteboardTypes.contains(type) else {
+                    isComplete = false
+                    continue
+                }
+                guard let data = item.data(forType: type),
                       data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes else {
+                    isComplete = false
                     continue
                 }
                 if !data.isEmpty {
@@ -547,6 +558,7 @@ final class ClipboardRestoringTextPaster {
             }
             return typeData
         } ?? []
+        return PasteboardSnapshot(items: items, isComplete: isComplete)
     }
 
     func restorePasteboardItems(
@@ -555,13 +567,14 @@ final class ClipboardRestoringTextPaster {
         temporaryChangeCount: Int,
         to pasteboard: any ClipboardPasteboard
     ) {
+        guard savedItems.isComplete else { return }
         guard pasteboard.changeCount == temporaryChangeCount,
               pasteboard.string(forType: .string) == temporaryString else {
             return
         }
 
         pasteboard.clearContents()
-        let items = savedItems.map { typeData -> NSPasteboardItem in
+        let items = savedItems.items.map { typeData -> NSPasteboardItem in
             let item = NSPasteboardItem()
             for (type, data) in typeData {
                 item.setData(data, forType: type)
