@@ -502,19 +502,23 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    @ViewBuilder
     private var homePage: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HomeCanvasHeader(
-                greeting: homeGreeting,
-                streakText: homeStreak.map { "\($0)d" },
-                hoursText: statsService.formattedTotalHours,
-                wordsText: formattedInteger(homeViewModel.totalDictationWordCount),
-                onViewStats: {
-                    trackSettingsAction("open_home_stats", page: .home)
-                    homeShowsStatsDetails = true
-                }
-            )
-            .padding(.top, 8)
+        if TimelineHomePreviewFlag.isEnabled() {
+            TimelineHomeView()
+        } else {
+            VStack(alignment: .leading, spacing: 20) {
+                HomeCanvasHeader(
+                    greeting: homeGreeting,
+                    streakText: homeStreak.map { "\($0)d" },
+                    hoursText: statsService.formattedTotalHours,
+                    wordsText: formattedInteger(homeViewModel.totalDictationWordCount),
+                    onViewStats: {
+                        trackSettingsAction("open_home_stats", page: .home)
+                        homeShowsStatsDetails = true
+                    }
+                )
+                .padding(.top, 8)
 
             if !homeAttentionIssues.isEmpty {
                 HomeAttentionPillsRow(issues: homeAttentionIssues) { issue in
@@ -622,8 +626,9 @@ struct TranscriptedSettingsView: View {
 
             homeMeetingsListSection
                 .padding(.top, homeMeetingSearchIsAvailable ? 0 : 6)
+            }
+            .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
         }
-        .animation(.snappy(duration: 0.22), value: homeTranscriptionActivity)
     }
 
     /// Show the meetings filter once there is at least one loaded meeting to
