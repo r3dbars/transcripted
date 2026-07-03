@@ -747,7 +747,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "entrypoint": entrypoint,
                 "has_target": lastExternalApplication == nil ? "false" : "true",
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
-                "mic_status": microphoneStatusAnalyticsName(TranscriptedPermissionAccess.microphoneAuthorizationStatus()),
+                "mic_status": TranscriptedPermissionAccess.microphoneAuthorizationStatus().diagnosticName,
                 "model_state": appState.sttRouter.modelDownloadState.diagnosticName,
                 "pasteback_status": TranscriptedPermissionAccess.isGranted(.accessibility) ? "granted" : "not_granted",
             ]
@@ -761,21 +761,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingRecordingActive: appState.meetingSession.isRecording,
             dictationRecordingActive: appState.sttRouter.isRecording
         )
-    }
-
-    private func microphoneStatusAnalyticsName(_ status: AVAuthorizationStatus) -> String {
-        switch status {
-        case .notDetermined:
-            return "not_determined"
-        case .restricted:
-            return "restricted"
-        case .denied:
-            return "denied"
-        case .authorized:
-            return "authorized"
-        @unknown default:
-            return "unknown"
-        }
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {

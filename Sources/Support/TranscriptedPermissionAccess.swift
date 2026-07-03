@@ -307,3 +307,24 @@ private final class SystemAudioPermissionRequester: NSObject, SCStreamOutput {
         completion?(granted)
     }
 }
+
+extension AVAuthorizationStatus {
+    /// Stable, privacy-safe string used in analytics and diagnostics context.
+    ///
+    /// Centralized here so the mic/camera authorization mapping is defined once
+    /// instead of being re-switched in every telemetry call site.
+    var diagnosticName: String {
+        switch self {
+        case .notDetermined:
+            return "not_determined"
+        case .restricted:
+            return "restricted"
+        case .denied:
+            return "denied"
+        case .authorized:
+            return "authorized"
+        @unknown default:
+            return "unknown"
+        }
+    }
+}

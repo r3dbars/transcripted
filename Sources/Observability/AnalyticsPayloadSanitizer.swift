@@ -2,28 +2,9 @@ import Foundation
 
 enum AnalyticsPayloadSanitizer {
     private static let maxValueLength = 80
-    private static let sensitiveKeyFragments = [
-        "audio",
-        "authorization",
-        "bearer",
-        "bundle",
-        "credential",
-        "dsn",
-        "email",
-        "error",
-        "file",
-        "name",
-        "password",
-        "path",
-        "speaker",
-        "source_app",
-        "secret",
-        "text",
-        "title",
-        "token",
-        "transcript",
-        "url",
-    ]
+    // Analytics drops exactly the shared base fragments; see
+    // `PayloadSanitizationCore.baseSensitiveKeyFragments`.
+    private static let sensitiveKeyFragments = PayloadSanitizationCore.baseSensitiveKeyFragments
 
     static func sanitizeProperties(
         _ properties: [String: String],

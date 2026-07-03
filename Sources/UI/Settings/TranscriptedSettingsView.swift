@@ -211,7 +211,7 @@ struct TranscriptedSettingsView: View {
                     openOwnFile(
                         candidateURLs: [preview.transcriptURL],
                         failureTitle: "Could not open transcript",
-                        failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                        failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
                     )
                 },
                 onCopyForAgent: {
@@ -588,7 +588,7 @@ struct TranscriptedSettingsView: View {
                             openOwnFile(
                                 candidateURLs: [notice.transcriptURL],
                                 failureTitle: "Could not open transcript",
-                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                                failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
                             )
                         }
                     },
@@ -771,7 +771,7 @@ struct TranscriptedSettingsView: View {
                     openOwnFile(
                         candidateURLs: [entry.url],
                         failureTitle: "Could not open dictation",
-                        failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                        failureMessage: SettingsArtifactMessage.dictationFileNotFound
                     )
                 },
                 onCopy: { handleCopyDictation(entry) },
@@ -868,7 +868,7 @@ struct TranscriptedSettingsView: View {
         guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
             presentHomeActionFailure(
                 title: "Could not copy meeting",
-                message: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                message: SettingsArtifactMessage.meetingTranscriptNotFound
             )
             return
         }
@@ -948,7 +948,7 @@ struct TranscriptedSettingsView: View {
         guard let systemURL = OwnFileResolver.resolveExistingFile(candidateURLs: [input.systemURL]) else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
-                message: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+                message: SettingsArtifactMessage.meetingRetainedAudioNotFound
             )
             return
         }
@@ -1246,7 +1246,7 @@ struct TranscriptedSettingsView: View {
                 openOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not open dictation",
-                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
                 )
             },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
@@ -1264,7 +1264,7 @@ struct TranscriptedSettingsView: View {
                 revealOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not show dictation",
-                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
                 )
             },
             HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
@@ -1334,7 +1334,7 @@ struct TranscriptedSettingsView: View {
                 revealOwnFile(
                     candidateURLs: HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
                     failureTitle: "Could not show transcript",
-                    failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
                 )
             }
         ])
@@ -1399,7 +1399,7 @@ struct TranscriptedSettingsView: View {
                         revealOwnFile(
                             candidateURLs: audioRevealURLs,
                             failureTitle: "Could not show audio",
-                            failureMessage: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+                            failureMessage: SettingsArtifactMessage.meetingRetainedAudioNotFound
                         )
                     }
                 )
@@ -5033,4 +5033,16 @@ struct TranscriptedSettingsView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+// User-facing copy for the "we can't find this artifact on disk" failures that
+// several Settings actions surface. Centralized so the identical strings are
+// not re-typed at each call site and can't drift apart.
+private enum SettingsArtifactMessage {
+    static let meetingTranscriptNotFound =
+        "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+    static let dictationFileNotFound =
+        "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+    static let meetingRetainedAudioNotFound =
+        "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
 }
