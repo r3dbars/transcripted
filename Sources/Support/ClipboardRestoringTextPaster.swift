@@ -176,6 +176,10 @@ private struct FocusedTextPasteConfirmation {
     private let focusedElement: AXUIElement
     private let initialValue: String?
 
+    var canObserveTextValue: Bool {
+        initialValue != nil
+    }
+
     static func capture() -> FocusedTextPasteConfirmation? {
         let systemWideElement = AXUIElementCreateSystemWide()
         var focusedElementValue: CFTypeRef?
@@ -322,10 +326,6 @@ final class ClipboardRestoringTextPaster {
         }
 
         let accessibilityConfirmation = FocusedTextPasteConfirmation.capture()
-        let confirmPasteReceived = pasteConfirmed ?? {
-            accessibilityConfirmation?.containsPastedText(text) == true
-        }
-
         let savedItems = snapshotPasteboardItems(from: pasteboard)
         guard savedItems.isComplete else {
             return .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.")
@@ -336,6 +336,7 @@ final class ClipboardRestoringTextPaster {
 
         pasteboard.clearContents()
         let wroteTemporaryString = writeTemporaryString(text, to: pasteboard)
+        let activeTemporaryProvider = wroteTemporaryString ? temporaryPasteboardDataProvider : nil
 
         if !wroteTemporaryString {
             pasteboard.clearContents()
@@ -364,6 +365,16 @@ final class ClipboardRestoringTextPaster {
                 "Couldn't paste automatically. The text was copied instead.",
                 reason: .pasteEventCreationFailed
             )
+        }
+
+        let confirmPasteReceived = pasteConfirmed ?? {
+            if accessibilityConfirmation?.containsPastedText(text) == true {
+                return true
+            }
+            if accessibilityConfirmation?.canObserveTextValue == true {
+                return false
+            }
+            return activeTemporaryProvider?.didProvideData == true
         }
 
         guard waitForPasteConfirmation(

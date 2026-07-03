@@ -504,6 +504,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                pasteConfirmed: { false },
                 pasteConfirmationWait: 0.05
             )
         }
