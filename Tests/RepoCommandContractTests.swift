@@ -2439,6 +2439,10 @@ func testRepoCommandContract() {
             failureBlock.contains("properties: failureTelemetryContext"),
             "analytics and diagnostics should share the same privacy-safe failure telemetry context"
         )
+        assertTrue(
+            countOccurrences(of: "handleBackgroundTranscriptionWorkChanged()", in: failureBlock) >= 3,
+            "terminal failed statuses should wake the queued-transcription drain even when a task was rejected before activeCount changed"
+        )
     }
 
     runSuite("Repo command contract - shutdown preservation clears live sidecar waits") {
