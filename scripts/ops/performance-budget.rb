@@ -22,6 +22,8 @@ MAX_DICTATION_START_TO_FIRST_SAMPLE_P95_MS = 350.0
 MAX_DICTATION_STOP_TO_PASTE_P95_MS = 750.0
 MAX_DICTATION_STOP_TO_DONE_P95_MS = 1_000.0
 MAX_MEETING_P95_RTF = 0.05
+MAX_HOME_RECENT_CAPTURE_AVERAGE_LOAD_MS = 750.0
+MAX_HOME_RECENT_CAPTURE_CANCEL_MS = 100.0
 MIN_MEETING_DURATION_SECONDS = 30.0
 MIN_TRANSCRIPTION_SAMPLES = 10
 MIN_STARTUP_SAMPLES = 3
@@ -55,6 +57,9 @@ options = {
   min_meeting_duration_seconds: MIN_MEETING_DURATION_SECONDS,
   min_transcription_samples: MIN_TRANSCRIPTION_SAMPLES,
   min_meeting_samples: MIN_MEETING_SAMPLES,
+  check_home_recent_captures: false,
+  max_home_recent_capture_average_load_ms: MAX_HOME_RECENT_CAPTURE_AVERAGE_LOAD_MS,
+  max_home_recent_capture_cancel_ms: MAX_HOME_RECENT_CAPTURE_CANCEL_MS,
   require_launch_model_ready_samples: 0,
   require_dictation_fast_start_samples: 0,
   require_dictation_stop_latency_samples: 0,
@@ -82,6 +87,9 @@ OptionParser.new do |parser|
   parser.on("--min-meeting-duration-s SECONDS", Float, "Minimum recording duration for meeting throughput stats") { |seconds| options[:min_meeting_duration_seconds] = seconds }
   parser.on("--min-transcription-samples N", Integer, "Minimum dictation transcription samples to require when --events is provided") { |count| options[:min_transcription_samples] = count }
   parser.on("--min-meeting-samples N", Integer, "Minimum meeting throughput samples to require when --stats is provided") { |count| options[:min_meeting_samples] = count }
+  parser.on("--check-home-recent-captures", "Run deterministic Home recent-captures loader budget") { options[:check_home_recent_captures] = true }
+  parser.on("--max-home-recent-capture-average-load-ms MS", Float, "Home recent-captures average load budget") { |ms| options[:max_home_recent_capture_average_load_ms] = ms }
+  parser.on("--max-home-recent-capture-cancel-ms MS", Float, "Home recent-captures cancellation acknowledgement budget") { |ms| options[:max_home_recent_capture_cancel_ms] = ms }
   parser.on("--require-launch-model-ready-samples N", Integer, "Require at least N launch-to-model-ready samples in --events logs") { |count| options[:require_launch_model_ready_samples] = count }
   parser.on("--require-dictation-fast-start-samples N", Integer, "Require at least N fast-start samples in --events logs") { |count| options[:require_dictation_fast_start_samples] = count }
   parser.on("--require-dictation-stop-latency-samples N", Integer, "Require at least N stop-latency samples in --events logs") { |count| options[:require_dictation_stop_latency_samples] = count }
@@ -212,6 +220,27 @@ def fail_budget!(errors)
   warn "Performance budget failed:"
   errors.each { |error| warn "- #{error}" }
   exit 1
+end
+
+def run_home_recent_capture_benchmark(max_average_load_ms:, max_cancel_ms:)
+  command = [
+    "scripts/dev/benchmark-home-recent-captures.sh",
+    "--max-average-load-ms",
+    max_average_load_ms.to_s,
+    "--max-cancellation-ms",
+    max_cancel_ms.to_s
+  ]
+  stdout, stderr, status = Open3.capture3(
+    { "REPETITIONS" => "5" },
+    *command,
+    chdir: REPO_ROOT.to_s
+  )
+  {
+    command: command.join(" "),
+    stdout: stdout,
+    stderr: stderr,
+    status: status
+  }
 end
 
 app_path = Pathname.new(options[:app_path]).expand_path
@@ -432,6 +461,22 @@ if options[:stats_path]
   end
 end
 
+home_recent_capture_summary = nil
+if options[:check_home_recent_captures]
+  result = run_home_recent_capture_benchmark(
+    max_average_load_ms: options[:max_home_recent_capture_average_load_ms],
+    max_cancel_ms: options[:max_home_recent_capture_cancel_ms]
+  )
+  home_recent_capture_summary = result
+  unless result[:status].success?
+    errors << [
+      "Home recent-captures benchmark failed",
+      result[:stderr].strip,
+      result[:stdout].strip
+    ].reject(&:empty?).join(": ")
+  end
+end
+
 fail_budget!(errors)
 
 puts "Performance budget OK"
@@ -505,4 +550,8 @@ if stats_summary
   else
     puts "Meeting processing p95 RTF: n/a"
   end
+end
+if home_recent_capture_summary
+  puts "Home recent-captures benchmark:"
+  puts home_recent_capture_summary[:stdout].strip
 end
