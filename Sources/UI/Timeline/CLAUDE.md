@@ -4,13 +4,14 @@
 
 `Sources/UI/Timeline/` owns the SwiftUI surface for the Dayflow-style
 Transcripted timeline. It renders screen-activity cards alongside meetings
-and dictations, exposes timeline navigation, and surfaces capture/permission
-pause states. Keep this folder focused on rendering and presentation policy;
-timeline capture, storage, and analysis belong outside the UI tree. Views
-should render from protocol/sample data until the capture/database seam is
-ready.
+and dictations, exposes timeline navigation, day and week views, and a chat
+shell over timeline data, and surfaces capture/permission pause states. Keep
+this folder focused on rendering and presentation policy; timeline capture,
+storage, and analysis belong outside the UI tree. Views should render from
+protocol/sample data until the capture/database seam is ready. It does not
+run screenshot capture or card generation.
 
-## Current files (Phase 4-7)
+## Current files
 
 - `TimelineHomePresentation.swift` — mock/sample data, layout policy, and the
   debug flag for previewing the timeline home.
@@ -21,13 +22,12 @@ ready.
 - `TimelineDayNavigation.swift` — day picker/navigation strip.
 - `TimelineTokens.swift` — local colors, spacing, and typography.
 - `TimelineWeekGridView.swift` — seven-day 4 AM to 4 AM week grid.
-- `TimelineDashboardView.swift` — compact weekly dashboard backed by
-  `WeeklyStatsBuilder`.
+- `TimelineDashboardView.swift` — compact weekly dashboard backed by `WeeklyStatsBuilder`.
+- `TimelineChatView.swift` — lightweight chat panel shell over `TimelineChatMessage`; renders a question composer, message list, local/off-device privacy state, and empty states.
 
 ## Planned files (future phases)
 
 - `ScreenshotSlideshowView.swift` — future fullscreen screenshot playback and scrubber
-- `TimelineChatView.swift` — future chat over a day
 - `CategoryPickerView.swift` — future category edit/swap overlay
 
 ## Current notes
@@ -39,6 +39,8 @@ ready.
   permission/onboarding path are landed. Use the preview/debug flag only.
 - Keep views local-first. Do not emit analytics payloads from these views unless
   the payload is bucketed and covered by observability policy tests.
+- Show a clear inline notice before a cloud provider can receive timeline text.
+- Keep heavy data loading and provider calls outside the view.
 
 ## Verification
 

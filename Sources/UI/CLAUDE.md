@@ -112,6 +112,10 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/TypingTimeSavedFormatter.swift` — Foundation-pure formatter for Home's typing-time-saved stat
 
+### Timeline/
+
+- `Timeline/TimelineChatView.swift` — Phase 8 chat panel shell for asking questions over the current timeline day, with local/cloud privacy state surfaced inline
+
 ### Shared/
 
 - `Shared/AgentConnectionGuide.swift` — shared starter prompt, folder paths, Codex inbox, live-sidecar, and portable meeting bundle copy for the agent-connect flow

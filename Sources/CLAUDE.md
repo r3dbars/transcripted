@@ -35,6 +35,7 @@ Important entry points:
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
 - `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including live capture, imported-audio handoff, queued meeting transcription, and local-speaker-split settings
 - `Speech/ParakeetEngine.swift` + `Speech/STTRouter.swift` — local STT path used by dictation and by the meeting adapter; Parakeet CoreAudio lookup and startup support live in the adjacent `ParakeetAudio*` support files
+- `Timeline/ChatToolExecutor.swift` + `Timeline/ChatPromptBuilder.swift` — read-only local timeline chat seam, including SQL guardrails and cloud-provider notice gating
 
 ## Directory map
 
@@ -46,7 +47,7 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
-- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the app-owned timeline database, screenshot storage retention, analysis scheduling, provider seams, category rules, day-boundary math, weekly aggregation helpers, and capture-library projection logic; capture-library artifacts remain the source of truth
+- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the app-owned timeline database, screenshot storage retention, analysis scheduling, provider seams, category rules, day-boundary math, weekly aggregation helpers, capture-library projection logic, and local-first read-only chat tools; capture-library artifacts remain the source of truth
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, and `Timeline/`
@@ -65,7 +66,7 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching meeting flow, imported-audio transcription, or meeting UI: `Sources/Meeting/CLAUDE.md`
 - touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
 - touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/CLAUDE.md`
-- touching timeline capture, local screenshot metadata, timeline pause/resume state, the timeline database, screenshot retention, analysis, provider seams, or card rules: `Sources/Timeline/CLAUDE.md`
+- touching timeline capture, local screenshot metadata, timeline pause/resume state, the timeline database, screenshot retention, analysis, provider seams, card rules, or timeline chat tools: `Sources/Timeline/CLAUDE.md`
 - touching app-wide support utilities: `Sources/Support/CLAUDE.md`
 - touching timeline UI scaffolding: `Sources/UI/Timeline/CLAUDE.md`
 - touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/CLAUDE.md`
