@@ -162,8 +162,20 @@ func testOverlayScreenSharePrivacy() async {
             to: "// Ad-hoc call detection:"
         )
         assertTrue(
-            promptRequest.contains("capturePillController.present(candidate: candidate, timeout:"),
+            promptRequest.contains("capturePillController.present("),
             "detected meeting prompts should use the floating capture pill"
+        )
+        assertTrue(
+            promptRequest.contains("MeetingPromptHeuristics.promptTimeoutSeconds"),
+            "detected meeting prompts should preserve calendar vs ad-hoc prompt timeouts"
+        )
+        assertTrue(
+            app.contains("capturePillController.onRemind = remindPrompt"),
+            "the capture pill should expose the short remind-soon path"
+        )
+        assertTrue(
+            app.contains("capturePillController.onExpired = expirePrompt"),
+            "the capture pill timeout should use the expiry path, not an explicit dismissal"
         )
         assertFalse(
             promptRequest.contains("meetingOverlayController.presentDetectedMeetingPrompt(candidate)"),

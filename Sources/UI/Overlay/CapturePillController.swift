@@ -249,6 +249,7 @@ private final class CapturePillView: NSView {
         let recordSize = NSSize(width: 72, height: 32)
         let remindSize = NSSize(width: 118, height: 32)
         let dismissSize = NSSize(width: 82, height: 32)
+        let remindSize = NSSize(width: 74, height: 32)
         recordButton.frame = NSRect(
             x: bounds.width - pad - recordSize.width,
             y: (bounds.height - recordSize.height) / 2,
@@ -300,7 +301,16 @@ private final class CapturePillView: NSView {
             : NSColor.controlColor.withAlphaComponent(0.85).cgColor
         button.contentTintColor = isPrimary ? .white : .labelColor
         button.setAccessibilityLabel(title)
-        button.setAccessibilityHelp(isPrimary ? "Start recording this meeting." : "Dismiss this meeting prompt.")
+        let help: String
+        switch title {
+        case "Record":
+            help = "Start recording this meeting."
+        case "Remind me soon":
+            help = "Ask again soon."
+        default:
+            help = "Dismiss this meeting prompt."
+        }
+        button.setAccessibilityHelp(help)
         addSubview(button)
     }
 
@@ -308,11 +318,11 @@ private final class CapturePillView: NSView {
         onRecord?()
     }
 
-    @objc private func dismissTapped() {
-        onDismiss?()
-    }
-
     @objc private func remindTapped() {
         onRemind?()
+    }
+
+    @objc private func dismissTapped() {
+        onDismiss?()
     }
 }

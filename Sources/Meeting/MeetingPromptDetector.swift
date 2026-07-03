@@ -48,16 +48,20 @@ final class MeetingPromptDetector {
 
     private let calendarReader = MeetingPromptCalendarReader()
     private let calendarAccessGranted: () -> Bool
+    private let fetchCalendarEventSnapshots: (Date, Date) async -> [MeetingPromptCalendarEventSnapshot]
     private let refreshesCalendarEventSnapshots: Bool
-    // Cache of upcoming meeting-link events refreshed off-main by each poll cycle.
+    // Cache of upcoming meeting-link events refreshed off-main on a TTL or
+    // EventKit invalidation. The 20s prompt loop should stay in-memory while idle.
     // Dismiss/markAccepted/title paths must stay synchronous (overlay callbacks and
     // the recording-start title closure), so they read this cache instead of querying
     // EKEventStore on the main actor.
     private var calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = []
-    private var lastCalendarEventRefreshAt: Date?
+    private var lastCalendarSnapshotRefreshAt: Date?
+    private var lastCalendarAccessGranted: Bool?
+    private var calendarSnapshotsNeedRefresh = true
     private var pollingTask: Task<Void, Never>?
     private var workspaceObservers: [NSObjectProtocol] = []
-    private var calendarChangeObserver: NSObjectProtocol?
+    private var calendarStoreObserver: NSObjectProtocol?
     private var snoozedUntil: [String: Date] = [:]
     private var pendingUntil: [String: Date] = [:]
     private var recentNativeActivity: [MeetingPromptProvider: Date] = [:]
@@ -111,22 +115,26 @@ final class MeetingPromptDetector {
     init(
         calendarAccessGranted: @escaping () -> Bool = { TranscriptedPermissionAccess.calendarAccessGranted() },
         calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = [],
-        refreshesCalendarEventSnapshots: Bool = true
+        refreshesCalendarEventSnapshots: Bool = true,
+        fetchCalendarEventSnapshots: ((Date, Date) async -> [MeetingPromptCalendarEventSnapshot])? = nil
     ) {
         self.calendarAccessGranted = calendarAccessGranted
         self.calendarEventSnapshots = calendarEventSnapshots
         self.refreshesCalendarEventSnapshots = refreshesCalendarEventSnapshots
+        self.fetchCalendarEventSnapshots = fetchCalendarEventSnapshots ?? { [calendarReader] start, end in
+            await calendarReader.fetchMeetingEventSnapshots(start: start, end: end)
+        }
     }
 
     func start() {
         guard pollingTask == nil else { return }
         installWorkspaceObservers()
-        installCalendarChangeObserver()
+        installCalendarStoreObserver()
 
         pollingTask = Task { [weak self] in
             guard let self else { return }
 
-            await evaluate()
+            await evaluate(forceCalendarRefresh: true)
 
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
@@ -143,9 +151,9 @@ final class MeetingPromptDetector {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
         workspaceObservers.removeAll()
-        if let calendarChangeObserver {
-            NotificationCenter.default.removeObserver(calendarChangeObserver)
-            self.calendarChangeObserver = nil
+        if let calendarStoreObserver {
+            NotificationCenter.default.removeObserver(calendarStoreObserver)
+            self.calendarStoreObserver = nil
         }
     }
 
@@ -313,8 +321,8 @@ final class MeetingPromptDetector {
         .first
     }
 
-    private func evaluate() async {
-        await refreshCalendarEventSnapshots()
+    private func evaluate(forceCalendarRefresh: Bool = false) async {
+        await refreshCalendarEventSnapshots(force: forceCalendarRefresh)
 
         let now = Date()
         let runningApplications = NSWorkspace.shared.runningApplications
@@ -389,38 +397,43 @@ final class MeetingPromptDetector {
         }
     }
 
-    private func refreshCalendarEventSnapshots() async {
+    private func refreshCalendarEventSnapshots(force: Bool = false) async {
         guard refreshesCalendarEventSnapshots else { return }
-        guard calendarAccessGranted() else {
+        let accessGranted = calendarAccessGranted()
+        let accessChanged = lastCalendarAccessGranted.map { $0 != accessGranted } ?? true
+        lastCalendarAccessGranted = accessGranted
+
+        guard accessGranted else {
             calendarEventSnapshots = []
-            lastCalendarEventRefreshAt = nil
+            lastCalendarSnapshotRefreshAt = Date()
+            calendarSnapshotsNeedRefresh = false
             return
         }
 
         let now = Date()
-        if let lastCalendarEventRefreshAt,
-           now.timeIntervalSince(lastCalendarEventRefreshAt) < calendarSnapshotRefreshInterval {
-            return
-        }
+        let refreshExpired = lastCalendarSnapshotRefreshAt.map {
+            now.timeIntervalSince($0) >= calendarSnapshotRefreshInterval
+        } ?? true
+        guard force || accessChanged || calendarSnapshotsNeedRefresh || refreshExpired else { return }
 
-        calendarEventSnapshots = await calendarReader.fetchMeetingEventSnapshots(
-            start: now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
-            end: now.addingTimeInterval(calendarLookaheadInterval)
+        calendarEventSnapshots = await fetchCalendarEventSnapshots(
+            now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
+            now.addingTimeInterval(calendarLookaheadInterval)
         )
-        lastCalendarEventRefreshAt = now
+        lastCalendarSnapshotRefreshAt = now
+        calendarSnapshotsNeedRefresh = false
     }
 
-    private func installCalendarChangeObserver() {
-        guard calendarChangeObserver == nil else { return }
-        calendarChangeObserver = NotificationCenter.default.addObserver(
+    private func installCalendarStoreObserver() {
+        guard calendarStoreObserver == nil else { return }
+        calendarStoreObserver = NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.lastCalendarEventRefreshAt = nil
-                await self.evaluate()
+                self?.calendarSnapshotsNeedRefresh = true
+                await self?.evaluate(forceCalendarRefresh: true)
             }
         }
     }
