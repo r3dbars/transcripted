@@ -67,12 +67,14 @@ final class OverlayDraftingView: NSView {
     private let errorIcon = NSImageView()
     private let errorLabel = NSTextField(wrappingLabelWithString: "")
     private let errorActionButton = OverlaySecondaryButton(frame: .zero)
+    private let errorDismissButton = NSButton(frame: .zero)
 
     // Secondary state: dimmed transcript + "Refining..." spinner
     private let dimmedTranscript = NSTextField(wrappingLabelWithString: "")
     private let refiningSpinner = NSProgressIndicator()
     private let refiningLabel = NSTextField(labelWithString: "")
     private var errorAction: (() -> Void)?
+    private var errorDismiss: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -124,6 +126,20 @@ final class OverlayDraftingView: NSView {
         errorActionButton.action = #selector(handleErrorAction)
         addSubview(errorActionButton)
 
+        if let closeImage = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Dismiss error") {
+            errorDismissButton.image = closeImage
+            errorDismissButton.imagePosition = .imageOnly
+        } else {
+            errorDismissButton.title = "x"
+        }
+        errorDismissButton.isBordered = false
+        errorDismissButton.contentTintColor = OverlayTokens.textSecondary
+        errorDismissButton.target = self
+        errorDismissButton.action = #selector(handleErrorDismiss)
+        errorDismissButton.isHidden = true
+        errorDismissButton.setAccessibilityLabel("Dismiss error")
+        addSubview(errorDismissButton)
+
         // Dimmed transcript (for showing text at reduced opacity during processing)
         dimmedTranscript.font = NSFont.systemFont(ofSize: 13)
         dimmedTranscript.textColor = OverlayTokens.textPrimary
@@ -169,6 +185,14 @@ final class OverlayDraftingView: NSView {
             let buttonSpacing: CGFloat = hasAction ? 10 : 0
             let totalHeight = iconSize + 8 + labelSize.height + buttonSpacing + buttonSize.height
             let startY = centerY - totalHeight / 2
+            let dismissSize: CGFloat = 22
+
+            errorDismissButton.frame = NSRect(
+                x: bounds.width - pad - dismissSize,
+                y: bounds.height - pad - dismissSize,
+                width: dismissSize,
+                height: dismissSize
+            )
 
             errorIcon.frame = NSRect(
                 x: centerX - iconSize / 2,
@@ -230,6 +254,7 @@ final class OverlayDraftingView: NSView {
         errorActionTitle: String?,
         onErrorAction: (() -> Void)?,
         isNotice: Bool = false,
+        onErrorDismiss: (() -> Void)?,
         isTranscribing: Bool,
         transcriptText: String,
         statusText: String
@@ -238,9 +263,11 @@ final class OverlayDraftingView: NSView {
             // Error mode
             errorAction = onErrorAction
             applyMessageIcon(isNotice: isNotice)
+            errorDismiss = onErrorDismiss
             errorIcon.isHidden = false
             errorLabel.isHidden = false
             errorLabel.stringValue = error
+            errorDismissButton.isHidden = false
             if let errorActionTitle, !errorActionTitle.isEmpty {
                 errorActionButton.title = errorActionTitle
                 errorActionButton.isHidden = false
@@ -256,6 +283,7 @@ final class OverlayDraftingView: NSView {
         } else if isTranscribing, !transcriptText.isEmpty {
             // Dimmed transcript + refining
             errorAction = nil
+            errorDismiss = nil
             dimmedTranscript.isHidden = false
             dimmedTranscript.stringValue = transcriptText
             refiningSpinner.isHidden = false
@@ -267,9 +295,11 @@ final class OverlayDraftingView: NSView {
             errorIcon.isHidden = true
             errorLabel.isHidden = true
             errorActionButton.isHidden = true
+            errorDismissButton.isHidden = true
         } else {
             // Default: spinner + status
             errorAction = nil
+            errorDismiss = nil
             spinner.isHidden = false
             spinner.startAnimation(nil)
             statusLabel.isHidden = false
@@ -280,6 +310,7 @@ final class OverlayDraftingView: NSView {
             refiningSpinner.isHidden = true
             refiningLabel.isHidden = true
             errorActionButton.isHidden = true
+            errorDismissButton.isHidden = true
         }
         needsLayout = true
     }
@@ -287,5 +318,10 @@ final class OverlayDraftingView: NSView {
     @objc
     private func handleErrorAction() {
         errorAction?()
+    }
+
+    @objc
+    private func handleErrorDismiss() {
+        errorDismiss?()
     }
 }

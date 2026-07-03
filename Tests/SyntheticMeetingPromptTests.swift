@@ -556,6 +556,10 @@ func testSyntheticMeetingPrompts() {
             sessionState: .loadingModels,
             overlayState: .idle
         )
+        let transcribing = MeetingPromptPresentationSnapshot(
+            sessionState: .transcribing,
+            overlayState: .idle
+        )
         let overlayBusy = MeetingPromptPresentationSnapshot(
             sessionState: .ready,
             overlayState: .prompt
@@ -568,6 +572,7 @@ func testSyntheticMeetingPrompts() {
         assertTrue(MeetingPromptPresentationGate.allowsDetectedMeetingPrompt(idle), "ready + idle overlay should allow prompts")
         assertFalse(MeetingPromptPresentationGate.allowsDetectedMeetingPrompt(recording), "active recording should suppress detected prompts")
         assertFalse(MeetingPromptPresentationGate.allowsDetectedMeetingPrompt(loading), "model loading should suppress detected prompts")
+        assertTrue(MeetingPromptPresentationGate.allowsDetectedMeetingPrompt(transcribing), "background transcription should not hide back-to-back meeting prompts")
         assertFalse(MeetingPromptPresentationGate.allowsDetectedMeetingPrompt(overlayBusy), "an existing prompt should suppress another prompt")
         assertTrue(MeetingPromptPresentationGate.allowsDetectedMeetingPrompt(savedOverlay), "recent saved state may show a new prompt")
     }
