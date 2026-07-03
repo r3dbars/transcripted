@@ -2417,13 +2417,30 @@ struct HomeMeetingPreviewSheet: View {
                 .onExitCommand { cancelTitleEdit() }
                 .accessibilityIdentifier("transcripted.home.meeting-preview.title-field")
         } else {
-            Text(preview.title)
-                .font(.system(size: 22, weight: .semibold))
-                .lineLimit(2)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { beginTitleEdit() }
-                .help("Double-click to rename")
-                .accessibilityIdentifier("transcripted.home.meeting-preview.title")
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(preview.title)
+                    .font(.system(size: 22, weight: .semibold))
+                    .lineLimit(2)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { beginTitleEdit() }
+                    .help(HomeMeetingRenameAffordance.help)
+                    .accessibilityIdentifier("transcripted.home.meeting-preview.title")
+
+                Button(action: beginTitleEdit) {
+                    Image(systemName: HomeMeetingRenameAffordance.symbolName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(SettingsHoverButtonStyle(
+                    tone: .neutral,
+                    cornerRadius: 7,
+                    normalFill: Color.primary.opacity(0.035),
+                    normalStroke: Color.primary.opacity(0.08)
+                ))
+                .help(HomeMeetingRenameAffordance.help)
+                .accessibilityLabel(HomeMeetingRenameAffordance.title)
+                .accessibilityIdentifier(HomeMeetingRenameAffordance.automationIdentifier)
+            }
         }
     }
 

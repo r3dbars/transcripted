@@ -90,4 +90,14 @@ func testHomePresentation() {
         )
         assertEqual(HomeCaptureListCopy.emptyDictations, "No recent dictations.")
     }
+
+    runSuite("HomeMeetingRenameAffordance — pinned discoverable edit control") {
+        assertEqual(HomeMeetingRenameAffordance.title, "Rename")
+        assertEqual(HomeMeetingRenameAffordance.help, "Rename meeting")
+        assertEqual(HomeMeetingRenameAffordance.symbolName, "pencil")
+        assertEqual(
+            HomeMeetingRenameAffordance.automationIdentifier,
+            "transcripted.home.meeting-preview.rename"
+        )
+    }
 }
