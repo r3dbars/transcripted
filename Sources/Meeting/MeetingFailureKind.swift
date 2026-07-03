@@ -119,7 +119,9 @@ enum MeetingFailureKind: String {
 
         if normalized.contains(anyOf: [
             "does not look like audio",
+            "does not include a readable audio track",
             "choose an audio file",
+            "choose an audio or video recording file",
             "not an audio file",
             "unsupported audio",
         ]) {
@@ -128,6 +130,7 @@ enum MeetingFailureKind: String {
 
         if normalized.contains(anyOf: [
             "couldn't copy that audio file",
+            "couldn't copy or extract that recording",
             "could not copy that audio file",
             "working area",
         ]) {

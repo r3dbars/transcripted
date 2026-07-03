@@ -38,15 +38,20 @@ enum MeetingImportedAudioPreparationError: LocalizedError, Equatable {
         case .cannotInspect:
             return "Transcripted couldn't inspect that audio file. Check Finder permissions and try again."
         case .notRegularFile:
-            return "Choose an audio file, not a folder or app package."
+            return "Choose an audio or video recording file, not a folder or app package."
         case .unsupportedAudioType:
-            return "That file does not look like audio. Choose a WAV, MP3, M4A, AAC, or AIFF file."
+            return "That file does not include a readable audio track. Choose a WAV, MP3, M4A, AAC, AIFF, MP4, or MOV file."
         case .unreadable:
             return "Transcripted couldn't read that audio file. Try moving it to a folder you can access."
         case .copyFailed:
-            return "Transcripted couldn't copy that audio file into its working area. Check disk space and try again."
+            return "Transcripted couldn't copy or extract that recording into its working area. Check disk space and try again."
         }
     }
+}
+
+enum ImportedMeetingMediaKind: Equatable {
+    case audio
+    case audiovisual
 }
 
 enum MeetingImportedAudioPreparer {
@@ -111,28 +116,36 @@ enum MeetingImportedAudioPreparer {
             throw MeetingImportedAudioPreparationError.unreadable
         }
 
-        if let contentType = resourceValues.contentType,
-           !contentType.conforms(to: .audio) {
-            throw MeetingImportedAudioPreparationError.unsupportedAudioType
-        }
+        let mediaKind = try importMediaKind(for: resourceValues.contentType)
 
         let destinationURL = uniqueScratchURL(
             for: resolvedSourceURL,
             in: scratchDirectory,
-            fileManager: fileManager
+            fileManager: fileManager,
+            preferredExtension: mediaKind == .audiovisual ? "m4a" : nil
         )
 
         do {
-            try copyInterruptibly(
-                from: resolvedSourceURL,
-                to: destinationURL,
-                fileManager: fileManager
-            )
+            switch mediaKind {
+            case .audio:
+                try copyInterruptibly(
+                    from: resolvedSourceURL,
+                    to: destinationURL,
+                    fileManager: fileManager
+                )
+            case .audiovisual:
+                try await extractAudioTrack(
+                    from: resolvedSourceURL,
+                    to: destinationURL
+                )
+            }
             fileManager.restrictFileToOwnerOnly(at: destinationURL)
         } catch is CancellationError {
-            // copyInterruptibly already removed the partial copy; surface the
-            // cancellation so the caller can leave no ambiguous artifact behind.
+            try? fileManager.removeItem(at: destinationURL)
             throw CancellationError()
+        } catch let error as MeetingImportedAudioPreparationError {
+            try? fileManager.removeItem(at: destinationURL)
+            throw error
         } catch {
             try? fileManager.removeItem(at: destinationURL)
             throw MeetingImportedAudioPreparationError.copyFailed
@@ -146,6 +159,47 @@ enum MeetingImportedAudioPreparer {
                 sourceAttributes: sourceAttributes
             )
         )
+    }
+
+    static func importMediaKind(for contentType: UTType?) throws -> ImportedMeetingMediaKind {
+        guard let contentType else { return .audio }
+        if contentType.conforms(to: .audio) {
+            return .audio
+        }
+        if contentType.conforms(to: .audiovisualContent) || contentType.conforms(to: .movie) {
+            return .audiovisual
+        }
+        throw MeetingImportedAudioPreparationError.unsupportedAudioType
+    }
+
+    static func extractAudioTrack(
+        from sourceURL: URL,
+        to destinationURL: URL
+    ) async throws {
+        try Task.checkCancellation()
+
+        let asset = AVURLAsset(url: sourceURL)
+        let audioTracks: [AVAssetTrack]
+        do {
+            audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        } catch {
+            throw MeetingImportedAudioPreparationError.unsupportedAudioType
+        }
+
+        guard !audioTracks.isEmpty else {
+            throw MeetingImportedAudioPreparationError.unsupportedAudioType
+        }
+        guard let exportSession = AVAssetExportSession(
+            asset: asset,
+            presetName: AVAssetExportPresetAppleM4A
+        ) else {
+            throw MeetingImportedAudioPreparationError.unsupportedAudioType
+        }
+
+        exportSession.shouldOptimizeForNetworkUse = false
+
+        try await exportSession.export(to: destinationURL, as: .m4a)
+        try Task.checkCancellation()
     }
 
     private static func recordingDate(
@@ -423,10 +477,11 @@ enum MeetingImportedAudioPreparer {
     private static func uniqueScratchURL(
         for sourceURL: URL,
         in directory: URL,
-        fileManager: FileManager
+        fileManager: FileManager,
+        preferredExtension: String? = nil
     ) -> URL {
         let originalExtension = sourceURL.pathExtension
-        let safeExtension = originalExtension.isEmpty ? "m4a" : originalExtension
+        let safeExtension = preferredExtension ?? (originalExtension.isEmpty ? "m4a" : originalExtension)
         let stem = "imported-\(UUID().uuidString)"
         var candidate = directory
             .appendingPathComponent(stem, isDirectory: false)
