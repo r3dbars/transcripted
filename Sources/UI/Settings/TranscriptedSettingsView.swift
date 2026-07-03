@@ -49,6 +49,9 @@ struct TranscriptedSettingsView: View {
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
+    @State private var pendingCaptureLibraryChoice: PendingCaptureLibraryChoice?
+    @State private var captureLibraryMigrationInProgress = false
+    @State private var captureLibraryMigrationStatus: String?
     @State private var homeDashboardRefreshTask: Task<Void, Never>?
     @State private var homeDashboardRefreshInFlight = false
     @State private var homeDashboardRefreshGeneration = 0
@@ -256,7 +259,14 @@ struct TranscriptedSettingsView: View {
                 return Alert(
                     title: Text(failure.title),
                     message: Text(failure.message),
-                    dismissButton: .default(Text("OK"))
+                    primaryButton: .default(Text(failure.retryTitle)) {
+                        failure.retry()
+                    },
+                    secondaryButton: .cancel(Text(failure.details == nil ? "Dismiss" : HomeActionFailureCopy.detailsTitle)) {
+                        if let details = failure.details {
+                            copyHomeFailureDetails(details)
+                        }
+                    }
                 )
             case .audioRetention(let window):
                 return Alert(
@@ -869,7 +879,10 @@ struct TranscriptedSettingsView: View {
         guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
             presentHomeActionFailure(
                 title: "Could not copy meeting",
-                message: SettingsArtifactMessage.meetingTranscriptNotFound
+                message: SettingsArtifactMessage.meetingTranscriptNotFound,
+                retry: {
+                    handleCopyMeeting(item)
+                }
             )
             return
         }
@@ -886,7 +899,10 @@ struct TranscriptedSettingsView: View {
         } else {
             presentHomeActionFailure(
                 title: "Could not copy meeting",
-                message: "Transcripted found this meeting's transcript but couldn't read it. The file may be open exclusively elsewhere or corrupted."
+                message: "Transcripted found this meeting's transcript but couldn't read it. The file may be open exclusively elsewhere or corrupted.",
+                retry: {
+                    handleCopyMeeting(item)
+                }
             )
             return
         }
@@ -936,7 +952,10 @@ struct TranscriptedSettingsView: View {
         guard let input = item.audio?.retranscriptionInput else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
-                message: "Transcripted couldn't find the retained audio for this meeting. It may have been recompressed or removed by the audio-retention setting."
+                message: "Transcripted couldn't find the retained audio for this meeting. It may have been recompressed or removed by the audio-retention setting.",
+                retry: {
+                    handleRetranscribeMeeting(item)
+                }
             )
             return
         }
@@ -949,7 +968,10 @@ struct TranscriptedSettingsView: View {
         guard let systemURL = OwnFileResolver.resolveExistingFile(candidateURLs: [input.systemURL]) else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
-                message: SettingsArtifactMessage.meetingRetainedAudioNotFound
+                message: SettingsArtifactMessage.meetingRetainedAudioNotFound,
+                retry: {
+                    handleRetranscribeMeeting(item)
+                }
             )
             return
         }
@@ -966,7 +988,10 @@ struct TranscriptedSettingsView: View {
             if !didStart {
                 presentHomeActionFailure(
                     title: "Could not re-transcribe meeting",
-                    message: "Transcripted couldn't start re-transcription from the retained audio. The saved files may be incomplete or already in use."
+                    message: "Transcripted couldn't start re-transcription from the retained audio. The saved files may be incomplete or already in use.",
+                    retry: {
+                        handleRetranscribeMeeting(item)
+                    }
                 )
             }
         }
@@ -1008,7 +1033,14 @@ struct TranscriptedSettingsView: View {
             trackLocalSummaryAbandoned(reason: .blocked, stage: "start", priorReadyState: "not_ready")
             homeDeleteFailure = HomeDeleteFailure(
                 title: "Could not summarize meeting",
-                message: unavailableReason
+                message: unavailableReason,
+                retry: {
+                    generateLocalSummary(
+                        transcriptURL: transcriptURL,
+                        title: title,
+                        hasExistingSummary: hasExistingSummary
+                    )
+                }
             )
             return
         }
@@ -1281,7 +1313,20 @@ struct TranscriptedSettingsView: View {
                     } catch {
                         presentHomeDeleteFailure(
                             title: "Could not delete dictation",
-                            error: error
+                            error: error,
+                            retry: {
+                                trackSettingsAction("delete_dictation_retry", page: .home)
+                                do {
+                                    try DictationTranscriptStore.deleteEntry(entry)
+                                    refreshRecentCaptures(force: true)
+                                } catch {
+                                    presentHomeDeleteFailure(
+                                        title: "Could not delete dictation",
+                                        error: error,
+                                        retry: { refreshRecentCaptures(force: true) }
+                                    )
+                                }
+                            }
                         )
                     }
                 }
@@ -1515,14 +1560,20 @@ struct TranscriptedSettingsView: View {
                    FileManager.default.fileExists(atPath: item.transcriptURL.path) {
                     presentHomeActionFailure(
                         title: "Could not delete meeting",
-                        message: "Transcripted couldn't remove this meeting's files. They may have been moved or renamed outside the app — reopen Settings and try again."
+                        message: "Transcripted couldn't remove this meeting's files. They may have been moved or renamed outside the app. Reopen Settings, then try again.",
+                        retry: {
+                            deleteMeeting(item)
+                        }
                     )
                 }
             } catch {
                 refreshRecentCaptures(force: true)
                 presentHomeDeleteFailure(
                     title: "Could not delete meeting",
-                    error: error
+                    error: error,
+                    retry: {
+                        deleteMeeting(item)
+                    }
                 )
             }
         }
@@ -1561,7 +1612,10 @@ struct TranscriptedSettingsView: View {
                 refreshRecentCaptures(force: true)
                 presentHomeDeleteFailure(
                     title: "Could not rename meeting",
-                    error: error
+                    error: error,
+                    retry: {
+                        renameMeetingPreview(preview, to: rawTitle)
+                    }
                 )
             }
         }
@@ -1619,7 +1673,10 @@ struct TranscriptedSettingsView: View {
         if !didClear {
             presentHomeActionFailure(
                 title: failureTitle,
-                message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again."
+                message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again.",
+                retry: {
+                    clearFailedMeeting(item)
+                }
             )
         } else {
             ActivationTelemetry.trackWorkflowAbandoned(
@@ -1645,7 +1702,17 @@ struct TranscriptedSettingsView: View {
         case .reveal(let urls):
             NSWorkspace.shared.activateFileViewerSelecting(urls)
         case .unavailable:
-            presentHomeActionFailure(title: failureTitle, message: failureMessage)
+            presentHomeActionFailure(
+                title: failureTitle,
+                message: failureMessage,
+                retry: {
+                    revealOwnFile(
+                        candidateURLs: candidateURLs,
+                        failureTitle: failureTitle,
+                        failureMessage: failureMessage
+                    )
+                }
+            )
         }
     }
 
@@ -1660,26 +1727,61 @@ struct TranscriptedSettingsView: View {
         failureMessage: String
     ) -> Bool {
         guard let url = OwnFileResolver.resolveExistingFile(candidateURLs: candidateURLs) else {
-            presentHomeActionFailure(title: failureTitle, message: failureMessage)
+            presentHomeActionFailure(
+                title: failureTitle,
+                message: failureMessage,
+                retry: {
+                    _ = openOwnFile(
+                        candidateURLs: candidateURLs,
+                        failureTitle: failureTitle,
+                        failureMessage: failureMessage
+                    )
+                }
+            )
             return false
         }
         NSWorkspace.shared.open(url)
         return true
     }
 
-    private func presentHomeDeleteFailure(title: String, error: Error) {
-        presentHomeActionFailure(title: title, message: error.localizedDescription)
+    private func presentHomeDeleteFailure(
+        title: String,
+        error: Error,
+        retry: @escaping () -> Void
+    ) {
+        presentHomeActionFailure(
+            title: title,
+            message: HomeActionFailureCopy.message(forFailureTitle: title),
+            details: error.localizedDescription,
+            retry: retry
+        )
     }
 
-    private func presentHomeActionFailure(title: String, message: String) {
+    private func presentHomeActionFailure(
+        title: String,
+        message: String,
+        details: String? = nil,
+        retry: @escaping () -> Void
+    ) {
         NSSound.beep()
         // Defer to the next runloop turn so a failure raised synchronously inside
         // an alert's confirm action lands after that alert finishes dismissing.
         // SwiftUI won't present a second alert during the first one's dismissal,
         // and the shared binding clears the dismissed alert on the same turn.
         DispatchQueue.main.async {
-            homeDeleteFailure = HomeDeleteFailure(title: title, message: message)
+            homeDeleteFailure = HomeDeleteFailure(
+                title: title,
+                message: message,
+                details: details,
+                retry: retry
+            )
         }
+    }
+
+    private func copyHomeFailureDetails(_ details: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(details, forType: .string)
     }
 
     private func retryFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
@@ -1688,7 +1790,10 @@ struct TranscriptedSettingsView: View {
             presentHomeActionFailure(
                 title: "Could not retry meeting",
                 message: failedMeetingRetryUnavailableReason
-                    ?? "Transcripted could not start that retry. The saved audio may already be cleared."
+                    ?? "Transcripted could not start that retry. The saved audio may already be cleared.",
+                retry: {
+                    retryFailedMeeting(item)
+                }
             )
         }
     }
@@ -2963,11 +3068,14 @@ struct TranscriptedSettingsView: View {
                         trackSettingsAction("choose_capture_library", page: .storage)
                         chooseCaptureLibrary()
                     }
+                    .disabled(captureLibraryMigrationInProgress)
+                    .help(captureLibraryMigrationInProgress ? captureLibraryMigrationBusyHelp : "")
 
                     SettingsInlineActionButton(title: "Reset to Default") {
                         trackSettingsAction("reset_capture_library", page: .storage)
                         TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
                         refreshStoragePaths()
+                        CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
                         AnalyticsReporter.track(
                             "settings_capture_library_changed",
                             properties: [
@@ -2976,11 +3084,44 @@ struct TranscriptedSettingsView: View {
                             ]
                         )
                     }
+                    .disabled(captureLibraryMigrationInProgress)
+                    .help(captureLibraryMigrationInProgress ? captureLibraryMigrationBusyHelp : "")
+                }
+
+                if captureLibraryMigrationInProgress {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(captureLibraryMigrationStatus ?? "Copying captures...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let captureLibraryMigrationStatus {
+                    Text(captureLibraryMigrationStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text("Pick an Obsidian vault or any folder you want agents to read.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            .alert(
+                "Copy existing captures?",
+                isPresented: captureLibraryChoicePromptBinding,
+                presenting: pendingCaptureLibraryChoice
+            ) { choice in
+                Button("Copy to New Folder") {
+                    copyCapturesThenSwitchLibrary(choice)
+                }
+                .keyboardShortcut(.defaultAction)
+                Button("Just Switch") {
+                    switchLibraryWithoutCopying(choice)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { choice in
+                Text("Your current library still has saved meetings or dictations. Copy puts a copy of them in the new folder and never deletes the originals. Just Switch leaves everything in \(choice.currentLibrary.path) - Transcripted and connected agents will only see the new folder.")
             }
 
             SettingsSection(
@@ -4789,6 +4930,21 @@ struct TranscriptedSettingsView: View {
         diagnosticsActionStatus = "Queued diagnostic event \(eventID.prefix(8))."
     }
 
+    private var captureLibraryChoicePromptBinding: Binding<Bool> {
+        Binding(
+            get: { pendingCaptureLibraryChoice != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingCaptureLibraryChoice = nil
+                }
+            }
+        )
+    }
+
+    private var captureLibraryMigrationBusyHelp: String {
+        "Captures are still being copied to the new folder."
+    }
+
     private func chooseCaptureLibrary() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -4800,12 +4956,77 @@ struct TranscriptedSettingsView: View {
         panel.directoryURL = captureLibraryURL
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        guard TranscriptedStoragePreferences.prepareCaptureLibraryURL(url) else {
+            refreshStoragePaths()
+            showCaptureLibrarySelectionError()
+            return
+        }
+
+        let currentLibrary = FileManager.default.transcriptedCaptureLibraryDir
+        let isSameFolder = url.standardizedFileURL.path == currentLibrary.standardizedFileURL.path
+        if !isSameFolder, CaptureLibraryMigrationPlanner().libraryHasCaptures(at: currentLibrary) {
+            pendingCaptureLibraryChoice = PendingCaptureLibraryChoice(
+                currentLibrary: currentLibrary,
+                newLibrary: url
+            )
+            return
+        }
+
+        captureLibraryMigrationStatus = nil
+        applyCaptureLibraryChoice(url)
+    }
+
+    private func switchLibraryWithoutCopying(_ choice: PendingCaptureLibraryChoice) {
+        captureLibraryMigrationStatus = "Existing captures stayed in \(choice.currentLibrary.path)."
+        applyCaptureLibraryChoice(choice.newLibrary)
+    }
+
+    private func copyCapturesThenSwitchLibrary(_ choice: PendingCaptureLibraryChoice) {
+        guard !captureLibraryMigrationInProgress else { return }
+        captureLibraryMigrationInProgress = true
+        captureLibraryMigrationStatus = "Copying captures..."
+
+        Task.detached(priority: .utility) {
+            let planner = CaptureLibraryMigrationPlanner()
+            let plan = planner.makePlan(from: choice.currentLibrary, to: choice.newLibrary)
+            do {
+                let result = try planner.copy(plan) { copied, total in
+                    Task { @MainActor in
+                        captureLibraryMigrationStatus = "Copying captures... \(copied) of \(total)"
+                    }
+                }
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = captureLibraryCopySummary(result)
+                    applyCaptureLibraryChoice(choice.newLibrary)
+                }
+            } catch {
+                await MainActor.run {
+                    captureLibraryMigrationInProgress = false
+                    captureLibraryMigrationStatus = "Copy stopped: \(error.localizedDescription) "
+                        + "Your captures are still in \(choice.currentLibrary.path) and the library was not switched."
+                }
+            }
+        }
+    }
+
+    private func captureLibraryCopySummary(_ result: CaptureLibraryMigrationResult) -> String {
+        var summary = "Copied \(result.copiedCount) item\(result.copiedCount == 1 ? "" : "s") to the new folder. Originals stay in the old folder."
+        if result.skippedExistingCount > 0 {
+            summary += " Skipped \(result.skippedExistingCount) that already existed at the destination."
+        }
+        return summary
+    }
+
+    private func applyCaptureLibraryChoice(_ url: URL) {
         guard TranscriptedStoragePreferences.setCaptureLibraryURL(url) else {
             refreshStoragePaths()
             showCaptureLibrarySelectionError()
             return
         }
         refreshStoragePaths()
+        CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
         AnalyticsReporter.track(
             "settings_capture_library_changed",
             properties: [
@@ -5055,6 +5276,11 @@ struct TranscriptedSettingsView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+private struct PendingCaptureLibraryChoice: Equatable {
+    let currentLibrary: URL
+    let newLibrary: URL
 }
 
 // User-facing copy for the "we can't find this artifact on disk" failures that

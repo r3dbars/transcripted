@@ -8,10 +8,12 @@ Support root:
 - app support root: `~/Library/Application Support/Transcripted/`
 - default capture library: `~/Library/Application Support/Transcripted/captures/`
 
-Users can move the capture library in Settings via the `transcriptSaveLocation`
-preference. When that happens, meetings and dictations move under the selected
-folder, while app-owned state, cache, logs, and temp files stay under
-`~/Library/Application Support/Transcripted/`.
+Users can point the capture library at a different folder in Settings via the
+`transcriptSaveLocation` preference. When the current library still has saved
+meetings or dictations, Settings offers to copy those captures to the new
+folder before switching. The copy never deletes originals and skips destination
+name collisions instead of overwriting. App-owned state, cache, logs, and temp
+files always stay under `~/Library/Application Support/Transcripted/`.
 
 ## Dictation
 
