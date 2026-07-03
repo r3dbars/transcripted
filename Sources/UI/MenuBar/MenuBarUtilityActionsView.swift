@@ -48,6 +48,7 @@ final class MenuBarUtilityActionsView: NSView {
     }
 
     func update(
+        updateSymbolName: String,
         updateTitle: String,
         updateDetail: String,
         updateVersion: String?,
@@ -65,14 +66,14 @@ final class MenuBarUtilityActionsView: NSView {
 
         feedbackRow.update(
             symbolName: "bubble.left",
-            title: "Submit feedback",
+            title: "Submit Feedback",
             detail: "",
             tone: .standard,
             size: .utility
         )
 
         updatesRow.update(
-            symbolName: "arrow.triangle.2.circlepath.circle",
+            symbolName: updateSymbolName,
             title: updateTitle,
             detail: updateDetail,
             trailingText: updateVersion,
@@ -90,12 +91,13 @@ final class MenuBarUtilityActionsView: NSView {
             size: .utility
         )
 
+        // Quitting isn't dangerous — no warning tone.
         quitRow.update(
             symbolName: "power",
             title: "Quit",
             detail: "",
             trailingText: "⌘Q",
-            tone: .warning,
+            tone: .standard,
             size: .utility
         )
 

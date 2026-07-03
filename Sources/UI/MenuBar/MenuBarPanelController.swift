@@ -63,7 +63,6 @@ final class MenuBarPanelController: NSViewController {
         content.onUpdateAction = { [weak self] in self?.performUpdateActionFromMenu() }
         view = content
         contentView = content
-        view.appearance = NSAppearance(named: .darkAqua)
 
         refresh()
         setupSubscriptions()
@@ -81,12 +80,13 @@ final class MenuBarPanelController: NSViewController {
         appState.contextCapture.refreshShortcutStatus()
 
         let warmupStatus = appState.meetingSession.warmupStatus
+        let isMeetingRecording = appState.meetingSession.isRecording
         let modelState = FirstRunLocalModelState(appState.sttRouter.modelDownloadState)
         let dictationState = FirstRunExperience.dictationAction(for: modelState)
         let meetingState = FirstRunExperience.meetingAction(
             dictationReady: appState.sttRouter.isModelLoaded,
             meetingsStatus: warmupStatus.meetingsStatus,
-            isRecording: appState.meetingSession.isRecording
+            isRecording: isMeetingRecording
         )
         let updatePresentation = menuUpdatePresentation(
             for: appState.sparkleUpdater.updateStatus,
@@ -97,19 +97,29 @@ final class MenuBarPanelController: NSViewController {
 
         content.headerView.update(
             warmupStatus: warmupStatus,
-            hotkeyError: appState.contextCapture.hotkeyError
+            hotkeyError: appState.contextCapture.hotkeyError,
+            isMeetingRecording: isMeetingRecording
         )
 
+        // While a meeting records, the row's trailing slot shows the live
+        // elapsed timer instead of the start shortcut.
         content.primaryActionsView.update(
-            dictationKey: appState.contextCapture.dictationShortcutDisplay,
-            meetingKey: appState.contextCapture.meetingShortcutDisplay,
+            dictationTrailing: appState.contextCapture.dictationShortcutDisplay,
+            meetingTrailing: isMeetingRecording
+                ? MeetingDurationFormatter.formatDuration(appState.meetingSession.recordingDuration)
+                : appState.contextCapture.meetingShortcutDisplay,
             dictationState: dictationState,
             meetingState: meetingState,
             pasteDetail: pasteDetail(for: latestDictation),
             pasteEnabled: latestDictation != nil,
+            isMeetingRecording: isMeetingRecording,
             showStartDictation: menuVisibility[.startDictation] ?? true,
             showStartMeeting: menuVisibility[.startMeeting] ?? true,
-            showPasteLastDictation: menuVisibility[.pasteLastDictation] ?? true,
+            // A disabled "no saved dictation yet" row is an empty state
+            // advertising itself — hide paste until it has content. The smoke
+            // override forces it visible so launch automation can assert on it.
+            showPasteLastDictation: (menuVisibility[.pasteLastDictation] ?? true)
+                && (menuVisibilityOverride != nil || latestDictation != nil),
             showRecentMeetings: menuVisibility[.recentMeetings] ?? true
         )
 
@@ -125,6 +135,7 @@ final class MenuBarPanelController: NSViewController {
 
         content.utilityActionsView.pasteAvailable = latestDictationLoaded ? (latestDictation != nil) : nil
         content.utilityActionsView.update(
+            updateSymbolName: updatePresentation.symbolName,
             updateTitle: updatePresentation.title,
             updateDetail: updatePresentation.detail,
             updateVersion: updatePresentation.trailingText,
@@ -189,6 +200,21 @@ final class MenuBarPanelController: NSViewController {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.scheduleRefresh()
+            }
+            .store(in: &subscriptions)
+
+        // Keeps the meeting row's elapsed timer live while the popover is on
+        // screen. Duration ticks arrive several times a second, so collapse
+        // them to whole seconds and skip entirely when the popover is closed —
+        // `refresh()` runs on every open, so the timer is current by the time
+        // the user sees it.
+        appState.meetingSession.$recordingDuration
+            .map { Int($0) }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.isViewLoaded, self.view.window != nil else { return }
+                self.scheduleRefresh()
             }
             .store(in: &subscriptions)
 
@@ -392,13 +418,16 @@ final class MenuBarPanelController: NSViewController {
                 )
             }
 
+            // Available-but-not-downloaded stays in the quiet utility row;
+            // the loud callout is reserved for the one state that actually
+            // needs the user (restart to finish installing).
             return (
-                "arrow.down.circle.fill",
+                "arrow.down.circle",
                 "Update available: \(version)",
                 "A new version is ready to install",
                 "Install",
-                .warning,
-                true
+                .standard,
+                false
             )
         case .downloading(let version):
             return (

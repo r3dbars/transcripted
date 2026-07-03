@@ -401,10 +401,12 @@ enum FirstRunExperience {
     }
 
     static func dictationAction(for modelState: FirstRunLocalModelState) -> MenuBarPrimaryActionState {
+        // Steady states stay quiet: subtitles only carry setup/failure state,
+        // so the everyday popover reads as clean single-line actions.
         let subtitle: String
         switch modelState {
         case .ready:
-            subtitle = "Paste spoken text anywhere"
+            subtitle = ""
         case .failed:
             subtitle = "Try again to retry local voice setup"
         case .notLoaded:
@@ -431,18 +433,20 @@ enum FirstRunExperience {
         isRecording: Bool = false
     ) -> MenuBarPrimaryActionState {
         if isRecording {
+            // The red row tone and elapsed timer already say "recording";
+            // a subtitle would repeat them.
             return MenuBarPrimaryActionState(
                 title: "Stop Meeting",
                 symbolName: "stop.circle.fill",
                 isEnabled: true,
-                subtitle: "Recording now"
+                subtitle: ""
             )
         }
 
         let subtitle: String
         switch meetingsStatus {
         case "Ready":
-            subtitle = "Capture mic and system audio"
+            subtitle = ""
         case "Failed":
             subtitle = "Try again to reload meeting tools"
         default:

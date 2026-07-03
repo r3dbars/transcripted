@@ -186,7 +186,7 @@ func testFirstRunExperience() {
         assertEqual(idle.symbolName, "record.circle.fill", "idle menu action should use the record icon")
         assertEqual(recording.title, "Stop Meeting", "recording menu action should not keep saying Start Meeting")
         assertEqual(recording.symbolName, "stop.circle.fill", "recording menu action should use the stop icon")
-        assertEqual(recording.subtitle, "Recording now", "recording menu detail should explain the current state")
+        assertEqual(recording.subtitle, "", "recording row should stay quiet — the red tone and timer carry the state")
     }
 
     runSuite("FirstRunExperience.meetingAction — exposes retry copy after meeting tool failure") {

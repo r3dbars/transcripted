@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 struct MenuBarActionRowSmokeSnapshot: Codable, Equatable {
     let title: String
@@ -12,9 +13,9 @@ struct MenuBarActionRowSmokeSnapshot: Codable, Equatable {
 @MainActor
 final class MenuBarActionRowView: NSControl {
     enum Tone {
-        case accent
         case standard
         case warning
+        case recording
     }
 
     enum Size {
@@ -30,7 +31,8 @@ final class MenuBarActionRowView: NSControl {
     private let detailLabel = NSTextField(labelWithString: "")
     private let trailingLabel = NSTextField(labelWithString: "")
 
-    private var isHovering = false { didSet { updateAppearance() } }
+    // Hover eases in and out; presses snap so activation feels immediate.
+    private var isHovering = false { didSet { updateAppearance(animated: true) } }
     private var isPressing = false { didSet { updateAppearance() } }
     private var trackingAreaRef: NSTrackingArea?
     private var rowTone: Tone = .standard
@@ -124,7 +126,7 @@ final class MenuBarActionRowView: NSControl {
         updateAppearance()
     }
 
-    private func updateAppearance() {
+    private func updateAppearance(animated: Bool = false) {
         let backgroundColor: NSColor
         let iconTint: NSColor
         let titleColor: NSColor
@@ -157,7 +159,7 @@ final class MenuBarActionRowView: NSControl {
             trailingColor = MenuTokens.textMutedNS
         }
 
-        layer?.backgroundColor = backgroundColor.cgColor
+        setLayerBackground(menuResolvedCGColor(backgroundColor), animated: animated)
         layer?.borderWidth = 0
         symbolView.contentTintColor = iconTint
         titleLabel.textColor = titleColor
@@ -168,12 +170,12 @@ final class MenuBarActionRowView: NSControl {
 
     private func toneColors() -> (normal: NSColor, pressed: NSColor) {
         switch rowTone {
-        case .accent:
-            return (NSColor.systemBlue, NSColor.systemBlue)
         case .standard:
             return (MenuTokens.textSecondaryNS, MenuTokens.textPrimaryNS)
         case .warning:
             return (MenuTokens.statusOrangeNS, MenuTokens.statusOrangeNS)
+        case .recording:
+            return (MenuTokens.statusRedNS, MenuTokens.statusRedNS)
         }
     }
 
@@ -239,6 +241,24 @@ final class MenuBarActionRowView: NSControl {
         case .utility:
             return hasDetail ? MenuTokens.utilityActionRowHeight : MenuTokens.minimumHitTargetSize
         }
+    }
+
+    private func setLayerBackground(_ color: CGColor, animated: Bool) {
+        guard let layer else { return }
+        let duration = AccessibilityDisplayPolicy.motionDuration(0.12)
+        if animated, duration > 0 {
+            let fade = CABasicAnimation(keyPath: "backgroundColor")
+            fade.fromValue = layer.presentation()?.backgroundColor ?? layer.backgroundColor
+            fade.toValue = color
+            fade.duration = duration
+            layer.add(fade, forKey: "backgroundFade")
+        }
+        layer.backgroundColor = color
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
     }
 
     override func updateTrackingAreas() {

@@ -333,6 +333,7 @@ APP_SOURCES=(
     "Sources/Meeting/LiveMeetingStreamingUpdatePolicy.swift"
     "Sources/Meeting/LiveMeetingTranscriptFeed.swift"
     "Sources/UI/MenuBar/MenuBarHeaderLayoutPolicy.swift"
+    "Sources/UI/MenuBar/MenuBarHeaderStatusPresentation.swift"
     "Sources/UI/MenuBar/PasteLastDictationFeedback.swift"
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"

@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (80 Swift files)
+## Files (82 Swift files)
 
 ### Overlay/
 
@@ -51,18 +51,14 @@ into a taller loading or error state.
 ### MenuBar/
 
 - `MenuBar/MenuBarActionRowView.swift` — AppKit control backing both primary and utility action rows, with tone, size, and press-handler styling
-- `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover
+- `MenuBar/MenuBarContentView.swift` — root content view for the menubar popover; transparent so NSPopover's native material provides the surface
 - `MenuBar/MenuBarHeaderLayoutPolicy.swift` — small layout policy for the menubar header status and model rows
-- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status
-- `MenuBar/MenuBarModelStatusView.swift` — persistent local-model status badge with download progress, error state, and settings shortcut
-- `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar
+- `MenuBar/MenuBarHeaderStatusPresentation.swift` — Foundation-pure policy for the header status line's text and tone (recording wins over ready/warmup)
+- `MenuBar/MenuBarHeaderView.swift` — popover header with app name and status; hidden entirely when idle and ready, visible for warmup, hotkey warnings, and the red "Recording" state while a meeting records
+- `MenuBar/MenuBarPanelController.swift` — NSPopover controller for the menubar; while a meeting records, the meeting row's trailing slot shows the live elapsed timer instead of the start shortcut
 - `MenuBar/MenuBarPrimaryActionsView.swift` — groups the dictation, meeting, paste, and recent-meetings action rows at the top of the popover
-- `MenuBar/MenuBarSettingsView.swift` — settings actions in the popover footer, including imported-audio transcription entry points
-- `MenuBar/MenuBarShortcutsView.swift` — keyboard shortcut hints in the popover
 - `MenuBar/MenuBarUtilityActionsView.swift` — groups the connect-agent, feedback, updates, settings, and quit action rows at the bottom of the popover
-- `MenuBar/MenuIconButton.swift` — icon-only button style for menubar items
-- `MenuBar/MenuOutlineButton.swift` — outlined button style for menubar actions
-- `MenuBar/MenuTokens.swift` — design tokens for menubar views
+- `MenuBar/MenuTokens.swift` — design tokens for menubar views; colors are dynamic so the popover follows the system light/dark appearance, and layer-bound colors re-resolve through `NSView.menuResolvedCGColor(_:)` on appearance changes
 
 The agent-connect surface is the Settings window's Agent page plus the
 onboarding connect stage. Both keep one mental model:
@@ -207,6 +203,7 @@ Relevant direct coverage:
 - `Tests/HomeMeetingSummaryBetaPresentationPolicyTests.swift`
 - `Tests/FirstRunExperienceTests.swift`
 - `Tests/HomeMeetingPreviewFormatterTests.swift`
+- `Tests/MenuBarHeaderStatusPresentationTests.swift`
 - `Tests/MeetingAudioArchiveResolverTests.swift`
 - `Tests/MeetingLiveViewAffordancePolicyTests.swift`
 - `Tests/MeetingDurationFormatterTests.swift`

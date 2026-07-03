@@ -31,7 +31,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var lastExternalApplication: NSRunningApplication?
     private var hasPresentedInitialOnboarding = false
     private let statusItemUpdateBadge = NSView(frame: .zero)
-    private var statusItemUpdateSubscription: AnyCancellable?
+    private var statusItemSubscriptions: Set<AnyCancellable> = []
+    private var statusItemMeetingRecording = false
+    private var statusItemDictationRecording = false
+    private var statusItemUpdateVersion: String?
     private let settingsTextPaster = ClipboardRestoringTextPaster()
     private lazy var settingsActions = TranscriptedSettingsActions(
         startDictation: { [weak self] in self?.startDictationFromSettings() },
@@ -353,6 +356,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             configureStatusItemButton(button)
         }
         bindStatusItemUpdateBadge()
+        bindStatusItemRecordingIndicator()
         installSettingsMenuHandler()
 
         // Set up popover (pure AppKit — no NSHostingController, no AttributeGraph)
@@ -360,7 +364,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         pop.contentSize = NSSize(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
         pop.behavior = .transient
         pop.delegate = self
-        pop.appearance = NSAppearance(named: .darkAqua)
         popover = pop
 
         writeLaunchUISmokeReportIfRequested()
@@ -592,12 +595,119 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return
         }
 
+        if statusItemClickWantsQuickMenu(NSApp.currentEvent) {
+            showStatusItemQuickMenu()
+            return
+        }
+
         guard let button = statusItem?.button, let popover = popover else { return }
         if popover.isShown {
             closePopover()
         } else {
             showMainPopover(relativeTo: button, popover: popover)
         }
+    }
+
+    /// Right-click (or control-click) on the status item opens the lean quick
+    /// menu; a plain left-click keeps opening the popover.
+    private func statusItemClickWantsQuickMenu(_ event: NSEvent?) -> Bool {
+        guard let event else { return false }
+        switch event.type {
+        case .rightMouseUp, .rightMouseDown:
+            return true
+        case .leftMouseUp, .leftMouseDown:
+            return event.modifierFlags.contains(.control)
+        default:
+            return false
+        }
+    }
+
+    private func showStatusItemQuickMenu() {
+        guard let statusItem else { return }
+
+        let menu = NSMenu()
+
+        let dictationItem = NSMenuItem(
+            title: appState.sttRouter.isRecording ? "Stop Dictation" : "Start Dictation",
+            action: #selector(quickMenuToggleDictation),
+            keyEquivalent: ""
+        )
+        dictationItem.target = self
+        menu.addItem(dictationItem)
+
+        let meetingItem = NSMenuItem(
+            title: appState.meetingSession.isRecording ? "Stop Meeting Recording" : "Start Meeting Recording",
+            action: #selector(quickMenuToggleMeeting),
+            keyEquivalent: ""
+        )
+        meetingItem.target = self
+        menu.addItem(meetingItem)
+
+        menu.addItem(.separator())
+
+        let homeItem = NSMenuItem(
+            title: "Open Home",
+            action: #selector(quickMenuOpenHome),
+            keyEquivalent: ""
+        )
+        homeItem.target = self
+        menu.addItem(homeItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit Transcripted",
+            action: #selector(quickMenuQuit),
+            keyEquivalent: ""
+        )
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        // Standard status-item trick: attach the menu only for this click so
+        // the plain left-click action keeps opening the popover. Menu tracking
+        // runs synchronously inside performClick.
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func quickMenuToggleDictation() {
+        let isRecording = appState.sttRouter.isRecording
+        trackQuickMenuAction(isRecording ? "quick_menu_stop_dictation" : "quick_menu_start_dictation")
+        if isRecording {
+            sessionController.stopDictationAndPaste(trigger: .menu)
+        } else {
+            startDictationFromSettings()
+        }
+    }
+
+    @objc private func quickMenuToggleMeeting() {
+        trackQuickMenuAction(
+            appState.meetingSession.isRecording ? "quick_menu_stop_meeting" : "quick_menu_start_meeting"
+        )
+        menuToggleMeetingRecording()
+    }
+
+    @objc private func quickMenuOpenHome() {
+        trackQuickMenuAction("quick_menu_home")
+        showSettingsWindow(page: .home, source: "quick_menu")
+    }
+
+    @objc private func quickMenuQuit() {
+        trackQuickMenuAction("quick_menu_quit")
+        NSApplication.shared.terminate(nil)
+    }
+
+    private func trackQuickMenuAction(_ actionID: String) {
+        AnalyticsReporter.track(
+            "menu_bar_action_clicked",
+            properties: [
+                "action_id": actionID,
+                "dictation_ready": appState.sttRouter.isModelLoaded ? "true" : "false",
+                "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
+                "paste_available": "unknown",
+            ]
+        )
     }
 
     @objc private func openSettingsFromAppMenu(_ sender: Any?) {
@@ -616,6 +726,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         button.setAccessibilityLabel("Transcripted")
         button.action = #selector(togglePopover)
         button.target = self
+        // Right clicks must reach the action so togglePopover can route them
+        // to the quick menu; buttons only send left-ups by default.
+        _ = button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         installStatusItemUpdateBadge(on: button)
     }
@@ -626,16 +739,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         statusItemUpdateBadge.translatesAutoresizingMaskIntoConstraints = false
         statusItemUpdateBadge.wantsLayer = true
         statusItemUpdateBadge.layer?.backgroundColor = NSColor.systemOrange.cgColor
-        statusItemUpdateBadge.layer?.borderColor = NSColor.black.withAlphaComponent(0.45).cgColor
-        statusItemUpdateBadge.layer?.borderWidth = 1
-        statusItemUpdateBadge.layer?.cornerRadius = 4
+        statusItemUpdateBadge.layer?.cornerRadius = 3.5
         statusItemUpdateBadge.layer?.masksToBounds = true
         statusItemUpdateBadge.isHidden = true
 
         button.addSubview(statusItemUpdateBadge)
         NSLayoutConstraint.activate([
-            statusItemUpdateBadge.widthAnchor.constraint(equalToConstant: 8),
-            statusItemUpdateBadge.heightAnchor.constraint(equalToConstant: 8),
+            statusItemUpdateBadge.widthAnchor.constraint(equalToConstant: 7),
+            statusItemUpdateBadge.heightAnchor.constraint(equalToConstant: 7),
             statusItemUpdateBadge.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
             statusItemUpdateBadge.topAnchor.constraint(equalTo: button.topAnchor, constant: 3),
         ])
@@ -686,22 +797,80 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func bindStatusItemUpdateBadge() {
-        statusItemUpdateSubscription = appState.sparkleUpdater.$updateStatus
+        appState.sparkleUpdater.$updateStatus
             .receive(on: RunLoop.main)
             .sink { [weak self] status in
                 self?.updateStatusItemBadge(for: status)
             }
+            .store(in: &statusItemSubscriptions)
         updateStatusItemBadge(for: appState.sparkleUpdater.updateStatus)
+    }
+
+    /// Keeps the status-item glyph in sync with active capture so the menu bar
+    /// itself answers "am I recording?" without opening the popover.
+    private func bindStatusItemRecordingIndicator() {
+        appState.sttRouter.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRecording in
+                guard let self, self.statusItemDictationRecording != isRecording else { return }
+                self.statusItemDictationRecording = isRecording
+                self.refreshStatusItemPresentation()
+            }
+            .store(in: &statusItemSubscriptions)
+
+        if #available(macOS 14.0, *) {
+            appState.meetingSession.$isRecording
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] isRecording in
+                    guard let self, self.statusItemMeetingRecording != isRecording else { return }
+                    self.statusItemMeetingRecording = isRecording
+                    self.refreshStatusItemPresentation()
+                }
+                .store(in: &statusItemSubscriptions)
+        }
     }
 
     private func updateStatusItemBadge(for status: SparkleUpdaterController.UpdateStatus) {
         let updateVersion = status.readyToInstallVersion
         statusItemUpdateBadge.isHidden = updateVersion == nil
+        statusItemUpdateVersion = updateVersion
+        refreshStatusItemPresentation()
+    }
 
-        if let updateVersion {
-            statusItem?.button?.toolTip = "Transcripted - restart to update to \(updateVersion)"
+    /// Single writer for the status-item button's image, tint, tooltip, and
+    /// accessibility label so the recording indicator and the update badge
+    /// cannot fight over shared button state.
+    private func refreshStatusItemPresentation() {
+        guard let button = statusItem?.button else { return }
+
+        let symbolName: String
+        let tint: NSColor?
+        let label: String
+        if statusItemMeetingRecording {
+            symbolName = "record.circle"
+            tint = .systemRed
+            label = "Transcripted — recording meeting"
+        } else if statusItemDictationRecording {
+            symbolName = "mic.fill"
+            tint = .systemRed
+            label = "Transcripted — dictating"
         } else {
-            statusItem?.button?.toolTip = "Transcripted"
+            symbolName = "mic.and.signal.meter"
+            tint = nil
+            label = "Transcripted"
+        }
+
+        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label) {
+            image.isTemplate = true
+            button.image = image
+        }
+        button.contentTintColor = tint
+        button.setAccessibilityLabel(label)
+
+        if let statusItemUpdateVersion {
+            button.toolTip = "\(label) - restart to update to \(statusItemUpdateVersion)"
+        } else {
+            button.toolTip = label
         }
     }
 

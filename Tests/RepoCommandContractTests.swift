@@ -2856,7 +2856,6 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - Paste Last Dictation uses the paste target guard") {
         let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
-        let shortcutContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarShortcutsView.swift")
         let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
 
         assertTrue(
@@ -2872,12 +2871,6 @@ func testRepoCommandContract() {
                 && appContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))")
                 && appContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)"),
             "settings Paste Last Dictation should use the same focus guard and visible outcome feedback"
-        )
-        assertTrue(
-            shortcutContents.contains("var onPasteLastDictation: (() -> Void)?")
-                && shortcutContents.contains("self.onPasteLastDictation?()")
-                && !shortcutContents.contains("pasteLastDictationRow.onPrimaryAction = {}"),
-            "shortcut-panel Paste Last Dictation should invoke the paste action instead of an empty primary action"
         )
     }
 
