@@ -46,7 +46,7 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
-- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the app-owned timeline database, screenshot storage retention, analysis scheduling, provider seams, category rules, day-boundary math, and capture-library projection logic; capture-library artifacts remain the source of truth
+- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the app-owned timeline database, screenshot storage retention, analysis scheduling, provider seams, category rules, day-boundary math, weekly aggregation helpers, and capture-library projection logic; capture-library artifacts remain the source of truth
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, and `Timeline/`

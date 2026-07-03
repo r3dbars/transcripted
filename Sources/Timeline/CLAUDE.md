@@ -7,10 +7,11 @@
 snapshots, local screenshot writes, and pause/resume state exposed for future
 UI), the app-owned timeline database and storage-cap retention cleanup,
 deterministic analysis seams (batching, observation building, card
-generation, category normalization, provider stubs, and scheduling), and
+generation, category normalization, provider stubs, and scheduling),
 projection logic that joins saved meeting/dictation artifacts into timeline
-card records. It is app-side code, not part of `Sources/TranscriptedCore/`,
-and should stay off-main for capture, analysis, and database work.
+card records, and pure weekly aggregation helpers. It is app-side code, not
+part of `Sources/TranscriptedCore/`, and should stay off-main for capture,
+analysis, and database work, and UI-free.
 
 ## Files
 
@@ -29,6 +30,8 @@ and should stay off-main for capture, analysis, and database work.
 - `TimelineLLMProvider.swift` - provider protocol and safe inert stubs
 - `AnalysisScheduler.swift` - single-flight in-memory scheduler harness for the pure pipeline
 - `TimelineCaptureJoiner.swift` - projects saved meeting and dictation artifacts into timeline card records without changing the capture source of truth
+- `WeeklyStatsBuilder.swift` - pure weekly aggregation helpers used by the week
+  grid and dashboard sample/protocol views.
 
 ## Guardrails
 
@@ -45,6 +48,7 @@ and should stay off-main for capture, analysis, and database work.
 - Keep screenshots, OCR text, app names, URLs, and window titles local unless a later user-facing preference explicitly enables a cloud provider.
 - Provider stubs must not make network calls by default.
 - Pure rules need fast tests before being wired into capture, storage, or UI.
+- Keep analytics-facing values bucketed or enum-like. Raw titles, transcript text, app names, URLs, file paths, and screenshot-derived text stay local UI data only.
 - UI, cards-facing OCR, and full LLM provider wiring belong to later phases.
 
 ## Verify

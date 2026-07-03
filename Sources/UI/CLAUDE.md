@@ -8,6 +8,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 - `Overlay/`
 - `MenuBar/`
 - `Settings/`
+- `Timeline/`
 - `Shared/`
 - `Timeline/`
 
@@ -72,6 +73,11 @@ onboarding connect stage. Both keep one mental model:
 - every row points the agent's own MCP config at the same installed helper
 - the universal copy-prompt row covers agents we cannot configure directly
 - folders, the Codex inbox automation, and config details stay behind Advanced
+
+### Timeline/
+
+- `TimelineWeekGridView.swift` — protocol/sample-backed 7-day, 4 AM to 4 AM week grid for timeline cards
+- `TimelineDashboardView.swift` — weekly overview stats, category donut, focus heatmap, top apps/sites, and meeting/dictation chips backed by `WeeklyStatsBuilder`
 
 ### Settings/
 

@@ -6,9 +6,11 @@
 Transcripted timeline. It renders screen-activity cards alongside meetings
 and dictations, exposes timeline navigation, and surfaces capture/permission
 pause states. Keep this folder focused on rendering and presentation policy;
-timeline capture, storage, and analysis belong outside the UI tree.
+timeline capture, storage, and analysis belong outside the UI tree. Views
+should render from protocol/sample data until the capture/database seam is
+ready.
 
-## Current files (Phase 4)
+## Current files (Phase 4-7)
 
 - `TimelineHomePresentation.swift` — mock/sample data, layout policy, and the
   debug flag for previewing the timeline home.
@@ -18,12 +20,13 @@ timeline capture, storage, and analysis belong outside the UI tree.
 - `TimelineLiveStatusCard.swift` — current generating/paused/resume status row.
 - `TimelineDayNavigation.swift` — day picker/navigation strip.
 - `TimelineTokens.swift` — local colors, spacing, and typography.
+- `TimelineWeekGridView.swift` — seven-day 4 AM to 4 AM week grid.
+- `TimelineDashboardView.swift` — compact weekly dashboard backed by
+  `WeeklyStatsBuilder`.
 
 ## Planned files (future phases)
 
 - `ScreenshotSlideshowView.swift` — future fullscreen screenshot playback and scrubber
-- `TimelineWeekGridView.swift` — future weekly overview
-- `TimelineDashboardView.swift` — future weekly analytics
 - `TimelineChatView.swift` — future chat over a day
 - `CategoryPickerView.swift` — future category edit/swap overlay
 
@@ -34,6 +37,8 @@ timeline capture, storage, and analysis belong outside the UI tree.
 - Do not send screen-derived titles, OCR text, app names, URLs, or screenshot paths to Sentry or PostHog.
 - Do not make Timeline Home the default settings Home until the backend and
   permission/onboarding path are landed. Use the preview/debug flag only.
+- Keep views local-first. Do not emit analytics payloads from these views unless
+  the payload is bucketed and covered by observability policy tests.
 
 ## Verification
 
