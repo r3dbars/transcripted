@@ -436,7 +436,8 @@ public final class SpeakerNamingSimulationRunner {
             transcriptId: transcriptId,
             classification: classification,
             targetURL: targetURL,
-            directory: state.paths.transcripts
+            directory: state.paths.transcripts,
+            speakerDB: state.speakerDB
         )
 
         var notes: [String] = []
@@ -739,7 +740,8 @@ public final class SpeakerNamingSimulationRunner {
         transcriptId: UUID,
         classification: Classification,
         targetURL: URL?,
-        directory: URL
+        directory: URL,
+        speakerDB: SpeakerDatabase
     ) throws -> URL {
         var speakerMappings: [String: SpeakerMapping] = [:]
         var speakerSources: [String: String] = [:]
@@ -758,16 +760,25 @@ public final class SpeakerNamingSimulationRunner {
 
             if let snapshot = context.matchedProfileSnapshot,
                let similarity = context.matchSimilarity {
+                // Mirror the production pipeline's health-aware gate so
+                // simulation-derived auto-accept rates cannot drift from the
+                // app's demotion behavior.
+                let recentOutcomes = speakerDB.recentMatchOutcomes(
+                    profileId: snapshot.id,
+                    limit: SpeakerProfileHealth.recentOutcomeWindow
+                ).map(\.kind)
                 let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                     profile: snapshot,
                     similarity: similarity,
-                    secondBestSimilarity: context.matchSecondSimilarity
+                    secondBestSimilarity: context.matchSecondSimilarity,
+                    recentOutcomes: recentOutcomes
                 )
                 speakerMappings[key] = SpeakerNamingPolicy.initialMapping(
                     speakerId: speakerId,
                     profile: snapshot,
                     similarity: similarity,
-                    secondBestSimilarity: context.matchSecondSimilarity
+                    secondBestSimilarity: context.matchSecondSimilarity,
+                    recentOutcomes: recentOutcomes
                 )
                 speakerSources[key] = canAutoAccept ? "db" : "db_pending"
             } else {

@@ -10,6 +10,7 @@
 - `ParakeetAudioDeviceLookup.swift` — CoreAudio default-input lookup and dictation input selection descriptors used before Parakeet starts recording
 - `ParakeetAudioEngineSupport.swift` — support types for Parakeet engine startup snapshots, retired-engine retention, default-input listener teardown, and the disabled live-display shim
 - `WhisperEngine.swift` — app-owned WhisperKit STT engine used when advanced users select a Whisper model
+- `NemotronEngine.swift` — app-owned FluidAudio Nemotron streaming STT engine, beta-gated behind `SpeechModelBetaPreferences`; transcribes buffered samples only (recording stays in `ParakeetEngine`)
 - `DictationAudioLevelMeter.swift` — normalizes live PCM buffers into a 0...1 level used by the dictation waveform UI
 - `DictationAudioRecovery.swift` — analyzes recorded dictation audio for usable speech signal and extracts focused, gain-normalized retry segments when an initial transcription attempt returns empty
 - `DictationInputDeviceSelectionPolicy.swift` — prefers a built-in mic over Bluetooth headset input for dictation when that avoids HFP-style playback downgrades

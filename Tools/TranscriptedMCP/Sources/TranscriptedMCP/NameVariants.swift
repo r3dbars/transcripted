@@ -1,7 +1,13 @@
 import Foundation
 
 /// Name variant expansion for speaker matching.
-/// Source: SpeakerProfileMerger.swift in the main Transcripted app.
+///
+/// The `variants` table below is intentionally mirrored from
+/// `Sources/TranscriptedCore/Speaker/SpeakerProfileMerger.swift` in the main
+/// Transcripted app. The two cannot share a module (this standalone server has
+/// no compile-time dependency on Core, and Core must not depend on the Tools
+/// packages), so they are kept byte-for-byte identical instead. Any edit here
+/// MUST be mirrored there, and vice versa.
 enum NameVariants {
     private static let variants: [String: Set<String>] = [
         "mike": ["michael", "mike", "mikey"],

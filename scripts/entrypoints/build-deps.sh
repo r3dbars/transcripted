@@ -49,7 +49,7 @@ DEPS_TOOLS="$DRAFT_DIR/deps-tools"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULES/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 ARGMAX_CORE_MODULE="$DEPS_MODULES/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
 WHISPERKIT_MODULE="$DEPS_MODULES/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
-FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.7.9}"
+FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.15.4}"
 MLX_SWIFT_LM_REVISION="${MLX_SWIFT_LM_REVISION:-25b00d4}"
 SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
 ARGMAX_OSS_SWIFT_VERSION="${ARGMAX_OSS_SWIFT_VERSION:-v0.18.0}"
@@ -121,7 +121,6 @@ deps_are_ready() {
         || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] \
         || [ ! -f "$ARGMAX_CORE_MODULE" ] \
         || [ ! -f "$WHISPERKIT_MODULE" ] \
-        || [ ! -d "$DEPS_FRAMEWORKS/ESpeakNG.framework" ] \
         || [ ! -d "$DEPS_FRAMEWORKS/Sentry.framework" ] \
         || [ ! -d "$DEPS_FRAMEWORKS/Sparkle.framework" ] \
         || [ ! -x "$DEPS_TOOLS/sparkle/bin/generate_appcast" ]; then
@@ -614,12 +613,15 @@ if [ -z "$ESPEAK_FRAMEWORK_SRC" ]; then
             head -1 || true
     )"
 fi
+# FluidAudio 0.15.x no longer vendors the ESpeakNG binary target; drop any stale
+# copy from an older deps build instead of failing.
 if [ -z "$ESPEAK_FRAMEWORK_SRC" ]; then
-    echo "[build-deps] ERROR: ESpeakNG.framework not found in resolved dependencies"
-    exit 1
+    echo "[build-deps] ESpeakNG.framework not in resolved dependencies (expected on FluidAudio >= 0.15); skipping copy"
+    rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
+else
+    rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
+    ditto "$ESPEAK_FRAMEWORK_SRC" "$DEPS_FRAMEWORKS/ESpeakNG.framework"
 fi
-rm -rf "$DEPS_FRAMEWORKS/ESpeakNG.framework"
-ditto "$ESPEAK_FRAMEWORK_SRC" "$DEPS_FRAMEWORKS/ESpeakNG.framework"
 
 download_sentry_distribution
 download_sparkle_distribution

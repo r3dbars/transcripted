@@ -19,6 +19,110 @@ private func textResult(_ text: String, isError: Bool = false) -> CallTool.Resul
     .init(content: [.text(text: text, annotations: nil, _meta: nil)], isError: isError)
 }
 
+/// Character budget for read_meeting / read_dictation raw markdown responses.
+/// Anything larger switches to a paginated window even when the caller did not
+/// pass offset/limit, so one 90-minute transcript cannot blow out an agent's
+/// context window. ~30k characters is roughly 7-8k tokens — big enough that
+/// typical meetings and dictation days pass through byte-identical, small
+/// enough that a runaway dump stays readable.
+let maxUnpaginatedReadCharacters = 30_000
+
+/// Rough per-item JSON encoding overhead (keys, timestamps, speaker names)
+/// used when auto-sizing a pagination window against the character budget.
+private let paginationItemOverheadCharacters = 80
+
+/// Index one past the last item that fits the character budget starting at
+/// `start`. Always advances by at least one item when any remain, so an
+/// oversized single item still makes progress.
+private func autoWindowEnd<T>(items: [T], start: Int, cost: (T) -> Int) -> Int {
+    var end = start
+    var used = 0
+    while end < items.count {
+        used += cost(items[end])
+        if used > maxUnpaginatedReadCharacters, end > start { break }
+        end += 1
+    }
+    return end
+}
+
+/// Which artifact population a tool reads; drives which indexed counts and
+/// hint an empty response carries.
+private enum EmptyResultScope {
+    case meetings
+    case dictations
+    case mixed
+    case summaries
+}
+
+/// Self-describing zero-result response: where the server looked, what is
+/// indexed, and what to try next — so agents can tell an unindexed library
+/// apart from a query that matched nothing.
+private func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: TranscriptIndex) throws -> CallTool.Result {
+    let counts = try index.counts()
+    let directories = uniquePaths(searchedDirectories)
+
+    let payload: EmptyQueryResult
+    switch scope {
+    case .meetings:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: counts.meetings,
+            indexedDictationDays: nil,
+            indexedDictationEntries: nil,
+            indexedSummaryItems: nil,
+            hint: counts.meetings == 0
+                ? "No meetings are indexed — check that the directories above contain capture Markdown, or call the status tool."
+                : "No meetings matched these filters — try widening the date range or changing the query."
+        )
+    case .dictations:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: nil,
+            indexedDictationDays: counts.dictationDays,
+            indexedDictationEntries: counts.dictationEntries,
+            indexedSummaryItems: nil,
+            hint: counts.dictationDays == 0
+                ? "No dictations are indexed — check that the directories above contain capture Markdown, or call the status tool."
+                : "No dictations matched these filters — try widening the date range or changing the query."
+        )
+    case .mixed:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: counts.meetings,
+            indexedDictationDays: counts.dictationDays,
+            indexedDictationEntries: nil,
+            indexedSummaryItems: nil,
+            hint: counts.meetings == 0 && counts.dictationDays == 0
+                ? "Nothing is indexed — check that the directories above contain capture Markdown, or call the status tool."
+                : "No items matched these filters — try widening the date range or changing the query."
+        )
+    case .summaries:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: counts.meetings,
+            indexedDictationDays: nil,
+            indexedDictationEntries: nil,
+            indexedSummaryItems: counts.summaryItems,
+            hint: counts.summaryItems == 0
+                ? "No structured summaries are indexed. Rollups only cover meetings with a saved summary (Settings → Meetings → local summaries)."
+                : "No summary items matched these filters — try widening the date range or removing filters."
+        )
+    }
+
+    let json = try JSONEncoder.pretty.encode(payload)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
+private func uniquePaths(_ directories: [URL]) -> [String] {
+    var seen: Set<String> = []
+    var paths: [String] = []
+    for url in directories {
+        guard seen.insert(url.standardizedFileURL.path).inserted else { continue }
+        paths.append(url.path)
+    }
+    return paths
+}
+
 func registerToolHandlers(server: Server, index: TranscriptIndex, directories: TranscriptedDataDirectories) async {
     await server.withMethodHandler(ListTools.self) { _ in
         .init(tools: [
@@ -50,7 +154,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "read_meeting",
-                description: "Read the full transcript of a specific meeting. Returns the complete dialogue with speaker names and timestamps. Use list_meetings first to get the filename.",
+                description: "Read a meeting transcript by filename (from list_meetings). Long meetings are token-heavy: pass offset/limit to page through utterances, or section 'speakers' for metadata and analytics without dialogue. Full or transcript responses over ~30k characters are automatically truncated to a bounded window with total_utterances, next_offset, and a continuation hint.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -60,7 +164,15 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         ]),
                         "section": .object([
                             "type": .string("string"),
-                            "description": .string("Which section to return: 'full' (default — complete transcript), 'transcript' (dialogue only), or 'speakers' (analytics only)")
+                            "description": .string("Which section to return: 'full' (default — complete transcript), 'transcript' (dialogue only), or 'speakers' (frontmatter + analytics, cheapest for long meetings)")
+                        ]),
+                        "offset": .object([
+                            "type": .string("integer"),
+                            "description": .string("0-based utterance index to start the transcript window at (default: 0). Applies to sections 'full' and 'transcript'.")
+                        ]),
+                        "limit": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum utterances to return. Setting this (or exceeding the size guard) switches the response to a paginated JSON window with total_utterances, next_offset, and a hint.")
                         ]),
                     ]),
                     "required": .array([.string("filename")]),
@@ -153,7 +265,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "read_dictation",
-                description: "Read a saved dictation day or one specific dictation entry by ID. Use list_dictations or recent_context first to find the filename or entry_id you need.",
+                description: "Read a saved dictation day, one specific entry by ID, or a bounded window of entries. Use list_dictations or recent_context first to find the filename or entry_id you need. Prefer entry_id for a single entry. Without entry_id, pass offset/limit to page through entries; day files over ~30k characters are automatically truncated to a window with total_entries, next_offset, and a continuation hint.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -164,6 +276,14 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         "entry_id": .object([
                             "type": .string("string"),
                             "description": .string("Optional entry ID from recent_context or search_context to return one dictation entry")
+                        ]),
+                        "offset": .object([
+                            "type": .string("integer"),
+                            "description": .string("0-based entry index to start the window at (default: 0). Ignored when entry_id is set.")
+                        ]),
+                        "limit": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum entries to return. Setting this (or exceeding the size guard) switches the response to a paginated JSON window with total_entries, next_offset, and a hint. Ignored when entry_id is set.")
                         ]),
                     ]),
                     "required": .array([.string("filename")]),
@@ -266,7 +386,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "list_action_items",
-                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status (open by default, or 'done'/'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Status and due come from trailing markers on the bullet in the saved meeting Markdown — '(done)', '(status: done)', '(due: Friday)' — so an item can be closed by editing its bullet in the transcript file; unmarked items are open. Depends on the meeting summary index.",
+                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status ('open' by default, or 'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Items carry status/due metadata from trailing markers on the bullet in the saved meeting Markdown — '(done)', '(status: done)', '(due: Friday)' — so marked-done items drop out of 'open' results; unmarked items are open. Depends on the meeting summary index.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -276,7 +396,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         ]),
                         "status": .object([
                             "type": .string("string"),
-                            "description": .string("Which items to return: 'open' (default), 'done', or 'all'")
+                            "description": .string("Which items to return: 'open' (default) or 'all'. 'done' is not enabled yet; marked-done items already drop out of 'open' results.")
                         ]),
                         "query": .object([
                             "type": .string("string"),
@@ -342,6 +462,15 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 ]),
                 annotations: .init(readOnlyHint: true)
             ),
+            Tool(
+                name: "status",
+                description: "Server status and configuration: version, resolved capture directories, which resolution rule selected them, index location, and indexed counts. Call this when other tools return empty results to see whether anything is indexed at all.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([:]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
         ])
     }
 
@@ -351,7 +480,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             case "list_meetings":
                 return try handleListMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "list_dictations":
-                return try handleListDictations(params: params, index: index)
+                return try handleListDictations(params: params, index: index, dictationDirs: directories.dictationDirs)
             case "read_meeting":
                 return try handleReadMeeting(params: params, meetingDirs: directories.meetingDirs)
             case "read_dictation":
@@ -359,11 +488,11 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             case "search":
                 return try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "search_context":
-                return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs)
+                return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
             case "semantic_search":
                 return try handleSemanticSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "recent_context":
-                return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs)
+                return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
             case "who_is":
                 return try handleWhoIs(params: params, index: index)
             case "recap":
@@ -374,6 +503,8 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 return try handleListDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "digest":
                 return try handleDigest(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "status":
+                return try handleStatus(index: index, directories: directories)
             default:
                 return textResult("Unknown tool: \(params.name)", isError: true)
             }
@@ -406,7 +537,7 @@ func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, mee
     }
 
     if results.isEmpty {
-        return textResult("No meetings found.")
+        return try emptyResult(scope: .meetings, searchedDirectories: meetingDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -420,7 +551,7 @@ func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, mee
     return textResult(String(data: json, encoding: .utf8) ?? "[]")
 }
 
-func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
+func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex, dictationDirs: [URL]) throws -> CallTool.Result {
     let count = params.arguments?["count"]?.intValue ?? 10
     let date = params.arguments?["date"]?.stringValue
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? date
@@ -429,7 +560,7 @@ func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex) t
     let results = try index.listDictationDays(count: count, dateFrom: dateFrom, dateTo: dateTo)
 
     if results.isEmpty {
-        return textResult("No dictations found.")
+        return try emptyResult(scope: .dictations, searchedDirectories: dictationDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -499,12 +630,15 @@ func meetingSummaryPreview(from content: String) -> String? {
 
 // MARK: - read_meeting
 
-private func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
         return textResult("Missing required parameter: filename", isError: true)
     }
 
     let section = params.arguments?["section"]?.stringValue ?? "full"
+    let offset = max(0, params.arguments?["offset"]?.intValue ?? 0)
+    let limit = params.arguments?["limit"]?.intValue
+    let paginationRequested = limit != nil || offset > 0
 
     let mdURL: URL
     switch PathSecurity.resolveReadableFile(named: filename, appendingExtension: "md", in: meetingDirs) {
@@ -520,24 +654,32 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) 
         return textResult("Meeting not found: \(filename). Use list_meetings to see available meetings.", isError: true)
     }
 
+    let parsed = CaptureMarkdownParser.parseMeeting(from: content)
+
     trackAgentCaptureQueryObserved(
         queryKind: "read",
         artifactKind: "meeting",
-        captureDate: captureDateFromMeetingMarkdown(content),
+        captureDate: parsed.flatMap { parseCaptureDate($0.datetime) },
         sourceCount: 1
     )
 
     switch section {
     case "transcript":
         let dialogue = extractDialogueLines(from: content).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return textResult(dialogue.isEmpty ? content : dialogue)
+        let raw = dialogue.isEmpty ? content : dialogue
+        if !paginationRequested, raw.count <= maxUnpaginatedReadCharacters {
+            return textResult(raw)
+        }
+        return try meetingTranscriptPageResult(
+            parsed: parsed, content: content, filename: filename,
+            offset: offset, limit: limit, includeFrontmatter: false, rawFallback: raw
+        )
 
     case "speakers":
         // Return YAML frontmatter + speaker analytics section
         var result = ""
-        if content.count >= 8, content.hasPrefix("---"),
-           let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) {
-            result += String(content[content.startIndex...endRange.upperBound])
+        if let frontmatter = frontmatterBlock(of: content) {
+            result += frontmatter
         }
         if let analyticsRange = content.range(of: "## Channel & Speaker Analytics") {
             if let transcriptRange = content.range(of: "## Full Transcript") {
@@ -549,11 +691,95 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) 
         return textResult(result.isEmpty ? content : result)
 
     default: // "full"
-        return textResult(content)
+        if !paginationRequested, content.count <= maxUnpaginatedReadCharacters {
+            return textResult(content)
+        }
+        return try meetingTranscriptPageResult(
+            parsed: parsed, content: content, filename: filename,
+            offset: offset, limit: limit, includeFrontmatter: true, rawFallback: content
+        )
     }
 }
 
-private func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) throws -> CallTool.Result {
+/// Bounded transcript read: frontmatter metadata plus one utterance window and
+/// explicit pagination fields, so a long meeting never comes back as an
+/// unbounded dump. Falls back to the raw markdown when the file does not parse
+/// as a windowable transcript — we can only page what the parser understands.
+private func meetingTranscriptPageResult(
+    parsed: ParsedMeetingCapture?,
+    content: String,
+    filename: String,
+    offset: Int,
+    limit: Int?,
+    includeFrontmatter: Bool,
+    rawFallback: String
+) throws -> CallTool.Result {
+    guard let parsed, !parsed.utterances.isEmpty else {
+        return textResult(rawFallback)
+    }
+
+    let total = parsed.utterances.count
+    let start = min(offset, total)
+    let end: Int
+    if let limit {
+        end = min(start + max(1, limit), total)
+    } else {
+        end = autoWindowEnd(items: parsed.utterances, start: start) {
+            $0.text.count + paginationItemOverheadCharacters
+        }
+    }
+
+    let speakerNames = Dictionary(uniqueKeysWithValues: parsed.speakers.map { ($0.id, $0.name) })
+    let utterances = parsed.utterances[start..<end].map { utterance in
+        MeetingTranscriptPageUtterance(
+            start: utterance.start,
+            end: utterance.end,
+            speaker: speakerNames[utterance.speakerId] ?? utterance.speakerId,
+            speakerId: utterance.speakerId,
+            text: utterance.text
+        )
+    }
+
+    let returned = utterances.count
+    let truncated = start + returned < total
+    let nextOffset = truncated ? start + returned : nil
+
+    let hint: String
+    if offset >= total {
+        hint = "offset \(offset) is past the end — this transcript has \(total) utterances. Retry with a smaller offset."
+    } else if let nextOffset {
+        hint = "Showing utterances \(start)-\(end - 1) of \(total). Call read_meeting again with offset=\(nextOffset) to continue, or use section \"speakers\" for the overview without dialogue."
+    } else {
+        hint = "End of transcript — all remaining utterances included."
+    }
+
+    let page = MeetingTranscriptPage(
+        filename: filename,
+        frontmatter: includeFrontmatter ? frontmatterBlock(of: content) : nil,
+        totalUtterances: total,
+        offset: offset,
+        returned: returned,
+        truncated: truncated,
+        nextOffset: nextOffset,
+        hint: hint,
+        utterances: utterances
+    )
+
+    let json = try JSONEncoder.pretty.encode(page)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
+/// Raw YAML frontmatter block, matching the exact slice the speakers section
+/// has always returned (both fences plus the character after the closing one).
+private func frontmatterBlock(of content: String) -> String? {
+    guard content.count >= 8, content.hasPrefix("---"),
+          let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else {
+        return nil
+    }
+    return String(content[content.startIndex...endRange.upperBound])
+}
+
+func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
         return textResult("Missing required parameter: filename", isError: true)
     }
@@ -605,12 +831,66 @@ private func handleReadDictation(params: CallTool.Parameters, dictationDirs: [UR
         sourceCount: day.entries.count
     )
 
+    let offset = max(0, params.arguments?["offset"]?.intValue ?? 0)
+    let limit = params.arguments?["limit"]?.intValue
+    let paginationRequested = limit != nil || offset > 0
+
     guard let content = try? String(contentsOf: markdownURL, encoding: .utf8) else {
         let json = try JSONEncoder.pretty.encode(day)
         return textResult(String(data: json, encoding: .utf8) ?? "{}")
     }
 
-    return textResult(content)
+    if !paginationRequested, content.count <= maxUnpaginatedReadCharacters {
+        return textResult(content)
+    }
+
+    return try dictationDayPageResult(day: day, filename: filename, offset: offset, limit: limit)
+}
+
+/// Bounded dictation-day read: day metadata plus one entry window and explicit
+/// pagination fields, mirroring the meeting transcript window.
+private func dictationDayPageResult(day: AgentDictationDay, filename: String, offset: Int, limit: Int?) throws -> CallTool.Result {
+    let total = day.entries.count
+    let start = min(offset, total)
+    let end: Int
+    if let limit {
+        end = min(start + max(1, limit), total)
+    } else {
+        end = autoWindowEnd(items: day.entries, start: start) {
+            $0.text.count + $0.title.count + paginationItemOverheadCharacters * 3
+        }
+    }
+
+    let entries = Array(day.entries[start..<end])
+    let returned = entries.count
+    let truncated = start + returned < total
+    let nextOffset = truncated ? start + returned : nil
+
+    let hint: String
+    if total == 0 {
+        hint = "This dictation day has no entries."
+    } else if offset >= total {
+        hint = "offset \(offset) is past the end — this day has \(total) entries. Retry with a smaller offset."
+    } else if let nextOffset {
+        hint = "Showing entries \(start)-\(end - 1) of \(total). Call read_dictation again with offset=\(nextOffset) to continue, or pass entry_id for one specific entry."
+    } else {
+        hint = "End of day — all remaining entries included."
+    }
+
+    let page = DictationDayPage(
+        filename: filename,
+        date: day.date,
+        totalEntries: total,
+        offset: offset,
+        returned: returned,
+        truncated: truncated,
+        nextOffset: nextOffset,
+        hint: hint,
+        entries: entries
+    )
+
+    let json = try JSONEncoder.pretty.encode(page)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
 // MARK: - search
@@ -628,9 +908,7 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, m
     hydrateMeetingSearchTitles(in: &results, meetingDirs: meetingDirs)
 
     if results.results.isEmpty {
-        var msg = "No results found for \"\(query)\""
-        if let s = speaker { msg += " by \(s)" }
-        return textResult(msg)
+        return try emptyResult(scope: .meetings, searchedDirectories: meetingDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -700,7 +978,7 @@ private func semanticArtifactKind(for hits: [SemanticSearchHit]) -> String {
     return "mixed"
 }
 
-private func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+private func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], dictationDirs: [URL]) throws -> CallTool.Result {
     guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
         return textResult("Missing required parameter: query", isError: true)
     }
@@ -723,7 +1001,7 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     hydrateMeetingTitles(in: &results.results, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
 
     if results.results.isEmpty {
-        return textResult("No context found for \"\(query)\".")
+        return try emptyResult(scope: .mixed, searchedDirectories: meetingDirs + dictationDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -737,7 +1015,7 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
-func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], dictationDirs: [URL]) throws -> CallTool.Result {
     let kind = parseContextKind(params.arguments?["kind"]?.stringValue)
     let count = max(1, min(params.arguments?["count"]?.intValue ?? 10, 50))
     let dateFrom = params.arguments?["date_from"]?.stringValue
@@ -747,7 +1025,7 @@ func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, me
     hydrateMeetingTitles(in: &result.items, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
 
     if result.items.isEmpty {
-        return textResult("No recent context found.")
+        return try emptyResult(scope: .mixed, searchedDirectories: meetingDirs + dictationDirs, index: index)
     }
 
     trackAgentCaptureQueryObserved(
@@ -796,7 +1074,7 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
     let meetings = try index.listMeetings(count: 50, dateFrom: dateFrom, dateTo: dateTo)
 
     if meetings.isEmpty {
-        return textResult("No meetings found from \(dateFrom) to \(dateTo).")
+        return try emptyResult(scope: .meetings, searchedDirectories: meetingDirs, index: index)
     }
 
     var recapParts: [RecapEntry] = []
@@ -849,13 +1127,25 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
 
 // MARK: - list_action_items / list_decisions / digest (cross-meeting rollups)
 
-private func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     let owner = params.arguments?["owner"]?.stringValue
     let query = params.arguments?["query"]?.stringValue
-    let status = ActionItemStatusFilter(raw: params.arguments?["status"]?.stringValue)
+    let rawStatus = params.arguments?["status"]?.stringValue
+    let status = ActionItemStatusFilter(raw: rawStatus)
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
     let count = params.arguments?["count"]?.intValue ?? 50
+
+    // Marker-backed status data exists in the index (trailing '(done)' /
+    // '(status: done)' bullet markers), but the done filter stays rejected
+    // until the marker write-back path is verified against a real library —
+    // fail loudly rather than expose an unproven filter.
+    if status == .done {
+        return textResult(
+            "Unsupported status filter: \"\(rawStatus ?? "done")\". The done filter is not enabled yet. Use status \"open\" (the default) or \"all\" — items whose bullet carries a '(done)' or '(status: done)' marker in the saved Markdown already drop out of \"open\" results.",
+            isError: true
+        )
+    }
 
     var result = try index.listActionItems(
         owner: owner, query: query, status: status,
@@ -867,10 +1157,7 @@ private func handleListActionItems(params: CallTool.Parameters, index: Transcrip
     }
 
     if result.items.isEmpty {
-        var msg = "No \(status == .all ? "" : status.rawValue + " ")action items found"
-        if let owner, !owner.isEmpty { msg += " for \(owner)" }
-        msg += ". Action items come from the meeting summary index; if summaries have not been indexed yet, this will be empty."
-        return textResult(msg)
+        return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
     }
 
     let json = try JSONEncoder.pretty.encode(result)
@@ -890,7 +1177,7 @@ private func handleListDecisions(params: CallTool.Parameters, index: TranscriptI
     }
 
     if result.decisions.isEmpty {
-        return textResult("No decisions found. Decisions come from the meeting summary index; if summaries have not been indexed yet, this will be empty.")
+        return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
     }
 
     let json = try JSONEncoder.pretty.encode(result)
@@ -910,8 +1197,31 @@ private func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, m
     }
 
     if result.meetings.isEmpty {
-        return textResult("No summarized meetings found for \(result.dateRange). Digest reads the meeting summary index; if summaries have not been indexed yet, this will be empty.")
+        return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
     }
+
+    let json = try JSONEncoder.pretty.encode(result)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
+// MARK: - status
+
+func handleStatus(index: TranscriptIndex, directories: TranscriptedDataDirectories) throws -> CallTool.Result {
+    let counts = try index.counts()
+    let result = StatusResult(
+        serverVersion: TranscriptedMCP.serverVersion,
+        meetingDirectories: directories.meetingDirs.map(\.path),
+        dictationDirectories: directories.dictationDirs.map(\.path),
+        resolutionSource: directories.resolutionSource.rawValue,
+        legacyFallbackAppended: directories.legacyFallbackAppended,
+        indexDirectory: directories.indexDir.path,
+        indexedMeetings: counts.meetings,
+        indexedDictationDays: counts.dictationDays,
+        indexedDictationEntries: counts.dictationEntries,
+        indexedSummaryItems: counts.summaryItems,
+        summarizedMeetings: counts.summarizedMeetings,
+        summariesIndexed: counts.summaryItems > 0
+    )
 
     let json = try JSONEncoder.pretty.encode(result)
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
@@ -1050,11 +1360,6 @@ private func artifactKind(for kinds: [ContextKind]) -> String {
         return "dictation"
     }
     return "mixed"
-}
-
-private func captureDateFromMeetingMarkdown(_ content: String) -> Date? {
-    guard let parsed = CaptureMarkdownParser.parseMeeting(from: content) else { return nil }
-    return parseCaptureDate(parsed.datetime)
 }
 
 extension JSONEncoder {

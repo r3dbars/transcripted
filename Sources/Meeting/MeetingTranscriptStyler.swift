@@ -279,7 +279,17 @@ enum MeetingTranscriptStyler {
     }
 
     private static func renderFrontmatter(lines: [String], title: String) -> String {
-        let filtered = lines.filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("title:") }
+        // Preserve every writer key except `title:` (re-emitted first with the
+        // styled title) and `transcript_style:`. The persisted restyle rewrites
+        // the body into the styled grammar, so the style marker is replaced with
+        // `styled` — filter-then-append keeps it from duplicating on repeat
+        // passes. `format_version` passes through untouched.
+        // See docs/capture-format.md.
+        var filtered = lines.filter { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return !trimmed.hasPrefix("title:") && !trimmed.hasPrefix("transcript_style:")
+        }
+        filtered.append("transcript_style: styled")
         let escapedTitle = title.replacingOccurrences(of: "\"", with: "'")
         return ([
             "---",

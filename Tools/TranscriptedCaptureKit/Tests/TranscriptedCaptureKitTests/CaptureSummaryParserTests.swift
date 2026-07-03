@@ -61,6 +61,7 @@ final class CaptureSummaryParserTests: XCTestCase {
     func testParsesInlineBodyBlockSections() throws {
         let summary = try XCTUnwrap(CaptureSummaryParser.parse(from: inlineMeeting()))
         XCTAssertEqual(summary.title, "Beta launch sync")
+        XCTAssertEqual(summary.attendees, ["Jenny"])
         XCTAssertEqual(summary.decisions, ["Ship the beta on Friday", "Cut the legacy import path"])
         XCTAssertEqual(summary.openQuestions, ["Do we need a migration window?"])
         XCTAssertEqual(summary.actionItems.count, 2)
@@ -141,6 +142,21 @@ final class CaptureSummaryParserTests: XCTestCase {
         XCTAssertTrue(summary.decisions.isEmpty)
         XCTAssertTrue(summary.openQuestions.isEmpty)
         XCTAssertEqual(summary.actionItems.count, 2)
+    }
+
+    func testParsesTitleAndParticipantsWhenFactSectionsAreEmpty() throws {
+        let markdown = inlineMeeting(
+            decisions: "### Decisions\n- None found.",
+            actionItems: "### Action Items\n- None found.",
+            openQuestions: "### Open Questions\n- None found."
+        )
+        let summary = try XCTUnwrap(CaptureSummaryParser.parse(from: markdown))
+
+        XCTAssertEqual(summary.title, "Beta launch sync")
+        XCTAssertEqual(summary.attendees, ["Jenny"])
+        XCTAssertTrue(summary.decisions.isEmpty)
+        XCTAssertTrue(summary.actionItems.isEmpty)
+        XCTAssertTrue(summary.openQuestions.isEmpty)
     }
 
     func testFallsBackToFrontmatterWhenBodyBlockMissing() throws {
@@ -251,6 +267,7 @@ final class CaptureSummaryParserTests: XCTestCase {
         """
         let summary = try XCTUnwrap(CaptureSummaryParser.parse(from: sidecar))
         XCTAssertEqual(summary.title, "Beta launch sync")
+        XCTAssertTrue(summary.attendees.isEmpty)
         XCTAssertEqual(summary.decisions, ["Ship the beta on Friday"])
         XCTAssertEqual(summary.actionItems.first?.owner, "Jenny")
         XCTAssertEqual(summary.openQuestions, ["Do we need a migration window?"])
@@ -274,11 +291,34 @@ final class CaptureSummaryParserTests: XCTestCase {
     }
 
     func testReturnsNilWhenEverySectionEmpty() {
-        let markdown = inlineMeeting(
-            decisions: "### Decisions\n- None found.",
-            actionItems: "### Action Items\n- None found.",
-            openQuestions: "### Open Questions\n- None found."
-        )
+        let markdown = """
+        ---
+        capture_type: meeting
+        date: 2026-04-18
+        time: 09:15:00
+        local_summary_version: "1"
+        local_summary_decisions: "None found."
+        local_summary_action_items: "None found."
+        local_summary_open_questions: "None found."
+        ---
+
+        # Meeting
+
+        ## Full Transcript
+
+        [00:00] [System/Jenny] Nothing to summarize.
+
+        ## Local Summary
+
+        ### Decisions
+        - None found.
+
+        ### Action Items
+        - None found.
+
+        ### Open Questions
+        - None found.
+        """
         XCTAssertNil(CaptureSummaryParser.parse(from: markdown))
     }
 }

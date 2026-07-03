@@ -118,6 +118,14 @@ public enum TranscriptFrontmatter {
         try readDocument(from: url, byteLimit: byteLimit)?.values
     }
 
+    /// Resolve the capture identity from parsed frontmatter values, preferring
+    /// `transcript_id` and falling back to the legacy `capture_id` key. Shared
+    /// so callers cannot drift on the fallback order.
+    public static func captureID(in values: [String: String]) -> UUID? {
+        (values["transcript_id"] ?? values["capture_id"])
+            .flatMap(UUID.init(uuidString:))
+    }
+
     public static func durationSeconds(from value: String?) -> Int? {
         guard let value else { return nil }
 

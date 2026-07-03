@@ -155,6 +155,7 @@ private final class PasteLastDictationFeedbackPanel: NSPanel {
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        sharingType = .none
     }
 
     override var canBecomeKey: Bool { false }

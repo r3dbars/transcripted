@@ -50,4 +50,43 @@ func testMicActivityMonitor() {
             "an empty own-bundle id should not accidentally filter real mic users"
         )
     }
+
+    runSuite("MicActivityMonitor.callOutputBundleIDs — keeps only native conferencing apps playing output") {
+        let processes: [(bundleID: String?, isRunningOutput: Bool)] = [
+            ("us.zoom.xos", true),
+            ("com.microsoft.teams2", false),
+            ("com.google.Chrome.helper", true),
+            ("com.spotify.client", true),
+            (nil, true),
+        ]
+        let users = MicActivityMonitor.callOutputBundleIDs(from: processes, ownBundleID: "com.justinbetker.draft")
+        assertEqual(
+            users,
+            ["us.zoom.xos"],
+            "only native conferencing output should count — browsers and media apps must stay invisible"
+        )
+    }
+
+    runSuite("MicActivityMonitor.callOutputBundleIDs — drops our own playback, including helpers") {
+        let processes: [(bundleID: String?, isRunningOutput: Bool)] = [
+            ("com.justinbetker.draft", true),
+            ("com.justinbetker.draft.helper", true),
+            ("com.apple.FaceTime", true),
+        ]
+        let users = MicActivityMonitor.callOutputBundleIDs(from: processes, ownBundleID: "com.justinbetker.draft")
+        assertEqual(
+            users,
+            ["com.apple.FaceTime"],
+            "our own bundle and its helpers must never count as a detected call"
+        )
+    }
+
+    runSuite("MicActivityMonitor.callOutputBundleIDs — emits an empty set when no conferencing app plays output") {
+        let processes: [(bundleID: String?, isRunningOutput: Bool)] = [
+            ("us.zoom.xos", false),
+            ("com.spotify.client", true),
+        ]
+        let users = MicActivityMonitor.callOutputBundleIDs(from: processes, ownBundleID: "com.justinbetker.draft")
+        assertTrue(users.isEmpty, "no conferencing output should produce the explicit empty 'inactive' set")
+    }
 }

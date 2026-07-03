@@ -770,30 +770,82 @@ enum MeetingAudioStorageManager {
                 continue
             }
 
-            let tempURL = audioDirectory
-                .appendingPathComponent(".\(sourceURL.deletingPathExtension().lastPathComponent)-\(UUID().uuidString)")
-                .appendingPathExtension("m4a")
-
-            do {
-                try await converter.convertWAVToM4A(sourceURL: sourceURL, destinationURL: tempURL)
-                guard validator.isUsableAudioFile(at: tempURL, fileManager: fileManager) else {
-                    throw MeetingAudioStorageError.emptyConvertedFile
-                }
-                if fileManager.fileExists(atPath: destinationURL.path) {
-                    try fileManager.removeItem(at: destinationURL)
-                }
-                try fileManager.moveItem(at: tempURL, to: destinationURL)
-                fileManager.restrictFileToOwnerOnly(at: destinationURL)
-                try fileManager.removeItem(at: sourceURL)
+            switch await convertWAVToM4AAtomically(
+                sourceURL: sourceURL,
+                destinationURL: destinationURL,
+                in: audioDirectory,
+                checkingCancellation: false,
+                fileManager: fileManager,
+                converter: converter,
+                validator: validator
+            ) {
+            case .converted:
+                try? fileManager.removeItem(at: sourceURL)
                 convertedCount += 1
-            } catch {
-                reportMaintenanceFailure("wav_to_m4a", error)
-                try? fileManager.removeItem(at: tempURL)
+            case .cancelled, .failed:
                 continue
             }
         }
 
         return convertedCount
+    }
+
+    /// Outcome of an atomic WAV → M4A conversion attempt.
+    private enum WAVToM4AConversionOutcome {
+        /// `destinationURL` now holds a validated M4A and any existing file
+        /// there was replaced.
+        case converted
+        /// The task was cancelled mid-flight; nothing was moved into place.
+        case cancelled
+        /// Conversion or validation failed; nothing was moved into place.
+        case failed
+    }
+
+    /// Convert `sourceURL` (a WAV) into `destinationURL` (an `.m4a`) atomically:
+    /// write to a hidden temp file in `audioDirectory`, validate it, replace any
+    /// existing destination, move it into place, and restrict it to the owner.
+    /// The temp file is always removed on cancellation or failure. The caller
+    /// owns whether to delete or retain `sourceURL`.
+    ///
+    /// This is the single implementation shared by retained-audio compression
+    /// and failed-meeting audio promotion, which previously duplicated the whole
+    /// temp/convert/validate/move/cleanup flow.
+    private static func convertWAVToM4AAtomically(
+        sourceURL: URL,
+        destinationURL: URL,
+        in audioDirectory: URL,
+        checkingCancellation: Bool,
+        operation: String = "wav_to_m4a",
+        fileManager: FileManager,
+        converter: MeetingAudioFileConverting,
+        validator: MeetingAudioFileValidating
+    ) async -> WAVToM4AConversionOutcome {
+        let tempURL = audioDirectory
+            .appendingPathComponent(".\(sourceURL.deletingPathExtension().lastPathComponent)-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+
+        do {
+            try await converter.convertWAVToM4A(sourceURL: sourceURL, destinationURL: tempURL)
+            if checkingCancellation, Task.isCancelled {
+                try? fileManager.removeItem(at: tempURL)
+                return .cancelled
+            }
+            guard validator.isUsableAudioFile(at: tempURL, fileManager: fileManager) else {
+                throw MeetingAudioStorageError.emptyConvertedFile
+            }
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.moveItem(at: tempURL, to: destinationURL)
+            fileManager.restrictFileToOwnerOnly(at: destinationURL)
+            return .converted
+        } catch {
+            // The maintenance loops deliberately keep going past a failed file;
+            // report the skip so it doesn't vanish (cancellation is not a failure).
+            reportMaintenanceFailure(operation, error)
+            try? fileManager.removeItem(at: tempURL)
+            return .failed
+        }
     }
 
     @discardableResult
@@ -1136,24 +1188,17 @@ enum MeetingAudioStorageManager {
             )
         }
 
-        let tempURL = audioDirectory
-            .appendingPathComponent(".\(sourceURL.deletingPathExtension().lastPathComponent)-\(UUID().uuidString)")
-            .appendingPathExtension("m4a")
-
-        do {
-            try await converter.convertWAVToM4A(sourceURL: sourceURL, destinationURL: tempURL)
-            guard !Task.isCancelled else {
-                try? fileManager.removeItem(at: tempURL)
-                return FailedAudioCompressionResolution(updatedURL: sourceURL, promotedFile: nil)
-            }
-            guard validator.isUsableAudioFile(at: tempURL, fileManager: fileManager) else {
-                throw MeetingAudioStorageError.emptyConvertedFile
-            }
-            if fileManager.fileExists(atPath: destinationURL.path) {
-                try fileManager.removeItem(at: destinationURL)
-            }
-            try fileManager.moveItem(at: tempURL, to: destinationURL)
-            fileManager.restrictFileToOwnerOnly(at: destinationURL)
+        switch await convertWAVToM4AAtomically(
+            sourceURL: sourceURL,
+            destinationURL: destinationURL,
+            in: audioDirectory,
+            checkingCancellation: true,
+            operation: "failed_audio_compress",
+            fileManager: fileManager,
+            converter: converter,
+            validator: validator
+        ) {
+        case .converted:
             return FailedAudioCompressionResolution(
                 updatedURL: destinationURL,
                 promotedFile: FailedAudioPromotion(
@@ -1162,9 +1207,7 @@ enum MeetingAudioStorageManager {
                     wasConverted: true
                 )
             )
-        } catch {
-            reportMaintenanceFailure("failed_audio_compress", error)
-            try? fileManager.removeItem(at: tempURL)
+        case .cancelled, .failed:
             return FailedAudioCompressionResolution(updatedURL: sourceURL, promotedFile: nil)
         }
     }

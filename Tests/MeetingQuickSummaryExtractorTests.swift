@@ -113,6 +113,8 @@ func testMeetingQuickSummaryExtractor() {
         let markdown = """
         ---
         capture_type: meeting
+        format_version: 1
+        transcript_style: raw
         title: "Weekly Sync"
         ---
 
@@ -140,6 +142,10 @@ func testMeetingQuickSummaryExtractor() {
         assertTrue(updated.contains("delay the rollout"), "extracted decision should be persisted")
         // Body preserved verbatim.
         assertTrue(updated.contains("## Transcript"), "transcript body should be preserved")
+        // Capture-format keys (docs/capture-format.md) are not managed by this
+        // writer and must survive the frontmatter rewrite untouched.
+        assertTrue(updated.contains("format_version: 1"), "format_version must survive summary injection")
+        assertTrue(updated.contains("transcript_style: raw"), "transcript_style must survive summary injection")
         assertFalse(
             updated.contains("local_summary_version"),
             "cheap extraction must not write the heavy summarizer's keys"

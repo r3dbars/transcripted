@@ -41,6 +41,8 @@ bash run-tests.sh                  # curated fast tests (manifest-driven)
 bash run-integration-smoke.sh      # app/core linkage + wake recovery + MicRecordingFileMerger
 bash run-e2e-smoke.sh              # deterministic release-critical artifact smoke (no mic/TCC)
 bash run-live-capture-smoke.sh     # local hardware/TCC smoke (needs mic + System Audio Recording perms)
+bash run-slow-pasteback-smoke.sh   # paste-back timing smoke for the clipboard-restoring paster
+bash run-daily-audio-reliability.sh  # daily audio-reliability check harness
 swift test                         # Swift Package tests for TranscriptedCore seam only
 bash build-beta.sh '' <user>       # signed beta/distribution build; first arg is compatibility-only
 bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the current branch diff
@@ -50,7 +52,8 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 
 - Touched `Sources/**/*.swift`, root `Tests/*.swift`, or `Tests/FastTests.manifest` → `bash build.sh --no-open` + `bash run-tests.sh`
 - Touched `Sources/Meeting/**`, `Sources/TranscriptedCore/**`, or `Tests/Integration/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
-- Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `bash run-e2e-smoke.sh`
+- Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `python3 scripts/dev/check-build-source-lists.py` + `bash run-e2e-smoke.sh`
+- Touched the slow-pasteback smoke path (`Tests/E2E/SlowPastebackSmoke.swift`, `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/Support/TranscriptedConstants.swift`, `run-slow-pasteback-smoke.sh`) → `python3 scripts/dev/check-build-source-lists.py` + `bash run-slow-pasteback-smoke.sh`
 - Touched QA bench/corpus files (`scripts/ops/transcripted-qa-bench.sh`, `scripts/ops/validate-meeting-corpus.py`, `scripts/ops/compare-meeting-corpus.py`, `docs/qa-test-bench.md`) → quick QA bench + Python compile checks
 - Touched live-capture smoke paths (`Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift`, `run-live-capture-smoke.sh`, `scripts/entrypoints/run-live-capture-smoke.sh`) → `bash run-live-capture-smoke.sh --skip-build`
 - Touched `Package.swift`, `Sources/TranscriptedCore/**`, or `Tests/TranscriptedCoreTests/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh` + `swift test`
@@ -58,8 +61,9 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 - Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh --no-open` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>`
 - Touched `Tools/TranscriptedCaptureKit/**` → `swift test --package-path Tools/TranscriptedCaptureKit` + `swift test --package-path Tools/TranscriptedCLI` + `swift test --package-path Tools/TranscriptedMCP` + `bash run-e2e-smoke.sh`
 - Touched `Tools/TranscriptedCLI/**` → `swift test --package-path Tools/TranscriptedCLI`
-- Touched `Tools/TranscriptedMCP/**` → `swift test --package-path Tools/TranscriptedMCP`
+- Touched `Tools/TranscriptedMCP/**` → `swift test --package-path Tools/TranscriptedMCP` + `bash run-e2e-smoke.sh`
 - Touched `Tools/TranscriptedQA/**` → `swift test --package-path Tools/TranscriptedQA`
+- Touched `Tools/SpeakerEvalHarness/**` or its `scripts/*speaker*`/`scripts/download_ami.sh` helpers → `bash build-deps.sh --force` + `swift build --package-path Tools/SpeakerEvalHarness` + the harness's compile/syntax checks (see `.agents/test-matrix.yml`)
 - Touched docs/agent files (`README.md`, `AGENT_START.md`, `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `WORKFLOW.md`, `docs/**`, `.agents/**`, `.github/**`) → `scripts/dev/agent-preflight.sh`
 
 ### Fast-test gotchas
@@ -88,6 +92,7 @@ Top-level entry points (see `Sources/CLAUDE.md` for the full list):
 
 - `TranscriptedApp.swift` — app entry, menubar wiring, popover/overlay setup, detected-meeting prompts, activation-policy switching so active recordings stay visible in the force-quit dialog
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and the lazy `MeetingSessionController`
+- `TranscriptedMenuCommands.swift` — menubar/menu command wiring
 
 Subsystem boundaries (each has a local `CLAUDE.md`):
 
@@ -106,8 +111,9 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
 | `Tools/TranscriptedCaptureKit` | shared capture-library resolution + capture-Markdown parsing library for the CLI and MCP tools |
 | `Tools/TranscriptedCLI` | standalone local-context and offline diarization CLI |
-| `Tools/TranscriptedMCP` | read-only MCP server for saved meetings/dictations |
+| `Tools/TranscriptedMCP` | read-only MCP server for saved meetings/dictations, including cross-meeting rollup tools (`list_action_items`/`list_decisions`/`digest`) |
 | `Tools/TranscriptedQA` | standalone artifact validation and QA CLI |
+| `Tools/SpeakerEvalHarness` | headless AMI speaker-naming eval harness (diarization, embedding, clustering, cross-meeting match sweeps) |
 
 Keep `Sources/TranscriptedCore/` a library boundary — meetings reuse the app's STT path through `Sources/Meeting/MeetingSTTAdapter.swift`. Sources/Speech/ owns dictation STT.
 

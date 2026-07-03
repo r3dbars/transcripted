@@ -1,9 +1,59 @@
 # Voices model upgrade plan — Nemotron 3.5 streaming + FluidAudio 0.15.x
 
-Status: proposed (2026-07-01)
+Status: in progress (2026-07-01)
 Owner: app/speech
 Related: `Sources/Speech/CLAUDE.md`, `docs/qa-test-bench.md`, `.agents/test-matrix.yml`
 In-flight speaker work this must sequence around: #1330 (reversible speaker merges), #1175 (ERes2Net voiceprint)
+
+## Progress log
+
+- 2026-07-01: sequencing prerequisites landed — #1330 merged, #1175
+  superseded by #1346 (rebased onto main) and merged.
+- 2026-07-01: #1345 spike probed 0.15.4 (two CI rounds), breakage list
+  recorded on the PR; closed after phase 1 opened.
+- 2026-07-01: phase 1 in flight as #1347 — full 0.7.9 → 0.15.4
+  migration; app build + all 575 package tests green on first real CI
+  round, integration smoke fixed in follow-up.
+- 2026-07-01: phase 2 in flight on `claude/phase2-nemotron-optin` —
+  `NemotronEngine` (batch entry over the 0.15.4 `StreamingAsrManager`
+  protocol, `nemotron1120ms` variant), `nemotron-streaming-0.6b` model
+  case, `SpeechModelBetaPreferences` gate + Beta-page toggle, STTRouter
+  wiring, fast tests. Default stays Parakeet; Nemotron is hidden unless
+  the beta toggle is on and `effectiveModel()` self-heals when it's
+  turned back off.
+
+### Phase 1 exit checklist (before #1347 merges)
+
+Cache-continuity finding (source-verified against both FluidAudio tags):
+0.15.x renames the v3 cache folder (`parakeet-tdt-0.6b-v3-coreml` →
+`parakeet-tdt-0.6b-v3`) and adds one required file
+(`JointDecisionv3.mlmodelc`). Without mitigation that means a silent full
+~600MB re-download. #1347 ships the mitigation: ParakeetEngine renames the
+legacy cache folder in place on first init (so only the new joint file
+downloads), `ModelCacheInventory` swaps active/stale names so storage
+cleanup can't delete the live cache, and `build.sh` bundles under the new
+folder name gated on the new file.
+
+Needs a real Mac with an existing Parakeet install:
+
+```bash
+# 1. Confirm the cache migration: after launching the PR build once, the
+#    Models dir should show parakeet-tdt-0.6b-v3 (renamed, not re-downloaded)
+#    plus a newly fetched JointDecisionv3.mlmodelc — and no -coreml folder:
+ls "$HOME/Library/Application Support/Transcripted/FluidAudio/Models"
+ls "$HOME/Library/Application Support/Transcripted/FluidAudio/Models/parakeet-tdt-0.6b-v3"
+
+# 2. Quality gate vs the pre-upgrade baseline:
+bash scripts/ops/transcripted-qa-bench.sh --mode corpus-compare
+
+# 3. Real-hardware capture smoke:
+bash run-live-capture-smoke.sh --skip-build
+```
+
+Known accepted deltas on 0.15.4: two Swift-6-mode Sendable warnings in
+`DiarizationService` (upstream diarizer manager types); batch segments
+now use a fresh caller-owned `TdtDecoderState` per call (replaces the
+removed per-source internal state — strictly less cross-talk risk).
 
 ## TL;DR
 

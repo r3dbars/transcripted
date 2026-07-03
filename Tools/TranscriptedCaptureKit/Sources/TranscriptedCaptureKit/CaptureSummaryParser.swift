@@ -1,8 +1,6 @@
 import Foundation
 
-/// Structured meeting-summary fields extracted from a saved capture. Carries the
-/// rollup-friendly subset the index needs (decisions, action items, open
-/// questions); each item is one bullet so cross-meeting tools can aggregate.
+/// Structured meeting-summary fields extracted from a saved capture.
 public struct ParsedMeetingSummary: Equatable {
     public struct ActionItem: Equatable {
         /// Named owner if the bullet led with one (`Owner: do thing`); nil means
@@ -27,24 +25,32 @@ public struct ParsedMeetingSummary: Equatable {
     }
 
     public let title: String?
+    public let attendees: [String]
     public let decisions: [String]
     public let actionItems: [ActionItem]
     public let openQuestions: [String]
 
     public init(
         title: String?,
+        attendees: [String] = [],
         decisions: [String],
         actionItems: [ActionItem],
         openQuestions: [String]
     ) {
         self.title = title
+        self.attendees = attendees
         self.decisions = decisions
         self.actionItems = actionItems
         self.openQuestions = openQuestions
     }
 
     public var isEmpty: Bool {
-        decisions.isEmpty && actionItems.isEmpty && openQuestions.isEmpty
+        let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (cleanTitle?.isEmpty ?? true)
+            && attendees.isEmpty
+            && decisions.isEmpty
+            && actionItems.isEmpty
+            && openQuestions.isEmpty
     }
 }
 
@@ -78,6 +84,8 @@ public enum CaptureSummaryParser {
         if values["capture_type"] == "meeting_summary" {
             return assemble(
                 title: cleanTitle(values["summary_title"]),
+                attendees: bulletItems(section("# Attendees", in: body, headingLevel: "#"))
+                    + bulletItems(section("# Participants", in: body, headingLevel: "#")),
                 decisions: bulletItems(section("# Decisions", in: body, headingLevel: "#")),
                 actions: bulletItems(section("# Action Items", in: body, headingLevel: "#")),
                 questions: bulletItems(section("# Open Questions", in: body, headingLevel: "#"))
@@ -88,6 +96,8 @@ public enum CaptureSummaryParser {
             let block = localSummaryBlock(in: body) ?? body
             if let localSummary = assemble(
                 title: cleanTitle(values["local_summary_title"]),
+                attendees: inlineItems("### Attendees", in: block, fallback: nil)
+                    + inlineItems("### Participants", in: block, fallback: values["local_summary_participants"]),
                 decisions: inlineItems("### Decisions", in: block, fallback: values["local_summary_decisions"]),
                 actions: inlineItems("### Action Items", in: block, fallback: values["local_summary_action_items"]),
                 questions: inlineItems("### Open Questions", in: block, fallback: values["local_summary_open_questions"])
@@ -99,6 +109,7 @@ public enum CaptureSummaryParser {
         if values["auto_summary_version"] != nil {
             return assemble(
                 title: nil,
+                attendees: [],
                 decisions: frontmatterItems(values["auto_summary_decisions"]),
                 actions: frontmatterItems(values["auto_summary_action_items"]),
                 questions: frontmatterItems(values["auto_summary_open_questions"])
@@ -112,12 +123,14 @@ public enum CaptureSummaryParser {
 
     private static func assemble(
         title: String?,
+        attendees: [String],
         decisions: [String],
         actions: [String],
         questions: [String]
     ) -> ParsedMeetingSummary? {
         let summary = ParsedMeetingSummary(
             title: title,
+            attendees: unique(attendees),
             decisions: decisions,
             actionItems: actions.map(actionItem(from:)),
             openQuestions: questions
@@ -281,6 +294,17 @@ public enum CaptureSummaryParser {
         let title = cleanMarkdown(raw)
         guard !title.isEmpty, title != placeholder else { return nil }
         return String(title.prefix(96))
+    }
+
+    private static func unique(_ values: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for value in values {
+            let normalized = value.lowercased()
+            guard seen.insert(normalized).inserted else { continue }
+            result.append(value)
+        }
+        return result
     }
 
     private static func cleanMarkdown(_ raw: String?) -> String {

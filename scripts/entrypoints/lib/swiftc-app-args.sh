@@ -54,7 +54,6 @@ build_app_swiftc_args() {
         "-F$framework_root"
         -Ldeps-libs
         -lDraftDeps
-        -framework ESpeakNG
         -framework CoreML
         -framework CoreAudio
         -framework CoreMediaIO

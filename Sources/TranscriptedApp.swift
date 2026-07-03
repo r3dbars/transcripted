@@ -146,7 +146,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     "meeting_prompt_record_selected",
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: self.meetingPromptTelemetryReadiness(),
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 Task { @MainActor [weak self] in
@@ -168,13 +169,37 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
                         readiness: self.meetingPromptTelemetryReadiness(),
-                        backoffKind: backoffDecision.kind
+                        backoffKind: backoffDecision.kind,
+                        signals: self.meetingPromptDetector.currentSignalSnapshot(),
+                        dismissStreak: self.meetingPromptDetector.dismissStreak(for: candidate.provider)
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
                     workflowKind: .meetingPrompt,
                     stage: "prompt_shown",
                     reasonKind: .dismissed,
+                    surface: .meetingOverlay,
+                    priorReadyState: MeetingPromptTelemetry.readyState(
+                        readiness: self.meetingPromptTelemetryReadiness()
+                    )
+                )
+            }
+            meetingOverlayController.onPromptExpired = { [weak self] candidate in
+                guard let self else { return }
+                let backoffDecision = self.meetingPromptDetector.expire(candidate: candidate)
+                AnalyticsReporter.track(
+                    "meeting_prompt_dismissed",
+                    properties: MeetingPromptTelemetry.properties(
+                        for: candidate,
+                        readiness: self.meetingPromptTelemetryReadiness(),
+                        backoffKind: backoffDecision.kind,
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
+                    )
+                )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "prompt_shown",
+                    reasonKind: .expired,
                     surface: .meetingOverlay,
                     priorReadyState: MeetingPromptTelemetry.readyState(
                         readiness: self.meetingPromptTelemetryReadiness()
@@ -189,7 +214,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
                         readiness: self.meetingPromptTelemetryReadiness(),
-                        backoffKind: backoffDecision.kind
+                        backoffKind: backoffDecision.kind,
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
@@ -208,7 +234,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     "meeting_prompt_suppressed",
                     properties: MeetingPromptTelemetry.properties(
                         for: suppression,
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: self.meetingPromptTelemetryReadiness(),
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
@@ -230,11 +257,48 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         "meeting_prompt_shown",
                         properties: MeetingPromptTelemetry.properties(
                             for: candidate,
-                            readiness: self.meetingPromptTelemetryReadiness()
+                            readiness: self.meetingPromptTelemetryReadiness(),
+                            signals: self.meetingPromptDetector.currentSignalSnapshot()
                         )
                     )
                 }
                 return presented
+            }
+            // Capture-funnel denominator: one event per detected call at its
+            // end, recorded or not, so capture rate is measured against calls
+            // that actually happened instead of prompts that fired.
+            meetingPromptDetector.onDetectedCallEnded = { summary in
+                AnalyticsReporter.track(
+                    "meeting_detected_call_ended",
+                    properties: MeetingPromptTelemetry.properties(for: summary)
+                )
+            }
+            // Post-call awareness nudge: a long detected call ended with no
+            // recording (and no explicit decline). Policy gates live in the
+            // detector; the preference gate and opt-out live here.
+            meetingPromptDetector.onUnrecordedCallEnded = { [weak self] call in
+                guard let self else { return }
+                guard MissedCallNudgePreferences.isEnabled() else { return }
+                let presented = self.meetingOverlayController.presentMissedCallNudge(call)
+                if presented {
+                    AnalyticsReporter.track(
+                        "meeting_missed_call_nudge",
+                        properties: [
+                            "action": "shown",
+                            "duration_bucket": MissedCallNudgePolicy.durationBucket(for: call.duration),
+                            "provider": call.provider.rawValue,
+                        ]
+                    )
+                }
+            }
+            meetingOverlayController.onMissedCallNudgeResolved = { outcome in
+                if outcome == .disabled {
+                    MissedCallNudgePreferences.setEnabled(false)
+                }
+                AnalyticsReporter.track(
+                    "meeting_missed_call_nudge",
+                    properties: ["action": outcome.rawValue]
+                )
             }
             // Ad-hoc call detection: never prompt while we already hold the mic
             // (meeting recording or dictation), and feed mic-activity into the
@@ -258,6 +322,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             micActivityMonitor.onChange = { [weak self] micUsers in
                 self?.meetingPromptDetector.updateMicInputUsers(micUsers)
+            }
+            // Native-app audio output is the listen-only call signal (remote
+            // people talking, nothing holding the mic here). Same prompt pipe;
+            // the detector de-dupes it against the mic and camera signals.
+            micActivityMonitor.onOutputChange = { [weak self] outputUsers in
+                self?.meetingPromptDetector.updateAudioOutputUsers(outputUsers)
             }
             // Camera-on is a second, complementary call sensor (e.g. a camera-on,
             // mic-muted Meet join). It feeds the same prompt; the detector de-dupes
@@ -678,6 +748,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func finishOnboarding() {
         PermissionsOnboardingPreferences.markCompleted()
+        // Meeting detection only works while the app runs; register the login
+        // item by default now that onboarding gives the macOS notice context.
+        // One-time, and an explicit Settings choice always wins.
+        try? LaunchAtLoginController.applyDefaultEnableIfNeeded(onboardingCompleted: true)
         appState.recoverHotkeysAfterPermissionChange()
         onboardingWindowController.dismiss()
         closePopover()
@@ -747,7 +821,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "entrypoint": entrypoint,
                 "has_target": lastExternalApplication == nil ? "false" : "true",
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
-                "mic_status": microphoneStatusAnalyticsName(TranscriptedPermissionAccess.microphoneAuthorizationStatus()),
+                "mic_status": TranscriptedPermissionAccess.microphoneAuthorizationStatus().diagnosticName,
                 "model_state": appState.sttRouter.modelDownloadState.diagnosticName,
                 "pasteback_status": TranscriptedPermissionAccess.isGranted(.accessibility) ? "granted" : "not_granted",
             ]
@@ -761,21 +835,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingRecordingActive: appState.meetingSession.isRecording,
             dictationRecordingActive: appState.sttRouter.isRecording
         )
-    }
-
-    private func microphoneStatusAnalyticsName(_ status: AVAuthorizationStatus) -> String {
-        switch status {
-        case .notDetermined:
-            return "not_determined"
-        case .restricted:
-            return "restricted"
-        case .denied:
-            return "denied"
-        case .authorized:
-            return "authorized"
-        @unknown default:
-            return "unknown"
-        }
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {
@@ -884,8 +943,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         } else {
             micActivityMonitor.stop()
             cameraActivityMonitor.stop()
-            // Drop any in-flight mic/camera candidates so a stale call can't prompt.
+            // Drop any in-flight mic/output/camera candidates so a stale call can't prompt.
             meetingPromptDetector.updateMicInputUsers([])
+            meetingPromptDetector.updateAudioOutputUsers([])
             meetingPromptDetector.updateCameraInUse(false)
         }
     }

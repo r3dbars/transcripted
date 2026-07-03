@@ -12,7 +12,9 @@ enum MeetingPromptTelemetry {
     static func properties(
         for candidate: MeetingPromptDetector.Candidate,
         readiness: MeetingPromptTelemetryReadiness,
-        backoffKind: MeetingPromptBackoffKind? = nil
+        backoffKind: MeetingPromptBackoffKind? = nil,
+        signals: MeetingPromptSignalSnapshot? = nil,
+        dismissStreak: Int? = nil
     ) -> [String: String] {
         var properties = [
             "app_signal": candidate.analyticsAppSignal,
@@ -28,14 +30,28 @@ enum MeetingPromptTelemetry {
             properties["backoff_kind"] = backoffKind.rawValue
             properties["cooldown_reason"] = backoffKind.rawValue
         }
+        // Which sensors were live at the moment of the decision, so accepts and
+        // "Not now"s can be sliced by the evidence behind them. Booleans only.
+        // Named "output", not "speaker": property keys containing "speaker" are
+        // reserved for the sensitive speaker-name taxonomy guard and are
+        // dropped by the sanitizer.
+        if let signals {
+            properties["mic_signal"] = signals.micActive ? "true" : "false"
+            properties["output_signal"] = signals.speakerActive ? "true" : "false"
+            properties["camera_signal"] = signals.cameraActive ? "true" : "false"
+        }
+        if let dismissStreak {
+            properties["dismiss_streak_bucket"] = MeetingPromptCallTelemetry.dismissStreakBucket(dismissStreak)
+        }
         return properties
     }
 
     static func properties(
         for suppression: MeetingPromptSuppression,
-        readiness: MeetingPromptTelemetryReadiness
+        readiness: MeetingPromptTelemetryReadiness,
+        signals: MeetingPromptSignalSnapshot? = nil
     ) -> [String: String] {
-        var properties = properties(for: suppression.candidate, readiness: readiness)
+        var properties = properties(for: suppression.candidate, readiness: readiness, signals: signals)
         properties["suppression_reason"] = suppression.reason.rawValue
         if let cooldownReason = suppression.cooldownReason {
             properties["cooldown_reason"] = cooldownReason
@@ -44,6 +60,16 @@ enum MeetingPromptTelemetry {
             properties["capture_activity"] = captureActivity.rawValue
         }
         return properties
+    }
+
+    static func properties(for summary: MeetingPromptDetectedCallSummary) -> [String: String] {
+        [
+            "duration_bucket": MeetingPromptCallTelemetry.durationBucket(for: summary.duration),
+            "prompt_outcome": summary.promptOutcome.rawValue,
+            "provider": summary.provider.rawValue,
+            "signal_kinds": summary.signalKinds,
+            "was_recorded": summary.wasRecorded ? "true" : "false",
+        ]
     }
 
     static func readyState(readiness: MeetingPromptTelemetryReadiness) -> String {
