@@ -35,6 +35,13 @@ func testDictationTranscriptWriter() {
 
         let contents = (try? String(contentsOf: expectedURL, encoding: .utf8)) ?? ""
         assertTrue(contents.contains("# Dictations for"), "daily file should include a single day header")
+        assertTrue(contents.contains("capture_type: dictation_day"), "day header should mark the file as a dictation day capture")
+        assertTrue(contents.contains("format_version: 1"), "day header should carry the capture format_version key")
+        assertEqual(
+            contents.components(separatedBy: "format_version:").count - 1,
+            1,
+            "appending a second dictation must not write a second day header"
+        )
         assertTrue(contents.contains("## 9:15 AM -"), "first dictation section should include time heading")
         assertTrue(contents.contains("## 4:45 PM -"), "second dictation section should include time heading")
         assertTrue(contents.contains("first note from the morning"), "first dictation text should be present")

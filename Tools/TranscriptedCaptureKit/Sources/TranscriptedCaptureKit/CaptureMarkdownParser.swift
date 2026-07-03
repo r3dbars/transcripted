@@ -32,6 +32,12 @@ public struct ParsedMeetingCapture {
     public let droppedSegments: Int
     public let sttEngine: String
     public let diarizationEngine: String
+    /// `format_version` frontmatter when present. Absent means the file predates
+    /// capture-format versioning and parses as version 1 (docs/capture-format.md).
+    public let formatVersion: Int?
+    /// `transcript_style` frontmatter (`raw` or `styled`) when present. Absent
+    /// means pre-versioning; the body grammar is sniffed from its heading.
+    public let transcriptStyle: String?
     public let speakers: [Speaker]
     public let utterances: [Utterance]
 }
@@ -52,6 +58,9 @@ public struct ParsedDictationDayCapture {
 
     public let captureType: String
     public let date: String
+    /// `format_version` frontmatter when present. Absent means the day file
+    /// predates capture-format versioning and parses as version 1.
+    public let formatVersion: Int?
     public let markdownFilename: String
     public let entryCount: Int
     public let wordCount: Int
@@ -266,6 +275,8 @@ public enum CaptureMarkdownParser {
             droppedSegments: Int(document.values["dropped_segments"] ?? "") ?? 0,
             sttEngine: document.values["transcription_engine"] ?? "unknown",
             diarizationEngine: document.values["diarization_engine"] ?? "unknown",
+            formatVersion: Int(document.values["format_version"] ?? ""),
+            transcriptStyle: document.values["transcript_style"],
             speakers: speakers,
             utterances: utterances
         )
@@ -283,6 +294,7 @@ public enum CaptureMarkdownParser {
         return ParsedDictationDayCapture(
             captureType: document.values["capture_type"] ?? "dictation_day",
             date: document.values["date"] ?? fallbackDate,
+            formatVersion: Int(document.values["format_version"] ?? ""),
             markdownFilename: url.lastPathComponent,
             entryCount: entries.count,
             wordCount: entries.reduce(0) { $0 + $1.wordCount },

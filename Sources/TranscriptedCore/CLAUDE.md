@@ -60,7 +60,7 @@ The app still injects app-specific `CoreStoragePaths` for meetings so the
 capture folder follows the selected capture library rather than a hard-coded
 default path.
 
-`TranscriptSaver.saveTranscript(...)` writes a markdown transcript, including YAML speaker metadata and recording-health fields like `capture_quality`, `audio_gaps`, and `device_switches` when the host provides them.
+`TranscriptSaver.saveTranscript(...)` writes a markdown transcript, including YAML speaker metadata and recording-health fields like `capture_quality`, `audio_gaps`, and `device_switches` when the host provides them. The written Markdown (frontmatter keys, `format_version` / `transcript_style` versioning, both body grammars, and the save → summary-injection → restyle lifecycle) is specified in `docs/capture-format.md` — keep that spec in sync with formatter changes, and keep new frontmatter keys flat (the shared parser skips indented lines).
 
 The standalone CLI/MCP tools parse this same Markdown format through a dependency-free mirror in `Tools/TranscriptedCaptureKit` (it intentionally does not link Core). If `TranscriptFormatter` or `TranscriptFrontmatter` changes the written format, update the kit's parsers and tests in the same change.
 
@@ -116,6 +116,7 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/SpeakerProfileMergerTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerProvenanceTests.swift`
 - `Tests/TranscriptedCoreTests/StatsDatabaseTests.swift`
+- `Tests/TranscriptedCoreTests/TranscriptFormatVersionTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptFrontmatterTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptMetadataBuilderTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptionPipelineHelpersTests.swift`
