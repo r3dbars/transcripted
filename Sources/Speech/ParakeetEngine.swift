@@ -1161,7 +1161,7 @@ class ParakeetEngine: ObservableObject {
                 AnalyticsReporter.track(
                     "dictation_audio_route_recovery_finished",
                     properties: self.dictationRouteAnalyticsContext(
-                        selection: Self.loadDictationInputDeviceSelection(),
+                        selection: self.cachedInputDeviceSelection,
                         extra: [
                             "outcome": "failed",
                             "recovery_latency_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt),
@@ -1176,7 +1176,7 @@ class ParakeetEngine: ObservableObject {
                         event: "recording_interrupted",
                         message: "Recording interrupted — engine rewarm failed after device change",
                         context: self.dictationRouteDiagnosticsContext(
-                            selection: Self.loadDictationInputDeviceSelection(),
+                            selection: self.cachedInputDeviceSelection,
                             extra: [
                                 "audio_device": self.inputDeviceName,
                                 "error": error.localizedDescription
@@ -1188,7 +1188,7 @@ class ParakeetEngine: ObservableObject {
                         event: "device_change_rewarm_failed",
                         message: error.localizedDescription,
                         context: self.dictationRouteDiagnosticsContext(
-                            selection: Self.loadDictationInputDeviceSelection(),
+                            selection: self.cachedInputDeviceSelection,
                             extra: [
                                 "audio_device": self.inputDeviceName,
                                 "was_recording": "\(shouldRestartRecording)",
@@ -1200,7 +1200,7 @@ class ParakeetEngine: ObservableObject {
                         event: "device_change_rewarm_deferred",
                         message: "Idle audio route still settling after device change",
                         context: self.dictationRouteDiagnosticsContext(
-                            selection: Self.loadDictationInputDeviceSelection(),
+                            selection: self.cachedInputDeviceSelection,
                             extra: [
                                 "was_recording": "false",
                                 "error": error.localizedDescription,
@@ -1238,7 +1238,7 @@ class ParakeetEngine: ObservableObject {
             AnalyticsReporter.track(
                 "dictation_audio_route_recovery_timeout",
                 properties: self.dictationRouteAnalyticsContext(
-                    selection: Self.loadDictationInputDeviceSelection(),
+                    selection: self.cachedInputDeviceSelection,
                     extra: [
                         "recovery_latency_bucket": AnalyticsReporter.durationBucket(
                             seconds: Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000
@@ -1269,7 +1269,7 @@ class ParakeetEngine: ObservableObject {
                 event: diagnosticsEvent,
                 message: diagnosticsMessage,
                 context: self.dictationRouteDiagnosticsContext(
-                    selection: Self.loadDictationInputDeviceSelection(),
+                    selection: self.cachedInputDeviceSelection,
                     extra: [
                         "recovery_generation": "\(generation)",
                         "timeout_ms": "\(TranscriptedConstants.audioDeviceRecoveryTimeout / 1_000_000)",
@@ -1286,7 +1286,7 @@ class ParakeetEngine: ObservableObject {
                     event: "recording_interrupted",
                     message: "Recording interrupted because audio device recovery timed out",
                     context: self.dictationRouteDiagnosticsContext(
-                        selection: Self.loadDictationInputDeviceSelection(),
+                        selection: self.cachedInputDeviceSelection,
                         extra: [
                             "audio_device": self.inputDeviceName,
                             "reason": "device_change_recovery_timeout"
@@ -1498,9 +1498,11 @@ class ParakeetEngine: ObservableObject {
     ) async throws -> ParakeetAudioInputSnapshot {
         let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
         let selectionStartedAt = CFAbsoluteTimeGetCurrent()
-        let selection = Self.loadDictationInputDeviceSelection(
-            allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
-        )
+        let selection = await Task.detached(priority: .utility) {
+            Self.loadDictationInputDeviceSelection(
+                allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
+            )
+        }.value
         var stageTimings = [
             "audio_input_selection_load_ms": Self.elapsedMilliseconds(since: selectionStartedAt)
         ]
