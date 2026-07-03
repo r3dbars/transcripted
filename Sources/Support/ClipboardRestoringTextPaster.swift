@@ -224,15 +224,6 @@ final class ClipboardRestoringTextPaster {
         let isComplete: Bool
     }
 
-    private static let eagerlySnapshottedPasteboardTypes: Set<NSPasteboard.PasteboardType> = [
-        .string,
-        .rtf,
-        .html,
-        .tabularText,
-        .URL,
-        .fileURL
-    ]
-
     private struct PendingClipboardRestore {
         let savedItems: PasteboardSnapshot
         let temporaryString: String
@@ -599,10 +590,6 @@ final class ClipboardRestoringTextPaster {
         let items: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
             for type in item.types {
-                guard Self.eagerlySnapshottedPasteboardTypes.contains(type) else {
-                    isComplete = false
-                    continue
-                }
                 guard let data = item.data(forType: type),
                       data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes else {
                     isComplete = false

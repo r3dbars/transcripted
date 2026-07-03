@@ -69,7 +69,7 @@ func testClipboardRestoringTextPaster() async {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
             let customType = NSPasteboard.PasteboardType("com.transcripted.clipboard-test")
-            let customData = Data([0xde, 0xad, 0xbe, 0xef])
+            let customData = Data(repeating: 0xab, count: TranscriptedConstants.clipboardSnapshotMaxTypeBytes + 1)
             let originalString = "original rich clipboard"
             let temporary = "temporary dictation"
 
@@ -80,7 +80,7 @@ func testClipboardRestoringTextPaster() async {
             pasteboard.clearContents()
             pasteboard.writeObjects([stringItem, customItem])
             let snapshot = paster.snapshotPasteboardItems(from: pasteboard)
-            assertFalse(snapshot.isComplete, "custom pasteboard data should mark the snapshot incomplete")
+            assertFalse(snapshot.isComplete, "oversized pasteboard data should mark the snapshot incomplete")
 
             pasteboard.clearContents()
             pasteboard.setString(temporary, forType: .string)
@@ -100,14 +100,14 @@ func testClipboardRestoringTextPaster() async {
                 temporary,
                 "incomplete snapshots should leave the temporary clipboard untouched instead of clearing it"
             )
-            assertNil(restoredItems.first?.data(forType: customType), "custom data should not be eagerly snapshotted")
+            assertNil(restoredItems.first?.data(forType: customType), "oversized data should not be eagerly snapshotted")
         }
 
         runSuite("ClipboardRestoringTextPaster.paste — incomplete snapshots still dispatch without restore") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
             let customType = NSPasteboard.PasteboardType("com.transcripted.clipboard-test")
-            let customData = Data([0xde, 0xad, 0xbe, 0xef])
+            let customData = Data(repeating: 0xcd, count: TranscriptedConstants.clipboardSnapshotMaxTypeBytes + 1)
             let customItem = NSPasteboardItem()
             customItem.setData(customData, forType: customType)
             pasteboard.clearContents()
