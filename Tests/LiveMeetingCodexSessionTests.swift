@@ -170,6 +170,36 @@ func testLiveMeetingCodexSession() {
         )
     }
 
+    runSuite("LiveMeetingCodexSession sidecar failures - persist failed status even when transcript note cannot be trusted") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedLiveMeetingCodex-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let session = LiveMeetingCodexSession(workspaceRoot: root)
+        try? session.start(
+            title: "Sidecar Write Failure",
+            startedAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+
+        let note = "Live sidecar stopped updating after repeated write failures."
+        try? session.markSidecarAppendFailed(
+            note: note,
+            at: Date(timeIntervalSince1970: 1_765_994_430)
+        )
+
+        let state = decodeLiveMeetingCodexState(at: session.stateURL)
+        assertEqual(state?.status, .failed, "state should mark the live sidecar failed")
+        assertEqual(state?.streamingBackendStatus, "sidecar_append_failed", "streaming status should name append failure")
+        assertEqual(state?.note, note, "state note should tell agents the live sidecar is stale")
+
+        let liveText = (try? String(contentsOf: session.liveTranscriptURL, encoding: .utf8)) ?? ""
+        assertTrue(liveText.contains("Status: failed"), "live transcript status should reflect sidecar failure")
+        assertTrue(liveText.contains(note), "live transcript should include the sidecar failure note when writable")
+
+        let handoffText = (try? String(contentsOf: session.handoffURL, encoding: .utf8)) ?? ""
+        assertTrue(handoffText.contains("Status: failed"), "agent handoff should stop advertising a live recording")
+    }
+
     runSuite("LiveMeetingCodexSession.ensureWorkspaceFiles - rebuilds automatic handoff from saved state") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedLiveMeetingCodex-\(UUID().uuidString)", isDirectory: true)

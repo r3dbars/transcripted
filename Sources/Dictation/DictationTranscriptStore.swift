@@ -35,6 +35,11 @@ struct DictationTranscriptCounts: Sendable {
 
 enum DictationTranscriptStore {
     private static let dictationDayPrefix = "Dictations_"
+    private struct DictationFileStatsCacheKey: Hashable {
+        let path: String
+        let fileSize: Int64
+        let modificationTime: TimeInterval
+    }
 
     private static let iso8601Formatters: [ISO8601DateFormatter] = {
         let fractional = ISO8601DateFormatter()
@@ -46,6 +51,8 @@ enum DictationTranscriptStore {
         return [fractional, standard]
     }()
     private static let iso8601FormatterQueue = DispatchQueue(label: "Transcripted.DictationTranscriptStore.iso8601Formatters")
+    private static let statsCacheQueue = DispatchQueue(label: "Transcripted.DictationTranscriptStore.fileStatsCache")
+    private static var statsCache: [DictationFileStatsCacheKey: DictationFileStats] = [:]
 
     @discardableResult
     static func save(
@@ -94,7 +101,7 @@ enum DictationTranscriptStore {
 
         for file in files where isDictationDayFile(file) {
             if Task.isCancelled { break }
-            let stats = fileStats(in: file)
+            let stats = cachedFileStats(in: file)
             total += stats.entries
             totalWords += stats.words
             if file.lastPathComponent == todayURL.lastPathComponent {
@@ -223,6 +230,36 @@ enum DictationTranscriptStore {
     private struct DictationFileStats {
         let entries: Int
         let words: Int
+    }
+
+    private static func cachedFileStats(in url: URL) -> DictationFileStats {
+        guard let key = statsCacheKey(for: url) else {
+            return fileStats(in: url)
+        }
+
+        if let cached = statsCacheQueue.sync(execute: { statsCache[key] }) {
+            return cached
+        }
+
+        let stats = fileStats(in: url)
+        statsCacheQueue.sync {
+            statsCache[key] = stats
+        }
+        return stats
+    }
+
+    private static func statsCacheKey(for url: URL) -> DictationFileStatsCacheKey? {
+        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+              let fileSize = values.fileSize,
+              let modificationDate = values.contentModificationDate else {
+            return nil
+        }
+
+        return DictationFileStatsCacheKey(
+            path: url.standardizedFileURL.path,
+            fileSize: Int64(fileSize),
+            modificationTime: modificationDate.timeIntervalSinceReferenceDate
+        )
     }
 
     private static func fileStats(in url: URL) -> DictationFileStats {

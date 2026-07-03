@@ -96,6 +96,10 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private var updateState = LiveMeetingStreamingUpdateState()
     private var lastFeedText = ""
     private var lastFeedWasFinal = false
+    private var consecutiveSidecarAppendFailures = 0
+    private var reportedSidecarAppendFailure = false
+
+    private static let sidecarAppendFailureThreshold = 3
 
     init(
         source: LiveMeetingCodexSource,
@@ -285,7 +289,31 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
             updateState.lastAppendedWasFinal = update.isConfirmed
         }
 
-        try? codexSession.append(entry)
+        do {
+            try codexSession.append(entry)
+            lock.withLock {
+                consecutiveSidecarAppendFailures = 0
+            }
+        } catch {
+            let shouldReport = lock.withLock { () -> Bool in
+                consecutiveSidecarAppendFailures += 1
+                guard consecutiveSidecarAppendFailures >= Self.sidecarAppendFailureThreshold,
+                      !reportedSidecarAppendFailure else {
+                    return false
+                }
+                reportedSidecarAppendFailure = true
+                return true
+            }
+            guard shouldReport else { return }
+
+            let note = "Live sidecar stopped updating after repeated write failures. The final Transcripted transcript still saves normally."
+            try? codexSession.markSidecarAppendFailed(note: note)
+            if let feed {
+                Task { @MainActor in
+                    feed.markFailed(note: note)
+                }
+            }
+        }
     }
 
     private static func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {

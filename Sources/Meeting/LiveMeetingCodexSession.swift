@@ -348,6 +348,25 @@ final class LiveMeetingCodexSession {
         }
     }
 
+    func markSidecarAppendFailed(note: String, at date: Date = Date()) throws {
+        try withSessionLock {
+            try ensureWorkspaceFilesLocked(createdAt: date, forcePreviewRewrite: false)
+            state.status = .failed
+            state.streamingBackendStatus = "sidecar_append_failed"
+            state.updatedAt = date
+            state.note = note
+
+            // Persist state first. The live transcript itself may be locked,
+            // missing, or on a full volume, so failure to append the note must
+            // not hide the failed sidecar status from agents or the preview.
+            try writeState()
+            try? rewriteLiveTranscriptStatus(state.status.rawValue)
+            try? appendText("\n\(note)\n", to: liveTranscriptURL)
+            try? writeTextIfChanged(failedHandoffText(title: state.title, endedAt: date), to: handoffURL)
+            try? writePreview()
+        }
+    }
+
     private func withSessionLock<T>(_ body: () throws -> T) rethrows -> T {
         sessionLock.lock()
         defer { sessionLock.unlock() }

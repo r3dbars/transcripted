@@ -81,17 +81,18 @@ private enum PhysicalShortcutPhase {
 
 private final class PhysicalShortcutDetector {
     /// Cached binding snapshot, rebuilt by ContextCaptureEngine on
-    /// .hotkeysDidChange. The tap callback runs on the main run loop for every
-    /// system-wide keyDown/keyUp/flagsChanged, so it must read this cache
-    /// instead of hitting UserDefaults per keystroke — per-event preference
-    /// reads add latency to all typing on the machine and raise the
-    /// tapDisabledByTimeout risk. Both the tap callback and the engine's
-    /// configure path run on the main thread, so a plain property is safe.
-    var shortcutBindings: [PhysicalShortcutBinding] = []
-    var onShortcut: ((PhysicalShortcutAction, PhysicalShortcutPhase) -> Void)?
+    /// .hotkeysDidChange. The active event tap is serviced on a dedicated
+    /// thread so Transcripted main-thread work cannot delay system-wide key
+    /// delivery, and the callback reads this cache instead of hitting
+    /// UserDefaults per keystroke.
+    private var shortcutBindings: [PhysicalShortcutBinding] = []
+    private var onShortcut: ((PhysicalShortcutAction, PhysicalShortcutPhase) -> Void)?
 
+    private let stateLock = NSLock()
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var tapRunLoop: CFRunLoop?
+    private var tapThread: Thread?
     private var activePushToTalkKeyCode: UInt32?
     private var consumedKeyCodes: Set<UInt32> = []
     private var pendingModifierShortcut: PendingModifierShortcut?
@@ -110,6 +111,16 @@ private final class PhysicalShortcutDetector {
             .fromOpaque(userInfo)
             .takeUnretainedValue()
         return detector.handle(type: type, event: event)
+    }
+
+    func updateShortcutConfiguration(
+        bindings: [PhysicalShortcutBinding],
+        onShortcut: @escaping (PhysicalShortcutAction, PhysicalShortcutPhase) -> Void
+    ) {
+        stateLock.lock()
+        shortcutBindings = bindings
+        self.onShortcut = onShortcut
+        stateLock.unlock()
     }
 
     func install() -> String? {
@@ -141,27 +152,67 @@ private final class PhysicalShortcutDetector {
             return "Shortcut trigger failed to start"
         }
 
+        let startSemaphore = DispatchSemaphore(value: 0)
         eventTap = tap
         runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
+        let thread = Thread { [weak self] in
+            let runLoop = CFRunLoopGetCurrent()
+            self?.stateLock.lock()
+            self?.tapRunLoop = runLoop
+            self?.stateLock.unlock()
+
+            CFRunLoopAddSource(runLoop, source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            startSemaphore.signal()
+            CFRunLoopRun()
+            CFRunLoopRemoveSource(runLoop, source, .commonModes)
+        }
+        thread.name = "TranscriptedPhysicalShortcutTap"
+        thread.qualityOfService = .userInteractive
+        tapThread = thread
+        thread.start()
+
+        if startSemaphore.wait(timeout: .now() + 1.0) == .timedOut {
+            CFMachPortInvalidate(tap)
+            resetState()
+            eventTap = nil
+            runLoopSource = nil
+            tapRunLoop = nil
+            tapThread = nil
+            return "Shortcut trigger failed to start"
+        }
+
         return nil
     }
 
     func remove() {
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-            CFMachPortInvalidate(eventTap)
-        }
+        stateLock.lock()
+        let tap = eventTap
+        let runLoop = tapRunLoop
         runLoopSource = nil
         eventTap = nil
-        resetState()
+        tapRunLoop = nil
+        tapThread = nil
+        resetStateLocked()
+        stateLock.unlock()
+
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
+        if let runLoop {
+            CFRunLoopStop(runLoop)
+            CFRunLoopWakeUp(runLoop)
+        }
     }
 
     private func resetState() {
+        stateLock.lock()
+        resetStateLocked()
+        stateLock.unlock()
+    }
+
+    private func resetStateLocked() {
         pendingModifierShortcut?.workItem?.cancel()
         pendingModifierShortcut = nil
         activePushToTalkKeyCode = nil
@@ -169,6 +220,9 @@ private final class PhysicalShortcutDetector {
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
@@ -333,8 +387,10 @@ private final class PhysicalShortcutDetector {
         let workItem: DispatchWorkItem?
         if action == .dictationPushToTalk {
             let delayedWorkItem = DispatchWorkItem { [weak self] in
-                guard let self,
-                      self.pendingModifierShortcut?.keyCode == keyCode,
+                guard let self else { return }
+                self.stateLock.lock()
+                defer { self.stateLock.unlock() }
+                guard self.pendingModifierShortcut?.keyCode == keyCode,
                       self.pendingModifierShortcut?.action == action else {
                     return
                 }
@@ -471,8 +527,7 @@ class ContextCaptureEngine: ObservableObject {
         // here through reRegisterHotkeys(), so the detector's cache never goes
         // stale — and the per-keystroke tap callback stays free of
         // UserDefaults reads and migration-fallback work.
-        physicalShortcutDetector.shortcutBindings = Self.currentShortcutBindings()
-        physicalShortcutDetector.onShortcut = { [weak self] action, phase in
+        physicalShortcutDetector.updateShortcutConfiguration(bindings: Self.currentShortcutBindings()) { [weak self] action, phase in
             Task { @MainActor [weak self] in
                 self?.handlePhysicalShortcut(action, phase: phase)
             }

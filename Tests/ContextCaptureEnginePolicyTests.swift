@@ -104,18 +104,27 @@ func testContextCaptureEnginePolicy() {
     }
 
     // MARK: - Cached binding snapshot
-    // The CGEventTap callback runs on the main run loop for every system-wide
-    // keyDown/keyUp/flagsChanged. It must read a cached binding snapshot —
-    // rebuilt on .hotkeysDidChange — instead of hitting UserDefaults (4 binding
-    // lookups plus migration fallbacks) per keystroke, which added latency to
-    // all typing on the machine and raised the tapDisabledByTimeout risk.
+    // The active CGEventTap callback runs for every system-wide keyDown/keyUp/
+    // flagsChanged. It must be serviced off the main run loop and read a cached
+    // binding snapshot — rebuilt on .hotkeysDidChange — instead of hitting
+    // UserDefaults (4 binding lookups plus migration fallbacks) per keystroke,
+    // which added latency to all typing on the machine and raised the
+    // tapDisabledByTimeout risk.
 
     runSuite("ContextCaptureEngine binding snapshot — tap callback reads cached bindings, not per-event UserDefaults") {
         let source = readContextCaptureEngineSource()
 
         assertTrue(
-            source.contains("physicalShortcutDetector.shortcutBindings = Self.currentShortcutBindings()"),
+            source.contains("physicalShortcutDetector.updateShortcutConfiguration(bindings: Self.currentShortcutBindings())"),
             "engine should rebuild the detector's cached binding snapshot when it (re)configures the detector"
+        )
+        assertTrue(
+            source.contains("thread.name = \"TranscriptedPhysicalShortcutTap\""),
+            "active event tap should be serviced by the dedicated shortcut thread instead of the main run loop"
+        )
+        assertFalse(
+            source.contains("CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)"),
+            "active event tap should not attach its source to the main run loop"
         )
         assertFalse(
             source.contains("bindingProvider"),
