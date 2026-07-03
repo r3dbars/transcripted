@@ -32,6 +32,13 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         }
     }
 
+    static func requiredForCurrentUse(dictationShortcutsEnabled: Bool) -> [TranscriptedPermissionKind] {
+        if dictationShortcutsEnabled {
+            return [.microphone, .accessibility]
+        }
+        return [.microphone, .systemAudioRecording]
+    }
+
     var title: String {
         switch self {
         case .microphone:
