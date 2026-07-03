@@ -222,7 +222,7 @@ private final class PhysicalShortcutDetector {
         defer { stateLock.unlock() }
 
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            reconcileStateAfterTapWasDisabled()
+            reconcileActivePushToTalkAfterTapDisabled()
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
@@ -416,21 +416,31 @@ private final class PhysicalShortcutDetector {
         pendingModifierShortcut = nil
     }
 
-    private func reconcileStateAfterTapWasDisabled() {
+    private func reconcileActivePushToTalkAfterTapDisabled() {
         cancelPendingModifierShortcut()
 
-        if let keyCode = activePushToTalkKeyCode,
-           !Self.isKeyPhysicallyDown(keyCode) {
+        if PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease(
+            activeKeyCode: activePushToTalkKeyCode,
+            isPhysicallyDown: Self.isPhysicalKeyDown
+        ), let releasedKeyCode = activePushToTalkKeyCode {
             activePushToTalkKeyCode = nil
-            consumedKeyCodes.remove(keyCode)
+            consumedKeyCodes.remove(releasedKeyCode)
             onShortcut?(.dictationPushToTalk, .release)
         }
 
-        consumedKeyCodes = consumedKeyCodes.filter { Self.isKeyPhysicallyDown($0) }
+        consumedKeyCodes = consumedKeyCodes.filter { Self.isPhysicalKeyDown($0) }
     }
 
-    private static func isKeyPhysicallyDown(_ keyCode: UInt32) -> Bool {
-        CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
+    private static func isPhysicalKeyDown(_ keyCode: UInt32) -> Bool {
+        if PhysicalDictationTriggerPreferences.isModifierKey(keyCode),
+           let modifier = PhysicalDictationTriggerPreferences.primaryModifierMask(for: keyCode) {
+            let modifiers = PhysicalDictationTriggerPreferences.modifiers(
+                from: CGEventSource.flagsState(.combinedSessionState)
+            )
+            return (modifiers & modifier) != 0
+        }
+
+        return CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
     }
 }
 

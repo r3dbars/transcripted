@@ -766,6 +766,41 @@ func testParakeetStartRecordingFailurePolicy() {
             "shared watchdog cancellation should clear pending zombie restart state"
         )
     }
+
+    runSuite("ParakeetEngine preserves recovered dictation audio for stop and wake recovery") {
+        let source = readParakeetEngineSource()
+        guard let wakeStart = source.range(of: "private func handleSystemWake()"),
+              let wakeEnd = source.range(of: "// MARK: - Recording", range: wakeStart.upperBound..<source.endIndex),
+              let stopStart = source.range(of: "func stopRecording()"),
+              let stopEnd = source.range(of: "// MARK: - EOU Streaming", range: stopStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find wake and stopRecording bodies")
+            return
+        }
+
+        let wakeBody = String(source[wakeStart.lowerBound..<wakeEnd.lowerBound])
+        let stopBody = String(source[stopStart.lowerBound..<stopEnd.lowerBound])
+
+        assertTrue(
+            wakeBody.contains("preserveCurrentRecordingBuffersForRecovery()"),
+            "system wake during dictation should move buffered speech into the recovered timeline before teardown"
+        )
+        assertTrue(
+            wakeBody.contains("interruptRecordingPreservingRecoveredTimeline()"),
+            "system wake should mark the interruption without clearing recovered audio"
+        )
+        assertTrue(
+            stopBody.contains("preservingRecordingAcrossRecovery || !recoveredRecordingTimeline.isEmpty"),
+            "stopRecording while recovery holds audio should preserve the timeline"
+        )
+        assertTrue(
+            stopBody.contains("cancelPendingRecordingRecovery()"),
+            "user stop during recovery should cancel pending restart tasks before transcribing recovered audio"
+        )
+        assertTrue(
+            source.contains("var hasRecoverableRecording: Bool"),
+            "the router/UI need a public engine signal for recovered dictation audio"
+        )
+    }
 }
 
 private func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String {
