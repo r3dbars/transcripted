@@ -65,6 +65,7 @@ struct TranscriptedSettingsView: View {
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
+    @State private var missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
@@ -2220,9 +2221,29 @@ struct TranscriptedSettingsView: View {
                         : "Only detect meetings from your calendar and conferencing apps.",
                     info: GeneralInfo(
                         title: "Auto-detect calls",
-                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone, or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
+                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone, when a conferencing app starts playing call audio (even if you joined muted), or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
+                )
+
+                GeneralToggleRow(
+                    title: "Missed-call reminders",
+                    isOn: Binding(
+                        get: { missedCallNudgeEnabled },
+                        set: { newValue in
+                            missedCallNudgeEnabled = newValue
+                            trackSettingsToggle("missed_call_nudge", enabled: newValue, page: .general)
+                            MissedCallNudgePreferences.setEnabled(newValue)
+                        }
+                    ),
+                    help: missedCallNudgeEnabled
+                        ? "Mention when a long call ends without a recording."
+                        : "Stay quiet when calls end without a recording.",
+                    info: GeneralInfo(
+                        title: "Missed-call reminders",
+                        message: "When a detected call lasts ten minutes or more and ends without a Transcripted recording, a small reminder appears so you know the meeting was not captured. It never shows after you decline a recording prompt, and it appears at most a few times a day."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.missed-call-reminders"
                 )
             }
 
@@ -4330,6 +4351,7 @@ struct TranscriptedSettingsView: View {
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+        missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
         refreshLocalSummarySetupStatus()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))

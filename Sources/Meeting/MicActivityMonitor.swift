@@ -37,6 +37,17 @@
 // deadline so a genuine call still surfaces within a couple of seconds. This is
 // the on-device "is this really a call?" check that lets us be aggressive on
 // latency without prompting on every blip.
+//
+// Output side (listen-only call detection): the same process objects also expose
+// kAudioProcessPropertyIsRunningOutput, so each scan additionally collects which
+// *native conferencing apps* are playing audio output. That is the signal for
+// the call the mic and camera both miss — a listen-only or hard-muted join where
+// remote people are talking but nothing on this Mac holds the mic. Output is
+// scoped to native conferencing families only (`MeetingPromptProvider
+// .audioOutputProvider`): browser/media output is dominated by non-call playback
+// and never enters the confirmer, so Spotify or YouTube cannot churn emissions.
+// Output uses a longer sustain than the mic because conferencing apps also play
+// short notification sounds (message dings, join chimes) that must not prompt.
 
 import CoreAudio
 import Foundation
@@ -48,12 +59,18 @@ final class MicActivityMonitor: @unchecked Sendable {
     /// last mic user stopped). Assign before calling `start()` and do not mutate
     /// while running.
     var onChange: ((Set<String>) -> Void)?
+    /// Delivered on the main actor with the set of native conferencing bundle IDs
+    /// confirmed to be playing audio output (the listen-only call signal). An
+    /// empty set is the explicit "inactive" edge. Assign before calling `start()`
+    /// and do not mutate while running.
+    var onOutputChange: ((Set<String>) -> Void)?
 
     private let ownBundleID: String
     private let queue = DispatchQueue(label: "MicActivityMonitor.process-objects", qos: .utility)
     private let debounceInterval: TimeInterval
     private let pollInterval: TimeInterval
     private let sustainInterval: TimeInterval
+    private let outputSustainInterval: TimeInterval
 
     // All of the following are touched only on `queue`.
     private var started = false
@@ -63,18 +80,22 @@ final class MicActivityMonitor: @unchecked Sendable {
     private var debounceWorkItem: DispatchWorkItem?
     private var sustainWorkItem: DispatchWorkItem?
     private var activeSince: [String: Date] = [:]
+    private var outputActiveSince: [String: Date] = [:]
     private var lastEmitted: Set<String>?
+    private var lastEmittedOutput: Set<String>?
 
     init(
         ownBundleID: String = Bundle.main.bundleIdentifier ?? "",
         debounceInterval: TimeInterval = 1.0,
         pollInterval: TimeInterval = 5.0,
-        sustainInterval: TimeInterval = 3.0
+        sustainInterval: TimeInterval = 3.0,
+        outputSustainInterval: TimeInterval = 10.0
     ) {
         self.ownBundleID = ownBundleID
         self.debounceInterval = debounceInterval
         self.pollInterval = pollInterval
         self.sustainInterval = sustainInterval
+        self.outputSustainInterval = outputSustainInterval
     }
 
     // MARK: - Lifecycle (called on the main actor)
@@ -101,7 +122,9 @@ final class MicActivityMonitor: @unchecked Sendable {
             self.sustainWorkItem?.cancel()
             self.sustainWorkItem = nil
             self.activeSince = [:]
+            self.outputActiveSince = [:]
             self.lastEmitted = nil
+            self.lastEmittedOutput = nil
         }
     }
 
@@ -126,6 +149,24 @@ final class MicActivityMonitor: @unchecked Sendable {
         return bundleIDs.filter { !$0.matchesBundleFamily(ownBundleID) }
     }
 
+    /// Bundle IDs of *native conferencing* processes currently playing audio
+    /// output, minus our own. Deliberately narrower than the mic side: only
+    /// bundles that map to a native provider via
+    /// `MeetingPromptProvider.audioOutputProvider` count, so browsers and media
+    /// apps never enter the sustain confirmer and cannot churn emissions. This is
+    /// the listen-only / hard-muted call signal.
+    static func callOutputBundleIDs(
+        from processes: [(bundleID: String?, isRunningOutput: Bool)],
+        ownBundleID: String
+    ) -> Set<String> {
+        let active = processes.compactMap { process -> String? in
+            guard process.isRunningOutput, let bundleID = process.bundleID else { return nil }
+            guard MeetingPromptProvider.audioOutputProvider(forBundleID: bundleID) != nil else { return nil }
+            return bundleID
+        }
+        return nonSelfBundleIDs(Set(active), ownBundleID: ownBundleID)
+    }
+
     // MARK: - Scanning (on `queue`)
 
     private func scheduleDebouncedScan() {
@@ -136,25 +177,52 @@ final class MicActivityMonitor: @unchecked Sendable {
     }
 
     private func scanAndEmit() {
-        let raw = Self.micUsingBundleIDs(from: currentProcessInputState(), ownBundleID: ownBundleID)
+        let processes = currentProcessAudioState()
         let now = Date()
-        let outcome = SustainedActivityConfirmer.confirm(
-            raw: raw,
+
+        let micRaw = Self.micUsingBundleIDs(
+            from: processes.map { (bundleID: $0.bundleID, isRunningInput: $0.isRunningInput) },
+            ownBundleID: ownBundleID
+        )
+        let micOutcome = SustainedActivityConfirmer.confirm(
+            raw: micRaw,
             activeSince: activeSince,
             now: now,
             sustain: sustainInterval
         )
-        activeSince = outcome.activeSince
-        // Re-scan exactly when the next pending bundle would cross the sustain
-        // threshold, so a real call surfaces ~`sustainInterval` after it starts
-        // rather than waiting for the next backstop poll.
-        scheduleSustainScan(at: outcome.nextDeadline, now: now)
+        activeSince = micOutcome.activeSince
 
-        let users = outcome.confirmed
-        guard users != lastEmitted else { return }
-        lastEmitted = users
-        let callback = onChange
-        DispatchQueue.main.async { callback?(users) }
+        let outputRaw = Self.callOutputBundleIDs(
+            from: processes.map { (bundleID: $0.bundleID, isRunningOutput: $0.isRunningOutput) },
+            ownBundleID: ownBundleID
+        )
+        let outputOutcome = SustainedActivityConfirmer.confirm(
+            raw: outputRaw,
+            activeSince: outputActiveSince,
+            now: now,
+            sustain: outputSustainInterval
+        )
+        outputActiveSince = outputOutcome.activeSince
+
+        // Re-scan exactly when the next pending bundle (either side) would cross
+        // its sustain threshold, so a real call surfaces ~sustain after it starts
+        // rather than waiting for the next backstop poll.
+        let nextDeadline = [micOutcome.nextDeadline, outputOutcome.nextDeadline].compactMap { $0 }.min()
+        scheduleSustainScan(at: nextDeadline, now: now)
+
+        if micOutcome.confirmed != lastEmitted {
+            lastEmitted = micOutcome.confirmed
+            let callback = onChange
+            let users = micOutcome.confirmed
+            DispatchQueue.main.async { callback?(users) }
+        }
+
+        if outputOutcome.confirmed != lastEmittedOutput {
+            lastEmittedOutput = outputOutcome.confirmed
+            let callback = onOutputChange
+            let users = outputOutcome.confirmed
+            DispatchQueue.main.async { callback?(users) }
+        }
     }
 
     private func scheduleSustainScan(at deadline: Date?, now: Date) {
@@ -246,9 +314,13 @@ final class MicActivityMonitor: @unchecked Sendable {
 
     // MARK: - CoreAudio reads (on `queue`; read-only, no stored-state mutation)
 
-    private func currentProcessInputState() -> [(bundleID: String?, isRunningInput: Bool)] {
+    private func currentProcessAudioState() -> [(bundleID: String?, isRunningInput: Bool, isRunningOutput: Bool)] {
         processObjectIDs().map { object in
-            (bundleID: bundleIDProperty(object), isRunningInput: isRunningInputProperty(object))
+            (
+                bundleID: bundleIDProperty(object),
+                isRunningInput: isRunningInputProperty(object),
+                isRunningOutput: isRunningOutputProperty(object)
+            )
         }
     }
 
@@ -275,6 +347,18 @@ final class MicActivityMonitor: @unchecked Sendable {
     private func isRunningInputProperty(_ object: AudioObjectID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioProcessPropertyIsRunningInput,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value)
+        return status == noErr && value != 0
+    }
+
+    private func isRunningOutputProperty(_ object: AudioObjectID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyIsRunningOutput,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
