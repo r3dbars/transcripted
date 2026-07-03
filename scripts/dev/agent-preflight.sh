@@ -175,7 +175,7 @@ if [ -n "$changed_paths" ]; then
         if matches_any "$path" "scripts/dev/benchmark-home-recent-captures.sh" "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "bash -n scripts/dev/benchmark-home-recent-captures.sh"
-            add_command "scripts/dev/benchmark-home-recent-captures.sh"
+            add_command "scripts/dev/benchmark-home-recent-captures.sh --max-average-load-ms 500 --max-cancellation-ms 100"
         fi
 
         if matches_any "$path" "scripts/ops/generate-nightly-digest.py"; then
