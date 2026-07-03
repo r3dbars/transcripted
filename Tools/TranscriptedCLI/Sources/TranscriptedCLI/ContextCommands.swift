@@ -18,21 +18,26 @@ struct ContextRecent: ParsableCommand {
     @Option(name: .long, help: "End date filter (YYYY-MM-DD).")
     var dateTo: String?
 
-    @Option(name: .shortAndLong, help: "Number of items to return.")
+    @Option(name: .shortAndLong, help: "Number of items to return (valid range 1-50; values outside are clamped).")
     var count: Int = 10
 
     @Flag(name: .long, help: "Output JSON instead of text.")
     var json: Bool = false
 
     func run() throws {
+        let directories = paths.resolved
         let items = CLIContextStore.recent(
-            in: paths.resolved,
+            in: directories,
             kind: kind,
             count: max(1, min(count, 50)),
             dateFrom: dateFrom,
             dateTo: dateTo
         )
-        try printContextItems(items, asJSON: json)
+        try printContextItems(
+            items,
+            asJSON: json,
+            searchedDirectories: searchedDirectoryPaths(in: directories, kind: kind)
+        )
     }
 }
 
@@ -59,23 +64,33 @@ struct ContextSearch: ParsableCommand {
     @Option(name: .long, help: "End date filter (YYYY-MM-DD).")
     var dateTo: String?
 
-    @Option(name: .shortAndLong, help: "Number of results to return.")
+    @Option(name: .shortAndLong, help: "Number of results to return (valid range 1-50; values outside are clamped).")
     var count: Int = 10
 
     @Flag(name: .long, help: "Output JSON instead of text.")
     var json: Bool = false
 
     func run() throws {
+        let directories = paths.resolved
+        var notes: [String] = []
+        if speaker != nil, kind != .meeting {
+            notes.append("Note: --speaker only matches meetings; dictations skipped.")
+        }
         let items = CLIContextStore.search(
             query: query,
             speaker: speaker,
-            in: paths.resolved,
+            in: directories,
             kind: kind,
             count: max(1, min(count, 50)),
             dateFrom: dateFrom,
             dateTo: dateTo
         )
-        try printContextItems(items, asJSON: json)
+        try printContextItems(
+            items,
+            asJSON: json,
+            searchedDirectories: searchedDirectoryPaths(in: directories, kind: kind),
+            notes: notes
+        )
     }
 }
 
@@ -93,23 +108,34 @@ struct ListDictations: ParsableCommand {
     @Option(name: .long, help: "End date filter (YYYY-MM-DD).")
     var dateTo: String?
 
-    @Option(name: .shortAndLong, help: "Number of days to return.")
+    @Option(name: .shortAndLong, help: "Number of days to return (valid range 1-50; values outside are clamped).")
     var count: Int = 10
 
     @Flag(name: .long, help: "Output JSON instead of text.")
     var json: Bool = false
 
     func run() throws {
+        let directories = paths.resolved
         let days = CLIContextStore.listDictationDays(
-            in: paths.resolved,
+            in: directories,
             count: max(1, min(count, 50)),
             dateFrom: dateFrom,
             dateTo: dateTo
         )
+        let searchedDirectories = searchedDirectoryPaths(in: directories, kind: .dictation)
 
         if json {
+            if days.isEmpty {
+                try printEmptyResultsJSON(searchedDirectories: searchedDirectories, notes: [])
+                return
+            }
             let data = try JSONEncoder.contextPretty.encode(days)
             print(String(data: data, encoding: .utf8) ?? "[]")
+            return
+        }
+
+        if days.isEmpty {
+            printEmptyResultsToStandardError(searchedDirectories: searchedDirectories)
             return
         }
 
@@ -139,13 +165,17 @@ struct ReadMeeting: ParsableCommand {
 
     func run() throws {
         let markdown = try CLIContextStore.readMeeting(filename: filename, in: paths.resolved)
-        try printReadMarkdown(
+        let transcript = json ? CLIContextStore.meetingTranscript(fromMarkdown: markdown) : nil
+        let document = CLIReadMarkdownDocument(
             kind: .meeting,
-            filename: filename,
+            filename: normalizedMarkdownFilename(filename),
             entryId: nil,
             markdown: markdown,
-            asJSON: json
+            recording: transcript?.recording,
+            speakers: transcript?.speakers,
+            utterances: transcript?.utterances
         )
+        try printReadDocument(document, asJSON: json)
     }
 }
 
@@ -167,21 +197,54 @@ struct ReadDictation: ParsableCommand {
     var json: Bool = false
 
     func run() throws {
-        let markdown = try CLIContextStore.readDictation(filename: filename, entryId: entryId, in: paths.resolved)
-        try printReadMarkdown(
+        let read = try CLIContextStore.readDictationDocument(filename: filename, entryId: entryId, in: paths.resolved)
+        let document = CLIReadMarkdownDocument(
             kind: .dictation,
-            filename: filename,
+            filename: normalizedMarkdownFilename(filename),
             entryId: entryId,
-            markdown: markdown,
-            asJSON: json
+            markdown: read.markdown,
+            date: read.date,
+            entries: read.entries
         )
+        try printReadDocument(document, asJSON: json)
     }
 }
 
-private func printContextItems(_ items: [CLIContextItem], asJSON: Bool) throws {
+private let emptyResultsHint = "No captures matched. Check the searched directories or pass --data-dir, --meetings-dir, or --dictations-dir."
+
+private func printContextItems(
+    _ items: [CLIContextItem],
+    asJSON: Bool,
+    searchedDirectories: [String],
+    notes: [String] = []
+) throws {
     if asJSON {
+        if items.isEmpty {
+            try printEmptyResultsJSON(searchedDirectories: searchedDirectories, notes: notes)
+            return
+        }
+        if !notes.isEmpty {
+            let document = CLIContextResultsDocument(
+                results: items,
+                searchedDirectories: nil,
+                hint: nil,
+                notes: notes
+            )
+            let data = try JSONEncoder.contextPretty.encode(document)
+            print(String(data: data, encoding: .utf8) ?? "{}")
+            return
+        }
         let data = try JSONEncoder.contextPretty.encode(items)
         print(String(data: data, encoding: .utf8) ?? "[]")
+        return
+    }
+
+    for note in notes {
+        printToStandardError(note)
+    }
+
+    if items.isEmpty {
+        printEmptyResultsToStandardError(searchedDirectories: searchedDirectories)
         return
     }
 
@@ -198,26 +261,48 @@ private func printContextItems(_ items: [CLIContextItem], asJSON: Bool) throws {
     }
 }
 
-private func printReadMarkdown(
-    kind: CLIContextKind,
-    filename: String,
-    entryId: String?,
-    markdown: String,
-    asJSON: Bool
-) throws {
+private func printReadDocument(_ document: CLIReadMarkdownDocument, asJSON: Bool) throws {
     guard asJSON else {
-        print(markdown)
+        print(document.markdown)
         return
     }
 
-    let document = CLIReadMarkdownDocument(
-        kind: kind,
-        filename: normalizedMarkdownFilename(filename),
-        entryId: entryId,
-        markdown: markdown
+    let data = try JSONEncoder.contextPretty.encode(document)
+    print(String(data: data, encoding: .utf8) ?? "{}")
+}
+
+private func printEmptyResultsJSON(searchedDirectories: [String], notes: [String]) throws {
+    let document = CLIContextResultsDocument(
+        results: [],
+        searchedDirectories: searchedDirectories,
+        hint: emptyResultsHint,
+        notes: notes.isEmpty ? nil : notes
     )
     let data = try JSONEncoder.contextPretty.encode(document)
     print(String(data: data, encoding: .utf8) ?? "{}")
+}
+
+private func printEmptyResultsToStandardError(searchedDirectories: [String]) {
+    printToStandardError("No results. Searched: \(searchedDirectories.joined(separator: ", "))")
+}
+
+private func printToStandardError(_ message: String) {
+    FileHandle.standardError.write(Data((message + "\n").utf8))
+}
+
+private func searchedDirectoryPaths(in directories: CLIContextDirectories, kind: CLIContextKind) -> [String] {
+    var urls: [URL] = []
+    if kind != .dictation {
+        urls.append(contentsOf: directories.meetingDirs)
+    }
+    if kind != .meeting {
+        urls.append(contentsOf: directories.dictationDirs)
+    }
+
+    var seen: Set<String> = []
+    return urls.compactMap { url in
+        seen.insert(url.path).inserted ? url.path : nil
+    }
 }
 
 private func normalizedMarkdownFilename(_ filename: String) -> String {

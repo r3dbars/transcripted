@@ -221,7 +221,17 @@ enum CLIContextStore {
         return content
     }
 
+    struct DictationRead {
+        let markdown: String
+        let date: String
+        let entries: [CLIClientDictationEntry]
+    }
+
     static func readDictation(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> String {
+        try readDictationDocument(filename: filename, entryId: entryId, in: directories).markdown
+    }
+
+    static func readDictationDocument(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> DictationRead {
         let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
         var invalidPathRequested = false
         var markdownURL: URL?
@@ -254,7 +264,7 @@ enum CLIContextStore {
                 throw ValidationError("Dictation entry not found: \(entryId)")
             }
 
-            return """
+            let markdown = """
             # \(entry.title)
 
             Captured: \(entry.createdAt)
@@ -264,14 +274,19 @@ enum CLIContextStore {
 
             \(entry.text)
             """
+            return DictationRead(markdown: markdown, date: day.payload.date, entries: [entry])
         }
 
         if let content = try? String(contentsOf: markdownURL, encoding: .utf8) {
-            return content
+            return DictationRead(markdown: content, date: day.payload.date, entries: day.entries)
         }
 
         let data = try JSONEncoder.contextPretty.encode(day.payload)
-        return String(data: data, encoding: .utf8) ?? "{}"
+        return DictationRead(
+            markdown: String(data: data, encoding: .utf8) ?? "{}",
+            date: day.payload.date,
+            entries: day.entries
+        )
     }
 
     private struct MeetingRecord {
@@ -386,8 +401,12 @@ enum CLIContextStore {
     }
 
     private static func loadMeeting(at url: URL) -> CLIAgentTranscript? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8),
-              let parsed = CaptureMarkdownParser.parseMeeting(from: content) else { return nil }
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        return meetingTranscript(fromMarkdown: content)
+    }
+
+    static func meetingTranscript(fromMarkdown content: String) -> CLIAgentTranscript? {
+        guard let parsed = CaptureMarkdownParser.parseMeeting(from: content) else { return nil }
 
         return CLIAgentTranscript(
             version: "2.0",
