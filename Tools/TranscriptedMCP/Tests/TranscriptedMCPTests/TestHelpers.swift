@@ -143,6 +143,7 @@ func writeFixture(_ content: String, filename: String, to directory: URL) throws
 func makeMeetingWithInlineSummary(
     date: String = "2026-04-18",
     time: String = "09:15:00",
+    attendees: [String] = ["Jenny", "Sam"],
     decisions: [String] = ["Ship the beta on Friday", "Cut the legacy import path"],
     actionItems: [String] = ["Jenny: send the revised spec", "Follow up with legal"],
     openQuestions: [String] = ["Do we need a migration window?"]
@@ -184,6 +185,8 @@ func makeMeetingWithInlineSummary(
     \(block("### Decisions", decisions))
 
     \(block("### Open Questions", openQuestions))
+
+    \(block("### Participants", attendees))
 
     \(block("### Action Items", actionItems))
     <!-- transcripted:local-summary:end -->
