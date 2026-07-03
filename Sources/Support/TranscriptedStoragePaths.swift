@@ -18,22 +18,51 @@ enum TranscriptedStoragePreferences {
         userDefaults: UserDefaults = .standard,
         fileManager: FileManager = .default
     ) -> URL {
-        if let customPath = userDefaults.string(forKey: captureLibraryLocationKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !customPath.isEmpty {
+        customCaptureLibraryURL(userDefaults: userDefaults, fileManager: fileManager)
+            ?? fileManager.transcriptedDefaultCaptureLibraryDir
+    }
+
+    static func customCaptureLibraryURL(
+        userDefaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        if let customPath = storedCustomCaptureLibraryPath(userDefaults: userDefaults) {
             guard customPath.hasPrefix("/") else {
-                return fileManager.transcriptedDefaultCaptureLibraryDir
+                return nil
             }
 
             let candidate = URL(fileURLWithPath: customPath, isDirectory: true)
             // Security: reject tampered preferences that target traversal or system
             // roots while preserving the user's ability to choose their own library.
-            if isSafeCaptureLibraryURL(candidate) {
+            if isSafeCaptureLibraryURL(candidate),
+               isExistingCaptureLibraryURL(candidate, fileManager: fileManager) {
                 return candidate.standardizedFileURL
             }
         }
 
-        return fileManager.transcriptedDefaultCaptureLibraryDir
+        return nil
+    }
+
+    static func storedCustomCaptureLibraryPath(
+        userDefaults: UserDefaults = .standard
+    ) -> String? {
+        guard let customPath = userDefaults.string(forKey: captureLibraryLocationKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !customPath.isEmpty else {
+            return nil
+        }
+        return customPath
+    }
+
+    static func unavailableCustomCaptureLibraryPath(
+        userDefaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> String? {
+        guard let customPath = storedCustomCaptureLibraryPath(userDefaults: userDefaults),
+              customCaptureLibraryURL(userDefaults: userDefaults, fileManager: fileManager) == nil else {
+            return nil
+        }
+        return customPath
     }
 
     @discardableResult
@@ -79,6 +108,16 @@ enum TranscriptedStoragePreferences {
         return !forbiddenPrefixes.contains { prefix in
             candidate.path == prefix || candidate.path.hasPrefix(prefix + "/")
         }
+    }
+
+    static func isExistingCaptureLibraryURL(
+        _ url: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        let candidate = url.standardizedFileURL
+        var isDirectory: ObjCBool = false
+        return fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 
     static func prepareCaptureLibraryURL(

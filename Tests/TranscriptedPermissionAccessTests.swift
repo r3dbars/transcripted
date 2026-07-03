@@ -165,6 +165,48 @@ func testTranscriptedPermissionAccess() async {
         )
     }
 
+    runSuite("TranscriptedPermissionKind.requiredForCurrentUse — meetings-first setup requires system audio, not Accessibility") {
+        assertEqual(
+            TranscriptedPermissionKind.requiredForCurrentUse(dictationShortcutsEnabled: true),
+            [.microphone, .accessibility],
+            "dictation shortcut users should still need Accessibility for paste-back"
+        )
+        assertEqual(
+            TranscriptedPermissionKind.requiredForCurrentUse(dictationShortcutsEnabled: false),
+            [.microphone, .systemAudioRecording],
+            "meetings-first users with dictation shortcuts off should need system audio instead of Accessibility"
+        )
+    }
+
+    await runSuite("TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus — updates stale cached grants") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+
+        UserDefaults.standard.set(true, forKey: knownKey)
+        UserDefaults.standard.set(true, forKey: grantedKey)
+
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus {
+            requestBox.callCount += 1
+            return false
+        }
+
+        assertFalse(granted, "a failed revalidation should return the live denied state")
+        assertEqual(requestBox.callCount, 1, "status-surface revalidation should perform a real probe")
+        assertTrue(
+            UserDefaults.standard.bool(forKey: knownKey),
+            "revalidation should keep the permission state marked as known"
+        )
+        assertFalse(
+            UserDefaults.standard.bool(forKey: grantedKey),
+            "revalidation should clear stale cached grants after revocation"
+        )
+    }
+
     await runSuite("TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded — skips requester when microphone is already authorized") {
         let requestBox = PermissionRequestBox()
         let granted = await TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded(
