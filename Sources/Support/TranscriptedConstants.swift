@@ -211,6 +211,9 @@ enum TranscriptedConstants {
     /// Duration to show error messages in overlay before auto-dismiss (nanoseconds)
     static let errorDismissDelay: UInt64 = 2_500_000_000  // 2.5 seconds
     static let noSpeechDismissDelay: UInt64 = 2_200_000_000  // 2.2 seconds — enough time to read the physical-key recovery hint
+    /// Clipboard-fallback notices carry a "press ⌘V" instruction, so they dwell
+    /// longer than plain errors before fading out.
+    static let clipboardNoticeDismissDelay: UInt64 = 4_500_000_000  // 4.5 seconds
 
     // MARK: - Feedback Sounds
 

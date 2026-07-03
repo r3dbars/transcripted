@@ -280,11 +280,13 @@ final class OverlayHeaderView: NSView {
         loadingTitle: String?,
         successTitle: String = "Pasted",
         isError: Bool = false,
+        isNotice: Bool = false,
         isMiniCursorMode: Bool = false,
         meterPresentation: DictationMeterPolicy.Presentation
     ) {
+        let showsMessage = isError || isNotice
         usesMiniCursorLayout = isMiniCursorMode
-            && (state == .starting || state == .listening || (state == .drafting && !isError) || state == .success)
+            && (state == .starting || state == .listening || (state == .drafting && !showsMessage) || state == .success)
         let miniWaveformOnly = usesMiniCursorLayout && (state == .starting || state == .listening)
 
         // Mode label text + color
@@ -296,7 +298,11 @@ final class OverlayHeaderView: NSView {
             modeLabel.stringValue = "Listening"
             modeLabel.textColor = OverlayTokens.textPrimary
         case .drafting:
-            modeLabel.stringValue = isError ? "Dictation issue" : "Transcribing"
+            if isNotice {
+                modeLabel.stringValue = "Copied to clipboard"
+            } else {
+                modeLabel.stringValue = isError ? "Dictation issue" : "Transcribing"
+            }
             modeLabel.textColor = OverlayTokens.textPrimary
         case .success:
             modeLabel.stringValue = successTitle
@@ -312,7 +318,7 @@ final class OverlayHeaderView: NSView {
         updateAccessibility(for: state, usesMiniCursorLayout: usesMiniCursorLayout, successTitle: successTitle)
 
         // Spinner visibility
-        let showSpinner = state == .starting || (state == .drafting && !isError) || state == .loading
+        let showSpinner = state == .starting || (state == .drafting && !showsMessage) || state == .loading
         spinner.isHidden = usesMiniCursorLayout || !showSpinner
         if showSpinner { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
 

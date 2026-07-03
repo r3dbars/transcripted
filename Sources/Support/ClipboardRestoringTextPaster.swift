@@ -200,7 +200,7 @@ final class ClipboardRestoringTextPaster {
            !waitForTargetActivation(target, timeout: activationWait) {
             copyTextToClipboard(text, to: pasteboard)
             return .copied(
-                "Focus changed before Transcripted could paste, so the text was copied.",
+                "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
                 reason: .focusChanged
             )
         }
@@ -209,7 +209,7 @@ final class ClipboardRestoringTextPaster {
             requestAccessibilityTrust()
             copyTextToClipboard(text, to: pasteboard)
             return .copied(
-                "Couldn't paste automatically. Accessibility is off, so the text was copied.",
+                "Accessibility is off, so Transcripted can't paste for you. Your text is on the clipboard — press ⌘V.",
                 reason: .accessibilityMissing
             )
         }
@@ -237,7 +237,7 @@ final class ClipboardRestoringTextPaster {
             pasteboard.clearContents()
             guard pasteboard.setString(text, forType: .string),
                   pasteboard.string(forType: .string) == text else {
-                return .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run.")
+                return .failed("Couldn't paste or copy the text automatically. It's still saved in your dictation history.")
             }
         }
         temporaryChangeCount = pasteboard.changeCount
@@ -254,10 +254,10 @@ final class ClipboardRestoringTextPaster {
         guard pasteDispatcher() else {
             cancelPendingClipboardRestore()
             guard copyTextToClipboard(text, to: pasteboard) else {
-                return .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run.")
+                return .failed("Couldn't paste or copy the text automatically. It's still saved in your dictation history.")
             }
             return .copied(
-                "Couldn't paste automatically. The text was copied instead.",
+                "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.",
                 reason: .pasteEventCreationFailed
             )
         }

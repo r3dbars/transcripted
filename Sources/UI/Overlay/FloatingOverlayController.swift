@@ -14,8 +14,8 @@ class FloatingOverlayController {
         let status: String?
 
         static let initial = LoadingPresentation(
-            title: "Loading voice model",
-            detail: "Recording starts automatically when it's ready.",
+            title: "Warming up",
+            detail: "Dictation starts automatically as soon as the voice model is ready.",
             progress: 0.08,
             status: "Starting up"
         )
@@ -32,6 +32,13 @@ class FloatingOverlayController {
         case listening    // Recording dictation
         case drafting     // Processing dictation
         case success      // Finished successfully — brief confirmation before dismiss
+    }
+
+    /// How a drafting-state message should read: a real problem, or a calm
+    /// "your text is safe on the clipboard" fallback that is not the user's fault.
+    enum MessageTone {
+        case error
+        case notice
     }
 
     /// Human-readable shortcut hints (reads live from UserDefaults)
@@ -61,6 +68,7 @@ class FloatingOverlayController {
     }
     var isVisible = false
     var errorMessage: String = ""
+    private var messageTone: MessageTone = .error
     private var errorActionTitle: String?
     private var errorActionHandler: (() -> Void)?
     var loadingElapsedSeconds: Int = 0 {
@@ -215,6 +223,7 @@ class FloatingOverlayController {
             errorMessage: errorMessage,
             errorActionTitle: errorActionTitle,
             onErrorAction: errorActionHandler,
+            messageTone: messageTone,
             loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
             successTitle: successTitle,
@@ -242,6 +251,7 @@ class FloatingOverlayController {
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
         errorMessage = ""
+        messageTone = .error
         successTitle = "Pasted"
 
         let shouldOpenAtCursor = isCursorMiniPanelMode
@@ -361,6 +371,7 @@ class FloatingOverlayController {
         loadingTimerTask = nil
         cancelMiniLoadingReveal()
         errorMessage = ""
+        messageTone = .error
         errorActionTitle = nil
         errorActionHandler = nil
         state = .starting
@@ -467,6 +478,7 @@ class FloatingOverlayController {
     ) {
         errorDismissTask?.cancel()
         errorMessage = ""
+        messageTone = .error
         errorActionTitle = nil
         errorActionHandler = nil
         if let presentation {
@@ -544,10 +556,27 @@ class FloatingOverlayController {
         actionTitle: String? = nil,
         action: (() -> Void)? = nil
     ) {
+        showMessage(message, tone: .error, actionTitle: actionTitle, action: action)
+    }
+
+    /// Calm variant of showError for "your text is on the clipboard" fallbacks:
+    /// clipboard icon instead of a warning triangle, a longer dwell so the
+    /// ⌘V instruction stays readable, and a clean fade instead of the shake.
+    func showClipboardNotice(_ message: String) {
+        showMessage(message, tone: .notice)
+    }
+
+    private func showMessage(
+        _ message: String,
+        tone: MessageTone,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
         errorMessage = message
+        messageTone = tone
         errorActionTitle = actionTitle
         errorActionHandler = action
         state = .drafting
@@ -557,15 +586,22 @@ class FloatingOverlayController {
         }
         pushStateToViews()  // Force update for error message
         guard actionTitle == nil else { return }
+        let dismissDelay = tone == .notice
+            ? TranscriptedConstants.clipboardNoticeDismissDelay
+            : TranscriptedConstants.errorDismissDelay
         errorDismissTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: TranscriptedConstants.errorDismissDelay)
+                try await Task.sleep(nanoseconds: dismissDelay)
             } catch { return }
             guard let self = self, !self.errorMessage.isEmpty else { return }
             self.errorMessage = ""
             self.errorActionTitle = nil
             self.errorActionHandler = nil
-            self.hideWithCancelAnimation()
+            if tone == .notice {
+                self.hideWithConfirmAnimation()
+            } else {
+                self.hideWithCancelAnimation()
+            }
         }
     }
 
@@ -573,6 +609,7 @@ class FloatingOverlayController {
     func showNoSpeechAndDismiss(trigger: String = "unknown") {
         errorDismissTask?.cancel()
         errorMessage = DictationNoSpeechPresentationPolicy.message(trigger: trigger)
+        messageTone = .error
         errorActionTitle = nil
         errorActionHandler = nil
         state = .drafting
@@ -596,6 +633,7 @@ class FloatingOverlayController {
         loadingTimerTask?.cancel()
         successDismissTask?.cancel()
         errorMessage = ""
+        messageTone = .error
         errorActionTitle = nil
         errorActionHandler = nil
         successTitle = title
@@ -637,6 +675,7 @@ class FloatingOverlayController {
         successDismissTask = nil
         state = .idle
         errorMessage = ""
+        messageTone = .error
         errorActionTitle = nil
         errorActionHandler = nil
         loadingPresentation = .initial
@@ -742,9 +781,12 @@ class FloatingOverlayController {
     }
 
     private func errorPanelSize() -> NSSize {
-        let height = errorActionTitle == nil
+        let base = errorActionTitle == nil
             ? OverlayTokens.panelMinHeight
             : OverlayTokens.panelActionErrorHeight
+        // Messages past roughly one rendered line wrap in the drafting view;
+        // give the panel enough height that the second line stays visible.
+        let height = errorMessage.count > 64 ? base + 18 : base
         return NSSize(width: OverlayTokens.panelWidth, height: height)
     }
 

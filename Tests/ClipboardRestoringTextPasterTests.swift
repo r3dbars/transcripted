@@ -160,7 +160,7 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run."),
+                .failed("Couldn't paste or copy the text automatically. It's still saved in your dictation history."),
                 "failed clipboard writes should be reported as paste-back failures"
             )
             assertEqual(postCount, 0, "Cmd+V should not fire when the dictation text is not on the pasteboard")
@@ -195,7 +195,7 @@ func testClipboardRestoringTextPaster() async {
             assertEqual(
                 outcome,
                 .copied(
-                    "Couldn't paste automatically. Accessibility is off, so the text was copied.",
+                    "Accessibility is off, so Transcripted can't paste for you. Your text is on the clipboard — press ⌘V.",
                     reason: .accessibilityMissing
                 ),
                 "missing Accessibility permission should report a copied fallback with the right reason"
@@ -731,7 +731,7 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             outcome,
             .copied(
-                "Couldn't paste automatically. The text was copied instead.",
+                "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.",
                 reason: .pasteEventCreationFailed
             ),
             "paste event failures should fall back to a copied result"
@@ -773,7 +773,7 @@ func testClipboardRestoringTextPaster() async {
 
         assertEqual(
             outcome,
-            .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run."),
+            .failed("Couldn't paste or copy the text automatically. It's still saved in your dictation history."),
             "paste dispatch fallback should report failure when the copied fallback cannot be written"
         )
         let clipboardAfterFailure = await MainActor.run {
