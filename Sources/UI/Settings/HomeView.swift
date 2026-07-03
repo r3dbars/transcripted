@@ -285,6 +285,23 @@ struct HomeDeleteFailure: Identifiable {
     let id = UUID()
     let title: String
     let message: String
+    let retryTitle: String
+    let details: String?
+    let retry: () -> Void
+
+    init(
+        title: String,
+        message: String,
+        retryTitle: String = HomeActionFailureCopy.retryTitle,
+        details: String? = nil,
+        retry: @escaping () -> Void = {}
+    ) {
+        self.title = title
+        self.message = message
+        self.retryTitle = retryTitle
+        self.details = details
+        self.retry = retry
+    }
 }
 
 // MARK: - Stats summary

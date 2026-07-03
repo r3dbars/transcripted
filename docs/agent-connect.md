@@ -70,6 +70,13 @@ Current `transcripted-mcp` capabilities:
 - `search`
 - `who_is`
 - `recap`
+- `list_action_items`
+- `list_decisions`
+- `digest`
+
+The last three roll up structured summary fields (decisions, action items,
+open questions) across saved meetings. They only return rows for meetings
+that have a saved summary; see `docs/cross-meeting-tools.md`.
 
 These tools are read-only, but they are not redacted. `read_meeting` and
 `read_dictation` can return local transcript text to the agent you connected.
