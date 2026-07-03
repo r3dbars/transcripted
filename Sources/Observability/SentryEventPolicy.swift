@@ -21,8 +21,25 @@ struct SentryEventPolicy: Equatable {
             tags["wait_bucket"] = waitBucket
         }
 
+        // `reason` is allowlisted because callers usually set it to a short
+        // enum-style value (e.g. "preferred_built_in_for_bluetooth_headset"),
+        // but some producers pass free-text error strings. The redactor in
+        // `sanitizeTags` strips obvious paths/emails/secrets, yet a hard length
+        // cap is the cheaper backstop against an accidental free-text blob
+        // riding off-device under a "safe" key. We keep `reason` (it carries
+        // diagnostic signal `failure_kind` does not always duplicate) but bound
+        // it tightly; enum-style values fit well under the cap.
+        if let reason = tags["reason"], reason.count > maxReasonTagLength {
+            tags["reason"] = String(reason.prefix(maxReasonTagLength)) + "..."
+        }
+
         return SentryPayloadSanitizer.sanitizeTags(tags)
     }
+
+    /// Hard cap for the free-text-capable `reason` diagnostic tag. Enum-style
+    /// reason values stay well below this; anything longer is truncated before
+    /// redaction so a stray error message cannot ship a large blob to Sentry.
+    static let maxReasonTagLength = 80
 
     private static let allowedDiagnosticTagKeys: Set<String> = [
         "attenuation_kind",
