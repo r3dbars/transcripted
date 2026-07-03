@@ -212,7 +212,7 @@ enum CLIContextStore {
         }
 
         guard let markdownURL,
-              let content = try? String(contentsOf: markdownURL, encoding: .utf8),
+              let content = CaptureMarkdown.readBoundedContents(of: markdownURL),
               CaptureMarkdown.looksLikeCaptureMarkdown(markdownURL),
               !markdownURL.deletingPathExtension().lastPathComponent.hasPrefix("Dictations_") else {
             throw ValidationError("Meeting not found: \(filename)")
@@ -277,7 +277,7 @@ enum CLIContextStore {
             return DictationRead(markdown: markdown, date: day.payload.date, entries: [entry])
         }
 
-        if let content = try? String(contentsOf: markdownURL, encoding: .utf8) {
+        if let content = CaptureMarkdown.readBoundedContents(of: markdownURL) {
             return DictationRead(markdown: content, date: day.payload.date, entries: day.entries)
         }
 
@@ -401,7 +401,7 @@ enum CLIContextStore {
     }
 
     private static func loadMeeting(at url: URL) -> CLIAgentTranscript? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        guard let content = CaptureMarkdown.readBoundedContents(of: url) else { return nil }
         return meetingTranscript(fromMarkdown: content)
     }
 
@@ -434,7 +434,7 @@ enum CLIContextStore {
     }
 
     private static func loadDictationDay(at url: URL) -> (payload: CLIAgentDictationDay, entries: [CLIClientDictationEntry])? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8),
+        guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseDictationDay(from: content, markdownURL: url) else { return nil }
 
         let entries = parsed.entries.map { entry in
@@ -465,7 +465,7 @@ enum CLIContextStore {
 
     private static func readMeetingTitle(filename: String, from directory: URL) -> String {
         let mdURL = directory.appendingPathComponent(filename + ".md")
-        guard let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
+        guard let content = CaptureMarkdown.readBoundedContents(of: mdURL) else {
             return filename
         }
         return CaptureMarkdown.extractTitle(from: content) ?? filename

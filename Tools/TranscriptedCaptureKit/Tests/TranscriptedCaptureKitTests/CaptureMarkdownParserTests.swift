@@ -614,6 +614,23 @@ final class CaptureMarkdownParserTests: XCTestCase {
         XCTAssertTrue(CaptureMarkdown.directoryHasCaptureMarkdownFiles(tempDir))
     }
 
+    func testCaptureMarkdownRefusesOversizedFiles() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let oversized = tempDir.appendingPathComponent("Oversized.md")
+        try Data().write(to: oversized)
+        let handle = try FileHandle(forWritingTo: oversized)
+        defer { try? handle.close() }
+        handle.write(Data("---\ntitle: Too Large\n---\n".utf8))
+        handle.truncateFile(atOffset: UInt64(CaptureFileLimits.maxTranscriptBytes + 1))
+
+        XCTAssertNil(CaptureMarkdown.readBoundedContents(of: oversized))
+        XCTAssertFalse(CaptureMarkdown.looksLikeCaptureMarkdown(oversized))
+        XCTAssertFalse(CaptureMarkdown.directoryHasCaptureMarkdownFiles(tempDir))
+    }
+
     // MARK: - Format-sync round trip with the Core writer
 
     // Parser side of the format-sync contract. The fixture below is a faithful

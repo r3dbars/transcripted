@@ -21,7 +21,7 @@ enum TranscriptLoader {
     }
 
     static func loadMeeting(_ url: URL) -> AgentTranscript? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8),
+        guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseMeeting(from: content) else {
             log("Cannot read markdown meeting: \(url.lastPathComponent)")
             return nil
@@ -70,13 +70,13 @@ enum TranscriptLoader {
     /// isolation does not bump the parent transcript's mtime, so its items only
     /// refresh on the next reindex of the transcript itself.
     static func loadMeetingSummary(forTranscript url: URL) -> ParsedMeetingSummary? {
-        if let content = try? String(contentsOf: url, encoding: .utf8),
+        if let content = CaptureMarkdown.readBoundedContents(of: url),
            let summary = CaptureSummaryParser.parse(from: content) {
             return summary
         }
 
         let sidecarURL = summarySidecarURL(forTranscript: url)
-        if let content = try? String(contentsOf: sidecarURL, encoding: .utf8),
+        if let content = CaptureMarkdown.readBoundedContents(of: sidecarURL),
            let summary = CaptureSummaryParser.parse(from: content) {
             return summary
         }
@@ -95,7 +95,7 @@ enum TranscriptLoader {
     }
 
     static func loadDictationDay(_ url: URL) -> AgentDictationDay? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8),
+        guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseDictationDay(from: content, markdownURL: url) else {
             log("Cannot read markdown dictation day: \(url.lastPathComponent)")
             return nil
