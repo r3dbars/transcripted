@@ -303,4 +303,31 @@ func testSentryEventPolicy() {
 
         assertTrue(tags.isEmpty, "local-only events should not get Sentry diagnostic tags")
     }
+
+    runSuite("SentryEventPolicy diagnosticTags hard-caps the free-text reason tag") {
+        let enumReason = "preferred_built_in_for_bluetooth_headset"
+        let shortTags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "recording_capture_degraded",
+            context: ["reason": enumReason]
+        )
+        assertEqual(shortTags["reason"], enumReason, "short enum-style reasons should pass through untruncated")
+
+        let freeText = String(repeating: "a", count: 400)
+        let cappedTags = SentryEventPolicy.diagnosticTags(
+            forEngine: "meeting",
+            event: "recording_capture_degraded",
+            context: ["reason": freeText]
+        )
+        let cappedReason = cappedTags["reason"]
+        assertTrue(cappedReason != nil, "reason should still be forwarded after capping")
+        assertTrue(
+            (cappedReason?.count ?? 0) <= SentryEventPolicy.maxReasonTagLength + 3,
+            "an oversized free-text reason should be truncated to the hard cap plus ellipsis"
+        )
+        assertTrue(
+            cappedReason?.hasSuffix("...") ?? false,
+            "a truncated reason should be marked with an ellipsis"
+        )
+    }
 }

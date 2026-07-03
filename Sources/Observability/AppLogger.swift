@@ -35,7 +35,7 @@ private actor AppLogFileWriter {
             }
             // File exists and is either small enough or just rotated — open for append
         } else {
-            fm.createFile(atPath: path, contents: nil)
+            fm.createFile(atPath: path, contents: nil, attributes: [.posixPermissions: 0o600])
         }
 
         fm.restrictFileToOwnerOnly(at: URL(fileURLWithPath: path))
