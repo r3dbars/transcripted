@@ -19,6 +19,32 @@ private func textResult(_ text: String, isError: Bool = false) -> CallTool.Resul
     .init(content: [.text(text: text, annotations: nil, _meta: nil)], isError: isError)
 }
 
+/// Character budget for read_meeting / read_dictation raw markdown responses.
+/// Anything larger switches to a paginated window even when the caller did not
+/// pass offset/limit, so one 90-minute transcript cannot blow out an agent's
+/// context window. ~30k characters is roughly 7-8k tokens — big enough that
+/// typical meetings and dictation days pass through byte-identical, small
+/// enough that a runaway dump stays readable.
+let maxUnpaginatedReadCharacters = 30_000
+
+/// Rough per-item JSON encoding overhead (keys, timestamps, speaker names)
+/// used when auto-sizing a pagination window against the character budget.
+private let paginationItemOverheadCharacters = 80
+
+/// Index one past the last item that fits the character budget starting at
+/// `start`. Always advances by at least one item when any remain, so an
+/// oversized single item still makes progress.
+private func autoWindowEnd<T>(items: [T], start: Int, cost: (T) -> Int) -> Int {
+    var end = start
+    var used = 0
+    while end < items.count {
+        used += cost(items[end])
+        if used > maxUnpaginatedReadCharacters, end > start { break }
+        end += 1
+    }
+    return end
+}
+
 /// Which artifact population a tool reads; drives which indexed counts and
 /// hint an empty response carries.
 private enum EmptyResultScope {
@@ -128,7 +154,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "read_meeting",
-                description: "Read the full transcript of a specific meeting. Returns the complete dialogue with speaker names and timestamps. Use list_meetings first to get the filename.",
+                description: "Read a meeting transcript by filename (from list_meetings). Long meetings are token-heavy: pass offset/limit to page through utterances, or section 'speakers' for metadata and analytics without dialogue. Full or transcript responses over ~30k characters are automatically truncated to a bounded window with total_utterances, next_offset, and a continuation hint.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -138,7 +164,15 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         ]),
                         "section": .object([
                             "type": .string("string"),
-                            "description": .string("Which section to return: 'full' (default — complete transcript), 'transcript' (dialogue only), or 'speakers' (analytics only)")
+                            "description": .string("Which section to return: 'full' (default — complete transcript), 'transcript' (dialogue only), or 'speakers' (frontmatter + analytics, cheapest for long meetings)")
+                        ]),
+                        "offset": .object([
+                            "type": .string("integer"),
+                            "description": .string("0-based utterance index to start the transcript window at (default: 0). Applies to sections 'full' and 'transcript'.")
+                        ]),
+                        "limit": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum utterances to return. Setting this (or exceeding the size guard) switches the response to a paginated JSON window with total_utterances, next_offset, and a hint.")
                         ]),
                     ]),
                     "required": .array([.string("filename")]),
@@ -200,7 +234,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "read_dictation",
-                description: "Read a saved dictation day or one specific dictation entry by ID. Use list_dictations or recent_context first to find the filename or entry_id you need.",
+                description: "Read a saved dictation day, one specific entry by ID, or a bounded window of entries. Use list_dictations or recent_context first to find the filename or entry_id you need. Prefer entry_id for a single entry. Without entry_id, pass offset/limit to page through entries; day files over ~30k characters are automatically truncated to a window with total_entries, next_offset, and a continuation hint.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -211,6 +245,14 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         "entry_id": .object([
                             "type": .string("string"),
                             "description": .string("Optional entry ID from recent_context or search_context to return one dictation entry")
+                        ]),
+                        "offset": .object([
+                            "type": .string("integer"),
+                            "description": .string("0-based entry index to start the window at (default: 0). Ignored when entry_id is set.")
+                        ]),
+                        "limit": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum entries to return. Setting this (or exceeding the size guard) switches the response to a paginated JSON window with total_entries, next_offset, and a hint. Ignored when entry_id is set.")
                         ]),
                     ]),
                     "required": .array([.string("filename")]),
@@ -515,12 +557,15 @@ private func extractDialogueLines(from content: String) -> [String] {
 
 // MARK: - read_meeting
 
-private func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
         return textResult("Missing required parameter: filename", isError: true)
     }
 
     let section = params.arguments?["section"]?.stringValue ?? "full"
+    let offset = max(0, params.arguments?["offset"]?.intValue ?? 0)
+    let limit = params.arguments?["limit"]?.intValue
+    let paginationRequested = limit != nil || offset > 0
 
     let mdURL: URL
     switch PathSecurity.resolveReadableFile(named: filename, appendingExtension: "md", in: meetingDirs) {
@@ -536,24 +581,32 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) 
         return textResult("Meeting not found: \(filename). Use list_meetings to see available meetings.", isError: true)
     }
 
+    let parsed = CaptureMarkdownParser.parseMeeting(from: content)
+
     trackAgentCaptureQueryObserved(
         queryKind: "read",
         artifactKind: "meeting",
-        captureDate: captureDateFromMeetingMarkdown(content),
+        captureDate: parsed.flatMap { parseCaptureDate($0.datetime) },
         sourceCount: 1
     )
 
     switch section {
     case "transcript":
         let dialogue = extractDialogueLines(from: content).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return textResult(dialogue.isEmpty ? content : dialogue)
+        let raw = dialogue.isEmpty ? content : dialogue
+        if !paginationRequested, raw.count <= maxUnpaginatedReadCharacters {
+            return textResult(raw)
+        }
+        return try meetingTranscriptPageResult(
+            parsed: parsed, content: content, filename: filename,
+            offset: offset, limit: limit, includeFrontmatter: false, rawFallback: raw
+        )
 
     case "speakers":
         // Return YAML frontmatter + speaker analytics section
         var result = ""
-        if content.count >= 8, content.hasPrefix("---"),
-           let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) {
-            result += String(content[content.startIndex...endRange.upperBound])
+        if let frontmatter = frontmatterBlock(of: content) {
+            result += frontmatter
         }
         if let analyticsRange = content.range(of: "## Channel & Speaker Analytics") {
             if let transcriptRange = content.range(of: "## Full Transcript") {
@@ -565,11 +618,95 @@ private func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) 
         return textResult(result.isEmpty ? content : result)
 
     default: // "full"
-        return textResult(content)
+        if !paginationRequested, content.count <= maxUnpaginatedReadCharacters {
+            return textResult(content)
+        }
+        return try meetingTranscriptPageResult(
+            parsed: parsed, content: content, filename: filename,
+            offset: offset, limit: limit, includeFrontmatter: true, rawFallback: content
+        )
     }
 }
 
-private func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) throws -> CallTool.Result {
+/// Bounded transcript read: frontmatter metadata plus one utterance window and
+/// explicit pagination fields, so a long meeting never comes back as an
+/// unbounded dump. Falls back to the raw markdown when the file does not parse
+/// as a windowable transcript — we can only page what the parser understands.
+private func meetingTranscriptPageResult(
+    parsed: ParsedMeetingCapture?,
+    content: String,
+    filename: String,
+    offset: Int,
+    limit: Int?,
+    includeFrontmatter: Bool,
+    rawFallback: String
+) throws -> CallTool.Result {
+    guard let parsed, !parsed.utterances.isEmpty else {
+        return textResult(rawFallback)
+    }
+
+    let total = parsed.utterances.count
+    let start = min(offset, total)
+    let end: Int
+    if let limit {
+        end = min(start + max(1, limit), total)
+    } else {
+        end = autoWindowEnd(items: parsed.utterances, start: start) {
+            $0.text.count + paginationItemOverheadCharacters
+        }
+    }
+
+    let speakerNames = Dictionary(uniqueKeysWithValues: parsed.speakers.map { ($0.id, $0.name) })
+    let utterances = parsed.utterances[start..<end].map { utterance in
+        MeetingTranscriptPageUtterance(
+            start: utterance.start,
+            end: utterance.end,
+            speaker: speakerNames[utterance.speakerId] ?? utterance.speakerId,
+            speakerId: utterance.speakerId,
+            text: utterance.text
+        )
+    }
+
+    let returned = utterances.count
+    let truncated = start + returned < total
+    let nextOffset = truncated ? start + returned : nil
+
+    let hint: String
+    if offset >= total {
+        hint = "offset \(offset) is past the end — this transcript has \(total) utterances. Retry with a smaller offset."
+    } else if let nextOffset {
+        hint = "Showing utterances \(start)-\(end - 1) of \(total). Call read_meeting again with offset=\(nextOffset) to continue, or use section \"speakers\" for the overview without dialogue."
+    } else {
+        hint = "End of transcript — all remaining utterances included."
+    }
+
+    let page = MeetingTranscriptPage(
+        filename: filename,
+        frontmatter: includeFrontmatter ? frontmatterBlock(of: content) : nil,
+        totalUtterances: total,
+        offset: offset,
+        returned: returned,
+        truncated: truncated,
+        nextOffset: nextOffset,
+        hint: hint,
+        utterances: utterances
+    )
+
+    let json = try JSONEncoder.pretty.encode(page)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
+/// Raw YAML frontmatter block, matching the exact slice the speakers section
+/// has always returned (both fences plus the character after the closing one).
+private func frontmatterBlock(of content: String) -> String? {
+    guard content.count >= 8, content.hasPrefix("---"),
+          let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else {
+        return nil
+    }
+    return String(content[content.startIndex...endRange.upperBound])
+}
+
+func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
         return textResult("Missing required parameter: filename", isError: true)
     }
@@ -621,12 +758,66 @@ private func handleReadDictation(params: CallTool.Parameters, dictationDirs: [UR
         sourceCount: day.entries.count
     )
 
+    let offset = max(0, params.arguments?["offset"]?.intValue ?? 0)
+    let limit = params.arguments?["limit"]?.intValue
+    let paginationRequested = limit != nil || offset > 0
+
     guard let content = try? String(contentsOf: markdownURL, encoding: .utf8) else {
         let json = try JSONEncoder.pretty.encode(day)
         return textResult(String(data: json, encoding: .utf8) ?? "{}")
     }
 
-    return textResult(content)
+    if !paginationRequested, content.count <= maxUnpaginatedReadCharacters {
+        return textResult(content)
+    }
+
+    return try dictationDayPageResult(day: day, filename: filename, offset: offset, limit: limit)
+}
+
+/// Bounded dictation-day read: day metadata plus one entry window and explicit
+/// pagination fields, mirroring the meeting transcript window.
+private func dictationDayPageResult(day: AgentDictationDay, filename: String, offset: Int, limit: Int?) throws -> CallTool.Result {
+    let total = day.entries.count
+    let start = min(offset, total)
+    let end: Int
+    if let limit {
+        end = min(start + max(1, limit), total)
+    } else {
+        end = autoWindowEnd(items: day.entries, start: start) {
+            $0.text.count + $0.title.count + paginationItemOverheadCharacters * 3
+        }
+    }
+
+    let entries = Array(day.entries[start..<end])
+    let returned = entries.count
+    let truncated = start + returned < total
+    let nextOffset = truncated ? start + returned : nil
+
+    let hint: String
+    if total == 0 {
+        hint = "This dictation day has no entries."
+    } else if offset >= total {
+        hint = "offset \(offset) is past the end — this day has \(total) entries. Retry with a smaller offset."
+    } else if let nextOffset {
+        hint = "Showing entries \(start)-\(end - 1) of \(total). Call read_dictation again with offset=\(nextOffset) to continue, or pass entry_id for one specific entry."
+    } else {
+        hint = "End of day — all remaining entries included."
+    }
+
+    let page = DictationDayPage(
+        filename: filename,
+        date: day.date,
+        totalEntries: total,
+        offset: offset,
+        returned: returned,
+        truncated: truncated,
+        nextOffset: nextOffset,
+        hint: hint,
+        entries: entries
+    )
+
+    let json = try JSONEncoder.pretty.encode(page)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
 // MARK: - search
@@ -1035,11 +1226,6 @@ private func artifactKind(for kinds: [ContextKind]) -> String {
         return "dictation"
     }
     return "mixed"
-}
-
-private func captureDateFromMeetingMarkdown(_ content: String) -> Date? {
-    guard let parsed = CaptureMarkdownParser.parseMeeting(from: content) else { return nil }
-    return parseCaptureDate(parsed.datetime)
 }
 
 extension JSONEncoder {

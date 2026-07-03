@@ -67,7 +67,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
 | `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
-| `ToolHandlersTests.swift` | Handler-level coverage: title hydration, telemetry, status tool payload, self-describing empty results, done-filter error |
+| `ToolHandlersTests.swift` | Handler-level coverage: title hydration, telemetry, status tool payload, self-describing empty results, done-filter error, read pagination windows and size guard |
 | `AgentCaptureQueryTelemetryTests.swift` | Bucketing and payload coverage for agent capture-query telemetry |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
@@ -78,9 +78,9 @@ All tools are read-only.
 | Tool | Description |
 |------|-------------|
 | `list_meetings` | List saved meetings with metadata and optional date filters |
-| `read_meeting` | Read one meeting transcript by filename |
+| `read_meeting` | Read one meeting transcript by filename; `section` (`full`/`transcript`/`speakers`) plus optional `offset`/`limit` utterance paging |
 | `list_dictations` | List saved dictation day files with counts, source apps, and titles |
-| `read_dictation` | Read one dictation day or one specific dictation entry |
+| `read_dictation` | Read one dictation day, one specific entry by `entry_id`, or a paged window of entries via `offset`/`limit` |
 | `search` | Search meeting transcript content |
 | `search_context` | Search across meetings, dictations, or both |
 | `recent_context` | Get a mixed recent feed of meetings and dictations |
@@ -188,4 +188,5 @@ The in-app Claude Desktop installer copies that helper into:
 - `recent_context` is intentionally mixed; for the latest meeting specifically, prefer `list_meetings` or `recent_context` with `kind: "meeting"`
 - zero-result queries return a self-describing JSON payload (`searched_directories`, indexed counts, `hint`) instead of a bare "not found" string; call `status` to see the full resolution + index picture
 - `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
+- both read tools carry a size guard: raw dumps larger than `maxUnpaginatedReadCharacters` (~30k chars) — or any call passing `offset`/`limit` — come back as a paginated JSON window (`total_utterances`/`total_entries`, `offset`, `returned`, `truncated`, `next_offset`, `hint`) instead of the full markdown; small unpaginated reads stay byte-identical raw markdown, and `entry_id` reads are unaffected
 - source builds can run the server standalone, but shipped app builds bundle the helper for the one-click Claude Desktop installer
