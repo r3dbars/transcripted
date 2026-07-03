@@ -31,6 +31,17 @@ Dictation artifacts live under:
 folder. There is no extra `transcripts/` subdirectory in the current app
 layout.
 
+## Timeline
+
+Agent-readable day timeline files live under:
+
+- root: `<capture-library>/timeline/`
+- current runtime output: daily markdown files like `2026-04-11.md`
+
+Timeline files summarize activity cards for a local day. They may link to saved
+meeting Markdown by relative path, but they must not include screenshots or raw
+OCR text.
+
 ## Meetings
 
 Meeting captures live under:
@@ -159,6 +170,6 @@ can follow the user-selected capture library.
 
 The standalone tools do not all resolve paths the same way:
 
-- `TranscriptedCLI` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current Transcripted capture folders, then legacy Draft `.../transcripts/`, then `~/Documents/Transcripted/`; explicit `--data-dir`, `--meetings-dir`, `--dictations-dir`, or matching env vars still override this
-- `TranscriptedMCP` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current-plus-legacy read order. It keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default; if `TRANSCRIPTED_DATA_DIR` is set, it instead keeps the index in that shared root unless `TRANSCRIPTED_INDEX_DIR` is also set
-- `TranscriptedQA` now defaults to the current Transcripted meetings/dictations/state/log layout, uses `~/Library/Application Support/Transcripted/logs/app.jsonl` for log validation, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--dictations-path`, `--state-dir`, and `--log-path` overrides for nonstandard setups
+- `TranscriptedCLI` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current Transcripted capture folders, then legacy Draft `.../transcripts/`, then `~/Documents/Transcripted/`; explicit `--data-dir`, `--meetings-dir`, `--dictations-dir`, `--timeline-dir`, or matching env vars still override this
+- `TranscriptedMCP` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current-plus-legacy read order. It keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default; if `TRANSCRIPTED_DATA_DIR` is set, it instead keeps the index in that shared root unless `TRANSCRIPTED_INDEX_DIR` is also set. `TRANSCRIPTED_TIMELINE_DIR` can override just the timeline directory.
+- `TranscriptedQA` now defaults to the current Transcripted meetings/dictations/timeline/state/log layout, uses `~/Library/Application Support/Transcripted/logs/app.jsonl` for log validation, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--dictations-path`, `--timeline-path`, `--state-dir`, and `--log-path` overrides for nonstandard setups

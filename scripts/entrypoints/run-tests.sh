@@ -295,6 +295,7 @@ APP_SOURCES=(
     "Sources/Dictation/DictationStopFinalizationPolicy.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/Dictation/DictationTranscriptStore.swift"
+    "Sources/Timeline/TimelineMarkdownWriter.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
     "Sources/Support/TranscriptedConstants.swift"
     "Sources/Timeline/ActiveDisplayTracker.swift"

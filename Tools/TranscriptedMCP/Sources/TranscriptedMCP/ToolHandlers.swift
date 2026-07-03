@@ -50,6 +50,7 @@ private func autoWindowEnd<T>(items: [T], start: Int, cost: (T) -> Int) -> Int {
 private enum EmptyResultScope {
     case meetings
     case dictations
+    case timelines
     case mixed
     case summaries
 }
@@ -70,6 +71,7 @@ private func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], in
             indexedDictationDays: nil,
             indexedDictationEntries: nil,
             indexedSummaryItems: nil,
+            indexedTimelineDays: nil,
             hint: counts.meetings == 0
                 ? "No meetings are indexed — check that the directories above contain capture Markdown, or call the status tool."
                 : "No meetings matched these filters — try widening the date range or changing the query."
@@ -81,9 +83,22 @@ private func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], in
             indexedDictationDays: counts.dictationDays,
             indexedDictationEntries: counts.dictationEntries,
             indexedSummaryItems: nil,
+            indexedTimelineDays: nil,
             hint: counts.dictationDays == 0
                 ? "No dictations are indexed — check that the directories above contain capture Markdown, or call the status tool."
                 : "No dictations matched these filters — try widening the date range or changing the query."
+        )
+    case .timelines:
+        payload = EmptyQueryResult(
+            searchedDirectories: directories,
+            indexedMeetings: nil,
+            indexedDictationDays: nil,
+            indexedDictationEntries: nil,
+            indexedSummaryItems: nil,
+            indexedTimelineDays: counts.timelineDays,
+            hint: counts.timelineDays == 0
+                ? "No timeline days are indexed — check that the directories above contain timeline Markdown, or call the status tool."
+                : "No timeline days matched these filters — try widening the date range."
         )
     case .mixed:
         payload = EmptyQueryResult(
@@ -92,6 +107,7 @@ private func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], in
             indexedDictationDays: counts.dictationDays,
             indexedDictationEntries: nil,
             indexedSummaryItems: nil,
+            indexedTimelineDays: counts.timelineDays,
             hint: counts.meetings == 0 && counts.dictationDays == 0
                 ? "Nothing is indexed — check that the directories above contain capture Markdown, or call the status tool."
                 : "No items matched these filters — try widening the date range or changing the query."
@@ -103,6 +119,7 @@ private func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], in
             indexedDictationDays: nil,
             indexedDictationEntries: nil,
             indexedSummaryItems: counts.summaryItems,
+            indexedTimelineDays: nil,
             hint: counts.summaryItems == 0
                 ? "No structured summaries are indexed. Rollups only cover meetings with a saved summary (Settings → Meetings → local summaries)."
                 : "No summary items matched these filters — try widening the date range or removing filters."
@@ -423,7 +440,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "digest",
-                description: "Cross-meeting summary for a time window: every meeting in range that has structured summary facts, with its decisions, action items, and open questions, plus rolled-up counts. Use for 'what happened across all my meetings this week'. Depends on the meeting summary index.",
+                description: "Merged day summary for a time window: timeline activity cards plus every meeting in range that has structured summary facts, with decisions, action items, and open questions. Use for 'what happened across my day/week'.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -434,6 +451,28 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         "date_to": .object([
                             "type": .string("string"),
                             "description": .string("End date (YYYY-MM-DD). Defaults to same as date_from.")
+                        ]),
+                    ]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
+                name: "get_timeline",
+                description: "Read saved timeline Markdown for one date or date range. Returns activity, meeting, and dictation cards from captures/timeline/*.md when available.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "date": .object([
+                            "type": .string("string"),
+                            "description": .string("Specific timeline date (YYYY-MM-DD)")
+                        ]),
+                        "date_from": .object([
+                            "type": .string("string"),
+                            "description": .string("Start date (YYYY-MM-DD)")
+                        ]),
+                        "date_to": .object([
+                            "type": .string("string"),
+                            "description": .string("End date (YYYY-MM-DD)")
                         ]),
                     ]),
                 ]),
@@ -566,7 +605,9 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             case "list_decisions":
                 return try handleListDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "digest":
-                return try handleDigest(params: params, index: index, meetingDirs: directories.meetingDirs)
+                return try handleDigest(params: params, index: index, meetingDirs: directories.meetingDirs, timelineDirs: directories.timelineDirs)
+            case "get_timeline":
+                return try handleGetTimeline(params: params, index: index, timelineDirs: directories.timelineDirs)
             case "decisions":
                 return try handleDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "commitments":
@@ -1180,23 +1221,36 @@ private func handleListDecisions(params: CallTool.Parameters, index: TranscriptI
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
-private func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], timelineDirs: [URL]) throws -> CallTool.Result {
     // Default to today when no window is given, matching recap's behavior.
     let today = DateFormatter.localYYYYMMDD.string(from: Date())
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? today
     let dateTo = params.arguments?["date_to"]?.stringValue ?? dateFrom
 
     var result = try index.digest(dateFrom: dateFrom, dateTo: dateTo)
+    result.timelineDays = try index.listTimelineDays(dateFrom: dateFrom, dateTo: dateTo)
 
     for i in result.meetings.indices {
         result.meetings[i].title = meetingTitle(for: result.meetings[i].filename, meetingDirs: meetingDirs)
     }
 
-    if result.meetings.isEmpty {
-        return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
+    if result.meetings.isEmpty && result.timelineDays.isEmpty {
+        return try emptyResult(scope: .timelines, searchedDirectories: timelineDirs, index: index)
     }
 
     let json = try JSONEncoder.pretty.encode(result)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
+func handleGetTimeline(params: CallTool.Parameters, index: TranscriptIndex, timelineDirs: [URL]) throws -> CallTool.Result {
+    let date = params.arguments?["date"]?.stringValue
+    let dateFrom = params.arguments?["date_from"]?.stringValue ?? date
+    let dateTo = params.arguments?["date_to"]?.stringValue ?? dateFrom
+    let days = try index.listTimelineDays(dateFrom: dateFrom, dateTo: dateTo)
+    if days.isEmpty {
+        return try emptyResult(scope: .timelines, searchedDirectories: timelineDirs, index: index)
+    }
+    let json = try JSONEncoder.pretty.encode(["timeline_days": days])
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
@@ -1208,6 +1262,7 @@ func handleStatus(index: TranscriptIndex, directories: TranscriptedDataDirectori
         serverVersion: TranscriptedMCP.serverVersion,
         meetingDirectories: directories.meetingDirs.map(\.path),
         dictationDirectories: directories.dictationDirs.map(\.path),
+        timelineDirectories: directories.timelineDirs.map(\.path),
         resolutionSource: directories.resolutionSource.rawValue,
         legacyFallbackAppended: directories.legacyFallbackAppended,
         indexDirectory: directories.indexDir.path,
@@ -1216,6 +1271,8 @@ func handleStatus(index: TranscriptIndex, directories: TranscriptedDataDirectori
         indexedDictationEntries: counts.dictationEntries,
         indexedSummaryItems: counts.summaryItems,
         summarizedMeetings: counts.summarizedMeetings,
+        indexedTimelineDays: counts.timelineDays,
+        indexedTimelineCards: counts.timelineCards,
         summariesIndexed: counts.summaryItems > 0
     )
 

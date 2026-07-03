@@ -51,7 +51,7 @@ bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the
 Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multiple rules, run the union):
 
 - Touched `Sources/**/*.swift`, root `Tests/*.swift`, or `Tests/FastTests.manifest` → `bash build.sh --no-open` + `bash run-tests.sh`
-- Touched `Sources/Timeline/**` or `Sources/UI/Timeline/**` → `bash build.sh --no-open` + `bash run-tests.sh`
+- Touched `Sources/Timeline/**` or `Sources/UI/Timeline/**` → `python3 scripts/dev/check-build-source-lists.py` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
 - Touched `Sources/Meeting/**`, `Sources/TranscriptedCore/**`, or `Tests/Integration/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
 - Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `python3 scripts/dev/check-build-source-lists.py` + `bash run-e2e-smoke.sh`
 - Touched the slow-pasteback smoke path (`Tests/E2E/SlowPastebackSmoke.swift`, `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/Support/TranscriptedConstants.swift`, `run-slow-pasteback-smoke.sh`) → `python3 scripts/dev/check-build-source-lists.py` + `bash run-slow-pasteback-smoke.sh`

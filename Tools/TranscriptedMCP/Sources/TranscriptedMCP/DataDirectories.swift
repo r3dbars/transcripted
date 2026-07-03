@@ -4,6 +4,7 @@ import TranscriptedCaptureKit
 struct TranscriptedDataDirectories {
     let meetingDirs: [URL]
     let dictationDirs: [URL]
+    let timelineDirs: [URL]
     let indexDir: URL
     let resolutionSource: CaptureLibraryResolutionSource
     let legacyFallbackAppended: Bool
@@ -16,11 +17,15 @@ struct TranscriptedDataDirectories {
         dictationDirs[0]
     }
 
+    var timelineDir: URL {
+        timelineDirs[0]
+    }
+
     var watchedDirectories: [URL] {
         var seen: Set<String> = []
         var directories: [URL] = []
 
-        for url in meetingDirs + dictationDirs {
+        for url in meetingDirs + dictationDirs + timelineDirs {
             let path = url.standardizedFileURL.path
             guard !seen.contains(path) else { continue }
             seen.insert(path)
@@ -33,12 +38,14 @@ struct TranscriptedDataDirectories {
     init(
         meetingsDir: URL,
         dictationsDir: URL,
+        timelineDir: URL? = nil,
         indexDir: URL,
         resolutionSource: CaptureLibraryResolutionSource = .defaultCaptures,
         legacyFallbackAppended: Bool = false
     ) {
         self.meetingDirs = [meetingsDir]
         self.dictationDirs = [dictationsDir]
+        self.timelineDirs = [timelineDir ?? meetingsDir.deletingLastPathComponent().appendingPathComponent("timeline", isDirectory: true)]
         self.indexDir = indexDir
         self.resolutionSource = resolutionSource
         self.legacyFallbackAppended = legacyFallbackAppended
@@ -47,12 +54,14 @@ struct TranscriptedDataDirectories {
     init(
         meetingDirs: [URL],
         dictationDirs: [URL],
+        timelineDirs: [URL] = [],
         indexDir: URL,
         resolutionSource: CaptureLibraryResolutionSource = .defaultCaptures,
         legacyFallbackAppended: Bool = false
     ) {
         self.meetingDirs = meetingDirs
         self.dictationDirs = dictationDirs
+        self.timelineDirs = timelineDirs
         self.indexDir = indexDir
         self.resolutionSource = resolutionSource
         self.legacyFallbackAppended = legacyFallbackAppended
@@ -74,6 +83,7 @@ struct TranscriptedDataDirectories {
             return TranscriptedDataDirectories(
                 meetingDirs: resolved.meetingDirs,
                 dictationDirs: resolved.dictationDirs,
+                timelineDirs: resolved.timelineDirs,
                 indexDir: indexOverride ?? sharedDataRoot,
                 resolutionSource: resolved.resolutionSource,
                 legacyFallbackAppended: resolved.legacyFallbackAppended
@@ -90,6 +100,7 @@ struct TranscriptedDataDirectories {
         return TranscriptedDataDirectories(
             meetingDirs: resolved.meetingDirs,
             dictationDirs: resolved.dictationDirs,
+            timelineDirs: resolved.timelineDirs,
             indexDir: indexOverride ?? defaultIndex,
             resolutionSource: resolved.resolutionSource,
             legacyFallbackAppended: resolved.legacyFallbackAppended

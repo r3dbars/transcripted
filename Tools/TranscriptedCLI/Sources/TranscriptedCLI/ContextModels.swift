@@ -1,10 +1,12 @@
 import ArgumentParser
 import Foundation
+import TranscriptedCaptureKit
 
 enum CLIContextKind: String, ExpressibleByArgument, Codable {
     case all
     case meeting
     case dictation
+    case timeline
 }
 
 struct CLIAgentTranscript: Codable {
@@ -129,6 +131,78 @@ struct CLIDictationDaySummary: Codable {
     }
 }
 
+struct CLITimelineDaySummary: Codable {
+    let filename: String
+    let date: String
+    let cardCount: Int
+    let activeMinutes: Int
+    let categories: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, categories
+        case cardCount = "card_count"
+        case activeMinutes = "active_minutes"
+    }
+}
+
+struct CLIAgentTimelineDay: Codable {
+    let version: String
+    let captureType: String
+    let date: String
+    let markdownFilename: String
+    let cardCount: Int
+    let activeMinutes: Int
+    let categories: [String]
+    let cards: [CLIAgentTimelineCard]
+
+    init(_ parsed: ParsedTimelineDayCapture) {
+        self.version = "\(parsed.formatVersion)"
+        self.captureType = parsed.captureType
+        self.date = parsed.date
+        self.markdownFilename = parsed.markdownFilename
+        self.cardCount = parsed.cardCount
+        self.activeMinutes = parsed.activeMinutes
+        self.categories = parsed.categories
+        self.cards = parsed.cards.map(CLIAgentTimelineCard.init)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case version, date, categories, cards
+        case captureType = "capture_type"
+        case markdownFilename = "markdown_filename"
+        case cardCount = "card_count"
+        case activeMinutes = "active_minutes"
+    }
+}
+
+struct CLIAgentTimelineCard: Codable {
+    let position: Int
+    let timeRange: String
+    let title: String
+    let category: String
+    let kind: String
+    let summary: String
+    let details: String?
+    let transcriptPath: String?
+
+    init(_ parsed: ParsedTimelineCard) {
+        self.position = parsed.position
+        self.timeRange = parsed.timeRange
+        self.title = parsed.title
+        self.category = parsed.category
+        self.kind = parsed.kind
+        self.summary = parsed.summary
+        self.details = parsed.details
+        self.transcriptPath = parsed.transcriptPath
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case position, title, category, kind, summary, details
+        case timeRange = "time_range"
+        case transcriptPath = "transcript_path"
+    }
+}
+
 struct CLIReadMarkdownDocument: Codable {
     let kind: CLIContextKind
     let filename: String
@@ -139,6 +213,7 @@ struct CLIReadMarkdownDocument: Codable {
     let utterances: [CLIUtterance]?
     let date: String?
     let entries: [CLIClientDictationEntry]?
+    let timeline: CLIAgentTimelineDay?
 
     init(
         kind: CLIContextKind,
@@ -149,7 +224,8 @@ struct CLIReadMarkdownDocument: Codable {
         speakers: [CLIActorSpeaker]? = nil,
         utterances: [CLIUtterance]? = nil,
         date: String? = nil,
-        entries: [CLIClientDictationEntry]? = nil
+        entries: [CLIClientDictationEntry]? = nil,
+        timeline: CLIAgentTimelineDay? = nil
     ) {
         self.kind = kind
         self.filename = filename
@@ -160,10 +236,11 @@ struct CLIReadMarkdownDocument: Codable {
         self.utterances = utterances
         self.date = date
         self.entries = entries
+        self.timeline = timeline
     }
 
     enum CodingKeys: String, CodingKey {
-        case kind, filename, markdown, recording, speakers, utterances, date, entries
+        case kind, filename, markdown, recording, speakers, utterances, date, entries, timeline
         case entryId = "entry_id"
     }
 }

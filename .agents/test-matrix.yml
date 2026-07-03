@@ -20,6 +20,7 @@ rules:
       - "python3 scripts/dev/check-build-source-lists.py"
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
+      - "bash run-integration-smoke.sh"
 
   - paths:
       - "Sources/Meeting/**"

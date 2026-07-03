@@ -5,6 +5,7 @@
 - capture-library directory resolution (env overrides, app manifest, `transcriptSaveLocation` preference, legacy Draft / `~/Documents/Transcripted` fallback)
 - capture-Markdown detection (`looksLikeCaptureMarkdown`, directory probing, frontmatter title extraction)
 - capture-Markdown parsing (meeting transcripts and dictation day files)
+- timeline Markdown formatting/parsing for `<capture-library>/timeline/YYYY-MM-DD.md`
 - structured meeting-summary parsing (Decisions / Action Items / Open Questions)
 
 Both `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` depend on it via a relative `.package(path: "../TranscriptedCaptureKit")` dependency. Before this package existed, that logic was duplicated nearly verbatim in both tools and had already drifted; do not re-inline it.
@@ -17,6 +18,7 @@ Both `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` depend on it via a rela
 | `Sources/TranscriptedCaptureKit/CaptureLibraryResolver.swift` | `CaptureLibraryResolver.resolve(...)` → `ResolvedCaptureDirectories` (meeting dirs, dictation dirs, optional shared data root, winning resolution rule + legacy-fallback flag) |
 | `Sources/TranscriptedCaptureKit/CaptureMarkdown.swift` | Capture-Markdown detection and frontmatter `title:` extraction |
 | `Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift` | Frontmatter, meeting transcript, and dictation day parsing into `ParsedMeetingCapture` / `ParsedDictationDayCapture` |
+| `Sources/TranscriptedCaptureKit/TimelineMarkdown.swift` | Shared timeline day Markdown formatter/parser used by CLI, MCP, QA, and tests |
 | `Sources/TranscriptedCaptureKit/CaptureSummaryParser.swift` | Structured summary parsing into `ParsedMeetingSummary` (Decisions / Action Items with owner / Open Questions); understands inline transcript summaries and generated `meeting_summary` sidecars. Ports the app's `RecentMeetingSummaryPreviewParser` section logic across the module boundary |
 
 ## Test Files
@@ -25,6 +27,7 @@ Both `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` depend on it via a rela
 |------|---------|
 | `Tests/TranscriptedCaptureKitTests/CaptureLibraryResolverTests.swift` | Resolution precedence: shared data dir, per-kind overrides, manifest, preference, legacy fallback, symlinked legacy roots |
 | `Tests/TranscriptedCaptureKitTests/CaptureMarkdownParserTests.swift` | Legacy + styled transcript parsing, speaker metadata, durations, dictation entries, detection helpers |
+| `Tests/TranscriptedCaptureKitTests/TimelineMarkdownTests.swift` | Timeline day formatting/parsing, stable frontmatter, relative meeting links, and non-timeline rejection |
 | `Tests/TranscriptedCaptureKitTests/CaptureSummaryParserTests.swift` | Inline + sidecar summary parsing, action-item owner extraction, placeholder/None-found handling, frontmatter fallback |
 
 ## Build and test
