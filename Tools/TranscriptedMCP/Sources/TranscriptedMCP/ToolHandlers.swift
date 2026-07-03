@@ -207,7 +207,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "search",
-                description: "Full-text search across all meeting transcripts. Returns matching utterances with speaker, timestamp, and meeting context. Optionally filter by speaker name (supports variants: Mike finds Michael) or date range.",
+                description: "Search meeting transcripts. Defaults to hybrid search: exact full-text matches PLUS on-device semantic matches, so paraphrases hit (e.g. 'pricing pushback' finds 'they balked at the cost'). Returns matching utterances with speaker, timestamp, and meeting context. Optionally filter by speaker name (supports variants: Mike finds Michael) or date range.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -218,6 +218,10 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         "speaker": .object([
                             "type": .string("string"),
                             "description": .string("Filter to utterances by this speaker")
+                        ]),
+                        "mode": .object([
+                            "type": .string("string"),
+                            "description": .string("Search strategy: 'hybrid' (default — FTS + semantic), 'lexical' (exact/stemmed only), or 'semantic' (paraphrase only). Semantic and hybrid fall back to lexical when the on-device embedding model is unavailable.")
                         ]),
                         "date_from": .object([
                             "type": .string("string"),
@@ -261,7 +265,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "search_context",
-                description: "Search across saved meetings, dictations, or both. Great for finding everything you captured about a topic, regardless of whether it came from a meeting or a quick dictated note.",
+                description: "Search across saved meetings, dictations, or both. Defaults to hybrid (full-text + on-device semantic), so paraphrases match, not just exact wording. Great for finding everything you captured about a topic, regardless of whether it came from a meeting or a quick dictated note.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -272,6 +276,10 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         "kind": .object([
                             "type": .string("string"),
                             "description": .string("Which context to search: 'all' (default), 'meeting', or 'dictation'")
+                        ]),
+                        "mode": .object([
+                            "type": .string("string"),
+                            "description": .string("Search strategy: 'hybrid' (default — FTS + semantic), 'lexical', or 'semantic'. Falls back to lexical when the embedding model is unavailable.")
                         ]),
                         "speaker": .object([
                             "type": .string("string"),
@@ -432,6 +440,95 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
+                name: "decisions",
+                description: "Find decisions across meeting summaries. Returns local structured receipts with meetingId, timestamp when available, and quote. No semantic embeddings or LLM synthesis.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "topic": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional topic filter, e.g. pricing")
+                        ]),
+                        "range": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional date range: YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD, today, or all")
+                        ]),
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum receipts to return (default: 20, max: 100)")
+                        ]),
+                    ]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
+                name: "commitments",
+                description: "Find action-item commitments across meeting summaries. Filter by person and date range. Returns local structured receipts with meetingId, timestamp when available, and quote.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "person": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional person/owner filter, e.g. Sarah")
+                        ]),
+                        "range": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional date range: YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD, today, or all")
+                        ]),
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum receipts to return (default: 20, max: 100)")
+                        ]),
+                    ]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
+                name: "open_questions",
+                description: "Find open questions across meeting summaries for a project/topic. Returns local structured receipts with meetingId, timestamp when available, and quote.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "project": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional project/topic filter")
+                        ]),
+                        "range": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional date range: YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD, today, or all")
+                        ]),
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum receipts to return (default: 20, max: 100)")
+                        ]),
+                    ]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
+                name: "search_meetings",
+                description: "Keyword search over local meeting transcript utterances. Returns structured receipts with meetingId, timestamp, and quote. This is not semantic search.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "query": .object([
+                            "type": .string("string"),
+                            "description": .string("Keyword query")
+                        ]),
+                        "range": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional date range: YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD, today, or all")
+                        ]),
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Maximum receipts to return (default: 20, max: 100)")
+                        ]),
+                    ]),
+                    "required": .array([.string("query")]),
+                ]),
+                annotations: .init(readOnlyHint: true)
+            ),
+            Tool(
                 name: "status",
                 description: "Server status and configuration: version, resolved capture directories, which resolution rule selected them, index location, and indexed counts. Call this when other tools return empty results to see whether anything is indexed at all.",
                 inputSchema: .object([
@@ -470,6 +567,14 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 return try handleListDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "digest":
                 return try handleDigest(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "decisions":
+                return try handleDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "commitments":
+                return try handleCommitments(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "open_questions":
+                return try handleOpenQuestions(params: params, index: index, meetingDirs: directories.meetingDirs)
+            case "search_meetings":
+                return try handleSearchMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "status":
                 return try handleStatus(index: index, directories: directories)
             default:
@@ -830,8 +935,9 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, m
     let speaker = params.arguments?["speaker"]?.stringValue
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
+    let mode = parseSearchMode(params.arguments?["mode"]?.stringValue)
 
-    var results = try index.searchUtterances(query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo)
+    var results = try index.searchUtterances(query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo, mode: mode)
     hydrateMeetingSearchTitles(in: &results, meetingDirs: meetingDirs)
 
     if results.results.isEmpty {
@@ -859,6 +965,7 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     let count = max(1, min(params.arguments?["count"]?.intValue ?? 10, 50))
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
+    let mode = parseSearchMode(params.arguments?["mode"]?.stringValue)
 
     var results = try index.searchContext(
         query: query,
@@ -866,7 +973,8 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
         kind: kind,
         dateFrom: dateFrom,
         dateTo: dateTo,
-        maxItems: count
+        maxItems: count,
+        mode: mode
     )
 
     hydrateMeetingTitles(in: &results.results, kind: \.kind, filename: \.filename, title: \.title, meetingDirs: meetingDirs)
@@ -936,7 +1044,7 @@ private func handleWhoIs(params: CallTool.Parameters, index: TranscriptIndex) th
 
 // MARK: - recap
 
-private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     // Use local calendar so "today" matches transcript dates (which are stored in local time)
     let today = DateFormatter.localYYYYMMDD.string(from: Date())
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? String(today)
@@ -951,7 +1059,6 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
     var recapParts: [RecapEntry] = []
 
     for meeting in meetings {
-        // Read first ~200 words of transcript as preview
         guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
             named: meeting.filename,
             appendingExtension: "md",
@@ -959,9 +1066,28 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
         ) else { continue }
         var preview = ""
         var title = meeting.filename
+        var decisions: [String] = []
+        var actionItems: [RecapActionItem] = []
+        var openQuestions: [String] = []
+        var summarySource = "transcript_fallback"
+
         if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
             title = extractTitle(from: content) ?? meeting.filename
-            preview = extractDialogueLines(from: content).prefix(15).joined(separator: "\n")
+            if let summary = TranscriptLoader.loadMeetingSummary(forTranscript: mdURL) {
+                title = summary.title ?? title
+                decisions = summary.decisions
+                actionItems = summary.actionItems.map { RecapActionItem(owner: $0.owner, text: $0.text) }
+                openQuestions = summary.openQuestions
+                let hasStructuredFacts = !decisions.isEmpty || !actionItems.isEmpty || !openQuestions.isEmpty
+                if hasStructuredFacts {
+                    preview = summaryPreview(decisions: decisions, actionItems: actionItems, openQuestions: openQuestions)
+                    summarySource = "summary"
+                } else {
+                    preview = extractDialogueLines(from: content).prefix(15).joined(separator: "\n")
+                }
+            } else {
+                preview = extractDialogueLines(from: content).prefix(15).joined(separator: "\n")
+            }
         }
 
         recapParts.append(RecapEntry(
@@ -972,7 +1098,11 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
             durationFormatted: formatDuration(meeting.durationSeconds),
             speakers: meeting.speakers.map { $0.name },
             wordCount: meeting.wordCount,
-            preview: preview
+            preview: preview,
+            decisions: decisions,
+            actionItems: actionItems,
+            openQuestions: openQuestions,
+            summarySource: summarySource
         ))
     }
 
@@ -1093,6 +1223,152 @@ func handleStatus(index: TranscriptIndex, directories: TranscriptedDataDirectori
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
+// MARK: - decisions / commitments / open_questions / search_meetings
+
+func handleDecisions(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+    let topic = params.arguments?["topic"]?.stringValue
+    let range = parseToolRange(params.arguments?["range"]?.stringValue)
+    let count = cappedCrossMeetingCount(params.arguments?["count"]?.intValue)
+    let indexed = try index.listDecisions(
+        query: topic,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+        maxItems: count + 1
+    )
+    var receipts = indexed.decisions.prefix(count).map { item in
+        CrossMeetingReceipt(
+            meetingId: item.filename,
+            meetingTitle: meetingTitle(for: item.filename, meetingDirs: meetingDirs),
+            timestamp: nil,
+            quote: item.text,
+            date: item.date,
+            datetime: item.datetime,
+            kind: "decision",
+            person: nil
+        )
+    }
+    hydrateReceiptTitles(&receipts, meetingDirs: meetingDirs)
+    let result = CrossMeetingToolResult(
+        query: topic,
+        range: range.label,
+        count: receipts.count,
+        truncated: indexed.truncated || indexed.decisions.count > count,
+        results: receipts
+    )
+    return try encodedToolResult(result)
+}
+
+func handleCommitments(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+    let person = params.arguments?["person"]?.stringValue
+    let range = parseToolRange(params.arguments?["range"]?.stringValue)
+    let count = cappedCrossMeetingCount(params.arguments?["count"]?.intValue)
+    let indexed = try index.listActionItems(
+        owner: person,
+        query: nil,
+        status: .open,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+        maxItems: count + 1
+    )
+    var receipts = indexed.items.prefix(count).map { item in
+        CrossMeetingReceipt(
+            meetingId: item.filename,
+            meetingTitle: meetingTitle(for: item.filename, meetingDirs: meetingDirs),
+            timestamp: nil,
+            quote: item.owner.map { "\($0): \(item.text)" } ?? item.text,
+            date: item.date,
+            datetime: item.datetime,
+            kind: "commitment",
+            person: item.owner
+        )
+    }
+    hydrateReceiptTitles(&receipts, meetingDirs: meetingDirs)
+    let result = CrossMeetingToolResult(
+        query: person,
+        range: range.label,
+        count: receipts.count,
+        truncated: indexed.truncated || indexed.items.count > count,
+        results: receipts
+    )
+    return try encodedToolResult(result)
+}
+
+func handleOpenQuestions(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+    let project = params.arguments?["project"]?.stringValue
+    let range = parseToolRange(params.arguments?["range"]?.stringValue)
+    let count = cappedCrossMeetingCount(params.arguments?["count"]?.intValue)
+    let fetchLimit = project?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? 1000 : count + 1
+    let indexed = try index.listSummaryItems(
+        kind: TranscriptIndex.SummaryItemKind.openQuestion,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+        limit: fetchLimit
+    )
+    let filtered = filterSummaryItems(indexed, matching: project)
+    var receipts = filtered.prefix(count).map { item in
+        CrossMeetingReceipt(
+            meetingId: item.filename,
+            meetingTitle: meetingTitle(for: item.filename, meetingDirs: meetingDirs),
+            timestamp: nil,
+            quote: item.text,
+            date: item.meetingDate,
+            datetime: item.meetingDateTime,
+            kind: "open_question",
+            person: nil
+        )
+    }
+    hydrateReceiptTitles(&receipts, meetingDirs: meetingDirs)
+    let result = CrossMeetingToolResult(
+        query: project,
+        range: range.label,
+        count: receipts.count,
+        truncated: filtered.count > count,
+        results: receipts
+    )
+    return try encodedToolResult(result)
+}
+
+func handleSearchMeetings(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+    guard let query = params.arguments?["query"]?.stringValue, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return textResult("Missing required parameter: query", isError: true)
+    }
+
+    let range = parseToolRange(params.arguments?["range"]?.stringValue)
+    let count = cappedCrossMeetingCount(params.arguments?["count"]?.intValue)
+    var groups = try index.searchUtterances(
+        query: query,
+        speaker: nil,
+        dateFrom: range.dateFrom,
+        dateTo: range.dateTo,
+        maxMeetings: count,
+        snippetsPerMeeting: 3
+    )
+    hydrateMeetingSearchTitles(in: &groups, meetingDirs: meetingDirs)
+
+    let receipts = groups.results.flatMap { group in
+        group.snippets.map { snippet in
+            CrossMeetingReceipt(
+                meetingId: group.filename,
+                meetingTitle: group.meetingTitle,
+                timestamp: snippet.timestamp,
+                quote: snippet.text,
+                date: group.meetingDate,
+                datetime: group.meetingDateTime,
+                kind: "utterance",
+                person: snippet.speaker
+            )
+        }
+    }
+    let result = CrossMeetingToolResult(
+        query: query,
+        range: range.label,
+        count: min(receipts.count, count),
+        truncated: groups.truncated || receipts.count > count,
+        results: Array(receipts.prefix(count))
+    )
+    return try encodedToolResult(result)
+}
+
 // MARK: - Output Types
 
 struct RecapEntry: Codable {
@@ -1104,6 +1380,15 @@ struct RecapEntry: Codable {
     let speakers: [String]
     let wordCount: Int
     let preview: String
+    let decisions: [String]
+    let actionItems: [RecapActionItem]
+    let openQuestions: [String]
+    let summarySource: String
+}
+
+struct RecapActionItem: Codable, Equatable {
+    let owner: String?
+    let text: String
 }
 
 struct RecapResult: Codable {
@@ -1140,6 +1425,15 @@ private func parseContextKind(_ raw: String?) -> ContextKind {
         return .all
     }
     return kind
+}
+
+/// Default to hybrid so paraphrase matches surface without the caller opting in.
+/// Falls back to lexical automatically when no embedding backend is available.
+private func parseSearchMode(_ raw: String?) -> SearchMode {
+    guard let raw, let mode = SearchMode(rawValue: raw.lowercased()) else {
+        return .hybrid
+    }
+    return mode
 }
 
 /// Frontmatter title for a meeting markdown file, or nil when the file is
@@ -1183,11 +1477,97 @@ private func hydrateMeetingTitles<T>(
     }
 }
 
+private func hydrateReceiptTitles(_ receipts: inout [CrossMeetingReceipt], meetingDirs: [URL]) {
+    for index in receipts.indices {
+        receipts[index].meetingTitle = meetingTitle(for: receipts[index].meetingId, meetingDirs: meetingDirs)
+    }
+}
+
+private struct ParsedToolRange {
+    let dateFrom: String?
+    let dateTo: String?
+    let label: String?
+}
+
+private func parseToolRange(_ raw: String?) -> ParsedToolRange {
+    guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+        return ParsedToolRange(dateFrom: nil, dateTo: nil, label: nil)
+    }
+    let lower = raw.lowercased()
+    if lower == "all" || lower == "all time" {
+        return ParsedToolRange(dateFrom: nil, dateTo: nil, label: raw)
+    }
+    if lower == "today" {
+        let today = DateFormatter.localYYYYMMDD.string(from: Date())
+        return ParsedToolRange(dateFrom: today, dateTo: today, label: today)
+    }
+
+    let separators = ["..", " to ", " - "]
+    for separator in separators where raw.contains(separator) {
+        let parts = raw.components(separatedBy: separator).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if parts.count == 2 {
+            let from = parts[0].isEmpty ? nil : parts[0]
+            let to = parts[1].isEmpty ? nil : parts[1]
+            return ParsedToolRange(dateFrom: from, dateTo: to, label: raw)
+        }
+    }
+
+    return ParsedToolRange(dateFrom: raw, dateTo: raw, label: raw)
+}
+
+private func cappedCrossMeetingCount(_ raw: Int?) -> Int {
+    max(1, min(raw ?? 20, 100))
+}
+
+private func filterSummaryItems(_ items: [TranscriptIndex.IndexedSummaryItem], matching query: String?) -> [TranscriptIndex.IndexedSummaryItem] {
+    guard let query = query?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty else {
+        return items
+    }
+    let terms = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+    guard !terms.isEmpty else { return items }
+    return items.filter { item in
+        let haystack = item.text.lowercased()
+        return terms.allSatisfy { haystack.contains($0) }
+    }
+}
+
+private func encodedToolResult<T: Encodable>(_ result: T) throws -> CallTool.Result {
+    let json = try JSONEncoder.pretty.encode(result)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
+}
+
 private func formatDuration(_ seconds: Int) -> String {
     let h = seconds / 3600
     let m = (seconds % 3600) / 60
     if h > 0 { return "\(h)h \(m)m" }
     return "\(m)m"
+}
+
+private func summaryPreview(
+    decisions: [String],
+    actionItems: [RecapActionItem],
+    openQuestions: [String]
+) -> String {
+    var sections: [String] = []
+    appendSummarySection("Decisions", decisions, to: &sections)
+    appendSummarySection(
+        "Action Items",
+        actionItems.map { item in
+            if let owner = item.owner, !owner.isEmpty {
+                return "\(owner): \(item.text)"
+            }
+            return item.text
+        },
+        to: &sections
+    )
+    appendSummarySection("Open Questions", openQuestions, to: &sections)
+    return sections.joined(separator: "\n\n")
+}
+
+private func appendSummarySection(_ title: String, _ items: [String], to sections: inout [String]) {
+    guard !items.isEmpty else { return }
+    let body = items.map { "- \($0)" }.joined(separator: "\n")
+    sections.append("## \(title)\n\(body)")
 }
 
 private func latestMeetingDate(in results: [MeetingSummary]) -> Date? {

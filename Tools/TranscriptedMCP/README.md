@@ -49,3 +49,17 @@ If `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 `dictations/` subfolders, `transcripted-mcp` uses those subfolders
 automatically and stores its SQLite index in that shared root unless
 `TRANSCRIPTED_INDEX_DIR` is also set.
+
+## Cross-Meeting Receipt Tools
+
+WS2.3 adds local structured retrieval tools for agents:
+
+- `decisions(topic, range)`
+- `commitments(person, range)`
+- `open_questions(project, range)`
+- `search_meetings(query, range)`
+
+Each returns JSON receipts shaped around `meetingId`, `timestamp`, and `quote`.
+Summary-derived receipts have `timestamp: null` until exact audio anchors are
+available; raw utterance search includes the transcript timestamp. These tools
+use only the local SQLite index and saved summary/parser output.

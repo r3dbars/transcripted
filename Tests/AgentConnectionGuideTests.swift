@@ -27,7 +27,7 @@ func testAgentConnectionGuide() {
             "prompt should tell local agents to use direct tools when available"
         )
         assertTrue(
-            AgentConnectionGuide.directToolNames.count == 9,
+            AgentConnectionGuide.directToolNames.count == 13,
             "prompt should track the full Transcripted MCP direct tool set"
         )
         for toolName in AgentConnectionGuide.directToolNames {
@@ -48,6 +48,10 @@ func testAgentConnectionGuide() {
                 "search",
                 "who_is",
                 "recap",
+                "decisions",
+                "commitments",
+                "open_questions",
+                "search_meetings",
             ]),
             "direct tool list should mirror Tools/TranscriptedMCP tool registration"
         )
