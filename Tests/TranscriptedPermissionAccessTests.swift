@@ -159,6 +159,11 @@ func testTranscriptedPermissionAccess() async {
             "system audio action should explain the destination when the permission is still missing"
         )
         assertEqual(
+            TranscriptedPermissionKind.screenRecordingActionTitle(isGranted: false),
+            "Open Screen Recording Settings",
+            "screen recording action should point to the distinct Screen Recording TCC pane"
+        )
+        assertEqual(
             TranscriptedPermissionKind.calendarActionTitle(for: .notDetermined),
             "Allow Calendar Access",
             "calendar action should stay prompt-like before the first decision"
@@ -222,6 +227,36 @@ func testTranscriptedPermissionAccess() async {
 
         assertTrue(granted, "full calendar access should return true")
         assertEqual(requestBox.callCount, 0, "authorized calendar status should not trigger another prompt")
+    }
+
+    await runSuite("TranscriptedPermissionAccess.requestScreenRecordingAccessIfNeeded — skips requester when already granted") {
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.requestScreenRecordingAccessIfNeeded(
+            preflight: { true },
+            activateForPrompt: {},
+            requester: {
+                requestBox.callCount += 1
+                return false
+            }
+        )
+
+        assertTrue(granted, "granted screen recording access should return true")
+        assertEqual(requestBox.callCount, 0, "granted screen recording access should not prompt again")
+    }
+
+    await runSuite("TranscriptedPermissionAccess.requestScreenRecordingAccessIfNeeded — asks once when missing") {
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.requestScreenRecordingAccessIfNeeded(
+            preflight: { false },
+            activateForPrompt: {},
+            requester: {
+                requestBox.callCount += 1
+                return true
+            }
+        )
+
+        assertTrue(granted, "missing screen recording access should return the requester result")
+        assertEqual(requestBox.callCount, 1, "missing screen recording access should ask macOS once")
     }
 
     await runSuite("TranscriptedPermissionAccess.requestCalendarAccessIfNeeded — prompts when calendar is not determined") {

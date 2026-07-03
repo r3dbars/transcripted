@@ -44,6 +44,7 @@
 - `TranscriptedPermissionKind.swift` — shared permission metadata, onboarding requirements, copy, icons, and action labels used by onboarding and Settings
 - `TranscriptedStoragePaths.swift` — canonical app-support path helpers for captures, state, cache, logs, and temporary files
 - `TranscriptionModelPreferences.swift` — persisted local transcription-model selection shared by dictation and meetings
+- `TimelinePreferences.swift` — persisted opt-in timeline settings: enablement, provider, local endpoint, storage cap, blocklist, and onboarding completion
 
 ## Current notes
 
@@ -51,7 +52,7 @@
 - `PhysicalDictationTriggerPreferences` is the canonical binding layer for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts. Avoid reintroducing ad hoc keycode logic or special-case right-Option handling in UI or capture code.
 - `TranscriptionModelPreferences` is the shared switch between `Parakeet`, the available local Whisper variants, and the beta-gated Nemotron streaming model (`SpeechModelBetaPreferences` controls its availability; `effectiveModel()` falls back to the default while the gate is off). Model-specific runtime behavior still belongs in `Sources/Speech/` and `Sources/Meeting/`.
 - `CustomDictionaryPreferences` and `DictationAutoSendPreferences` back the Settings `General` and `Dictation` pages. If you change parsing rules or policy thresholds, update the relevant tests.
-- `TranscriptedPermissionAccess` plus `TranscriptedPermissionKind` are the app-level permission seams. UI flows should call into them instead of duplicating TCC branching, metadata, or user-facing permission copy.
+- `TranscriptedPermissionAccess` plus `TranscriptedPermissionKind` are the app-level permission seams. UI flows should call into them instead of duplicating TCC branching, metadata, or user-facing permission copy. `screenRecording` is the full Screen Recording TCC tier for timeline pixels; keep it distinct from the narrower `systemAudioRecording` tier used for meeting audio.
 - `SpeakerNameSelectionPolicy` keeps speaker search and "You" matching consistent across settings and review UI. Keep duplicate-name disambiguation here instead of in individual SwiftUI controls.
 - `PermissionsOnboardingPreferences` is the canonical completion flag for the guided first-run permissions flow. Keep onboarding state out of view-local storage so forced reruns and completion state stay consistent.
 - `TranscriptedStoragePaths` should stay as the canonical path resolver for the app target. `Sources/TranscriptedCore/Services/CoreStoragePaths.swift` is the injected library-side seam.

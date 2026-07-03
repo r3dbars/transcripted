@@ -45,7 +45,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Transcripted needs microphone access for dictation and to capture your side of meetings.</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Transcripted needs screen recording access so meeting capture can access system audio from calls, videos, and other apps.</string>
+	<string>Transcripted needs screen recording access to save local timeline snapshots and to capture system audio from calls, videos, and other apps.</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Transcripted records system audio alongside your microphone so meetings can be transcribed locally on your Mac.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>

@@ -51,6 +51,7 @@ bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the
 Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multiple rules, run the union):
 
 - Touched `Sources/**/*.swift`, root `Tests/*.swift`, or `Tests/FastTests.manifest` → `bash build.sh --no-open` + `bash run-tests.sh`
+- Touched `Sources/Timeline/**` or `Sources/UI/Timeline/**` → `bash build.sh --no-open` + `bash run-tests.sh`
 - Touched `Sources/Meeting/**`, `Sources/TranscriptedCore/**`, or `Tests/Integration/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
 - Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `python3 scripts/dev/check-build-source-lists.py` + `bash run-e2e-smoke.sh`
 - Touched the slow-pasteback smoke path (`Tests/E2E/SlowPastebackSmoke.swift`, `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/Support/TranscriptedConstants.swift`, `run-slow-pasteback-smoke.sh`) → `python3 scripts/dev/check-build-source-lists.py` + `bash run-slow-pasteback-smoke.sh`
@@ -107,8 +108,9 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | `Sources/Reliability/` | wake/sleep recovery for hotkeys and active capture |
 | `Sources/Speech/` | local STT engines (`ParakeetEngine`), `STTRouter`, recorded-audio buffering, dictation audio recovery |
 | `Sources/Support/` | app paths, permissions metadata, hotkey/trigger preferences, paste, dictionary, launch-at-login |
+| `Sources/Timeline/` | Dayflow-style timeline engine scaffolding; future screen-activity capture, analysis, storage, and Markdown projection |
 | `Sources/TranscriptedCore/` | reusable meeting transcription library — strict library boundary, consumed only through `Sources/Meeting/` |
-| `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
+| `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, `Timeline/` |
 | `Tools/TranscriptedCaptureKit` | shared capture-library resolution + capture-Markdown parsing library for the CLI and MCP tools |
 | `Tools/TranscriptedCLI` | standalone local-context, offline transcription, and offline diarization CLI |
 | `Tools/TranscriptedMCP` | read-only MCP server for saved meetings/dictations, including cross-meeting rollup tools (`list_action_items`/`list_decisions`/`digest`) |

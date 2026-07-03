@@ -28,6 +28,8 @@ enum TranscriptedPermissionAccess {
             return AXIsProcessTrusted()
         case .systemAudioRecording:
             return systemAudioRecordingGranted()
+        case .screenRecording:
+            return screenRecordingGranted()
         case .calendar:
             return calendarAccessGranted()
         }
@@ -111,6 +113,18 @@ enum TranscriptedPermissionAccess {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
             }
             return granted
+        case .screenRecording:
+            if screenRecordingGranted() {
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+                return true
+            }
+
+            let granted = await requestScreenRecordingAccessIfNeeded()
+            notifyPermissionsDidChange(kind: .screenRecording)
+            if !granted {
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            }
+            return granted
         case .calendar:
             activateForPermissionPrompt()
             let granted = await requestCalendarAccessIfNeeded()
@@ -173,6 +187,26 @@ enum TranscriptedPermissionAccess {
 
     static func systemAudioRecordingGranted() -> Bool {
         systemAudioRecordingStatus().isGranted
+    }
+
+    static func screenRecordingGranted(
+        preflight: () -> Bool = { CGPreflightScreenCaptureAccess() }
+    ) -> Bool {
+        preflight()
+    }
+
+    @MainActor
+    static func requestScreenRecordingAccessIfNeeded(
+        preflight: () -> Bool = { CGPreflightScreenCaptureAccess() },
+        activateForPrompt: @MainActor () -> Void = { activateForPermissionPrompt() },
+        requester: () -> Bool = { CGRequestScreenCaptureAccess() }
+    ) async -> Bool {
+        if preflight() {
+            return true
+        }
+
+        activateForPrompt()
+        return requester()
     }
 
     private static func setSystemAudioRecordingGranted(_ granted: Bool) {
