@@ -35,6 +35,8 @@ final class MeetingCaptureBridge: ObservableObject {
     /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
     @Published private(set) var micAttenuationCueObserved: Bool = false
 
+    var onUnexpectedRecordingComplete: ((CaptureStopResult) -> Void)?
+
     // MARK: - Underlying capture
 
     /// Core's CoreAudio capture. NOT @MainActor — UI updates come via the
@@ -45,6 +47,7 @@ final class MeetingCaptureBridge: ObservableObject {
     private let completionAttempt = MeetingCaptureAttempt<CaptureStopResult>()
     private let startAttempt = MeetingCaptureAttempt<Bool>()
     private var timedOutStopCompletionHandler: ((CaptureStopResult) -> Void)?
+    private var isAwaitingTimedOutStopCompletion = false
 
     init(audio: Audio? = nil) {
         self.audio = audio ?? Audio(
@@ -73,6 +76,8 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Start a new recording session. Returns immediately; the session remains
     /// active until `stopAndAwaitFiles()` is called.
     func startRecording() async -> Bool {
+        isAwaitingTimedOutStopCompletion = false
+        timedOutStopCompletionHandler = nil
         completionAttempt.reset()?.resume(returning: currentStopResult())
         if audio.isRecording { return true }
 
@@ -122,6 +127,8 @@ final class MeetingCaptureBridge: ObservableObject {
         )
 
         return await withCheckedContinuation { continuation in
+            isAwaitingTimedOutStopCompletion = false
+            timedOutStopCompletionHandler = nil
             let attemptID = completionAttempt.begin(continuation)
             audio.stop()
 
@@ -144,6 +151,7 @@ final class MeetingCaptureBridge: ObservableObject {
                         uniquingKeysWith: { _, new in new }
                     )
                 )
+                self.isAwaitingTimedOutStopCompletion = true
                 self.timedOutStopCompletionHandler = onTimedOutCompletion
                 continuation.resume(returning: self.currentStopResult(didTimeOut: true))
             })
@@ -213,14 +221,21 @@ final class MeetingCaptureBridge: ObservableObject {
                     didTimeOut: false
                 )
                 if let continuation = self.completionAttempt.reset() {
+                    self.isAwaitingTimedOutStopCompletion = false
                     self.timedOutStopCompletionHandler = nil
                     continuation.resume(returning: result)
                     return
                 }
 
-                let handler = self.timedOutStopCompletionHandler
-                self.timedOutStopCompletionHandler = nil
-                handler?(result)
+                if self.isAwaitingTimedOutStopCompletion {
+                    self.isAwaitingTimedOutStopCompletion = false
+                    let handler = self.timedOutStopCompletionHandler
+                    self.timedOutStopCompletionHandler = nil
+                    handler?(result)
+                    return
+                }
+
+                self.onUnexpectedRecordingComplete?(result)
             }
         }
 

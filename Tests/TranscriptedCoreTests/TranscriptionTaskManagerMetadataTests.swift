@@ -478,10 +478,9 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(obsidianMarkdown.contains("\ntags:"), "embedders can still opt into Obsidian metadata explicitly")
     }
 
-    func testStartTranscriptionWithMicOnlyAudioSavesSingleTrackTranscript() async throws {
+    func testStartTranscriptionAllowsMicOnlyRecovery() async throws {
         let manager = makeManager(
-            speechToText: MetadataStubSpeechToTextEngine(transcript: "Mic only recovered meeting."),
-            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments())
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Mic only recovery worked.")
         )
         let micScratchDirectory = tempDirectory.appendingPathComponent("audio")
         try FileManager.default.createDirectory(at: micScratchDirectory, withIntermediateDirectories: true)
@@ -502,16 +501,23 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.backgroundTaskCount, 0)
         XCTAssertEqual(manager.activeTasks.count, 0)
         XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(manager.displayStatus, .transcriptSaved)
+
         let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(markdown.contains("Mic only recovered meeting."))
+        XCTAssertTrue(markdown.contains("sources: [mic]"))
+        XCTAssertTrue(markdown.contains("system_audio_missing: true"))
+        XCTAssertTrue(markdown.contains("Mic only recovery worked."))
     }
 
-    func testMicOnlyFailedQueueRetainsArchiveAndRemovesScratch() throws {
+    func testMicOnlyTranscriptionRetainsMicAudioAndRemovesScratch() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
-        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered from the microphone."),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
         let micScratchDirectory = tempDirectory.appendingPathComponent("audio")
         try FileManager.default.createDirectory(at: micScratchDirectory, withIntermediateDirectories: true)
         let micURL = micScratchDirectory.appendingPathComponent("mic.wav")
@@ -523,19 +529,20 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
         ))
 
-        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
-        XCTAssertTrue(
-            failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"),
-            "failed queue should point at retained archive audio, not scratch audio"
-        )
-        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should be removed after archiving")
 
-        let archivedDirectory = failed.micAudioURL.deletingLastPathComponent()
-        manager.failedTranscriptionManager.deleteFailedTranscription(id: failed.id)
-
-        XCTAssertFalse(FileManager.default.fileExists(atPath: failed.micAudioURL.path), "delete should remove archived failed audio")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: archivedDirectory.path), "delete should remove the empty failed-audio directory")
+        let retainedFiles = FileManager.default
+            .enumerator(at: retainedAudioDirectory, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL } ?? []
+        XCTAssertTrue(
+            retainedFiles.contains { $0.lastPathComponent == "microphone.wav" },
+            "successful mic-only transcription should retain the microphone WAV beside the transcript"
+        )
     }
 
     func testManualFailedQueueRetainsAudioBeforeRemovingScratch() throws {
@@ -1154,10 +1161,9 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Recovered meeting artifact."))
     }
 
-    func testRetryFailedTranscriptionWithMicOnlyAudioUsesSingleTrackPath() async throws {
+    func testRetryFailedTranscriptionSupportsMicOnlyRecoveredAudio() async throws {
         let manager = makeManager(
-            speechToText: MetadataStubSpeechToTextEngine(transcript: "Mic only retry artifact."),
-            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments())
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered from mic only.")
         )
         let audioDirectory = tempDirectory.appendingPathComponent("audio", isDirectory: true)
         let micURL = audioDirectory.appendingPathComponent("retry-mic-only.wav")
@@ -1166,7 +1172,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
             micAudioURL: micURL,
             systemAudioURL: nil,
-            errorMessage: PipelineError.missingSystemAudio.localizedDescription,
+            errorMessage: "Recording was interrupted before it could be saved. The recovered audio is ready to transcribe.",
             meetingTitle: "Mic-only recovered call"
         ))
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
@@ -1178,29 +1184,12 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         )
 
         XCTAssertTrue(didRetry)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
         let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(markdown.contains("Mic-only recovered call"))
-        XCTAssertTrue(markdown.contains("Mic only retry artifact."))
-
-        let request = try XCTUnwrap(manager.speakerNamingRequest)
-        XCTAssertEqual(request.sourceFailedTranscriptionId, failed.id)
-        let speaker = try XCTUnwrap(request.speakers.first)
-        request.onComplete([
-            SpeakerNameUpdate(
-                persistentSpeakerId: speaker.id,
-                diarizerSpeakerId: speaker.diarizerSpeakerId,
-                channel: speaker.channel,
-                newName: "Local Mic",
-                previousName: speaker.currentName,
-                action: .named
-            )
-        ])
-
-        try await waitUntil {
-            manager.failedTranscriptionManager.failedTranscriptions.isEmpty
-                && manager.speakerNamingRequest == nil
-        }
+        XCTAssertTrue(markdown.contains("sources: [mic]"))
+        XCTAssertTrue(markdown.contains("system_audio_missing: true"))
+        XCTAssertTrue(markdown.contains("Recovered from mic only."))
     }
 
     func testCancelAllDuringRetryDoesNotPoisonFutureRetry() async throws {

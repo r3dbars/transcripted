@@ -1428,10 +1428,14 @@ public class TranscriptionTaskManager: ObservableObject {
         retainedAudioDirectoryProvider?() ?? retainedAudioDirectory
     }
 
-    func resolvedTranscriptFormatOptions(hasMicAudio: Bool) -> TranscriptFormatOptions {
-        let audioSources: [TranscriptAudioSource] = hasMicAudio
-            ? [.microphone, .systemAudio]
-            : [.systemAudio]
+    func resolvedTranscriptFormatOptions(hasMicAudio: Bool, hasSystemAudio: Bool = true) -> TranscriptFormatOptions {
+        var audioSources: [TranscriptAudioSource] = []
+        if hasMicAudio {
+            audioSources.append(.microphone)
+        }
+        if hasSystemAudio {
+            audioSources.append(.systemAudio)
+        }
         return (transcriptFormatOptionsProvider?() ?? .default)
             .withAudioSources(audioSources)
     }

@@ -211,13 +211,7 @@ extension Audio {
                                 try audioFile.write(from: bufferForAsyncUse)
                                 self.consecutiveSystemWriteErrors = 0
                             } catch {
-                                self.consecutiveSystemWriteErrors += 1
-                                if self.consecutiveSystemWriteErrors <= 3 || self.consecutiveSystemWriteErrors == self.maxConsecutiveWriteErrors {
-                                    AppLogger.audioSystem.error("System audio write failed", ["bufferNumber": "\(currentBufferCount)", "error": error.localizedDescription, "consecutive": "\(self.consecutiveSystemWriteErrors)"])
-                                }
-                                if self.consecutiveSystemWriteErrors >= self.maxConsecutiveWriteErrors {
-                                    AppLogger.audioSystem.error("Too many consecutive system write errors, stopping system writes")
-                                }
+                                self.recordSystemWriteFailure(error, bufferNumber: currentBufferCount)
                             }
                         }
                     }
@@ -431,6 +425,26 @@ extension Audio {
         return true
     }
 
+    @discardableResult
+    func recordSystemWriteFailure(_ error: Error, bufferNumber: Int? = nil) -> Bool {
+        consecutiveSystemWriteErrors += 1
+        let count = consecutiveSystemWriteErrors
+        if count <= 3 || count == maxConsecutiveWriteErrors {
+            var context = [
+                "error": error.localizedDescription,
+                "consecutive": "\(count)"
+            ]
+            if let bufferNumber {
+                context["bufferNumber"] = "\(bufferNumber)"
+            }
+            AppLogger.audioSystem.error("System audio write failed", context)
+        }
+        guard count >= maxConsecutiveWriteErrors else { return false }
+        AppLogger.audioSystem.error("Too many consecutive system write errors, stopping recording")
+        surfaceSystemWriteFailureAndStop()
+        return true
+    }
+
     /// Stops the recording and surfaces a write-failure error, mirroring the
     /// disk-full stop path in `startTimer()`. Callers run on a file-write queue,
     /// so this hops to main. No-ops if recording already ended (a cap crossed
@@ -441,6 +455,16 @@ extension Audio {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isRecording else { return }
             self.error = "Recording stopped \u{2014} Transcripted couldn't save audio to disk. Check that there's free space and the save location is still available, then start a new recording."
+            self.stop()
+        }
+    }
+
+    func surfaceSystemWriteFailureAndStop() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isRecording else { return }
+            self.systemAudioFailed = true
+            self.systemAudioStatus = .failed
+            self.error = "Recording stopped \u{2014} Transcripted couldn't save system audio to disk. Check that there's free space and the save location is still available, then start a new recording."
             self.stop()
         }
     }
@@ -671,6 +695,7 @@ extension Audio {
                 }
             } else if message.contains("unavailable") || message.contains("failed") {
                 systemAudioStatus = .failed
+                systemAudioFailed = true
             }
         } else {
             // No error - status is healthy (if we're recording)
