@@ -50,6 +50,32 @@ func testMeetingAudioStorageManager() async {
         )
     }
 
+    await runSuite("MeetingAudioStorageManager reports swallowed conversion failures") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let transcriptURL = try! makeTranscript(named: "Risky Call", in: directory, ageDays: 1)
+        let audioDirectory = makeAudioDirectory(for: transcriptURL)
+        try! Data("wav".utf8).write(to: audioDirectory.appendingPathComponent("microphone.wav"))
+
+        var reported: [MeetingAudioMaintenanceFailure] = []
+        MeetingAudioStorageManager.setMaintenanceFailureHandler { reported.append($0) }
+        defer { MeetingAudioStorageManager.setMaintenanceFailureHandler(nil) }
+
+        _ = await MeetingAudioStorageManager.compressWAVAudio(
+            in: audioDirectory,
+            converter: FakeMeetingAudioConverter(shouldFail: true),
+            validator: FakeMeetingAudioValidator()
+        )
+
+        assertEqual(reported.count, 1, "a failed conversion should report exactly one maintenance failure")
+        assertEqual(reported.first?.operation ?? "", "wav_to_m4a", "failure should carry the operation name")
+        assertFalse(
+            reported.first?.errorDomain.isEmpty ?? true,
+            "failure should carry the error domain for triage"
+        )
+    }
+
     await runSuite("MeetingAudioStorageManager does not trust unusable existing M4A files") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

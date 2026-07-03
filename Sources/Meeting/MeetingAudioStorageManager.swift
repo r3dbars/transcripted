@@ -470,10 +470,37 @@ struct FailedMeetingAudioCompressionResult: Equatable {
     let updatedEntries: Int
 }
 
+struct MeetingAudioMaintenanceFailure: Equatable {
+    let operation: String
+    let errorDomain: String
+    let errorCode: Int
+}
+
 enum MeetingAudioStorageManager {
     private static let frontmatterPreviewByteLimit = 64 * 1024
     private static let staleTemporaryAudioAge: TimeInterval = 6 * 60 * 60
     private static let managedAudioStems = ["microphone", "system_audio", "recording", "playback"]
+    private static let maintenanceFailureLock = NSLock()
+    private static var maintenanceFailureHandler: ((MeetingAudioMaintenanceFailure) -> Void)?
+
+    static func setMaintenanceFailureHandler(_ handler: ((MeetingAudioMaintenanceFailure) -> Void)?) {
+        maintenanceFailureLock.lock()
+        maintenanceFailureHandler = handler
+        maintenanceFailureLock.unlock()
+    }
+
+    private static func reportMaintenanceFailure(_ operation: String, _ error: Error) {
+        maintenanceFailureLock.lock()
+        let handler = maintenanceFailureHandler
+        maintenanceFailureLock.unlock()
+
+        let nsError = error as NSError
+        handler?(MeetingAudioMaintenanceFailure(
+            operation: operation,
+            errorDomain: nsError.domain,
+            errorCode: nsError.code
+        ))
+    }
 
     @discardableResult
     static func processExistingRetainedAudio(
@@ -621,6 +648,7 @@ enum MeetingAudioStorageManager {
                 try fileManager.removeItem(at: file)
                 removedAny = true
             } catch {
+                reportMaintenanceFailure("retention_prune", error)
                 continue
             }
         }
@@ -692,6 +720,7 @@ enum MeetingAudioStorageManager {
             fileManager.restrictFileToOwnerOnly(at: playbackWAVURL)
             return true
         } catch {
+            reportMaintenanceFailure("playback_mix", error)
             try? fileManager.removeItem(at: tempURL)
             return false
         }
@@ -774,6 +803,7 @@ enum MeetingAudioStorageManager {
         destinationURL: URL,
         in audioDirectory: URL,
         checkingCancellation: Bool,
+        operation: String = "wav_to_m4a",
         fileManager: FileManager,
         converter: MeetingAudioFileConverting,
         validator: MeetingAudioFileValidating
@@ -798,6 +828,7 @@ enum MeetingAudioStorageManager {
             fileManager.restrictFileToOwnerOnly(at: destinationURL)
             return .converted
         } catch {
+            reportMaintenanceFailure(operation, error)
             try? fileManager.removeItem(at: tempURL)
             return .failed
         }
@@ -925,6 +956,7 @@ enum MeetingAudioStorageManager {
                 try fileManager.removeItem(at: file)
                 removedCount += 1
             } catch {
+                reportMaintenanceFailure("stale_temp_cleanup", error)
                 continue
             }
         }
@@ -1147,6 +1179,7 @@ enum MeetingAudioStorageManager {
             destinationURL: destinationURL,
             in: audioDirectory,
             checkingCancellation: true,
+            operation: "failed_audio_compress",
             fileManager: fileManager,
             converter: converter,
             validator: validator
