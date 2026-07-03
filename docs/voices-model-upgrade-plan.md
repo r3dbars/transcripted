@@ -14,6 +14,13 @@ In-flight speaker work this must sequence around: #1330 (reversible speaker merg
 - 2026-07-01: phase 1 in flight as #1347 — full 0.7.9 → 0.15.4
   migration; app build + all 575 package tests green on first real CI
   round, integration smoke fixed in follow-up.
+- 2026-07-01: phase 2 in flight on `claude/phase2-nemotron-optin` —
+  `NemotronEngine` (batch entry over the 0.15.4 `StreamingAsrManager`
+  protocol, `nemotron1120ms` variant), `nemotron-streaming-0.6b` model
+  case, `SpeechModelBetaPreferences` gate + Beta-page toggle, STTRouter
+  wiring, fast tests. Default stays Parakeet; Nemotron is hidden unless
+  the beta toggle is on and `effectiveModel()` self-heals when it's
+  turned back off.
 
 ### Phase 1 exit checklist (before #1347 merges)
 

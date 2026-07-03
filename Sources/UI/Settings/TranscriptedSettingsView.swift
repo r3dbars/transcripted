@@ -85,6 +85,7 @@ struct TranscriptedSettingsView: View {
     @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
     @AppStorage(LocalMeetingSummaryPreferences.providerKey) private var localMeetingSummaryProviderRawValue = LocalMeetingSummaryProvider.defaultProvider.rawValue
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
+    @AppStorage(SpeechModelBetaPreferences.nemotronEnabledKey) private var betaNemotronModelEnabled = SpeechModelBetaPreferences.defaultNemotronEnabled
     @State private var betaFeatureStatus: String?
     @State private var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
     @State private var appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
@@ -2367,13 +2368,13 @@ struct TranscriptedSettingsView: View {
                             updatePreferredTranscriptionModel(newValue, page: .general)
                         }
                     )) {
-                        ForEach(TranscriptionModelChoice.allCases) { model in
+                        ForEach(visibleTranscriptionModelChoices) { model in
                             Text(model.title).tag(model)
                         }
                     }
                     .pickerStyle(.menu)
 
-                    ForEach(TranscriptionModelChoice.allCases) { model in
+                    ForEach(visibleTranscriptionModelChoices) { model in
                         ModelChoiceRow(
                             model: model,
                             isPreferred: preferredTranscriptionModel == model,
@@ -2873,13 +2874,13 @@ struct TranscriptedSettingsView: View {
                                 updatePreferredTranscriptionModel(newValue)
                             }
                         )) {
-                            ForEach(TranscriptionModelChoice.allCases) { model in
+                            ForEach(visibleTranscriptionModelChoices) { model in
                                 Text(model.title).tag(model)
                             }
                         }
                         .pickerStyle(.menu)
 
-                        ForEach(TranscriptionModelChoice.allCases) { model in
+                        ForEach(visibleTranscriptionModelChoices) { model in
                             ModelChoiceRow(
                                 model: model,
                                 isPreferred: preferredTranscriptionModel == model,
@@ -3248,6 +3249,34 @@ struct TranscriptedSettingsView: View {
                     )
 
                     betaLiveSidecarSetupStatus
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsToggleRow(
+                        title: "Nemotron streaming model (beta)",
+                        detail: betaNemotronModelEnabled
+                            ? "On. Nemotron appears as a transcription model choice in General settings; its ~600 MB download happens only if you select it."
+                            : "Adds a local streaming transcription model covering 40 languages to the model picker. Parakeet stays the default.",
+                        isOn: Binding(
+                            get: { betaNemotronModelEnabled },
+                            set: { enabled in
+                                betaNemotronModelEnabled = enabled
+                                SpeechModelBetaPreferences.setNemotronBetaEnabled(enabled)
+                                trackSettingsToggle("nemotron_streaming_model", enabled: enabled, page: .beta)
+                            }
+                        ),
+                        help: "Opt in to the Nemotron streaming transcription model.",
+                        automationIdentifier: "transcripted.settings.beta.nemotron-streaming-model"
+                    )
+
+                    if !betaNemotronModelEnabled && preferredTranscriptionModel == .nemotronStreaming {
+                        Text("Nemotron is still your saved preference, but with the beta off Transcripted uses \(TranscriptionModelPreferences.defaultModel.title).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
@@ -4152,6 +4181,16 @@ struct TranscriptedSettingsView: View {
 
     private var effectiveTranscriptionModel: TranscriptionModelChoice {
         TranscriptionModelPreferences.effectiveModel()
+    }
+
+    // Nemotron is beta-gated: it only shows up in the model picker while the
+    // Beta-page toggle is on (or while it is still the saved preference, so
+    // the picker never points at a hidden selection).
+    private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
+        TranscriptionModelChoice.allCases.filter { model in
+            guard model == .nemotronStreaming else { return true }
+            return betaNemotronModelEnabled || preferredTranscriptionModel == .nemotronStreaming
+        }
     }
 
     private var activeModelDetail: String {

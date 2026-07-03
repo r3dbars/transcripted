@@ -274,6 +274,7 @@ APP_SOURCES=(
     "Sources/Support/CaptureLibraryChangeBroadcaster.swift"
     "Sources/Support/LiveMeetingCodexPreferences.swift"
     "Sources/Support/LocalMeetingSummaryPreferences.swift"
+    "Sources/Support/SpeechModelBetaPreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"
     "Sources/Support/ModelCacheInventory.swift"
