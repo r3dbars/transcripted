@@ -1,42 +1,31 @@
-# Timeline Directory
+# Timeline
 
-## What this directory does
+## What This Directory Owns
 
-`Sources/Timeline/` owns the non-UI timeline engine for the future Dayflow-style
-Transcripted timeline. This subsystem will capture screen-activity snapshots,
-store app-owned timeline state, analyze activity locally first, and project
-meetings and dictations into one day view.
+`Sources/Timeline/` owns the Dayflow-style timeline engine. Phase 1 is capture
+plumbing only: screenshot cadence, display selection, foreground-app metadata,
+idle snapshots, local screenshot writes, and the pause/resume state exposed for
+future UI.
 
-Phase 0 is scaffolding only. Do not add capture, database, scheduler, or LLM
-runtime code here until the matching implementation phase.
+## Files
 
-## Planned files
+- `ScreenCaptureEngine.swift` - serial-queue capture loop, state machine, local JPEG writer, and `TimelineEngineController`
+- `ActiveDisplayTracker.swift` - display selection and even-dimension scaling helpers
+- `InputIdleSnapshot.swift` - local input-idle sampling
+- `ForegroundAppSampler.swift` - frontmost app plus best-effort window title
 
-- `ScreenCaptureEngine.swift` — future ScreenCaptureKit screenshot loop and pause/resume state machine
-- `TimelineEngineController.swift` — future main-actor facade owned by app state
-- `TimelineDatabase.swift` — future raw SQLite3 app-state store under Application Support
-- `TimelineRetentionManager.swift` — future storage-cap and screenshot cleanup policy
-- `AnalysisScheduler.swift` — future off-main analysis scheduler
-- `BatchPlanner.swift` — future pure batching rules
-- `ObservationBuilder.swift` — future local OCR/app metadata observation builder
-- `CardGenerator.swift` — future activity-card generation and validation
-- `TimelineLLMProvider.swift` — future provider protocol and shared provider plumbing
-- `TimelineCaptureJoiner.swift` — future meeting/dictation projection into timeline entries
-- `TimelineMarkdownWriter.swift` — future daily timeline Markdown writer
-- `TimelineDayBoundary.swift` — future 4 AM logical-day helper
+## Guardrails
 
-## Current notes
+- Screenshots and screen-derived metadata stay local.
+- Do not send app names, window titles, screenshot paths, OCR text, or screen content to Sentry/PostHog.
+- Keep ScreenCaptureKit work off the main thread.
+- Fast tests must stay deterministic and must not require Screen Recording permission.
+- UI, analysis, cards, OCR, LLM providers, and SQLite belong to later phases.
 
-- Keep this directory engine-only. UI belongs in `Sources/UI/Timeline/`.
-- Keep `Sources/TranscriptedCore/` out of this feature; timeline state is app-owned.
-- Screenshot capture, encoding, SQLite writes, and LLM work must run off the main thread.
-- Screen-derived text and images stay local unless the user explicitly opts into a cloud timeline provider.
-
-## Verification
-
-After changing timeline source:
+## Verify
 
 ```bash
+python3 scripts/dev/check-build-source-lists.py
 bash build.sh --no-open
 bash run-tests.sh
 ```

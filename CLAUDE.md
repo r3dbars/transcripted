@@ -107,6 +107,7 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | `Sources/Observability/` | events, debug log, Sentry, anonymous PostHog analytics, Sparkle updater, crash reporting |
 | `Sources/Reliability/` | wake/sleep recovery for hotkeys and active capture |
 | `Sources/Speech/` | local STT engines (`ParakeetEngine`), `STTRouter`, recorded-audio buffering, dictation audio recovery |
+| `Sources/Timeline/` | Dayflow-style timeline capture engine, local screenshot metadata, and pause/resume state exposure |
 | `Sources/Support/` | app paths, permissions metadata, hotkey/trigger preferences, paste, dictionary, launch-at-login |
 | `Sources/Timeline/` | Dayflow-style timeline engine scaffolding; future screen-activity capture, analysis, storage, and Markdown projection |
 | `Sources/TranscriptedCore/` | reusable meeting transcription library — strict library boundary, consumed only through `Sources/Meeting/` |
