@@ -5,7 +5,7 @@
 ## Packages
 
 - `TranscriptedCaptureKit/` — shared library for capture-library resolution and capture-Markdown parsing, used by the CLI and MCP packages
-- `TranscriptedCLI/` — local context and offline diarization CLI
+- `TranscriptedCLI/` — local context, offline transcription, and offline diarization CLI
 - `TranscriptedMCP/` — read-only MCP server for saved meetings and dictations
 - `TranscriptedQA/` — artifact validation and QA CLI
 - `SpeakerEvalHarness/` — headless AMI speaker-naming eval harness for diarization, embedding, clustering, and cross-meeting match sweeps

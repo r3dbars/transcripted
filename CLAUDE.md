@@ -110,7 +110,7 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | `Sources/TranscriptedCore/` | reusable meeting transcription library — strict library boundary, consumed only through `Sources/Meeting/` |
 | `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
 | `Tools/TranscriptedCaptureKit` | shared capture-library resolution + capture-Markdown parsing library for the CLI and MCP tools |
-| `Tools/TranscriptedCLI` | standalone local-context and offline diarization CLI |
+| `Tools/TranscriptedCLI` | standalone local-context, offline transcription, and offline diarization CLI |
 | `Tools/TranscriptedMCP` | read-only MCP server for saved meetings/dictations, including cross-meeting rollup tools (`list_action_items`/`list_decisions`/`digest`) |
 | `Tools/TranscriptedQA` | standalone artifact validation and QA CLI |
 | `Tools/SpeakerEvalHarness` | headless AMI speaker-naming eval harness (diarization, embedding, clustering, cross-meeting match sweeps) |
