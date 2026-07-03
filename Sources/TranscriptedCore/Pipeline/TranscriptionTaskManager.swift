@@ -107,25 +107,6 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
-        guard systemURL != nil else {
-            let errorMessage = PipelineError.missingSystemAudio.localizedDescription
-            AppLogger.pipeline.warning("Rejecting transcription — system audio capture is missing")
-            addFailedTranscriptionRetainingAudio(
-                micAudioURL: micURL,
-                systemAudioURL: nil,
-                errorMessage: errorMessage,
-                meetingTitle: meetingTitle,
-                recordingDate: recordingDate
-            )
-            publishFailure(
-                displayMessage: "System audio required",
-                diagnosticMessage: errorMessage
-            )
-            sendFailureNotification(errorMessage: errorMessage)
-            scheduleStatusReset(delay: 4)
-            return
-        }
-
         // Gate: reject only when every available capture track is too short.
         // Meeting recovery can produce a very short mic stub while system audio is still
         // intact and fully transcribable, so don't throw away the whole recording just
@@ -286,6 +267,12 @@ public class TranscriptionTaskManager: ObservableObject {
         let taskId = UUID()
         activeCount += 1
         backgroundTaskCount += 1
+        activeTaskAudio[taskId] = (
+            micURL: audioURL,
+            systemURL: nil,
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate
+        )
         publishNonFailureStatus(.gettingReady)
 
         AppLogger.pipeline.info("Starting imported transcription task", [
@@ -690,37 +677,26 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        let retainedAudio = archiveFailedRecordingAudioIfConfigured(
-            micURL: micAudioURL,
-            systemURL: systemAudioURL,
-            taskId: id
-        )
         let retryIsUsingOriginalAudio = activeTasks[id] != nil
-        let promotedMicURL = retainedAudio?.micURL ?? micAudioURL
-        let promotedSystemURL = retainedAudio?.systemURL ?? systemAudioURL
         let didPersist = failedTranscriptionManager.updateFailedTranscriptionAudio(
             id: id,
-            micAudioURL: promotedMicURL,
-            systemAudioURL: promotedSystemURL
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL
         )
+        guard didPersist else { return false }
 
-        guard didPersist else {
-            if let retainedAudio {
-                removeRetainedFailedAudio(retainedAudio)
-            }
-            return false
-        }
-
-        if retryIsUsingOriginalAudio, retainedAudio != nil {
+        scheduleFailedRecordingAudioArchive(
+            micURL: micAudioURL,
+            systemURL: systemAudioURL,
+            taskId: id,
+            removeOriginalsAfterArchive: !retryIsUsingOriginalAudio,
+            originalMicCleanupLabel: "finalized failed mic scratch",
+            originalSystemCleanupLabel: "finalized failed system scratch"
+        )
+        if retryIsUsingOriginalAudio {
             AppLogger.pipeline.info("Deferred finalized failed audio scratch cleanup until active retry finishes", [
                 "id": id.uuidString
             ])
-        }
-        if retainedAudio?.micURL != nil, !retryIsUsingOriginalAudio {
-            removeManagedCleanupFile(micAudioURL, label: "finalized failed mic scratch")
-        }
-        if retainedAudio?.systemURL != nil, !retryIsUsingOriginalAudio {
-            removeManagedCleanupFile(systemAudioURL, label: "finalized failed system scratch")
         }
         return true
     }
@@ -742,23 +718,27 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        let retainedAudio = archiveAudio
-            ? archiveFailedRecordingAudioIfConfigured(
-                micURL: micAudioURL,
-                systemURL: systemAudioURL,
-                taskId: taskId
-            )
-            : nil
-        return enqueueFailedTranscriptionAfterRetainingAudio(
+        let didPersist = enqueueFailedTranscriptionAfterRetainingAudio(
             taskId: taskId,
-            retainedAudio: retainedAudio,
+            retainedAudio: nil,
             originalMicURL: micAudioURL,
             originalSystemURL: systemAudioURL,
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            removeOriginalsAfterArchive: archiveAudio
+            removeOriginalsAfterArchive: false
         )
+        if didPersist, archiveAudio {
+            scheduleFailedRecordingAudioArchive(
+                micURL: micAudioURL,
+                systemURL: systemAudioURL,
+                taskId: taskId,
+                removeOriginalsAfterArchive: true,
+                originalMicCleanupLabel: "archived failed mic scratch",
+                originalSystemCleanupLabel: "archived failed system scratch"
+            )
+        }
+        return didPersist
     }
 
     @discardableResult
@@ -1483,24 +1463,116 @@ public class TranscriptionTaskManager: ObservableObject {
         return filePath.hasPrefix(normalizedDirectoryPath)
     }
 
-    private func archiveFailedRecordingAudioIfConfigured(
+    private func scheduleFailedRecordingAudioArchive(
         micURL: URL?,
         systemURL: URL?,
-        taskId: UUID
-    ) -> RetainedRecordingAudio? {
-        guard let retainedAudioDirectory = resolvedRetainedAudioDirectory() else { return nil }
+        taskId: UUID,
+        removeOriginalsAfterArchive: Bool,
+        originalMicCleanupLabel: String,
+        originalSystemCleanupLabel: String
+    ) {
+        guard let retainedAudioDirectory = resolvedRetainedAudioDirectory() else { return }
 
         let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
         let placeholderTranscriptURL = retainedAudioDirectory
             .appendingPathComponent(failedStem)
             .appendingPathExtension("md")
 
+        if Self.shouldArchiveFailedAudioSynchronouslyForTests {
+            guard let retainedAudio = Self.archiveFailedRecordingAudio(
+                micURL: micURL,
+                systemURL: systemURL,
+                taskId: taskId,
+                transcriptURL: placeholderTranscriptURL,
+                archiveRoot: retainedAudioDirectory
+            ) else { return }
+            applyRetainedFailedRecordingAudio(
+                retainedAudio,
+                micURL: micURL,
+                systemURL: systemURL,
+                taskId: taskId,
+                removeOriginalsAfterArchive: removeOriginalsAfterArchive,
+                originalMicCleanupLabel: originalMicCleanupLabel,
+                originalSystemCleanupLabel: originalSystemCleanupLabel
+            )
+            return
+        }
+
+        Task { [weak self] in
+            let retainedAudio = await Task.detached(priority: .utility) {
+                Self.archiveFailedRecordingAudio(
+                    micURL: micURL,
+                    systemURL: systemURL,
+                    taskId: taskId,
+                    transcriptURL: placeholderTranscriptURL,
+                    archiveRoot: retainedAudioDirectory
+                )
+            }.value
+
+            guard let self, let retainedAudio else { return }
+            self.applyRetainedFailedRecordingAudio(
+                retainedAudio,
+                micURL: micURL,
+                systemURL: systemURL,
+                taskId: taskId,
+                removeOriginalsAfterArchive: removeOriginalsAfterArchive,
+                originalMicCleanupLabel: originalMicCleanupLabel,
+                originalSystemCleanupLabel: originalSystemCleanupLabel
+            )
+        }
+    }
+
+    private func applyRetainedFailedRecordingAudio(
+        _ retainedAudio: RetainedRecordingAudio,
+        micURL: URL?,
+        systemURL: URL?,
+        taskId: UUID,
+        removeOriginalsAfterArchive: Bool,
+        originalMicCleanupLabel: String,
+        originalSystemCleanupLabel: String
+    ) {
+        let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
+            retainedAudio: retainedAudio,
+            hasOriginalMic: micURL != nil,
+            failedSystemURL: retainedAudio.systemURL ?? systemURL
+        )
+        guard let updatedMicURL = retainedAudio.micURL ?? micURL ?? placeholderMicURL else {
+            removeRetainedFailedAudio(retainedAudio)
+            return
+        }
+        let didPersist = failedTranscriptionManager.updateFailedTranscriptionAudio(
+            id: taskId,
+            micAudioURL: updatedMicURL,
+            systemAudioURL: retainedAudio.systemURL ?? systemURL
+        )
+
+        guard didPersist else {
+            removeRetainedFailedAudio(retainedAudio)
+            return
+        }
+
+        guard removeOriginalsAfterArchive else { return }
+        if retainedAudio.micURL != nil {
+            removeManagedCleanupFile(micURL, label: originalMicCleanupLabel)
+        }
+        if retainedAudio.systemURL != nil {
+            removeManagedCleanupFile(systemURL, label: originalSystemCleanupLabel)
+        }
+    }
+
+    nonisolated private static func archiveFailedRecordingAudio(
+        micURL: URL?,
+        systemURL: URL?,
+        taskId: UUID,
+        transcriptURL: URL,
+        archiveRoot: URL
+    ) -> RetainedRecordingAudio? {
         do {
             let retainedAudio = try RecordingAudioArchiver.archive(
                 micURL: micURL,
                 systemURL: systemURL,
-                transcriptURL: placeholderTranscriptURL,
-                archiveRoot: retainedAudioDirectory
+                transcriptURL: transcriptURL,
+                archiveRoot: archiveRoot
             )
             AppLogger.pipeline.info("Retained failed meeting audio files", [
                 "hasMic": "\(retainedAudio.micURL != nil)",
@@ -1514,6 +1586,11 @@ public class TranscriptionTaskManager: ObservableObject {
             ])
             return nil
         }
+    }
+
+    nonisolated private static var shouldArchiveFailedAudioSynchronouslyForTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.processName == "xctest"
     }
 }
 

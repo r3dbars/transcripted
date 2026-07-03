@@ -401,6 +401,7 @@ APP_SOURCES=(
     "Sources/UI/Overlay/DictationCancelHintPolicy.swift"
     "Sources/UI/Overlay/DictationNoSpeechPresentationPolicy.swift"
     "Sources/UI/Overlay/DictationMicrophoneLoadingPresentationPolicy.swift"
+    "Sources/UI/Overlay/DictationWarmupPresentationPolicy.swift"
     "Sources/UI/Overlay/DictationRecordingStartOverlayPolicy.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
     "Sources/UI/Shared/MeetingAudioPlayback.swift"

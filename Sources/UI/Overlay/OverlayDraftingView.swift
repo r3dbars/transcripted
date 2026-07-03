@@ -65,7 +65,7 @@ final class OverlayDraftingView: NSView {
     private let spinner = NSProgressIndicator()
     private let statusLabel = NSTextField(labelWithString: "")
     private let errorIcon = NSImageView()
-    private let errorLabel = NSTextField(labelWithString: "")
+    private let errorLabel = NSTextField(wrappingLabelWithString: "")
     private let errorActionButton = OverlaySecondaryButton(frame: .zero)
 
     // Secondary state: dimmed transcript + "Refining..." spinner
@@ -103,22 +103,19 @@ final class OverlayDraftingView: NSView {
         addSubview(statusLabel)
 
         // Error icon
-        if let image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: "Error") {
-            errorIcon.image = image
-            errorIcon.contentTintColor = OverlayTokens.warningColor
-            let config = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
-            errorIcon.symbolConfiguration = config
-        }
+        applyMessageIcon(isNotice: false)
+        errorIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
         errorIcon.isHidden = true
         addSubview(errorIcon)
 
-        // Error label
+        // Error label — wraps so "press ⌘V" instructions never truncate mid-sentence
         errorLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         errorLabel.textColor = OverlayTokens.textSecondary
         errorLabel.isBezeled = false
         errorLabel.isEditable = false
         errorLabel.drawsBackground = false
         errorLabel.alignment = .center
+        errorLabel.maximumNumberOfLines = 3
         errorLabel.isHidden = true
         addSubview(errorLabel)
 
@@ -165,6 +162,7 @@ final class OverlayDraftingView: NSView {
         if !errorIcon.isHidden {
             // Error mode: icon + label centered
             let iconSize: CGFloat = 24
+            errorLabel.preferredMaxLayoutWidth = bounds.width - pad * 2
             let labelSize = errorLabel.fittingSize
             let buttonSize = errorActionButton.isHidden ? .zero : errorActionButton.fittingSize
             let hasAction = !errorActionButton.isHidden
@@ -216,10 +214,22 @@ final class OverlayDraftingView: NSView {
         }
     }
 
+    /// Swap between the warning triangle for real problems and a calm clipboard
+    /// glyph for "your text is on the clipboard" fallback notices.
+    private func applyMessageIcon(isNotice: Bool) {
+        let symbolName = isNotice ? "doc.on.clipboard" : "exclamationmark.triangle"
+        let description = isNotice ? "Copied to clipboard" : "Error"
+        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: description) {
+            errorIcon.image = image
+        }
+        errorIcon.contentTintColor = isNotice ? OverlayTokens.textSecondary : OverlayTokens.warningColor
+    }
+
     func update(
         error: String?,
         errorActionTitle: String?,
         onErrorAction: (() -> Void)?,
+        isNotice: Bool = false,
         isTranscribing: Bool,
         transcriptText: String,
         statusText: String
@@ -227,6 +237,7 @@ final class OverlayDraftingView: NSView {
         if let error = error, !error.isEmpty {
             // Error mode
             errorAction = onErrorAction
+            applyMessageIcon(isNotice: isNotice)
             errorIcon.isHidden = false
             errorLabel.isHidden = false
             errorLabel.stringValue = error

@@ -509,7 +509,7 @@ private struct SmokeScenario {
                 failures.append("final clipboard was \(category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: userCopy))")
             }
         case .freshCopied:
-            if outcome != .copied("Couldn't paste automatically. The text was copied instead.", reason: .pasteEventCreationFailed) {
+            if outcome != .copied("Couldn't paste automatically. Your text is on the clipboard — press ⌘V.", reason: .pasteEventCreationFailed) {
                 failures.append("paste outcome was \(outcome.diagnosticName)")
             }
             if finalClipboard != freshDictation {

@@ -189,17 +189,38 @@ verify_signature() {
 
 verify_launch_smoke() {
     local smoke_log="$REPO_ROOT/$BUILD_DIR/launch-smoke.log"
-    local smoke_home="$REPO_ROOT/$BUILD_DIR/launch-smoke-home"
     local ui_report="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
     local open_pid=""
     local pre_launch_app_pids=""
+    local launch_smoke_dir=""
+    local launch_app_bundle=""
+    local launch_app_binary=""
+    local launch_smoke_log=""
+    local launch_smoke_home=""
+    local launch_ui_report=""
     rm -f "$smoke_log"
-    rm -rf "$smoke_home"
     rm -f "$ui_report"
-    mkdir -p "$smoke_home"
+
+    cleanup_launch_smoke_app_bundle() {
+        [ -n "$launch_smoke_dir" ] && rm -rf "$launch_smoke_dir"
+    }
+
+    persist_launch_smoke_artifacts() {
+        [ -n "$launch_smoke_log" ] && [ -f "$launch_smoke_log" ] && cp "$launch_smoke_log" "$smoke_log"
+        [ -n "$launch_ui_report" ] && [ -f "$launch_ui_report" ] && cp "$launch_ui_report" "$ui_report"
+    }
+
+    launch_smoke_dir="$(mktemp -d "/tmp/transcripted-launch-smoke.XXXXXX")"
+    launch_app_bundle="$launch_smoke_dir/$APP_NAME.app"
+    launch_app_binary="$launch_app_bundle/Contents/MacOS/$APP_NAME"
+    launch_smoke_log="$launch_smoke_dir/launch-smoke.log"
+    launch_smoke_home="$launch_smoke_dir/home"
+    launch_ui_report="$launch_smoke_dir/launch-ui-smoke.json"
+    mkdir -p "$launch_smoke_home"
+    cp -R "$APP_BUNDLE" "$launch_app_bundle"
 
     snapshot_launch_smoke_app_pids() {
-        pgrep -f "$APP_BINARY" || true
+        pgrep -f "$launch_app_binary" || true
     }
 
     is_pre_launch_app_pid() {
@@ -228,20 +249,20 @@ verify_launch_smoke() {
     pre_launch_app_pids="$(snapshot_launch_smoke_app_pids)"
 
     /usr/bin/open -n -g -F -W \
-        --stdout "$smoke_log" \
-        --stderr "$smoke_log" \
-        --env "CFFIXED_USER_HOME=$smoke_home" \
-        --env "HOME=$smoke_home" \
+        --stdout "$launch_smoke_log" \
+        --stderr "$launch_smoke_log" \
+        --env "CFFIXED_USER_HOME=$launch_smoke_home" \
+        --env "HOME=$launch_smoke_home" \
         --env "TRANSCRIPTED_DISABLE_FILE_LOGGER=1" \
         --env "TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1" \
         --env "TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD=1" \
-        --env "TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT=$ui_report" \
+        --env "TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT=$launch_ui_report" \
         --env "TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT=1" \
-        "$APP_BUNDLE" >>"$smoke_log" 2>&1 &
+        "$launch_app_bundle" >>"$launch_smoke_log" 2>&1 &
     open_pid=$!
 
     for _ in $(seq 1 50); do
-        if [ -s "$ui_report" ]; then
+        if [ -s "$launch_ui_report" ]; then
             break
         fi
         if ! kill -0 "$open_pid" 2>/dev/null; then
@@ -250,25 +271,29 @@ verify_launch_smoke() {
         sleep 0.1
     done
 
-    if ! kill -0 "$open_pid" 2>/dev/null && [ ! -s "$ui_report" ]; then
+    if ! kill -0 "$open_pid" 2>/dev/null && [ ! -s "$launch_ui_report" ]; then
         wait "$open_pid" || true
+        persist_launch_smoke_artifacts
         echo "Transcripted exited during launch smoke."
         echo "Smoke log:"
         cat "$smoke_log"
-        exit 1
+        cleanup_launch_smoke_app_bundle
+        return 1
     fi
 
-    if [ ! -s "$ui_report" ]; then
+    if [ ! -s "$launch_ui_report" ]; then
+        persist_launch_smoke_artifacts
         echo "Transcripted launch UI smoke report was not written."
         echo "Smoke log:"
         cat "$smoke_log"
         terminate_launch_smoke_app
         kill "$open_pid" 2>/dev/null || true
         wait "$open_pid" 2>/dev/null || true
-        exit 1
+        cleanup_launch_smoke_app_bundle
+        return 1
     fi
 
-    if ! /usr/bin/python3 - "$ui_report" <<'PY'
+    if ! /usr/bin/python3 - "$launch_ui_report" <<'PY'
 import json
 import sys
 
@@ -338,18 +363,25 @@ if errors:
     sys.exit(1)
 PY
     then
+        persist_launch_smoke_artifacts
         terminate_launch_smoke_app
         kill "$open_pid" 2>/dev/null || true
         wait "$open_pid" 2>/dev/null || true
-        exit 1
+        cleanup_launch_smoke_app_bundle
+        return 1
     fi
 
     if ! wait "$open_pid"; then
+        persist_launch_smoke_artifacts
         echo "Transcripted exited with an error during launch smoke."
         echo "Smoke log:"
         cat "$smoke_log"
-        exit 1
+        cleanup_launch_smoke_app_bundle
+        return 1
     fi
+
+    persist_launch_smoke_artifacts
+    cleanup_launch_smoke_app_bundle
 }
 
 sign_embedded_code() {

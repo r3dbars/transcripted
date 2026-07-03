@@ -53,6 +53,14 @@ final class LiveMeetingTranscriptFeed: ObservableObject {
         partialEntries = [:]
     }
 
+    func recoverFromSidecarAppendFailure(note: String) {
+        guard case .failed(let currentNote) = phase,
+              currentNote == note else {
+            return
+        }
+        phase = .live
+    }
+
     func ingest(_ entry: LiveMeetingCodexTranscriptEntry) {
         guard phase != .idle, phase != .stopped else { return }
 

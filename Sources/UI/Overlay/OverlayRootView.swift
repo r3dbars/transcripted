@@ -120,6 +120,7 @@ final class OverlayRootView: NSView {
         errorMessage: String,
         errorActionTitle: String?,
         onErrorAction: (() -> Void)?,
+        messageTone: FloatingOverlayController.MessageTone,
         loadingPresentation: FloatingOverlayController.LoadingPresentation,
         loadingElapsedSeconds: Int,
         successTitle: String,
@@ -133,8 +134,9 @@ final class OverlayRootView: NSView {
         currentErrorMessage = errorMessage
 
         let showLoading = state == .loading
-        let showError = state == .drafting && !errorMessage.isEmpty
-        let showContent = showLoading || showError
+        let showMessage = state == .drafting && !errorMessage.isEmpty
+        let isNotice = showMessage && messageTone == .notice
+        let showContent = showLoading || showMessage
 
         // Update header
         headerView.update(
@@ -142,7 +144,8 @@ final class OverlayRootView: NSView {
             dictationShortcutHint: dictationShortcutHint,
             loadingTitle: state == .loading ? "Dictation" : nil,
             successTitle: successTitle,
-            isError: showError,
+            isError: showMessage && !isNotice,
+            isNotice: isNotice,
             isMiniCursorMode: isMiniCursorMode,
             meterPresentation: DictationMeterPolicy.presentation(
                 isListening: state == .listening,
@@ -165,13 +168,14 @@ final class OverlayRootView: NSView {
             )
         }
 
-        if showError {
+        if showMessage {
             draftingView.isHidden = false
             let statusText = isTranscribing ? "Transcribing..." : "Processing..."
             draftingView.update(
                 error: errorMessage.isEmpty ? nil : errorMessage,
                 errorActionTitle: errorActionTitle,
                 onErrorAction: onErrorAction,
+                isNotice: isNotice,
                 isTranscribing: isTranscribing,
                 transcriptText: liveTranscript,
                 statusText: statusText
@@ -188,6 +192,7 @@ final class OverlayRootView: NSView {
 @MainActor
 final class OverlayLoadingView: NSView {
     private let titleLabel = NSTextField(labelWithString: "Getting ready")
+    private let statusLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(wrappingLabelWithString: "")
     private let progressBar = NSProgressIndicator()
 
@@ -207,7 +212,16 @@ final class OverlayLoadingView: NSView {
         titleLabel.isBezeled = false
         titleLabel.isEditable = false
         titleLabel.drawsBackground = false
+        titleLabel.lineBreakMode = .byTruncatingTail
         addSubview(titleLabel)
+
+        statusLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        statusLabel.textColor = OverlayTokens.textMuted
+        statusLabel.isBezeled = false
+        statusLabel.isEditable = false
+        statusLabel.drawsBackground = false
+        statusLabel.alignment = .right
+        addSubview(statusLabel)
 
         detailLabel.font = NSFont.systemFont(ofSize: 11)
         detailLabel.textColor = OverlayTokens.textSecondary
@@ -226,8 +240,10 @@ final class OverlayLoadingView: NSView {
         super.layout()
         let pad: CGFloat = 14
         let contentWidth = max(0, bounds.width - pad * 2)
+        let statusWidth = min(statusLabel.fittingSize.width, contentWidth * 0.5)
 
-        titleLabel.frame = NSRect(x: pad, y: 9, width: contentWidth, height: 16)
+        titleLabel.frame = NSRect(x: pad, y: 9, width: contentWidth - statusWidth - 6, height: 16)
+        statusLabel.frame = NSRect(x: pad + contentWidth - statusWidth, y: 11, width: statusWidth, height: 13)
         detailLabel.frame = NSRect(x: pad, y: 29, width: contentWidth, height: 28)
         progressBar.frame = NSRect(x: pad, y: 59, width: contentWidth, height: 6)
     }
@@ -239,6 +255,13 @@ final class OverlayLoadingView: NSView {
         titleLabel.stringValue = presentation.title
         detailLabel.stringValue = presentation.detail
         progressBar.doubleValue = presentation.progress
+        // Keep the user oriented during long warmups: show the concrete stage
+        // ("42% downloaded", "Almost ready") and how long it has been waiting.
+        var status = presentation.status ?? ""
+        if elapsedSeconds >= 10 {
+            status = status.isEmpty ? "\(elapsedSeconds)s" : "\(status) · \(elapsedSeconds)s"
+        }
+        statusLabel.stringValue = status
         needsLayout = true
     }
 }

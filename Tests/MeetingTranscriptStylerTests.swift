@@ -17,6 +17,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerPreservesObsidianSpeakerLinks()
         testMeetingTranscriptStylerPreservesLocalGemmaSummaryBlock()
         testMeetingTranscriptStylerRestrictsRewrittenTranscript()
+        testMeetingTranscriptStylerSerializesAgainstStaleWholeFileWriters()
         testMeetingTranscriptStylerPreservesImportedRecordingDate()
         testMeetingTranscriptStylerFailsClosedOnUnparseableBody()
         testMeetingTranscriptStylerStillRewritesGenuinelyEmptyTranscript()
@@ -267,6 +268,74 @@ private func testMeetingTranscriptStylerPreservesImportedRecordingDate() {
     assertTrue(
         updatedMarkdown.contains("time: \"09:14:00\""),
         "Restyling must preserve the imported recording time in the front matter"
+    )
+}
+
+private func testMeetingTranscriptStylerSerializesAgainstStaleWholeFileWriters() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let staleReadFinished = DispatchSemaphore(value: 0)
+    let releaseStaleWriter = DispatchSemaphore(value: 0)
+    let writerFinished = DispatchSemaphore(value: 0)
+    var writerError: String?
+
+    DispatchQueue.global(qos: .userInitiated).async {
+        let staleRaw: String
+        do {
+            staleRaw = try String(contentsOf: transcriptURL, encoding: .utf8)
+        } catch {
+            writerError = "stale read failed: \(error)"
+            staleReadFinished.signal()
+            writerFinished.signal()
+            return
+        }
+
+        staleReadFinished.signal()
+        releaseStaleWriter.wait()
+
+        do {
+            try MeetingTranscriptFileUpdateSerializer.sync {
+                guard FileManager.default.fileExists(atPath: transcriptURL.path) else { return }
+                let staleRename = staleRaw.replacingOccurrences(of: "[System/Alex]", with: "[System/Jamie]")
+                try staleRename.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            }
+        } catch {
+            writerError = "stale write failed: \(error)"
+        }
+        writerFinished.signal()
+    }
+
+    assertEqual(
+        staleReadFinished.wait(timeout: .now() + 2),
+        .success,
+        "stale writer should capture its old snapshot before restyle starts"
+    )
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    releaseStaleWriter.signal()
+
+    assertEqual(
+        writerFinished.wait(timeout: .now() + 2),
+        .success,
+        "stale writer should finish after restyle releases the shared serializer"
+    )
+    assertNil(writerError, "stale writer should not fail")
+    assertFalse(
+        FileManager.default.fileExists(atPath: transcriptURL.path),
+        "A stale whole-file writer must not recreate the pre-restyle path"
+    )
+    assertTrue(
+        FileManager.default.fileExists(atPath: styled.url.path),
+        "The restyled transcript should remain at its canonical path"
+    )
+    let finalMarkdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
+    assertTrue(
+        finalMarkdown.contains("[System/Alex]"),
+        "The stale snapshot must not overwrite the canonical transcript"
     )
 }
 

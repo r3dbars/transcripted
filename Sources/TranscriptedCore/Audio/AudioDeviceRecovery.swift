@@ -97,6 +97,7 @@ extension Audio {
         // unconditional — it's the watchdog give-up safety counter and
         // resets on success below.
         let switchStart = Date()
+        let lastMicBufferTime = lastBufferTime
         if reason == .deviceChange {
             deviceSwitchCount += 1
         }
@@ -193,10 +194,6 @@ extension Audio {
             AppLogger.audioMic.debug("Recovery: will manually downmix to mono", ["channels": "\(recordingSnapshot.channelCount)"])
         }
 
-        // Rotate files only when the sample rate changes. Channel-count-only changes
-        // keep writing into the same mono WAV, which avoids unnecessary segment churn.
-        // All micAudioFile accesses wrapped in micAudioFileQueue.sync for thread safety.
-        let sampleRateChanged = micAudioFileQueue.sync { micAudioFile.map { recordingSnapshot.sampleRate != $0.processingFormat.sampleRate } ?? false }
         let channelCountChanged = oldChannelCount != recordingSnapshot.channelCount
         var recoverySegmentURL: URL?
         var shouldKeepRecoverySegment = false
@@ -212,48 +209,46 @@ extension Audio {
             }
         }
 
-        if channelCountChanged && !sampleRateChanged {
-            AppLogger.audioMic.info("Input channel count changed, keeping current recording file", [
+        if channelCountChanged {
+            AppLogger.audioMic.info("Input channel count changed during recovery", [
                 "oldChannels": "\(oldChannelCount)",
                 "newChannels": "\(recordingSnapshot.channelCount)"
             ])
         }
 
-        if sampleRateChanged {
-            AppLogger.audioMic.warning("Sample rate changed, closing old file and creating new segment")
-            // Close explicitly so the retiring segment's WAV header is
-            // finalized before the merger can ever read it.
-            micAudioFileQueue.sync {
-                micAudioFile?.close()
-                micAudioFile = nil
-            }
+        AppLogger.audioMic.warning("Closing current mic file and creating recovery segment")
+        // Close explicitly so the retiring segment's WAV header is finalized
+        // before the merger can ever read it. Even same-rate device switches
+        // need a new segment so the missing-buffer interval can be padded.
+        micAudioFileQueue.sync {
+            micAudioFile?.close()
+            micAudioFile = nil
+        }
 
-            // Create new file segment as mono
-            let captureDir = self.paths.audioCaptures
-            try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
-            let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
-            let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
-            recoverySegmentURL = fileURL
+        let captureDir = self.paths.audioCaptures
+        try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
+        let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
+        let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
+        recoverySegmentURL = fileURL
 
-            do {
-                let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
-                    sampleRate: recordingSnapshot.sampleRate
-                )
-                self.monoOutputFormat = monoFormat
+        do {
+            let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
+                sampleRate: recordingSnapshot.sampleRate
+            )
+            self.monoOutputFormat = monoFormat
 
-                let newFile = try AVAudioFile(
-                    forWriting: fileURL,
-                    settings: monoFormat.settings,
-                    commonFormat: monoFormat.commonFormat,
-                    interleaved: monoFormat.isInterleaved
-                )
-                FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-                micAudioFileQueue.sync { micAudioFile = newFile }
-                AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
-            } catch {
-                AppLogger.audioMic.error("Failed to create recovery audio file", ["error": error.localizedDescription])
-                return
-            }
+            let newFile = try AVAudioFile(
+                forWriting: fileURL,
+                settings: monoFormat.settings,
+                commonFormat: monoFormat.commonFormat,
+                interleaved: monoFormat.isInterleaved
+            )
+            FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
+            micAudioFileQueue.sync { micAudioFile = newFile }
+            AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
+        } catch {
+            AppLogger.audioMic.error("Failed to create recovery audio file", ["error": error.localizedDescription])
+            return
         }
 
         guard sessionGeneration == recordingSessionGeneration else {
@@ -307,10 +302,16 @@ extension Audio {
                 }
             }
 
-            // Record the restart gap
+            // Record the true missing-buffer interval. The watchdog only
+            // invokes recovery after buffers have already been absent for a
+            // few seconds, so measuring from recovery start undercounts the
+            // timeline gap and desyncs mic/system audio after device switches.
+            let monotonicGapDuration = CACurrentMediaTime() - lastMicBufferTime
+            let wallClockGapDuration = Date().timeIntervalSince(switchStart)
+            let gapDuration = max(0, max(monotonicGapDuration, wallClockGapDuration))
             let gap = AudioGap(
-                start: switchStart,
-                duration: Date().timeIntervalSince(switchStart),
+                start: Date(timeIntervalSinceNow: -gapDuration),
+                duration: gapDuration,
                 reason: reason == .processingChange ? "Mic processing change" : "Device switch"
             )
             appendRecordingGap(gap)
