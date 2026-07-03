@@ -14,9 +14,9 @@ import Foundation
 
 @MainActor
 func testOverlayScreenSharePrivacy() async {
-    // Behavioral: the dictation overlay panel is dependency-free, so the fast
-    // runner can instantiate it and assert the real runtime property instead of
-    // only inspecting source.
+    // Behavioral: these panels are dependency-free, so the fast runner can
+    // instantiate them and assert the real runtime property instead of only
+    // inspecting source.
     runSuite("FloatingOverlayPanel is excluded from screen capture") {
         _ = NSApplication.shared
         let panel = FloatingOverlayPanel(
@@ -32,6 +32,22 @@ func testOverlayScreenSharePrivacy() async {
         )
     }
 
+    runSuite("CapturePillPanel is excluded from screen capture") {
+        _ = NSApplication.shared
+        let panel = CapturePillPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 74),
+            styleMask: [.nonactivatingPanel, .borderless],
+            backing: .buffered,
+            defer: true
+        )
+        assertEqual(
+            panel.sharingType,
+            .none,
+            "the capture pill must not be visible to screen sharing / capture"
+        )
+        assertTrue(panel.canBecomeKey, "the capture pill must be keyboard-dismissable")
+    }
+
     // Source contract: the two meeting-overlay panels live in a heavy controller
     // file the fast runner cannot compile in isolation, so guard their init
     // bodies at the source level. The on-screen live transcript drawer renders
@@ -39,6 +55,7 @@ func testOverlayScreenSharePrivacy() async {
     // MeetingOverlayTooltipPanel. Both must stay out of screen capture.
     runSuite("every overlay NSPanel init sets sharingType = .none") {
         let floating = overlayPrivacySource("Sources/UI/Overlay/FloatingOverlayPanel.swift")
+        let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
         let controller = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayController.swift")
 
         let inits: [(name: String, body: String)] = [
@@ -48,6 +65,14 @@ func testOverlayScreenSharePrivacy() async {
                     floating,
                     from: "class FloatingOverlayPanel: NSPanel {",
                     to: "override var canBecomeKey"
+                )
+            ),
+            (
+                "CapturePillPanel",
+                overlayPrivacySlice(
+                    capturePill,
+                    from: "final class CapturePillPanel: NSPanel {",
+                    to: "private final class CapturePillView"
                 )
             ),
             (
@@ -74,6 +99,23 @@ func testOverlayScreenSharePrivacy() async {
                 "\(entry.name) init must set self.sharingType = .none so the overlay stays out of screen capture"
             )
         }
+    }
+
+    runSuite("detected meeting prompts route through the capture pill") {
+        let app = overlayPrivacySource("Sources/TranscriptedApp.swift")
+        let promptRequest = overlayPrivacySlice(
+            app,
+            from: "meetingPromptDetector.onPromptRequest =",
+            to: "// Ad-hoc call detection:"
+        )
+        assertTrue(
+            promptRequest.contains("capturePillController.present(candidate: candidate)"),
+            "detected meeting prompts should use the floating capture pill"
+        )
+        assertFalse(
+            promptRequest.contains("meetingOverlayController.presentDetectedMeetingPrompt(candidate)"),
+            "detected meeting prompts should not reuse the recording overlay prompt surface"
+        )
     }
 }
 

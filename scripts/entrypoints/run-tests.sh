@@ -386,6 +386,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/HomeFailedMeetingInlinePresentation.swift"
     "Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
+    "Sources/UI/Overlay/CapturePillController.swift"
     "Sources/UI/Overlay/FloatingOverlayPanel.swift"
     "Sources/UI/Overlay/DictationMeterPolicy.swift"
     "Sources/UI/Overlay/MeetingLiveViewAffordancePolicy.swift"
