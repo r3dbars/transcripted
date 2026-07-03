@@ -22,6 +22,7 @@ Important entry points:
 - `Support/DockVisibilityPreferences.swift` — persisted General toggle for whether Transcripted keeps a Dock icon while idle
 - `Support/LocalSpeakerPreferences.swift` — persisted toggle that decides whether meeting transcription should split the local mic into multiple named speakers or keep it as a single "You" track
 - `Support/MicrophoneProcessingPreferences.swift` — persisted mic processing mode for meetings and dictation, defaulting to software AGC while also exposing raw/off input and optional Apple voice processing for the WebRTC-specific recovery path through Settings or the in-meeting boost prompt
+- `Support/TimelinePreferences.swift` — persisted opt-in timeline settings: master enablement, provider, local endpoint, storage cap, blocklist, and onboarding completion
 - `Support/TranscriptionModelPreferences.swift` — persisted local model selection shared by dictation and meetings (`Parakeet`, `Whisper Large V3 Turbo`, `Whisper Large V3`, plus beta-gated `Nemotron Streaming`)
 - `Support/ActivationPolicyController.swift` — main-actor policy for combining the Dock toggle with recording-state safety so active capture stays force-quit-visible
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
@@ -42,8 +43,9 @@ Important entry points:
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
+- `Timeline/` — Dayflow-style timeline engine scaffolding; future screen-activity capture, analysis, storage, and Markdown projection
 - `TranscriptedCore/` — shared library boundary
-- `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
+- `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, and `Timeline/`
 
 The historical planning docs that used to live alongside older placeholder
 areas were moved under `docs/archive/` so the source tree reads more like the
@@ -60,6 +62,8 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
 - touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/CLAUDE.md`
 - touching app-wide support utilities: `Sources/Support/CLAUDE.md`
+- touching timeline engine scaffolding: `Sources/Timeline/CLAUDE.md`
+- touching timeline UI scaffolding: `Sources/UI/Timeline/CLAUDE.md`
 - touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/CLAUDE.md`
 - touching hotkeys or physical dictation trigger routing: `Sources/Capture/CLAUDE.md`
 - touching focused-editor AX metadata, overlay placement, or paste-back context: `Sources/Accessibility/CLAUDE.md`

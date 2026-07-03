@@ -78,8 +78,9 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Sources/Reliability/` — wake/sleep recovery
 - `Sources/Speech/` — local STT engines, router, and audio recovery
 - `Sources/Support/` — shared app utilities such as paths, permissions, hotkeys, and constants
+- `Sources/Timeline/` — Dayflow-style timeline engine scaffolding; future screen-activity capture, analysis, storage, and Markdown projection
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
-- `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
+- `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, and `Timeline/`
 - `Tests/` — fast tests, package tests, and integration smoke sources
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
 - `docs/` — live project docs

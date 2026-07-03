@@ -108,6 +108,22 @@ directory:
 
 - core pipeline log: `~/Library/Application Support/Transcripted/logs/app.jsonl`
 
+## Timeline
+
+Timeline state is app-owned and stays under the Transcripted Application
+Support root:
+
+- timeline DB: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
+- timeline screenshots: `~/Library/Application Support/Transcripted/recordings/screenshots/`
+
+The future agent-readable daily timeline Markdown will live in the relocatable
+capture library:
+
+- timeline Markdown: `<capture-library>/timeline/`
+
+Screen pixels and screen-derived text stay out of the capture library unless a
+future phase writes user/agent-readable Markdown summaries there.
+
 ## `TranscriptedCore` Defaults
 
 `CoreStoragePaths.default` now uses the same Transcripted-named Application

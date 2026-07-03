@@ -733,6 +733,7 @@ struct PermissionsOnboardingView: View {
             .microphone: micGranted ? "granted" : "not_granted",
             .accessibility: accessibilityGranted ? "granted" : "not_granted",
             .systemAudioRecording: screenRecordingGranted ? "granted" : "not_granted",
+            .screenRecording: TranscriptedPermissionAccess.isGranted(.screenRecording) ? "granted" : "not_granted",
             .calendar: calendarGranted ? "granted" : "not_granted",
         ]
     }
