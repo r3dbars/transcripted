@@ -96,6 +96,7 @@ final class NamingWindowController: NSWindowController, NSWindowDelegate {
         window.contentView = contentView
         window.isReleasedWhenClosed = false
         window.level = .modalPanel
+        window.sharingType = .none
 
         super.init(window: window)
         window.delegate = self

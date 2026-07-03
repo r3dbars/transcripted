@@ -37,6 +37,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         window.contentViewController = hostingController
         window.contentMinSize = NSSize(width: 880, height: 640)
         window.isReleasedWhenClosed = false
+        window.sharingType = .none
         window.center()
 
         super.init(window: window)
