@@ -442,6 +442,27 @@ struct DigestResult: Codable {
     }
 }
 
+// MARK: - WS2.3 Cross-Meeting Retrieval
+
+struct CrossMeetingReceipt: Codable {
+    let meetingId: String
+    var meetingTitle: String
+    let timestamp: String?
+    let quote: String
+    let date: String
+    let datetime: String
+    let kind: String?
+    let person: String?
+}
+
+struct CrossMeetingToolResult: Codable {
+    let query: String?
+    let range: String?
+    let count: Int
+    let truncated: Bool
+    var results: [CrossMeetingReceipt]
+}
+
 // MARK: - Errors
 
 enum MCPIndexError: Error, LocalizedError {
