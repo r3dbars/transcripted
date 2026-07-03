@@ -29,7 +29,9 @@ enum MeetingTranscriptStyler {
     private static let formatterQueue = DispatchQueue(label: "Transcripted.MeetingTranscriptStyler.formatters")
 
     static func restyleTranscript(at url: URL) -> StyledMeetingTranscript {
-        styledTranscript(at: url, persistChanges: true)
+        MeetingTranscriptFileUpdateSerializer.sync {
+            styledTranscript(at: url, persistChanges: true)
+        }
     }
 
     static func displayTranscript(at url: URL) -> StyledMeetingTranscript {
