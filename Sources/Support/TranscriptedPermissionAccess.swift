@@ -19,6 +19,7 @@ enum TranscriptedPermissionAccess {
     private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"
     private static let systemAudioRecordingKnownKey = "systemAudioRecordingPermissionKnown"
     @MainActor private static var activeSystemAudioRequester: SystemAudioPermissionRequester?
+    @MainActor private static var activeSystemAudioRevalidator: Task<Bool, Never>?
 
     static func isGranted(_ kind: TranscriptedPermissionKind) -> Bool {
         switch kind {
@@ -100,16 +101,14 @@ enum TranscriptedPermissionAccess {
             notifyPermissionsDidChange(kind: .accessibility)
             return AXIsProcessTrusted()
         case .systemAudioRecording:
-            if systemAudioRecordingStatus() == .granted {
+            let granted = await requestSystemAudioRecordingAccessIfNeeded(forceRefresh: true)
+            notifyPermissionsDidChange(kind: .systemAudioRecording)
+            if granted {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
                 return true
             }
 
-            let granted = await requestSystemAudioRecordingAccessIfNeeded()
-            notifyPermissionsDidChange(kind: .systemAudioRecording)
-            if !granted {
-                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
-            }
+            openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
             return granted
         case .calendar:
             activateForPermissionPrompt()
@@ -189,6 +188,34 @@ enum TranscriptedPermissionAccess {
         activateForPermissionPrompt()
         let granted = await performSystemAudioRecordingAccessRequest()
         setSystemAudioRecordingGranted(granted)
+        return granted
+    }
+
+    @MainActor
+    static func revalidateSystemAudioRecordingStatus() async -> Bool {
+        if let activeSystemAudioRevalidator {
+            return await activeSystemAudioRevalidator.value
+        }
+
+        let task = Task { @MainActor in
+            let granted = await performSystemAudioRecordingAccessRequest()
+            setSystemAudioRecordingGranted(granted)
+            notifyPermissionsDidChange(kind: .systemAudioRecording)
+            return granted
+        }
+        activeSystemAudioRevalidator = task
+        let granted = await task.value
+        activeSystemAudioRevalidator = nil
+        return granted
+    }
+
+    @MainActor
+    static func revalidateSystemAudioRecordingStatus(
+        requester: @escaping @MainActor () async -> Bool
+    ) async -> Bool {
+        let granted = await requester()
+        setSystemAudioRecordingGranted(granted)
+        notifyPermissionsDidChange(kind: .systemAudioRecording)
         return granted
     }
 

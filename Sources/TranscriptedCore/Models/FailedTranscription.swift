@@ -56,6 +56,9 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// for entries persisted before typed errors were introduced.
     public var isRetryable: Bool {
         if let typed = pipelineError {
+            if case .missingSystemAudio = typed, systemAudioURL == nil {
+                return true
+            }
             return typed.isRetryable
         }
         // Legacy fallback: keyword matching for pre-typed-error entries

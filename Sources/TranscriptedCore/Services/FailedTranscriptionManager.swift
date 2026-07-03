@@ -8,6 +8,7 @@ public class FailedTranscriptionManager: ObservableObject {
 
     private let storageURL: URL
     private let allowedAudioRoots: [URL]
+    private let audioArchiveRoot: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -25,6 +26,9 @@ public class FailedTranscriptionManager: ObservableObject {
             ])
         }
         self.storageURL = paths.failedQueue
+        self.audioArchiveRoot = Self.canonicalDirectoryURL(
+            paths.transcripts.appendingPathComponent("audio", isDirectory: true)
+        )
         self.allowedAudioRoots = [
             paths.audioCaptures,
             paths.transcripts
@@ -51,53 +55,68 @@ public class FailedTranscriptionManager: ObservableObject {
             let data = try Data(contentsOf: storageURL)
             let loaded = try decoder.decode([FailedTranscription].self, from: data)
 
-            // Security: audio file paths are deserialized from a JSON file that the user could
-            // tamper with. Canonicalize first, then only accept files under Transcripted-owned
-            // scratch/archive audio roots so cleanup cannot be redirected to arbitrary files.
-            let sandboxedEntries = loaded.filter { entry in
-                let micSafe = isSafeAudioURL(entry.micAudioURL)
-                let systemSafe = entry.systemAudioURL.map(isSafeAudioURL) ?? true
-                if !micSafe || !systemSafe {
-                    AppLogger.pipeline.error("Rejected failed transcription entry with out-of-sandbox audio path", [
-                        "micURL": entry.micAudioURL.path,
-                        "systemURL": entry.systemAudioURL?.path ?? "none"
-                    ])
-                }
-                return micSafe && systemSafe
-            }
-
-            // Heal stale audio references before the existence filter. A crash
-            // between the merger's segment cleanup and the queue repoint leaves
-            // an entry pointing at a deleted pre-merge WAV while
-            // `<stem>_merged.wav` sits on disk — dropping that entry here would
-            // make the meeting disappear permanently.
             var healedCount = 0
-            let healedEntries = sandboxedEntries.map { entry in
-                let healed = healAudioReferences(of: entry)
-                if healed != nil { healedCount += 1 }
-                return healed ?? entry
-            }
+            var removedCount = 0
+            var unavailableCount = 0
+            var reconciledEntries: [FailedTranscription] = []
 
-            // Filter out entries where audio files no longer exist
-            failedTranscriptions = healedEntries.filter { entry in
-                guard entry.audioFilesExist() else {
-                    AppLogger.pipeline.error("Dropping failed transcription entry with missing audio", [
-                        "id": entry.id.uuidString,
-                        "micFile": entry.micAudioURL.lastPathComponent,
-                        "systemFile": entry.systemAudioURL?.lastPathComponent ?? "none"
-                    ])
-                    return false
+            for loadedEntry in loaded {
+                let relocation = healRelocatedAudioReferences(of: loadedEntry)
+                if relocation.didHeal {
+                    healedCount += 1
                 }
-                return true
-            }
+                let relocatedEntry = relocation.entry
 
-            // Save back if we filtered or healed any
-            if failedTranscriptions.count != loaded.count || healedCount > 0 {
+                // Security: audio file paths are deserialized from a JSON file that the user could
+                // tamper with. Canonicalize first, then only accept files under Transcripted-owned
+                // scratch/archive audio roots so cleanup cannot be redirected to arbitrary files.
+                let micSafe = isSafeAudioURL(relocatedEntry.micAudioURL)
+                let systemSafe = relocatedEntry.systemAudioURL.map(isSafeAudioURL) ?? true
+                guard micSafe && systemSafe else {
+                    AppLogger.pipeline.error("Rejected failed transcription entry with out-of-sandbox audio path", [
+                        "micURL": relocatedEntry.micAudioURL.path,
+                        "systemURL": relocatedEntry.systemAudioURL?.path ?? "none"
+                    ])
+                    removedCount += 1
+                    continue
+                }
+
+                // Heal stale audio references before the existence filter. A crash
+                // between the merger's segment cleanup and the queue repoint leaves
+                // an entry pointing at a deleted pre-merge WAV while
+                // `<stem>_merged.wav` sits on disk — dropping that entry here would
+                // make the meeting disappear permanently.
+                let reconciliation = reconcileAudioReferences(of: relocatedEntry)
+                if reconciliation.didHeal {
+                    healedCount += 1
+                }
+                if reconciliation.hasUnavailableAudio {
+                    unavailableCount += 1
+                }
+                guard let entry = reconciliation.entry else {
+                    removedCount += 1
+                    continue
+                }
+                reconciledEntries.append(entry)
+            }
+            failedTranscriptions = reconciledEntries
+
+            // Save back if we filtered or healed any, unless a missing file may
+            // be caused by an unavailable library/volume. In that case, keep the
+            // in-memory queue visible and avoid making any destructive rewrite.
+            if removedCount > 0 || healedCount > 0 {
                 AppLogger.pipeline.info("Reconciled failed transcription entries on load", [
-                    "removed": "\(loaded.count - failedTranscriptions.count)",
-                    "healed": "\(healedCount)"
+                    "removed": "\(removedCount)",
+                    "healed": "\(healedCount)",
+                    "unavailable": "\(unavailableCount)"
                 ])
-                saveFailedTranscriptions()
+                if unavailableCount == 0 {
+                    saveFailedTranscriptions()
+                } else {
+                    AppLogger.pipeline.warning("Skipped saving failed transcription reconciliation because audio root is unavailable", [
+                        "unavailable": "\(unavailableCount)"
+                    ])
+                }
             }
 
             AppLogger.pipeline.info("Loaded failed transcriptions", ["count": "\(failedTranscriptions.count)"])
@@ -119,38 +138,54 @@ public class FailedTranscriptionManager: ObservableObject {
 
     /// Repairs an entry whose audio references no longer match the disk state.
     /// Returns the healed entry, or nil when nothing needed healing.
-    private func healAudioReferences(of entry: FailedTranscription) -> FailedTranscription? {
+    private typealias AudioReconciliation = (
+        entry: FailedTranscription?,
+        didHeal: Bool,
+        hasUnavailableAudio: Bool
+    )
+
+    private func reconcileAudioReferences(of entry: FailedTranscription) -> AudioReconciliation {
         let fileManager = FileManager.default
         var micURL = entry.micAudioURL
         var systemURL = entry.systemAudioURL
         var didHeal = false
+        var hasUnavailableAudio = false
 
         // A merge that completed after the entry was written deletes the
         // pre-merge segments and leaves `<stem>_merged.wav` in their place.
         if !fileManager.fileExists(atPath: micURL.path) {
-            let mergedCandidate = micURL.deletingLastPathComponent()
-                .appendingPathComponent(micURL.deletingPathExtension().lastPathComponent + "_merged.wav")
-            if fileManager.fileExists(atPath: mergedCandidate.path), isSafeAudioURL(mergedCandidate) {
+            if let mergedCandidate = mergedSibling(for: micURL),
+               fileManager.fileExists(atPath: mergedCandidate.path),
+               isSafeAudioURL(mergedCandidate) {
                 micURL = mergedCandidate
                 didHeal = true
                 AppLogger.pipeline.info("Healed failed transcription mic audio to merged file", [
                     "id": entry.id.uuidString,
                     "file": mergedCandidate.lastPathComponent
                 ])
+            } else if !isContainingAudioRootReachable(for: micURL) {
+                hasUnavailableAudio = true
             }
         }
 
         // Keep the meeting retryable with mic audio only rather than dropping
         // it because the system-audio file went missing.
         if let existingSystemURL = systemURL,
-           !fileManager.fileExists(atPath: existingSystemURL.path),
-           fileManager.fileExists(atPath: micURL.path) {
-            systemURL = nil
-            didHeal = true
-            AppLogger.pipeline.warning("Dropped missing system audio reference from failed transcription", [
-                "id": entry.id.uuidString,
-                "file": existingSystemURL.lastPathComponent
-            ])
+           !fileManager.fileExists(atPath: existingSystemURL.path) {
+            if !isContainingAudioRootReachable(for: existingSystemURL) {
+                hasUnavailableAudio = true
+            } else if fileManager.fileExists(atPath: micURL.path) {
+                systemURL = nil
+                didHeal = true
+                AppLogger.pipeline.warning("Dropped missing system audio reference from failed transcription", [
+                    "id": entry.id.uuidString,
+                    "file": existingSystemURL.lastPathComponent
+                ])
+            }
+        }
+
+        if hasUnavailableAudio {
+            return (entry, didHeal, true)
         }
 
         // Audio preserved during a quit that interrupted finalization can have
@@ -161,8 +196,25 @@ public class FailedTranscriptionManager: ObservableObject {
             repairWAVHeaderIfNeeded(at: systemURL, entryId: entry.id)
         }
 
-        guard didHeal else { return nil }
-        return FailedTranscription(
+        if !fileManager.fileExists(atPath: micURL.path) {
+            AppLogger.pipeline.error("Dropping failed transcription entry with missing audio", [
+                "id": entry.id.uuidString,
+                "micFile": micURL.lastPathComponent,
+                "systemFile": systemURL?.lastPathComponent ?? "none"
+            ])
+            return (nil, didHeal, false)
+        }
+        if let systemURL, !fileManager.fileExists(atPath: systemURL.path) {
+            AppLogger.pipeline.error("Dropping failed transcription entry with missing audio", [
+                "id": entry.id.uuidString,
+                "micFile": micURL.lastPathComponent,
+                "systemFile": systemURL.lastPathComponent
+            ])
+            return (nil, didHeal, false)
+        }
+
+        guard didHeal else { return (entry, false, false) }
+        return (FailedTranscription(
             id: entry.id,
             timestamp: entry.timestamp,
             recordingDate: entry.recordingDate,
@@ -172,7 +224,68 @@ public class FailedTranscriptionManager: ObservableObject {
             meetingTitle: entry.meetingTitle,
             retryCount: entry.retryCount,
             lastRetryDate: entry.lastRetryDate
-        )
+        ), true, false)
+    }
+
+    private func healRelocatedAudioReferences(of entry: FailedTranscription) -> (entry: FailedTranscription, didHeal: Bool) {
+        var micURL = entry.micAudioURL
+        var systemURL = entry.systemAudioURL
+        var didHeal = false
+
+        if !isSafeAudioURL(micURL),
+           let relocatedMicURL = relocatedAudioURL(for: micURL),
+           FileManager.default.fileExists(atPath: relocatedMicURL.path),
+           isSafeAudioURL(relocatedMicURL) {
+            micURL = relocatedMicURL
+            didHeal = true
+        }
+
+        if let existingSystemURL = systemURL,
+           !isSafeAudioURL(existingSystemURL),
+           let relocatedSystemURL = relocatedAudioURL(for: existingSystemURL),
+           FileManager.default.fileExists(atPath: relocatedSystemURL.path),
+           isSafeAudioURL(relocatedSystemURL) {
+            systemURL = relocatedSystemURL
+            didHeal = true
+        }
+
+        guard didHeal else { return (entry, false) }
+        AppLogger.pipeline.info("Healed failed transcription audio paths after capture library relocation", [
+            "id": entry.id.uuidString
+        ])
+        return (FailedTranscription(
+            id: entry.id,
+            timestamp: entry.timestamp,
+            recordingDate: entry.recordingDate,
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: entry.errorMessage,
+            meetingTitle: entry.meetingTitle,
+            retryCount: entry.retryCount,
+            lastRetryDate: entry.lastRetryDate
+        ), true)
+    }
+
+    private func relocatedAudioURL(for url: URL) -> URL? {
+        let directory = url.deletingLastPathComponent()
+        guard directory.lastPathComponent.hasSuffix("_audio") else { return nil }
+        return audioArchiveRoot
+            .appendingPathComponent(directory.lastPathComponent, isDirectory: true)
+            .appendingPathComponent(url.lastPathComponent)
+    }
+
+    private func mergedSibling(for url: URL) -> URL? {
+        url.deletingLastPathComponent()
+            .appendingPathComponent(url.deletingPathExtension().lastPathComponent + "_merged.wav")
+    }
+
+    private func isContainingAudioRootReachable(for url: URL) -> Bool {
+        guard let root = allowedAudioRoots.first(where: { Self.isFile(url, containedIn: $0) }) else {
+            return true
+        }
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 
     private func repairWAVHeaderIfNeeded(at url: URL, entryId: UUID) {

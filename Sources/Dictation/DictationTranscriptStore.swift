@@ -35,11 +35,7 @@ struct DictationTranscriptCounts: Sendable {
 
 enum DictationTranscriptStore {
     private static let dictationDayPrefix = "Dictations_"
-    private struct DictationFileStatsCacheKey: Hashable {
-        let path: String
-        let fileSize: Int64
-        let modificationTime: TimeInterval
-    }
+    private static let statsCache = DictationFileStatsCache()
 
     private static let iso8601Formatters: [ISO8601DateFormatter] = {
         let fractional = ISO8601DateFormatter()
@@ -51,8 +47,6 @@ enum DictationTranscriptStore {
         return [fractional, standard]
     }()
     private static let iso8601FormatterQueue = DispatchQueue(label: "Transcripted.DictationTranscriptStore.iso8601Formatters")
-    private static let statsCacheQueue = DispatchQueue(label: "Transcripted.DictationTranscriptStore.fileStatsCache")
-    private static var statsCache: [DictationFileStatsCacheKey: DictationFileStats] = [:]
 
     @discardableResult
     static func save(
@@ -88,7 +82,7 @@ enum DictationTranscriptStore {
               isDirectory.boolValue,
               let files = try? FileManager.default.contentsOfDirectory(
                 at: folder,
-                includingPropertiesForKeys: nil,
+                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
                 options: [.skipsHiddenFiles]
               ) else {
             return DictationTranscriptCounts(total: 0, today: 0, totalWords: 0)
@@ -99,17 +93,31 @@ enum DictationTranscriptStore {
         var todayCount = 0
         var totalWords = 0
 
+        var scannedPaths = Set<String>()
         for file in files where isDictationDayFile(file) {
             if Task.isCancelled { break }
-            let stats = cachedFileStats(in: file)
+            guard let signature = DictationFileStatsCache.Signature(url: file) else { continue }
+            scannedPaths.insert(signature.path)
+            let stats = statsCache.stats(for: signature) {
+                fileStats(in: file)
+            }
             total += stats.entries
             totalWords += stats.words
             if file.lastPathComponent == todayURL.lastPathComponent {
                 todayCount = stats.entries
             }
         }
+        statsCache.prune(keeping: scannedPaths)
 
         return DictationTranscriptCounts(total: total, today: todayCount, totalWords: totalWords)
+    }
+
+    static func resetSavedDictationCountsCacheForTesting() {
+        statsCache.reset()
+    }
+
+    static func savedDictationCountsCacheMissesForTesting() -> Int {
+        statsCache.misses
     }
 
     static func recentSavedDictations(limit: Int = 5, directory: URL? = nil) -> [SavedDictationEntry] {
@@ -232,34 +240,70 @@ enum DictationTranscriptStore {
         let words: Int
     }
 
-    private static func cachedFileStats(in url: URL) -> DictationFileStats {
-        guard let key = statsCacheKey(for: url) else {
-            return fileStats(in: url)
+    private final class DictationFileStatsCache: @unchecked Sendable {
+        struct Signature: Hashable {
+            let path: String
+            let modifiedAt: Date
+            let size: Int
+
+            init?(url: URL) {
+                let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
+                guard let values = try? url.resourceValues(forKeys: keys),
+                      values.isRegularFile != false,
+                      let modifiedAt = values.contentModificationDate,
+                      let size = values.fileSize else {
+                    return nil
+                }
+
+                self.path = url.standardizedFileURL.path
+                self.modifiedAt = modifiedAt
+                self.size = size
+            }
         }
 
-        if let cached = statsCacheQueue.sync(execute: { statsCache[key] }) {
-            return cached
+        private struct Entry {
+            let signature: Signature
+            let stats: DictationFileStats
         }
 
-        let stats = fileStats(in: url)
-        statsCacheQueue.sync {
-            statsCache[key] = stats
-        }
-        return stats
-    }
+        private let lock = NSLock()
+        private var entriesByPath: [String: Entry] = [:]
+        private var missCount = 0
 
-    private static func statsCacheKey(for url: URL) -> DictationFileStatsCacheKey? {
-        guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
-              let fileSize = values.fileSize,
-              let modificationDate = values.contentModificationDate else {
-            return nil
+        var misses: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return missCount
         }
 
-        return DictationFileStatsCacheKey(
-            path: url.standardizedFileURL.path,
-            fileSize: Int64(fileSize),
-            modificationTime: modificationDate.timeIntervalSinceReferenceDate
-        )
+        func stats(for signature: Signature, load: () -> DictationFileStats) -> DictationFileStats {
+            lock.lock()
+            let cached = entriesByPath[signature.path]
+            lock.unlock()
+            if cached?.signature == signature, let stats = cached?.stats {
+                return stats
+            }
+
+            let stats = load()
+            lock.lock()
+            entriesByPath[signature.path] = Entry(signature: signature, stats: stats)
+            missCount += 1
+            lock.unlock()
+            return stats
+        }
+
+        func prune(keeping paths: Set<String>) {
+            lock.lock()
+            entriesByPath = entriesByPath.filter { paths.contains($0.key) }
+            lock.unlock()
+        }
+
+        func reset() {
+            lock.lock()
+            entriesByPath.removeAll()
+            missCount = 0
+            lock.unlock()
+        }
     }
 
     private static func fileStats(in url: URL) -> DictationFileStats {
