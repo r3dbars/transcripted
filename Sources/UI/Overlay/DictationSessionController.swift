@@ -800,6 +800,9 @@ class DictationSessionController: ObservableObject {
         }
 
         guard stopDecision == .stopRecording else {
+            if overlayController.state == .drafting {
+                overlayController.showError("Still finishing the last dictation. Try again in a moment.")
+            }
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: .warning,
