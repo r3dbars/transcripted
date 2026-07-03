@@ -180,7 +180,10 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
         feedContinuation?.finish()
         inputTask?.cancel()
         inputTask = nil
-        feedTask?.cancel()
+        // Do not cancel the feed consumer here. Finishing the continuation lets
+        // its AsyncStream drain any already-yielded final/partial entries before
+        // the task exits, while cancellation can drop those queued entries during
+        // stop/teardown.
         feedTask = nil
     }
 
