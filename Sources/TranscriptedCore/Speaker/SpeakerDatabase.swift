@@ -146,6 +146,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         migrateSchema()
         createProvenanceTablesImpl()
+        createMatchOutcomeTablesImpl()
     }
 
     /// Add columns that may be missing from older databases.

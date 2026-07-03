@@ -356,13 +356,12 @@ if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     exit 1
 fi
 
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
     echo "❌ Dependencies missing or stale — required for beta builds"
     echo "   Missing stamp: $DEPS_BUILD_STAMP"
     echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
     echo "   Missing module: $ARGMAX_CORE_MODULE"
     echo "   Missing module: $WHISPERKIT_MODULE"
-    echo "   Missing framework: $ESPEAK_FRAMEWORK"
     echo "   Missing framework: $SENTRY_FRAMEWORK"
     echo "   Missing framework: $SPARKLE_FRAMEWORK"
     echo "   Run build-deps.sh --force first to rebuild dependencies."
@@ -483,7 +482,7 @@ for metallib in deps-libs/*.metallib; do
     [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
 done
 
-cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+[ -d "$ESPEAK_FRAMEWORK" ] && cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 

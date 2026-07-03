@@ -8,6 +8,34 @@ import Foundation
 /// sanitizer still owns its own sensitive-key list and length cap, but the
 /// mechanics live in one place.
 enum PayloadSanitizationCore {
+    /// Sensitive-key fragments shared by every off-device destination. A value
+    /// is dropped when its lowercased key contains any of these as a substring.
+    /// Both the Sentry and Analytics sanitizers start from this list and layer
+    /// their own destination-specific fragments on top, so the common floor
+    /// cannot drift between the two.
+    static let baseSensitiveKeyFragments: [String] = [
+        "audio",
+        "authorization",
+        "bearer",
+        "bundle",
+        "credential",
+        "dsn",
+        "email",
+        "error",
+        "file",
+        "name",
+        "password",
+        "path",
+        "speaker",
+        "source_app",
+        "secret",
+        "text",
+        "title",
+        "token",
+        "transcript",
+        "url",
+    ]
+
     /// Apply `ObservabilityTextRedactor.redact` and then cap the result at
     /// `maxValueLength`, appending an ellipsis when truncated. Returns an
     /// empty string when the input redacts to empty so callers can drop

@@ -130,4 +130,55 @@ func testMeetingPromptTelemetry() async {
             "missing route permission should report not ready"
         )
     }
+
+    runSuite("MeetingPromptTelemetry.properties — decision-time signal snapshot and dismiss streak stay coarse") {
+        let properties = MeetingPromptTelemetry.properties(
+            for: makeTelemetryPromptCandidate(reason: .micInput, source: .runtimeApp),
+            readiness: MeetingPromptTelemetryReadiness(
+                microphoneGranted: true,
+                systemAudioRecordingGranted: true,
+                meetingRecordingActive: false,
+                dictationRecordingActive: false
+            ),
+            signals: MeetingPromptSignalSnapshot(micActive: true, speakerActive: true, cameraActive: false),
+            dismissStreak: 4
+        )
+
+        assertEqual(properties["mic_signal"], "true", "the mic sensor state at decision time should be a boolean")
+        assertEqual(properties["output_signal"], "true", "the output sensor state at decision time should be a boolean")
+        assertEqual(properties["camera_signal"], "false", "the camera sensor state at decision time should be a boolean")
+        assertEqual(properties["speaker_signal"], nil, "no property key may contain 'speaker' — the sanitizer drops such keys")
+        assertEqual(properties["dismiss_streak_bucket"], "3_plus", "dismiss streaks should be bucketed, never raw counts")
+
+        let withoutSignals = MeetingPromptTelemetry.properties(
+            for: makeTelemetryPromptCandidate(),
+            readiness: MeetingPromptTelemetryReadiness(
+                microphoneGranted: true,
+                systemAudioRecordingGranted: true,
+                meetingRecordingActive: false,
+                dictationRecordingActive: false
+            )
+        )
+        assertEqual(withoutSignals["mic_signal"], nil, "signal props are omitted when no snapshot is supplied")
+        assertEqual(withoutSignals["dismiss_streak_bucket"], nil, "streak prop is omitted when not supplied")
+    }
+
+    runSuite("MeetingPromptTelemetry.properties — detected-call funnel summary stays coarse") {
+        let properties = MeetingPromptTelemetry.properties(
+            for: MeetingPromptDetectedCallSummary(
+                provider: .zoom,
+                duration: 42 * 60,
+                wasRecorded: false,
+                promptOutcome: .ignored,
+                signalKinds: "mic+output"
+            )
+        )
+
+        assertEqual(properties["provider"], "zoom", "funnel provider should stay enum-shaped")
+        assertEqual(properties["duration_bucket"], "40m_plus", "funnel duration should be bucketed, never raw")
+        assertEqual(properties["was_recorded"], "false", "capture outcome should be a boolean")
+        assertEqual(properties["prompt_outcome"], "ignored", "prompt outcome should separate 'said no' from 'never saw it'")
+        assertEqual(properties["signal_kinds"], "mic+output", "signal kinds should pass through as the stable enum string")
+        assertEqual(properties.count, 5, "the funnel event must carry exactly its five coarse properties")
+    }
 }

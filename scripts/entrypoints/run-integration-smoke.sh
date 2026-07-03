@@ -26,7 +26,6 @@ DEPS_MODULE_ROOT="$REPO_ROOT/deps-modules"
 TRANSCRIPTED_CORE_MODULE="$DEPS_MODULE_ROOT/TranscriptedCore.swiftmodule/arm64-apple-macos.swiftmodule"
 ARGMAX_CORE_MODULE="$DEPS_MODULE_ROOT/ArgmaxCore.swiftmodule/arm64-apple-macos.swiftmodule"
 WHISPERKIT_MODULE="$DEPS_MODULE_ROOT/WhisperKit.swiftmodule/arm64-apple-macos.swiftmodule"
-ESPEAK_FRAMEWORK="$DEPS_FRAMEWORK_ROOT/ESpeakNG.framework"
 
 dependency_input_paths() {
     {
@@ -66,7 +65,7 @@ deps_build_stamp_digest() {
     fi
 }
 
-if [ ! -f "$DEPS_ARCHIVE" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "$DEPS_MODULE_ROOT" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ]; then
+if [ ! -f "$DEPS_ARCHIVE" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "$DEPS_MODULE_ROOT" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ]; then
     echo "Dependencies not found — run build-deps.sh first."
     exit 1
 fi
@@ -120,13 +119,11 @@ swiftc \
     -framework Combine \
     -framework CoreML \
     -framework CoreAudio \
-    -framework ESpeakNG \
     -framework Metal \
     -framework MetalKit \
     -framework Accelerate \
     -framework Network \
     -framework UserNotifications \
-    -framework ESpeakNG \
     -lc++ \
     $DEPS_MODULE_FLAGS \
     $DEPS_FRAMEWORK_FLAGS \

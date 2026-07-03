@@ -33,6 +33,91 @@ final class SummaryItemIndexTests: XCTestCase {
         XCTAssertEqual(questions.map(\.text), ["Do we need a migration window?"])
     }
 
+    func testSearchIndexesSummaryTitleAttendeesAndSections() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                attendees: ["Jenny", "Priya"],
+                decisions: ["Adopt pricing decision memo"],
+                actionItems: ["Priya: send launch checklist"],
+                openQuestions: ["Should enterprise pricing wait?"]
+            ),
+            filename: "Call_2026-04-18_09-15-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let decision = try index.searchUtterances(query: "pricing decision", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(decision.results.first?.filename, "Call_2026-04-18_09-15-00")
+        XCTAssertEqual(decision.results.first?.snippets.first?.speaker, "Summary")
+        XCTAssertTrue(decision.results.first?.snippets.first?.text.contains("Decisions") == true)
+
+        let attendee = try index.searchUtterances(query: "Priya", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(attendee.results.first?.filename, "Call_2026-04-18_09-15-00")
+        XCTAssertTrue(attendee.results.first?.snippets.contains(where: { $0.timestamp == "Attendees" }) == true)
+
+        let title = try index.searchUtterances(query: "Beta launch", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(title.results.first?.meetingTitle, "Beta launch sync")
+    }
+
+    func testSearchIndexesTitleAndAttendeesWhenFactSectionsAreEmpty() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                attendees: ["Priya"],
+                decisions: [],
+                actionItems: [],
+                openQuestions: []
+            ),
+            filename: "Call_2026-04-18_09-15-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        XCTAssertTrue(try index.listSummaryItems().isEmpty)
+
+        let attendee = try index.searchUtterances(query: "Priya", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(attendee.results.first?.filename, "Call_2026-04-18_09-15-00")
+        XCTAssertEqual(attendee.results.first?.snippets.first?.speaker, "Summary")
+
+        let title = try index.searchUtterances(query: "Beta launch", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(title.results.first?.meetingTitle, "Beta launch sync")
+    }
+
+    func testSummarySearchRanksAboveRawUtteranceHits() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                date: "2026-04-18",
+                decisions: ["Pricing decision is to keep the beta free"],
+                actionItems: [],
+                openQuestions: []
+            ).replacingOccurrences(
+                of: "[00:00] [System/Jenny] Let's lock the launch.",
+                with: "[00:00] [System/Jenny] Raw pricing decision transcript evidence"
+            ),
+            filename: "Call_2026-04-18_09-15-00",
+            to: tempDir
+        )
+        try writeFixture(
+            makeFixtureJSON(
+                date: "2026-04-19T09:15:00-0500",
+                utterances: [("system_0", 0.0, 5.0, "Raw pricing decision chatter")]
+            ),
+            filename: "Call_2026-04-19_09-15-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let results = try index.searchUtterances(query: "pricing decision", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(results.results.map(\.filename), [
+            "Call_2026-04-18_09-15-00",
+            "Call_2026-04-19_09-15-00"
+        ])
+        XCTAssertEqual(results.results.first?.snippets.first?.speaker, "Summary")
+        XCTAssertEqual(results.results.first?.snippets.count, 3)
+        XCTAssertTrue(results.results.first?.snippets.contains(where: {
+            $0.speaker == "Jenny" && $0.timestamp == "0:00" && $0.text.contains("transcript evidence")
+        }) == true)
+    }
+
     func testIndexesActionItemOwnerAndUnassigned() throws {
         try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
@@ -134,6 +219,54 @@ final class SummaryItemIndexTests: XCTestCase {
         try reopened.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
         XCTAssertEqual(try reopened.listRecentMeetings(count: 10).count, 1)
         XCTAssertEqual(try reopened.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision).count, 2)
+    }
+
+    func testVersionTwoIndexBackfillsSummarySearchDocuments() throws {
+        try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        index = nil
+
+        let dbPath = tempDir.appendingPathComponent("mcp_index.sqlite").path
+        var raw: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath, &raw), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(raw, "PRAGMA user_version=2", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(raw)
+
+        let reopened = try TranscriptIndex(indexDir: tempDir)
+        XCTAssertTrue(try reopened.searchUtterances(query: "beta", speaker: nil, dateFrom: nil, dateTo: nil).results.isEmpty)
+
+        try reopened.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        XCTAssertEqual(
+            try reopened.searchUtterances(query: "Beta launch", speaker: nil, dateFrom: nil, dateTo: nil).results.first?.filename,
+            "Call_2026-04-18_09-15-00"
+        )
+    }
+
+    func testFiveHundredMeetingSummaryBackfillBudget() throws {
+        for index in 0..<500 {
+            try writeFixture(
+                makeMeetingWithInlineSummary(
+                    decisions: ["Synthetic pricing decision \(index)"],
+                    actionItems: ["Jenny: follow up on synthetic task \(index)"],
+                    openQuestions: ["Should synthetic question \(index) stay open?"]
+                ),
+                filename: String(format: "Call_2026-04-18_09-15-%03d", index),
+                to: tempDir
+            )
+        }
+
+        let started = Date()
+        try withLogsSuppressed {
+            try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        }
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertLessThan(elapsed, 60, "500-meeting summary backfill should stay under the PRD budget")
+        XCTAssertEqual(try index.listRecentMeetings(count: 50).count, 50)
+        XCTAssertEqual(
+            try index.searchUtterances(query: "Synthetic pricing decision 499", speaker: nil, dateFrom: nil, dateTo: nil).results.first?.snippets.first?.speaker,
+            "Summary"
+        )
     }
 
     func testGeneratedSidecarIsNotIndexedAsMeetingButFeedsSummary() throws {

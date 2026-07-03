@@ -173,11 +173,15 @@ enum DictationTranscriptWriter {
         let escapedTitle = "Dictations for \(dayTitleFormatter.string(from: date))"
             .replacingOccurrences(of: "\"", with: "'")
 
+        // `format_version: 1` is the capture-format contract from
+        // docs/capture-format.md — absent means the day file predates
+        // versioning and parses the same way. Keep frontmatter keys flat.
         return """
         ---
         title: "\(escapedTitle)"
         date: \(dayFilenameFormatter.string(from: date))
         capture_type: dictation_day
+        format_version: 1
         ---
 
         # Dictations for \(dayTitleFormatter.string(from: date))
@@ -221,21 +225,11 @@ enum DictationTranscriptWriter {
     }
 
     private static func appendSection(_ section: String, to url: URL) throws {
-        // O(1) append: day files grow all day, so never read/rewrite the whole file.
-        // Only the last two bytes matter — they decide the blank-line separator.
-        let handle = try FileHandle(forUpdating: url)
-        defer { try? handle.close() }
-
-        let size = try handle.seekToEnd()
-        var separator = "\n\n"
-        if size >= 2 {
-            try handle.seek(toOffset: size - 2)
-            if try handle.read(upToCount: 2) == Data([0x0A, 0x0A]) {
-                separator = ""
-            }
-            try handle.seekToEnd()
-        }
-        try handle.write(contentsOf: Data((separator + section).utf8))
+        var data = try Data(contentsOf: url)
+        let separator = data.suffix(2) == Data([0x0A, 0x0A]) ? "" : "\n\n"
+        guard let appended = (separator + section).data(using: .utf8) else { return }
+        data.append(appended)
+        try data.write(to: url, options: .atomic)
     }
 
     private static func buildTitle(from text: String, createdAt: Date) -> String {

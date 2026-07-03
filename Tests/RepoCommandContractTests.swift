@@ -233,12 +233,16 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
         let contents = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(
-            contents.contains("PARAKEET_MODEL_DIR=\"parakeet-tdt-0.6b-v3-coreml\""),
-            "build.sh should bundle the CoreML Parakeet directory loaded by ParakeetEngine"
+            contents.contains("PARAKEET_MODEL_DIR=\"parakeet-tdt-0.6b-v3\""),
+            "build.sh should bundle the FluidAudio 0.15.x Parakeet directory name loaded by ParakeetEngine"
+        )
+        assertTrue(
+            contents.contains("ditto \"$model_src\" \"$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR\""),
+            "build.sh should stage every Parakeet source (including a legacy -coreml cache) under the runtime directory name"
         )
         assertFalse(
-            contents.contains("\"parakeet-tdt-0.6b-v3\""),
-            "build.sh should not bundle the legacy Parakeet directory as a second 461 MB copy"
+            contents.contains("$PARAKEET_BUNDLE_DIR/parakeet-tdt-0.6b-v3-coreml"),
+            "build.sh should never bundle the legacy -coreml directory as a second ~600 MB copy"
         )
     }
 

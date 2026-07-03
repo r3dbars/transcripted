@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import TranscriptedCaptureKit
 
 final class TranscriptIndex: @unchecked Sendable {
     private var db: OpaquePointer?
@@ -52,8 +53,9 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     /// Bump when the derived index shape changes so existing on-disk indexes are
-    /// rebuilt from disk on next open. v2 added `meeting_summary_items`.
-    private static let schemaVersion: Int32 = 2
+    /// rebuilt from disk on next open. v2 added `meeting_summary_items`; v3 adds
+    /// the meeting-summary FTS document used by general search.
+    private static let schemaVersion: Int32 = 3
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
@@ -237,6 +239,40 @@ final class TranscriptIndex: @unchecked Sendable {
             END
         """)
 
+        exec("""
+            CREATE TABLE IF NOT EXISTS meeting_summary_documents (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL DEFAULT '',
+                attendees TEXT NOT NULL DEFAULT '',
+                decisions TEXT NOT NULL DEFAULT '',
+                action_items TEXT NOT NULL DEFAULT '',
+                open_questions TEXT NOT NULL DEFAULT ''
+            )
+        """)
+
+        exec("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS meeting_summary_documents_fts USING fts5(
+                title, attendees, decisions, action_items, open_questions,
+                content='meeting_summary_documents', content_rowid='rowid',
+                tokenize='porter unicode61'
+            )
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS meeting_summary_documents_ai AFTER INSERT ON meeting_summary_documents BEGIN
+                INSERT INTO meeting_summary_documents_fts(rowid, title, attendees, decisions, action_items, open_questions)
+                VALUES (new.rowid, new.title, new.attendees, new.decisions, new.action_items, new.open_questions);
+            END
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS meeting_summary_documents_ad AFTER DELETE ON meeting_summary_documents BEGIN
+                INSERT INTO meeting_summary_documents_fts(meeting_summary_documents_fts, rowid, title, attendees, decisions, action_items, open_questions)
+                VALUES ('delete', old.rowid, old.title, old.attendees, old.decisions, old.action_items, old.open_questions);
+            END
+        """)
+
         exec("CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(date)")
         exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_name ON meeting_speakers(speaker_name COLLATE NOCASE)")
         exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_persistent_id ON meeting_speakers(persistent_speaker_id)")
@@ -247,6 +283,7 @@ final class TranscriptIndex: @unchecked Sendable {
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_filename ON meeting_summary_items(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON meeting_summary_items(kind)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_owner ON meeting_summary_items(owner COLLATE NOCASE)")
+        exec("CREATE INDEX IF NOT EXISTS idx_summary_documents_filename ON meeting_summary_documents(filename)")
     }
 
     // MARK: - Reconciliation
@@ -398,7 +435,10 @@ final class TranscriptIndex: @unchecked Sendable {
             )
         }
 
-        try insertSummaryItems(forMeeting: url, filename: filename)
+        if let summary = TranscriptLoader.loadMeetingSummary(forTranscript: url) {
+            try insertSummaryItems(summary, filename: filename)
+            try insertSummarySearchDocument(summary, filename: filename)
+        }
 
         try execOrThrow("COMMIT")
         committed = true
@@ -409,9 +449,7 @@ final class TranscriptIndex: @unchecked Sendable {
     /// generated sidecar) and write one row per Decision / Action Item / Open
     /// Question. Called inside the meeting index transaction. A meeting with no
     /// summary inserts nothing.
-    private func insertSummaryItems(forMeeting url: URL, filename: String) throws {
-        guard let summary = TranscriptLoader.loadMeetingSummary(forTranscript: url) else { return }
-
+    private func insertSummaryItems(_ summary: ParsedMeetingSummary, filename: String) throws {
         for (position, text) in summary.decisions.enumerated() {
             try bindExec(
                 "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
@@ -433,6 +471,24 @@ final class TranscriptIndex: @unchecked Sendable {
                 bindings: [.text(filename), .text(SummaryItemKind.openQuestion), .int(position), .null, .text(text)]
             )
         }
+    }
+
+    private func insertSummarySearchDocument(_ summary: ParsedMeetingSummary, filename: String) throws {
+        try bindExec(
+            """
+            INSERT INTO meeting_summary_documents
+                (filename, title, attendees, decisions, action_items, open_questions)
+            VALUES (?,?,?,?,?,?)
+            """,
+            bindings: [
+                .text(filename),
+                .text(summary.title ?? ""),
+                .text(summary.attendees.joined(separator: "\n")),
+                .text(summary.decisions.joined(separator: "\n")),
+                .text(summary.actionItems.map(\.text).joined(separator: "\n")),
+                .text(summary.openQuestions.joined(separator: "\n"))
+            ]
+        )
     }
 
     private func indexDictationDay(file url: URL, filename: String, modDate: TimeInterval) throws {
@@ -493,6 +549,7 @@ final class TranscriptIndex: @unchecked Sendable {
         defer { if !committed { exec("ROLLBACK") } }
         try bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_summary_items WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM meeting_summary_documents WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_speakers WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM dictation_entries WHERE filename = ?", bindings: [.text(filename)])
@@ -595,12 +652,104 @@ final class TranscriptIndex: @unchecked Sendable {
         }
     }
 
+    // MARK: - Index counts (status tool + self-describing empty results)
+
+    /// Row counts across the derived tables so agents can tell an unindexed
+    /// library apart from a query that matched nothing.
+    struct IndexCounts {
+        let meetings: Int
+        let dictationDays: Int
+        let dictationEntries: Int
+        let summaryItems: Int
+        let summarizedMeetings: Int
+    }
+
+    func counts() throws -> IndexCounts {
+        try queue.sync {
+            IndexCounts(
+                meetings: try scalarCount("SELECT COUNT(*) FROM meetings"),
+                dictationDays: try scalarCount("SELECT COUNT(*) FROM dictation_days"),
+                dictationEntries: try scalarCount("SELECT COUNT(*) FROM dictation_entries"),
+                summaryItems: try scalarCount("SELECT COUNT(*) FROM meeting_summary_items"),
+                summarizedMeetings: try scalarCount("SELECT COUNT(DISTINCT filename) FROM meeting_summary_items")
+            )
+        }
+    }
+
+    /// Single-value COUNT query. Must run inside `queue.sync`.
+    private func scalarCount(_ sql: String) throws -> Int {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw MCPIndexError.queryFailed(dbError())
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            throw MCPIndexError.queryFailed(dbError())
+        }
+        return Int(sqlite3_column_int64(stmt, 0))
+    }
+
     // MARK: - Queries
 
     func searchUtterances(query: String, speaker: String?, dateFrom: String?, dateTo: String?, maxMeetings: Int = 10, snippetsPerMeeting: Int = 3) throws -> GroupedSearchResult {
         return try queue.sync {
-            let tokens = query.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-            let ftsQuery = tokens.map { "\"\($0.replacingOccurrences(of: "\"", with: ""))\"" }.joined(separator: " ")
+            guard let ftsQuery = ftsQuery(from: query) else {
+                return GroupedSearchResult(results: [], totalMeetingsMatched: 0, truncated: false)
+            }
+
+            var summaryGroups: [MeetingSearchGroup] = []
+            var summaryFilenames: Set<String> = []
+
+            if speaker == nil {
+                var summarySQL = """
+                    SELECT d.filename, d.title, d.attendees, d.decisions, d.action_items, d.open_questions,
+                           m.date, m.datetime, m.duration_seconds,
+                           bm25(meeting_summary_documents_fts, 8.0, 4.0, 6.0, 6.0, 6.0) AS score
+                    FROM meeting_summary_documents_fts
+                    JOIN meeting_summary_documents d ON d.rowid = meeting_summary_documents_fts.rowid
+                    JOIN meetings m ON m.filename = d.filename
+                    WHERE meeting_summary_documents_fts MATCH ?
+                """
+                var summaryBindings: [SQLBinding] = [.text(ftsQuery)]
+                if let dateFrom = dateFrom {
+                    summarySQL += " AND m.date >= ?"
+                    summaryBindings.append(.text(dateFrom))
+                }
+                if let dateTo = dateTo {
+                    summarySQL += " AND m.date <= ?"
+                    summaryBindings.append(.text(dateTo))
+                }
+                summarySQL += " ORDER BY score LIMIT 200"
+
+                var summaryStmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, summarySQL, -1, &summaryStmt, nil) == SQLITE_OK else {
+                    throw MCPIndexError.queryFailed(dbError())
+                }
+                defer { sqlite3_finalize(summaryStmt) }
+                for (i, binding) in summaryBindings.enumerated() {
+                    bind(stmt: summaryStmt, index: Int32(i + 1), value: binding)
+                }
+
+                while sqlite3_step(summaryStmt) == SQLITE_ROW {
+                    let filename = colText(summaryStmt, 0)
+                    summaryFilenames.insert(filename)
+                    summaryGroups.append(MeetingSearchGroup(
+                        meetingTitle: summarySearchTitle(summaryTitle: colText(summaryStmt, 1), filename: filename),
+                        meetingDate: colText(summaryStmt, 6),
+                        meetingDateTime: colText(summaryStmt, 7),
+                        filename: filename,
+                        snippets: summarySearchSnippets(
+                            query: query,
+                            title: colText(summaryStmt, 1),
+                            attendees: colText(summaryStmt, 2),
+                            decisions: colText(summaryStmt, 3),
+                            actionItems: colText(summaryStmt, 4),
+                            openQuestions: colText(summaryStmt, 5),
+                            limit: snippetsPerMeeting
+                        )
+                    ))
+                }
+            }
 
             var sql = """
                 SELECT u.filename, u.speaker_name, u.utterance_start, u.text,
@@ -677,8 +826,7 @@ final class TranscriptIndex: @unchecked Sendable {
                 }
             }
 
-            let totalMeetings = meetingOrder.count
-            let results = meetingOrder.prefix(maxMeetings).compactMap { filename -> MeetingSearchGroup? in
+            var rawSearchGroups = meetingOrder.compactMap { filename -> MeetingSearchGroup? in
                 guard let g = grouped[filename] else { return nil }
                 let title = filename
                     .replacingOccurrences(of: "Call_", with: "")
@@ -692,13 +840,101 @@ final class TranscriptIndex: @unchecked Sendable {
                     snippets: g.snippets
                 )
             }
+            let rawGroupsByFilename = Dictionary(uniqueKeysWithValues: rawSearchGroups.map { ($0.filename, $0) })
+            let mergedSummaryGroups = summaryGroups.map { summaryGroup -> MeetingSearchGroup in
+                guard let rawGroup = rawGroupsByFilename[summaryGroup.filename] else { return summaryGroup }
+                let cappedSnippets: [SearchSnippet]
+                if snippetsPerMeeting > 1, !rawGroup.snippets.isEmpty {
+                    let summarySlots = max(1, snippetsPerMeeting - 1)
+                    var snippets = Array(summaryGroup.snippets.prefix(summarySlots))
+                    snippets.append(contentsOf: rawGroup.snippets.prefix(snippetsPerMeeting - snippets.count))
+                    cappedSnippets = snippets
+                } else {
+                    cappedSnippets = Array(summaryGroup.snippets.prefix(max(1, snippetsPerMeeting)))
+                }
+                return MeetingSearchGroup(
+                    meetingTitle: summaryGroup.meetingTitle,
+                    meetingDate: summaryGroup.meetingDate,
+                    meetingDateTime: summaryGroup.meetingDateTime,
+                    filename: summaryGroup.filename,
+                    snippets: cappedSnippets
+                )
+            }
+            rawSearchGroups.removeAll { summaryFilenames.contains($0.filename) }
+
+            let combined = mergedSummaryGroups + rawSearchGroups
+            let uniqueTotal = summaryFilenames.union(Set(meetingOrder)).count
 
             return GroupedSearchResult(
-                results: Array(results),
-                totalMeetingsMatched: totalMeetings,
-                truncated: totalMeetings > maxMeetings
+                results: Array(combined.prefix(maxMeetings)),
+                totalMeetingsMatched: uniqueTotal,
+                truncated: uniqueTotal > maxMeetings
             )
         }
+    }
+
+    private func summarySearchTitle(summaryTitle: String, filename: String) -> String {
+        let trimmed = summaryTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return filename
+            .replacingOccurrences(of: "Call_", with: "")
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: ":")
+    }
+
+    private func summarySearchSnippets(
+        query: String,
+        title: String,
+        attendees: String,
+        decisions: String,
+        actionItems: String,
+        openQuestions: String,
+        limit: Int
+    ) -> [SearchSnippet] {
+        let fields: [(label: String, text: String)] = [
+            ("Title", title),
+            ("Decisions", decisions),
+            ("Action Items", actionItems),
+            ("Open Questions", openQuestions),
+            ("Attendees", attendees)
+        ]
+
+        let queryTokens = query
+            .components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).lowercased() }
+            .filter { !$0.isEmpty }
+        let orderedFields = fields.sorted { lhs, rhs in
+            let lhsMatches = summaryField(lhs.text, matchesAny: queryTokens)
+            let rhsMatches = summaryField(rhs.text, matchesAny: queryTokens)
+            return lhsMatches == rhsMatches ? false : lhsMatches
+        }
+
+        let snippets = orderedFields.compactMap { field -> SearchSnippet? in
+            let trimmed = field.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return SearchSnippet(
+                speaker: "Summary",
+                speakerId: nil,
+                timestamp: field.label,
+                text: "\(field.label): \(singleLineSummarySnippet(trimmed))"
+            )
+        }
+        return Array(snippets.prefix(max(1, limit)))
+    }
+
+    private func summaryField(_ text: String, matchesAny queryTokens: [String]) -> Bool {
+        guard !queryTokens.isEmpty else { return false }
+        let normalized = text.lowercased()
+        return queryTokens.contains { normalized.contains($0) }
+    }
+
+    private func singleLineSummarySnippet(_ text: String) -> String {
+        let singleLine = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " | ")
+        return String(singleLine.prefix(320))
     }
 
     func listDictationDays(count: Int, dateFrom: String? = nil, dateTo: String? = nil) throws -> [DictationDaySummary] {

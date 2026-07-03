@@ -139,12 +139,14 @@ allowlist.
 - `dictation_audio_route_recovery_timeout`
 - `meeting_recording_started`
 - `meeting_recording_start_failed`
+- `meeting_detected_call_ended`
 - `meeting_prompt_shown`
 - `meeting_prompt_dismissed`
 - `meeting_prompt_record_selected`
 - `meeting_prompt_suppressed`
 - `meeting_mic_boost_prompt_shown`
 - `meeting_mic_boost_prompt_actioned`
+- `meeting_missed_call_nudge`
 - `meeting_recording_stopped`
 - `meeting_capture_health_snapshot`
 - `meeting_recording_cancelled`
@@ -155,7 +157,9 @@ allowlist.
 - `local_meeting_summary_completed`
 - `local_meeting_summary_failed`
 - `meeting_transcript_failed`
+- `meeting_speaker_auto_recognized`
 - `meeting_speaker_finalization_failed`
+- `meeting_speaker_match_reviewed`
 - `meeting_speaker_review_shown`
 - `meeting_speaker_review_submitted`
 - `meeting_transcript_skipped`

@@ -2068,19 +2068,5 @@ private extension TextPasteCopyReason {
     }
 }
 
-private extension AVAuthorizationStatus {
-    var diagnosticName: String {
-        switch self {
-        case .notDetermined:
-            return "not_determined"
-        case .restricted:
-            return "restricted"
-        case .denied:
-            return "denied"
-        case .authorized:
-            return "authorized"
-        @unknown default:
-            return "unknown"
-        }
-    }
-}
+// AVAuthorizationStatus.diagnosticName is defined once in
+// Sources/Support/TranscriptedPermissionAccess.swift and reused here.

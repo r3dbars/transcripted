@@ -39,6 +39,26 @@ enum LaunchAtLoginController {
         try unregisterIfNeeded()
     }
 
+    /// One-time default-enable: the meeting-detection stack is dead while the
+    /// app is not running, so once onboarding is complete the login item is
+    /// registered by default. The applied-marker guarantees this runs at most
+    /// once per install, so removing the login item in System Settings sticks,
+    /// and an explicit Settings-toggle choice always wins. Registration surfaces
+    /// the standard macOS "added to Login Items" notice, and the Settings toggle
+    /// reflects (and can revert) the state.
+    static func applyDefaultEnableIfNeeded(onboardingCompleted: Bool) throws {
+        guard LaunchAtLoginPreferences.shouldApplyDefaultEnable(
+            hasExplicitChoice: LaunchAtLoginPreferences.hasExplicitChoice(),
+            hasAppliedDefault: LaunchAtLoginPreferences.hasAppliedDefaultEnable(),
+            onboardingCompleted: onboardingCompleted
+        ) else {
+            return
+        }
+
+        LaunchAtLoginPreferences.markDefaultEnableApplied()
+        try registerIfNeeded()
+    }
+
     static func setEnabled(_ enabled: Bool) throws {
         if enabled {
             try registerIfNeeded()

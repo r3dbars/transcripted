@@ -71,12 +71,15 @@ struct ModelCacheCleanupResult: Equatable {
 }
 
 enum ModelCacheInventory {
-    static let activeParakeetModelDirectoryName = "parakeet-tdt-0.6b-v3-coreml"
+    // FluidAudio 0.15.x resolves the v3 cache folder WITHOUT the -coreml suffix
+    // (ModelNames.folderName strips it). ParakeetEngine renames a 0.7.9-era
+    // -coreml cache to this name on first init so users keep their download.
+    static let activeParakeetModelDirectoryName = "parakeet-tdt-0.6b-v3"
 
     static let knownStaleFluidAudioModelDirectories: Set<String> = [
         "parakeet-tdt-0.6b-v2",
         "parakeet-tdt-0.6b-v2-coreml",
-        "parakeet-tdt-0.6b-v3",
+        "parakeet-tdt-0.6b-v3-coreml",
     ]
 
     static func snapshot(

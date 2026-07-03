@@ -260,7 +260,10 @@ Start here:
 Coding agents can run `scripts/dev/agent-preflight.sh` to get a suggested
 verification map for their branch.
 
-If Transcripted is useful to you, a star helps other people find it.
+If Transcripted is useful to you, a star helps other people find it. If you
+want to help keep it maintained, you can also
+[sponsor the project](https://github.com/sponsors/r3dbars) — the app stays free,
+local, and MIT either way.
 
 ## License
 

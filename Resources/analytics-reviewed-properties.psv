@@ -29,12 +29,14 @@ build_version
 calendar_confidence
 calendar_status
 call_state
+camera_signal
 capture_activity
 capture_quality
 captured_input_volume_before
 captured_input_volume_changed
 captured_input_volume_dropped
 captured_input_volume_during
+channel
 cleanup_changed
 cleanup_enabled
 completion_flow
@@ -74,6 +76,8 @@ first_artifact_kind
 first_dictation_saved
 format_ready
 from_status
+graduated
+had_suggestion
 has_target
 hfp_suspected
 import_stage
@@ -90,6 +94,7 @@ mic_processed_peak
 mic_processing
 mic_raw_peak
 mic_recovering
+mic_signal
 mic_status
 mic_stream_present
 missing_permission
@@ -100,6 +105,7 @@ output_channels
 output_device_class
 output_ducking_detected
 output_rate_hz
+output_signal
 page_id
 paste_available
 pasteback_status
@@ -110,6 +116,7 @@ prior_artifact_kind
 prior_ready_state
 prior_status
 prompt_kind
+prompt_outcome
 prompt_reason
 provider
 proxy_kind
@@ -125,6 +132,7 @@ reporting_kind
 required
 result
 retry_source
+review_action
 review_reason
 route_ready
 route_shape
@@ -141,6 +149,7 @@ session_stage
 setting_id
 setup_kind
 setup_ready
+signal_kinds
 source
 stage
 stall_kind
@@ -167,5 +176,6 @@ update_state
 version
 voice_processing
 voice_processing_active
+was_recorded
 was_recording
 workflow_kind

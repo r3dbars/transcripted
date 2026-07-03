@@ -140,6 +140,22 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
         return nil
     }
 
+    /// Maps a process bundle ID that is *currently playing audio output* to a
+    /// meeting provider, or `nil` if it is not a recognized call source.
+    ///
+    /// Deliberately narrower than the mic-input mapping: only native conferencing
+    /// app families count. Browsers are excluded because browser output is
+    /// dominated by non-call playback (YouTube, music, videos), while a native
+    /// conferencing app emitting sustained output is almost always a live call.
+    /// This is the signal that catches the listen-only or hard-muted join the mic
+    /// and camera both miss: remote participants are talking, so the app plays
+    /// output, but nothing on this Mac holds the mic.
+    static func audioOutputProvider(forBundleID bundleID: String) -> MeetingPromptProvider? {
+        allCases.first { provider in
+            provider.activeBundleIdentifiers.contains { bundleID.matchesBundleFamily($0) }
+        }
+    }
+
     /// Attributes a "camera is on, nothing is holding the mic" signal to a meeting
     /// provider using only the *frontmost* app, or `nil` if the frontmost app is
     /// not a known call surface.
@@ -193,12 +209,17 @@ enum MeetingPromptReason: String, Equatable {
     // apart. When the mic is also active the mic candidate wins, so this reason
     // marks the camera-only case.
     case cameraInput = "camera_input"
+    // A native conferencing app is playing sustained audio output while nothing
+    // holds the mic (a listen-only or hard-muted join: remote people are talking,
+    // you are not). Same prompt + backoff as `.micInput`; distinct for analytics.
+    // Native apps only — browser output is far too noisy to be a call signal.
+    case audioOutput = "audio_output"
 
-    /// Mic- or camera-driven ad-hoc call detection (as opposed to calendar- or
-    /// runtime-app-driven). Both feed the same prompt and the same browser-call
-    /// vs calendar preference logic.
+    /// Mic-, camera-, or speaker-driven ad-hoc call detection (as opposed to
+    /// calendar- or runtime-app-driven). All feed the same prompt and the same
+    /// browser-call vs calendar preference logic.
     var isAdHocCallSignal: Bool {
-        self == .micInput || self == .cameraInput
+        self == .micInput || self == .cameraInput || self == .audioOutput
     }
 }
 
@@ -210,6 +231,10 @@ enum MeetingPromptBackoffKind: String, Equatable {
     case runtimeDefaultFallback = "runtime_default_fallback"
     case runtimeTeamsExtended = "runtime_teams_extended"
     case runtimeShortReminder = "runtime_short_reminder"
+    // The prompt countdown ran out with no interaction. Not an explicit "no",
+    // so the candidate re-offers after a short interval instead of inheriting
+    // the full dismissal backoff (capped — see `MeetingPromptHeuristics`).
+    case expiredReoffer = "expired_reoffer"
 }
 
 enum MeetingPromptSuppressionReason: String, Equatable {
@@ -231,6 +256,144 @@ enum MeetingPromptOwnCaptureActivity: String, Equatable {
 struct MeetingPromptBackoffDecision: Equatable {
     let kind: MeetingPromptBackoffKind
     let until: Date
+}
+
+/// A detected call that ended without a Transcripted meeting recording.
+/// Emitted by `MeetingPromptDetector.onUnrecordedCallEnded` once the call's
+/// ad-hoc signals go quiet; consumed by the missed-call nudge.
+struct MeetingPromptUnrecordedCall: Equatable {
+    let provider: MeetingPromptProvider
+    let duration: TimeInterval
+}
+
+/// What the ad-hoc sensors see at one moment, attached to prompt telemetry so
+/// accepts/dismissals/ignores can be sliced by the evidence behind them.
+/// Booleans only — never bundle IDs or device names.
+struct MeetingPromptSignalSnapshot: Equatable {
+    let micActive: Bool
+    let speakerActive: Bool
+    let cameraActive: Bool
+}
+
+/// One detected call summarized at its end — the capture-funnel denominator.
+/// Every real call this long becomes exactly one `meeting_detected_call_ended`
+/// event, so capture rate is measurable against calls that actually happened,
+/// not just prompts that fired.
+struct MeetingPromptDetectedCallSummary: Equatable {
+    enum PromptOutcome: String, Equatable {
+        case recorded
+        case declined
+        case ignored
+        case noPrompt = "no_prompt"
+    }
+
+    let provider: MeetingPromptProvider
+    let duration: TimeInterval
+    let wasRecorded: Bool
+    let promptOutcome: PromptOutcome
+    /// Sorted "+"-joined sensor kinds seen during the call (e.g. "camera+mic").
+    let signalKinds: String
+}
+
+/// Pure helpers for the detected-call funnel event and prompt-decision
+/// telemetry. Everything stays coarse: buckets and small enums only.
+enum MeetingPromptCallTelemetry {
+    /// Calls shorter than this never emit the funnel event — a seconds-long
+    /// mic blip that survived the sustain gate is not a meeting.
+    static let minimumReportableCallDuration: TimeInterval = 60
+
+    static func durationBucket(for duration: TimeInterval) -> String {
+        switch duration {
+        case ..<(5 * 60):
+            return "1_to_5m"
+        case ..<(10 * 60):
+            return "5_to_10m"
+        case ..<(20 * 60):
+            return "10_to_20m"
+        case ..<(40 * 60):
+            return "20_to_40m"
+        default:
+            return "40m_plus"
+        }
+    }
+
+    // "output", not "speaker", in analytics values too — the speaker word is
+    // reserved for the sensitive speaker-name taxonomy.
+    static func signalKinds(micSeen: Bool, speakerSeen: Bool, cameraSeen: Bool) -> String {
+        var kinds: [String] = []
+        if cameraSeen { kinds.append("camera") }
+        if micSeen { kinds.append("mic") }
+        if speakerSeen { kinds.append("output") }
+        return kinds.isEmpty ? "none" : kinds.joined(separator: "+")
+    }
+
+    static func promptOutcome(
+        promptShown: Bool,
+        wasRecorded: Bool,
+        userDeclined: Bool
+    ) -> MeetingPromptDetectedCallSummary.PromptOutcome {
+        if wasRecorded { return .recorded }
+        if userDeclined { return .declined }
+        return promptShown ? .ignored : .noPrompt
+    }
+
+    /// "Keeps hitting Not now" bucket: 1, 2, or 3_plus consecutive explicit
+    /// dismissals for a provider since the last accepted recording.
+    static func dismissStreakBucket(_ count: Int) -> String {
+        switch count {
+        case ..<2:
+            return "1"
+        case 2:
+            return "2"
+        default:
+            return "3_plus"
+        }
+    }
+}
+
+/// How the missed-call nudge was resolved, for coarse analytics.
+enum MissedCallNudgeOutcome: String, Equatable {
+    case acknowledged
+    case disabled
+    case expired
+}
+
+/// Pure policy for the post-call "that call wasn't recorded" nudge. The nudge
+/// cannot recover the meeting — its job is to close the awareness loop (most
+/// users never realize a prompt fired and vanished) and train the record habit.
+/// So it must stay rare and respectful: long calls only, never after the user
+/// explicitly declined to record, never when a recording actually happened, and
+/// rate-limited so back-to-back calls do not stack nudges.
+enum MissedCallNudgePolicy {
+    static let minimumCallDuration: TimeInterval = 10 * 60
+    static let nudgeCooldown: TimeInterval = 4 * 60 * 60
+
+    static func shouldNudge(
+        duration: TimeInterval,
+        sawMeetingRecording: Bool,
+        userDeclined: Bool,
+        lastNudgeAt: Date?,
+        now: Date
+    ) -> Bool {
+        guard !sawMeetingRecording, !userDeclined else { return false }
+        guard duration >= minimumCallDuration else { return false }
+        if let lastNudgeAt, now.timeIntervalSince(lastNudgeAt) < nudgeCooldown {
+            return false
+        }
+        return true
+    }
+
+    /// Coarse duration bucket for analytics — never the raw duration.
+    static func durationBucket(for duration: TimeInterval) -> String {
+        switch duration {
+        case ..<(20 * 60):
+            return "10_to_20m"
+        case ..<(40 * 60):
+            return "20_to_40m"
+        default:
+            return "40m_plus"
+        }
+    }
 }
 
 enum MeetingPromptWindowPolicy {
@@ -255,6 +418,35 @@ enum MeetingPromptHeuristics {
     static let runtimeActivityFreshness: TimeInterval = 5 * 60
     static let calendarReminderLeadTime: TimeInterval = 60
     static let calendarReminderPostStartGrace: TimeInterval = 5 * 60
+
+    // MARK: Unattended prompt expiry (countdown ran out, nobody clicked)
+    //
+    // An unattended countdown is weaker evidence of "don't record" than an
+    // explicit dismissal — the user may be heads-down in the call, on another
+    // Space, or away from the screen for the first minute. Re-offer a short
+    // while later while the call evidence persists, capped so an ignored call
+    // eventually falls back to the normal dismissal backoff instead of nagging.
+    static let promptExpiryReofferInterval: TimeInterval = 3 * 60
+    static let maxPromptExpiryReoffers = 2
+    /// How long an expiry streak is remembered. Past this window (matches the
+    /// default runtime dismissal) a fresh call starts a fresh re-offer budget.
+    static let promptExpiryStreakResetInterval: TimeInterval = defaultRuntimeDismissFallbackInterval
+
+    /// Whether the `expiryCount`-th consecutive unattended expiry should
+    /// schedule a short re-offer (`true`) or fall back to a full dismissal.
+    static func shouldReofferAfterExpiry(expiryCount: Int) -> Bool {
+        expiryCount <= maxPromptExpiryReoffers
+    }
+
+    /// Ad-hoc call prompts stay up longer than calendar reminders: the call is
+    /// happening *right now*, and the first minute of a join is exactly when
+    /// the user is not looking at overlays. Calendar prompts keep the shorter
+    /// default because their moment ("starts in 1 min") ages out quickly.
+    static let adHocCallPromptTimeoutSeconds = 60
+
+    static func promptTimeoutSeconds(for reason: MeetingPromptReason, calendarDefault: Int) -> Int {
+        reason.isAdHocCallSignal ? adHocCallPromptTimeoutSeconds : calendarDefault
+    }
 
     static func snoozeInterval(
         for source: MeetingPromptSource,
@@ -437,6 +629,10 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
     /// only — CoreMediaIO gives no process attribution — so it is attributed to a
     /// provider via the frontmost app when nothing holds the mic.
     let cameraInUse: Bool
+    /// Bundle IDs of native conferencing apps confirmed to be playing audio
+    /// output (MicActivityMonitor's output side). Catches the listen-only /
+    /// hard-muted join where nothing holds the mic and the camera stays off.
+    let audioOutputActiveBundleIDs: Set<String>
     let isOwnCaptureActive: Bool
     let isMicInputPromptEnabled: Bool
 
@@ -447,6 +643,7 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
         runtimeSuppressedUntil: [MeetingPromptProvider: Date],
         micActiveBundleIDs: Set<String> = [],
         cameraInUse: Bool = false,
+        audioOutputActiveBundleIDs: Set<String> = [],
         isOwnCaptureActive: Bool = false,
         isMicInputPromptEnabled: Bool = true
     ) {
@@ -456,6 +653,7 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
         self.runtimeSuppressedUntil = runtimeSuppressedUntil
         self.micActiveBundleIDs = micActiveBundleIDs
         self.cameraInUse = cameraInUse
+        self.audioOutputActiveBundleIDs = audioOutputActiveBundleIDs
         self.isOwnCaptureActive = isOwnCaptureActive
         self.isMicInputPromptEnabled = isMicInputPromptEnabled
     }
@@ -493,7 +691,7 @@ extension MeetingPromptDetector.Candidate {
             return "linked_event_runtime_match"
         case .calendarNearby:
             return "linked_event"
-        case .micInput, .cameraInput, .runtimeOnly:
+        case .micInput, .cameraInput, .audioOutput, .runtimeOnly:
             return "none"
         }
     }
@@ -504,6 +702,8 @@ extension MeetingPromptDetector.Candidate {
             return "mic_active"
         case .cameraInput:
             return "camera_active"
+        case .audioOutput:
+            return "output_active"
         case .calendarPlusRuntimeMatch, .runtimeOnly:
             return "app_active"
         case .calendarNearby:
@@ -517,6 +717,9 @@ extension MeetingPromptDetector.Candidate {
             return provider == .googleMeet ? "browser_mic" : "native_mic"
         case .cameraInput:
             return provider == .googleMeet ? "browser_camera" : "native_camera"
+        case .audioOutput:
+            // Output attribution is native-only by construction.
+            return "native_output"
         case .runtimeOnly:
             return "native_runtime"
         case .calendarPlusRuntimeMatch:
@@ -668,19 +871,26 @@ enum MeetingPromptSyntheticEvaluator {
     }
 
     /// The ad-hoc call signals from this snapshot, de-duped to one entry per
-    /// provider so mic-and-camera on the same call surface a single prompt. Mic
-    /// activity is the primary signal (`.micInput`). The camera is only a
-    /// *standalone* signal when **nothing holds the mic** — the camera-on,
-    /// mic-muted join — because the camera boolean has no process attribution, so
-    /// attributing it to the frontmost app while the mic already identifies a call
-    /// could point at a different (wrong) app or double-prompt. When the mic is
-    /// active it already names the call and the camera adds nothing.
+    /// provider so multiple sensors on the same call surface a single prompt.
+    /// Tiered: mic activity is the primary signal (`.micInput`); native-app audio
+    /// output is the standalone fallback when nothing holds the mic (the
+    /// listen-only / hard-muted join, with real process attribution); the camera
+    /// is the last standalone signal (the camera-on, mic-muted join) because the
+    /// camera boolean has no process attribution — attributing it to the
+    /// frontmost app while a stronger signal already identifies a call could
+    /// point at a different (wrong) app or double-prompt. When a higher tier is
+    /// active it already names the call and the lower tiers add nothing.
     static func callSignals(
         from snapshot: MeetingPromptRuntimeSnapshot
     ) -> [(provider: MeetingPromptProvider, reason: MeetingPromptReason)] {
         let micProviders = micInputProviders(from: snapshot)
         if !micProviders.isEmpty {
             return micProviders.map { ($0, .micInput) }
+        }
+
+        let outputProviders = audioOutputProviders(from: snapshot)
+        if !outputProviders.isEmpty {
+            return outputProviders.map { ($0, .audioOutput) }
         }
 
         if snapshot.cameraInUse,
@@ -695,6 +905,13 @@ enum MeetingPromptSyntheticEvaluator {
         from snapshot: MeetingPromptRuntimeSnapshot
     ) -> [MeetingPromptProvider] {
         Set(snapshot.micActiveBundleIDs.compactMap(MeetingPromptProvider.micInputProvider(forBundleID:)))
+            .sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private static func audioOutputProviders(
+        from snapshot: MeetingPromptRuntimeSnapshot
+    ) -> [MeetingPromptProvider] {
+        Set(snapshot.audioOutputActiveBundleIDs.compactMap(MeetingPromptProvider.audioOutputProvider(forBundleID:)))
             .sorted { $0.rawValue < $1.rawValue }
     }
 

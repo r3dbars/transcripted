@@ -66,6 +66,17 @@ class TranscriptedAppState: ObservableObject {
                 message: error.localizedDescription)
         }
 
+        // Covers existing installs that finished onboarding before the default
+        // existed; fresh installs get it from the onboarding-completion hook.
+        do {
+            try LaunchAtLoginController.applyDefaultEnableIfNeeded(
+                onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
+            )
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
+                message: error.localizedDescription)
+        }
+
         if ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] == nil {
             sparkleUpdater.performStartupUpdateCheckIfNeeded()
         }
