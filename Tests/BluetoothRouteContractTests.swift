@@ -325,7 +325,7 @@ func testBluetoothRouteContract() {
         }
         let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
 
-        guard let loadSelection = snapshotBody.range(of: "let selection = Self.loadDictationInputDeviceSelection"),
+        guard let loadSelection = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
               let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
               let applyOverride = snapshotBody.range(of: "Self.applyPreferredDictationInputDevice(selection, to: inputNode)"),
               let outputFormatRead = snapshotBody.range(of: "inputNode.outputFormat(forBus: 0)"),
