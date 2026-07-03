@@ -85,9 +85,22 @@ extension TranscriptionTaskManager {
         removeSourceAudioAfterArchive: Bool = true
     ) async throws -> URL {
 
-        // Require system audio for multichannel transcription
         guard let systemURL = systemURL else {
-            throw PipelineError.missingSystemAudio
+            AppLogger.pipeline.warning("Transcribing mic-only failed meeting audio through single-track path", [
+                "taskId": taskId.uuidString
+            ])
+            return try await transcribeMultichannelPipeline(
+                micURL: nil,
+                systemURL: micURL,
+                outputFolder: outputFolder,
+                taskId: taskId,
+                healthInfo: healthInfo,
+                splitLocalSpeakers: false,
+                meetingTitle: meetingTitle,
+                recordingDate: recordingDate,
+                sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                removeSourceAudioAfterArchive: removeSourceAudioAfterArchive
+            )
         }
 
         return try await transcribeMultichannelPipeline(

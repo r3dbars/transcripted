@@ -478,8 +478,11 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(obsidianMarkdown.contains("\ntags:"), "embedders can still opt into Obsidian metadata explicitly")
     }
 
-    func testStartTranscriptionRejectsMissingSystemAudioBeforeBackgroundWorkStarts() throws {
-        let manager = makeManager()
+    func testStartTranscriptionWithMicOnlyAudioSavesSingleTrackTranscript() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Mic only recovered meeting."),
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments())
+        )
         let micScratchDirectory = tempDirectory.appendingPathComponent("audio")
         try FileManager.default.createDirectory(at: micScratchDirectory, withIntermediateDirectories: true)
         let micURL = micScratchDirectory.appendingPathComponent("mic.wav")
@@ -491,22 +494,20 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             outputFolder: tempDirectory.appendingPathComponent("transcripts")
         )
 
+        try await waitUntil {
+            manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+
         XCTAssertEqual(manager.activeCount, 0)
         XCTAssertEqual(manager.backgroundTaskCount, 0)
         XCTAssertEqual(manager.activeTasks.count, 0)
-        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
-        XCTAssertEqual(
-            manager.failedTranscriptionManager.failedTranscriptions.first?.errorMessage,
-            PipelineError.missingSystemAudio.localizedDescription
-        )
-
-        guard case .failed(let message) = manager.displayStatus else {
-            return XCTFail("Expected failed display status when system audio is missing")
-        }
-        XCTAssertEqual(message, "System audio required")
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("Mic only recovered meeting."))
     }
 
-    func testMissingSystemAudioQueuesRetainedArchiveAndRemovesScratch() throws {
+    func testMicOnlyFailedQueueRetainsArchiveAndRemovesScratch() throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -516,11 +517,11 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         let micURL = micScratchDirectory.appendingPathComponent("mic.wav")
         try writeMonoWAV(to: micURL, duration: 2.5)
 
-        manager.startTranscription(
-            micURL: micURL,
-            systemURL: nil,
-            outputFolder: tempDirectory.appendingPathComponent("transcripts")
-        )
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
+        ))
 
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertTrue(
@@ -1153,6 +1154,55 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Recovered meeting artifact."))
     }
 
+    func testRetryFailedTranscriptionWithMicOnlyAudioUsesSingleTrackPath() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Mic only retry artifact."),
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments())
+        )
+        let audioDirectory = tempDirectory.appendingPathComponent("audio", isDirectory: true)
+        let micURL = audioDirectory.appendingPathComponent("retry-mic-only.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: PipelineError.missingSystemAudio.localizedDescription,
+            meetingTitle: "Mic-only recovered call"
+        ))
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(failed.isRetryable)
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failed.id,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        )
+
+        XCTAssertTrue(didRetry)
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("Mic-only recovered call"))
+        XCTAssertTrue(markdown.contains("Mic only retry artifact."))
+
+        let request = try XCTUnwrap(manager.speakerNamingRequest)
+        XCTAssertEqual(request.sourceFailedTranscriptionId, failed.id)
+        let speaker = try XCTUnwrap(request.speakers.first)
+        request.onComplete([
+            SpeakerNameUpdate(
+                persistentSpeakerId: speaker.id,
+                diarizerSpeakerId: speaker.diarizerSpeakerId,
+                channel: speaker.channel,
+                newName: "Local Mic",
+                previousName: speaker.currentName,
+                action: .named
+            )
+        ])
+
+        try await waitUntil {
+            manager.failedTranscriptionManager.failedTranscriptions.isEmpty
+                && manager.speakerNamingRequest == nil
+        }
+    }
+
     func testCancelAllDuringRetryDoesNotPoisonFutureRetry() async throws {
         let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Recovered after cancel.")
         let manager = makeManager(speechToText: speech)
@@ -1296,6 +1346,48 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         )
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
+    }
+
+    func testPreserveActiveTranscriptionsForShutdownRetainsImportedAudio() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Imported shutdown recovery.")
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments()),
+            retainedAudioDirectory: retainedAudioDirectory
+        )
+        let copiedImportURL = tempDirectory
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("imported-meeting.wav")
+        try writeMonoWAV(to: copiedImportURL, duration: 2.5)
+
+        manager.startImportedTranscription(
+            audioURL: copiedImportURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Imported customer call"
+        )
+
+        try await waitUntil {
+            speech.didStart
+        }
+
+        let preserved = manager.preserveActiveTranscriptionsForShutdown(
+            errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
+        )
+
+        XCTAssertEqual(preserved, 1)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        XCTAssertEqual(manager.activeCount, 0)
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.meetingTitle, "Imported customer call")
+        XCTAssertNil(failed.systemAudioURL)
+        XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: copiedImportURL.path))
+
+        speech.release()
     }
 
     func testStartSavedAudioRetranscriptionDoesNotDeleteSourceWhenRejectedForActiveTask() throws {
@@ -2255,6 +2347,18 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         }
 
         try file.write(from: buffer)
+    }
+
+    private func singleSpeakerSegments(duration: TimeInterval = 2.0) -> [SpeakerSegment] {
+        [
+            SpeakerSegment(
+                speakerId: 1,
+                startTime: 0,
+                endTime: duration,
+                embedding: [Float](repeating: 0.42, count: 256),
+                qualityScore: 0.95
+            )
+        ]
     }
 
     private func waitUntil(

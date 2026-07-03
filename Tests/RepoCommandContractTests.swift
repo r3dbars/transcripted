@@ -1473,10 +1473,13 @@ func testRepoCommandContract() {
         )
         assertTrue(
             localBuildScript.contains("/usr/bin/open -n -g -F -W")
-                && localBuildScript.contains("--env \"TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT=$ui_report\"")
+                && localBuildScript.contains("mktemp -d \"/tmp/transcripted-launch-smoke.XXXXXX\"")
+                && localBuildScript.contains("--env \"TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT=$launch_ui_report\"")
                 && localBuildScript.contains("--env \"TRANSCRIPTED_LAUNCH_UI_SMOKE_TERMINATE_AFTER_REPORT=1\"")
-                && localBuildScript.contains("\"$APP_BUNDLE\""),
-            "local launch smoke should launch the app bundle through LaunchServices"
+                && localBuildScript.contains("cp -R \"$APP_BUNDLE\" \"$launch_app_bundle\"")
+                && localBuildScript.contains("\"$launch_app_bundle\"")
+                && localBuildScript.contains("cp \"$launch_ui_report\" \"$ui_report\""),
+            "local launch smoke should launch a temporary app-bundle copy through LaunchServices and keep repo-local artifacts"
         )
         assertFalse(
             localBuildScript.contains("\"$APP_BINARY\" >\"$smoke_log\""),
@@ -1485,7 +1488,7 @@ func testRepoCommandContract() {
         assertTrue(
             localBuildScript.contains("pre_launch_app_pids=\"$(snapshot_launch_smoke_app_pids)\"")
                 && localBuildScript.contains("terminate_launch_smoke_app()")
-                && localBuildScript.contains("pgrep -f \"$APP_BINARY\"")
+                && localBuildScript.contains("pgrep -f \"$launch_app_binary\"")
                 && localBuildScript.contains("is_pre_launch_app_pid")
                 && localBuildScript.contains("kill -TERM \"$pid\"")
                 && localBuildScript.contains("kill -KILL \"$pid\""),
@@ -2438,6 +2441,10 @@ func testRepoCommandContract() {
         assertTrue(
             failureBlock.contains("properties: failureTelemetryContext"),
             "analytics and diagnostics should share the same privacy-safe failure telemetry context"
+        )
+        assertTrue(
+            countOccurrences(of: "handleBackgroundTranscriptionWorkChanged()", in: failureBlock) >= 3,
+            "terminal failed statuses should wake the queued-transcription drain even when a task was rejected before activeCount changed"
         )
     }
 
