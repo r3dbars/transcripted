@@ -9,29 +9,11 @@ enum SentryPayloadSanitizer {
         "mic_file_available",
         "system_file_available",
     ]
-    private static let sensitiveKeyFragments = [
-        "audio",
-        "authorization",
-        "bearer",
-        "bundle",
+    // Sentry layers two extra fragments ("context", "identifier") on top of the
+    // shared base in `PayloadSanitizationCore.baseSensitiveKeyFragments`.
+    private static let sensitiveKeyFragments = PayloadSanitizationCore.baseSensitiveKeyFragments + [
         "context",
-        "credential",
-        "dsn",
-        "email",
-        "error",
-        "file",
         "identifier",
-        "name",
-        "password",
-        "path",
-        "speaker",
-        "source_app",
-        "secret",
-        "text",
-        "title",
-        "token",
-        "transcript",
-        "url",
     ]
 
     static func sanitizeTags(_ tags: [String: String]) -> [String: String] {

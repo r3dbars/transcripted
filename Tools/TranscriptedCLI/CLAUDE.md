@@ -35,6 +35,13 @@ They also honor:
 - `TRANSCRIPTED_MEETINGS_DIR`
 - `TRANSCRIPTED_DICTATIONS_DIR`
 
+### Output Shapes
+
+- `context-recent`, `context-search`, and `list-dictations` print a bare JSON array with `--json` when there are results; with zero results they emit `{"results": [], "searched_directories": [...], "hint": "..."}` instead, and in text mode print `No results. Searched: <dirs>` to stderr
+- `context-search --speaker` with `--kind all` or `--kind dictation` skips dictations by design; text mode prints a one-line note to stderr, `--json` wraps the results as `{"results": [...], "notes": [...]}`
+- `--count` values are clamped to 1-50
+- `read-meeting --json` includes `recording`, `speakers`, and `utterances` (parsed transcript structure) alongside the raw `markdown`; `read-dictation --json` includes `date` and `entries` (entry id, captured timestamp, source app, title, text) alongside `markdown`
+
 ### Offline Audio
 
 - `transcripted-cli transcribe <media...>` — transcribe audio or video files to plain text (default), JSON, or SRT with the local Parakeet model
@@ -150,5 +157,6 @@ enables both command groups) when offline audio work is needed.
 - the default context resolver prefers the app-selected capture library when Transcripted has one, then falls back to the current Transcripted capture folders, then Draft-era exports, then `~/Documents/Transcripted/`
 - when the user moved the capture library in Transcripted Settings, the CLI should follow that app-selected path before defaulting back to `~/Library/Application Support/Transcripted/captures`
 - `context-recent` is intentionally a mixed feed; if the user asks for the latest meeting specifically, add `--kind meeting`
+- diagnostics (empty-result and speaker-filter notes) go to stderr in text mode so piped stdout stays parseable; keep it that way
 - changes here should be verified independently from the app build
 - directory resolution and capture-Markdown parsing live in `Tools/TranscriptedCaptureKit` and are shared with `Tools/TranscriptedMCP`; change them there, not by re-inlining logic into `ContextStore.swift`

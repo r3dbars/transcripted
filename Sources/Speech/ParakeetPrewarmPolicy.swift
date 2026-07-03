@@ -21,14 +21,14 @@ enum ParakeetPrewarmPolicy {
                 level: .info,
                 event: "prewarm_permission_pending",
                 message: "Skipping speech engine prewarm until microphone permission is decided",
-                context: ["mic_status": diagnosticName(for: microphoneStatus)]
+                context: ["mic_status": microphoneStatus.diagnosticName]
             )
         case .denied, .restricted:
             return .skip(
                 level: .warning,
                 event: "prewarm_permission_unavailable",
                 message: "Skipping speech engine prewarm because microphone permission is unavailable",
-                context: ["mic_status": diagnosticName(for: microphoneStatus)]
+                context: ["mic_status": microphoneStatus.diagnosticName]
             )
         @unknown default:
             return .skip(
@@ -37,21 +37,6 @@ enum ParakeetPrewarmPolicy {
                 message: "Skipping speech engine prewarm because microphone permission is unavailable",
                 context: ["mic_status": "unknown"]
             )
-        }
-    }
-
-    private static func diagnosticName(for status: AVAuthorizationStatus) -> String {
-        switch status {
-        case .notDetermined:
-            return "not_determined"
-        case .restricted:
-            return "restricted"
-        case .denied:
-            return "denied"
-        case .authorized:
-            return "authorized"
-        @unknown default:
-            return "unknown"
         }
     }
 }

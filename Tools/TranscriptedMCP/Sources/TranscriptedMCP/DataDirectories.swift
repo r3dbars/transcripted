@@ -5,6 +5,8 @@ struct TranscriptedDataDirectories {
     let meetingDirs: [URL]
     let dictationDirs: [URL]
     let indexDir: URL
+    let resolutionSource: CaptureLibraryResolutionSource
+    let legacyFallbackAppended: Bool
 
     var meetingsDir: URL {
         meetingDirs[0]
@@ -28,16 +30,32 @@ struct TranscriptedDataDirectories {
         return directories
     }
 
-    init(meetingsDir: URL, dictationsDir: URL, indexDir: URL) {
+    init(
+        meetingsDir: URL,
+        dictationsDir: URL,
+        indexDir: URL,
+        resolutionSource: CaptureLibraryResolutionSource = .defaultCaptures,
+        legacyFallbackAppended: Bool = false
+    ) {
         self.meetingDirs = [meetingsDir]
         self.dictationDirs = [dictationsDir]
         self.indexDir = indexDir
+        self.resolutionSource = resolutionSource
+        self.legacyFallbackAppended = legacyFallbackAppended
     }
 
-    init(meetingDirs: [URL], dictationDirs: [URL], indexDir: URL) {
+    init(
+        meetingDirs: [URL],
+        dictationDirs: [URL],
+        indexDir: URL,
+        resolutionSource: CaptureLibraryResolutionSource = .defaultCaptures,
+        legacyFallbackAppended: Bool = false
+    ) {
         self.meetingDirs = meetingDirs
         self.dictationDirs = dictationDirs
         self.indexDir = indexDir
+        self.resolutionSource = resolutionSource
+        self.legacyFallbackAppended = legacyFallbackAppended
     }
 
     static func resolve(
@@ -56,7 +74,9 @@ struct TranscriptedDataDirectories {
             return TranscriptedDataDirectories(
                 meetingDirs: resolved.meetingDirs,
                 dictationDirs: resolved.dictationDirs,
-                indexDir: indexOverride ?? sharedDataRoot
+                indexDir: indexOverride ?? sharedDataRoot,
+                resolutionSource: resolved.resolutionSource,
+                legacyFallbackAppended: resolved.legacyFallbackAppended
             )
         }
 
@@ -70,7 +90,9 @@ struct TranscriptedDataDirectories {
         return TranscriptedDataDirectories(
             meetingDirs: resolved.meetingDirs,
             dictationDirs: resolved.dictationDirs,
-            indexDir: indexOverride ?? defaultIndex
+            indexDir: indexOverride ?? defaultIndex,
+            resolutionSource: resolved.resolutionSource,
+            legacyFallbackAppended: resolved.legacyFallbackAppended
         )
     }
 }

@@ -14,7 +14,7 @@ Both `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` depend on it via a rela
 | File | Purpose |
 |------|---------|
 | `Package.swift` | Library-only Swift package manifest (no external dependencies) |
-| `Sources/TranscriptedCaptureKit/CaptureLibraryResolver.swift` | `CaptureLibraryResolver.resolve(...)` → `ResolvedCaptureDirectories` (meeting dirs, dictation dirs, optional shared data root) |
+| `Sources/TranscriptedCaptureKit/CaptureLibraryResolver.swift` | `CaptureLibraryResolver.resolve(...)` → `ResolvedCaptureDirectories` (meeting dirs, dictation dirs, optional shared data root, winning resolution rule + legacy-fallback flag) |
 | `Sources/TranscriptedCaptureKit/CaptureMarkdown.swift` | Capture-Markdown detection and frontmatter `title:` extraction |
 | `Sources/TranscriptedCaptureKit/CaptureMarkdownParser.swift` | Frontmatter, meeting transcript, and dictation day parsing into `ParsedMeetingCapture` / `ParsedDictationDayCapture` |
 | `Sources/TranscriptedCaptureKit/CaptureSummaryParser.swift` | Structured summary parsing into `ParsedMeetingSummary` (Decisions / Action Items with owner / Open Questions); understands inline transcript summaries and generated `meeting_summary` sidecars. Ports the app's `RecentMeetingSummaryPreviewParser` section logic across the module boundary |

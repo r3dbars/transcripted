@@ -23,9 +23,11 @@ func unregisterDefaultInputDeviceListener(_ listener: AudioObjectPropertyListene
     }
 }
 
-// FluidAudio 0.7.9 no longer exposes the older streaming EOU manager used by
-// this dormant live-display path. Keep a no-op shim so the disabled code path
-// still compiles until we rewire live transcripts to the newer streaming API.
+// No-op shim for the dormant live-display path (liveDisplayEnabled = false).
+// FluidAudio 0.15.x ships a real `StreamingEouAsrManager` again with a different
+// API; this local declaration deliberately shadows it so the disabled code path
+// keeps compiling unchanged. Delete this shim when live display is rewired to
+// the real streaming API (phase 3 of docs/voices-model-upgrade-plan.md).
 actor StreamingEouAsrManager {
     enum ChunkSize {
         case ms320

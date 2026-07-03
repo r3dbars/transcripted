@@ -5,7 +5,7 @@ import Foundation
 @available(macOS 14.0, *)
 @MainActor
 final class LiveMeetingTranscriber {
-    private var streamingSession: StreamingAsrSession?
+    private var streamingSession: SlidingWindowAsrSession?
     private var channels: [LiveMeetingCodexSource: LiveMeetingTranscriberChannel] = [:]
 
     var isRunning: Bool {
@@ -20,7 +20,7 @@ final class LiveMeetingTranscriber {
     ) {
         stop(capture: capture)
 
-        let session = StreamingAsrSession()
+        let session = SlidingWindowAsrSession()
         streamingSession = session
 
         let microphoneChannel = LiveMeetingTranscriberChannel(
@@ -82,7 +82,7 @@ final class LiveMeetingTranscriber {
 private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private let source: LiveMeetingCodexSource
     private let audioSource: AudioSource
-    private let streamingSession: StreamingAsrSession
+    private let streamingSession: SlidingWindowAsrSession
     private let codexSession: LiveMeetingCodexSession
     private let feed: LiveMeetingTranscriptFeed?
     private let startedAt: Date
@@ -98,7 +98,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     init(
         source: LiveMeetingCodexSource,
         audioSource: AudioSource,
-        streamingSession: StreamingAsrSession,
+        streamingSession: SlidingWindowAsrSession,
         codexSession: LiveMeetingCodexSession,
         feed: LiveMeetingTranscriptFeed?,
         startedAt: Date
@@ -189,13 +189,13 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
         }
     }
 
-    private func consume(updates: AsyncStream<StreamingTranscriptionUpdate>) async {
+    private func consume(updates: AsyncStream<SlidingWindowTranscriptionUpdate>) async {
         for await update in updates {
             append(update: update)
         }
     }
 
-    private func append(update: StreamingTranscriptionUpdate) {
+    private func append(update: SlidingWindowTranscriptionUpdate) {
         let now = Date()
         let normalized = LiveMeetingStreamingUpdatePolicy.normalizedText(update.text)
         guard !normalized.isEmpty else { return }

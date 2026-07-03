@@ -12,7 +12,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe (WAV, MP3, M4A, AAC, AIFF, CAF, MP4, MOV, M4V, ...).")
     var mediaPaths: [String]
 
-    @Option(name: .long, help: "Path to a Parakeet TDT v3 CoreML model directory (must be named parakeet-tdt-0.6b-v3-coreml, matching FluidAudio's layout).")
+    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, or FluidAudio's parakeet-tdt-0.6b-v3 cache folder).")
     var modelsDir: String?
 
     @Flag(name: .long, help: "Fail instead of downloading models when no local copy exists.")
@@ -94,7 +94,12 @@ struct Transcribe: AsyncParsableCommand {
 
             Self.logProgress("Transcribing \(mediaURL.lastPathComponent) (\(Self.formattedDuration(decoded.durationSeconds)))...")
             let startedAt = Date()
-            let result = try await manager.transcribe(samples, source: .system)
+            // FluidAudio 0.15.x hands decoder-state ownership to the caller
+            // (the 0.7.9 `source:` parameter is gone). Fresh state per file so
+            // batch runs can never leak decoder context between inputs.
+            let decoderLayers = await manager.decoderLayerCount
+            var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
+            let result = try await manager.transcribe(samples, decoderState: &decoderState)
             let elapsed = Date().timeIntervalSince(startedAt)
 
             let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -189,7 +194,8 @@ struct Transcribe: AsyncParsableCommand {
 ///    (`~/Library/Application Support/FluidAudio/Models/`), downloading into
 ///    it on first use unless `--no-download` was set.
 enum TranscribeModelResolver {
-    static let bundledModelSubpath = "Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml"
+    /// build.sh bundles under the 0.15.x folder name (no `-coreml` suffix).
+    static let bundledModelSubpath = "Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3"
 
     static func candidateBundledModelDirectories(fileManager: FileManager = .default) -> [URL] {
         let applicationRoots = [
@@ -211,22 +217,23 @@ enum TranscribeModelResolver {
 
         if let modelsDir {
             let directory = URL(fileURLWithPath: modelsDir, isDirectory: true).standardizedFileURL
-            guard AsrModels.modelsExist(at: directory, version: .v3) else {
+            guard AsrModels.modelsExist(at: directory) else {
                 throw ValidationError(
                     "No complete Parakeet TDT v3 model bundle at \(directory.path)."
-                        + " FluidAudio resolves models from a directory named parakeet-tdt-0.6b-v3-coreml;"
-                        + " point --models-dir at that folder."
+                        + " Point --models-dir at a staged model folder (a parakeet-tdt-0.6b-v3-coreml"
+                        + " HuggingFace clone, or FluidAudio's parakeet-tdt-0.6b-v3 cache folder)."
                 )
             }
             log("Loading Parakeet models from \(directory.path)")
             models = try await AsrModels.load(from: directory, version: .v3)
         } else if let bundled = candidateBundledModelDirectories()
-            .first(where: { AsrModels.modelsExist(at: $0, version: .v3) }) {
+            .first(where: { AsrModels.modelsExist(at: $0) }) {
             log("Loading Parakeet models bundled with Transcripted.app")
             models = try await AsrModels.load(from: bundled, version: .v3)
         } else {
+            migrateLegacyParakeetCacheIfNeeded(log: log)
             let cacheDirectory = AsrModels.defaultCacheDirectory(for: .v3)
-            let cached = AsrModels.modelsExist(at: cacheDirectory, version: .v3)
+            let cached = AsrModels.modelsExist(at: cacheDirectory)
             if cached {
                 log("Loading Parakeet models from \(cacheDirectory.path)")
             } else if allowDownload {
@@ -242,8 +249,31 @@ enum TranscribeModelResolver {
         }
 
         let manager = AsrManager(config: .default)
-        try await manager.initialize(models: models)
+        try await manager.loadModels(models)
         return manager
+    }
+
+    /// FluidAudio 0.15.x renamed the v3 cache folder from
+    /// `parakeet-tdt-0.6b-v3-coreml` to `parakeet-tdt-0.6b-v3`. Mirror the
+    /// app's in-place rename so a 0.7.9-era cache keeps its ~600MB download
+    /// and FluidAudio only fetches the file new in 0.15.x. A failed rename is
+    /// harmless — the loader falls back to a fresh download.
+    static func migrateLegacyParakeetCacheIfNeeded(
+        fileManager: FileManager = .default,
+        log: (String) -> Void
+    ) {
+        let newDir = AsrModels.defaultCacheDirectory(for: .v3)
+        guard !newDir.lastPathComponent.hasSuffix("-coreml") else { return }
+        let legacyDir = newDir.deletingLastPathComponent()
+            .appendingPathComponent(newDir.lastPathComponent + "-coreml", isDirectory: true)
+        guard fileManager.fileExists(atPath: legacyDir.path),
+              !fileManager.fileExists(atPath: newDir.path) else { return }
+        do {
+            try fileManager.moveItem(at: legacyDir, to: newDir)
+            log("Migrated legacy Parakeet model cache to \(newDir.lastPathComponent)")
+        } catch {
+            log("Legacy model cache migration failed (will download fresh): \(error.localizedDescription)")
+        }
     }
 }
 #else
@@ -255,7 +285,7 @@ struct Transcribe: AsyncParsableCommand {
     @Argument(help: "Audio or video files to transcribe (WAV, MP3, M4A, AAC, AIFF, CAF, MP4, MOV, M4V, ...).")
     var mediaPaths: [String]
 
-    @Option(name: .long, help: "Path to a Parakeet TDT v3 CoreML model directory (must be named parakeet-tdt-0.6b-v3-coreml, matching FluidAudio's layout).")
+    @Option(name: .long, help: "Path to a staged Parakeet TDT v3 model folder (a parakeet-tdt-0.6b-v3-coreml HuggingFace clone, or FluidAudio's parakeet-tdt-0.6b-v3 cache folder).")
     var modelsDir: String?
 
     @Flag(name: .long, help: "Fail instead of downloading models when no local copy exists.")

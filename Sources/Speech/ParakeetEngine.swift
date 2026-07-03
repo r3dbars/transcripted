@@ -346,7 +346,11 @@ class ParakeetEngine: ObservableObject {
 
         var failureStage: ParakeetModelInitStage = .authorizationRequest
         var loadSource: ParakeetModelLoadSource = .unresolved
-        let bundledModelPath = bundledModelPath(subdirectory: "parakeet-tdt-0.6b-v3-coreml", checkFile: "Encoder.mlmodelc")
+        Self.migrateLegacyParakeetCacheIfNeeded()
+        // FluidAudio 0.15.x resolves bundled models as <parent>/<repo folderName>, and the
+        // folder name lost its -coreml suffix. Gate on JointDecisionv3.mlmodelc (new required
+        // file) so an incomplete bundle can't trigger a download into the signed app bundle.
+        let bundledModelPath = bundledModelPath(subdirectory: "parakeet-tdt-0.6b-v3", checkFile: "JointDecisionv3.mlmodelc")
         let bundledModelPresent = bundledModelPath != nil
 
         do {
@@ -407,9 +411,9 @@ class ParakeetEngine: ObservableObject {
 
             failureStage = .managerInitialize
             let manager = AsrManager(config: .default)
-            try await manager.initialize(models: models)
+            try await manager.loadModels(models)
             guard !Task.isCancelled, !isShuttingDown else {
-                Task { manager.cleanup() }
+                Task { await manager.cleanup() }
                 return
             }
 
@@ -601,6 +605,31 @@ class ParakeetEngine: ObservableObject {
             // Non-fatal — live display will just stay empty until batch result arrives
             print("⚠️ PARAKEET EOU | model load failed (live display disabled): \(error.localizedDescription)")
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "eou_model_failed",
+                message: error.localizedDescription)
+        }
+    }
+
+    /// FluidAudio 0.15.x renamed the v3 cache folder from `parakeet-tdt-0.6b-v3-coreml`
+    /// to `parakeet-tdt-0.6b-v3` (ModelNames.folderName strips the suffix). Rename a
+    /// 0.7.9-era cache in place so existing users keep their ~600MB download; FluidAudio
+    /// then only fetches the one file new in 0.15.x (JointDecisionv3.mlmodelc). A failed
+    /// rename is harmless — the loader falls back to a fresh download.
+    private static func migrateLegacyParakeetCacheIfNeeded() {
+        let newDir = AsrModels.defaultCacheDirectory(for: .v3)
+        guard !newDir.lastPathComponent.hasSuffix("-coreml") else { return }
+        let legacyDir = newDir.deletingLastPathComponent()
+            .appendingPathComponent(newDir.lastPathComponent + "-coreml", isDirectory: true)
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: legacyDir.path),
+              !fileManager.fileExists(atPath: newDir.path) else { return }
+        do {
+            try fileManager.moveItem(at: legacyDir, to: newDir)
+            print("📦 PARAKEET | migrated legacy model cache to \(newDir.lastPathComponent)")
+            EventReporter.shared.capture(level: .info, engine: "parakeet", event: "model_cache_migrated",
+                message: "Renamed pre-0.15 FluidAudio model cache folder")
+        } catch {
+            print("⚠️ PARAKEET | legacy model cache migration failed: \(error.localizedDescription)")
+            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "model_cache_migration_failed",
                 message: error.localizedDescription)
         }
     }
@@ -2690,13 +2719,18 @@ class ParakeetEngine: ObservableObject {
 
     private func runASRInference(
         manager: AsrManager,
-        samples: [Float],
-        source: AudioSource
+        samples: [Float]
     ) async throws -> String {
         await beginASRInference()
         do {
             try Task.checkCancellation()
-            let result = try await manager.transcribe(samples, source: source)
+            // FluidAudio 0.15.x hands decoder-state ownership to the caller. Every batch
+            // segment gets a fresh state so concurrent mic/system segments can never
+            // contaminate each other's decoder context (0.7.9 kept per-source state
+            // internally, keyed by the removed `source:` parameter).
+            let decoderLayers = await manager.decoderLayerCount
+            var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
+            let result = try await manager.transcribe(samples, decoderState: &decoderState)
             let text = withExtendedLifetime(result) {
                 String(result.text)
             }
@@ -2759,8 +2793,7 @@ class ParakeetEngine: ObservableObject {
         do {
             let resultText = try await runASRInference(
                 manager: manager,
-                samples: resampled,
-                source: .microphone
+                samples: resampled
             )
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             let trimmed = resultText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2798,8 +2831,7 @@ class ParakeetEngine: ObservableObject {
                     do {
                         let retryResultText = try await runASRInference(
                             manager: manager,
-                            samples: retrySamples,
-                            source: .microphone
+                            samples: retrySamples
                         )
                         let retryElapsed = CFAbsoluteTimeGetCurrent() - retryStarted
                         let retryTrimmed = retryResultText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2936,8 +2968,7 @@ class ParakeetEngine: ObservableObject {
         do {
             resultText = try await runASRInference(
                 manager: manager,
-                samples: samples,
-                source: source
+                samples: samples
             )
         } catch {
             if let fallbackDecision = ParakeetShortAudioGate.meetingSegmentFallback(
@@ -3141,7 +3172,7 @@ class ParakeetEngine: ObservableObject {
         eouManager = nil
         modelDownloadState = .notLoaded
         if cleanupDecision == .cleanupNow {
-            Task { mgr?.cleanup() }
+            Task { await mgr?.cleanup() }
         } else {
             print("ℹ️ PARAKEET | deferring ASR manager cleanup while transcription is active")
         }
@@ -3163,7 +3194,7 @@ class ParakeetEngine: ObservableObject {
         }
         ParakeetRetiredAudioEngineStore.shared.retire(audioEngine, reason: "deinit")
         let mgr = asrManager
-        Task { mgr?.cleanup() }
+        Task { await mgr?.cleanup() }
         eouManager = nil
     }
 }

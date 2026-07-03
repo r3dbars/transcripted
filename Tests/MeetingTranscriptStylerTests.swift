@@ -21,7 +21,71 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerFailsClosedOnUnparseableBody()
         testMeetingTranscriptStylerStillRewritesGenuinelyEmptyTranscript()
         testMeetingTranscriptStylerUsesTimeOnlyFallbackTitle()
+        testMeetingTranscriptStylerRewritesTranscriptStyleMarker()
+        testMeetingTranscriptStylerLeavesLegacyFilesWithoutFormatVersion()
     }
+}
+
+private func testMeetingTranscriptStylerRewritesTranscriptStyleMarker() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleVersionedMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let updated = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
+
+    assertTrue(
+        updated.contains("format_version: 1"),
+        "Restyling must preserve the format_version frontmatter key"
+    )
+    assertTrue(
+        updated.contains("transcript_style: styled"),
+        "Persisted restyles must rewrite the transcript_style marker to styled"
+    )
+    assertFalse(
+        updated.contains("transcript_style: raw"),
+        "The raw transcript_style marker must not survive a persisted restyle"
+    )
+    assertEqual(
+        updated.components(separatedBy: "transcript_style:").count - 1,
+        1,
+        "Restyling must update the transcript_style key in place, not duplicate it"
+    )
+
+    // Second pass stays idempotent: still exactly one styled marker.
+    let secondPass = MeetingTranscriptStyler.restyleTranscript(at: styled.url)
+    let secondUpdated = (try? String(contentsOf: secondPass.url, encoding: .utf8)) ?? ""
+    assertEqual(
+        secondUpdated.components(separatedBy: "transcript_style:").count - 1,
+        1,
+        "Repeated restyle passes must keep a single transcript_style key"
+    )
+    assertTrue(
+        secondUpdated.contains("format_version: 1"),
+        "Repeated restyle passes must keep the format_version key"
+    )
+}
+
+private func testMeetingTranscriptStylerLeavesLegacyFilesWithoutFormatVersion() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let updated = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
+
+    assertFalse(
+        updated.contains("format_version:"),
+        "Restyling a pre-versioning transcript must not invent a format_version"
+    )
+    assertTrue(
+        updated.contains("transcript_style: styled"),
+        "Restyled bodies always carry the styled marker so parsers can skip sniffing"
+    )
 }
 
 private func testMeetingTranscriptStylerUsesTimeOnlyFallbackTitle() {
@@ -477,6 +541,30 @@ private func sampleMeetingTranscriptLocalSummarySections() -> LocalMeetingSummar
 private func sampleMeetingTranscript() -> String {
     """
     ---
+    date: "2026-04-07"
+    time: "09:14:00"
+    duration: "12:30"
+    total_word_count: "42"
+    mic_utterances: "1"
+    system_utterances: "1"
+    ---
+
+    ## Full Transcript
+
+    **[00:00] [Mic/You]**
+    Thanks for making time today.
+
+    **[00:04] [System/Alex]**
+    Happy to help. Let's get started.
+    """
+}
+
+private func sampleVersionedMeetingTranscript() -> String {
+    """
+    ---
+    capture_type: meeting
+    format_version: 1
+    transcript_style: raw
     date: "2026-04-07"
     time: "09:14:00"
     duration: "12:30"

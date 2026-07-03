@@ -35,11 +35,11 @@ When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
-## Package Layout (17 Swift files)
+## Package Layout (20 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
-- `Sources/TranscriptedMCP/` — 9 source files for server startup, directory resolution, path validation, indexing, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 8 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, markdown loading, logging, name variants, and shared fixtures
+- `Sources/TranscriptedMCP/` — 10 source files for server startup, directory resolution, path validation, indexing, telemetry, and tool handlers
+- `Tests/TranscriptedMCPTests/` — 10 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, tool handlers, markdown loading, logging, telemetry, name variants, and shared fixtures
 
 ## File Index
 
@@ -54,6 +54,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
 | `PathSecurity.swift` | Guards direct file reads against traversal, symlinks, and out-of-root paths |
 | `FileWatcher.swift` | Watches the local transcript directories and incrementally reindexes changed files |
+| `AgentCaptureQueryTelemetry.swift` | Anonymous bucketed telemetry for agent capture queries |
 
 ## Test Files
 
@@ -66,6 +67,8 @@ that mode the SQLite index also defaults to the shared root unless
 | `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
 | `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
+| `ToolHandlersTests.swift` | Handler-level coverage: title hydration, telemetry, status tool payload, self-describing empty results, done-filter error, read pagination windows and size guard |
+| `AgentCaptureQueryTelemetryTests.swift` | Bucketing and payload coverage for agent capture-query telemetry |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
 ## MCP Tools
@@ -75,17 +78,18 @@ All tools are read-only.
 | Tool | Description |
 |------|-------------|
 | `list_meetings` | List saved meetings with metadata and optional date filters |
-| `read_meeting` | Read one meeting transcript by filename |
+| `read_meeting` | Read one meeting transcript by filename; `section` (`full`/`transcript`/`speakers`) plus optional `offset`/`limit` utterance paging |
 | `list_dictations` | List saved dictation day files with counts, source apps, and titles |
-| `read_dictation` | Read one dictation day or one specific dictation entry |
+| `read_dictation` | Read one dictation day, one specific entry by `entry_id`, or a paged window of entries via `offset`/`limit` |
 | `search` | Search meeting transcript content |
 | `search_context` | Search across meetings, dictations, or both |
 | `recent_context` | Get a mixed recent feed of meetings and dictations |
 | `who_is` | Look up a speaker profile across saved meetings |
 | `recap` | Build a structured digest for a date range |
-| `list_action_items` | Roll up action items across meetings; filter by owner / status / query / date |
+| `list_action_items` | Roll up action items across meetings; filter by owner / status (`open`/`all`; `done` is rejected with an explicit error) / query / date |
 | `list_decisions` | Roll up decisions across meetings; filter by query / date |
 | `digest` | Cross-meeting summary (decisions + action items + open questions) for a window |
+| `status` | Server version, resolved capture directories and which resolution rule selected them, index location, and indexed counts |
 
 The last three are cross-meeting rollups over the structured summary fields and
 query the same `meeting_summary_items` index populated from saved meeting
@@ -182,5 +186,7 @@ The in-app Claude Desktop installer copies that helper into:
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
 - `recent_context` is intentionally mixed; for the latest meeting specifically, prefer `list_meetings` or `recent_context` with `kind: "meeting"`
+- zero-result queries return a self-describing JSON payload (`searched_directories`, indexed counts, `hint`) instead of a bare "not found" string; call `status` to see the full resolution + index picture
 - `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
+- both read tools carry a size guard: raw dumps larger than `maxUnpaginatedReadCharacters` (~30k chars) — or any call passing `offset`/`limit` — come back as a paginated JSON window (`total_utterances`/`total_entries`, `offset`, `returned`, `truncated`, `next_offset`, `hint`) instead of the full markdown; small unpaginated reads stay byte-identical raw markdown, and `entry_id` reads are unaffected
 - source builds can run the server standalone, but shipped app builds bundle the helper for the one-click Claude Desktop installer

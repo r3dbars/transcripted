@@ -65,6 +65,7 @@ struct TranscriptedSettingsView: View {
     @State private var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State private var confirmQuitDuringMeetingEnabled = QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording()
     @State private var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
+    @State private var missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
     @StateObject private var homeViewModel = HomeViewModel()
@@ -85,6 +86,7 @@ struct TranscriptedSettingsView: View {
     @AppStorage(LocalMeetingSummaryPreferences.enabledKey) private var localMeetingSummariesEnabled = LocalMeetingSummaryPreferences.defaultEnabled
     @AppStorage(LocalMeetingSummaryPreferences.providerKey) private var localMeetingSummaryProviderRawValue = LocalMeetingSummaryProvider.defaultProvider.rawValue
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var betaLiveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
+    @AppStorage(SpeechModelBetaPreferences.nemotronEnabledKey) private var betaNemotronModelEnabled = SpeechModelBetaPreferences.defaultNemotronEnabled
     @State private var betaFeatureStatus: String?
     @State private var localSummarySetupStatus = LocalMeetingSummarySetupStatus.current()
     @State private var appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
@@ -210,7 +212,7 @@ struct TranscriptedSettingsView: View {
                     openOwnFile(
                         candidateURLs: [preview.transcriptURL],
                         failureTitle: "Could not open transcript",
-                        failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                        failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
                     )
                 },
                 onCopyForAgent: {
@@ -587,7 +589,7 @@ struct TranscriptedSettingsView: View {
                             openOwnFile(
                                 candidateURLs: [notice.transcriptURL],
                                 failureTitle: "Could not open transcript",
-                                failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                                failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
                             )
                         }
                     },
@@ -770,7 +772,7 @@ struct TranscriptedSettingsView: View {
                     openOwnFile(
                         candidateURLs: [entry.url],
                         failureTitle: "Could not open dictation",
-                        failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                        failureMessage: SettingsArtifactMessage.dictationFileNotFound
                     )
                 },
                 onCopy: { handleCopyDictation(entry) },
@@ -867,7 +869,7 @@ struct TranscriptedSettingsView: View {
         guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
             presentHomeActionFailure(
                 title: "Could not copy meeting",
-                message: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                message: SettingsArtifactMessage.meetingTranscriptNotFound
             )
             return
         }
@@ -947,7 +949,7 @@ struct TranscriptedSettingsView: View {
         guard let systemURL = OwnFileResolver.resolveExistingFile(candidateURLs: [input.systemURL]) else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
-                message: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+                message: SettingsArtifactMessage.meetingRetainedAudioNotFound
             )
             return
         }
@@ -1245,7 +1247,7 @@ struct TranscriptedSettingsView: View {
                 openOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not open dictation",
-                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
                 )
             },
             HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
@@ -1263,7 +1265,7 @@ struct TranscriptedSettingsView: View {
                 revealOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not show dictation",
-                    failureMessage: "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
                 )
             },
             HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
@@ -1333,7 +1335,7 @@ struct TranscriptedSettingsView: View {
                 revealOwnFile(
                     candidateURLs: HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
                     failureTitle: "Could not show transcript",
-                    failureMessage: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                    failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
                 )
             }
         ])
@@ -1398,7 +1400,7 @@ struct TranscriptedSettingsView: View {
                         revealOwnFile(
                             candidateURLs: audioRevealURLs,
                             failureTitle: "Could not show audio",
-                            failureMessage: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+                            failureMessage: SettingsArtifactMessage.meetingRetainedAudioNotFound
                         )
                     }
                 )
@@ -2219,9 +2221,29 @@ struct TranscriptedSettingsView: View {
                         : "Only detect meetings from your calendar and conferencing apps.",
                     info: GeneralInfo(
                         title: "Auto-detect calls",
-                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone, or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
+                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone, when a conferencing app starts playing call audio (even if you joined muted), or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
+                )
+
+                GeneralToggleRow(
+                    title: "Missed-call reminders",
+                    isOn: Binding(
+                        get: { missedCallNudgeEnabled },
+                        set: { newValue in
+                            missedCallNudgeEnabled = newValue
+                            trackSettingsToggle("missed_call_nudge", enabled: newValue, page: .general)
+                            MissedCallNudgePreferences.setEnabled(newValue)
+                        }
+                    ),
+                    help: missedCallNudgeEnabled
+                        ? "Mention when a long call ends without a recording."
+                        : "Stay quiet when calls end without a recording.",
+                    info: GeneralInfo(
+                        title: "Missed-call reminders",
+                        message: "When a detected call lasts ten minutes or more and ends without a Transcripted recording, a small reminder appears so you know the meeting was not captured. It never shows after you decline a recording prompt, and it appears at most a few times a day."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.missed-call-reminders"
                 )
             }
 
@@ -2367,13 +2389,13 @@ struct TranscriptedSettingsView: View {
                             updatePreferredTranscriptionModel(newValue, page: .general)
                         }
                     )) {
-                        ForEach(TranscriptionModelChoice.allCases) { model in
+                        ForEach(visibleTranscriptionModelChoices) { model in
                             Text(model.title).tag(model)
                         }
                     }
                     .pickerStyle(.menu)
 
-                    ForEach(TranscriptionModelChoice.allCases) { model in
+                    ForEach(visibleTranscriptionModelChoices) { model in
                         ModelChoiceRow(
                             model: model,
                             isPreferred: preferredTranscriptionModel == model,
@@ -2873,13 +2895,13 @@ struct TranscriptedSettingsView: View {
                                 updatePreferredTranscriptionModel(newValue)
                             }
                         )) {
-                            ForEach(TranscriptionModelChoice.allCases) { model in
+                            ForEach(visibleTranscriptionModelChoices) { model in
                                 Text(model.title).tag(model)
                             }
                         }
                         .pickerStyle(.menu)
 
-                        ForEach(TranscriptionModelChoice.allCases) { model in
+                        ForEach(visibleTranscriptionModelChoices) { model in
                             ModelChoiceRow(
                                 model: model,
                                 isPreferred: preferredTranscriptionModel == model,
@@ -3248,6 +3270,34 @@ struct TranscriptedSettingsView: View {
                     )
 
                     betaLiveSidecarSetupStatus
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsToggleRow(
+                        title: "Nemotron streaming model (beta)",
+                        detail: betaNemotronModelEnabled
+                            ? "On. Nemotron appears as a transcription model choice in General settings; its ~600 MB download happens only if you select it."
+                            : "Adds a local streaming transcription model covering 40 languages to the model picker. Parakeet stays the default.",
+                        isOn: Binding(
+                            get: { betaNemotronModelEnabled },
+                            set: { enabled in
+                                betaNemotronModelEnabled = enabled
+                                SpeechModelBetaPreferences.setNemotronBetaEnabled(enabled)
+                                trackSettingsToggle("nemotron_streaming_model", enabled: enabled, page: .beta)
+                            }
+                        ),
+                        help: "Opt in to the Nemotron streaming transcription model.",
+                        automationIdentifier: "transcripted.settings.beta.nemotron-streaming-model"
+                    )
+
+                    if !betaNemotronModelEnabled && preferredTranscriptionModel == .nemotronStreaming {
+                        Text("Nemotron is still your saved preference, but with the beta off Transcripted uses \(TranscriptionModelPreferences.defaultModel.title).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
@@ -4154,6 +4204,16 @@ struct TranscriptedSettingsView: View {
         TranscriptionModelPreferences.effectiveModel()
     }
 
+    // Nemotron is beta-gated: it only shows up in the model picker while the
+    // Beta-page toggle is on (or while it is still the saved preference, so
+    // the picker never points at a hidden selection).
+    private var visibleTranscriptionModelChoices: [TranscriptionModelChoice] {
+        TranscriptionModelChoice.allCases.filter { model in
+            guard model == .nemotronStreaming else { return true }
+            return betaNemotronModelEnabled || preferredTranscriptionModel == .nemotronStreaming
+        }
+    }
+
     private var activeModelDetail: String {
         "\(effectiveTranscriptionModel.summary) Audio and transcripts stay local. Model files are stored outside app updates."
     }
@@ -4291,6 +4351,7 @@ struct TranscriptedSettingsView: View {
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
+        missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
         refreshLocalSummarySetupStatus()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
@@ -4994,4 +5055,16 @@ struct TranscriptedSettingsView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+// User-facing copy for the "we can't find this artifact on disk" failures that
+// several Settings actions surface. Centralized so the identical strings are
+// not re-typed at each call site and can't drift apart.
+private enum SettingsArtifactMessage {
+    static let meetingTranscriptNotFound =
+        "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+    static let dictationFileNotFound =
+        "Transcripted couldn't find this dictation's file on disk. It may have been moved, renamed, or deleted outside the app."
+    static let meetingRetainedAudioNotFound =
+        "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
 }
