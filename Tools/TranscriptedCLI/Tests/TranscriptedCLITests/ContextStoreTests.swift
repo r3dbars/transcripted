@@ -932,9 +932,12 @@ final class ContextStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        let timelineDir = root.appendingPathComponent("timeline", isDirectory: true)
+        try FileManager.default.createDirectory(at: timelineDir, withIntermediateDirectories: true)
         let command = try ContextRecent.parse([
             "--meetings-dir", meetingsDir.path,
             "--dictations-dir", dictationsDir.path,
+            "--timeline-dir", timelineDir.path,
             "--json",
         ])
         let output = try captureStandardOutput {
@@ -943,7 +946,7 @@ final class ContextStoreTests: XCTestCase {
         let document = try JSONDecoder().decode(CLIContextResultsDocument.self, from: XCTUnwrap(output.data(using: .utf8)))
 
         XCTAssertTrue(document.results.isEmpty)
-        XCTAssertEqual(document.searchedDirectories, [meetingsDir.path, dictationsDir.path])
+        XCTAssertEqual(document.searchedDirectories, [meetingsDir.path, dictationsDir.path, timelineDir.path])
         XCTAssertEqual(document.hint?.isEmpty, false)
         XCTAssertNil(document.notes)
     }
