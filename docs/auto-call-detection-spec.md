@@ -1,6 +1,6 @@
 # Spec: ad-hoc call detection via mic activity
 
-- **Status:** Phase 1 complete + live-verified (Phase 2 UDP hardening deferred). Phase 3 (aggressiveness + camera-on detection, 2026-06-20) is the current follow-on design; see "Phase 3" at the end.
+- **Status:** Phase 1 complete + live-verified (Phase 2 UDP hardening deferred). Phase 3 (aggressiveness + camera-on detection, 2026-06-20) shipped. Phase 4 (audio-output signal + unattended-prompt re-offer, 2026-07-02) is the latest layer; see "Phase 4" at the end.
 - **Created:** 2026-06-13
 - **Product decisions (2026-06-14):** auto-detection ships **default ON** behind a Settings
   toggle; trigger scope is **browsers + known conferencing apps only** (unknown mic users map
@@ -422,3 +422,138 @@ new `MeetingPromptHeuristicsTests` / `SyntheticMeetingPromptTests` /
 `MeetingPromptDetectorTests` cases (camera attribution, Photo-Booth quiet,
 mic+camera one-prompt de-dupe, own-capture/disabled gates). Current branch
 verification should follow `.agents/test-matrix.yml`.
+
+## Phase 4 — listen-only calls + unattended-prompt re-offer (2026-07-02)
+
+Two remaining leaks in "the system thinks you're in a meeting → the user taps
+record", found by auditing the prompt pipeline end to end:
+
+### Leak 1 — the listen-only / hard-muted call is invisible
+
+Every ad-hoc sensor so far requires *this Mac* to be sending something: the mic
+signal needs a process holding the input, the camera signal needs a camera on.
+A call you join muted with the camera off — a webinar, a big all-hands, a call
+where you mostly listen — produces neither, and without a calendar invite it
+never prompts.
+
+**The signal:** the same Core Audio process objects also expose
+`kAudioProcessPropertyIsRunningOutput`. A native conferencing app playing
+sustained audio output means remote people are talking — a live call — with real
+per-process attribution and the same metadata-only, TCC-free posture as the mic
+read (no audio is tapped).
+
+**Scope (deliberately narrow):** native conferencing families only
+(`MeetingPromptProvider.audioOutputProvider`): Zoom, Teams, Webex, FaceTime.
+Browsers are excluded — browser output is dominated by YouTube/music — so the
+spontaneous-browser-call gap stays covered by the mic/camera signals only. The
+filter runs inside `MicActivityMonitor.callOutputBundleIDs` *before* the sustain
+confirmer, so media apps never even churn the monitor's state.
+
+**Sustain:** output uses a longer sustain than the mic (`outputSustainInterval`,
+10s vs 3s) because conferencing apps also play short notification sounds
+(message dings, join/leave chimes) that must not prompt.
+
+**Tiering in `callSignals` (both implementations, kept in lockstep):** mic
+providers win outright; else native-output providers (`.audioOutput` reason);
+else the camera. Output outranks the camera because it carries process
+attribution while the camera boolean only has the frontmost-app guess. Same
+`mic:<provider>` candidate id, so all three sensors on one call de-dupe to a
+single prompt and existing snooze/dismiss/backoff applies unchanged.
+
+### Leak 2 — an ignored prompt was treated as an explicit "no"
+
+The detected-meeting prompt shows a 30s countdown
+(`MeetingOverlayTokens.defaultDetectedMeetingPromptTimeoutSeconds`). Before this
+phase, countdown expiry took the *same* path as clicking × —
+`detector.dismiss(candidate:)` — which suppresses the provider for up to 30
+minutes (Teams: 2h). A user heads-down in the call, on another Space, or away
+from the screen for the first minute lost the entire meeting to one missed
+30-second pill.
+
+**The fix:** expiry is now its own path. `MeetingOverlayController.onPromptExpired`
+→ `MeetingPromptDetector.expire(candidate:)` schedules a short *candidate-level*
+re-offer (`promptExpiryReofferInterval`, 3 min) with **no provider-wide
+suppression**, so the same call re-prompts while its evidence persists.
+Consecutive unattended expiries are capped (`maxPromptExpiryReoffers` = 2, streak
+forgotten after `promptExpiryStreakResetInterval`); past the cap the candidate
+falls back to the normal `dismiss` backoff so an ignored call eventually goes
+quiet. Net: up to 3 offers per call (~t+0, ~t+3.5min, ~t+7min), then silence.
+Explicit × dismissals and remind-soon behave exactly as before.
+
+**Analytics:** no new event names. Expiry reuses `meeting_prompt_dismissed` with
+`backoff_kind`/`cooldown_reason` = `expired_reoffer` and `workflow_abandoned`
+`reason_kind` = `expired`, so dashboards can now separate "user said no" from
+"user never saw it" — the number that tells us whether the prompt surface itself
+needs to be louder.
+
+**Coverage:** new `MicActivityMonitorTests` (output attribution + self-exclusion),
+`MeetingPromptHeuristicsTests` (output provider mapping, expiry policy),
+`SyntheticMeetingPromptTests` (output prompts, mic-wins de-dupe, tier order,
+media-app quiet, gates), and `MeetingPromptDetectorTests` (listen-only prompt,
+one-prompt de-dupe, expire re-offer + cap + cooldown shape).
+
+### Phase 4 follow-on — always running, longer live prompts, missed-call awareness
+
+Three more layers on the same funnel, in trust order:
+
+1. **Launch-at-login defaults on (one-time, post-onboarding).** The whole
+   detection stack is dead while the app is closed — the worst-case failure is
+   "the human never launched the app." `LaunchAtLoginController
+   .applyDefaultEnableIfNeeded` registers the login item once per install, only
+   after onboarding completes (so the macOS "added to Login Items" notice has
+   context), never over an explicit Settings choice, and never re-applied after
+   the user removes the item in System Settings (the applied-marker in
+   `LaunchAtLoginPreferences` guarantees at-most-once).
+2. **Live-call prompts last 60s instead of 30s**
+   (`MeetingPromptHeuristics.promptTimeoutSeconds`). An ad-hoc call prompt's
+   moment doesn't age out the way a calendar reminder does — the call is
+   happening *now* — so it waits longer before the expiry/re-offer machinery
+   takes over. Combined with Phase 4's re-offers, an unrecorded 10-minute call
+   now sees up to 3 minutes of cumulative prompt time instead of 30 seconds.
+3. **Missed-call nudge (awareness loop).** When a detected call session ends
+   unrecorded (`MeetingPromptDetector` folds the ad-hoc signals into a session
+   across evaluate() passes), a one-line overlay nudge says what was missed —
+   "That Zoom call wasn't recorded · About 42 minutes" — with Got It / Don't
+   show again. `MissedCallNudgePolicy` keeps it rare: ≥10-minute calls only,
+   never after an explicit prompt dismissal, never when a recording overlapped,
+   4-hour cooldown. Preference-gated (`MissedCallNudgePreferences`, default on,
+   Settings toggle). The nudge cannot recover the meeting; its job is to make
+   the invisible miss visible, which is what converts "the feature doesn't
+   exist" into "I should tap Record next time." Analytics:
+   `meeting_missed_call_nudge` with `action` / `duration_bucket` / `provider`.
+
+### Phase 4 telemetry — measuring the funnel instead of guessing
+
+The product question is "what fraction of real calls get captured, and where do
+the rest leak?" Three additions make that queryable (all coarse, allowlisted):
+
+1. **`meeting_detected_call_ended` — the denominator.** One event per detected
+   call (≥1 min) at its end: `duration_bucket`, `was_recorded`,
+   `prompt_outcome` (`recorded` / `declined` / `ignored` / `no_prompt`),
+   `signal_kinds` (which sensors saw the call: `mic` / `output` / `camera`
+   combos), `provider`. Capture rate = `was_recorded` share of long-bucket
+   calls; the `prompt_outcome` split says whether misses are UX (ignored),
+   intent (declined), or detection (no_prompt).
+2. **Decision-time signal snapshot** on `meeting_prompt_shown` / `_dismissed` /
+   `_record_selected` / `_suppressed`: `mic_signal` / `output_signal` /
+   `camera_signal` booleans, so accepts and "Not now"s can be sliced by the
+   evidence behind them (e.g. do camera-corroborated prompts convert better?).
+3. **`dismiss_streak_bucket`** (`1` / `2` / `3_plus`, reset on accept) on
+   dismissals — the "keeps hitting not now" cohort, which is the population
+   that should *not* get more aggressive prompting.
+
+Accept-quality joins through existing events: a recording started from the
+prompt carries its trigger, and `meeting_recording_stopped` /
+`meeting_capture_health_snapshot` carry `duration_bucket` — so "yes → long
+meeting" is `prompt_outcome=recorded` on long `duration_bucket`s, corroborated
+by recording-side durations.
+
+**Deliberately not built: default auto-record.** A visible countdown that
+auto-starts recording (Notion-style) remains the documented *opt-in* design in
+`docs/MEETING_CAPTURE_PROMPTING.md` — short countdown (~8s, with the prompt
+already visible ~60s), never silent at t=0, default OFF. The gentle default
+keeps the product invariant "no file is ever written without a human signal,"
+which is the line that keeps false positives from ever becoming privacy
+incidents. Revisit once `meeting_prompt_dismissed` telemetry separates
+`expired_reoffer` (never saw it) from explicit dismissals (said no): if misses
+dominate, the aggressive tier earns its switch.

@@ -5,6 +5,7 @@ import AppKit
 
 struct MenuBarContentSmokeSnapshot: Codable, Equatable {
     let header: MenuBarHeaderSmokeSnapshot
+    let updateCallout: MenuBarActionRowSmokeSnapshot
     let primaryActions: [String: MenuBarActionRowSmokeSnapshot]
     let utilityActions: [String: MenuBarActionRowSmokeSnapshot]
 }
@@ -13,7 +14,6 @@ struct MenuBarContentSmokeSnapshot: Codable, Equatable {
 final class MenuBarContentView: NSView {
     private let scrollView = NSScrollView()
     private let documentView = FlippedMenuDocumentView()
-    private let headerDivider = NSView()
     private let sectionDivider = NSView()
     private var documentHeight: CGFloat = MenuTokens.panelHeight
 
@@ -45,14 +45,9 @@ final class MenuBarContentView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func setupViews() {
-        appearance = NSAppearance(named: .darkAqua)
-        wantsLayer = true
-        layer?.cornerRadius = MenuTokens.surfaceCornerRadius
-        layer?.masksToBounds = true
-        layer?.backgroundColor = MenuTokens.surfaceBackgroundNS.cgColor
-        layer?.borderWidth = 1
-        layer?.borderColor = MenuTokens.surfaceStrokeNS.cgColor
-
+        // No painted surface: the content stays transparent so NSPopover's
+        // native material provides the background, corner chrome, and the
+        // Reduce Transparency behavior — the popover blends like system menus.
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.hasHorizontalScroller = false
@@ -61,14 +56,24 @@ final class MenuBarContentView: NSView {
         scrollView.documentView = documentView
         addSubview(scrollView)
 
-        [headerDivider, sectionDivider].forEach {
-            $0.wantsLayer = true
-            $0.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
-            documentView.addSubview($0)
-        }
+        sectionDivider.wantsLayer = true
+        documentView.addSubview(sectionDivider)
 
         updateCalloutRow.isHidden = true
         [headerView, updateCalloutRow, primaryActionsView, utilityActionsView].forEach(documentView.addSubview(_:))
+
+        applyLayerColors()
+    }
+
+    // Layer colors are appearance-resolved snapshots, so they must be
+    // re-applied whenever the popover's effective appearance flips.
+    private func applyLayerColors() {
+        sectionDivider.layer?.backgroundColor = menuResolvedCGColor(MenuTokens.sectionDividerNS)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyLayerColors()
     }
 
     override func layout() {
@@ -82,16 +87,11 @@ final class MenuBarContentView: NSView {
 
         let headerHeight = headerView.intrinsicHeight
         headerView.isHidden = headerHeight <= 0
-        headerDivider.isHidden = headerHeight <= 0
         if headerHeight > 0 {
             headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
-            y += headerHeight + 8
-
-            headerDivider.frame = NSRect(x: pad, y: y, width: width, height: 1)
-            y += 7
+            y += headerHeight + 10
         } else {
             headerView.frame = .zero
-            headerDivider.frame = .zero
         }
 
         if !updateCalloutRow.isHidden {
@@ -175,6 +175,7 @@ final class MenuBarContentView: NSView {
     var smokeSnapshot: MenuBarContentSmokeSnapshot {
         MenuBarContentSmokeSnapshot(
             header: headerView.smokeSnapshot,
+            updateCallout: updateCalloutRow.smokeSnapshot,
             primaryActions: primaryActionsView.smokeSnapshot,
             utilityActions: utilityActionsView.smokeSnapshot
         )

@@ -260,10 +260,22 @@ final class MeetingSessionController: ObservableObject {
         _ = MeetingStoragePaths.recordingsScratch
         _ = MeetingStoragePaths.audioArchiveFolder
 
+        // Speaker embedding model selection. ERes2Net (codec-robust, 192-dim) runs
+        // after diarization to drive same-voice consolidation + cross-call matching;
+        // WeSpeaker (256-dim, diarizer-native) is the default. The two produce
+        // different-dimension vectors, so each gets its own speaker database file —
+        // a SpeakerProfile row must never mix dimensions. The DB path is derived from
+        // the *actually-loaded* embedder (not mere model-file presence): if ERes2Net
+        // is selected but its model can't be loaded, makeEmbedder returns nil and we
+        // transparently fall back to the WeSpeaker path — native embedding AND the
+        // default speakers.sqlite — so 256-d vectors can never land in the 192-d DB.
+        let embedderChoice = SpeakerEmbedderPreferences.effectiveChoice()
+        let segmentEmbedder = SpeakerEmbedderFactory.makeEmbedder(for: embedderChoice)
+
         // Build app-owned CoreStoragePaths so captures and internal state stay split.
         self.storagePaths = CoreStoragePaths(
             transcripts: MeetingStoragePaths.transcriptsFolder,
-            speakerDB: MeetingStoragePaths.speakersDatabase,
+            speakerDB: SpeakerEmbedderFactory.speakerDBURL(for: segmentEmbedder),
             statsDB: MeetingStoragePaths.statsDatabase,
             failedQueue: MeetingStoragePaths.failedTranscriptionsFile,
             speakerClips: MeetingStoragePaths.speakerClipsFolder,
@@ -280,7 +292,9 @@ final class MeetingSessionController: ObservableObject {
 
         // Diarization: Core's concrete DiarizationService already conforms to
         // DiarizationEngine via an empty extension (see DiarizationService.swift).
-        self.diarization = DiarizationService()
+        // When a segment embedder is present, the diarizer re-embeds each segment
+        // with it (e.g. ERes2Net) before the speaker identity stack runs.
+        self.diarization = DiarizationService(segmentEmbedder: segmentEmbedder)
 
         // Speaker store: app-owned SQLite file under state/.
         self.speakerDatabase = SpeakerDatabase(path: storagePaths.speakerDB.path)
@@ -1736,7 +1750,16 @@ final class MeetingSessionController: ObservableObject {
         capture.$recordingDuration
             .sink { [weak self] duration in
                 guard let self else { return }
-                self.recordingDuration = duration
+                // The capture timer ticks every 0.2s, but every @Published
+                // mutation here re-renders any SwiftUI view observing this
+                // controller (Home observes it directly). UI consumers only
+                // display whole seconds, so republish the mirror on second
+                // boundaries plus resets; diagnostics reads tolerate the
+                // sub-second staleness. The inactivity tick below stays on
+                // the raw 0.2s cadence.
+                if Int(duration) != Int(self.recordingDuration) || duration < self.recordingDuration {
+                    self.recordingDuration = duration
+                }
                 guard self.isRecording else { return }
                 self.applyAudioInactivityEvent(
                     self.audioInactivityDetector.tick(at: duration)
@@ -1840,7 +1863,13 @@ final class MeetingSessionController: ObservableObject {
         let previousRestyle = savedTranscriptRestyleTask
         let restyle = Task.detached(priority: .userInitiated) { () -> StyledMeetingTranscript in
             _ = await previousRestyle?.value
-            return MeetingTranscriptStyler.restyleTranscript(at: url)
+            let styled = MeetingTranscriptStyler.restyleTranscript(at: url)
+            // Always-on cheap field extraction so the search index covers every
+            // meeting, not just the heavy local-summary beta opt-in. Runs after
+            // restyle (the body is now in canonical styled form) on this chained
+            // background task, and is idempotent + frontmatter-only.
+            MeetingQuickSummaryWriter.ensureQuickSummary(at: styled.url)
+            return styled
         }
         savedTranscriptRestyleTask = restyle
 
@@ -3022,6 +3051,7 @@ final class MeetingSessionController: ObservableObject {
     private func trackSavedTranscriptAnalyticsInBackground(baseProperties: [String: String]) {
         let restyle = savedTranscriptRestyleTask
         let fallbackTranscriptURL = taskManager.lastSavedTranscriptURL ?? lastSavedTranscriptURL
+        let speakerDatabase = self.speakerDatabase
         Task.detached(priority: .utility) {
             let transcriptURL: URL?
             if let restyle {
@@ -3029,7 +3059,14 @@ final class MeetingSessionController: ObservableObject {
             } else {
                 transcriptURL = fallbackTranscriptURL
             }
-            let transcriptProperties = Self.savedTranscriptAnalyticsProperties(transcriptURL: transcriptURL)
+            let frontmatterValues = transcriptURL.flatMap {
+                (try? TranscriptFrontmatter.readValues(from: $0)) ?? nil
+            }
+            let transcriptProperties = Self.savedTranscriptAnalyticsProperties(values: frontmatterValues)
+            let autoRecognitionEvents = Self.autoRecognitionAnalyticsProperties(
+                frontmatterValues: frontmatterValues,
+                speakerDatabase: speakerDatabase
+            )
             await MainActor.run {
                 let properties = transcriptProperties.merging(
                     baseProperties,
@@ -3046,13 +3083,69 @@ final class MeetingSessionController: ObservableObject {
                     "meeting_transcript_saved",
                     properties: properties
                 )
+                for eventProperties in autoRecognitionEvents {
+                    AnalyticsReporter.track(
+                        "meeting_speaker_auto_recognized",
+                        properties: eventProperties
+                    )
+                }
             }
         }
     }
 
-    nonisolated private static func savedTranscriptAnalyticsProperties(transcriptURL: URL?) -> [String: String] {
-        guard let transcriptURL,
-              let values = try? TranscriptFrontmatter.readValues(from: transcriptURL) else {
+    /// One bucketed event per auto-recognized *person* in the saved meeting,
+    /// read back from the local lifeline store keyed by the transcript id in
+    /// frontmatter. Outcomes are deduplicated by profile (the pipeline can
+    /// record one row per channel, and a retranscription of the same meeting
+    /// appends rows for its transcript id again), so one save emits at most
+    /// one event per speaker. `graduated` marks a profile whose only
+    /// auto-recognitions belong to this meeting — the "how many meetings
+    /// until the app just knows them" milestone. Only enum buckets leave the
+    /// device; no names, ids, or raw scores.
+    nonisolated private static func autoRecognitionAnalyticsProperties(
+        frontmatterValues: [String: String]?,
+        speakerDatabase: SpeakerDatabase
+    ) -> [[String: String]] {
+        guard let frontmatterValues,
+              let transcriptId = TranscriptFrontmatter.captureID(in: frontmatterValues) else {
+            return []
+        }
+
+        let autoOutcomes = speakerDatabase.matchOutcomes(transcriptId: transcriptId)
+            .filter { $0.kind == .autoAccepted }
+        // Rows arrive most-recent-first; keep the newest row per profile so a
+        // retranscription reports the latest run, not every historical run.
+        var newestByProfile: [UUID: SpeakerMatchOutcome] = [:]
+        var rowsPerProfile: [UUID: Int] = [:]
+        for outcome in autoOutcomes {
+            rowsPerProfile[outcome.profileId, default: 0] += 1
+            if newestByProfile[outcome.profileId] == nil {
+                newestByProfile[outcome.profileId] = outcome
+            }
+        }
+
+        return newestByProfile.values.map { outcome in
+            // Graduated when every auto-recognition this profile has ever had
+            // belongs to this meeting — robust to multi-channel rows within
+            // one save, unlike a bare count == 1 check.
+            let totalCount = speakerDatabase.autoAcceptedOutcomeCount(profileId: outcome.profileId)
+            let graduated = totalCount <= (rowsPerProfile[outcome.profileId] ?? 0)
+            return [
+                "similarity_bucket": SpeakerRecognitionTelemetry.similarityBucket(outcome.similarity),
+                "margin_bucket": SpeakerRecognitionTelemetry.marginBucket(
+                    similarity: outcome.similarity,
+                    secondSimilarity: outcome.secondSimilarity
+                ),
+                "call_count_bucket": AnalyticsReporter.countBucket(outcome.callCountAtMatch ?? 0),
+                "channel": outcome.channel ?? "unknown",
+                "graduated": graduated ? "true" : "false",
+                "surface": "meeting_save",
+            ]
+        }
+    }
+
+    nonisolated private static func savedTranscriptAnalyticsProperties(values: [String: String]?) -> [String: String] {
+        guard let values else {
             return [:]
         }
 

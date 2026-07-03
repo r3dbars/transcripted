@@ -47,8 +47,8 @@ Current inventory summary:
 Current proof summary:
 
 - Stories tracked: 80
-- Status counts after the 2026-06-21 unknown burn-down: `PASS` 29,
-  `RETEST PASS` 3, `BLOCKED` 48, `UNKNOWN` 0, `FAIL` 0
+- Status counts after the 2026-06-24 imported-audio native proof: `PASS` 31,
+  `RETEST PASS` 3, `BLOCKED` 46, `UNKNOWN` 0, `FAIL` 0
 - Full automated QA: `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-152351/qa-report.md`
 - UI automation: initial `INCOMPLETE` at `/tmp/transcripted-qa-bench/qa-20260621-152717/qa-report.md`,
   then `PASS` at `/tmp/transcripted-qa-bench/qa-20260621-153239/qa-report.md`
@@ -94,8 +94,8 @@ Current proof summary:
 - Imported-audio bad-input handling: `PASS`; focused
   `MeetingImportedAudioPreparerTests` passed 58/58 and proves unsupported
   file/folder/date-policy handling without needing private audio content.
-- Import-audio entry/transcription proof was refreshed while staying
-  `BLOCKED` only for native picker / real-media UX:
+- Import-audio entry/transcription proof is now `PASS` for the native picker
+  selected-audio path:
   `UIAutomationSurfaceContractTests` passed 233/233,
   `HomeImportAudioActionTests` passed 6/6,
   `MeetingImportedAudioPreparerTests` passed 58/58, and
@@ -103,7 +103,15 @@ Current proof summary:
   smoke proves deterministic imported meeting artifact shape, system-audio-only
   metadata, retained single-file audio, parser discovery, and TranscriptedQA
   validation. It does not click `NSOpenPanel` or prove real ML transcription
-  quality for user media.
+  quality for user media. On 2026-06-24,
+  `transcripted-qa imported-audio-native-smoke` passed 16/16, opening the real
+  Settings General import action, driving `NSOpenPanel`, selecting a generated
+  spoken AIFF, saving `2026-06-24 Native Imported Audio Proof.md`, retaining
+  `recording.aiff`, recording `sources: [system_audio]`, and validating the
+  saved imported transcript. Raw report:
+  `/tmp/transcripted-imported-audio-native-smoke.json`. The orchestrated bench
+  mode also passed 3/3 at
+  `/tmp/transcripted-qa-bench/qa-20260624-055644/qa-report.md`.
 - Secure input fallback proof was strengthened while staying `UNKNOWN`:
   `AccessibilityBridgeTests` passed 12/12, `ClipboardRestoringTextPasterTests`
   passed 58/58, `bash build.sh --no-open` passed, the full fast suite passed

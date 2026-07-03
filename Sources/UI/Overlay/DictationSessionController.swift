@@ -64,8 +64,12 @@ class DictationSessionController: ObservableObject {
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
     /// Prevents stuck sessions when the user walks away from the computer.
-    private static let sessionTimeoutNanos: UInt64 = 5 * 60 * 1_000_000_000
-    private static let sessionTimeoutInterval: TimeInterval = 5 * 60
+    /// Derived from the shared constant so the speech engine's audio buffer
+    /// sizing stays in lockstep with the cap.
+    private static let sessionTimeoutNanos: UInt64 =
+        UInt64(TranscriptedConstants.dictationSessionMaxDuration * 1_000_000_000)
+    private static let sessionTimeoutInterval: TimeInterval =
+        TranscriptedConstants.dictationSessionMaxDuration
     /// Cap on each polling sleep so a wake from system sleep gets a chance to
     /// re-evaluate the uptime-based deadline before firing the cancel branch.
     private static let sessionTimeoutPollIntervalNanos: UInt64 = 30 * 1_000_000_000
@@ -231,6 +235,24 @@ class DictationSessionController: ObservableObject {
     ) {
         guard isDictating else { return }
         if appState.sttRouter.isModelLoaded {
+            beginDictationRecording(sourceApp: sourceApp)
+            return
+        }
+
+        if appState.sttRouter.selectedModelFilesAvailableLocally {
+            // The model files are already on disk — open the microphone now
+            // and load the model concurrently so the first dictation after
+            // launch doesn't stare at "Loading voice model" before it can
+            // listen. The stop path already waits for the model before
+            // transcribing (and surfaces a load failure gracefully), so a
+            // stop that beats the load is covered.
+            //
+            // Deliberately untracked: cancelling this dictation must not
+            // abandon a model load the next session will need, and the
+            // engine dedupes concurrent initialization internally.
+            Task { @MainActor in
+                await appState.sttRouter.initializeSelectedModel()
+            }
             beginDictationRecording(sourceApp: sourceApp)
             return
         }
@@ -854,14 +876,34 @@ class DictationSessionController: ObservableObject {
             if !appState.sttRouter.isModelLoaded {
                 stopTiming.modelWaitStartedAt = CFAbsoluteTimeGetCurrent()
                 appState.logger.log("DICTATION | waiting for voice model before transcribe…")
-                self.updateLoadingOverlay(sourceApp: self.sessionSourceApp)
-                for _ in 0..<TranscriptedConstants.modelLoadMaxIterations {
+                self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
+                let modelWaitDeadline = ProcessInfo.processInfo.systemUptime
+                    + TranscriptedConstants.modelLoadWaitBudget
+                modelWait: while !appState.sttRouter.isModelLoaded,
+                    ProcessInfo.processInfo.systemUptime < modelWaitDeadline {
                     guard !Task.isCancelled,
                           self.isDictating,
                           self.currentDictationSessionID == taskSessionID else { return }
-                    if appState.sttRouter.isModelLoaded { break }
-                    self.updateLoadingOverlay(sourceApp: self.sessionSourceApp)
-                    try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
+                    self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
+                    switch appState.sttRouter.modelDownloadState {
+                    case .failed:
+                        // The concurrent load already failed — surface the
+                        // error now instead of waiting out the full budget.
+                        break modelWait
+                    case .notLoaded, .cached:
+                        // Nothing is loading the model; kick (or join) the
+                        // deduped initialization instead of waiting for
+                        // another caller to do it.
+                        let stateBefore = appState.sttRouter.modelDownloadState.diagnosticName
+                        await appState.sttRouter.initializeSelectedModel()
+                        // If initialization bailed without progressing (e.g.
+                        // mid-shutdown), sleep so this loop can't spin hot.
+                        if appState.sttRouter.modelDownloadState.diagnosticName == stateBefore {
+                            try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
+                        }
+                    case .downloading, .loading, .ready:
+                        await appState.sttRouter.waitForModelLoadProgress()
+                    }
                 }
                 guard self.isDictating,
                       self.currentDictationSessionID == taskSessionID else { return }
@@ -1250,14 +1292,15 @@ class DictationSessionController: ObservableObject {
         startupTask = Task { @MainActor [weak self] in
             guard let self else { return }
 
-            switch appState.sttRouter.modelDownloadState {
-            case .notLoaded, .downloading, .cached, .failed:
+            if case .failed = appState.sttRouter.modelDownloadState {
+                // A previous attempt failed; retry once before the wait loop
+                // treats .failed as terminal.
                 await appState.sttRouter.initializeSelectedModel()
-            case .loading, .ready:
-                break
             }
 
-            for _ in 0..<TranscriptedConstants.modelLoadMaxIterations {
+            let deadline = ProcessInfo.processInfo.systemUptime
+                + TranscriptedConstants.modelLoadWaitBudget
+            while ProcessInfo.processInfo.systemUptime < deadline {
                 guard !Task.isCancelled, self.isDictating else { return }
 
                 let modelState = appState.sttRouter.modelDownloadState
@@ -1285,11 +1328,20 @@ class DictationSessionController: ObservableObject {
                         }
                     )
                     return
-                default:
-                    break
+                case .notLoaded, .cached:
+                    let stateBefore = appState.sttRouter.modelDownloadState.diagnosticName
+                    await appState.sttRouter.initializeSelectedModel()
+                    // If initialization bailed without progressing (e.g.
+                    // mid-shutdown), sleep so this loop can't spin hot.
+                    if appState.sttRouter.modelDownloadState.diagnosticName == stateBefore {
+                        try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
+                    }
+                case .downloading, .loading:
+                    // Downloads publish progress the overlay refreshes on a
+                    // short poll; an in-flight load is joined directly so
+                    // recording starts the moment it settles.
+                    await appState.sttRouter.waitForModelLoadProgress()
                 }
-
-                try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
             }
 
             guard !Task.isCancelled else { return }
@@ -1298,8 +1350,7 @@ class DictationSessionController: ObservableObject {
             appState.runtimeDiagnostics.recordStall(
                 kind: "dictation",
                 stage: "model_load_timeout",
-                durationSeconds: Double(TranscriptedConstants.modelLoadMaxIterations)
-                    * Double(TranscriptedConstants.modelLoadPollInterval) / 1_000_000_000
+                durationSeconds: TranscriptedConstants.modelLoadWaitBudget
             )
             appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_load_timeout")
             overlayController.showError(
@@ -1316,12 +1367,23 @@ class DictationSessionController: ObservableObject {
         }
     }
 
+    /// Distinguishes the pre-recording model warmup overlay from the post-stop
+    /// wait, where audio is already captured and only transcription is pending.
+    private enum ModelLoadingPhase {
+        case beforeRecording
+        case afterRecording
+    }
+
     private func updateLoadingOverlay(
         sourceApp: NSRunningApplication?,
-        modelState: ParakeetModelState? = nil
+        modelState: ParakeetModelState? = nil,
+        phase: ModelLoadingPhase = .beforeRecording
     ) {
         guard let appState = appState else { return }
-        let presentation = loadingPresentation(for: modelState ?? appState.sttRouter.modelDownloadState)
+        let presentation = loadingPresentation(
+            for: modelState ?? appState.sttRouter.modelDownloadState,
+            phase: phase
+        )
         overlayController?.showLoadingState(
             near: sourceApp,
             presentation: presentation,
@@ -1329,33 +1391,41 @@ class DictationSessionController: ObservableObject {
         )
     }
 
-    private func loadingPresentation(for modelState: ParakeetModelState) -> FloatingOverlayController.LoadingPresentation {
+    private func loadingPresentation(
+        for modelState: ParakeetModelState,
+        phase: ModelLoadingPhase = .beforeRecording
+    ) -> FloatingOverlayController.LoadingPresentation {
+        let pendingDetail = phase == .afterRecording
+            ? "Your recording is captured and will be transcribed when it's ready."
+            : "Recording starts automatically when it's ready."
         switch modelState {
         case .notLoaded:
             return .init(
                 title: "Starting voice model",
-                detail: "Recording starts automatically when it's ready.",
+                detail: pendingDetail,
                 progress: 0.08,
                 status: "Preparing local model"
             )
         case .downloading(let progress):
             return .init(
                 title: "Downloading voice model",
-                detail: "Keep Transcripted open. Dictation will start when it's ready.",
+                detail: phase == .afterRecording
+                    ? "Keep Transcripted open. Your recording will be transcribed when it's ready."
+                    : "Keep Transcripted open. Dictation will start when it's ready.",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 status: "\(Int(progress * 100))% complete"
             )
         case .cached:
             return .init(
                 title: "Loading voice model",
-                detail: "Recording starts automatically when it's ready.",
+                detail: pendingDetail,
                 progress: 0.88,
                 status: "Loading cached model"
             )
         case .loading:
             return .init(
                 title: "Loading voice model",
-                detail: "Recording starts automatically when it's ready.",
+                detail: pendingDetail,
                 progress: 0.92,
                 status: "Almost ready"
             )
@@ -1998,19 +2068,5 @@ private extension TextPasteCopyReason {
     }
 }
 
-private extension AVAuthorizationStatus {
-    var diagnosticName: String {
-        switch self {
-        case .notDetermined:
-            return "not_determined"
-        case .restricted:
-            return "restricted"
-        case .denied:
-            return "denied"
-        case .authorized:
-            return "authorized"
-        @unknown default:
-            return "unknown"
-        }
-    }
-}
+// AVAuthorizationStatus.diagnosticName is defined once in
+// Sources/Support/TranscriptedPermissionAccess.swift and reused here.

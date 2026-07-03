@@ -22,6 +22,7 @@ final class MenuBarHeaderView: NSView {
 
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentHotkeyError: String?
+    private var currentStatusTone: MenuBarHeaderStatusPresentation.Tone = .ready
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -112,13 +113,23 @@ final class MenuBarHeaderView: NSView {
         }
     }
 
-    func update(warmupStatus: MeetingSessionController.ModelWarmupStatus, hotkeyError: String?) {
+    func update(
+        warmupStatus: MeetingSessionController.ModelWarmupStatus,
+        hotkeyError: String?,
+        isMeetingRecording: Bool = false
+    ) {
         currentWarmupStatus = warmupStatus
         currentHotkeyError = hotkeyError
 
         let isReady = warmupStatus.isReadyForMenuHeader
-        statusDot.layer?.backgroundColor = (isReady ? MenuTokens.statusGreenNS : MenuTokens.statusOrangeNS).cgColor
-        statusLabel.stringValue = isReady ? "Ready" : warmupStatus.subtitle
+        let status = MenuBarHeaderStatusPresentation.resolve(
+            isReady: isReady,
+            isMeetingRecording: isMeetingRecording,
+            warmupSubtitle: warmupStatus.subtitle
+        )
+        currentStatusTone = status.tone
+        statusLabel.stringValue = status.text
+        applyStatusDotColor()
         progressBar.doubleValue = warmupStatus.progress
         detailLabel.stringValue = isReady ? "" : warmupStatus.detail
         warningLabel.stringValue = hotkeyError ?? ""
@@ -127,10 +138,32 @@ final class MenuBarHeaderView: NSView {
         invalidateIntrinsicContentSize()
     }
 
+    private func applyStatusDotColor() {
+        let color: NSColor
+        switch currentStatusTone {
+        case .recording:
+            color = MenuTokens.statusRedNS
+        case .ready:
+            color = MenuTokens.statusGreenNS
+        case .working:
+            color = MenuTokens.statusOrangeNS
+        }
+        statusDot.layer?.backgroundColor = menuResolvedCGColor(color)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyStatusDotColor()
+    }
+
     var intrinsicHeight: CGFloat {
         let isReady = currentWarmupStatus.isReadyForMenuHeader
         let hasWarning = currentHotkeyError?.isEmpty == false
-        return MenuBarHeaderLayoutPolicy.intrinsicHeight(isReady: isReady, hasWarning: hasWarning)
+        return MenuBarHeaderLayoutPolicy.intrinsicHeight(
+            isReady: isReady,
+            hasWarning: hasWarning,
+            isRecording: currentStatusTone == .recording
+        )
     }
 
     var smokeSnapshot: MenuBarHeaderSmokeSnapshot {

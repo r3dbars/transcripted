@@ -11,6 +11,7 @@ private func syntheticRuntimeSnapshot(
     runtimeSuppressedUntil: [MeetingPromptProvider: Date] = [:],
     micActiveBundleIDs: Set<String> = [],
     cameraInUse: Bool = false,
+    audioOutputActiveBundleIDs: Set<String> = [],
     isOwnCaptureActive: Bool = false,
     isMicInputPromptEnabled: Bool = true
 ) -> MeetingPromptRuntimeSnapshot {
@@ -21,6 +22,7 @@ private func syntheticRuntimeSnapshot(
         runtimeSuppressedUntil: runtimeSuppressedUntil,
         micActiveBundleIDs: micActiveBundleIDs,
         cameraInUse: cameraInUse,
+        audioOutputActiveBundleIDs: audioOutputActiveBundleIDs,
         isOwnCaptureActive: isOwnCaptureActive,
         isMicInputPromptEnabled: isMicInputPromptEnabled
     )
@@ -674,5 +676,93 @@ func testSyntheticMeetingPrompts() {
         )
         assertFalse(disabled.shouldPrompt, "a disabled auto-detect toggle should suppress the camera path")
         assertEqual(disabled.suppressionReason, .micInputDisabled, "the disabled gate covers mic and camera signals")
+    }
+
+    runSuite("SyntheticMeetingPrompts — native-app audio output prompts the listen-only call the mic misses") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                audioOutputActiveBundleIDs: ["us.zoom.xos"]
+            )
+        )
+        assertTrue(result.shouldPrompt, "Zoom playing call audio with nothing holding the mic is a live listen-only call")
+        assertEqual(result.candidate?.id, "mic:zoom", "output attribution reuses the stable ad-hoc candidate id for de-dupe")
+        assertEqual(result.candidate?.reason, .audioOutput, "an output-led signal should record the distinct audio-output reason")
+        assertEqual(result.candidate?.title, "Zoom call detected", "native output attribution keeps provider-specific copy")
+    }
+
+    runSuite("SyntheticMeetingPrompts — mic and output on the same call raise exactly one prompt, mic wins") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                micActiveBundleIDs: ["us.zoom.xos"],
+                audioOutputActiveBundleIDs: ["us.zoom.xos"]
+            )
+        )
+        assertTrue(result.shouldPrompt, "a normal two-way call should still prompt")
+        assertEqual(result.candidate?.id, "mic:zoom", "mic and output on one call collapse to a single candidate id")
+        assertEqual(result.candidate?.reason, .micInput, "when the mic is also active, the mic signal wins")
+    }
+
+    runSuite("SyntheticMeetingPrompts — output attribution outranks the camera's frontmost inference") {
+        // Zoom is playing call audio while a browser happens to be frontmost with
+        // the camera on. Output carries real process attribution, so it must win
+        // over the camera's frontmost-based guess.
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                frontmostBundleID: "com.google.Chrome",
+                cameraInUse: true,
+                audioOutputActiveBundleIDs: ["us.zoom.xos"]
+            )
+        )
+        assertTrue(result.shouldPrompt, "the attributed output call should prompt")
+        assertEqual(result.candidate?.id, "mic:zoom", "process-attributed output wins over frontmost-inferred camera")
+        assertEqual(result.candidate?.reason, .audioOutput, "the output reason survives when the camera is also on")
+    }
+
+    runSuite("SyntheticMeetingPrompts — non-conferencing output never prompts") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                audioOutputActiveBundleIDs: ["com.spotify.client", "com.google.Chrome.helper"]
+            )
+        )
+        assertFalse(result.shouldPrompt, "music and browser playback are not call signals")
+        assertEqual(result.suppressionReason, .noCandidate, "unrecognized output bundles must map to no provider at all")
+    }
+
+    runSuite("SyntheticMeetingPrompts — output signal respects own-capture and the auto-detect toggle") {
+        let recording = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                audioOutputActiveBundleIDs: ["us.zoom.xos"],
+                isOwnCaptureActive: true
+            )
+        )
+        assertFalse(recording.shouldPrompt, "never prompt for an output call while Transcripted itself records")
+        assertEqual(recording.suppressionReason, .ownCaptureActive, "own-capture should gate the output path too")
+
+        let disabled = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                audioOutputActiveBundleIDs: ["us.zoom.xos"],
+                isMicInputPromptEnabled: false
+            )
+        )
+        assertFalse(disabled.shouldPrompt, "a disabled auto-detect toggle should suppress the output path")
+        assertEqual(disabled.suppressionReason, .micInputDisabled, "the disabled gate covers all three ad-hoc signals")
+    }
+
+    runSuite("SyntheticMeetingPrompts — a runtime-suppressed provider silences its output signal") {
+        let result = evaluateSyntheticPrompt(
+            calendarEvents: [],
+            runtimeSnapshot: syntheticRuntimeSnapshot(
+                runtimeSuppressedUntil: [.zoom: syntheticPromptNow.addingTimeInterval(10 * 60)],
+                audioOutputActiveBundleIDs: ["us.zoom.xos"]
+            )
+        )
+        assertFalse(result.shouldPrompt, "an explicit dismissal must keep suppressing the same provider's output signal")
+        assertEqual(result.suppressionReason, .runtimeSuppressed, "provider-level suppression covers the output path")
     }
 }

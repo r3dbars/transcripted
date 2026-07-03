@@ -77,6 +77,12 @@ jobs:
         # here instead of skipping it.
         run: bash build.sh --no-open
 
+      - name: Premium performance budget
+        shell: bash
+        env:
+          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+        run: scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80
+
       - name: Fast tests
         shell: bash
         env:

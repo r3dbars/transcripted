@@ -125,7 +125,7 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "bash -n scripts/dev/benchmark-home-recent-captures.sh"
-      - "scripts/dev/benchmark-home-recent-captures.sh"
+      - "scripts/dev/benchmark-home-recent-captures.sh --max-average-load-ms 750 --max-cancellation-ms 100"
 
   - paths:
       - "scripts/ops/generate-nightly-digest.py"

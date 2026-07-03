@@ -573,6 +573,8 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertTrue(json?.contains("\"kind\" : \"dictation\"") == true)
         XCTAssertTrue(json?.contains("\"entry_id\" : \"dictation-20260407-091500-000\"") == true)
         XCTAssertTrue(json?.contains("\"markdown\" :") == true)
+        XCTAssertTrue(json?.contains("\"utterances\"") == false)
+        XCTAssertTrue(json?.contains("\"entries\"") == false)
     }
 
     func testReadMeetingCommandJSONOutputsReadableDocument() throws {
@@ -902,6 +904,309 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertTrue(json?.contains("\"kind\" : \"dictation\"") == true)
     }
 
+    func testContextRecentCommandEmptyTextModePrintsSearchedDirectoriesToStandardError() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        let command = try ContextRecent.parse([
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+        ])
+
+        var stderr = ""
+        let stdout = try captureStandardOutput {
+            stderr = try captureStandardError {
+                try command.run()
+            }
+        }
+
+        XCTAssertEqual(stdout, "")
+        XCTAssertTrue(stderr.hasPrefix("No results. Searched: "))
+        XCTAssertTrue(stderr.contains(meetingsDir.path))
+        XCTAssertTrue(stderr.contains(dictationsDir.path))
+    }
+
+    func testContextRecentCommandEmptyJSONOutputsSearchedDirectoriesAndHint() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        let command = try ContextRecent.parse([
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+            "--json",
+        ])
+        let output = try captureStandardOutput {
+            try command.run()
+        }
+        let document = try JSONDecoder().decode(CLIContextResultsDocument.self, from: XCTUnwrap(output.data(using: .utf8)))
+
+        XCTAssertTrue(document.results.isEmpty)
+        XCTAssertEqual(document.searchedDirectories, [meetingsDir.path, dictationsDir.path])
+        XCTAssertEqual(document.hint?.isEmpty, false)
+        XCTAssertNil(document.notes)
+    }
+
+    func testContextRecentCommandEmptyJSONLimitsSearchedDirectoriesToRequestedKind() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        let command = try ContextRecent.parse([
+            "--kind", "meeting",
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+            "--json",
+        ])
+        let output = try captureStandardOutput {
+            try command.run()
+        }
+        let document = try JSONDecoder().decode(CLIContextResultsDocument.self, from: XCTUnwrap(output.data(using: .utf8)))
+
+        XCTAssertEqual(document.searchedDirectories, [meetingsDir.path])
+    }
+
+    func testListDictationsCommandEmptyJSONOutputsSearchedDirectoriesAndHint() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        let command = try ListDictations.parse([
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+            "--json",
+        ])
+        let output = try captureStandardOutput {
+            try command.run()
+        }
+        let document = try JSONDecoder().decode(CLIContextResultsDocument.self, from: XCTUnwrap(output.data(using: .utf8)))
+
+        XCTAssertTrue(document.results.isEmpty)
+        XCTAssertEqual(document.searchedDirectories, [dictationsDir.path])
+        XCTAssertEqual(document.hint?.isEmpty, false)
+    }
+
+    func testListDictationsCommandEmptyTextModePrintsSearchedDirectoriesToStandardError() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        let command = try ListDictations.parse([
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+        ])
+
+        var stderr = ""
+        let stdout = try captureStandardOutput {
+            stderr = try captureStandardError {
+                try command.run()
+            }
+        }
+
+        XCTAssertEqual(stdout, "")
+        XCTAssertTrue(stderr.hasPrefix("No results. Searched: "))
+        XCTAssertTrue(stderr.contains(dictationsDir.path))
+        XCTAssertFalse(stderr.contains(meetingsDir.path))
+    }
+
+    func testContextSearchCommandSpeakerWithKindAllEmitsNoteInJSON() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeMeetingMarkdown(title: "Planning", date: "2026-04-06", body: "[00:03] [Mic/You] Roadmap meeting note.")
+            .write(to: meetingsDir.appendingPathComponent("Planning.md"), atomically: true, encoding: .utf8)
+
+        let command = try ContextSearch.parse([
+            "roadmap",
+            "--speaker", "You",
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+            "--json",
+        ])
+        let output = try captureStandardOutput {
+            try command.run()
+        }
+        let document = try JSONDecoder().decode(CLIContextResultsDocument.self, from: XCTUnwrap(output.data(using: .utf8)))
+
+        XCTAssertEqual(document.results.count, 1)
+        XCTAssertEqual(document.results.first?.kind, .meeting)
+        XCTAssertEqual(document.notes, ["Note: --speaker only matches meetings; dictations skipped."])
+        XCTAssertNil(document.searchedDirectories)
+        XCTAssertNil(document.hint)
+    }
+
+    func testContextSearchCommandSpeakerWithKindAllPrintsNoteToStandardError() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeMeetingMarkdown(title: "Planning", date: "2026-04-06", body: "[00:03] [Mic/You] Roadmap meeting note.")
+            .write(to: meetingsDir.appendingPathComponent("Planning.md"), atomically: true, encoding: .utf8)
+
+        let command = try ContextSearch.parse([
+            "roadmap",
+            "--speaker", "You",
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+        ])
+
+        var stderr = ""
+        let stdout = try captureStandardOutput {
+            stderr = try captureStandardError {
+                try command.run()
+            }
+        }
+
+        XCTAssertTrue(stdout.contains("Planning"))
+        XCTAssertTrue(stderr.contains("Note: --speaker only matches meetings; dictations skipped."))
+    }
+
+    func testContextSearchCommandSpeakerWithMeetingKindKeepsBareArrayJSON() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeMeetingMarkdown(title: "Planning", date: "2026-04-06", body: "[00:03] [Mic/You] Roadmap meeting note.")
+            .write(to: meetingsDir.appendingPathComponent("Planning.md"), atomically: true, encoding: .utf8)
+
+        let command = try ContextSearch.parse([
+            "roadmap",
+            "--kind", "meeting",
+            "--speaker", "You",
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+            "--json",
+        ])
+        let output = try captureStandardOutput {
+            try command.run()
+        }
+        let items = try JSONDecoder().decode([CLIContextItem].self, from: XCTUnwrap(output.data(using: .utf8)))
+
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items.first?.title, "Planning")
+    }
+
+    func testContextRecentCommandNonEmptyJSONKeepsBareArrayShape() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeMeetingMarkdown(title: "Planning", date: "2026-04-06", body: "[00:03] [Mic/You] Roadmap meeting note.")
+            .write(to: meetingsDir.appendingPathComponent("Planning.md"), atomically: true, encoding: .utf8)
+
+        let command = try ContextRecent.parse([
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+            "--json",
+        ])
+        let output = try captureStandardOutput {
+            try command.run()
+        }
+        let items = try JSONDecoder().decode([CLIContextItem].self, from: XCTUnwrap(output.data(using: .utf8)))
+
+        XCTAssertEqual(items.map(\.title), ["Planning"])
+    }
+
+    func testReadMeetingCommandJSONIncludesStructuredTranscript() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        let markdown = makeMeetingMarkdown(
+            title: "Product review",
+            date: "2026-04-18",
+            body: "[00:03] [Mic/You] Ship the agent path.\n\n[00:08] [System/Speaker 2] Agreed."
+        )
+        try markdown.write(
+            to: meetingsDir.appendingPathComponent("Product review.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let command = try ReadMeeting.parse([
+            "Product review",
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+            "--json",
+        ])
+        let output = try captureStandardOutput {
+            try command.run()
+        }
+        let document = try JSONDecoder().decode(CLIReadMarkdownDocument.self, from: XCTUnwrap(output.data(using: .utf8)))
+
+        XCTAssertEqual(document.kind, .meeting)
+        XCTAssertEqual(document.markdown, markdown)
+        XCTAssertEqual(document.recording?.date.prefix(10), "2026-04-18")
+        XCTAssertEqual(document.utterances?.count, 2)
+        XCTAssertEqual(document.utterances?.first?.text, "Ship the agent path.")
+        let speakerIds = Set((document.speakers ?? []).map(\.id))
+        XCTAssertTrue(Set((document.utterances ?? []).map(\.speakerId)).isSubset(of: speakerIds))
+    }
+
+    func testReadDictationCommandJSONIncludesDayEntries() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeDictationMarkdown(text: "Fixture dictation.")
+            .write(
+                to: dictationsDir.appendingPathComponent("Dictations_2026-04-07.md"),
+                atomically: true,
+                encoding: .utf8
+            )
+
+        let command = try ReadDictation.parse([
+            "Dictations_2026-04-07",
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+            "--json",
+        ])
+        let output = try captureStandardOutput {
+            try command.run()
+        }
+        let document = try JSONDecoder().decode(CLIReadMarkdownDocument.self, from: XCTUnwrap(output.data(using: .utf8)))
+
+        XCTAssertEqual(document.kind, .dictation)
+        XCTAssertEqual(document.date, "2026-04-07")
+        XCTAssertEqual(document.entries?.count, 1)
+        XCTAssertEqual(document.entries?.first?.id, "dictation-20260407-091500-000")
+        XCTAssertEqual(document.entries?.first?.createdAt, "2026-04-07T09:15:00-0500")
+        XCTAssertEqual(document.entries?.first?.title, "Morning note")
+        XCTAssertEqual(document.entries?.first?.sourceAppName, "Slack")
+        XCTAssertEqual(document.entries?.first?.text, "Fixture dictation.")
+        XCTAssertNil(document.utterances)
+    }
+
+    func testReadDictationCommandJSONWithEntryIdLimitsEntries() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeDictationMarkdown(text: "Fixture dictation.")
+            .write(
+                to: dictationsDir.appendingPathComponent("Dictations_2026-04-07.md"),
+                atomically: true,
+                encoding: .utf8
+            )
+
+        let command = try ReadDictation.parse([
+            "Dictations_2026-04-07",
+            "--meetings-dir", meetingsDir.path,
+            "--dictations-dir", dictationsDir.path,
+            "--entry-id", "dictation-20260407-091500-000",
+            "--json",
+        ])
+        let output = try captureStandardOutput {
+            try command.run()
+        }
+        let document = try JSONDecoder().decode(CLIReadMarkdownDocument.self, from: XCTUnwrap(output.data(using: .utf8)))
+
+        XCTAssertEqual(document.entryId, "dictation-20260407-091500-000")
+        XCTAssertEqual(document.entries?.map(\.id), ["dictation-20260407-091500-000"])
+    }
+
     private func makeTempDir() -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -936,6 +1241,32 @@ final class ContextStoreTests: XCTestCase {
             fflush(stdout)
             dup2(originalStdout, STDOUT_FILENO)
             close(originalStdout)
+            pipe.fileHandleForWriting.closeFile()
+            _ = pipe.fileHandleForReading.readDataToEndOfFile()
+            throw error
+        }
+    }
+
+    private func captureStandardError(_ body: () throws -> Void) throws -> String {
+        let pipe = Pipe()
+        let originalStderr = dup(STDERR_FILENO)
+        XCTAssertGreaterThanOrEqual(originalStderr, 0)
+
+        fflush(stderr)
+        dup2(pipe.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
+
+        do {
+            try body()
+            fflush(stderr)
+            dup2(originalStderr, STDERR_FILENO)
+            close(originalStderr)
+            pipe.fileHandleForWriting.closeFile()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            fflush(stderr)
+            dup2(originalStderr, STDERR_FILENO)
+            close(originalStderr)
             pipe.fileHandleForWriting.closeFile()
             _ = pipe.fileHandleForReading.readDataToEndOfFile()
             throw error

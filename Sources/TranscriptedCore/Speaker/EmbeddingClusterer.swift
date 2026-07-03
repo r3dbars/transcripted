@@ -63,7 +63,8 @@ public enum EmbeddingClusterer {
         segments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile],
         pairwiseMergeThreshold: Float? = 0.85,
-        consolidationThreshold: Float? = sameVoiceConsolidationThreshold
+        consolidationThreshold: Float? = sameVoiceConsolidationThreshold,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
     ) -> [SpeakerSegment] {
         guard segments.count >= 2 else { return segments }
         var result: [SpeakerSegment]
@@ -72,15 +73,24 @@ public enum EmbeddingClusterer {
         } else {
             result = segments
         }
-        result = absorbSmallClusters(segments: result)
+        result = absorbSmallClusters(
+            segments: result,
+            absorptionThreshold: thresholds.absorb,
+            microAbsorptionThreshold: thresholds.microAbsorb
+        )
         if let consolidationThreshold {
             result = consolidateSameVoiceClusters(
                 segments: result,
                 threshold: consolidationThreshold,
-                existingProfiles: existingProfiles
+                existingProfiles: existingProfiles,
+                knownProfileConflictThreshold: thresholds.knownProfileConflict
             )
         }
-        result = dbInformedSplit(segments: result, profiles: existingProfiles)
+        result = dbInformedSplit(
+            segments: result,
+            profiles: existingProfiles,
+            perSegmentThreshold: thresholds.perSegmentSplit
+        )
         return result
     }
 
@@ -327,7 +337,8 @@ public enum EmbeddingClusterer {
     static func consolidateSameVoiceClusters(
         segments: [SpeakerSegment],
         threshold: Float = sameVoiceConsolidationThreshold,
-        existingProfiles: [SpeakerProfile] = []
+        existingProfiles: [SpeakerProfile] = [],
+        knownProfileConflictThreshold conflictThreshold: Float = knownProfileConflictThreshold
     ) -> [SpeakerSegment] {
         let distinctIds = Set(segments.map { $0.speakerId })
         guard distinctIds.count >= 2 else { return segments }
@@ -379,7 +390,8 @@ public enum EmbeddingClusterer {
                     if hasKnownProfileConflict(
                         ea,
                         eb,
-                        profiles: existingProfiles
+                        profiles: existingProfiles,
+                        conflictThreshold: conflictThreshold
                     ) {
                         continue
                     }
@@ -423,11 +435,12 @@ public enum EmbeddingClusterer {
     private static func hasKnownProfileConflict(
         _ lhs: [Float],
         _ rhs: [Float],
-        profiles: [SpeakerProfile]
+        profiles: [SpeakerProfile],
+        conflictThreshold: Float
     ) -> Bool {
         guard !profiles.isEmpty else { return false }
-        let lhsMatches = knownProfileMatches(for: lhs, profiles: profiles)
-        let rhsMatches = knownProfileMatches(for: rhs, profiles: profiles)
+        let lhsMatches = knownProfileMatches(for: lhs, profiles: profiles, conflictThreshold: conflictThreshold)
+        let rhsMatches = knownProfileMatches(for: rhs, profiles: profiles, conflictThreshold: conflictThreshold)
         guard !lhsMatches.isEmpty, !rhsMatches.isEmpty else { return false }
 
         return lhsMatches.union(rhsMatches).count > 1
@@ -435,7 +448,8 @@ public enum EmbeddingClusterer {
 
     private static func knownProfileMatches(
         for embedding: [Float],
-        profiles: [SpeakerProfile]
+        profiles: [SpeakerProfile],
+        conflictThreshold: Float
     ) -> Set<UUID> {
         Set(profiles.compactMap { profile in
             guard profile.disputeCount == 0,
@@ -443,7 +457,7 @@ public enum EmbeddingClusterer {
                 return nil
             }
             let similarity = Float(Transcription.cosineSimilarityStatic(embedding, profile.embedding))
-            return similarity >= knownProfileConflictThreshold ? profile.id : nil
+            return similarity >= conflictThreshold ? profile.id : nil
         })
     }
 

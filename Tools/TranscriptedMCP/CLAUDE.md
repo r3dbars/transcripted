@@ -35,25 +35,29 @@ When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
-## Package Layout (16 Swift files)
+## Package Layout (24 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
-- `Sources/TranscriptedMCP/` — 9 source files for server startup, directory resolution, path validation, indexing, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 6 test files for directory resolution, index lifecycle, markdown loading, logging, name variants, and shared fixtures
+- `Sources/TranscriptedMCP/` — 13 source files for server startup, directory resolution, path validation, indexing, telemetry, semantic search, and tool handlers
+- `Tests/TranscriptedMCPTests/` — 11 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, tool handlers, markdown loading, logging, telemetry, name variants, semantic search, and shared fixtures
 
 ## File Index
 
 | File | Purpose |
 |------|---------|
-| `Main.swift` | `@main` entry point; resolves directories, builds the index, starts file watchers, then starts the MCP stdio server |
+| `Main.swift` | `@main` entry point; resolves directories, builds the index (with an `NLEmbeddingProvider` for semantic search), starts file watchers, then starts the MCP stdio server |
 | `DataDirectories.swift` | Index-dir resolution plus a thin wrapper over `TranscriptedCaptureKit`'s shared capture-library resolver |
 | `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct loader or index method |
-| `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations |
+| `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations; routes `lexical`/`semantic`/`hybrid` search modes |
+| `EmbeddingProvider.swift` | `EmbeddingProvider` protocol, the default `NLEmbeddingProvider` (Apple NaturalLanguage, zero-bundle on-device), `SearchMode`, and `VectorMath` helpers |
+| `EmbeddingStore.swift` | Vector store on its own SQLite connection; embeds rows, stores Float32 vectors, and runs cosine semantic search over utterances and dictation entries |
+| `SemanticSearchFusion.swift` | Reciprocal-rank fusion that merges lexical (FTS) and semantic result lists for hybrid search |
 | `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files from disk; parsing delegates to `TranscriptedCaptureKit` |
 | `Models.swift` | Codable input/output models and `MCPIndexError` |
 | `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
 | `PathSecurity.swift` | Guards direct file reads against traversal, symlinks, and out-of-root paths |
 | `FileWatcher.swift` | Watches the local transcript directories and incrementally reindexes changed files |
+| `AgentCaptureQueryTelemetry.swift` | Anonymous bucketed telemetry for agent capture queries |
 
 ## Test Files
 
@@ -61,9 +65,14 @@ that mode the SQLite index also defaults to the shared root unless
 |------|---------|
 | `DataDirectoriesTests.swift` | Directory-resolution coverage for current Transcripted captures vs legacy Draft fallback |
 | `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search, and mixed-context indexing |
+| `SummaryItemIndexTests.swift` | Structured summary parse→index→query: decisions/action-items/open-questions, owner + unassigned rollup, reindex/delete, sidecar-not-a-meeting |
 | `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases, including path-safety checks |
 | `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
+| `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
+| `ToolHandlersTests.swift` | Handler-level coverage: title hydration, telemetry, status tool payload, self-describing empty results, done-filter error, read pagination windows and size guard |
+| `AgentCaptureQueryTelemetryTests.swift` | Bucketing and payload coverage for agent capture-query telemetry |
+| `SemanticSearchTests.swift` | Semantic + hybrid search via a deterministic stub provider, graceful fallback, model-change re-embed, vector-math, and RRF fusion |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
 ## MCP Tools
@@ -73,14 +82,27 @@ All tools are read-only.
 | Tool | Description |
 |------|-------------|
 | `list_meetings` | List saved meetings with metadata and optional date filters |
-| `read_meeting` | Read one meeting transcript by filename |
+| `read_meeting` | Read one meeting transcript by filename; `section` (`full`/`transcript`/`speakers`) plus optional `offset`/`limit` utterance paging |
 | `list_dictations` | List saved dictation day files with counts, source apps, and titles |
-| `read_dictation` | Read one dictation day or one specific dictation entry |
-| `search` | Search meeting transcript content |
-| `search_context` | Search across meetings, dictations, or both |
+| `read_dictation` | Read one dictation day, one specific entry by `entry_id`, or a paged window of entries via `offset`/`limit` |
+| `search` | Search meeting transcript content (lexical / semantic / hybrid via `mode`, default hybrid) |
+| `search_context` | Search across meetings, dictations, or both (same `mode` options) |
 | `recent_context` | Get a mixed recent feed of meetings and dictations |
 | `who_is` | Look up a speaker profile across saved meetings |
 | `recap` | Build a structured digest for a date range |
+| `list_action_items` | Roll up action items across meetings; filter by owner / status (`open`/`all`; `done` is rejected with an explicit error) / query / date |
+| `list_decisions` | Roll up decisions across meetings; filter by query / date |
+| `digest` | Cross-meeting summary (decisions + action items + open questions) for a window |
+| `decisions` | WS2.3 receipt API for local decision lookup by topic/range |
+| `commitments` | WS2.3 receipt API for local action-item lookup by person/range |
+| `open_questions` | WS2.3 receipt API for local open-question lookup by project/range |
+| `search_meetings` | WS2.3 receipt API for local keyword search over meeting utterances |
+| `status` | Server version, resolved capture directories and which resolution rule selected them, index location, and indexed counts |
+
+The rollup and WS2.3 tools are cross-meeting reads over local structured summary
+fields and raw utterance FTS. They query the same `meeting_summary_items` index
+populated from saved meeting Markdown during reconcile. They do not use
+embeddings, cloud calls, or LLM synthesis.
 
 ## Common Agent Retrieval Shapes
 
@@ -107,10 +129,25 @@ The SQLite index keeps separate records for:
 
 - meetings
 - meeting speakers / utterance search rows
+- structured meeting-summary items (Decisions / Action Items with owner / Open Questions), one row per bullet in `meeting_summary_items` with a `kind` discriminator + FTS5, so cross-meeting tools can roll up across all meetings
 - dictation day files
 - dictation entry search rows
 
+Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from each meeting's inline local summary (or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
+
 This lets the server answer both meeting-specific queries (`who_is`, `read_meeting`) and mixed-context queries (`search_context`, `recent_context`) without touching app-owned runtime state.
+
+The semantic layer adds three additive tables on a separate connection: `embedding_meta` (model id + dimension), `utterance_vectors`, and `dictation_entry_vectors` (Float32 BLOBs keyed by the lexical rows' `rowid`). They never alter the lexical write path.
+
+## Semantic Search
+
+Local, on-device semantic search complements FTS so paraphrase queries hit (e.g. "pricing pushback" finds "they balked at the cost").
+
+- Embeddings come from Apple's `NaturalLanguage` `NLEmbedding.sentenceEmbedding` — **no bundled model, no download, negligible app-size impact**. Backend is pluggable via `EmbeddingProvider`, so a bundled CoreML model can replace it later without touching the store or search path.
+- `EmbeddingStore` embeds new/changed rows after each reconcile (lazily, keyed by `rowid`), re-embeds everything on a model-id/dimension change, and runs a streaming cosine scan with the same speaker/date filters as FTS.
+- `search` / `search_context` accept `mode`: `hybrid` (default — FTS + semantic fused with reciprocal-rank fusion, a strict superset of FTS recall), `lexical`, or `semantic`.
+- All modes degrade gracefully: if the embedding backend is unavailable (e.g. missing OS language assets), the store is never created and every mode runs lexical-only.
+- NLEmbedding's similarity floor is high, so `semantic` alone is best-effort; `hybrid` is rank-based and stays robust because exact FTS hits anchor precision.
 
 ## Build And Test
 
@@ -170,5 +207,7 @@ The in-app Claude Desktop installer copies that helper into:
 - the server auto-creates missing data and index directories
 - the index rebuilds from disk on startup
 - `recent_context` is intentionally mixed; for the latest meeting specifically, prefer `list_meetings` or `recent_context` with `kind: "meeting"`
+- zero-result queries return a self-describing JSON payload (`searched_directories`, indexed counts, `hint`) instead of a bare "not found" string; call `status` to see the full resolution + index picture
 - `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
+- both read tools carry a size guard: raw dumps larger than `maxUnpaginatedReadCharacters` (~30k chars) — or any call passing `offset`/`limit` — come back as a paginated JSON window (`total_utterances`/`total_entries`, `offset`, `returned`, `truncated`, `next_offset`, `hint`) instead of the full markdown; small unpaginated reads stay byte-identical raw markdown, and `entry_id` reads are unaffected
 - source builds can run the server standalone, but shipped app builds bundle the helper for the one-click Claude Desktop installer

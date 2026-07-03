@@ -66,6 +66,17 @@ class TranscriptedAppState: ObservableObject {
                 message: error.localizedDescription)
         }
 
+        // Covers existing installs that finished onboarding before the default
+        // existed; fresh installs get it from the onboarding-completion hook.
+        do {
+            try LaunchAtLoginController.applyDefaultEnableIfNeeded(
+                onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
+            )
+        } catch {
+            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
+                message: error.localizedDescription)
+        }
+
         if ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] == nil {
             sparkleUpdater.performStartupUpdateCheckIfNeeded()
         }
@@ -119,6 +130,21 @@ class TranscriptedAppState: ObservableObject {
                 "stt_recording": "\(sttRouter.isRecording)",
                 "meeting_state": meetingStateSummary,
             ]
+        }
+        MeetingAudioStorageManager.setMaintenanceFailureHandler { failure in
+            Task { @MainActor in
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "meeting",
+                    event: "audio_maintenance_failure",
+                    message: "Retained-audio maintenance skipped a file",
+                    context: [
+                        "operation": failure.operation,
+                        "error_domain": failure.errorDomain,
+                        "error_code": "\(failure.errorCode)",
+                    ]
+                )
+            }
         }
         EventReporter.shared.capture(level: .info, engine: "app", event: "app_launched",
             message: "Transcripted initialized for dictation and meetings")
@@ -335,6 +361,23 @@ class TranscriptedAppState: ObservableObject {
             if result.changedArtifacts {
                 await MainActor.run {
                     CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
+                }
+            }
+
+            if let libraryBytes = CaptureLibrarySize.measureBytes(at: MeetingStoragePaths.transcriptsFolder) {
+                let bucket = CaptureLibrarySize.bucketLabel(forBytes: libraryBytes)
+                let retention = AudioStoragePreferences.deleteAudioAfter().rawValue
+                await MainActor.run {
+                    EventReporter.shared.capture(
+                        level: .info,
+                        engine: "meeting",
+                        event: "capture_library_size",
+                        message: "Capture library size measured after audio maintenance",
+                        context: [
+                            "size_bucket": bucket,
+                            "audio_retention": retention,
+                        ]
+                    )
                 }
             }
         }

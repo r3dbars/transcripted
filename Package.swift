@@ -9,14 +9,12 @@ import Foundation
 //   2. `swift test` for the TranscriptedCore smoke tests in this repo
 //
 // Binary dependency layout:
-//   deps-libs/libDraftDeps.a          — legacy-named prebuilt library (FluidAudio 0.7.9 + MLX + deps + TranscriptedCore)
+//   deps-libs/libDraftDeps.a          — legacy-named prebuilt library (FluidAudio + MLX + deps + TranscriptedCore)
 //   deps-libs/libExternalDeps.a       — external-only archive for SPM tests (no TranscriptedCore objects)
-//   deps-frameworks/ESpeakNG.framework — FluidAudio binary dependency for package recompiles
 //   deps-modules/*.swiftmodule        — Swift interface files for FluidAudio et al.
 //   deps-modules/FastClusterWrapper   — C header for fast-cluster C++ wrapper
 //   deps-modules/MachTaskSelfWrapper  — C header for mach_task_self helper
 //   deps-modules/yyjson               — C header for yyjson JSON parser
-//   deps-frameworks/ESpeakNG.framework — binary framework re-exported by FluidAudio
 //
 // `#filePath` resolves to Package.swift's absolute location on disk, so the -I/-L
 // flags work whether swiftc is invoked from the package root (`swift test`) or from
@@ -59,7 +57,6 @@ let package = Package(
                     "-Xlinker", "-rpath",
                     "-Xlinker", "\(repoRoot)/deps-frameworks",
                 ]),
-                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),
@@ -97,7 +94,6 @@ let package = Package(
                     "-Xlinker", "-rpath",
                     "-Xlinker", "\(repoRoot)/deps-frameworks",
                 ]),
-                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),

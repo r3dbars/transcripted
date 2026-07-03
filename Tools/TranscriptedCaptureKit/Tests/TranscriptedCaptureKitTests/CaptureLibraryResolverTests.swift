@@ -29,6 +29,8 @@ final class CaptureLibraryResolverTests: XCTestCase {
             legacyDraftMeetings.standardizedFileURL.path,
         ])
         XCTAssertNil(resolved.sharedDataRoot)
+        XCTAssertEqual(resolved.resolutionSource, .defaultCaptures)
+        XCTAssertTrue(resolved.legacyFallbackAppended)
     }
 
     func testResolveSkipsLegacyCandidatesWithoutCaptureMarkdown() throws {
@@ -49,6 +51,8 @@ final class CaptureLibraryResolverTests: XCTestCase {
             .contains(legacyShared.standardizedFileURL.path))
         XCTAssertFalse(resolved.dictationDirs.map(\.standardizedFileURL.path)
             .contains(legacyShared.standardizedFileURL.path))
+        XCTAssertEqual(resolved.resolutionSource, .defaultCaptures)
+        XCTAssertFalse(resolved.legacyFallbackAppended)
     }
 
     func testResolveIncludesSymlinkedLegacyDirectoryWithCaptureMarkdown() throws {
@@ -103,6 +107,8 @@ final class CaptureLibraryResolverTests: XCTestCase {
             sharedRoot.appendingPathComponent("dictations", isDirectory: true).standardizedFileURL.path,
         ])
         XCTAssertEqual(resolved.sharedDataRoot?.standardizedFileURL.path, sharedRoot.standardizedFileURL.path)
+        XCTAssertEqual(resolved.resolutionSource, .envDataDir)
+        XCTAssertFalse(resolved.legacyFallbackAppended)
     }
 
     func testResolveExplicitDataDirWinsOverEnvironment() throws {
@@ -151,6 +157,8 @@ final class CaptureLibraryResolverTests: XCTestCase {
         XCTAssertEqual(resolved.meetingDirs.map(\.standardizedFileURL.path), [
             overrideMeetings.standardizedFileURL.path,
         ])
+        XCTAssertEqual(resolved.resolutionSource, .envKindDirs)
+        XCTAssertFalse(resolved.legacyFallbackAppended)
     }
 
     func testResolveUsesAppDirectoryManifestBeforeDefaultCaptures() throws {
@@ -190,6 +198,7 @@ final class CaptureLibraryResolverTests: XCTestCase {
         XCTAssertEqual(resolved.dictationDirs.map(\.standardizedFileURL.path), [
             manifestDictations.standardizedFileURL.path,
         ])
+        XCTAssertEqual(resolved.resolutionSource, .appManifest)
     }
 
     func testResolveUsesAppCaptureLibraryPreferenceWhenManifestIsMissing() throws {
@@ -223,6 +232,7 @@ final class CaptureLibraryResolverTests: XCTestCase {
         XCTAssertEqual(resolved.dictationDirs.map(\.standardizedFileURL.path), [
             customCaptureLibrary.appendingPathComponent("dictations", isDirectory: true).standardizedFileURL.path,
         ])
+        XCTAssertEqual(resolved.resolutionSource, .appPreference)
     }
 
     private let sampleMeetingMarkdown = """

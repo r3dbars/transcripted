@@ -356,13 +356,12 @@ if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     exit 1
 fi
 
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$ESPEAK_FRAMEWORK" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
     echo "❌ Dependencies missing or stale — required for beta builds"
     echo "   Missing stamp: $DEPS_BUILD_STAMP"
     echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
     echo "   Missing module: $ARGMAX_CORE_MODULE"
     echo "   Missing module: $WHISPERKIT_MODULE"
-    echo "   Missing framework: $ESPEAK_FRAMEWORK"
     echo "   Missing framework: $SENTRY_FRAMEWORK"
     echo "   Missing framework: $SPARKLE_FRAMEWORK"
     echo "   Run build-deps.sh --force first to rebuild dependencies."
@@ -439,6 +438,22 @@ else
     fi
 fi
 
+# Bundle the ERes2Net speaker-embedding CoreML model — OFF by default for
+# DISTRIBUTION builds. The weights derive from VoxCeleb2 (research-only license),
+# so a shipped/notarized build must NOT redistribute them. The app resolves the
+# model from the FluidAudio Models cache at runtime for local testing. Only set
+# TRANSCRIPTED_BUNDLE_ERES2NET=1 for a private local build you do not distribute.
+ERES2NET_SRC="$HOME/Library/Application Support/FluidAudio/Models/eres2net-embedding"
+ERES2NET_DEST="$APP_BUNDLE/Contents/Resources/eres2net-embedding"
+if [ "${TRANSCRIPTED_BUNDLE_ERES2NET:-0}" = "1" ] && [ -d "$ERES2NET_SRC/Model.mlmodelc" ]; then
+    echo "⚠️  Bundling ERes2Net model into a distribution build (TRANSCRIPTED_BUNDLE_ERES2NET=1) — do not redistribute VoxCeleb2-derived weights."
+    mkdir -p "$ERES2NET_DEST"
+    rm -rf "$ERES2NET_DEST/Model.mlmodelc"
+    ditto "$ERES2NET_SRC/Model.mlmodelc" "$ERES2NET_DEST/Model.mlmodelc"
+else
+    echo "ℹ️  ERes2Net model not bundled (default; VoxCeleb2 research-only license)."
+fi
+
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
 /usr/libexec/PlistBuddy -c "Set :TranscriptedBuildChannel release" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
@@ -467,7 +482,7 @@ for metallib in deps-libs/*.metallib; do
     [ -f "$metallib" ] && cp "$metallib" "$APP_BUNDLE/Contents/MacOS/"
 done
 
-cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
+[ -d "$ESPEAK_FRAMEWORK" ] && cp -R "$ESPEAK_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SENTRY_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 cp -R "$SPARKLE_FRAMEWORK" "$APP_BUNDLE/Contents/Frameworks/"
 

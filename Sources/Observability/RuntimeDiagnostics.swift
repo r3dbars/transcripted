@@ -148,11 +148,17 @@ final class RuntimeDiagnostics {
 
     private func startHeartbeatTimer() {
         heartbeatTimer?.invalidate()
-        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.persist(event: "heartbeat")
             }
         }
+        // The heartbeat only needs coarse "app is alive" granularity; a generous
+        // tolerance lets the system coalesce the wakeup instead of firing exactly
+        // on the minute. Dirty-shutdown detection buckets heartbeat age far more
+        // coarsely than 10s, so this costs nothing.
+        timer.tolerance = 10
+        heartbeatTimer = timer
     }
 
     private func persist(event: String) {

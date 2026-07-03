@@ -38,3 +38,26 @@ enum HomeRootAlertPolicy {
         return nil
     }
 }
+
+enum HomeActionFailureCopy {
+    static let retryTitle = "Try again"
+    static let detailsTitle = "Copy Details"
+
+    static func message(forFailureTitle title: String) -> String {
+        let normalized = title.lowercased()
+
+        if normalized.contains("rename") {
+            return "Transcripted couldn't rename this meeting. Check that the file is still in your capture folder, then try again."
+        }
+
+        if normalized.contains("delete dictation") {
+            return "Transcripted couldn't remove this dictation. Check that your dictation file is available, then try again."
+        }
+
+        if normalized.contains("delete") || normalized.contains("dismiss") || normalized.contains("remove") {
+            return "Transcripted couldn't remove this item. Check that your capture folder is available, then try again."
+        }
+
+        return "Transcripted couldn't finish that action. Check that your capture folder is available, then try again."
+    }
+}

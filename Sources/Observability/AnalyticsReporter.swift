@@ -110,8 +110,16 @@ struct AnalyticsDeliveryBufferStore {
             capped = Array(capped.suffix(maxRecordCount))
         }
 
-        while !capped.isEmpty && encodedByteCount(capped) > maxFileBytes {
-            capped.removeFirst()
+        // Encode once up front, then trim by subtracting each removed record's own
+        // encoded size instead of re-encoding the entire buffer per removal.
+        // JSONEncoder output is compact, so a removed record shrinks the file by its
+        // encoded bytes plus one array separator.
+        var totalBytes = encodedByteCount(capped)
+        while !capped.isEmpty && totalBytes > maxFileBytes {
+            let removed = capped.removeFirst()
+            let removedBytes = (try? JSONEncoder().encode(removed).count) ?? 0
+            let separatorBytes = capped.isEmpty ? 0 : 1
+            totalBytes = max(0, totalBytes - removedBytes - separatorBytes)
         }
 
         return capped
@@ -416,6 +424,7 @@ final class AnalyticsReporter {
         userDefaults: UserDefaults = .standard,
         currentDate: @escaping () -> Date = Date.init,
         retryDelay: @escaping (Int) -> TimeInterval = AnalyticsDeliveryPolicy.retryDelay(afterAttempt:),
+        persistDebounceInterval: TimeInterval = AnalyticsReporter.defaultPersistDebounceInterval,
         analyticsEnabled: (() -> Bool)? = nil,
         observePreferenceChanges: Bool = false
     ) {
@@ -426,6 +435,7 @@ final class AnalyticsReporter {
         self.userDefaults = userDefaults
         self.currentDate = currentDate
         self.retryDelay = retryDelay
+        self.persistDebounceInterval = persistDebounceInterval
         self.analyticsEnabled = analyticsEnabled ?? { AnalyticsPreferences.isEnabled(userDefaults: userDefaults) }
         deliveryQueue.setSpecific(key: Self.deliveryQueueSpecificKey, value: true)
 
@@ -442,6 +452,15 @@ final class AnalyticsReporter {
             }
         }
 
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: Self.appWillTerminateNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            // Final synchronous persist so debounced buffer writes are not lost on quit.
+            self?.persistPendingCapturesNow()
+        }
+
         if self.analyticsEnabled() {
             flushPendingCaptures()
         } else {
@@ -452,6 +471,9 @@ final class AnalyticsReporter {
     deinit {
         if let preferenceObserver {
             NotificationCenter.default.removeObserver(preferenceObserver)
+        }
+        if let terminationObserver {
+            NotificationCenter.default.removeObserver(terminationObserver)
         }
     }
 
@@ -466,11 +488,25 @@ final class AnalyticsReporter {
     private let userDefaults: UserDefaults
     private let currentDate: () -> Date
     private let retryDelay: (Int) -> TimeInterval
+    private let persistDebounceInterval: TimeInterval
     private let analyticsEnabled: () -> Bool
     private static let deliveryQueueSpecificKey = DispatchSpecificKey<Bool>()
     private let deliveryQueue = DispatchQueue(label: "com.transcripted.analytics.delivery-buffer")
     private var inFlightCaptureIDs: Set<String> = []
     private var preferenceObserver: NSObjectProtocol?
+    private var terminationObserver: NSObjectProtocol?
+
+    // The in-memory buffer is the source of truth after the first load; disk writes
+    // are debounced so a burst of tracked events costs one file write, not one per
+    // event. All of this state must only be touched on `deliveryQueue`.
+    static let defaultPersistDebounceInterval: TimeInterval = 1.0
+    // NSApplication.willTerminateNotification's raw name, so this file stays
+    // Foundation-only while still catching normal app quits.
+    private static let appWillTerminateNotification = Notification.Name("NSApplicationWillTerminateNotification")
+    private var pendingCaptures: [PendingAnalyticsCapture] = []
+    private var hasLoadedPendingCaptures = false
+    private var needsPersist = false
+    private var pendingPersistWorkItem: DispatchWorkItem?
 
     private lazy var distinctID: String = {
         if let existing = userDefaults.string(forKey: storageKey) {
@@ -525,17 +561,27 @@ final class AnalyticsReporter {
         flushPendingCaptures()
     }
 
-    private func enqueue(_ capture: PendingAnalyticsCapture) {
+    /// Synchronously persists the in-memory buffer to disk. Called on app
+    /// termination so debounced writes are not lost; also usable as a test drain hook.
+    func persistPendingCapturesNow() {
         syncOnDeliveryQueue {
+            self.persistPendingCapturesLocked()
+        }
+    }
+
+    private func enqueue(_ capture: PendingAnalyticsCapture) {
+        // Async so `track` callers (usually the main thread) never block on buffer file I/O.
+        deliveryQueue.async {
             guard self.analyticsEnabled() else {
-                self.bufferStore.remove()
+                self.clearBufferedCapturesLocked()
                 return
             }
 
             let now = self.currentDate()
-            var records = self.bufferStore.load(now: now)
-            records.append(capture)
-            self.bufferStore.save(records, now: now)
+            self.loadPendingCapturesIfNeededLocked(now: now)
+            self.pendingCaptures.append(capture)
+            self.pendingCaptures = self.bufferStore.cappedRecords(self.pendingCaptures, now: now)
+            self.schedulePersistLocked()
             self.flushPendingCapturesLocked()
         }
     }
@@ -549,8 +595,44 @@ final class AnalyticsReporter {
     private func clearPendingCaptures() {
         syncOnDeliveryQueue {
             self.inFlightCaptureIDs.removeAll()
-            self.bufferStore.remove()
+            self.clearBufferedCapturesLocked()
         }
+    }
+
+    private func loadPendingCapturesIfNeededLocked(now: Date) {
+        guard !hasLoadedPendingCaptures else { return }
+        pendingCaptures = bufferStore.load(now: now)
+        hasLoadedPendingCaptures = true
+    }
+
+    private func clearBufferedCapturesLocked() {
+        pendingPersistWorkItem?.cancel()
+        pendingPersistWorkItem = nil
+        needsPersist = false
+        pendingCaptures = []
+        hasLoadedPendingCaptures = true
+        bufferStore.remove()
+    }
+
+    private func schedulePersistLocked() {
+        needsPersist = true
+        guard pendingPersistWorkItem == nil else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.persistPendingCapturesLocked()
+        }
+        pendingPersistWorkItem = workItem
+        deliveryQueue.asyncAfter(deadline: .now() + persistDebounceInterval, execute: workItem)
+    }
+
+    private func persistPendingCapturesLocked() {
+        pendingPersistWorkItem?.cancel()
+        pendingPersistWorkItem = nil
+        guard needsPersist else { return }
+        needsPersist = false
+        // `save` re-applies TTL/count/byte caps and removes the file when empty, so
+        // the on-disk format, owner-only permissions, and cap semantics are unchanged.
+        bufferStore.save(pendingCaptures, now: currentDate())
     }
 
     private func syncOnDeliveryQueue(_ work: () -> Void) {
@@ -564,7 +646,7 @@ final class AnalyticsReporter {
     private func flushPendingCapturesLocked() {
         guard analyticsEnabled() else {
             inFlightCaptureIDs.removeAll()
-            bufferStore.remove()
+            clearBufferedCapturesLocked()
             return
         }
 
@@ -576,10 +658,10 @@ final class AnalyticsReporter {
         }
 
         let now = currentDate()
-        let records = bufferStore.load(now: now)
-        bufferStore.save(records, now: now)
+        loadPendingCapturesIfNeededLocked(now: now)
+        pendingCaptures = bufferStore.cappedRecords(pendingCaptures, now: now)
 
-        for capture in records {
+        for capture in pendingCaptures {
             guard capture.nextRetryAt.map({ $0 <= now.timeIntervalSince1970 }) ?? true else { continue }
             guard !inFlightCaptureIDs.contains(capture.id) else { continue }
 
@@ -626,25 +708,25 @@ final class AnalyticsReporter {
 
         guard analyticsEnabled() else {
             inFlightCaptureIDs.removeAll()
-            bufferStore.remove()
+            clearBufferedCapturesLocked()
             return
         }
 
         let now = currentDate()
-        var records = bufferStore.load(now: now)
-        guard let index = records.firstIndex(where: { $0.id == capture.id }) else { return }
+        loadPendingCapturesIfNeededLocked(now: now)
+        guard let index = pendingCaptures.firstIndex(where: { $0.id == capture.id }) else { return }
 
         switch result {
         case .delivered, .drop:
-            records.remove(at: index)
+            pendingCaptures.remove(at: index)
         case .retry:
-            var retryCapture = records[index]
+            var retryCapture = pendingCaptures[index]
             retryCapture.attemptCount += 1
             retryCapture.nextRetryAt = now.addingTimeInterval(retryDelay(retryCapture.attemptCount)).timeIntervalSince1970
-            records[index] = retryCapture
+            pendingCaptures[index] = retryCapture
         }
 
-        bufferStore.save(records, now: now)
+        schedulePersistLocked()
     }
 
     private func normalizedCaptureURL(from host: String) -> String? {

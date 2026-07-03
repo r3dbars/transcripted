@@ -134,10 +134,49 @@ struct CLIReadMarkdownDocument: Codable {
     let filename: String
     let entryId: String?
     let markdown: String
+    let recording: CLIAgentRecording?
+    let speakers: [CLIActorSpeaker]?
+    let utterances: [CLIUtterance]?
+    let date: String?
+    let entries: [CLIClientDictationEntry]?
+
+    init(
+        kind: CLIContextKind,
+        filename: String,
+        entryId: String?,
+        markdown: String,
+        recording: CLIAgentRecording? = nil,
+        speakers: [CLIActorSpeaker]? = nil,
+        utterances: [CLIUtterance]? = nil,
+        date: String? = nil,
+        entries: [CLIClientDictationEntry]? = nil
+    ) {
+        self.kind = kind
+        self.filename = filename
+        self.entryId = entryId
+        self.markdown = markdown
+        self.recording = recording
+        self.speakers = speakers
+        self.utterances = utterances
+        self.date = date
+        self.entries = entries
+    }
 
     enum CodingKeys: String, CodingKey {
-        case kind, filename, markdown
+        case kind, filename, markdown, recording, speakers, utterances, date, entries
         case entryId = "entry_id"
+    }
+}
+
+struct CLIContextResultsDocument: Codable {
+    let results: [CLIContextItem]
+    let searchedDirectories: [String]?
+    let hint: String?
+    let notes: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case results, hint, notes
+        case searchedDirectories = "searched_directories"
     }
 }
 

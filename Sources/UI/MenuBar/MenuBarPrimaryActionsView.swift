@@ -9,7 +9,6 @@ final class MenuBarPrimaryActionsView: NSView {
     var onOpenRecentMeetings: (() -> Void)?
 
     private let homeRow = MenuBarActionRowView()
-    private let homeDivider = NSView()
     private let dictationRow = MenuBarActionRowView()
     private let meetingRow = MenuBarActionRowView()
     private let pasteRow = MenuBarActionRowView()
@@ -38,19 +37,17 @@ final class MenuBarPrimaryActionsView: NSView {
         pasteRow.setAutomationIdentifier("transcripted.menubar.primary.paste-last-dictation")
         recentMeetingsRow.setAutomationIdentifier("transcripted.menubar.primary.recent-meetings")
 
-        homeDivider.wantsLayer = true
-        homeDivider.layer?.backgroundColor = MenuTokens.sectionDividerNS.cgColor
-
-        [homeRow, homeDivider, dictationRow, meetingRow, pasteRow, recentMeetingsRow].forEach(addSubview(_:))
+        [homeRow, dictationRow, meetingRow, pasteRow, recentMeetingsRow].forEach(addSubview(_:))
     }
 
     func update(
-        dictationKey: String,
-        meetingKey: String,
+        dictationTrailing: String,
+        meetingTrailing: String,
         dictationState: MenuBarPrimaryActionState,
         meetingState: MenuBarPrimaryActionState,
         pasteDetail: String,
         pasteEnabled: Bool,
+        isMeetingRecording: Bool,
         showStartDictation: Bool,
         showStartMeeting: Bool,
         showPasteLastDictation: Bool,
@@ -64,13 +61,15 @@ final class MenuBarPrimaryActionsView: NSView {
             size: .utility
         )
 
+        // Rows stay monochrome; color is reserved for state, so the one red
+        // row in the popover always means "recording right now".
         dictationRow.isHidden = !showStartDictation
         dictationRow.update(
             symbolName: dictationState.symbolName,
             title: dictationState.title,
             detail: dictationState.subtitle,
-            trailingText: dictationKey,
-            tone: .accent,
+            trailingText: dictationTrailing,
+            tone: .standard,
             size: .primary,
             isEnabled: dictationState.isEnabled
         )
@@ -80,8 +79,8 @@ final class MenuBarPrimaryActionsView: NSView {
             symbolName: meetingState.symbolName,
             title: meetingState.title,
             detail: meetingState.subtitle,
-            trailingText: meetingKey,
-            tone: .accent,
+            trailingText: meetingTrailing,
+            tone: isMeetingRecording ? .recording : .standard,
             size: .primary,
             isEnabled: meetingState.isEnabled
         )
@@ -117,12 +116,8 @@ final class MenuBarPrimaryActionsView: NSView {
         homeRow.frame = NSRect(x: 0, y: y, width: bounds.width, height: homeHeight)
 
         let rows = visibleActionRows
-        if rows.isEmpty {
-            homeDivider.frame = .zero
-        } else {
-            y += homeHeight + 6
-            homeDivider.frame = NSRect(x: 0, y: y, width: bounds.width, height: 1)
-            y += 7
+        if !rows.isEmpty {
+            y += homeHeight + 8
 
             for (index, row) in rows.enumerated() {
                 let rowHeight = row.intrinsicContentSize.height
@@ -146,7 +141,7 @@ final class MenuBarPrimaryActionsView: NSView {
         let rowSpacing = max(0, rows.count - 1) * 2
 
         return homeRow.intrinsicContentSize.height
-            + 14
+            + 8
             + rows.map { $0.intrinsicContentSize.height }.reduce(0, +)
             + CGFloat(rowSpacing)
     }

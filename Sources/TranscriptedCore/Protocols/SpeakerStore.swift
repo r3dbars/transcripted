@@ -56,6 +56,15 @@ public protocol SpeakerStore: Sendable {
 
     /// Find profiles matching a name (fuzzy, with name variants)
     func findProfilesByName(_ name: String) -> [SpeakerProfile]
+
+    /// Record one auto-accept or review verdict in the speaker's recognition lifeline
+    func recordMatchOutcome(_ outcome: SpeakerMatchOutcome)
+
+    /// Record a batch of lifeline outcomes (one review submit / one saved meeting)
+    func recordMatchOutcomes(_ outcomes: [SpeakerMatchOutcome])
+
+    /// Most-recent-first lifeline outcomes for a profile, for health/demotion decisions
+    func recentMatchOutcomes(profileId: UUID, limit: Int) -> [SpeakerMatchOutcome]
 }
 
 public extension SpeakerStore {
@@ -70,4 +79,15 @@ public extension SpeakerStore {
     func addOrUpdateSpeaker(embedding: [Float], existingId: UUID?, blendAlpha: Float) -> SpeakerProfile {
         addOrUpdateSpeaker(embedding: embedding, existingId: existingId)
     }
+
+    /// Back-compat defaults: stores that don't persist the recognition lifeline (test doubles,
+    /// simple stores) drop outcomes and report none, which keeps health assessment permissive.
+    /// `SpeakerDatabase` provides the real SQLite-backed implementations.
+    func recordMatchOutcome(_ outcome: SpeakerMatchOutcome) {}
+
+    func recordMatchOutcomes(_ outcomes: [SpeakerMatchOutcome]) {
+        for outcome in outcomes { recordMatchOutcome(outcome) }
+    }
+
+    func recentMatchOutcomes(profileId: UUID, limit: Int) -> [SpeakerMatchOutcome] { [] }
 }

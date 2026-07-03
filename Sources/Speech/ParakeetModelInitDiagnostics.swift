@@ -25,22 +25,7 @@ enum ParakeetModelInitDiagnostics {
             "failure_stage": stage.rawValue,
             "load_source": loadSource.rawValue,
             "model_bundle_present": bundledModelPresent ? "true" : "false",
-            "mic_status": diagnosticName(for: microphoneStatus),
+            "mic_status": microphoneStatus.diagnosticName,
         ]
-    }
-
-    private static func diagnosticName(for status: AVAuthorizationStatus) -> String {
-        switch status {
-        case .notDetermined:
-            return "not_determined"
-        case .restricted:
-            return "restricted"
-        case .denied:
-            return "denied"
-        case .authorized:
-            return "authorized"
-        @unknown default:
-            return "unknown"
-        }
     }
 }

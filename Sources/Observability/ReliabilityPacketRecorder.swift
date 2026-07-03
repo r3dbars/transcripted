@@ -153,7 +153,11 @@ enum ReliabilityPacketRecorder {
         )
 
         if !FileManager.default.fileExists(atPath: fileURL.path) {
-            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+            FileManager.default.createFile(
+                atPath: fileURL.path,
+                contents: nil,
+                attributes: [.posixPermissions: 0o600]
+            )
         }
         FileManager.default.restrictFileToOwnerOnly(at: fileURL)
 

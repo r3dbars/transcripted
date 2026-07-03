@@ -2,7 +2,7 @@
 
 ## Test Surfaces
 
-This repo has ten distinct verification layers:
+This repo has eleven distinct verification layers:
 
 1. `bash run-tests.sh`
    Curated fast test runner built with raw `swiftc`
@@ -20,9 +20,11 @@ This repo has ten distinct verification layers:
    Local hardware/TCC smoke for app launch plus production mic + system-audio capture
 8. `bash scripts/ops/transcripted-qa-bench.sh --mode ui`
    Accessibility-driven UI smoke for first-run onboarding, menu bar, Home, Settings, buttons, and basic navigation
-9. `bash scripts/ops/transcripted-qa-bench.sh --mode packaged`
+9. `bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update`
+   No-publish fake-state Sparkle update UI smoke for update-available and downloading menu surfaces
+10. `bash scripts/ops/transcripted-qa-bench.sh --mode packaged`
    No-publish `build-beta.sh` package smoke plus built app version, Sparkle, signing, dSYM, DMG, optional menu bar, and local log privacy checks
-10. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
+11. `bash scripts/ops/transcripted-qa-bench.sh --mode full`
    Deep QA plus release-health fixture proof and local Gemma summary planning when eligible transcripts exist
 
 There is also an orchestrated QA bench for human-style passes:
@@ -32,6 +34,7 @@ bash scripts/ops/transcripted-qa-bench.sh --mode quick
 bash scripts/ops/transcripted-qa-bench.sh --mode deep
 bash scripts/ops/transcripted-qa-bench.sh --mode full
 bash scripts/ops/transcripted-qa-bench.sh --mode ui
+bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update
 bash scripts/ops/transcripted-qa-bench.sh --mode packaged
 bash scripts/ops/transcripted-qa-bench.sh --mode pasteback-synthetic
 bash scripts/ops/transcripted-qa-bench.sh --mode corpus
@@ -188,6 +191,19 @@ and General navigation path. It needs
 Accessibility permission for the terminal or Codex runner so it can inspect AX
 identifiers and press controls. Missing permission exits `3` and is reported as
 `INCOMPLETE`, not green.
+
+## Sparkle Update UI Smoke
+
+`bash scripts/ops/transcripted-qa-bench.sh --mode sparkle-update` builds the
+app, then runs `transcripted-qa sparkle-update-smoke` against
+`build/Transcripted.app`. It launches the app through the launch-smoke harness
+with fake update-available and downloading states, then validates the menu
+snapshot copy and visibility for the prominent install callout and disabled
+download-progress row.
+
+This is no-publish local UI proof only. It does not contact the live appcast,
+download or verify an update, install, relaunch, notarize, publish, update
+Homebrew, or prove an existing installed app can upgrade.
 
 ## Packaged App Smoke
 

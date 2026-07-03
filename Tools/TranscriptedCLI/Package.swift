@@ -11,15 +11,17 @@ let fileManager = FileManager.default
 let depsModulesRoot = "\(repoRoot)/deps-modules"
 let depsFrameworksRoot = "\(repoRoot)/deps-frameworks"
 let depsLibsRoot = "\(repoRoot)/deps-libs"
+// Diarization and transcription share the same prebuilt FluidAudio bundle;
+// either env toggle links it and enables both offline audio command groups.
 let enableDiarization = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_ENABLE_DIARIZATION"] == "1"
+let enableTranscription = ProcessInfo.processInfo.environment["TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION"] == "1"
 let fluidAudioModuleCandidates = [
     "\(depsModulesRoot)/FluidAudio.swiftmodule",
     "\(depsModulesRoot)/FluidAudio.swiftmodule/arm64-apple-macos.swiftmodule",
 ]
-let hasDiarizationDeps = enableDiarization
+let hasAudioPipelineDeps = (enableDiarization || enableTranscription)
     && fluidAudioModuleCandidates.contains(where: { fileManager.fileExists(atPath: $0) })
     && fileManager.fileExists(atPath: "\(depsLibsRoot)/libDraftDeps.a")
-    && fileManager.fileExists(atPath: "\(depsFrameworksRoot)/ESpeakNG.framework")
 
 let package = Package(
     name: "TranscriptedCLI",
@@ -36,8 +38,9 @@ let package = Package(
                 .product(name: "TranscriptedCaptureKit", package: "TranscriptedCaptureKit"),
             ],
             path: "Sources/TranscriptedCLI",
-            swiftSettings: hasDiarizationDeps ? [
+            swiftSettings: hasAudioPipelineDeps ? [
                 .define("TRANSCRIPTEDCLI_WITH_DIARIZATION"),
+                .define("TRANSCRIPTEDCLI_WITH_TRANSCRIPTION"),
                 .unsafeFlags([
                     "-F", depsFrameworksRoot,
                     "-I", depsModulesRoot,
@@ -46,7 +49,7 @@ let package = Package(
                     "-I", "\(depsModulesRoot)/yyjson",
                 ]),
             ] : [],
-            linkerSettings: hasDiarizationDeps ? [
+            linkerSettings: hasAudioPipelineDeps ? [
                 .unsafeFlags([
                     "-F\(depsFrameworksRoot)",
                     "-L\(depsLibsRoot)",
@@ -55,7 +58,6 @@ let package = Package(
                     "-lDraftDeps",
                     "-lc++",
                 ]),
-                .linkedFramework("ESpeakNG"),
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("Accelerate"),
@@ -67,10 +69,14 @@ let package = Package(
         ),
         .testTarget(
             name: "TranscriptedCLITests",
-            dependencies: ["transcripted-cli"],
+            dependencies: [
+                "transcripted-cli",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
             path: "Tests/TranscriptedCLITests",
-            swiftSettings: hasDiarizationDeps ? [
+            swiftSettings: hasAudioPipelineDeps ? [
                 .define("TRANSCRIPTEDCLI_WITH_DIARIZATION"),
+                .define("TRANSCRIPTEDCLI_WITH_TRANSCRIPTION"),
                 .unsafeFlags([
                     "-F", depsFrameworksRoot,
                     "-I", depsModulesRoot,

@@ -55,6 +55,7 @@ SWIFT_SOURCES=(
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
     "Sources/UI/Shared/HomeMeetingDeletion.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"
+    "Sources/UI/Shared/RecentMeetingMetadataCache.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
     "Sources/Observability/PayloadSanitizationCore.swift"
@@ -65,6 +66,9 @@ SWIFT_SOURCES=(
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/NameVariants.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/PathSecurity.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptLoader.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingProvider.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingStore.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/SemanticSearchFusion.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift"
 )
 

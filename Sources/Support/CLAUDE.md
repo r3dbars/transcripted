@@ -11,6 +11,7 @@
 - `AutoCallDetectionPreferences.swift` — persisted (default-on) toggle for ad-hoc call detection via mic activity; gates `MicActivityMonitor` and the General-page "Auto-detect calls" setting (see `docs/auto-call-detection-spec.md`)
 - `AgentMCPConnector.swift` — per-agent MCP connect seam: detection, connection state, and config writers for Claude Code (via the `claude` CLI), Codex (`~/.codex/config.toml`), and Cursor (`~/.cursor/mcp.json`), all pointing at the shared installed helper
 - `CaptureLibraryChangeBroadcaster.swift` — single source of truth for the debounced `.meetingCaptureArtifactsDidChange` notification; coalesces background WAV→M4A recompression and transcript-rename file mutations so Home can re-resolve its cached transcript/audio URLs (empty id set means a library-wide change of unknown scope)
+- `CaptureLibraryMigrationPlanner.swift` — copy-only planning and execution for capture-library relocation: detects captures in the old folder, enumerates meeting Markdown plus retained `audio/*_audio/` directories plus dictation day files, skips destination collisions, and never deletes originals
 - `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges `mcpServers` JSON configs, runs the helper self-test, and silently refreshes a stale installed helper at app launch
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
@@ -21,8 +22,9 @@
 - `DictationOverlayPresentationPreferences.swift` — persisted overlay presentation mode for normal vs cursor-mini dictation UI
 - `ExistingInstallModelPrefetchPolicy.swift` — protects existing Parakeet users by deciding when model files should be prefetched after app updates
 - `HotkeyPreferences.swift` — persisted shortcut mode, meeting shortcut compatibility, legacy Carbon hotkey migration helpers, right-Option toggle migration, display formatting, and validation
-- `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior
-- `LaunchAtLoginPreferences.swift` — persisted first-run preference state around launch-at-login UX
+- `LaunchAtLoginController.swift` — app-facing wrapper for enabling or disabling launch-at-login behavior, including the one-time post-onboarding default-enable (meeting detection is dead while the app is closed)
+- `LaunchAtLoginPreferences.swift` — persisted preference state around launch-at-login UX: the explicit user choice plus the applied-once default-enable marker and its pure policy
+- `MissedCallNudgePreferences.swift` — persisted (default-on) toggle for the post-call "that call wasn't recorded" nudge; written by the nudge's "Don't show again" action and the Settings General toggle
 - `LiveMeetingCodexPreferences.swift` — persisted opt-in toggle for the live-meeting sidecar, plus the meeting overlay transcript drawer's remembered open state and clamped height
 - `LocalMeetingSummaryPreferences.swift` — persisted beta opt-in toggle and provider selection for local AI meeting summaries on Home
 - `LocalSpeakerPreferences.swift` — persisted toggle for splitting the local mic channel into multiple named speakers during meeting review
@@ -36,6 +38,7 @@
 - `QuitConfirmationPreferences.swift` — default-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit
 - `SingleInstanceGuard.swift` — local guard used to keep duplicate app instances from racing shared app state
 - `SpeakerNameSelectionPolicy.swift` — shared speaker-name matching, duplicate-label disambiguation, and owner-label policy used by people/review UI
+- `SpeechModelBetaPreferences.swift` — persisted default-off beta opt-in for the Nemotron streaming transcription model; gates its visibility in the model picker and its runtime availability in `effectiveModel()`
 - `TranscriptedConstants.swift` — shared timing thresholds and app-wide behavior constants
 - `TranscriptedPermissionAccess.swift` — shared permission status, prompting, and Settings-deep-link helpers for microphone, accessibility, system-audio recording, and calendar access
 - `TranscriptedPermissionKind.swift` — shared permission metadata, onboarding requirements, copy, icons, and action labels used by onboarding and Settings
@@ -46,7 +49,7 @@
 
 - Keep preference keys and notification names centralized here so UI and controllers do not drift.
 - `PhysicalDictationTriggerPreferences` is the canonical binding layer for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts. Avoid reintroducing ad hoc keycode logic or special-case right-Option handling in UI or capture code.
-- `TranscriptionModelPreferences` is the shared switch between `Parakeet` and the available local Whisper variants. Model-specific runtime behavior still belongs in `Sources/Speech/` and `Sources/Meeting/`.
+- `TranscriptionModelPreferences` is the shared switch between `Parakeet`, the available local Whisper variants, and the beta-gated Nemotron streaming model (`SpeechModelBetaPreferences` controls its availability; `effectiveModel()` falls back to the default while the gate is off). Model-specific runtime behavior still belongs in `Sources/Speech/` and `Sources/Meeting/`.
 - `CustomDictionaryPreferences` and `DictationAutoSendPreferences` back the Settings `General` and `Dictation` pages. If you change parsing rules or policy thresholds, update the relevant tests.
 - `TranscriptedPermissionAccess` plus `TranscriptedPermissionKind` are the app-level permission seams. UI flows should call into them instead of duplicating TCC branching, metadata, or user-facing permission copy.
 - `SpeakerNameSelectionPolicy` keeps speaker search and "You" matching consistent across settings and review UI. Keep duplicate-name disambiguation here instead of in individual SwiftUI controls.
@@ -73,6 +76,7 @@ Relevant direct coverage includes:
 
 - `Tests/AgentMCPConnectorTests.swift`
 - `Tests/CaptureLibraryChangeBroadcasterTests.swift`
+- `Tests/CaptureLibraryMigrationPlannerTests.swift`
 - `Tests/ClaudeDesktopIntegrationInstallerTests.swift`
 - `Tests/ActivationPolicyControllerTests.swift`
 - `Tests/AudioStoragePreferencesTests.swift`
@@ -95,3 +99,4 @@ Relevant direct coverage includes:
 - `Tests/TranscriptedPermissionAccessTests.swift`
 - `Tests/TranscriptedStoragePathsTests.swift`
 - `Tests/TranscriptionModelPreferencesTests.swift`
+- `Tests/SpeechModelBetaPreferencesTests.swift`

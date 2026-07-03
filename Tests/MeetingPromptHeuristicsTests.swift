@@ -397,10 +397,182 @@ func testMeetingPromptHeuristics() {
         )
     }
 
-    runSuite("MeetingPromptReason.isAdHocCallSignal — mic and camera are ad-hoc signals; calendar/runtime are not") {
+    runSuite("MeetingPromptReason.isAdHocCallSignal — mic, camera, and speaker are ad-hoc signals; calendar/runtime are not") {
         assertTrue(MeetingPromptReason.micInput.isAdHocCallSignal, "mic input is an ad-hoc call signal")
         assertTrue(MeetingPromptReason.cameraInput.isAdHocCallSignal, "camera input is an ad-hoc call signal")
+        assertTrue(MeetingPromptReason.audioOutput.isAdHocCallSignal, "native-app audio output is an ad-hoc call signal")
         assertFalse(MeetingPromptReason.runtimeOnly.isAdHocCallSignal, "runtime-app is not an ad-hoc mic/camera signal")
         assertFalse(MeetingPromptReason.calendarNearby.isAdHocCallSignal, "calendar is not an ad-hoc mic/camera signal")
+    }
+
+    runSuite("MeetingPromptProvider.audioOutputProvider — output attributes to native conferencing apps only") {
+        assertEqual(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "us.zoom.xos"),
+            .zoom,
+            "Zoom playing audio output maps to the Zoom provider"
+        )
+        assertEqual(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "us.zoom.xos.helper"),
+            .zoom,
+            "conferencing helper processes attribute to the parent app by family prefix"
+        )
+        assertEqual(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "com.microsoft.teams2"),
+            .teams,
+            "Teams playing audio output maps to the Teams provider"
+        )
+        assertNil(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "com.google.Chrome.helper"),
+            "browser output is dominated by non-call playback and must never count as a call signal"
+        )
+        assertNil(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "com.spotify.client"),
+            "media apps playing audio must never count as a call signal"
+        )
+    }
+
+    runSuite("MeetingPromptHeuristics.shouldReofferAfterExpiry — unattended prompts re-offer a bounded number of times") {
+        assertTrue(
+            MeetingPromptHeuristics.shouldReofferAfterExpiry(expiryCount: 1),
+            "the first unattended expiry should schedule a short re-offer, not a dismissal"
+        )
+        assertTrue(
+            MeetingPromptHeuristics.shouldReofferAfterExpiry(expiryCount: MeetingPromptHeuristics.maxPromptExpiryReoffers),
+            "expiries up to the cap should still re-offer"
+        )
+        assertFalse(
+            MeetingPromptHeuristics.shouldReofferAfterExpiry(expiryCount: MeetingPromptHeuristics.maxPromptExpiryReoffers + 1),
+            "past the cap an ignored call must fall back to the normal dismissal backoff"
+        )
+        assertTrue(
+            MeetingPromptHeuristics.promptExpiryReofferInterval < MeetingPromptHeuristics.defaultRuntimeDismissFallbackInterval,
+            "the re-offer interval must be meaningfully shorter than a dismissal, or the expiry path is pointless"
+        )
+    }
+
+    runSuite("MeetingPromptHeuristics.promptTimeoutSeconds — live call prompts outlast calendar reminders") {
+        assertEqual(
+            MeetingPromptHeuristics.promptTimeoutSeconds(for: .micInput, calendarDefault: 30),
+            MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds,
+            "an ad-hoc mic call prompt should use the longer live-call lifetime"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.promptTimeoutSeconds(for: .audioOutput, calendarDefault: 30),
+            MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds,
+            "an output-led call prompt should use the longer live-call lifetime"
+        )
+        assertEqual(
+            MeetingPromptHeuristics.promptTimeoutSeconds(for: .calendarNearby, calendarDefault: 30),
+            30,
+            "calendar reminders keep the shorter default because their moment ages out"
+        )
+        assertTrue(
+            MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds > 30,
+            "the live-call prompt lifetime should actually be longer than the calendar default"
+        )
+    }
+
+    runSuite("MissedCallNudgePolicy.shouldNudge — nudges long unrecorded calls, respects every gate") {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let longCall = MissedCallNudgePolicy.minimumCallDuration + 60
+
+        assertTrue(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: false, userDeclined: false, lastNudgeAt: nil, now: now
+            ),
+            "a long unrecorded call with no decline should nudge"
+        )
+        assertFalse(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: true, userDeclined: false, lastNudgeAt: nil, now: now
+            ),
+            "a call that was recorded needs no nudge"
+        )
+        assertFalse(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: false, userDeclined: true, lastNudgeAt: nil, now: now
+            ),
+            "an explicit 'not now' on the prompt means the nudge must stay quiet"
+        )
+        assertFalse(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: MissedCallNudgePolicy.minimumCallDuration - 1,
+                sawMeetingRecording: false, userDeclined: false, lastNudgeAt: nil, now: now
+            ),
+            "short calls are not worth interrupting for"
+        )
+        assertFalse(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: false, userDeclined: false,
+                lastNudgeAt: now.addingTimeInterval(-MissedCallNudgePolicy.nudgeCooldown + 60), now: now
+            ),
+            "back-to-back calls must not stack nudges inside the cooldown"
+        )
+        assertTrue(
+            MissedCallNudgePolicy.shouldNudge(
+                duration: longCall, sawMeetingRecording: false, userDeclined: false,
+                lastNudgeAt: now.addingTimeInterval(-MissedCallNudgePolicy.nudgeCooldown - 60), now: now
+            ),
+            "once the cooldown passes a fresh missed call can nudge again"
+        )
+    }
+
+    runSuite("MissedCallNudgePolicy.durationBucket — analytics stay coarse") {
+        assertEqual(MissedCallNudgePolicy.durationBucket(for: 12 * 60), "10_to_20m", "12 minutes lands in the shortest bucket")
+        assertEqual(MissedCallNudgePolicy.durationBucket(for: 25 * 60), "20_to_40m", "25 minutes lands in the middle bucket")
+        assertEqual(MissedCallNudgePolicy.durationBucket(for: 70 * 60), "40m_plus", "long calls collapse into the open-ended bucket")
+    }
+
+    runSuite("MeetingPromptCallTelemetry — funnel buckets and signal kinds stay coarse and deterministic") {
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 3 * 60), "1_to_5m", "short calls get the smallest bucket")
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 7 * 60), "5_to_10m", "mid-short calls bucket correctly")
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 15 * 60), "10_to_20m", "standard meetings bucket correctly")
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 30 * 60), "20_to_40m", "half-hour meetings bucket correctly")
+        assertEqual(MeetingPromptCallTelemetry.durationBucket(for: 90 * 60), "40m_plus", "long meetings collapse into the open bucket")
+
+        assertEqual(
+            MeetingPromptCallTelemetry.signalKinds(micSeen: true, speakerSeen: true, cameraSeen: true),
+            "camera+mic+output",
+            "signal kinds join sorted so dashboards get stable enum values"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.signalKinds(micSeen: false, speakerSeen: true, cameraSeen: false),
+            "output",
+            "a listen-only call reports the output signal alone"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.signalKinds(micSeen: false, speakerSeen: false, cameraSeen: false),
+            "none",
+            "an empty signal set stays an explicit enum value"
+        )
+    }
+
+    runSuite("MeetingPromptCallTelemetry.promptOutcome — recorded beats declined beats ignored beats no_prompt") {
+        assertEqual(
+            MeetingPromptCallTelemetry.promptOutcome(promptShown: true, wasRecorded: true, userDeclined: true),
+            .recorded,
+            "a recording is the terminal success no matter what happened before"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.promptOutcome(promptShown: true, wasRecorded: false, userDeclined: true),
+            .declined,
+            "an explicit 'not now' is a decision, not a miss"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.promptOutcome(promptShown: true, wasRecorded: false, userDeclined: false),
+            .ignored,
+            "a prompt that fired but got no interaction is the 'never saw it' bucket"
+        )
+        assertEqual(
+            MeetingPromptCallTelemetry.promptOutcome(promptShown: false, wasRecorded: false, userDeclined: false),
+            .noPrompt,
+            "a call we detected but never prompted for is a product gap, not a user choice"
+        )
+    }
+
+    runSuite("MeetingPromptCallTelemetry.dismissStreakBucket — 'keeps hitting not now' stays a coarse bucket") {
+        assertEqual(MeetingPromptCallTelemetry.dismissStreakBucket(1), "1", "a first dismissal is its own bucket")
+        assertEqual(MeetingPromptCallTelemetry.dismissStreakBucket(2), "2", "a second dismissal is its own bucket")
+        assertEqual(MeetingPromptCallTelemetry.dismissStreakBucket(5), "3_plus", "streaks collapse past three")
     }
 }

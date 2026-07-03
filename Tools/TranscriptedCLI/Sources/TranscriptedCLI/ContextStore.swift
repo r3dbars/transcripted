@@ -212,7 +212,7 @@ enum CLIContextStore {
         }
 
         guard let markdownURL,
-              let content = try? String(contentsOf: markdownURL, encoding: .utf8),
+              let content = CaptureMarkdown.readBoundedContents(of: markdownURL),
               CaptureMarkdown.looksLikeCaptureMarkdown(markdownURL),
               !markdownURL.deletingPathExtension().lastPathComponent.hasPrefix("Dictations_") else {
             throw ValidationError("Meeting not found: \(filename)")
@@ -221,7 +221,17 @@ enum CLIContextStore {
         return content
     }
 
+    struct DictationRead {
+        let markdown: String
+        let date: String
+        let entries: [CLIClientDictationEntry]
+    }
+
     static func readDictation(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> String {
+        try readDictationDocument(filename: filename, entryId: entryId, in: directories).markdown
+    }
+
+    static func readDictationDocument(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> DictationRead {
         let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
         var invalidPathRequested = false
         var markdownURL: URL?
@@ -254,7 +264,7 @@ enum CLIContextStore {
                 throw ValidationError("Dictation entry not found: \(entryId)")
             }
 
-            return """
+            let markdown = """
             # \(entry.title)
 
             Captured: \(entry.createdAt)
@@ -264,14 +274,19 @@ enum CLIContextStore {
 
             \(entry.text)
             """
+            return DictationRead(markdown: markdown, date: day.payload.date, entries: [entry])
         }
 
-        if let content = try? String(contentsOf: markdownURL, encoding: .utf8) {
-            return content
+        if let content = CaptureMarkdown.readBoundedContents(of: markdownURL) {
+            return DictationRead(markdown: content, date: day.payload.date, entries: day.entries)
         }
 
         let data = try JSONEncoder.contextPretty.encode(day.payload)
-        return String(data: data, encoding: .utf8) ?? "{}"
+        return DictationRead(
+            markdown: String(data: data, encoding: .utf8) ?? "{}",
+            date: day.payload.date,
+            entries: day.entries
+        )
     }
 
     private struct MeetingRecord {
@@ -386,8 +401,12 @@ enum CLIContextStore {
     }
 
     private static func loadMeeting(at url: URL) -> CLIAgentTranscript? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8),
-              let parsed = CaptureMarkdownParser.parseMeeting(from: content) else { return nil }
+        guard let content = CaptureMarkdown.readBoundedContents(of: url) else { return nil }
+        return meetingTranscript(fromMarkdown: content)
+    }
+
+    static func meetingTranscript(fromMarkdown content: String) -> CLIAgentTranscript? {
+        guard let parsed = CaptureMarkdownParser.parseMeeting(from: content) else { return nil }
 
         return CLIAgentTranscript(
             version: "2.0",
@@ -415,7 +434,7 @@ enum CLIContextStore {
     }
 
     private static func loadDictationDay(at url: URL) -> (payload: CLIAgentDictationDay, entries: [CLIClientDictationEntry])? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8),
+        guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseDictationDay(from: content, markdownURL: url) else { return nil }
 
         let entries = parsed.entries.map { entry in
@@ -446,7 +465,7 @@ enum CLIContextStore {
 
     private static func readMeetingTitle(filename: String, from directory: URL) -> String {
         let mdURL = directory.appendingPathComponent(filename + ".md")
-        guard let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
+        guard let content = CaptureMarkdown.readBoundedContents(of: mdURL) else {
             return filename
         }
         return CaptureMarkdown.extractTitle(from: content) ?? filename

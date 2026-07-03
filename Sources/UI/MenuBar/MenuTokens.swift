@@ -1,85 +1,87 @@
 // MenuTokens.swift
 // Design tokens for the menubar popover.
+//
+// Colors are dynamic: they resolve per-appearance so the popover can follow
+// the system light/dark setting instead of forcing dark. The dark variants
+// keep the popover's original look; light variants mirror them on a light
+// surface. NSTextField/contentTintColor users adapt automatically, but any
+// color written into a CALayer must be re-resolved when the effective
+// appearance changes — use `NSView.menuResolvedCGColor(_:)` for that and
+// re-apply from `viewDidChangeEffectiveAppearance()`.
 
 import AppKit
-import SwiftUI
 
 enum MenuTokens {
-    // Surface
-    static let surfaceBackgroundNS = NSColor(calibratedWhite: 0.11, alpha: 0.98)
-    static let surfaceStrokeNS = NSColor.white.withAlphaComponent(0.08)
-    static let sectionDividerNS = NSColor.white.withAlphaComponent(0.12)
+    private static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        }
+    }
+
+    // Surface — NSPopover's native material provides the background; only the
+    // section divider is drawn by the popover itself.
+    static let sectionDividerNS = dynamic(
+        dark: NSColor.white.withAlphaComponent(0.12),
+        light: NSColor.black.withAlphaComponent(0.12)
+    )
 
     // Text + status
     static let statusGreenNS = NSColor.systemGreen
     static let statusOrangeNS = NSColor.systemOrange
-    static let textPrimaryNS = OverlayTokens.textPrimary
-    static let textSecondaryNS = OverlayTokens.textSecondary
-    static let textMutedNS = OverlayTokens.textMuted
+    static let statusRedNS = NSColor.systemRed
+    static let textPrimaryNS = dynamic(
+        dark: NSColor.white,
+        light: NSColor(calibratedWhite: 0.10, alpha: 1.0)
+    )
+    static let textSecondaryNS = dynamic(
+        dark: NSColor(calibratedWhite: 0.74, alpha: 1.0),
+        light: NSColor(calibratedWhite: 0.35, alpha: 1.0)
+    )
+    static let textMutedNS = dynamic(
+        dark: NSColor(calibratedWhite: 0.58, alpha: 1.0),
+        light: NSColor(calibratedWhite: 0.50, alpha: 1.0)
+    )
 
     // Rows
-    static let actionBackgroundNS = NSColor.white.withAlphaComponent(0.06)
-    static let actionPressedNS = NSColor.white.withAlphaComponent(0.10)
-    static let actionDisabledNS = NSColor.white.withAlphaComponent(0.03)
-    static let actionBorderNS = NSColor.white.withAlphaComponent(0.08)
-    static let flatRowHoverNS = NSColor.white.withAlphaComponent(0.075)
-    static let flatRowPressedNS = NSColor.white.withAlphaComponent(0.12)
-    static let flatRowDisabledNS = NSColor.white.withAlphaComponent(0.02)
-    static let badgeBackgroundNS = NSColor.white.withAlphaComponent(0.08)
-    static let badgeBorderNS = NSColor.white.withAlphaComponent(0.12)
-    static let symbolBackgroundNS = NSColor.white.withAlphaComponent(0.05)
-    static let symbolBorderNS = NSColor.white.withAlphaComponent(0.08)
-    static let secondaryButtonBackgroundNS = NSColor.white.withAlphaComponent(0.02)
-    static let secondaryButtonHoverNS = NSColor.white.withAlphaComponent(0.07)
-    static let secondaryButtonPressedNS = NSColor.white.withAlphaComponent(0.10)
-    static let secondaryButtonBorderNS = NSColor.white.withAlphaComponent(0.10)
-    static let accentButtonBackgroundNS = NSColor.systemBlue.withAlphaComponent(0.16)
-    static let accentButtonHoverNS = NSColor.systemBlue.withAlphaComponent(0.22)
-    static let accentButtonPressedNS = NSColor.systemBlue.withAlphaComponent(0.28)
-    static let accentButtonBorderNS = NSColor.systemBlue.withAlphaComponent(0.34)
-    static let savedBackgroundNS = NSColor.systemGreen.withAlphaComponent(0.14)
-    static let savedBorderNS = NSColor.systemGreen.withAlphaComponent(0.24)
-
-    // Compatibility aliases for existing AppKit controls still using the old names.
-    static let cardBackgroundNS = actionBackgroundNS
-    static let cardBorderNS = actionBorderNS
-    static let pillBackgroundNS = badgeBackgroundNS
-    static let pillBorderNS = badgeBorderNS
-    static let buttonBackgroundNS = badgeBackgroundNS
-    static let buttonBorderNS = badgeBorderNS
-
-    // SwiftUI wrappers still used by onboarding
-    static let statusGreen = Color.green
-    static let statusOrange = Color.orange
-    static let textPrimary = Color(MenuTokens.textPrimaryNS)
-    static let textSecondary = Color(MenuTokens.textSecondaryNS)
-    static let textMuted = Color(MenuTokens.textMutedNS)
-    static let cardBackground = Color(MenuTokens.surfaceBackgroundNS)
-    static let cardBorder = Color(MenuTokens.surfaceStrokeNS)
-    static let pillBackground = Color(MenuTokens.badgeBackgroundNS)
-    static let pillBorder = Color(MenuTokens.badgeBorderNS)
-    static let savedBackground = Color(MenuTokens.savedBackgroundNS)
-    static let savedBorder = Color(MenuTokens.savedBorderNS)
+    static let flatRowHoverNS = dynamic(
+        dark: NSColor.white.withAlphaComponent(0.075),
+        light: NSColor.black.withAlphaComponent(0.06)
+    )
+    static let flatRowPressedNS = dynamic(
+        dark: NSColor.white.withAlphaComponent(0.12),
+        light: NSColor.black.withAlphaComponent(0.10)
+    )
+    static let flatRowDisabledNS = dynamic(
+        dark: NSColor.white.withAlphaComponent(0.02),
+        light: NSColor.black.withAlphaComponent(0.02)
+    )
+    static let buttonBackgroundNS = dynamic(
+        dark: NSColor.white.withAlphaComponent(0.08),
+        light: NSColor.black.withAlphaComponent(0.06)
+    )
 
     // Layout
     static let panelWidth: CGFloat = 304
     static let panelHeight: CGFloat = 480
-    static let onboardingWindowWidth: CGFloat = 720
-    static let onboardingWindowHeight: CGFloat = 740
     static let innerPadding: CGFloat = 10
     static let sectionSpacing: CGFloat = 7
-    static let surfaceCornerRadius: CGFloat = 14
     static let cardCornerRadius: CGFloat = 8
     static let minimumHitTargetSize: CGFloat = 40
     static let compactActionRowHeight: CGFloat = 42
     static let utilityActionRowHeight: CGFloat = 40
-    static let actionRowHeight: CGFloat = 46
-    static let savedRowHeight: CGFloat = 54
-    static let badgeHeight: CGFloat = 22
-    static let secondaryButtonSize: CGFloat = 32
-    static let secondaryButtonCornerRadius: CGFloat = 10
-    static let secondaryButtonIconPointSize: CGFloat = 11
-    static let symbolWellSize: CGFloat = 26
     static let statusDotSize: CGFloat = 6
-    static let compactStyleLines = 4
+}
+
+extension NSView {
+    /// Resolves a (possibly dynamic) color against this view's effective
+    /// appearance for CALayer use. `NSColor.cgColor` alone snapshots whatever
+    /// appearance is current on the calling thread, which is wrong when
+    /// layer colors are assigned outside of a draw pass.
+    func menuResolvedCGColor(_ color: NSColor) -> CGColor {
+        var resolved = color.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            resolved = color.cgColor
+        }
+        return resolved
+    }
 }

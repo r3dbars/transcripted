@@ -99,38 +99,76 @@ enum CustomDictionaryPreferences {
 }
 
 enum CustomDictionaryTextProcessor {
+    private struct CompiledEntry {
+        let regex: NSRegularExpression
+        let template: String
+
+        init?(entry: CustomDictionaryEntry) {
+            guard let regex = try? NSRegularExpression(
+                pattern: CustomDictionaryTextProcessor.pattern(for: entry.spoken),
+                options: [.caseInsensitive]
+            ) else {
+                return nil
+            }
+            self.regex = regex
+            self.template = NSRegularExpression.escapedTemplate(for: entry.replacement)
+        }
+
+        func apply(to text: String) -> String {
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            return regex.stringByReplacingMatches(
+                in: text,
+                options: [],
+                range: range,
+                withTemplate: template
+            )
+        }
+    }
+
+    private struct CompiledDictionary {
+        let entries: [CustomDictionaryEntry]
+        let compiledEntries: [CompiledEntry]
+    }
+
+    // Compiling one regex per entry on every dictation segment and meeting
+    // transcript chunk is the expensive part of this processor, so the sorted +
+    // compiled form is cached and reused while the dictionary is unchanged.
+    // There is no change notification for the underlying preference; keying the
+    // cache on the parsed entries value keeps it correct because the entries
+    // change exactly when the persisted raw text does. Guarded by a lock since
+    // dictation, meetings, and the Settings preview can call in concurrently.
+    private static let cacheLock = NSLock()
+    private static nonisolated(unsafe) var cachedDictionary: CompiledDictionary?
+
     static func apply(
         to text: String,
         entries: [CustomDictionaryEntry] = CustomDictionaryPreferences.entries()
     ) -> String {
         guard !text.isEmpty, !entries.isEmpty else { return text }
 
-        return entries
+        return compiledEntries(for: entries).reduce(text) { currentText, compiledEntry in
+            compiledEntry.apply(to: currentText)
+        }
+    }
+
+    private static func compiledEntries(for entries: [CustomDictionaryEntry]) -> [CompiledEntry] {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+
+        if let cached = cachedDictionary, cached.entries == entries {
+            return cached.compiledEntries
+        }
+
+        let compiledEntries = entries
             .sorted { lhs, rhs in
                 lhs.spoken.count == rhs.spoken.count
                     ? lhs.spoken.localizedCaseInsensitiveCompare(rhs.spoken) == .orderedAscending
                     : lhs.spoken.count > rhs.spoken.count
             }
-            .reduce(text) { currentText, entry in
-                replace(entry: entry, in: currentText)
-            }
-    }
+            .compactMap(CompiledEntry.init(entry:))
 
-    private static func replace(entry: CustomDictionaryEntry, in text: String) -> String {
-        guard let regex = try? NSRegularExpression(
-            pattern: pattern(for: entry.spoken),
-            options: [.caseInsensitive]
-        ) else {
-            return text
-        }
-
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return regex.stringByReplacingMatches(
-            in: text,
-            options: [],
-            range: range,
-            withTemplate: NSRegularExpression.escapedTemplate(for: entry.replacement)
-        )
+        cachedDictionary = CompiledDictionary(entries: entries, compiledEntries: compiledEntries)
+        return compiledEntries
     }
 
     private static func pattern(for spoken: String) -> String {

@@ -158,7 +158,7 @@ extension SpeakerDatabase {
         }
     }
 
-    func mergeProfilesImpl(sourceId: UUID, into targetId: UUID) {
+    func mergeProfilesImpl(sourceId: UUID, into targetId: UUID, kind: String = SpeakerMergeKind.explicit) {
         guard let source = getSpeakerImpl(id: sourceId),
               let target = getSpeakerImpl(id: targetId) else {
             AppLogger.speakers.warning("Merge failed — profile not found", [
@@ -200,6 +200,11 @@ extension SpeakerDatabase {
 
         // Wrap UPDATE + DELETE in a transaction so a crash between them can't orphan data
         transaction {
+            // Safety net: snapshot both profiles + re-point provenance BEFORE the blend
+            // overwrites the target and the source row is deleted, so a wrong merge can
+            // be reconstructed into two distinct profiles later. Same transaction → atomic.
+            recordMergeEventImpl(source: source, target: target, kind: kind)
+
             let sql = """
             UPDATE speakers SET embedding = ?, last_seen = ?, call_count = ?, confidence = ?
             WHERE id = ?;
@@ -300,7 +305,7 @@ extension SpeakerDatabase {
                 }
 
                 // Merge via mergeProfilesImpl (blends embeddings, transfers name, deletes source)
-                mergeProfilesImpl(sourceId: absorbed.id, into: keeper.id)
+                mergeProfilesImpl(sourceId: absorbed.id, into: keeper.id, kind: SpeakerMergeKind.duplicate)
 
                 mergedIds.insert(absorbed.id)
                 mergeCount += 1
@@ -369,7 +374,7 @@ extension SpeakerDatabase {
             let keeper = sorted[0]
 
             for source in sorted.dropFirst() {
-                mergeProfilesImpl(sourceId: source.id, into: keeper.id)
+                mergeProfilesImpl(sourceId: source.id, into: keeper.id, kind: SpeakerMergeKind.byName)
                 mergeCount += 1
             }
 
@@ -480,10 +485,19 @@ extension SpeakerDatabase {
 
     // MARK: - Name Variant Detection
 
-    /// Common English name variants (informal -> formal and vice versa)
+    /// Common English name variants (informal -> formal and vice versa).
+    ///
+    /// This table is intentionally mirrored in
+    /// `Tools/TranscriptedMCP/.../NameVariants.swift`, which uses it for
+    /// speaker-aware search. The two cannot share a module (Core is the lower
+    /// layer and must not depend on the Tools packages, and the standalone MCP
+    /// server has no compile-time dependency on Core), so they are kept
+    /// byte-for-byte identical instead. Any edit here MUST be mirrored there,
+    /// and vice versa.
     private static let nameVariants: [String: Set<String>] = [
         "mike": ["michael", "mike", "mikey"],
         "michael": ["michael", "mike", "mikey"],
+        "mikey": ["michael", "mike", "mikey"],
         "nate": ["nate", "nathan", "nathaniel"],
         "nathan": ["nate", "nathan", "nathaniel"],
         "nathaniel": ["nate", "nathan", "nathaniel"],
@@ -503,25 +517,33 @@ extension SpeakerDatabase {
         "christina": ["chris", "christina"],
         "nick": ["nick", "nicholas", "nic"],
         "nicholas": ["nick", "nicholas", "nic"],
+        "nic": ["nick", "nicholas", "nic"],
         "rob": ["rob", "robert", "robbie", "bob", "bobby"],
         "robert": ["rob", "robert", "robbie", "bob", "bobby"],
         "bob": ["rob", "robert", "bob", "bobby"],
+        "bobby": ["rob", "robert", "bob", "bobby"],
         "ed": ["ed", "edward", "eddie"],
         "edward": ["ed", "edward", "eddie"],
+        "eddie": ["ed", "edward", "eddie"],
         "joe": ["joe", "joseph", "joey"],
         "joseph": ["joe", "joseph", "joey"],
+        "joey": ["joe", "joseph", "joey"],
         "tom": ["tom", "thomas", "tommy"],
         "thomas": ["tom", "thomas", "tommy"],
+        "tommy": ["tom", "thomas", "tommy"],
         "sam": ["sam", "samuel", "samantha"],
         "samuel": ["sam", "samuel"],
         "samantha": ["sam", "samantha"],
         "jen": ["jen", "jennifer", "jenny"],
         "jennifer": ["jen", "jennifer", "jenny"],
+        "jenny": ["jen", "jennifer", "jenny"],
         "will": ["will", "william", "bill", "billy"],
         "william": ["will", "william", "bill", "billy"],
         "bill": ["will", "william", "bill", "billy"],
+        "billy": ["will", "william", "bill", "billy"],
         "jim": ["jim", "james", "jimmy"],
         "james": ["jim", "james", "jimmy"],
+        "jimmy": ["jim", "james", "jimmy"],
         "tony": ["tony", "anthony"],
         "anthony": ["tony", "anthony"],
         "steve": ["steve", "steven", "stephen"],
@@ -529,6 +551,7 @@ extension SpeakerDatabase {
         "stephen": ["steve", "steven", "stephen"],
         "ben": ["ben", "benjamin", "benny"],
         "benjamin": ["ben", "benjamin", "benny"],
+        "benny": ["ben", "benjamin", "benny"],
         "andy": ["andy", "andrew", "drew"],
         "andrew": ["andy", "andrew", "drew"],
         "drew": ["andy", "andrew", "drew"],

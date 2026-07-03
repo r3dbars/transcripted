@@ -34,9 +34,9 @@ As of 2026-06-06, the repo has these automated layers:
   Markdown, retained audio, parser discovery, and TranscriptedQA validation. It
   is not native picker or real media transcription proof.
 - `bash scripts/ops/transcripted-qa-bench.sh --mode ...`: orchestrated QA
-  reports for `quick`, `deep`, `full`, `ui`, `packaged`, `artifact`,
-  `audio-synthetic`, `pasteback-synthetic`, `corpus`, `corpus-compare`,
-  `scorecard`, and `live`.
+  reports for `quick`, `deep`, `full`, `ui`, `sparkle-update`, `packaged`,
+  `artifact`, `audio-synthetic`, `pasteback-synthetic`, `corpus`,
+  `corpus-compare`, `scorecard`, and `live`.
 - `.github/workflows/repo-hygiene.yml`: PR/workflow-dispatch hygiene that runs
   preflight plus shell, Ruby, and Python syntax checks.
 - BET-88 GitHub workflows: historical label-gated fixtures for the closed QA
@@ -62,6 +62,9 @@ As of 2026-06-06, the repo has these automated layers:
 - Release: release docs and scripts exist, but agents need one release-health
   report that compares source truth with GitHub release, appcast, cask, live
   download, crawler text, and Sentry metadata.
+- Updates: `--mode sparkle-update` covers local fake-state update-available and
+  downloading menu UI, but live appcast, signature/download/install, relaunch,
+  and existing-install upgrade proof remain separate release-path checks.
 - Privacy: sanitizer tests exist, but QA bench reports, generated PR text, local
   logs, and release notes need a single leakage sweep.
 - Summaries: summary preferences and local summarizer behavior have tests, but

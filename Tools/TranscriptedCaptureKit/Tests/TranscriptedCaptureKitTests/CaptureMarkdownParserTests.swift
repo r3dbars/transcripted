@@ -103,6 +103,8 @@ final class CaptureMarkdownParserTests: XCTestCase {
         XCTAssertEqual(parsed.droppedSegments, 2)
         XCTAssertEqual(parsed.sttEngine, "parakeet_local")
         XCTAssertEqual(parsed.diarizationEngine, "pyannote_offline")
+        XCTAssertNil(parsed.formatVersion, "pre-versioning files carry no format_version")
+        XCTAssertNil(parsed.transcriptStyle, "pre-versioning files carry no transcript_style")
         XCTAssertEqual(parsed.utterances.count, 2)
         XCTAssertEqual(parsed.utterances.map(\.speakerId), ["mic_0", "system_0"])
 
@@ -123,6 +125,8 @@ final class CaptureMarkdownParserTests: XCTestCase {
         ---
         capture_id: "2C356828-221B-43E8-B1BB-93E0C3360E2F"
         capture_type: meeting
+        format_version: 1
+        transcript_style: raw
         transcript_id: "2C356828-221B-43E8-B1BB-93E0C3360E2F"
         date: 2026-06-12
         time: 09:30:00
@@ -192,6 +196,8 @@ final class CaptureMarkdownParserTests: XCTestCase {
 
         let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
 
+        XCTAssertEqual(parsed.formatVersion, 1)
+        XCTAssertEqual(parsed.transcriptStyle, "raw")
         XCTAssertEqual(parsed.utterances.map(\.speakerId), ["mic_0", "system_1"])
 
         let mic = try XCTUnwrap(parsed.speakers.first(where: { $0.id == "mic_0" }))
@@ -385,10 +391,13 @@ final class CaptureMarkdownParserTests: XCTestCase {
     func testParseMeetingStyledTranscriptSection() throws {
         let markdown = """
         ---
+        title: "Meeting with Alex"
         capture_type: meeting
+        format_version: 1
         date: 2026-04-18
         time: 09:15:00
         duration: "0:18"
+        transcript_style: styled
         ---
 
         ## Transcript
@@ -402,6 +411,8 @@ final class CaptureMarkdownParserTests: XCTestCase {
 
         let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
 
+        XCTAssertEqual(parsed.formatVersion, 1)
+        XCTAssertEqual(parsed.transcriptStyle, "styled")
         XCTAssertEqual(parsed.utterances.count, 2)
         XCTAssertEqual(parsed.utterances.first?.text, "Styled entry text here.")
         XCTAssertEqual(parsed.utterances.first?.start, 3)
@@ -486,6 +497,7 @@ final class CaptureMarkdownParserTests: XCTestCase {
         title: "Dictations for 2026-04-07"
         date: 2026-04-07
         capture_type: dictation_day
+        format_version: 1
         ---
 
         # Dictations for 2026-04-07
@@ -517,6 +529,7 @@ final class CaptureMarkdownParserTests: XCTestCase {
 
         XCTAssertEqual(parsed.captureType, "dictation_day")
         XCTAssertEqual(parsed.date, "2026-04-07")
+        XCTAssertEqual(parsed.formatVersion, 1)
         XCTAssertEqual(parsed.markdownFilename, "Dictations_2026-04-07.md")
         XCTAssertEqual(parsed.entryCount, 2)
         XCTAssertEqual(parsed.entries.map(\.id), ["dictation-1", "dictation-2"])
@@ -546,6 +559,7 @@ final class CaptureMarkdownParserTests: XCTestCase {
         let url = URL(fileURLWithPath: "/tmp/Dictations_2026-04-08.md")
         let parsed = try XCTUnwrap(CaptureMarkdownParser.parseDictationDay(from: markdown, markdownURL: url))
         XCTAssertEqual(parsed.date, "2026-04-08")
+        XCTAssertNil(parsed.formatVersion, "pre-versioning day files carry no format_version")
     }
 
     func testExtractTitleTrimsQuotes() {
@@ -598,5 +612,229 @@ final class CaptureMarkdownParserTests: XCTestCase {
         XCTAssertFalse(CaptureMarkdown.looksLikeCaptureMarkdown(notes))
 
         XCTAssertTrue(CaptureMarkdown.directoryHasCaptureMarkdownFiles(tempDir))
+    }
+
+    func testCaptureMarkdownRefusesOversizedFiles() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let oversized = tempDir.appendingPathComponent("Oversized.md")
+        try Data().write(to: oversized)
+        let handle = try FileHandle(forWritingTo: oversized)
+        defer { try? handle.close() }
+        handle.write(Data("---\ntitle: Too Large\n---\n".utf8))
+        handle.truncateFile(atOffset: UInt64(CaptureFileLimits.maxTranscriptBytes + 1))
+
+        XCTAssertNil(CaptureMarkdown.readBoundedContents(of: oversized))
+        XCTAssertFalse(CaptureMarkdown.looksLikeCaptureMarkdown(oversized))
+        XCTAssertFalse(CaptureMarkdown.directoryHasCaptureMarkdownFiles(tempDir))
+    }
+
+    // MARK: - Format-sync round trip with the Core writer
+
+    // Parser side of the format-sync contract. The fixture below is a faithful
+    // full-document sample of TranscriptSaver.formatTranscriptMarkdown output:
+    // flat frontmatter, the channel-qualified speakers block, the
+    // "Channel & Speaker Analytics" section, the "## Full Transcript" rows, and
+    // the footer. The writer side is pinned by
+    // TranscriptFormatterCaptureKitContractTests in TranscriptedCoreTests. If
+    // the written format changes, update both together.
+    func testRoundTripParsesWriterDocument() throws {
+        let markdown = """
+        ---
+        capture_id: "2C356828-221B-43E8-B1BB-93E0C3360E2F"
+        capture_type: meeting
+        transcript_id: "2C356828-221B-43E8-B1BB-93E0C3360E2F"
+        date: 2026-04-18
+        time: 09:15:00
+        duration: "0:09"
+        processing_time: "1.2s"
+        transcription_engine: parakeet_local
+        diarization_engine: pyannote_offline
+        sources: [mic, system_audio]
+        mic_utterances: 1
+        system_utterances: 1
+        mic_speakers: 1
+        system_speakers: 1
+        total_word_count: 8
+        speakers:
+          - id: "0"
+            channel: system
+            db_id: "80FB272B-6061-4FC4-8408-3F7A974C59DB"
+            name: "Jenny Wen"
+            confidence: high
+            source: db_scan
+        ---
+
+        # Meeting Recording - Apr 18, 2026 at 9:15 AM
+
+        **Duration:** 0:09 | **Words:** 8 | **Utterances:** 2
+
+        ---
+
+        ---
+
+        ## Channel & Speaker Analytics
+
+        ### Microphone (You)
+        - **Utterances:** 1
+        - **Words:** ~3
+        - **Speaking Time:** 4s
+
+        ### Meeting Audio (Remote Participants)
+        - **Utterances:** 1
+        - **Words:** ~5
+        - **Speaking Time:** 4s
+        - **Speakers Detected:** 1
+
+        #### Remote Speaker Breakdown
+
+        - **Jenny Wen:** 1 utterances, ~5 words, 4s
+
+        ---
+
+        ## Full Transcript
+
+        [00:00] [Mic/You] Good morning everyone
+
+        [00:05] [System/Jenny Wen] Let us discuss the roadmap
+
+        ---
+
+        *Generated by Transcripted with Parakeet + PyAnnote (local) | Duration: 0:09 | 8 words | 2 speakers*
+        """
+
+        let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
+
+        XCTAssertEqual(parsed.datetime, "2026-04-18T09:15:00")
+        XCTAssertEqual(parsed.durationSeconds, 9)
+        XCTAssertEqual(parsed.sttEngine, "parakeet_local")
+        XCTAssertEqual(parsed.diarizationEngine, "pyannote_offline")
+        XCTAssertEqual(parsed.utterances.map(\.speakerId), ["mic_0", "system_0"])
+        XCTAssertEqual(parsed.utterances.map(\.text), [
+            "Good morning everyone",
+            "Let us discuss the roadmap",
+        ])
+
+        let mic = try XCTUnwrap(parsed.speakers.first(where: { $0.id == "mic_0" }))
+        XCTAssertEqual(mic.name, "You")
+        XCTAssertNil(mic.persistentSpeakerId)
+
+        let system = try XCTUnwrap(parsed.speakers.first(where: { $0.id == "system_0" }))
+        XCTAssertEqual(system.name, "Jenny Wen")
+        XCTAssertEqual(system.persistentSpeakerId, "80FB272B-6061-4FC4-8408-3F7A974C59DB")
+        XCTAssertEqual(system.confidence, "high")
+        XCTAssertEqual(system.wordCount, 5)
+    }
+
+    // MARK: - Malformed / adversarial input hardening
+
+    func testUnicodeSpeakerNameAndBodySurviveParsing() throws {
+        let markdown = """
+        ---
+        capture_type: meeting
+        date: 2026-04-18
+        time: 09:15:00
+        duration: "0:05"
+        speakers:
+          - id: "0"
+            channel: system
+            db_id: "11111111-1111-1111-1111-111111111111"
+            name: "José Ñoño 🎤"
+            confidence: high
+        ---
+
+        ## Full Transcript
+
+        [00:00] [System/José Ñoño 🎤] Café au lait, naïve façade — emoji 🎤 survives.
+        """
+
+        let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
+
+        XCTAssertEqual(parsed.utterances.count, 1)
+        XCTAssertTrue(parsed.utterances.first?.text.contains("Café au lait") == true)
+
+        let speaker = try XCTUnwrap(parsed.speakers.first(where: { $0.id == "system_0" }))
+        XCTAssertEqual(speaker.name, "José Ñoño 🎤")
+        XCTAssertEqual(speaker.persistentSpeakerId, "11111111-1111-1111-1111-111111111111")
+    }
+
+    func testFrontmatterValueWithEmbeddedColonKeepsRemainder() throws {
+        let markdown = """
+        ---
+        title: "Q3: Planning sync"
+        date: 2026-04-18
+        time: 09:15:00
+        ---
+
+        ## Full Transcript
+
+        [00:00] [Mic/You] Hi.
+        """
+
+        let document = try XCTUnwrap(CaptureMarkdownParser.parseFrontmatter(from: markdown))
+        XCTAssertEqual(document.values["title"], "Q3: Planning sync")
+        XCTAssertNotNil(CaptureMarkdownParser.parseMeeting(from: markdown))
+    }
+
+    func testMissingClosingDelimiterReturnsNilWithoutTrapping() {
+        let unterminated = "---\ndate: 2026-04-18\ntime: 09:15:00\n\nbody with no closing fence"
+        XCTAssertNil(CaptureMarkdownParser.parseFrontmatter(from: unterminated))
+        XCTAssertNil(CaptureMarkdownParser.parseMeeting(from: unterminated))
+        XCTAssertNil(CaptureMarkdown.extractTitle(from: unterminated))
+    }
+
+    // Forward compatibility: an indented writer field the parser does not model
+    // (a future `source:`/`future_field:` line) must not terminate the speakers
+    // block — only a new top-level key does.
+    func testUnknownIndentedSpeakerFieldDoesNotTerminateBlock() throws {
+        let markdown = """
+        ---
+        capture_type: meeting
+        date: 2026-04-18
+        time: 09:15:00
+        duration: "0:05"
+        speakers:
+          - id: "0"
+            channel: system
+            name: "Alex"
+            confidence: high
+            source: db_scan
+            future_field: "ignored by parser"
+        ---
+
+        ## Full Transcript
+
+        [00:00] [System/Alex] Forward-compatible metadata.
+        """
+
+        let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
+        let speaker = try XCTUnwrap(parsed.speakers.first(where: { $0.id == "system_0" }))
+        XCTAssertEqual(speaker.name, "Alex")
+        XCTAssertEqual(speaker.confidence, "high")
+    }
+
+    func testStyledTranscriptHeaderMissingBracketIsSkipped() throws {
+        let markdown = """
+        ---
+        capture_type: meeting
+        date: 2026-04-18
+        time: 09:15:00
+        duration: "0:18"
+        ---
+
+        ## Transcript
+
+        **00:03 [Mic/You**
+        Header is missing its closing bracket.
+
+        **00:07 [System/Alex]**
+        Well-formed entry still parses.
+        """
+
+        let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
+        XCTAssertEqual(parsed.utterances.count, 1)
+        XCTAssertEqual(parsed.utterances.first?.text, "Well-formed entry still parses.")
     }
 }

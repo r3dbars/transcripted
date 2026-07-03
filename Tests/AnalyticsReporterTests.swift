@@ -515,6 +515,31 @@ func testAnalyticsReporter() {
         assertEqual(AnalyticsReporterTestURLProtocol.requestCount(), 1, "opt-out should prevent new delivery attempts")
     }
 
+    runSuite("AnalyticsReporter buffers events in memory and persists synchronously on demand") {
+        let fixture = makeAnalyticsReporterFixture(
+            responses: [.networkFailure],
+            persistDebounceInterval: 60
+        )
+        defer { fixture.cleanup() }
+
+        fixture.reporter.trackEvent("app_launched")
+
+        assertTrue(
+            waitUntil { AnalyticsReporterTestURLProtocol.requestCount() == 1 },
+            "tracked capture should be delivered without waiting for a disk persist"
+        )
+        assertFalse(
+            FileManager.default.fileExists(atPath: fixture.bufferURL.path),
+            "buffer writes should be debounced instead of hitting disk once per tracked event"
+        )
+
+        fixture.reporter.persistPendingCapturesNow()
+
+        let captures = loadBufferedAnalyticsCaptures(from: fixture.bufferURL)
+        assertEqual(captures.count, 1, "synchronous persist should flush the in-memory buffer to disk")
+        assertEqual(captures.first?.event, "app_launched", "persisted capture should match the tracked event")
+    }
+
     runSuite("AnalyticsReporter refuses non-HTTPS PostHog hosts before buffering") {
         let fixture = makeAnalyticsReporterFixture(
             responses: [.status(200)],
@@ -628,6 +653,7 @@ private func makeAnalyticsReporterFixture(
     captureHost: String = "https://posthog.example.com",
     now: Date = Date(timeIntervalSince1970: 2_000),
     retryDelay: @escaping (Int) -> TimeInterval = { _ in 1 },
+    persistDebounceInterval: TimeInterval = 0.05,
     analyticsEnabled: (() -> Bool)? = nil,
     observePreferenceChanges: Bool = false,
     autostart: Bool = true
@@ -662,6 +688,7 @@ private func makeAnalyticsReporterFixture(
                 userDefaults: defaults,
                 currentDate: { now },
                 retryDelay: retryDelay,
+                persistDebounceInterval: persistDebounceInterval,
                 analyticsEnabled: analyticsEnabled,
                 observePreferenceChanges: observePreferenceChanges
             )

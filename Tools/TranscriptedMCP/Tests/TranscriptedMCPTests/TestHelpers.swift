@@ -1,6 +1,22 @@
 import Foundation
 @testable import transcripted_mcp
 
+/// Sequential system-channel utterances for pagination fixtures. Built with a
+/// loop: mapping to labeled tuples with inline Double math makes the type
+/// checker time out on CI.
+func makeSequentialUtterances(
+    count: Int,
+    text: (Int) -> String
+) -> [(speakerId: String, start: Double, end: Double, text: String)] {
+    var utterances: [(speakerId: String, start: Double, end: Double, text: String)] = []
+    for index in 0..<count {
+        let start = Double(index * 10)
+        let end = Double(index * 10 + 5)
+        utterances.append((speakerId: "system_0", start: start, end: end, text: text(index)))
+    }
+    return utterances
+}
+
 func makeFixtureJSON(
     title: String? = nil,
     date: String = "2026-03-29T10:00:00-0500",
@@ -135,6 +151,96 @@ func makeFixtureJSON(
 func writeFixture(_ content: String, filename: String, to directory: URL) throws {
     let path = directory.appendingPathComponent("\(filename).md")
     try content.write(to: path, atomically: true, encoding: .utf8)
+}
+
+/// Minimal meeting transcript carrying an inline local summary, mirroring what
+/// LocalMeetingSummaryMarkdownUpdater writes: `local_summary_*` frontmatter keys
+/// plus a marker-bounded `## Local Summary` body block with `###` subsections.
+func makeMeetingWithInlineSummary(
+    date: String = "2026-04-18",
+    time: String = "09:15:00",
+    attendees: [String] = ["Jenny", "Sam"],
+    decisions: [String] = ["Ship the beta on Friday", "Cut the legacy import path"],
+    actionItems: [String] = ["Jenny: send the revised spec", "Follow up with legal"],
+    openQuestions: [String] = ["Do we need a migration window?"]
+) -> String {
+    func block(_ heading: String, _ items: [String]) -> String {
+        let body = items.isEmpty ? "- None found." : items.map { "- \($0)" }.joined(separator: "\n")
+        return "\(heading)\n\(body)"
+    }
+    func frontmatter(_ items: [String]) -> String {
+        items.isEmpty ? "None found." : items.joined(separator: " | ")
+    }
+    return """
+    ---
+    capture_type: meeting
+    date: \(date)
+    time: \(time)
+    duration: "30:00"
+    transcription_engine: parakeet_local
+    diarization_engine: pyannote_offline
+    local_summary_version: "1"
+    local_summary_title: "Beta launch sync"
+    local_summary_decisions: "\(frontmatter(decisions))"
+    local_summary_action_items: "\(frontmatter(actionItems))"
+    local_summary_open_questions: "\(frontmatter(openQuestions))"
+    ---
+
+    # Meeting
+
+    ## Full Transcript
+
+    [00:00] [System/Jenny] Let's lock the launch.
+
+    <!-- transcripted:local-summary:start v=1 -->
+    ## Local Summary
+
+    ### Summary
+    - The team aligned on launch.
+
+    \(block("### Decisions", decisions))
+
+    \(block("### Open Questions", openQuestions))
+
+    \(block("### Participants", attendees))
+
+    \(block("### Action Items", actionItems))
+    <!-- transcripted:local-summary:end -->
+    """
+}
+
+func makeMeetingWithAutoSummary(
+    date: String = "2026-04-18",
+    time: String = "09:15:00",
+    decisions: [String] = ["Ship the beta on Friday"],
+    actionItems: [String] = ["Jenny: send the revised spec"],
+    openQuestions: [String] = ["Do we need a migration window?"]
+) -> String {
+    func frontmatter(_ items: [String]) -> String {
+        items.isEmpty ? "None found." : items.joined(separator: " | ")
+    }
+    return """
+    ---
+    capture_type: meeting
+    date: \(date)
+    time: \(time)
+    duration: "30:00"
+    transcription_engine: parakeet_local
+    diarization_engine: pyannote_offline
+    auto_summary_version: "1"
+    auto_summary_generated_at: "2026-04-18T14:15:00Z"
+    auto_summary_method: "heuristic-v1"
+    auto_summary_decisions: "\(frontmatter(decisions))"
+    auto_summary_action_items: "\(frontmatter(actionItems))"
+    auto_summary_open_questions: "\(frontmatter(openQuestions))"
+    ---
+
+    # Meeting
+
+    ## Full Transcript
+
+    [00:00] [System/Jenny] Let's lock the launch.
+    """
 }
 
 func makeDictationDayJSON(

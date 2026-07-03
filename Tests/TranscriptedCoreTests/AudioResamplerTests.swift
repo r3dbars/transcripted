@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import TranscriptedCore
 
@@ -58,6 +59,77 @@ final class AudioResamplerTests: XCTestCase {
         let samples: [Float] = [0.5, 0.6]
         let out = AudioResampler.resample(samples, from: 0, to: 16000)
         XCTAssertEqual(out, samples)
+    }
+
+    // MARK: - loadAndResample (convertToMono)
+
+    func testLoadAndResampleDownmixesStereoAndResamplesToTargetRate() throws {
+        // 1s of constant 48 kHz stereo -> 16 kHz mono through the chunked
+        // AVAudioConverter path.
+        let url = try writeWAV(sampleRate: 48_000, channels: 2, frames: 48_000, value: 0.5)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let samples = try AudioResampler.loadAndResample(url: url, targetRate: 16_000)
+
+        // The converter may emit a few frames of slack around 16_000; the
+        // destination capacity allows up to +64.
+        XCTAssertGreaterThanOrEqual(samples.count, 15_500)
+        XCTAssertLessThanOrEqual(samples.count, 16_064)
+
+        // Interior samples should sit at the constant value (edges can carry
+        // the anti-aliasing filter's ramp-in).
+        let interior = samples[1_000..<15_000]
+        let average = interior.reduce(0, +) / Float(interior.count)
+        XCTAssertEqual(average, 0.5, accuracy: 0.01)
+    }
+
+    func testLoadAndResampleMonoAtTargetRatePassesThrough() throws {
+        // Already 16 kHz mono: short-circuits through loadWAV, count is exact.
+        let url = try writeWAV(sampleRate: 16_000, channels: 1, frames: 1_600, value: 0.25)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let samples = try AudioResampler.loadAndResample(url: url, targetRate: 16_000)
+
+        XCTAssertEqual(samples.count, 1_600)
+        XCTAssertEqual(samples.first ?? 0, 0.25, accuracy: 0.000_1)
+        XCTAssertEqual(samples.last ?? 0, 0.25, accuracy: 0.000_1)
+    }
+
+    private func writeWAV(
+        sampleRate: Double,
+        channels: AVAudioChannelCount,
+        frames: AVAudioFrameCount,
+        value: Float
+    ) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioResamplerTests-\(UUID().uuidString).wav")
+        guard let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: channels,
+            interleaved: false
+        ), let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
+            throw NSError(domain: "AudioResamplerTests", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Failed to create test format or buffer"
+            ])
+        }
+
+        buffer.frameLength = frames
+        for channel in 0..<Int(channels) {
+            guard let channelData = buffer.floatChannelData?[channel] else { continue }
+            for frame in 0..<Int(frames) {
+                channelData[frame] = value
+            }
+        }
+
+        let file = try AVAudioFile(
+            forWriting: url,
+            settings: format.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        try file.write(from: buffer)
+        return url
     }
 
     // MARK: - extractSlice

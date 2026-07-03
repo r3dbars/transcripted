@@ -77,31 +77,24 @@ final class CrashReporter {
         previousUncaughtHandler?(exception)
     }
 
+    // `capture(error:)` and `capture(message:)` forwarded arbitrary
+    // error/message text to Sentry gated only by text sanitization, with no
+    // positive event allowlist (unlike `captureObservabilityEvent`). They have
+    // no callers anywhere in the app target, so rather than keep an
+    // allowlist-bypassing path alive we make them inert no-ops. If a real need
+    // for ad-hoc error capture returns, route it through `SentryEventPolicy`
+    // like `captureObservabilityEvent` instead of re-enabling these.
+    @available(*, deprecated, message: "Unused; allowlist-bypassing. Route new error capture through captureObservabilityEvent + SentryEventPolicy.")
     func capture(error: Error, context: String = "") {
-        var extra: [String: String] = [:]
-        if !context.isEmpty {
-            // Keyed "detail", not "context": "context" is a sensitive-key fragment in
-            // SentryPayloadSanitizer, so that key would be dropped before send.
-            extra["detail"] = context
-        }
-
-        _ = captureMessageEvent(
-            level: .error,
-            title: String(describing: type(of: error)),
-            message: "Swift error captured",
-            tags: ["source": "swift_error"],
-            extra: extra
-        )
+        _ = error
+        _ = context
     }
 
+    @available(*, deprecated, message: "Unused; allowlist-bypassing. Route new message capture through captureObservabilityEvent + SentryEventPolicy.")
     func capture(message: String, level: String = "warning", extra: [String: String] = [:]) {
-        _ = captureMessageEvent(
-            level: sentryLevel(for: level),
-            title: message,
-            message: message,
-            tags: ["source": "manual_message"],
-            extra: extra
-        )
+        _ = message
+        _ = level
+        _ = extra
     }
 
     static func setRuntimeDiagnosticsContext(_ context: [String: String]) {
@@ -121,6 +114,15 @@ final class CrashReporter {
 
     @discardableResult
     func captureSupportDiagnosticEvent(extra: [String: String]) -> String? {
+        // Support-diagnostic extras are built from app state and can pick up
+        // free-text values under innocuous-looking keys (e.g. the
+        // `latest_reliability_packet` blob, interpolated `route_*`/`runtime_*`/
+        // `storage_*` keys that the sensitive-key fragment list does not catch).
+        // The off-device contract is positive-allowlist gated like
+        // `captureObservabilityEvent`, not just key-drop + redaction, so we
+        // filter to the known-safe key set owned by `SupportDiagnosticsBundle`
+        // before send. Surviving values still pass through the text redactor
+        // inside `captureMessageEvent` as defense-in-depth.
         captureMessageEvent(
             level: .warning,
             title: "support_diagnostic_event",
@@ -130,7 +132,7 @@ final class CrashReporter {
                 "engine": "support",
                 "event": "diagnostic_event",
             ],
-            extra: extra,
+            extra: SupportDiagnosticsBundle.allowlistedSentryContext(extra),
             fingerprint: ["support", "diagnostic_event"]
         )
     }
@@ -309,19 +311,6 @@ final class CrashReporter {
             return .warning
         case .info:
             return .info
-        }
-    }
-
-    private func sentryLevel(for level: String) -> SentryLevel {
-        switch level.lowercased() {
-        case "fatal":
-            return .fatal
-        case "error":
-            return .error
-        case "info":
-            return .info
-        default:
-            return .warning
         }
     }
 }

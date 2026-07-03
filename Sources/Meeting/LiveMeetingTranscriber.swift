@@ -5,7 +5,7 @@ import Foundation
 @available(macOS 14.0, *)
 @MainActor
 final class LiveMeetingTranscriber {
-    private var streamingSession: StreamingAsrSession?
+    private var streamingSession: SlidingWindowAsrSession?
     private var channels: [LiveMeetingCodexSource: LiveMeetingTranscriberChannel] = [:]
 
     var isRunning: Bool {
@@ -20,7 +20,7 @@ final class LiveMeetingTranscriber {
     ) {
         stop(capture: capture)
 
-        let session = StreamingAsrSession()
+        let session = SlidingWindowAsrSession()
         streamingSession = session
 
         let microphoneChannel = LiveMeetingTranscriberChannel(
@@ -82,7 +82,7 @@ final class LiveMeetingTranscriber {
 private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     private let source: LiveMeetingCodexSource
     private let audioSource: AudioSource
-    private let streamingSession: StreamingAsrSession
+    private let streamingSession: SlidingWindowAsrSession
     private let codexSession: LiveMeetingCodexSession
     private let feed: LiveMeetingTranscriptFeed?
     private let startedAt: Date
@@ -91,6 +91,8 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
 
     private var continuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
     private var inputTask: Task<Void, Never>?
+    private var feedContinuation: AsyncStream<LiveMeetingCodexTranscriptEntry>.Continuation?
+    private var feedTask: Task<Void, Never>?
     private var updateState = LiveMeetingStreamingUpdateState()
     private var lastFeedText = ""
     private var lastFeedWasFinal = false
@@ -98,7 +100,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
     init(
         source: LiveMeetingCodexSource,
         audioSource: AudioSource,
-        streamingSession: StreamingAsrSession,
+        streamingSession: SlidingWindowAsrSession,
         codexSession: LiveMeetingCodexSession,
         feed: LiveMeetingTranscriptFeed?,
         startedAt: Date
@@ -123,28 +125,66 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
             self.continuation = continuation
         }
 
+        if let feed {
+            // One long-lived main-actor consumer instead of spawning a fresh
+            // Task { @MainActor } per distinct partial hypothesis. Entries are
+            // yielded in update order from the single consume task, so the
+            // feed still sees partials and finals in sequence. Unbounded
+            // buffering is deliberate: entries are small values, finals must
+            // not be dropped, and the producer is bounded by the ASR update
+            // rate — strictly cheaper than the unbounded task creation it
+            // replaces.
+            let (entries, feedContinuation) = AsyncStream<LiveMeetingCodexTranscriptEntry>.makeStream()
+            lock.withLock {
+                self.feedContinuation = feedContinuation
+            }
+            feedTask = Task { @MainActor in
+                for await entry in entries {
+                    feed.ingest(entry)
+                }
+            }
+        }
+
         inputTask = Task.detached(priority: .utility) { [weak self] in
             await self?.run(stream: stream)
         }
     }
 
+    /// Called on the capture tap thread with the buffer that Core's
+    /// `onMicPCMBuffer` / `onSystemPCMBuffer` hooks deliver. Those buffers
+    /// own their memory (Core deep-copies borrowed tap memory before
+    /// delivery; SCK system buffers already own theirs) and are only read —
+    /// never mutated — after delivery, so it is safe to retain the delivered
+    /// buffer across the async hop and defer the deep copy to `inputQueue`.
+    /// That keeps the per-buffer allocation + memcpy off the tap thread. The
+    /// copy itself stays (on `inputQueue`) so the buffer handed to streaming
+    /// ASR remains private to this channel, since Core's file writer shares
+    /// the delivered buffer for its own read.
     func enqueueCopy(of buffer: AVAudioPCMBuffer) {
-        guard let copy = Self.copyPCMBuffer(buffer) else { return }
         inputQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self, let copy = Self.copyPCMBuffer(buffer) else { return }
             self.lock.withLock { self.continuation }?.yield(copy)
         }
     }
 
     func cancel() {
-        let continuation = lock.withLock { () -> AsyncStream<AVAudioPCMBuffer>.Continuation? in
+        let (continuation, feedContinuation) = lock.withLock {
+            () -> (AsyncStream<AVAudioPCMBuffer>.Continuation?, AsyncStream<LiveMeetingCodexTranscriptEntry>.Continuation?) in
             let continuation = self.continuation
+            let feedContinuation = self.feedContinuation
             self.continuation = nil
-            return continuation
+            self.feedContinuation = nil
+            return (continuation, feedContinuation)
         }
         continuation?.finish()
+        feedContinuation?.finish()
         inputTask?.cancel()
         inputTask = nil
+        // Do not cancel the feed consumer here. Finishing the continuation lets
+        // its AsyncStream drain any already-yielded final/partial entries before
+        // the task exits, while cancellation can drop those queued entries during
+        // stop/teardown.
+        feedTask = nil
     }
 
     private func run(stream: AsyncStream<AVAudioPCMBuffer>) async {
@@ -189,13 +229,13 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
         }
     }
 
-    private func consume(updates: AsyncStream<StreamingTranscriptionUpdate>) async {
+    private func consume(updates: AsyncStream<SlidingWindowTranscriptionUpdate>) async {
         for await update in updates {
             append(update: update)
         }
     }
 
-    private func append(update: StreamingTranscriptionUpdate) {
+    private func append(update: SlidingWindowTranscriptionUpdate) {
         let now = Date()
         let normalized = LiveMeetingStreamingUpdatePolicy.normalizedText(update.text)
         guard !normalized.isEmpty else { return }
@@ -210,8 +250,10 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
 
         // In-app drawer lane: unthrottled. Partials replace themselves in
         // memory, so every distinct hypothesis can flow word-by-word; only
-        // exact repeats are dropped.
-        if let feed {
+        // exact repeats are dropped. Distinct entries go through the
+        // channel's single main-actor feed consumer (see `start()`) instead
+        // of a per-hypothesis task.
+        if feed != nil {
             let isDistinct = lock.withLock {
                 guard normalized != lastFeedText || update.isConfirmed != lastFeedWasFinal else {
                     return false
@@ -221,7 +263,7 @@ private final class LiveMeetingTranscriberChannel: @unchecked Sendable {
                 return true
             }
             if isDistinct {
-                Task { @MainActor in feed.ingest(entry) }
+                lock.withLock { feedContinuation }?.yield(entry)
             }
         }
 

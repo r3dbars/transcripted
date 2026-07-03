@@ -31,7 +31,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     private var lastExternalApplication: NSRunningApplication?
     private var hasPresentedInitialOnboarding = false
     private let statusItemUpdateBadge = NSView(frame: .zero)
-    private var statusItemUpdateSubscription: AnyCancellable?
+    private var statusItemSubscriptions: Set<AnyCancellable> = []
+    private var statusItemMeetingRecording = false
+    private var statusItemDictationRecording = false
+    private var statusItemUpdateVersion: String?
     private let settingsTextPaster = ClipboardRestoringTextPaster()
     private lazy var settingsActions = TranscriptedSettingsActions(
         startDictation: { [weak self] in self?.startDictationFromSettings() },
@@ -81,6 +84,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     /// the dictation overlay so regressions to one can't break the other.
     @available(macOS 14.0, *)
     lazy var meetingOverlayController = MeetingOverlayController()
+    @available(macOS 14.0, *)
+    lazy var capturePillController = CapturePillController()
     @available(macOS 14.0, *)
     lazy var meetingPromptDetector = MeetingPromptDetector()
     @available(macOS 14.0, *)
@@ -140,13 +145,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 ).allowsDetectedMeetingPrompt
             }
             meetingOverlayController.setup(meetingSession: meetingSession)
-            meetingOverlayController.onPromptRecord = { [weak self] candidate in
+            let recordPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 AnalyticsReporter.track(
                     "meeting_prompt_record_selected",
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: self.meetingPromptTelemetryReadiness(),
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 Task { @MainActor [weak self] in
@@ -160,7 +166,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     }
                 }
             }
-            meetingOverlayController.onPromptDismiss = { [weak self] candidate in
+            let dismissPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
                 AnalyticsReporter.track(
@@ -168,7 +174,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
                         readiness: self.meetingPromptTelemetryReadiness(),
-                        backoffKind: backoffDecision.kind
+                        backoffKind: backoffDecision.kind,
+                        signals: self.meetingPromptDetector.currentSignalSnapshot(),
+                        dismissStreak: self.meetingPromptDetector.dismissStreak(for: candidate.provider)
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
@@ -181,6 +189,30 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
+            meetingOverlayController.onPromptExpired = { [weak self] candidate in
+                guard let self else { return }
+                let backoffDecision = self.meetingPromptDetector.expire(candidate: candidate)
+                AnalyticsReporter.track(
+                    "meeting_prompt_dismissed",
+                    properties: MeetingPromptTelemetry.properties(
+                        for: candidate,
+                        readiness: self.meetingPromptTelemetryReadiness(),
+                        backoffKind: backoffDecision.kind,
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
+                    )
+                )
+                ActivationTelemetry.trackWorkflowAbandoned(
+                    workflowKind: .meetingPrompt,
+                    stage: "prompt_shown",
+                    reasonKind: .expired,
+                    surface: .meetingOverlay,
+                    priorReadyState: MeetingPromptTelemetry.readyState(
+                        readiness: self.meetingPromptTelemetryReadiness()
+                    )
+                )
+            }
+            meetingOverlayController.onPromptRecord = recordPrompt
+            meetingOverlayController.onPromptDismiss = dismissPrompt
             meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
                 guard let self else { return }
                 let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
@@ -189,7 +221,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
                         readiness: self.meetingPromptTelemetryReadiness(),
-                        backoffKind: backoffDecision.kind
+                        backoffKind: backoffDecision.kind,
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
@@ -202,13 +235,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
+            capturePillController.onRecord = recordPrompt
+            capturePillController.onDismiss = dismissPrompt
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
                 AnalyticsReporter.track(
                     "meeting_prompt_suppressed",
                     properties: MeetingPromptTelemetry.properties(
                         for: suppression,
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: self.meetingPromptTelemetryReadiness(),
+                        signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
                 ActivationTelemetry.trackWorkflowAbandoned(
@@ -224,17 +260,54 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
                 guard PermissionsOnboardingPreferences.hasCompleted() else { return false }
                 guard let self else { return false }
-                let presented = self.meetingOverlayController.presentDetectedMeetingPrompt(candidate)
+                let presented = self.capturePillController.present(candidate: candidate)
                 if presented {
                     AnalyticsReporter.track(
                         "meeting_prompt_shown",
                         properties: MeetingPromptTelemetry.properties(
                             for: candidate,
-                            readiness: self.meetingPromptTelemetryReadiness()
+                            readiness: self.meetingPromptTelemetryReadiness(),
+                            signals: self.meetingPromptDetector.currentSignalSnapshot()
                         )
                     )
                 }
                 return presented
+            }
+            // Capture-funnel denominator: one event per detected call at its
+            // end, recorded or not, so capture rate is measured against calls
+            // that actually happened instead of prompts that fired.
+            meetingPromptDetector.onDetectedCallEnded = { summary in
+                AnalyticsReporter.track(
+                    "meeting_detected_call_ended",
+                    properties: MeetingPromptTelemetry.properties(for: summary)
+                )
+            }
+            // Post-call awareness nudge: a long detected call ended with no
+            // recording (and no explicit decline). Policy gates live in the
+            // detector; the preference gate and opt-out live here.
+            meetingPromptDetector.onUnrecordedCallEnded = { [weak self] call in
+                guard let self else { return }
+                guard MissedCallNudgePreferences.isEnabled() else { return }
+                let presented = self.meetingOverlayController.presentMissedCallNudge(call)
+                if presented {
+                    AnalyticsReporter.track(
+                        "meeting_missed_call_nudge",
+                        properties: [
+                            "action": "shown",
+                            "duration_bucket": MissedCallNudgePolicy.durationBucket(for: call.duration),
+                            "provider": call.provider.rawValue,
+                        ]
+                    )
+                }
+            }
+            meetingOverlayController.onMissedCallNudgeResolved = { outcome in
+                if outcome == .disabled {
+                    MissedCallNudgePreferences.setEnabled(false)
+                }
+                AnalyticsReporter.track(
+                    "meeting_missed_call_nudge",
+                    properties: ["action": outcome.rawValue]
+                )
             }
             // Ad-hoc call detection: never prompt while we already hold the mic
             // (meeting recording or dictation), and feed mic-activity into the
@@ -258,6 +331,12 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             micActivityMonitor.onChange = { [weak self] micUsers in
                 self?.meetingPromptDetector.updateMicInputUsers(micUsers)
+            }
+            // Native-app audio output is the listen-only call signal (remote
+            // people talking, nothing holding the mic here). Same prompt pipe;
+            // the detector de-dupes it against the mic and camera signals.
+            micActivityMonitor.onOutputChange = { [weak self] outputUsers in
+                self?.meetingPromptDetector.updateAudioOutputUsers(outputUsers)
             }
             // Camera-on is a second, complementary call sensor (e.g. a camera-on,
             // mic-muted Meet join). It feeds the same prompt; the detector de-dupes
@@ -283,6 +362,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             configureStatusItemButton(button)
         }
         bindStatusItemUpdateBadge()
+        bindStatusItemRecordingIndicator()
         installSettingsMenuHandler()
 
         // Set up popover (pure AppKit — no NSHostingController, no AttributeGraph)
@@ -290,7 +370,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         pop.contentSize = NSSize(width: MenuTokens.panelWidth, height: MenuTokens.panelHeight)
         pop.behavior = .transient
         pop.delegate = self
-        pop.appearance = NSAppearance(named: .darkAqua)
         popover = pop
 
         writeLaunchUISmokeReportIfRequested()
@@ -522,12 +601,119 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return
         }
 
+        if statusItemClickWantsQuickMenu(NSApp.currentEvent) {
+            showStatusItemQuickMenu()
+            return
+        }
+
         guard let button = statusItem?.button, let popover = popover else { return }
         if popover.isShown {
             closePopover()
         } else {
             showMainPopover(relativeTo: button, popover: popover)
         }
+    }
+
+    /// Right-click (or control-click) on the status item opens the lean quick
+    /// menu; a plain left-click keeps opening the popover.
+    private func statusItemClickWantsQuickMenu(_ event: NSEvent?) -> Bool {
+        guard let event else { return false }
+        switch event.type {
+        case .rightMouseUp, .rightMouseDown:
+            return true
+        case .leftMouseUp, .leftMouseDown:
+            return event.modifierFlags.contains(.control)
+        default:
+            return false
+        }
+    }
+
+    private func showStatusItemQuickMenu() {
+        guard let statusItem else { return }
+
+        let menu = NSMenu()
+
+        let dictationItem = NSMenuItem(
+            title: appState.sttRouter.isRecording ? "Stop Dictation" : "Start Dictation",
+            action: #selector(quickMenuToggleDictation),
+            keyEquivalent: ""
+        )
+        dictationItem.target = self
+        menu.addItem(dictationItem)
+
+        let meetingItem = NSMenuItem(
+            title: appState.meetingSession.isRecording ? "Stop Meeting Recording" : "Start Meeting Recording",
+            action: #selector(quickMenuToggleMeeting),
+            keyEquivalent: ""
+        )
+        meetingItem.target = self
+        menu.addItem(meetingItem)
+
+        menu.addItem(.separator())
+
+        let homeItem = NSMenuItem(
+            title: "Open Home",
+            action: #selector(quickMenuOpenHome),
+            keyEquivalent: ""
+        )
+        homeItem.target = self
+        menu.addItem(homeItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit Transcripted",
+            action: #selector(quickMenuQuit),
+            keyEquivalent: ""
+        )
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        // Standard status-item trick: attach the menu only for this click so
+        // the plain left-click action keeps opening the popover. Menu tracking
+        // runs synchronously inside performClick.
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func quickMenuToggleDictation() {
+        let isRecording = appState.sttRouter.isRecording
+        trackQuickMenuAction(isRecording ? "quick_menu_stop_dictation" : "quick_menu_start_dictation")
+        if isRecording {
+            sessionController.stopDictationAndPaste(trigger: .menu)
+        } else {
+            startDictationFromSettings()
+        }
+    }
+
+    @objc private func quickMenuToggleMeeting() {
+        trackQuickMenuAction(
+            appState.meetingSession.isRecording ? "quick_menu_stop_meeting" : "quick_menu_start_meeting"
+        )
+        menuToggleMeetingRecording()
+    }
+
+    @objc private func quickMenuOpenHome() {
+        trackQuickMenuAction("quick_menu_home")
+        showSettingsWindow(page: .home, source: "quick_menu")
+    }
+
+    @objc private func quickMenuQuit() {
+        trackQuickMenuAction("quick_menu_quit")
+        NSApplication.shared.terminate(nil)
+    }
+
+    private func trackQuickMenuAction(_ actionID: String) {
+        AnalyticsReporter.track(
+            "menu_bar_action_clicked",
+            properties: [
+                "action_id": actionID,
+                "dictation_ready": appState.sttRouter.isModelLoaded ? "true" : "false",
+                "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
+                "paste_available": "unknown",
+            ]
+        )
     }
 
     @objc private func openSettingsFromAppMenu(_ sender: Any?) {
@@ -546,6 +732,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         button.setAccessibilityLabel("Transcripted")
         button.action = #selector(togglePopover)
         button.target = self
+        // Right clicks must reach the action so togglePopover can route them
+        // to the quick menu; buttons only send left-ups by default.
+        _ = button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         installStatusItemUpdateBadge(on: button)
     }
@@ -556,16 +745,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         statusItemUpdateBadge.translatesAutoresizingMaskIntoConstraints = false
         statusItemUpdateBadge.wantsLayer = true
         statusItemUpdateBadge.layer?.backgroundColor = NSColor.systemOrange.cgColor
-        statusItemUpdateBadge.layer?.borderColor = NSColor.black.withAlphaComponent(0.45).cgColor
-        statusItemUpdateBadge.layer?.borderWidth = 1
-        statusItemUpdateBadge.layer?.cornerRadius = 4
+        statusItemUpdateBadge.layer?.cornerRadius = 3.5
         statusItemUpdateBadge.layer?.masksToBounds = true
         statusItemUpdateBadge.isHidden = true
 
         button.addSubview(statusItemUpdateBadge)
         NSLayoutConstraint.activate([
-            statusItemUpdateBadge.widthAnchor.constraint(equalToConstant: 8),
-            statusItemUpdateBadge.heightAnchor.constraint(equalToConstant: 8),
+            statusItemUpdateBadge.widthAnchor.constraint(equalToConstant: 7),
+            statusItemUpdateBadge.heightAnchor.constraint(equalToConstant: 7),
             statusItemUpdateBadge.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
             statusItemUpdateBadge.topAnchor.constraint(equalTo: button.topAnchor, constant: 3),
         ])
@@ -616,22 +803,80 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func bindStatusItemUpdateBadge() {
-        statusItemUpdateSubscription = appState.sparkleUpdater.$updateStatus
+        appState.sparkleUpdater.$updateStatus
             .receive(on: RunLoop.main)
             .sink { [weak self] status in
                 self?.updateStatusItemBadge(for: status)
             }
+            .store(in: &statusItemSubscriptions)
         updateStatusItemBadge(for: appState.sparkleUpdater.updateStatus)
+    }
+
+    /// Keeps the status-item glyph in sync with active capture so the menu bar
+    /// itself answers "am I recording?" without opening the popover.
+    private func bindStatusItemRecordingIndicator() {
+        appState.sttRouter.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRecording in
+                guard let self, self.statusItemDictationRecording != isRecording else { return }
+                self.statusItemDictationRecording = isRecording
+                self.refreshStatusItemPresentation()
+            }
+            .store(in: &statusItemSubscriptions)
+
+        if #available(macOS 14.0, *) {
+            appState.meetingSession.$isRecording
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] isRecording in
+                    guard let self, self.statusItemMeetingRecording != isRecording else { return }
+                    self.statusItemMeetingRecording = isRecording
+                    self.refreshStatusItemPresentation()
+                }
+                .store(in: &statusItemSubscriptions)
+        }
     }
 
     private func updateStatusItemBadge(for status: SparkleUpdaterController.UpdateStatus) {
         let updateVersion = status.readyToInstallVersion
         statusItemUpdateBadge.isHidden = updateVersion == nil
+        statusItemUpdateVersion = updateVersion
+        refreshStatusItemPresentation()
+    }
 
-        if let updateVersion {
-            statusItem?.button?.toolTip = "Transcripted - restart to update to \(updateVersion)"
+    /// Single writer for the status-item button's image, tint, tooltip, and
+    /// accessibility label so the recording indicator and the update badge
+    /// cannot fight over shared button state.
+    private func refreshStatusItemPresentation() {
+        guard let button = statusItem?.button else { return }
+
+        let symbolName: String
+        let tint: NSColor?
+        let label: String
+        if statusItemMeetingRecording {
+            symbolName = "record.circle"
+            tint = .systemRed
+            label = "Transcripted — recording meeting"
+        } else if statusItemDictationRecording {
+            symbolName = "mic.fill"
+            tint = .systemRed
+            label = "Transcripted — dictating"
         } else {
-            statusItem?.button?.toolTip = "Transcripted"
+            symbolName = "mic.and.signal.meter"
+            tint = nil
+            label = "Transcripted"
+        }
+
+        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label) {
+            image.isTemplate = true
+            button.image = image
+        }
+        button.contentTintColor = tint
+        button.setAccessibilityLabel(label)
+
+        if let statusItemUpdateVersion {
+            button.toolTip = "\(label) - restart to update to \(statusItemUpdateVersion)"
+        } else {
+            button.toolTip = label
         }
     }
 
@@ -678,6 +923,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func finishOnboarding() {
         PermissionsOnboardingPreferences.markCompleted()
+        // Meeting detection only works while the app runs; register the login
+        // item by default now that onboarding gives the macOS notice context.
+        // One-time, and an explicit Settings choice always wins.
+        try? LaunchAtLoginController.applyDefaultEnableIfNeeded(onboardingCompleted: true)
         appState.recoverHotkeysAfterPermissionChange()
         onboardingWindowController.dismiss()
         closePopover()
@@ -747,7 +996,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 "entrypoint": entrypoint,
                 "has_target": lastExternalApplication == nil ? "false" : "true",
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
-                "mic_status": microphoneStatusAnalyticsName(TranscriptedPermissionAccess.microphoneAuthorizationStatus()),
+                "mic_status": TranscriptedPermissionAccess.microphoneAuthorizationStatus().diagnosticName,
                 "model_state": appState.sttRouter.modelDownloadState.diagnosticName,
                 "pasteback_status": TranscriptedPermissionAccess.isGranted(.accessibility) ? "granted" : "not_granted",
             ]
@@ -761,21 +1010,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingRecordingActive: appState.meetingSession.isRecording,
             dictationRecordingActive: appState.sttRouter.isRecording
         )
-    }
-
-    private func microphoneStatusAnalyticsName(_ status: AVAuthorizationStatus) -> String {
-        switch status {
-        case .notDetermined:
-            return "not_determined"
-        case .restricted:
-            return "restricted"
-        case .denied:
-            return "denied"
-        case .authorized:
-            return "authorized"
-        @unknown default:
-            return "unknown"
-        }
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {
@@ -884,8 +1118,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         } else {
             micActivityMonitor.stop()
             cameraActivityMonitor.stop()
-            // Drop any in-flight mic/camera candidates so a stale call can't prompt.
+            // Drop any in-flight mic/output/camera candidates so a stale call can't prompt.
             meetingPromptDetector.updateMicInputUsers([])
+            meetingPromptDetector.updateAudioOutputUsers([])
             meetingPromptDetector.updateCameraInUse(false)
         }
     }

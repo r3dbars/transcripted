@@ -70,9 +70,29 @@ Current `transcripted-mcp` capabilities:
 - `search`
 - `who_is`
 - `recap`
+- `list_action_items`
+- `list_decisions`
+- `digest`
+
+The last three roll up structured summary fields (decisions, action items,
+open questions) across saved meetings. They only return rows for meetings
+that have a saved summary; see `docs/cross-meeting-tools.md`.
 
 These tools are read-only, but they are not redacted. `read_meeting` and
 `read_dictation` can return local transcript text to the agent you connected.
+
+### Anonymous Usage Ping
+
+Like the app, the MCP helper can send one anonymous analytics event per
+successful tool call (`agent_capture_query_observed`) so we can tell whether
+the agent connection gets used. It carries only bucketed metadata: which kind
+of tool ran, meeting vs. dictation, rough capture age, and rough source count.
+It never includes transcript text, queries, titles, speaker names, file paths,
+or audio, and your captures still never leave your Mac.
+
+It follows the same anonymous analytics switch as the app: turn off analytics
+in Settings > Privacy and the helper sends nothing. Source builds send nothing
+by default because they ship without an analytics key.
 
 ## Local Coding Agents
 
@@ -99,6 +119,41 @@ connected, otherwise read the saved Markdown folders:
 ~/Library/Application Support/Transcripted/captures/meetings
 ~/Library/Application Support/Transcripted/captures/dictations
 ```
+
+## Transcribe Files From an Agent
+
+Coding agents (Claude Code, Codex, or anything that can run shell commands)
+can also use Transcripted's on-device Parakeet model to turn arbitrary audio
+or video files into plain text — downloaded talks, screen recordings, voice
+memos — without creating a meeting in the app.
+
+This is a contributor/source-build surface for now. From a repo checkout:
+
+```bash
+bash build-deps.sh
+cd Tools/TranscriptedCLI
+TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift build -c release
+```
+
+Then point the agent at the built binary:
+
+```bash
+# plain text to stdout — "just give me the words"
+./.build/release/transcripted-cli transcribe ~/Downloads/talk.mp4
+
+# a folder of downloaded videos, one .txt per file
+./.build/release/transcripted-cli transcribe ~/Downloads/videos/*.mp4 --output-dir ~/Downloads/transcripts
+
+# JSON with timestamped segments, or SRT subtitles
+./.build/release/transcripted-cli transcribe interview.m4a --json
+./.build/release/transcripted-cli transcribe talk.mov --srt --output talk.srt
+```
+
+Everything runs locally. The CLI reuses the Parakeet models the Transcripted
+app already has — the installed app bundle first, then the shared
+`~/Library/Application Support/FluidAudio/Models/` cache — and only downloads
+them (~600MB, one time) when neither exists. See
+`Tools/TranscriptedCLI/CLAUDE.md` for the full command reference.
 
 ## Live Meeting Sidecar
 

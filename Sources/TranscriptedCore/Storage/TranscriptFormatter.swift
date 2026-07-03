@@ -80,11 +80,19 @@ extension TranscriptSaver {
         let totalWordCount = result.micWordCount + result.systemWordCount
         let totalUtterances = result.micUtteranceCount + result.systemUtteranceCount
 
-        // Build YAML frontmatter
+        // Build YAML frontmatter.
+        // `format_version` / `transcript_style` are the capture-format contract
+        // documented in docs/capture-format.md. `format_version: 1` marks the
+        // current versioned format (absent means pre-versioning; parse as 1) and
+        // `transcript_style: raw` marks the save-time body grammar — the async
+        // restyle in MeetingTranscriptStyler rewrites it to `styled`. Keep both
+        // flat: TranscriptFrontmatter.values(from:) skips indented lines.
         var yaml = """
         ---
         capture_id: "\(transcriptId.uuidString)"
         capture_type: meeting
+        format_version: 1
+        transcript_style: raw
         transcript_id: "\(transcriptId.uuidString)"
         date: \(isoDate)
         time: \(timeString)

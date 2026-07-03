@@ -63,44 +63,26 @@ public final class StatsService: ObservableObject {
     // MARK: - Public Methods
 
     /// Refresh all stats from database
+    ///
+    /// The SQLite reads and streak scan run off the main actor (StatsDatabase
+    /// serializes access on its own utility queue), so opening the settings
+    /// window or refreshing the dashboard never blocks the main thread on
+    /// database I/O. Published properties are updated back on the main actor
+    /// once the snapshot is ready. Overlapping calls are serialized: a new
+    /// refresh waits for the in-flight one instead of stacking concurrent
+    /// query bursts.
     public func refreshStats() async {
-        // Get all-time stats
-        totalRecordings = database.getTotalRecordingsCount()
-
-        let totalSeconds = database.getTotalDurationSeconds()
-        totalHoursTranscribed = Double(totalSeconds) / 3600.0
-
-        // Calculate average duration
-        if totalRecordings > 0 {
-            averageMeetingDuration = Double(totalSeconds) / Double(totalRecordings)
+        let previousRefresh = refreshTask
+        let database = self.database
+        let task = Task { [weak self] in
+            await previousRefresh?.value
+            let snapshot = await Task.detached(priority: .utility) {
+                StatsSnapshot(database: database)
+            }.value
+            self?.apply(snapshot)
         }
-
-        // Get today's stats (for menu bar)
-        let todayStats = database.getStatsForLastDays(0)
-        todayRecordings = todayStats.recordings
-        todayDurationSeconds = todayStats.durationSeconds
-
-        // Get this week's stats (for menu bar)
-        let weekStats = database.getStatsForLastDays(7)
-        weekRecordings = weekStats.recordings
-        weekDurationSeconds = weekStats.durationSeconds
-
-        // Get last 30 days stats
-        let thirtyDayStats = database.getStatsForLastDays(30)
-        last30DaysRecordings = thirtyDayStats.recordings
-        last30DaysDuration = thirtyDayStats.durationSeconds
-        // Get monthly activity for heat map
-        monthlyActivity = database.getDailyActivity(for: Date())
-        activeDaysThisMonth = monthlyActivity.values.filter { $0.recordingCount > 0 }.count
-
-        // Calculate streaks
-        calculateStreaks()
-
-        // Get recent transcripts
-        recentTranscripts = database.getRecentRecordings(limit: 3)
-
-        // Update motivational message
-        updateMotivationalMessage()
+        refreshTask = task
+        await task.value
     }
 
     /// Record a new session (called after transcription completes)
@@ -126,75 +108,25 @@ public final class StatsService: ObservableObject {
 
     // MARK: - Private Methods
 
-    private func calculateStreaks() {
-        let activeDates = database.getAllActiveDates()
-
-        guard !activeDates.isEmpty else {
-            currentStreak = 0
-            longestStreak = 0
-            return
+    /// Publish a background-built snapshot to the observed properties (main actor).
+    private func apply(_ snapshot: StatsSnapshot) {
+        totalRecordings = snapshot.totalRecordings
+        totalHoursTranscribed = snapshot.totalHoursTranscribed
+        if let averageDuration = snapshot.averageMeetingDuration {
+            averageMeetingDuration = averageDuration
         }
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-
-        let calendar = Calendar.current
-        let today = dateFormatter.string(from: Date())
-        let yesterday = dateFormatter.string(from: calendar.date(byAdding: .day, value: -1, to: Date()) ?? Date())
-
-        // Calculate current streak
-        var streak = 0
-        var checkDate = Date()
-
-        // Start counting from today or yesterday if today has no activity
-        if !activeDates.contains(today) && !activeDates.contains(yesterday) {
-            currentStreak = 0
-        } else {
-            // If today has activity, start from today; otherwise start from yesterday
-            if !activeDates.contains(today) {
-                checkDate = calendar.date(byAdding: .day, value: -1, to: Date()) ?? Date()
-            }
-
-            while true {
-                let checkDateStr = dateFormatter.string(from: checkDate)
-                if activeDates.contains(checkDateStr) {
-                    streak += 1
-                    checkDate = calendar.date(byAdding: .day, value: -1, to: checkDate) ?? Date()
-                } else {
-                    break
-                }
-            }
-            currentStreak = streak
-        }
-
-        // Calculate longest streak
-        var longest = 0
-        var currentRun = 0
-        var previousDate: Date?
-
-        // Sort dates in ascending order
-        let sortedDates = activeDates.sorted()
-
-        for dateStr in sortedDates {
-            guard let date = dateFormatter.date(from: dateStr) else { continue }
-
-            if let previous = previousDate {
-                let daysDiff = calendar.dateComponents([.day], from: previous, to: date).day ?? 0
-                if daysDiff == 1 {
-                    currentRun += 1
-                } else {
-                    longest = max(longest, currentRun)
-                    currentRun = 1
-                }
-            } else {
-                currentRun = 1
-            }
-
-            previousDate = date
-        }
-
-        longest = max(longest, currentRun)
-        longestStreak = longest
+        todayRecordings = snapshot.todayRecordings
+        todayDurationSeconds = snapshot.todayDurationSeconds
+        weekRecordings = snapshot.weekRecordings
+        weekDurationSeconds = snapshot.weekDurationSeconds
+        last30DaysRecordings = snapshot.last30DaysRecordings
+        last30DaysDuration = snapshot.last30DaysDuration
+        monthlyActivity = snapshot.monthlyActivity
+        activeDaysThisMonth = snapshot.activeDaysThisMonth
+        currentStreak = snapshot.currentStreak
+        longestStreak = snapshot.longestStreak
+        recentTranscripts = snapshot.recentTranscripts
+        updateMotivationalMessage()
     }
 
     private func updateMotivationalMessage() {
@@ -307,4 +239,130 @@ extension StatsService {
         )
     }
 
+}
+
+// MARK: - Background Snapshot
+
+/// Everything `StatsService.refreshStats()` publishes, computed in one pass.
+/// Built off the main actor so the SQLite reads and streak scan never block
+/// the main thread; `StatsDatabase` serializes access on its own queue.
+@available(macOS 14.0, *)
+private struct StatsSnapshot {
+    let totalRecordings: Int
+    let totalHoursTranscribed: Double
+    /// nil when there are no recordings, so the previously published average is kept
+    let averageMeetingDuration: TimeInterval?
+    let todayRecordings: Int
+    let todayDurationSeconds: Int
+    let weekRecordings: Int
+    let weekDurationSeconds: Int
+    let last30DaysRecordings: Int
+    let last30DaysDuration: Int
+    let monthlyActivity: [String: DailyActivity]
+    let activeDaysThisMonth: Int
+    let currentStreak: Int
+    let longestStreak: Int
+    let recentTranscripts: [RecordingMetadata]
+
+    /// Cached "yyyy-MM-dd" formatter reused across refreshes and streak-scan
+    /// iterations. DateFormatter is expensive to allocate and formatting is
+    /// thread-safe on modern macOS.
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    init(database: StatsDatabase) {
+        // Get all-time stats
+        totalRecordings = database.getTotalRecordingsCount()
+
+        let totalSeconds = database.getTotalDurationSeconds()
+        totalHoursTranscribed = Double(totalSeconds) / 3600.0
+
+        // Calculate average duration
+        averageMeetingDuration = totalRecordings > 0
+            ? Double(totalSeconds) / Double(totalRecordings)
+            : nil
+
+        // Get today's stats (for menu bar)
+        let todayStats = database.getStatsForLastDays(0)
+        todayRecordings = todayStats.recordings
+        todayDurationSeconds = todayStats.durationSeconds
+
+        // Get this week's stats (for menu bar)
+        let weekStats = database.getStatsForLastDays(7)
+        weekRecordings = weekStats.recordings
+        weekDurationSeconds = weekStats.durationSeconds
+
+        // Get last 30 days stats
+        let thirtyDayStats = database.getStatsForLastDays(30)
+        last30DaysRecordings = thirtyDayStats.recordings
+        last30DaysDuration = thirtyDayStats.durationSeconds
+
+        // Get monthly activity for heat map
+        monthlyActivity = database.getDailyActivity(for: Date())
+        activeDaysThisMonth = monthlyActivity.values.filter { $0.recordingCount > 0 }.count
+
+        // Calculate streaks
+        let streaks = Self.calculateStreaks(activeDates: database.getAllActiveDates())
+        currentStreak = streaks.current
+        longestStreak = streaks.longest
+
+        // Get recent transcripts
+        recentTranscripts = database.getRecentRecordings(limit: 3)
+    }
+
+    private static func calculateStreaks(activeDates: [String]) -> (current: Int, longest: Int) {
+        guard !activeDates.isEmpty else {
+            return (current: 0, longest: 0)
+        }
+
+        let dateFormatter = dayFormatter
+        let calendar = Calendar.current
+        let activeDateSet = Set(activeDates)
+        let today = dateFormatter.string(from: Date())
+        let yesterday = dateFormatter.string(from: calendar.date(byAdding: .day, value: -1, to: Date()) ?? Date())
+
+        // Calculate current streak, counting from today or yesterday if today
+        // has no activity yet
+        var current = 0
+        if activeDateSet.contains(today) || activeDateSet.contains(yesterday) {
+            var checkDate = Date()
+            if !activeDateSet.contains(today) {
+                checkDate = calendar.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+            }
+
+            while activeDateSet.contains(dateFormatter.string(from: checkDate)) {
+                current += 1
+                checkDate = calendar.date(byAdding: .day, value: -1, to: checkDate) ?? Date()
+            }
+        }
+
+        // Calculate longest streak over dates sorted in ascending order
+        var longest = 0
+        var currentRun = 0
+        var previousDate: Date?
+
+        for dateStr in activeDates.sorted() {
+            guard let date = dateFormatter.date(from: dateStr) else { continue }
+
+            if let previous = previousDate {
+                let daysDiff = calendar.dateComponents([.day], from: previous, to: date).day ?? 0
+                if daysDiff == 1 {
+                    currentRun += 1
+                } else {
+                    longest = max(longest, currentRun)
+                    currentRun = 1
+                }
+            } else {
+                currentRun = 1
+            }
+
+            previousDate = date
+        }
+
+        longest = max(longest, currentRun)
+        return (current: current, longest: longest)
+    }
 }

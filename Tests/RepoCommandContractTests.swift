@@ -233,12 +233,16 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
         let contents = readRepoTextFile("scripts/entrypoints/build.sh")
         assertTrue(
-            contents.contains("PARAKEET_MODEL_DIR=\"parakeet-tdt-0.6b-v3-coreml\""),
-            "build.sh should bundle the CoreML Parakeet directory loaded by ParakeetEngine"
+            contents.contains("PARAKEET_MODEL_DIR=\"parakeet-tdt-0.6b-v3\""),
+            "build.sh should bundle the FluidAudio 0.15.x Parakeet directory name loaded by ParakeetEngine"
+        )
+        assertTrue(
+            contents.contains("ditto \"$model_src\" \"$PARAKEET_BUNDLE_DIR/$PARAKEET_MODEL_DIR\""),
+            "build.sh should stage every Parakeet source (including a legacy -coreml cache) under the runtime directory name"
         )
         assertFalse(
-            contents.contains("\"parakeet-tdt-0.6b-v3\""),
-            "build.sh should not bundle the legacy Parakeet directory as a second 461 MB copy"
+            contents.contains("$PARAKEET_BUNDLE_DIR/parakeet-tdt-0.6b-v3-coreml"),
+            "build.sh should never bundle the legacy -coreml directory as a second ~600 MB copy"
         )
     }
 
@@ -361,7 +365,7 @@ func testRepoCommandContract() {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
 
         assertTrue(
-            qaBench.contains("quick|deep|full|ui|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|scorecard|live")
+            qaBench.contains("quick|deep|full|ui|imported-audio-native|sparkle-update|packaged|artifact|audio-synthetic|pasteback-synthetic|corpus|corpus-compare|scorecard|live")
                 && qaBench.contains("run_full_tail")
                 && qaBench.contains("60-release-health")
                 && qaBench.contains("61-gemma-summary-plan")
@@ -2661,13 +2665,80 @@ func testRepoCommandContract() {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
         assertTrue(
-            overlayContents.contains("case .notLoaded, .downloading, .cached, .failed:"),
-            "dictation start should join an in-progress model file prefetch instead of waiting forever for ready"
+            overlayContents.contains("case .notLoaded, .cached:")
+                && overlayContents.contains("await appState.sttRouter.initializeSelectedModel()")
+                && overlayContents.contains("await appState.sttRouter.waitForModelLoadProgress()"),
+            "dictation start should join an in-progress model load/prefetch instead of waiting forever for ready"
+        )
+        assertTrue(
+            overlayContents.contains("if appState.sttRouter.selectedModelFilesAvailableLocally {")
+                && overlayContents.contains("beginDictationRecording(sourceApp: sourceApp)"),
+            "dictation with model files already on disk should open the microphone immediately and load concurrently"
+        )
+        assertTrue(
+            overlayContents.contains("break modelWait"),
+            "the post-stop model wait should fail fast when the concurrent load reports failure instead of polling out the budget"
         )
         assertTrue(
             engineContents.contains("private var modelInitializationTask: Task<Void, Never>?")
                 && engineContents.contains("await modelInitializationTask.value"),
             "Parakeet initialization should join an in-progress direct first-use download/load"
+        )
+    }
+
+    runSuite("Repo command contract - background meeting transcription avoids per-segment main-actor churn") {
+        let routerContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
+
+        // Per-segment initialize round-trips contend with any live meeting or
+        // dictation the user is in; segments must skip initialize when the
+        // model is already loaded.
+        guard
+            let segmentStart = routerContents.range(of: "func transcribeSegment("),
+            let segmentEnd = routerContents.range(of: "func cancel()", range: segmentStart.upperBound..<routerContents.endIndex)
+        else {
+            assertionFailure("STTRouter should keep a transcribeSegment entry point ahead of cancel()")
+            return
+        }
+        let segmentBody = String(routerContents[segmentStart.lowerBound..<segmentEnd.lowerBound])
+        assertTrue(
+            segmentBody.contains("if !isModelLoaded(for: resolvedModel) {"),
+            "segment transcription should only initialize when the model is not already loaded"
+        )
+
+        // Redundant @Published reassignments fan objectWillChange into the
+        // menubar, warmup-status, and settings subscribers once per segment.
+        guard
+            let refreshStart = routerContents.range(of: "private func refreshModelDownloadState()"),
+            let refreshEnd = routerContents.range(of: "private static func modelStatesEqual(", range: refreshStart.upperBound..<routerContents.endIndex)
+        else {
+            assertionFailure("STTRouter should keep refreshModelDownloadState and its state-equality helper")
+            return
+        }
+        let refreshBody = String(routerContents[refreshStart.lowerBound..<refreshEnd.lowerBound])
+        assertTrue(
+            refreshBody.contains("guard !Self.modelStatesEqual(refreshed, modelDownloadState) else { return }"),
+            "model-state refresh should skip the @Published reassignment when the state is unchanged"
+        )
+    }
+
+    runSuite("Repo command contract - meeting pipeline releases whole-meeting sample buffers after last use") {
+        let pipelineContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift")
+
+        // Whole-meeting 16kHz buffers are ~460MB per channel for a 2h
+        // recording. Each must be cleared once its channel's segment slicing
+        // is done instead of living for the entire pipeline run.
+        assertTrue(
+            pipelineContents.contains("var systemSamples = try AudioResampler.loadAndResample")
+                && pipelineContents.contains("systemSamples = []"),
+            "the system-audio buffer should be released after the system segment loop"
+        )
+        assertTrue(
+            pipelineContents.contains("var micSamples: [Float]"),
+            "the mic buffer should stay mutable so it can be released after its last use"
+        )
+        assertTrue(
+            pipelineContents.components(separatedBy: "micSamples = []").count >= 4,
+            "the mic buffer should be cleared in the no-mic, split-speakers, and silence-split paths"
         )
     }
 
@@ -2852,7 +2923,6 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - Paste Last Dictation uses the paste target guard") {
         let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
-        let shortcutContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarShortcutsView.swift")
         let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
 
         assertTrue(
@@ -2868,12 +2938,6 @@ func testRepoCommandContract() {
                 && appContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))")
                 && appContents.contains("PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)"),
             "settings Paste Last Dictation should use the same focus guard and visible outcome feedback"
-        )
-        assertTrue(
-            shortcutContents.contains("var onPasteLastDictation: (() -> Void)?")
-                && shortcutContents.contains("self.onPasteLastDictation?()")
-                && !shortcutContents.contains("pasteLastDictationRow.onPrimaryAction = {}"),
-            "shortcut-panel Paste Last Dictation should invoke the paste action instead of an empty primary action"
         )
     }
 

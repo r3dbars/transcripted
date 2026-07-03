@@ -337,6 +337,243 @@ struct PersonMeetingEntry: Codable {
     let otherSpeakers: [String]
 }
 
+// MARK: - Status / Empty Results
+
+struct StatusResult: Codable {
+    let serverVersion: String
+    let meetingDirectories: [String]
+    let dictationDirectories: [String]
+    let resolutionSource: String
+    let legacyFallbackAppended: Bool
+    let indexDirectory: String
+    let indexedMeetings: Int
+    let indexedDictationDays: Int
+    let indexedDictationEntries: Int
+    let indexedSummaryItems: Int
+    let summarizedMeetings: Int
+    let summariesIndexed: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case serverVersion = "server_version"
+        case meetingDirectories = "meeting_directories"
+        case dictationDirectories = "dictation_directories"
+        case resolutionSource = "resolution_source"
+        case legacyFallbackAppended = "legacy_fallback_appended"
+        case indexDirectory = "index_directory"
+        case indexedMeetings = "indexed_meetings"
+        case indexedDictationDays = "indexed_dictation_days"
+        case indexedDictationEntries = "indexed_dictation_entries"
+        case indexedSummaryItems = "indexed_summary_items"
+        case summarizedMeetings = "summarized_meetings"
+        case summariesIndexed = "summaries_indexed"
+    }
+}
+
+/// Payload returned when a query tool matches nothing: where the server
+/// looked, what is indexed, and what to try next. Only the counts relevant to
+/// the tool are populated; nil fields are omitted from the JSON.
+struct EmptyQueryResult: Codable {
+    let searchedDirectories: [String]
+    let indexedMeetings: Int?
+    let indexedDictationDays: Int?
+    let indexedDictationEntries: Int?
+    let indexedSummaryItems: Int?
+    let hint: String
+
+    enum CodingKeys: String, CodingKey {
+        case searchedDirectories = "searched_directories"
+        case indexedMeetings = "indexed_meetings"
+        case indexedDictationDays = "indexed_dictation_days"
+        case indexedDictationEntries = "indexed_dictation_entries"
+        case indexedSummaryItems = "indexed_summary_items"
+        case hint
+    }
+}
+
+// MARK: - Bounded Reads (read_meeting / read_dictation pagination)
+
+/// Paginated window over a meeting transcript, returned when the caller asks
+/// for one (offset/limit) or when the raw markdown would exceed the read
+/// character budget. Frontmatter metadata is preserved; the dialogue is
+/// bounded to the requested utterance window.
+struct MeetingTranscriptPage: Codable {
+    let filename: String
+    let frontmatter: String?
+    let totalUtterances: Int
+    let offset: Int
+    let returned: Int
+    let truncated: Bool
+    let nextOffset: Int?
+    let hint: String
+    let utterances: [MeetingTranscriptPageUtterance]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, frontmatter, offset, returned, truncated, hint, utterances
+        case totalUtterances = "total_utterances"
+        case nextOffset = "next_offset"
+    }
+}
+
+struct MeetingTranscriptPageUtterance: Codable {
+    let start: Double
+    let end: Double
+    let speaker: String
+    let speakerId: String
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case start, end, speaker, text
+        case speakerId = "speaker_id"
+    }
+}
+
+/// Paginated window over a dictation day's entries, mirroring
+/// `MeetingTranscriptPage` for `read_dictation` reads without an entry_id.
+struct DictationDayPage: Codable {
+    let filename: String
+    let date: String
+    let totalEntries: Int
+    let offset: Int
+    let returned: Int
+    let truncated: Bool
+    let nextOffset: Int?
+    let hint: String
+    let entries: [AgentDictationEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, offset, returned, truncated, hint, entries
+        case totalEntries = "total_entries"
+        case nextOffset = "next_offset"
+    }
+}
+
+// MARK: - Summary-Fact Rollups (cross-meeting tools)
+
+/// Open/all filter for `list_action_items`.
+/// Current saved meeting summaries do not carry done/due metadata; the tool
+/// handler rejects "done" with an explicit error instead of returning a
+/// silent empty set.
+enum ActionItemStatusFilter: String {
+    case open
+    case done
+    case all
+
+    init(raw: String?) {
+        switch raw?.lowercased() {
+        case "done", "closed", "completed": self = .done
+        case "all", "any": self = .all
+        default: self = .open
+        }
+    }
+}
+
+struct ActionItemRecord: Codable {
+    let filename: String
+    var meetingTitle: String
+    let date: String
+    let datetime: String
+    let text: String
+    let owner: String?
+    let status: String?
+    let due: String?
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, datetime, text, owner, status, due
+        case meetingTitle = "meeting_title"
+    }
+}
+
+struct ActionItemsResult: Codable {
+    let owner: String?
+    let status: String
+    let count: Int
+    let truncated: Bool
+    var items: [ActionItemRecord]
+}
+
+struct DecisionRecord: Codable {
+    let filename: String
+    var meetingTitle: String
+    let date: String
+    let datetime: String
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case filename, date, datetime, text
+        case meetingTitle = "meeting_title"
+    }
+}
+
+struct DecisionsResult: Codable {
+    let count: Int
+    let truncated: Bool
+    var decisions: [DecisionRecord]
+}
+
+struct DigestActionItem: Codable {
+    let text: String
+    let owner: String?
+    let status: String?
+    let due: String?
+}
+
+struct DigestMeeting: Codable {
+    let filename: String
+    var title: String
+    let date: String
+    let datetime: String
+    let decisions: [String]
+    let actionItems: [DigestActionItem]
+    let openQuestions: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case filename, title, date, datetime, decisions
+        case actionItems = "action_items"
+        case openQuestions = "open_questions"
+    }
+}
+
+struct DigestResult: Codable {
+    let dateRange: String
+    let meetingCount: Int
+    let actionItemCount: Int
+    let openActionItemCount: Int
+    let decisionCount: Int
+    let openQuestionCount: Int
+    var meetings: [DigestMeeting]
+
+    enum CodingKeys: String, CodingKey {
+        case dateRange = "date_range"
+        case meetingCount = "meeting_count"
+        case actionItemCount = "action_item_count"
+        case openActionItemCount = "open_action_item_count"
+        case decisionCount = "decision_count"
+        case openQuestionCount = "open_question_count"
+        case meetings
+    }
+}
+
+// MARK: - WS2.3 Cross-Meeting Retrieval
+
+struct CrossMeetingReceipt: Codable {
+    let meetingId: String
+    var meetingTitle: String
+    let timestamp: String?
+    let quote: String
+    let date: String
+    let datetime: String
+    let kind: String?
+    let person: String?
+}
+
+struct CrossMeetingToolResult: Codable {
+    let query: String?
+    let range: String?
+    let count: Int
+    let truncated: Bool
+    var results: [CrossMeetingReceipt]
+}
+
 // MARK: - Errors
 
 enum MCPIndexError: Error, LocalizedError {

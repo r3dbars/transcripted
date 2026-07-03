@@ -778,8 +778,8 @@ def manual_items(args: argparse.Namespace, root: Path, out_dir: Path) -> list[Re
         ReportItem(
             "Existing-install update path",
             "yellow",
-            "UNKNOWN: on a real installed app, verify Sparkle check/install behavior and Homebrew install/upgrade when publishing.",
-            evidence_list([root / "docs/sparkle-updates.md", root / "docs/release-packaging.md"]),
+            "UNKNOWN: local fake-state smoke can verify available/downloading UI copy, but a real installed app still needs Sparkle check/install behavior and Homebrew install/upgrade proof when publishing.",
+            evidence_list([root / "docs/sparkle-updates.md", root / "docs/release-packaging.md", root / "docs/qa-test-bench.md"]),
         ),
     ]
     if args.qa_mode != "live":

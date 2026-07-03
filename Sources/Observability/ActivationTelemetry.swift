@@ -47,6 +47,7 @@ enum ActivationTelemetry {
         case cancelled
         case deleted
         case dismissed
+        case expired
         case failed
         case remindedLater = "reminded_later"
         case suppressed
