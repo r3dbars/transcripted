@@ -15,6 +15,11 @@ folder before switching. The copy never deletes originals and skips destination
 name collisions instead of overwriting. App-owned state, cache, logs, and temp
 files always stay under `~/Library/Application Support/Transcripted/`.
 
+Timeline screen capture state is app-owned and local-only:
+
+- screenshots: `~/Library/Application Support/Transcripted/recordings/screenshots/`
+- future timeline database: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
+
 ## Dictation
 
 Dictation artifacts live under:

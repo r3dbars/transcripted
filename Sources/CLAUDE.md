@@ -42,6 +42,7 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
+- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, and pause/resume state exposure
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `Timeline/` — Dayflow-style timeline engine scaffolding; future screen-activity capture, analysis, storage, and Markdown projection
 - `TranscriptedCore/` — shared library boundary
@@ -61,6 +62,7 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching meeting flow, imported-audio transcription, or meeting UI: `Sources/Meeting/CLAUDE.md`
 - touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
 - touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/CLAUDE.md`
+- touching timeline capture, local screenshot metadata, or timeline pause/resume state: `Sources/Timeline/CLAUDE.md`
 - touching app-wide support utilities: `Sources/Support/CLAUDE.md`
 - touching timeline engine scaffolding: `Sources/Timeline/CLAUDE.md`
 - touching timeline UI scaffolding: `Sources/UI/Timeline/CLAUDE.md`
