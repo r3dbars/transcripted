@@ -1,13 +1,14 @@
 // OverlayScreenSharePrivacyTests.swift
-// Guards that every floating overlay panel is excluded from screen capture /
-// screen sharing.
+// Guards that every Transcripted AppKit window/panel surface is excluded from
+// screen capture / screen sharing.
 //
 // AppKit panels default to `NSWindow.SharingType.readOnly`, which
 // ScreenCaptureKit happily captures. For a tool whose whole premise is
 // privately recording a call, that default is a trust failure: a user sharing
 // their screen during a recorded meeting could unintentionally broadcast live
-// transcript text. The fix sets `sharingType = .none` in every overlay NSPanel
-// init; this test makes that property a regression-guarded invariant.
+// transcript text. The fix sets `sharingType = .none` in every Transcripted
+// NSWindow/NSPanel init; this test makes that property a regression-guarded
+// invariant.
 
 import AppKit
 import Foundation
@@ -32,14 +33,15 @@ func testOverlayScreenSharePrivacy() async {
         )
     }
 
-    // Source contract: the two meeting-overlay panels live in a heavy controller
-    // file the fast runner cannot compile in isolation, so guard their init
-    // bodies at the source level. The on-screen live transcript drawer renders
-    // inside MeetingOverlayPanel, and the hover tooltip inside
-    // MeetingOverlayTooltipPanel. Both must stay out of screen capture.
-    runSuite("every overlay NSPanel init sets sharingType = .none") {
+    // Source contract: most app surfaces live in files the fast runner cannot
+    // compile in isolation, so guard their init bodies at the source level.
+    runSuite("every Transcripted NSWindow/NSPanel init sets sharingType = .none") {
         let floating = overlayPrivacySource("Sources/UI/Overlay/FloatingOverlayPanel.swift")
         let controller = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let pasteFeedback = overlayPrivacySource("Sources/UI/MenuBar/PasteLastDictationFeedback.swift")
+        let settingsWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift")
+        let onboardingWindow = overlayPrivacySource("Sources/UI/Settings/TranscriptedOnboardingWindowController.swift")
+        let speakerNaming = overlayPrivacySource("Sources/UI/Settings/SpeakerNamingSheet.swift")
 
         let inits: [(name: String, body: String)] = [
             (
@@ -66,14 +68,64 @@ func testOverlayScreenSharePrivacy() async {
                     to: "final class MeetingOverlayTooltipView"
                 )
             ),
+            (
+                "PasteLastDictationFeedbackPanel",
+                overlayPrivacySlice(
+                    pasteFeedback,
+                    from: "private final class PasteLastDictationFeedbackPanel: NSPanel {",
+                    to: "override var canBecomeKey"
+                )
+            ),
+            (
+                "TranscriptedSettingsWindowController",
+                overlayPrivacySlice(
+                    settingsWindow,
+                    from: "let window = NSWindow(",
+                    to: "super.init(window: window)"
+                )
+            ),
+            (
+                "TranscriptedOnboardingWindowController",
+                overlayPrivacySlice(
+                    onboardingWindow,
+                    from: "let window = NSWindow(",
+                    to: "super.init(window: window)"
+                )
+            ),
+            (
+                "NamingWindowController",
+                overlayPrivacySlice(
+                    speakerNaming,
+                    from: "let window = NSWindow(",
+                    to: "super.init(window: window)"
+                )
+            ),
         ]
 
         for entry in inits {
             assertTrue(
-                entry.body.contains("self.sharingType = .none"),
-                "\(entry.name) init must set self.sharingType = .none so the overlay stays out of screen capture"
+                entry.body.contains("sharingType = .none"),
+                "\(entry.name) init must set sharingType = .none so the surface stays out of screen capture"
             )
         }
+    }
+
+    runSuite("new NSWindow/NSPanel surfaces must be added to the screen-share contract") {
+        let expectedMarkers: [String] = [
+            "Sources/UI/MenuBar/PasteLastDictationFeedback.swift|private final class PasteLastDictationFeedbackPanel: NSPanel {",
+            "Sources/UI/Overlay/FloatingOverlayPanel.swift|class FloatingOverlayPanel: NSPanel {",
+            "Sources/UI/Overlay/MeetingOverlayController.swift|final class MeetingOverlayPanel: NSPanel {",
+            "Sources/UI/Overlay/MeetingOverlayController.swift|final class MeetingOverlayTooltipPanel: NSPanel {",
+            "Sources/UI/Settings/SpeakerNamingSheet.swift|let window = NSWindow(",
+            "Sources/UI/Settings/TranscriptedOnboardingWindowController.swift|let window = NSWindow(",
+            "Sources/UI/Settings/TranscriptedSettingsWindowController.swift|let window = NSWindow(",
+        ]
+        let markers = overlayPrivacyWindowPanelMarkers()
+        assertEqual(
+            markers,
+            expectedMarkers,
+            "any new Transcripted NSWindow/NSPanel must be reviewed here and set sharingType = .none"
+        )
     }
 }
 
@@ -88,4 +140,31 @@ private func overlayPrivacySlice(_ contents: String, from start: String, to end:
     let tail = contents[startRange.upperBound...]
     guard let endRange = tail.range(of: end) else { return String(tail) }
     return String(tail[..<endRange.lowerBound])
+}
+
+private func overlayPrivacyWindowPanelMarkers() -> [String] {
+    let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .appendingPathComponent("Sources/UI")
+    guard let enumerator = FileManager.default.enumerator(
+        at: root,
+        includingPropertiesForKeys: nil
+    ) else { return [] }
+
+    var markers: [String] = []
+    for case let url as URL in enumerator where url.pathExtension == "swift" {
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
+        let relativePath = "Sources/UI/" + url.path.replacingOccurrences(of: root.path + "/", with: "")
+        for rawLine in contents.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            let isWindowOrPanelClass = (
+                line.hasPrefix("class ")
+                    || line.hasPrefix("final class ")
+                    || line.hasPrefix("private final class ")
+            ) && line.contains(": NSPanel")
+            if isWindowOrPanelClass || line.contains("NSPanel(") || line.contains("NSWindow(") {
+                markers.append("\(relativePath)|\(line)")
+            }
+        }
+    }
+    return markers.sorted()
 }
