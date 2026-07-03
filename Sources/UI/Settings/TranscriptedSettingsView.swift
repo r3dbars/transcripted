@@ -48,6 +48,7 @@ struct TranscriptedSettingsView: View {
     @State private var sentryTestStatus: String?
     @State private var diagnosticsActionStatus: String?
     @State private var permissionStates = PermissionSnapshot.current()
+    @State private var systemAudioPermissionRefreshTask: Task<Void, Never>?
     @State private var captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
     @State private var pendingCaptureLibraryChoice: PendingCaptureLibraryChoice?
     @State private var captureLibraryMigrationInProgress = false
@@ -3073,16 +3074,7 @@ struct TranscriptedSettingsView: View {
 
                     SettingsInlineActionButton(title: "Reset to Default") {
                         trackSettingsAction("reset_capture_library", page: .storage)
-                        TranscriptedStoragePreferences.setCaptureLibraryURL(nil)
-                        refreshStoragePaths()
-                        CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
-                        AnalyticsReporter.track(
-                            "settings_capture_library_changed",
-                            properties: [
-                                "location_type": "default",
-                                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
-                            ]
-                        )
+                        resetCaptureLibraryToDefault()
                     }
                     .disabled(captureLibraryMigrationInProgress)
                     .help(captureLibraryMigrationInProgress ? captureLibraryMigrationBusyHelp : "")
@@ -3112,7 +3104,7 @@ struct TranscriptedSettingsView: View {
                 isPresented: captureLibraryChoicePromptBinding,
                 presenting: pendingCaptureLibraryChoice
             ) { choice in
-                Button("Copy to New Folder") {
+                Button(choice.copyButtonTitle) {
                     copyCapturesThenSwitchLibrary(choice)
                 }
                 .keyboardShortcut(.defaultAction)
@@ -3121,7 +3113,7 @@ struct TranscriptedSettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { choice in
-                Text("Your current library still has saved meetings or dictations. Copy puts a copy of them in the new folder and never deletes the originals. Just Switch leaves everything in \(choice.currentLibrary.path) - Transcripted and connected agents will only see the new folder.")
+                Text("Your current library still has saved meetings or dictations. Copy puts a copy of them in \(choice.destinationName) and never deletes the originals. Just Switch leaves everything in \(choice.currentLibrary.path) - Transcripted and connected agents will only see \(choice.destinationName).")
             }
 
             SettingsSection(
@@ -4387,9 +4379,16 @@ struct TranscriptedSettingsView: View {
     }
 
     private var missingRequiredPermissions: [TranscriptedPermissionKind] {
-        TranscriptedPermissionKind.allCases.filter { kind in
-            kind.isRequiredOnFirstLaunch && !(permissionStates[kind] ?? false)
+        requiredPermissionsForCurrentUsage.filter { kind in
+            !(permissionStates[kind] ?? false)
         }
+    }
+
+    private var requiredPermissionsForCurrentUsage: [TranscriptedPermissionKind] {
+        if dictationShortcutsEnabled {
+            return [.microphone, .accessibility]
+        }
+        return [.microphone, .systemAudioRecording]
     }
 
     private var permissionsStatusLine: String {
@@ -4401,9 +4400,11 @@ struct TranscriptedSettingsView: View {
 
     private var permissionsDetailLine: String {
         if missingRequiredPermissions.isEmpty {
-            return "Required permissions are on. Meeting permissions are optional."
+            return dictationShortcutsEnabled
+                ? "Dictation permissions are on. Meeting permissions are optional."
+                : "Meeting permissions are on. Paste-back is optional while shortcuts are off."
         }
-        return "Turn on \(missingRequiredPermissions.map(\.title).joined(separator: " and ")) to record and paste back."
+        return "Turn on \(missingRequiredPermissions.map(\.title).joined(separator: " and ")) to keep your current setup ready."
     }
 
     private var isUsingDefaultCaptureLibrary: Bool {
@@ -4600,6 +4601,14 @@ struct TranscriptedSettingsView: View {
 
     private func refreshPermissions() {
         permissionStates = PermissionSnapshot.current()
+        guard TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown else { return }
+        systemAudioPermissionRefreshTask?.cancel()
+        systemAudioPermissionRefreshTask = Task { @MainActor in
+            _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
+            guard !Task.isCancelled else { return }
+            permissionStates = PermissionSnapshot.current()
+            systemAudioPermissionRefreshTask = nil
+        }
     }
 
     private func refreshStoragePaths() {
@@ -4968,7 +4977,8 @@ struct TranscriptedSettingsView: View {
         if !isSameFolder, CaptureLibraryMigrationPlanner().libraryHasCaptures(at: currentLibrary) {
             pendingCaptureLibraryChoice = PendingCaptureLibraryChoice(
                 currentLibrary: currentLibrary,
-                newLibrary: url
+                newLibrary: url,
+                resetsToDefault: false
             )
             return
         }
@@ -4977,9 +4987,26 @@ struct TranscriptedSettingsView: View {
         applyCaptureLibraryChoice(url)
     }
 
+    private func resetCaptureLibraryToDefault() {
+        let currentLibrary = FileManager.default.transcriptedCaptureLibraryDir
+        let defaultLibrary = FileManager.default.transcriptedDefaultCaptureLibraryDir
+        let isSameFolder = currentLibrary.standardizedFileURL.path == defaultLibrary.standardizedFileURL.path
+        if !isSameFolder, CaptureLibraryMigrationPlanner().libraryHasCaptures(at: currentLibrary) {
+            pendingCaptureLibraryChoice = PendingCaptureLibraryChoice(
+                currentLibrary: currentLibrary,
+                newLibrary: defaultLibrary,
+                resetsToDefault: true
+            )
+            return
+        }
+
+        captureLibraryMigrationStatus = nil
+        applyDefaultCaptureLibraryChoice()
+    }
+
     private func switchLibraryWithoutCopying(_ choice: PendingCaptureLibraryChoice) {
         captureLibraryMigrationStatus = "Existing captures stayed in \(choice.currentLibrary.path)."
-        applyCaptureLibraryChoice(choice.newLibrary)
+        applyCaptureLibraryChoice(choice)
     }
 
     private func copyCapturesThenSwitchLibrary(_ choice: PendingCaptureLibraryChoice) {
@@ -4999,7 +5026,7 @@ struct TranscriptedSettingsView: View {
                 await MainActor.run {
                     captureLibraryMigrationInProgress = false
                     captureLibraryMigrationStatus = captureLibraryCopySummary(result)
-                    applyCaptureLibraryChoice(choice.newLibrary)
+                    applyCaptureLibraryChoice(choice)
                 }
             } catch {
                 await MainActor.run {
@@ -5031,6 +5058,31 @@ struct TranscriptedSettingsView: View {
             "settings_capture_library_changed",
             properties: [
                 "location_type": isUsingDefaultCaptureLibrary ? "default" : "custom",
+                "page_id": TranscriptedSettingsPage.storage.analyticsValue,
+            ]
+        )
+    }
+
+    private func applyCaptureLibraryChoice(_ choice: PendingCaptureLibraryChoice) {
+        if choice.resetsToDefault {
+            applyDefaultCaptureLibraryChoice()
+        } else {
+            applyCaptureLibraryChoice(choice.newLibrary)
+        }
+    }
+
+    private func applyDefaultCaptureLibraryChoice() {
+        guard TranscriptedStoragePreferences.setCaptureLibraryURL(nil) else {
+            refreshStoragePaths()
+            showCaptureLibrarySelectionError()
+            return
+        }
+        refreshStoragePaths()
+        CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
+        AnalyticsReporter.track(
+            "settings_capture_library_changed",
+            properties: [
+                "location_type": "default",
                 "page_id": TranscriptedSettingsPage.storage.analyticsValue,
             ]
         )
@@ -5281,6 +5333,15 @@ struct TranscriptedSettingsView: View {
 private struct PendingCaptureLibraryChoice: Equatable {
     let currentLibrary: URL
     let newLibrary: URL
+    let resetsToDefault: Bool
+
+    var copyButtonTitle: String {
+        resetsToDefault ? "Copy to Default Folder" : "Copy to New Folder"
+    }
+
+    var destinationName: String {
+        resetsToDefault ? "the default folder" : "the new folder"
+    }
 }
 
 // User-facing copy for the "we can't find this artifact on disk" failures that

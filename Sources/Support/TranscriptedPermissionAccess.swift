@@ -101,8 +101,9 @@ enum TranscriptedPermissionAccess {
             return AXIsProcessTrusted()
         case .systemAudioRecording:
             if systemAudioRecordingStatus() == .granted {
+                let stillGranted = await revalidateSystemAudioRecordingStatus()
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
-                return true
+                return stillGranted
             }
 
             let granted = await requestSystemAudioRecordingAccessIfNeeded()
@@ -173,6 +174,24 @@ enum TranscriptedPermissionAccess {
 
     static func systemAudioRecordingGranted() -> Bool {
         systemAudioRecordingStatus().isGranted
+    }
+
+    @MainActor
+    static func revalidateSystemAudioRecordingStatus() async -> Bool {
+        let granted = await performSystemAudioRecordingAccessRequest()
+        setSystemAudioRecordingGranted(granted)
+        notifyPermissionsDidChange(kind: .systemAudioRecording)
+        return granted
+    }
+
+    @MainActor
+    static func revalidateSystemAudioRecordingStatus(
+        requester: @escaping @MainActor () async -> Bool
+    ) async -> Bool {
+        let granted = await requester()
+        setSystemAudioRecordingGranted(granted)
+        notifyPermissionsDidChange(kind: .systemAudioRecording)
+        return granted
     }
 
     private static func setSystemAudioRecordingGranted(_ granted: Bool) {

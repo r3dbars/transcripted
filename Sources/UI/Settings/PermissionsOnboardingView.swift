@@ -112,6 +112,7 @@ struct PermissionsOnboardingView: View {
                 flowStartedAt = CFAbsoluteTimeGetCurrent()
             }
             checkAllPermissions(trackChanges: false)
+            revalidateSystemAudioPermission(trackChanges: false)
             trackCurrentStepViewed()
             startPolling()
         }
@@ -580,7 +581,7 @@ struct PermissionsOnboardingView: View {
             // user has the System Settings menu open. A Task-driven loop keeps
             // polling regardless and dies cleanly when onDisappear cancels it.
             while !Task.isCancelled {
-                checkAllPermissions(trackChanges: true)
+                await revalidateSystemAudioPermissionNow(trackChanges: true)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -589,6 +590,23 @@ struct PermissionsOnboardingView: View {
     private func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+    }
+
+    private func revalidateSystemAudioPermission(trackChanges: Bool) {
+        Task { @MainActor in
+            await revalidateSystemAudioPermissionNow(trackChanges: trackChanges)
+        }
+    }
+
+    private func revalidateSystemAudioPermissionNow(trackChanges: Bool) async {
+        guard currentStep.kind == .permissions
+            || TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown
+        else {
+            checkAllPermissions(trackChanges: trackChanges)
+            return
+        }
+        _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
+        checkAllPermissions(trackChanges: trackChanges)
     }
 
     private func completeOnboarding() {

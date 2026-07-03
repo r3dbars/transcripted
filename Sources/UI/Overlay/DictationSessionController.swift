@@ -730,6 +730,7 @@ class DictationSessionController: ObservableObject {
                         )
                     }
                 case .denied, .restricted:
+                    overlayController.dismissError()
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 case .authorized:
                     self.startDictation(
@@ -738,6 +739,7 @@ class DictationSessionController: ObservableObject {
                         anchorRect: self.sessionAnchorRect
                     )
                 @unknown default:
+                    overlayController.dismissError()
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 }
             } : nil

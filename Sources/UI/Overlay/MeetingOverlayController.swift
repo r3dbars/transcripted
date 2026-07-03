@@ -666,7 +666,16 @@ final class MeetingOverlayRootView: NSView {
         statusDot.frame = NSRect(x: pad, y: topY - dotSize / 2, width: dotSize, height: dotSize)
 
         let titleX = statusDot.frame.maxX + 8
-        let titleWidth = max(0, bounds.width - titleX - pad)
+        let closeWidth: CGFloat = 70
+        let closeHeight: CGFloat = 24
+        closeButton.frame = NSRect(
+            x: bounds.width - pad - closeWidth,
+            y: topY - closeHeight / 2,
+            width: closeWidth,
+            height: closeHeight
+        )
+
+        let titleWidth = max(0, closeButton.frame.minX - titleX - 8)
         let titleSize = titleLabel.fittingSize
         titleLabel.frame = NSRect(
             x: titleX,
@@ -675,11 +684,12 @@ final class MeetingOverlayRootView: NSView {
             height: titleSize.height
         )
 
+        detailLabel.maximumNumberOfLines = 2
         detailLabel.frame = NSRect(
             x: pad,
-            y: 16,
+            y: 12,
             width: bounds.width - pad * 2,
-            height: 16
+            height: 32
         )
         refreshTooltipTrackingAreas()
     }
@@ -747,7 +757,7 @@ final class MeetingOverlayRootView: NSView {
         } else {
             audioWaveform.isHidden = true
             audioWaveform.alphaValue = 1
-            closeButton.isHidden = isPreparing || !isPrompting
+            closeButton.isHidden = isPreparing || !(isPrompting || isErrorState)
             closeButton.alphaValue = 1
         }
         pillBodyView.isHidden = state != .recording || liveView == nil
@@ -833,6 +843,15 @@ final class MeetingOverlayRootView: NSView {
                 isRetryable: true
             )
             titleLabel.stringValue = copy.title
+            closeButton.attributedTitle = buttonTitle("Dismiss", size: 11, weight: .semibold)
+            closeButton.image = nil
+            closeButton.imagePosition = .noImage
+            closeButton.toolTip = nil
+            closeButton.setAccessibilityLabel("Dismiss meeting failure")
+            closeButton.setAccessibilityHelp("Hides this meeting failure notice. Recovery remains available from Home.")
+            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+            closeButton.layer?.cornerRadius = 8
+            closeButton.layer?.borderWidth = 0
             updateStatusDot(
                 color: failureKind == .recordingTooShort
                     ? MeetingOverlayTokens.dotIdle
@@ -1868,8 +1887,8 @@ final class MeetingOverlayController: NSObject {
             promptCandidate = nil
             promptKind = nil
             promptCountdownTask?.cancel()
+            autoHideTask?.cancel()
             showPanel()
-            scheduleAutoHide(after: 5)
         }
         pushToView()
     }

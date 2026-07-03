@@ -120,6 +120,7 @@ final class OverlayRootView: NSView {
         errorMessage: String,
         errorActionTitle: String?,
         onErrorAction: (() -> Void)?,
+        onErrorDismiss: (() -> Void)?,
         loadingPresentation: FloatingOverlayController.LoadingPresentation,
         loadingElapsedSeconds: Int,
         successTitle: String,
@@ -172,6 +173,7 @@ final class OverlayRootView: NSView {
                 error: errorMessage.isEmpty ? nil : errorMessage,
                 errorActionTitle: errorActionTitle,
                 onErrorAction: onErrorAction,
+                onErrorDismiss: onErrorDismiss,
                 isTranscribing: isTranscribing,
                 transcriptText: liveTranscript,
                 statusText: statusText
