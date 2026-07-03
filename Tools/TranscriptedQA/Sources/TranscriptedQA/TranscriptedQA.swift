@@ -174,6 +174,7 @@ struct TranscriptedQA: ParsableCommand {
             ValidateArtifacts.self,
             ValidateIndex.self,
             CheckHealth.self,
+            SpeakerStats.self,
             PermissionState.self,
             GenerateFixtures.self,
             RoundTrip.self,

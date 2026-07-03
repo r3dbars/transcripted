@@ -222,6 +222,8 @@ Prefer a small number of lifecycle events over broad click tracking.
 | `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
+| `meeting_speaker_auto_recognized` | A returning speaker was silently recognized without review; `graduated` marks a profile's first-ever auto-recognition | `similarity_bucket`, `margin_bucket`, `call_count_bucket`, `channel`, `graduated`, `surface` |
+| `meeting_speaker_match_reviewed` | One review verdict joining match confidence to the user's answer (confirmed = right, corrected = wrong) | `review_action`, `similarity_bucket`, `margin_bucket`, `call_count_bucket`, `channel`, `had_suggestion`, `surface` |
 | `meeting_speaker_review_shown` | A saved meeting has review work surfaced | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `surface` |
 | `meeting_speaker_review_submitted` | User saves or defers speaker review | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `completion_kind`, `result`, `updates_submitted_bucket`, `surface` |
 | `meeting_summary_requested` | User asks for a local summary | `artifact_age_bucket`, `model_state`, `surface` |

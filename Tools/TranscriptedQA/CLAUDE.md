@@ -27,6 +27,7 @@ The current package is intentionally small:
 | `PermissionState.swift` | No-prompt macOS permission-state probe for Codex computer-use and live QA blockers |
 | `PackagedAppSmoke.swift` | Pre-publish packaged app smoke for app bundle metadata, Sparkle config, signing, dSYM, DMG, optional UI, and privacy-safe local logs |
 | `RoundTrip.swift` | Generate test data, validate, corrupt, re-validate, and confirm validators catch real defects |
+| `SpeakerStats.swift` | Speaker-recognition lifeline report: funnel, graduation, precision, and 30-day trends from `speaker_match_outcomes` |
 | `StressTest.swift` | Generate large datasets and validate performance + correctness |
 | `SparkleUpdateSmoke.swift` | No-publish fake-state Sparkle update UI smoke for update-available and downloading menu surfaces |
 | `ValidateAll.swift` | Run all validators: transcripts, dictations, DB, index, logs, artifacts |
@@ -94,6 +95,7 @@ swift run transcripted-qa validate-transcripts
 swift run transcripted-qa validate-index
 swift run transcripted-qa validate-logs
 swift run transcripted-qa check-health
+swift run transcripted-qa speaker-stats
 swift run transcripted-qa permission-state --mode computer-use
 swift run transcripted-qa imported-audio-smoke --output /tmp/transcripted-imported-audio-smoke
 swift run transcripted-qa sparkle-update-smoke --app ../../build/Transcripted.app --output /tmp/transcripted-sparkle-update-smoke

@@ -142,6 +142,7 @@ final class SpeakerNamingContentView: NSView {
 
     private let titleLabel = NSTextField(labelWithString: "Review meeting speakers")
     private let subtitleLabel = NSTextField(labelWithString: "Transcript saved. Name unknown voices, confirm suggested matches, or review later in Settings > People.")
+    private let payoffLabel = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
     private let documentView = NSView()
     private let saveButton = NSButton(title: "Save Names", target: nil, action: nil)
@@ -189,6 +190,12 @@ final class SpeakerNamingContentView: NSView {
         subtitleLabel.textColor = NSColor.secondaryLabelColor
         addSubview(subtitleLabel)
 
+        payoffLabel.stringValue = payoffText
+        payoffLabel.font = NSFont.systemFont(ofSize: 11)
+        payoffLabel.textColor = NSColor.secondaryLabelColor
+        payoffLabel.isHidden = payoffText.isEmpty
+        addSubview(payoffLabel)
+
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
@@ -234,8 +241,10 @@ final class SpeakerNamingContentView: NSView {
         systemRows.removeAll()
         localCollapsedToMe = false
 
-        let micEntries = request.speakers.filter { $0.channel == .mic }
-        let systemEntries = request.speakers.filter { $0.channel == .system }
+        // Most informative question first: doubtful suggestions lead, so the
+        // user's first tap is the one that teaches the matcher the most.
+        let micEntries = SpeakerReviewPrioritizer.ranked(request.speakers.filter { $0.channel == .mic })
+        let systemEntries = SpeakerReviewPrioritizer.ranked(request.speakers.filter { $0.channel == .system })
         hasMicSection = !micEntries.isEmpty
         hasSystemSection = !systemEntries.isEmpty
 
@@ -297,6 +306,14 @@ final class SpeakerNamingContentView: NSView {
             y: pad,
             width: cancelSize.width,
             height: btnH
+        )
+
+        // Payoff line sits bottom-left, vertically centered against the buttons.
+        payoffLabel.frame = NSRect(
+            x: pad,
+            y: pad + (btnH - 16) / 2,
+            width: max(0, cancelButton.frame.minX - 12 - pad),
+            height: 16
         )
 
         // Scroll view fills the middle.
@@ -404,6 +421,7 @@ final class SpeakerNamingContentView: NSView {
             updates.append(update)
         }
         trackReviewSubmitted(completionKind: "save", updateCount: updates.count)
+        trackMatchReviewOutcomes(updates)
         onSave?(updates)
     }
 
@@ -448,6 +466,46 @@ final class SpeakerNamingContentView: NSView {
             "review_reason": reviewReason,
             "surface": "speaker_review_sheet",
         ]
+    }
+
+    /// One bucketed event per verdict, joining the matcher's confidence to the
+    /// user's answer. This is the fleet-wide accuracy signal: correction rate
+    /// by similarity/margin bucket is what retunes the auto-accept gates.
+    /// Only enum buckets are sent — no names, ids, or raw scores.
+    private func trackMatchReviewOutcomes(_ updates: [SpeakerNameUpdate]) {
+        let entriesByKey = Dictionary(
+            request.speakers.map { ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for update in updates {
+            // Shared Core mapping — the same one the coordinator uses for the
+            // local lifeline store — so PostHog and speaker-stats can never
+            // classify one verdict differently.
+            guard let kind = SpeakerMatchOutcomeKind(reviewAction: update.action) else { continue }
+            let entry = entriesByKey[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
+            AnalyticsReporter.track(
+                "meeting_speaker_match_reviewed",
+                properties: [
+                    "review_action": kind.rawValue,
+                    "similarity_bucket": SpeakerRecognitionTelemetry.similarityBucket(entry?.matchSimilarity),
+                    "margin_bucket": SpeakerRecognitionTelemetry.marginBucket(
+                        similarity: entry?.matchSimilarity,
+                        secondSimilarity: entry?.matchSecondSimilarity
+                    ),
+                    "call_count_bucket": AnalyticsReporter.countBucket(entry?.callCount ?? 0),
+                    "channel": update.channel.rawValue,
+                    "had_suggestion": entry?.currentName != nil ? "true" : "false",
+                    "surface": "speaker_review_sheet",
+                ]
+            )
+        }
+    }
+
+    private var payoffText: String {
+        let count = request.recognizedPeopleCount
+        guard count > 0 else { return "" }
+        let people = count == 1 ? "1 person" : "\(count) people"
+        return "Transcripted recognizes \(people) automatically — confirming teaches it new voices."
     }
 
     private var suggestedMatchCount: Int {

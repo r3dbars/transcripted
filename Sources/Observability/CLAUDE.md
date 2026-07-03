@@ -24,6 +24,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference
 - `AnalyticsEventPolicy.swift` — compiles the explicit PostHog event/property allowlist from `Resources/analytics-events.psv`
 - `ActivationTelemetry.swift` — centralized activation analytics helpers for artifact actions, agent prompt/setup CTAs, and saved-recent artifact return-proxy buckets
+- `SpeakerRecognitionTelemetry.swift` — similarity/margin bucketing for speaker-recognition accuracy analytics, aligned with the matcher's decision thresholds
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
 - `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
 - `ObservabilityTextRedactor.swift` — shared text redactor for support-facing and diagnostic strings before they leave local-only surfaces
@@ -67,6 +68,7 @@ Relevant direct coverage:
 - `Tests/AnalyticsEventPolicyTests.swift`
 - `Tests/AnalyticsPayloadSanitizerTests.swift`
 - `Tests/AnalyticsReporterTests.swift`
+- `Tests/SpeakerRecognitionTelemetryTests.swift`
 - `Tests/ObservabilityPreferencesTests.swift`
 - `Tests/SentryEventPolicyTests.swift`
 - `Tests/SentryPayloadSanitizerTests.swift`
