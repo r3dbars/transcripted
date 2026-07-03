@@ -1649,6 +1649,10 @@ class DictationSessionController: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_not_confirmed",
                 message: "Paste-back was dispatched but the target did not confirm reading the borrowed clipboard")
             appState?.logger.log("DICTATION | paste not confirmed, keeping text on clipboard")
+        case .pasteConfirmationUnavailable:
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
+                message: "Paste-back was dispatched but the target did not expose confirmation")
+            appState?.logger.log("DICTATION | paste confirmation unavailable, keeping text on clipboard")
         case nil:
             break
         }
@@ -2070,6 +2074,8 @@ private extension TextPasteCopyReason {
             return "focus_changed"
         case .pasteNotConfirmed:
             return "paste_not_confirmed"
+        case .pasteConfirmationUnavailable:
+            return "paste_confirmation_unavailable"
         }
     }
 }

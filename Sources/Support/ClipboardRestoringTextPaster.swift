@@ -12,6 +12,7 @@ enum TextPasteCopyReason: Equatable {
     case pasteEventCreationFailed
     case focusChanged
     case pasteNotConfirmed
+    case pasteConfirmationUnavailable
 }
 
 enum TextPasteOutcome: Equatable {
@@ -356,10 +357,8 @@ final class ClipboardRestoringTextPaster {
             )
         }
 
+        let confirmationUnavailable = pasteConfirmed == nil && accessibilityConfirmation?.canObserveTextValue != true
         let confirmPasteReceived = pasteConfirmed ?? {
-            if self.temporaryPasteboardDataProvider?.didProvideData == true {
-                return true
-            }
             if accessibilityConfirmation?.containsPastedText(text) == true {
                 return true
             }
@@ -376,6 +375,12 @@ final class ClipboardRestoringTextPaster {
         ) else {
             guard leaveTemporaryClipboardAvailable() else {
                 return .failed("Couldn't keep the dictation copied after paste-back was unconfirmed. The dictation was saved, but paste-back did not run.")
+            }
+            if confirmationUnavailable {
+                return .copied(
+                    "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                    reason: .pasteConfirmationUnavailable
+                )
             }
             return .copied(
                 "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",

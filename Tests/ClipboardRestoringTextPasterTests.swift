@@ -161,8 +161,8 @@ func testClipboardRestoringTextPaster() async {
             assertEqual(
                 outcome,
                 .copied(
-                    "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
-                    reason: .pasteNotConfirmed
+                    "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                    reason: .pasteConfirmationUnavailable
                 ),
                 "unverified paste dispatch should be reported as copied instead of pasted"
             )
@@ -392,8 +392,8 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             outcome,
             .copied(
-                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
-                reason: .pasteNotConfirmed
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
             ),
             "unconfirmed slow pasteback should not claim automatic paste success"
         )
@@ -452,8 +452,8 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             outcome,
             .copied(
-                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
-                reason: .pasteNotConfirmed
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
             ),
             "an unread paste should not report automatic paste success"
         )
@@ -560,8 +560,8 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             outcome,
             .copied(
-                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
-                reason: .pasteNotConfirmed
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
             ),
             "unconfirmed pasteback should not claim automatic paste success"
         )
@@ -628,8 +628,8 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(
             outcome,
             .copied(
-                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
-                reason: .pasteNotConfirmed
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
             ),
             "unconfirmed pasteback should not claim automatic paste success"
         )
