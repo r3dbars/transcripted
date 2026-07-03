@@ -91,6 +91,51 @@ func testDictationTranscriptWriter() {
         )
     }
 
+    runSuite("DictationTranscriptWriter.save — a failed append leaves the existing day intact") {
+        let fm = FileManager.default
+        let tempRoot = temporaryDictationWriterTestRoot(fileManager: fm)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: outputDir.path)
+            try? fm.removeItem(at: tempRoot)
+        }
+
+        let firstSaved = try? DictationTranscriptWriter.save(
+            text: "first note that must survive a crash",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: localDate(year: 2026, month: 4, day: 7, hour: 9, minute: 15),
+            directory: outputDir
+        )
+
+        guard let dayFile = firstSaved?.url else {
+            assertionFailure("Expected first dictation to save")
+            return
+        }
+
+        let before = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
+        assertTrue(before.contains("first note that must survive a crash"), "first dictation should be on disk")
+
+        try? fm.setAttributes([.posixPermissions: 0o500], ofItemAtPath: outputDir.path)
+
+        let secondSaved = try? DictationTranscriptWriter.save(
+            text: "second note from a doomed write",
+            sourceApp: nil,
+            delivery: .copied,
+            createdAt: localDate(year: 2026, month: 4, day: 7, hour: 16, minute: 45),
+            directory: outputDir
+        )
+        assertTrue(secondSaved == nil, "append into a read-only folder should fail rather than succeed")
+
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: outputDir.path)
+
+        let after = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
+        assertEqual(after, before, "existing day file must be unchanged after a failed append")
+        assertTrue(after.contains("first note that must survive a crash"), "first dictation must survive")
+        assertTrue(!after.contains("second note from a doomed write"), "no partial second entry should leak in")
+    }
+
     runSuite("DictationTranscriptWriter.save — separates different days") {
         let fm = FileManager.default
         let tempRoot = temporaryDictationWriterTestRoot(fileManager: fm)
