@@ -38,7 +38,10 @@ struct PermissionsOnboardingView: View {
     @State private var micGranted = false
     @State private var accessibilityGranted = false
     @State private var screenRecordingGranted = false
+    @State private var timelineScreenRecordingGranted = false
     @State private var calendarGranted = false
+    @State private var timelineOptIn = TimelinePreferences.isEnabled()
+    @State private var timelineProvider = TimelinePreferences.provider()
     @State private var meetingPromptsEnabled = true
     @State private var selectedUseCase: OnboardingUseCase = .meetings
     @State private var leaveDictationShortcutsOff = true
@@ -82,12 +85,18 @@ struct PermissionsOnboardingView: View {
         if currentStep.kind == .useCase {
             return selectedUseCase == .meetings ? "Set up meetings" : "Set up dictation"
         }
+        if currentStep.kind == .timeline {
+            return timelineOptIn ? "Enable Timeline" : "Keep Timeline Off"
+        }
         if currentStepIndex == steps.count - 1 { return "Open Transcripted" }
         return "Continue"
     }
 
     private var primaryButtonDisabled: Bool {
-        (currentStep.kind == .permissions || currentStep.kind == .done) && !hasRequiredPermissions
+        if currentStep.kind == .timeline {
+            return timelineOptIn && !timelineScreenRecordingGranted
+        }
+        return (currentStep.kind == .permissions || currentStep.kind == .done) && !hasRequiredPermissions
     }
 
     var body: some View {
@@ -368,6 +377,44 @@ struct PermissionsOnboardingView: View {
                     AnalyticsPreferences.setEnabled(newValue)
                 }
             }
+        case .timeline:
+            SplitStage {
+                Kicker("Optional timeline")
+                Headline(primary: "Your day, in one private timeline.", size: 40, alignment: .leading)
+                BodyCopy("Timeline can capture lightweight screenshots, turn them into local activity cards, and place them beside meetings and dictations. It stays fully off unless you turn it on.")
+                BulletList([
+                    "Off by default",
+                    "Screen Recording required",
+                    timelineProvider == .gemini ? "Gemini is cloud and opt-in" : "Default provider stays local"
+                ])
+                ToggleCard(
+                    title: "Enable Timeline",
+                    detail: timelineOptIn
+                        ? "Timeline will start only after setup is complete and Screen Recording is allowed."
+                        : "Timeline remains off. You can enable it later in Settings.",
+                    isOn: $timelineOptIn,
+                    automationIdentifier: "transcripted.onboarding.timeline.enable"
+                )
+                .frame(maxWidth: 440)
+            } right: {
+                TimelineOnboardingSetupCard(
+                    timelineOptIn: timelineOptIn,
+                    provider: Binding(
+                        get: { timelineProvider },
+                        set: { newValue in
+                            timelineProvider = newValue
+                            AnalyticsReporter.track(
+                                "timeline_provider_selected",
+                                properties: ["provider": newValue.analyticsValue, "surface": "onboarding"]
+                            )
+                        }
+                    ),
+                    screenRecordingGranted: timelineScreenRecordingGranted,
+                    onRequestScreenRecording: {
+                        requestPermission(.screenRecording, required: timelineOptIn)
+                    }
+                )
+            }
         case .done:
             CenterStage {
                 Kicker("You're set")
@@ -564,6 +611,7 @@ struct PermissionsOnboardingView: View {
         micGranted = TranscriptedPermissionAccess.isGranted(.microphone)
         accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
         screenRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+        timelineScreenRecordingGranted = TranscriptedPermissionAccess.isGranted(.screenRecording)
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
         revalidateSystemAudioPermissionForStatusSurfaces()
 
@@ -608,8 +656,25 @@ struct PermissionsOnboardingView: View {
     private func completeOnboarding() {
         guard hasRequiredPermissions else { return }
         stopPolling()
+        applyTimelinePreferences()
         trackCompletionIfNeeded()
         onComplete()
+    }
+
+    private func applyTimelinePreferences() {
+        TimelinePreferences.setProvider(timelineProvider)
+        TimelinePreferences.setEnabled(timelineOptIn)
+        TimelinePreferences.setOnboardingCompleted(timelineOptIn)
+
+        if timelineOptIn {
+            AnalyticsReporter.track(
+                "timeline_onboarding_completed",
+                properties: [
+                    "provider": timelineProvider.analyticsValue,
+                    "screen_recording_status": timelineScreenRecordingGranted ? "granted" : "not_granted",
+                ]
+            )
+        }
     }
 
     private func trackCompletionIfNeeded() {
@@ -733,7 +798,7 @@ struct PermissionsOnboardingView: View {
             .microphone: micGranted ? "granted" : "not_granted",
             .accessibility: accessibilityGranted ? "granted" : "not_granted",
             .systemAudioRecording: screenRecordingGranted ? "granted" : "not_granted",
-            .screenRecording: TranscriptedPermissionAccess.isGranted(.screenRecording) ? "granted" : "not_granted",
+            .screenRecording: timelineScreenRecordingGranted ? "granted" : "not_granted",
             .calendar: calendarGranted ? "granted" : "not_granted",
         ]
     }
@@ -757,6 +822,7 @@ struct PermissionsOnboardingView: View {
                 .init(kind: .agentDemo),
                 .init(kind: .connectAgent, canSkip: true),
                 .init(kind: .diagnostics, canSkip: true),
+                .init(kind: .timeline, canSkip: true),
                 .init(kind: .done),
             ]
         case .dictation:
@@ -774,6 +840,7 @@ struct PermissionsOnboardingView: View {
                 .init(kind: .agentDemo),
                 .init(kind: .connectAgent, canSkip: true),
                 .init(kind: .diagnostics, canSkip: true),
+                .init(kind: .timeline, canSkip: true),
                 .init(kind: .done),
             ]
         }
@@ -800,6 +867,7 @@ private enum OnboardingStepKind: Hashable {
     case agentDemo
     case connectAgent
     case diagnostics
+    case timeline
     case done
 
     var analyticsID: String {
@@ -832,6 +900,8 @@ private enum OnboardingStepKind: Hashable {
             return "connect_agent"
         case .diagnostics:
             return "diagnostics"
+        case .timeline:
+            return "timeline"
         case .done:
             return "done"
         }
@@ -1741,6 +1811,72 @@ private struct MeetingStartPathCard: View {
             .padding(.vertical, 9)
             .background(Capsule().fill(OnboardingTheme.card))
             .overlay(Capsule().stroke(OnboardingTheme.border, lineWidth: 1))
+        }
+    }
+}
+
+private struct TimelineOnboardingSetupCard: View {
+    let timelineOptIn: Bool
+    @Binding var provider: TimelineProvider
+    let screenRecordingGranted: Bool
+    let onRequestScreenRecording: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            MiniWindow(title: "Timeline") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(Color(red: 0.28, green: 0.62, blue: 0.72))
+                            .frame(width: 6, height: 74)
+
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("9:00 - 10:15 AM")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundStyle(OnboardingTheme.muted)
+                            Text("Launch planning")
+                                .font(.system(size: 15, weight: .semibold))
+                            Text("Reviewed launch notes, checked the release list, and wrote down next actions.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(OnboardingTheme.body)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(12)
+                    .background(OnboardingTheme.cardSoft)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Picker("Provider", selection: $provider) {
+                        ForEach(TimelineProvider.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .disabled(!timelineOptIn)
+                    .accessibilityIdentifier("transcripted.onboarding.timeline.provider")
+
+                    Text(provider.detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(provider == .gemini ? Color.red.opacity(0.78) : OnboardingTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button(screenRecordingGranted ? "Screen Recording Ready" : "Allow Screen Recording") {
+                        onRequestScreenRecording()
+                    }
+                    .buttonStyle(InkButtonStyle(isSubtle: screenRecordingGranted || !timelineOptIn, compact: true))
+                    .disabled(!timelineOptIn || screenRecordingGranted)
+                    .accessibilityIdentifier("transcripted.onboarding.timeline.screen-recording")
+                }
+                .padding(16)
+            }
+            .frame(width: 380, height: 300)
+
+            Text(timelineOptIn
+                ? (screenRecordingGranted ? "Timeline is ready to turn on after onboarding." : "Allow Screen Recording to continue with Timeline on.")
+                : "Timeline stays off and captures nothing.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(OnboardingTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

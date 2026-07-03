@@ -124,6 +124,19 @@ enum TranscriptedPermissionAccess {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
             }
             return granted
+        case .screenRecording:
+            if screenRecordingGranted() {
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+                return true
+            }
+
+            activateForPermissionPrompt()
+            _ = CGRequestScreenCaptureAccess()
+            notifyPermissionsDidChange(kind: .screenRecording)
+            if !screenRecordingGranted() {
+                openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            }
+            return screenRecordingGranted()
         case .calendar:
             activateForPermissionPrompt()
             let granted = await requestCalendarAccessIfNeeded()
@@ -171,6 +184,10 @@ enum TranscriptedPermissionAccess {
         @unknown default:
             return false
         }
+    }
+
+    static func screenRecordingGranted() -> Bool {
+        CGPreflightScreenCaptureAccess()
     }
 
     static func systemAudioRecordingStatus() -> SystemAudioPermissionState {
