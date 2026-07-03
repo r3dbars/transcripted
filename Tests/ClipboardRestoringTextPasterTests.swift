@@ -103,7 +103,7 @@ func testClipboardRestoringTextPaster() async {
             assertNil(restoredItems.first?.data(forType: customType), "custom data should not be eagerly snapshotted")
         }
 
-        runSuite("ClipboardRestoringTextPaster.paste — incomplete snapshots fail before clearing clipboard") {
+        runSuite("ClipboardRestoringTextPaster.paste — incomplete snapshots fall back to copied text") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
             let customType = NSPasteboard.PasteboardType("com.transcripted.clipboard-test")
@@ -123,13 +123,16 @@ func testClipboardRestoringTextPaster() async {
 
             assertEqual(
                 outcome,
-                .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run."),
-                "unsupported clipboard contents should fail before paste-back borrows the clipboard"
+                .copied(
+                    "Couldn't paste automatically without risking your current clipboard. The text was copied instead.",
+                    reason: .pasteNotConfirmed
+                ),
+                "unsupported clipboard contents should skip paste-back but keep the dictation copied"
             )
             assertEqual(
-                pasteboard.pasteboardItems?.first?.data(forType: customType),
-                customData,
-                "unsupported clipboard contents should remain untouched"
+                pasteboard.string(forType: .string),
+                "synthetic just-finished dictation",
+                "unsupported clipboard contents should be replaced by the copied dictation fallback"
             )
         }
 

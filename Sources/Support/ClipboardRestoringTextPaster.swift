@@ -328,7 +328,13 @@ final class ClipboardRestoringTextPaster {
         let accessibilityConfirmation = FocusedTextPasteConfirmation.capture()
         let savedItems = snapshotPasteboardItems(from: pasteboard)
         guard savedItems.isComplete else {
-            return .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.")
+            guard copyTextToClipboard(text, to: pasteboard) else {
+                return .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.")
+            }
+            return .copied(
+                "Couldn't paste automatically without risking your current clipboard. The text was copied instead.",
+                reason: .pasteNotConfirmed
+            )
         }
         pasteGeneration += 1
         let generation = pasteGeneration
