@@ -254,6 +254,7 @@ final class ClipboardRestoringTextPaster {
             _ = AXIsProcessTrustedWithOptions(options)
         },
         pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
+        pasteConfirmed: @MainActor () -> Bool = { false },
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
@@ -288,19 +289,7 @@ final class ClipboardRestoringTextPaster {
         var temporaryChangeCount = 0
 
         pasteboard.clearContents()
-        let wroteTemporaryString = writeTemporaryString(text, to: pasteboard) { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.scheduleClipboardRestoreAfterTemporaryRead(
-                    savedItems,
-                    temporaryString: text,
-                    temporaryChangeCount: temporaryChangeCount,
-                    to: pasteboard,
-                    generation: generation,
-                    delay: restoreDelay
-                )
-            }
-        }
-        let activeTemporaryProvider = wroteTemporaryString ? temporaryPasteboardDataProvider : nil
+        let wroteTemporaryString = writeTemporaryString(text, to: pasteboard)
 
         if !wroteTemporaryString {
             pasteboard.clearContents()
@@ -332,8 +321,8 @@ final class ClipboardRestoringTextPaster {
         }
 
         guard waitForPasteConfirmation(
-            provider: activeTemporaryProvider,
             target: target,
+            pasteConfirmed: pasteConfirmed,
             timeout: pasteConfirmationWait
         ) else {
             leaveTemporaryClipboardAvailable()
@@ -343,6 +332,14 @@ final class ClipboardRestoringTextPaster {
             )
         }
 
+        scheduleClipboardRestore(
+            savedItems,
+            temporaryString: text,
+            temporaryChangeCount: temporaryChangeCount,
+            to: pasteboard,
+            generation: generation,
+            delay: restoreDelay
+        )
         return .pasted
     }
 
@@ -384,28 +381,6 @@ final class ClipboardRestoringTextPaster {
 
     private func leaveTemporaryClipboardAvailable() {
         clearPendingClipboardRestore(restore: false, keepTemporaryProvider: true)
-    }
-
-    private func scheduleClipboardRestoreAfterTemporaryRead(
-        _ savedItems: PasteboardSnapshot,
-        temporaryString: String,
-        temporaryChangeCount: Int,
-        to pasteboard: any ClipboardPasteboard,
-        generation: Int,
-        delay: UInt64
-    ) {
-        // Pasteboard observers can read the provider before the target app consumes Cmd+V.
-        // Keep the longer fallback active unless no restore has been scheduled yet.
-        scheduleClipboardAutoEnterReadiness(generation: generation, delay: delay)
-        guard clipboardRestoreTask == nil else { return }
-        scheduleClipboardRestore(
-            savedItems,
-            temporaryString: temporaryString,
-            temporaryChangeCount: temporaryChangeCount,
-            to: pasteboard,
-            generation: generation,
-            delay: delay
-        )
     }
 
     private func scheduleClipboardAutoEnterReadiness(generation: Int, delay: UInt64) {
@@ -492,14 +467,13 @@ final class ClipboardRestoringTextPaster {
     @discardableResult
     func writeTemporaryString(
         _ text: String,
-        to pasteboard: any ClipboardPasteboard,
-        onTemporaryStringRead: @escaping () -> Void
+        to pasteboard: any ClipboardPasteboard
     ) -> Bool {
         guard pasteboard is NSPasteboard else { return false }
 
         let provider = TemporaryPasteboardStringProvider(
             text: text,
-            onTemporaryStringRead: onTemporaryStringRead
+            onTemporaryStringRead: {}
         )
         let item = NSPasteboardItem()
         guard item.setDataProvider(provider, forTypes: [.string]) else {
@@ -516,13 +490,12 @@ final class ClipboardRestoringTextPaster {
     }
 
     private func waitForPasteConfirmation(
-        provider: TemporaryPasteboardStringProvider?,
         target: DictationPasteTarget?,
+        pasteConfirmed: @MainActor () -> Bool,
         timeout: TimeInterval
     ) -> Bool {
-        guard let provider else { return false }
         guard target?.matchesCurrentFrontmostApp() != false else { return false }
-        if provider.didProvideData {
+        if pasteConfirmed() {
             return true
         }
         guard timeout > 0 else { return false }
@@ -531,11 +504,11 @@ final class ClipboardRestoringTextPaster {
         while Date().timeIntervalSince(start) < timeout {
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
             guard target?.matchesCurrentFrontmostApp() != false else { return false }
-            if provider.didProvideData {
+            if pasteConfirmed() {
                 return true
             }
         }
-        return provider.didProvideData
+        return pasteConfirmed()
     }
 
     func snapshotPasteboardItems(from pasteboard: any ClipboardPasteboard) -> PasteboardSnapshot {

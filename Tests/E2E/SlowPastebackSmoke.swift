@@ -111,6 +111,7 @@ struct SlowPastebackSmoke {
         let startedAt = Date()
         var targetReadTask: Task<String?, Never>?
         var immediateTargetRead: String?
+        var pasteConfirmed = false
         var userCopyTask: Task<Void, Never>?
         var autoEnterTask: Task<TimeInterval, Never>?
 
@@ -124,6 +125,7 @@ struct SlowPastebackSmoke {
                     if let readDelay = scenario.readDelay {
                         if readDelay.nanoseconds == 0 {
                             immediateTargetRead = pasteboard.string(forType: .string)
+                            pasteConfirmed = immediateTargetRead == freshDictation
                         } else {
                             targetReadTask = Task {
                                 try? await Task.sleep(nanoseconds: readDelay.nanoseconds)
@@ -154,6 +156,7 @@ struct SlowPastebackSmoke {
                 }
                 return scenario.dispatcherSucceeds
             },
+            pasteConfirmed: { pasteConfirmed },
             restoreDelay: scenario.restoreDelay.nanoseconds,
             fallbackRestoreDelay: scenario.fallbackDelay.nanoseconds
         )
@@ -202,6 +205,7 @@ struct SlowPastebackSmoke {
                 _ = pasteboard.string(forType: .string)
                 return true
             },
+            pasteConfirmed: { true },
             restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
             fallbackRestoreDelay: SmokeDelay.milliseconds(1_000).nanoseconds
         )
@@ -210,6 +214,7 @@ struct SlowPastebackSmoke {
         let retryStartedAt = Date()
         var retryReadTask: Task<String?, Never>?
         var immediateRetryRead: String?
+        var retryPasteConfirmed = false
         var autoEnterTask: Task<TimeInterval, Never>?
         let retryOutcome = paster.paste(
             retryDictation,
@@ -219,6 +224,7 @@ struct SlowPastebackSmoke {
             pasteDispatcher: {
                 if readDelay.nanoseconds == 0 {
                     immediateRetryRead = pasteboard.string(forType: .string)
+                    retryPasteConfirmed = immediateRetryRead == retryDictation
                 } else {
                     retryReadTask = Task {
                         try? await Task.sleep(nanoseconds: readDelay.nanoseconds)
@@ -236,6 +242,7 @@ struct SlowPastebackSmoke {
                 }
                 return true
             },
+            pasteConfirmed: { retryPasteConfirmed },
             restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
             fallbackRestoreDelay: retryFallbackDelay.nanoseconds
         )
@@ -311,6 +318,7 @@ struct SlowPastebackSmoke {
                 _ = pasteboard.string(forType: .string)
                 return true
             },
+            pasteConfirmed: { true },
             restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
             fallbackRestoreDelay: fallbackDelay.nanoseconds
         )

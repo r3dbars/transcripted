@@ -338,6 +338,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                pasteConfirmed: { true },
                 restoreDelay: 20_000_000,
                 fallbackRestoreDelay: 120_000_000,
                 pasteConfirmationWait: 0.2
@@ -479,6 +480,50 @@ func testClipboardRestoringTextPaster() async {
             restoredClipboard,
             dictationText,
             "unconfirmed pasteback should keep the dictation copied instead of restoring too early"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — observer reads do not confirm target paste") {
+        let existingClipboard = "synthetic existing clipboard"
+        let dictationText = "synthetic observer-read dictation"
+        let pasteboardName = NSPasteboard.Name("TranscriptedObserverReadPasteTest-\(UUID().uuidString)")
+        let paster = await MainActor.run {
+            ClipboardRestoringTextPaster()
+        }
+
+        let outcome = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(existingClipboard, forType: .string)
+            return paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                pasteConfirmationWait: 0.05
+            )
+        }
+
+        assertEqual(
+            outcome,
+            .copied(
+                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
+                reason: .pasteNotConfirmed
+            ),
+            "a pasteboard read alone should not prove the target received Cmd+V"
+        )
+        let clipboardAfterUnconfirmedRead = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            return pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            clipboardAfterUnconfirmedRead,
+            dictationText,
+            "observer reads should leave the dictation available for manual recovery"
         )
     }
 
@@ -629,6 +674,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                pasteConfirmed: { true },
                 fallbackRestoreDelay: 2_000_000
             )
         }
@@ -666,6 +712,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                pasteConfirmed: { true },
                 fallbackRestoreDelay: 5_000_000
             )
         }
@@ -710,6 +757,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                pasteConfirmed: { true },
                 fallbackRestoreDelay: 50_000_000
             )
         }
@@ -724,6 +772,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                pasteConfirmed: { true },
                 fallbackRestoreDelay: 5_000_000
             )
         }
@@ -769,6 +818,7 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
+                pasteConfirmed: { true },
                 fallbackRestoreDelay: 5_000_000
             )
             paster.cancelPendingClipboardRestore()
