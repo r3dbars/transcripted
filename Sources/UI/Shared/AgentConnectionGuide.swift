@@ -100,6 +100,10 @@ enum AgentConnectionGuide {
         "search",
         "who_is",
         "recap",
+        "decisions",
+        "commitments",
+        "open_questions",
+        "search_meetings",
     ]
 
     static func skillFileURL(for skill: AgentConnectionStarterSkill) -> URL {

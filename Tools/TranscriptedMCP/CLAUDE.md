@@ -89,11 +89,16 @@ All tools are read-only.
 | `list_action_items` | Roll up action items across meetings; filter by owner / status (`open`/`all`; `done` is rejected with an explicit error) / query / date |
 | `list_decisions` | Roll up decisions across meetings; filter by query / date |
 | `digest` | Cross-meeting summary (decisions + action items + open questions) for a window |
+| `decisions` | WS2.3 receipt API for local decision lookup by topic/range |
+| `commitments` | WS2.3 receipt API for local action-item lookup by person/range |
+| `open_questions` | WS2.3 receipt API for local open-question lookup by project/range |
+| `search_meetings` | WS2.3 receipt API for local keyword search over meeting utterances |
 | `status` | Server version, resolved capture directories and which resolution rule selected them, index location, and indexed counts |
 
-The last three are cross-meeting rollups over the structured summary fields and
-query the same `meeting_summary_items` index populated from saved meeting
-Markdown during reconcile.
+The rollup and WS2.3 tools are cross-meeting reads over local structured summary
+fields and raw utterance FTS. They query the same `meeting_summary_items` index
+populated from saved meeting Markdown during reconcile. They do not use
+embeddings, cloud calls, or LLM synthesis.
 
 ## Common Agent Retrieval Shapes
 
