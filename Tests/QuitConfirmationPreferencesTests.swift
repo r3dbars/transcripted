@@ -36,7 +36,7 @@ func testQuitConfirmationPreferences() {
         )
     }
 
-    runSuite("ActiveMeetingQuitConfirmationPolicy only prompts for active meeting capture") {
+    runSuite("ActiveMeetingQuitConfirmationPolicy prompts for active and background meeting work") {
         assertTrue(
             ActiveMeetingQuitConfirmationPolicy.shouldConfirmQuit(
                 preferenceEnabled: true,
@@ -44,19 +44,28 @@ func testQuitConfirmationPreferences() {
             ),
             "default-on preference should prompt while a meeting is recording or finishing"
         )
+        assertTrue(
+            ActiveMeetingQuitConfirmationPolicy.shouldConfirmQuit(
+                preferenceEnabled: true,
+                activeMeetingCapture: false,
+                backgroundTranscriptionWork: true
+            ),
+            "default-on preference should also prompt while meeting transcription or imports are queued"
+        )
         assertFalse(
             ActiveMeetingQuitConfirmationPolicy.shouldConfirmQuit(
                 preferenceEnabled: true,
                 activeMeetingCapture: false
             ),
-            "idle or transcription-only quits should not show an extra dialog"
+            "idle quits should not show an extra dialog"
         )
         assertFalse(
             ActiveMeetingQuitConfirmationPolicy.shouldConfirmQuit(
                 preferenceEnabled: false,
-                activeMeetingCapture: true
+                activeMeetingCapture: true,
+                backgroundTranscriptionWork: true
             ),
-            "user opt-out should skip the dialog even during active capture"
+            "user opt-out should skip the dialog even during active or background meeting work"
         )
     }
 
@@ -65,15 +74,15 @@ func testQuitConfirmationPreferences() {
 
         assertEqual(
             presentation.title,
-            "Meeting is still recording",
-            "alert title should name the active meeting quit"
+            "Meeting work is still running",
+            "alert title should cover recording and background transcription work"
         )
         assertTrue(
-            presentation.message.contains("stop and make the transcript"),
-            "alert should offer the normal stop and transcribe path"
+            presentation.message.contains("Keep Transcripted open"),
+            "alert should offer the safe path of keeping the app open"
         )
         assertTrue(
-            presentation.message.contains("save the captured audio and quit"),
+            presentation.message.contains("save the audio and quit"),
             "alert should explain that quit preserves retry audio"
         )
         assertEqual(
@@ -90,6 +99,23 @@ func testQuitConfirmationPreferences() {
             presentation.saveAudioAndQuitTitle,
             "Save Audio & Quit",
             "confirm button should describe the recoverable quit path"
+        )
+
+        let backgroundPresentation = ActiveMeetingQuitConfirmationPolicy.backgroundPresentation
+        assertEqual(
+            backgroundPresentation.title,
+            "Meeting transcript is still running",
+            "background-only alert should name transcript work instead of active recording"
+        )
+        assertEqual(
+            backgroundPresentation.keepOpenTitle,
+            "Keep Open",
+            "background-only alert should not offer a recording action"
+        )
+        assertEqual(
+            backgroundPresentation.saveAudioAndQuitTitle,
+            "Save Audio & Quit",
+            "background-only quit should still describe preserved audio"
         )
     }
 }

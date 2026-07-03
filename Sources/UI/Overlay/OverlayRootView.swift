@@ -117,6 +117,7 @@ final class OverlayRootView: NSView {
     func updateForState(
         _ state: FloatingOverlayController.OverlayState,
         dictationShortcutHint: String,
+        listeningNotice: String,
         errorMessage: String,
         errorActionTitle: String?,
         onErrorAction: (() -> Void)?,
@@ -143,6 +144,7 @@ final class OverlayRootView: NSView {
         headerView.update(
             state: state,
             dictationShortcutHint: dictationShortcutHint,
+            listeningNotice: listeningNotice,
             loadingTitle: state == .loading ? "Dictation" : nil,
             successTitle: successTitle,
             isError: showMessage && !isNotice,

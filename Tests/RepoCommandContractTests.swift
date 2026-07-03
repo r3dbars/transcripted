@@ -1886,6 +1886,13 @@ func testRepoCommandContract() {
             "mini cursor should keep the quiet startup waveform visible long enough to avoid a broken-looking full-window flash"
         )
         assertTrue(
+            overlayContents.contains("func dismissError()")
+                && overlayContents.contains("let handler = self.errorActionHandler")
+                && overlayContents.contains("self.clearActionableErrorWithoutHiding()")
+                && overlayContents.contains("handler?()"),
+            "actionable dictation errors should clear their state before running one-shot actions"
+        )
+        assertTrue(
             overlayContents.contains("NSWorkspace.shared.accessibilityDisplayShouldReduceMotion"),
             "cursor-follow smoothing should respect macOS Reduce Motion"
         )
@@ -2522,6 +2529,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - transcription cancellation clears live sidecar waits") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let taskManagerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
         let cancelBlock = sourceSlice(
             controllerContents,
             from: "func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {",
@@ -2536,6 +2544,37 @@ func testRepoCommandContract() {
         assertTrue(
             cancelBlock.contains("activeQueuedTranscriptionJobID = nil"),
             "transcription cancellation should clear the queued job owner used for live sidecar final attachment"
+        )
+        assertTrue(
+            cancelBlock.contains("if reason == .userRequested")
+                && cancelBlock.contains("try? FileManager.default.removeItem(at: audioURL)")
+                && cancelBlock.contains("Imported audio saved before cancellation"),
+            "explicit user cancellation should delete cancelled imports while non-user cancellation keeps recovery audio"
+        )
+
+        let importBlock = sourceSlice(
+            taskManagerContents,
+            from: "public func startImportedTranscription(",
+            to: "activeTasks[taskId] = asyncTask"
+        )
+        assertTrue(
+            importBlock.contains("activeTaskAudio[taskId]")
+                && importBlock.contains("micURL: nil")
+                && importBlock.contains("systemURL: audioURL")
+                && importBlock.contains("meetingTitle: meetingTitle")
+                && importBlock.contains("recordingDate: recordingDate"),
+            "active imported transcription should register its audio so shutdown quit can preserve a Home retry item"
+        )
+        let preserveBlock = sourceSlice(
+            taskManagerContents,
+            from: "public func preserveActiveTranscriptionsForShutdown(errorMessage: String) -> Int {",
+            to: "func populateSavedMetadata"
+        )
+        assertTrue(
+            preserveBlock.contains("addFailedTranscriptionRetainingAvailableAudio")
+                && preserveBlock.contains("micAudioURL: audio.micURL")
+                && preserveBlock.contains("systemAudioURL: audio.systemURL"),
+            "shutdown preservation should retain registered active imported and recorded audio"
         )
     }
 
@@ -3292,6 +3331,31 @@ func testRepoCommandContract() {
             overlayContents.contains("static let drawerResizeHandleHeight: CGFloat = 40")
                 && drawerContents.contains("height: MeetingOverlayTokens.drawerResizeHandleHeight"),
             "live transcript drawer resize grip should keep a 40pt drag target"
+        )
+    }
+
+    runSuite("Repo command contract - meeting error feedback stays visible and useful") {
+        let overlayContents = readRepoTextFile("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let errorUpdateBlock = sourceSlice(
+            overlayContents,
+            from: "case .error(let message):",
+            to: "// Transcription has no progress channel"
+        )
+        assertTrue(
+            errorUpdateBlock.contains("detailLabel.lineBreakMode = .byWordWrapping")
+                && errorUpdateBlock.contains("detailLabel.maximumNumberOfLines = 2")
+                && errorUpdateBlock.contains("Dismiss meeting error"),
+            "meeting errors should wrap recovery detail and expose an explicit dismiss control"
+        )
+
+        let sessionErrorBlock = sourceSlice(
+            overlayContents,
+            from: "case .error(let message):",
+            to: "pushToView()"
+        )
+        assertFalse(
+            sessionErrorBlock.contains("scheduleAutoHide(after: 5)"),
+            "meeting failures should not disappear after a five-second toast"
         )
     }
 

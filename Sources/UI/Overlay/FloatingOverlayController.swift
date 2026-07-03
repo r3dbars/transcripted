@@ -53,6 +53,9 @@ class FloatingOverlayController {
             )
         )
     }
+    var listeningNotice = "" {
+        didSet { pushStateToViews() }
+    }
 
     // MARK: - State (plain vars with didSet — no @Published, no ObservableObject)
 
@@ -220,9 +223,15 @@ class FloatingOverlayController {
         rootView?.updateForState(
             state,
             dictationShortcutHint: dictationShortcutHint,
+            listeningNotice: listeningNotice,
             errorMessage: errorMessage,
             errorActionTitle: errorActionTitle,
-            onErrorAction: errorActionHandler,
+            onErrorAction: { [weak self] in
+                guard let self else { return }
+                let handler = self.errorActionHandler
+                self.clearActionableErrorWithoutHiding()
+                handler?()
+            },
             messageTone: messageTone,
             onErrorDismiss: { [weak self] in self?.dismissError() },
             loadingPresentation: loadingPresentation,
@@ -376,6 +385,7 @@ class FloatingOverlayController {
         messageTone = .error
         errorActionTitle = nil
         errorActionHandler = nil
+        listeningNotice = ""
         state = .starting
         resizePanelToCompact()
         if !isVisible {
@@ -596,14 +606,7 @@ class FloatingOverlayController {
                 try await Task.sleep(nanoseconds: dismissDelay)
             } catch { return }
             guard let self = self, !self.errorMessage.isEmpty else { return }
-            self.errorMessage = ""
-            self.errorActionTitle = nil
-            self.errorActionHandler = nil
-            if tone == .notice {
-                self.hideWithConfirmAnimation()
-            } else {
-                self.hideWithCancelAnimation()
-            }
+            self.dismissError()
         }
     }
 
@@ -615,6 +618,16 @@ class FloatingOverlayController {
         errorActionTitle = nil
         errorActionHandler = nil
         hideWithCancelAnimation()
+    }
+
+    private func clearActionableErrorWithoutHiding() {
+        guard state == .drafting, !errorMessage.isEmpty else { return }
+        errorDismissTask?.cancel()
+        errorDismissTask = nil
+        errorMessage = ""
+        errorActionTitle = nil
+        errorActionHandler = nil
+        pushStateToViews()
     }
 
     /// Fast dismiss for empty dictation audio — brief flash then clean fade (no shake).
@@ -690,6 +703,7 @@ class FloatingOverlayController {
         messageTone = .error
         errorActionTitle = nil
         errorActionHandler = nil
+        listeningNotice = ""
         loadingPresentation = .initial
     }
 

@@ -245,6 +245,14 @@ final class MeetingSessionController: ObservableObject {
         isCaptureSessionActive || isFinishingRecording
     }
 
+    var shouldConfirmQuitForBackgroundTranscription: Bool {
+        hasBackgroundTranscriptionWork
+    }
+
+    var shouldBlockDictationForActiveMeetingCapture: Bool {
+        isCaptureSessionActive || isFinishingRecording
+    }
+
     // MARK: - Init
 
     /// Construct the full Core stack with app-owned storage isolation.
@@ -1373,8 +1381,18 @@ final class MeetingSessionController: ObservableObject {
                     meetingTitle: meetingTitle,
                     recordingDate: recordingDate
                 )
-            case .imported(let audioURL, _, _):
-                try? FileManager.default.removeItem(at: audioURL)
+            case .imported(let audioURL, let suggestedTitle, let recordingDate):
+                if reason == .userRequested {
+                    try? FileManager.default.removeItem(at: audioURL)
+                } else {
+                    preserveFailedMeetingForRetry(
+                        micAudioURL: nil,
+                        systemAudioURL: audioURL,
+                        errorMessage: "Imported audio saved before cancellation. Audio is safe; finish the transcript from Home.",
+                        meetingTitle: suggestedTitle,
+                        recordingDate: recordingDate
+                    )
+                }
             }
         }
 
@@ -2710,8 +2728,14 @@ final class MeetingSessionController: ObservableObject {
                 meetingTitle: meetingTitle,
                 recordingDate: recordingDate
             )
-        case .imported(let audioURL, _, _):
-            try? FileManager.default.removeItem(at: audioURL)
+        case .imported(let audioURL, let suggestedTitle, let recordingDate):
+            preserveFailedMeetingForRetry(
+                micAudioURL: nil,
+                systemAudioURL: audioURL,
+                errorMessage: message,
+                meetingTitle: suggestedTitle,
+                recordingDate: recordingDate
+            )
         }
         clearQueuedTranscriptionRuntimeDiagnosticsIfOwned(for: job, outcome: "model_recovery_failed")
     }

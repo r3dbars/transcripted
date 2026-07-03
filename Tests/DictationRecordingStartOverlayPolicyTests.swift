@@ -255,32 +255,31 @@ func testDictationRecordingStartOverlayPolicy() {
         assertFalse(plan.cancelSpeechEngine, "idle overlay cleanup should not reset the speech engine")
     }
 
-    runSuite("DictationStartAvailabilityPolicy blocks dictation during meeting work") {
+    runSuite("DictationStartAvailabilityPolicy blocks dictation during active meeting capture") {
         assertEqual(
             DictationStartAvailabilityPolicy.unavailableReason(
-                hasMeetingWork: true,
+                hasActiveMeetingCapture: true,
                 isSpeakerReviewPending: false
             ),
-            DictationStartAvailabilityPolicy.meetingWorkMessage,
-            "dictation should not start while a meeting is recording, saving, or transcribing"
+            DictationStartAvailabilityPolicy.activeMeetingCaptureMessage,
+            "dictation should not start while meeting capture still owns the microphone"
         )
     }
 
-    runSuite("DictationStartAvailabilityPolicy blocks dictation during speaker review") {
-        assertEqual(
-            DictationStartAvailabilityPolicy.unavailableReason(
-                hasMeetingWork: false,
-                isSpeakerReviewPending: true
-            ),
-            DictationStartAvailabilityPolicy.speakerReviewMessage,
-            "dictation should wait for speaker review because it owns meeting post-processing UI"
-        )
-    }
-
-    runSuite("DictationStartAvailabilityPolicy allows dictation when meeting work is idle") {
+    runSuite("DictationStartAvailabilityPolicy allows dictation during speaker review") {
         assertNil(
             DictationStartAvailabilityPolicy.unavailableReason(
-                hasMeetingWork: false,
+                hasActiveMeetingCapture: false,
+                isSpeakerReviewPending: true
+            ),
+            "speaker review alone should not block dictation"
+        )
+    }
+
+    runSuite("DictationStartAvailabilityPolicy allows dictation when meeting capture is idle") {
+        assertNil(
+            DictationStartAvailabilityPolicy.unavailableReason(
+                hasActiveMeetingCapture: false,
                 isSpeakerReviewPending: false
             ),
             "idle meeting state should not block dictation"

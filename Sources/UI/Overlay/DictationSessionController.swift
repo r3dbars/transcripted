@@ -31,7 +31,11 @@ class DictationSessionController: ObservableObject {
     var overlayController: FloatingOverlayController? {
         didSet {
             overlayController?.onEscapeDuringSession = { [weak self] in
-                guard let self = self, self.isDictating else { return }
+                guard let self else { return }
+                guard self.isDictating else {
+                    self.overlayController?.dismissError()
+                    return
+                }
                 self.cancelDictation()
             }
             overlayController?.onStopListening = { [weak self] in
@@ -263,7 +267,7 @@ class DictationSessionController: ObservableObject {
     private func dictationStartUnavailableReason(appState: TranscriptedAppState) -> String? {
         guard #available(macOS 14.0, *) else { return nil }
         return DictationStartAvailabilityPolicy.unavailableReason(
-            hasMeetingWork: appState.meetingSession.hasRuntimeDiagnosticsWork,
+            hasActiveMeetingCapture: appState.meetingSession.shouldBlockDictationForActiveMeetingCapture,
             isSpeakerReviewPending: appState.meetingSession.isSpeakerReviewPending
         )
     }
@@ -1216,7 +1220,20 @@ class DictationSessionController: ObservableObject {
         if let saveFailureMessage {
             overlayController.showError(saveFailureMessage)
         } else {
-            overlayController.showSuccessAndDismiss(title: DictationDelivery.savedWithoutPaste.summaryText)
+            overlayController.showError(
+                "Saved to Markdown. Paste it now, or use Paste Last Dictation later.",
+                actionTitle: "Paste It",
+                action: { [weak self] in
+                    guard let self else { return }
+                    let outcome = self.pasteWithClipboardRestore(text)
+                    switch outcome {
+                    case .pasted:
+                        overlayController.showSuccessAndDismiss(title: "Pasted")
+                    case .copied(let message, reason: _), .failed(let message):
+                        overlayController.showError(message)
+                    }
+                }
+            )
             ActivationTelemetry.trackDictationArtifactSaved(
                 delivery: DictationDelivery.savedWithoutPaste.rawValue,
                 durationBucket: AnalyticsReporter.durationBucket(seconds: durationSeconds),
