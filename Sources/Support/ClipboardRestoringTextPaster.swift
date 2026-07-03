@@ -371,7 +371,9 @@ final class ClipboardRestoringTextPaster {
             pasteConfirmed: confirmPasteReceived,
             timeout: pasteConfirmationWait
         ) else {
-            leaveTemporaryClipboardAvailable()
+            guard leaveTemporaryClipboardAvailable() else {
+                return .failed("Couldn't keep the dictation copied after paste-back was unconfirmed. The dictation was saved, but paste-back did not run.")
+            }
             return .copied(
                 "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
                 reason: .pasteNotConfirmed
@@ -425,8 +427,19 @@ final class ClipboardRestoringTextPaster {
         )
     }
 
-    private func leaveTemporaryClipboardAvailable() {
-        clearPendingClipboardRestore(restore: false, keepTemporaryProvider: true)
+    private func leaveTemporaryClipboardAvailable() -> Bool {
+        guard let pendingClipboardRestore else {
+            clearPendingClipboardRestore(restore: false)
+            return true
+        }
+
+        let pasteboard = pendingClipboardRestore.pasteboard
+        let temporaryString = pendingClipboardRestore.temporaryString
+        let stillBorrowedClipboard = pasteboard.changeCount == pendingClipboardRestore.temporaryChangeCount
+            || pasteboard.string(forType: .string) == temporaryString
+        clearPendingClipboardRestore(restore: false)
+        guard stillBorrowedClipboard else { return true }
+        return copyTextToClipboard(temporaryString, to: pasteboard)
     }
 
     private func scheduleClipboardAutoEnterReadiness(generation: Int, delay: UInt64) {
