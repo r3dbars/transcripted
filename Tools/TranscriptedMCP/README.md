@@ -50,6 +50,25 @@ If `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 automatically and stores its SQLite index in that shared root unless
 `TRANSCRIPTED_INDEX_DIR` is also set.
 
+## Telemetry
+
+The server can emit one anonymous PostHog event per successful tool call
+(`agent_capture_query_observed`, see `AgentCaptureQueryTelemetry.swift`). The
+payload is bucketed metadata only: query kind, artifact kind, capture-age
+bucket, and source-count bucket. It is validated against an allow-list;
+transcript text, query strings, titles, speaker names, file paths, and audio are
+never sent.
+
+It is gated twice:
+
+- it honors the app's anonymous analytics toggle
+  (`observability-anonymous-analytics-enabled`; off means nothing is sent)
+- it no-ops entirely unless a PostHog API key and HTTPS host are configured via
+  `POSTHOG_API_KEY`/`POSTHOG_HOST`, a local override, or the bundle's
+  `TranscriptedPostHogAPIKey`; source builds have none by default
+
+Transcripts and audio never leave the Mac in any mode.
+
 ## Cross-Meeting Receipt Tools
 
 WS2.3 adds local structured retrieval tools for agents:
