@@ -196,7 +196,7 @@ final class LiveMeetingCodexSession {
         }
 
         if !fileManager.fileExists(atPath: liveTranscriptURL.path) {
-            try writeTextIfChanged(idleTranscriptText(), to: liveTranscriptURL)
+            try writeTextIfChanged(knownText(at: liveTranscriptURL) ?? idleTranscriptText(), to: liveTranscriptURL)
         }
         if !fileManager.fileExists(atPath: watcherStateURL.path) {
             try writeTextIfChanged(initialWatcherStateText(), to: watcherStateURL)
@@ -204,7 +204,9 @@ final class LiveMeetingCodexSession {
         try rewriteLiveTranscriptStatus(state.status.rawValue)
 
         try syncHandoffWithState(fallbackDate: createdAt)
-        try writePreview(force: forcePreviewRewrite)
+        if forcePreviewRewrite || !fileManager.fileExists(atPath: previewURL.path) {
+            try writePreview(force: true)
+        }
     }
 
     private func ensurePreviewAuthTokenLocked() throws -> String {
@@ -255,13 +257,61 @@ final class LiveMeetingCodexSession {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
 
+            let previewExistedBeforeRepair = fileManager.fileExists(atPath: previewURL.path)
             try ensureWorkspaceFilesLocked(forcePreviewRewrite: false)
             let marker = entry.isFinal ? "" : " [partial]"
             let line = "**\(Self.timestamp(entry.timestampSeconds))** \(entry.source.markdownTag)\(marker) \(text)\n"
             try appendText(line, to: liveTranscriptURL)
             state.updatedAt = entry.createdAt
             try writeState()
-            try writePreview(force: false)
+            try writePreview(force: !previewExistedBeforeRepair)
+        }
+    }
+
+    func markAppendFailed(
+        consecutiveFailures: Int,
+        error: Error,
+        at date: Date = Date()
+    ) throws {
+        try withSessionLock {
+            try fileManager.createPrivateDirectory(at: workspaceRoot)
+            _ = try? ensurePreviewAuthTokenLocked()
+            loadStoredStateIfAvailable()
+            guard state.status == .recording else { return }
+
+            let countText = consecutiveFailures == 1 ? "1 append failure" : "\(consecutiveFailures) append failures"
+            let note = "Live sidecar stopped updating after \(countText): \(error.localizedDescription). The final Transcripted meeting Markdown still saves normally."
+            state.status = .recording
+            state.streamingBackendStatus = "live_sidecar_append_failed"
+            state.note = note
+            state.updatedAt = date
+
+            try writeState()
+            try syncHandoffWithState(fallbackDate: date)
+            try? rewriteLiveTranscriptStatus(state.status.rawValue)
+            try? appendText("\n\(note)\n", to: liveTranscriptURL)
+            try writePreview(force: true)
+        }
+    }
+
+    func markAppendRecovered(at date: Date = Date()) throws {
+        try withSessionLock {
+            try ensureWorkspaceFilesLocked(createdAt: date, forcePreviewRewrite: false)
+            guard state.streamingBackendStatus == "live_sidecar_append_failed" else {
+                return
+            }
+
+            let note = "Live sidecar is updating again. The final Transcripted meeting Markdown still saves normally."
+            state.status = .recording
+            state.streamingBackendStatus = "local_streaming_asr_running"
+            state.note = note
+            state.updatedAt = date
+
+            try rewriteLiveTranscriptStatus(state.status.rawValue)
+            try appendText("\n\(note)\n", to: liveTranscriptURL)
+            try writeState()
+            try syncHandoffWithState(fallbackDate: date)
+            try writePreview(force: true)
         }
     }
 
@@ -738,21 +788,25 @@ final class LiveMeetingCodexSession {
         let status = "\(state.status.rawValue) - \(state.streamingBackendStatus)"
         let escapedStatus = Self.htmlEscaped(status)
         let statusLine: String
-        switch state.status {
-        case .recording:
-            statusLine = "Recording locally"
-        case .transcriptSaved:
-            statusLine = "Transcript saved"
-        case .stopped:
-            statusLine = "Waiting for transcript"
-        case .cancelled:
-            statusLine = "Recording cancelled."
-        case .failed:
+        if state.streamingBackendStatus == "live_sidecar_append_failed" {
             statusLine = "Needs attention"
-        case .disabled:
-            statusLine = "Live sidecar disabled"
-        case .idle:
-            statusLine = "Not recording"
+        } else {
+            switch state.status {
+            case .recording:
+                statusLine = "Recording locally"
+            case .transcriptSaved:
+                statusLine = "Transcript saved"
+            case .stopped:
+                statusLine = "Waiting for transcript"
+            case .cancelled:
+                statusLine = "Recording cancelled."
+            case .failed:
+                statusLine = "Needs attention"
+            case .disabled:
+                statusLine = "Live sidecar disabled"
+            case .idle:
+                statusLine = "Not recording"
+            }
         }
         let escapedDisplayStatus = Self.htmlEscaped(statusLine)
         let escapedTitle = Self.htmlEscaped(state.title ?? "Live Meeting")
@@ -1139,6 +1193,10 @@ final class LiveMeetingCodexSession {
             function friendlyStatus(state) {
               if (!state || !state.status) {
                 return "Not recording";
+              }
+
+              if (state.streamingBackendStatus === "live_sidecar_append_failed") {
+                return "Needs attention";
               }
 
               if (state.status === "recording") {
