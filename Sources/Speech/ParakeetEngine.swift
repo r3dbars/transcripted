@@ -38,6 +38,8 @@ class ParakeetEngine: ObservableObject {
     private var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
     private var inputDeviceChangeListener: AudioObjectPropertyListenerBlock?
+    private var recentAudioEngineRebuildTimestamps: [CFAbsoluteTime] = []
+    private var didReportAudioEngineRebuildChurn = false
 
     // Live streaming text is intentionally disabled — the product focuses on
     // stable capture and final transcription rather than provisional text.
@@ -758,11 +760,15 @@ class ParakeetEngine: ObservableObject {
                     selection: snapshot.selection,
                     readiness: readiness
                 ))
-            if readiness == .routeNotSettled {
-                let rebuildGeneration = audioGraphGeneration + 1
-                await rebuildAudioEngine(reason: "audio_route_not_settled")
-                guard canContinuePrewarm(generation: rebuildGeneration) else { return }
-            }
+            // Do NOT rebuild the engine here, even for .routeNotSettled. The override
+            // this snapshot just applied (built-in mic instead of a Bluetooth headset)
+            // lives on this engine's AUHAL; discarding the engine forces the next
+            // snapshot to touch the AirPods mic again to rebind the AUHAL to the
+            // system default before re-applying the override — audibly bumping the
+            // Bluetooth route on every retry and racing settling with churn instead
+            // of waiting it out. Keep the engine and let schedulePrewarmRetry() poll;
+            // applyPreferredDictationInputDevice() is a no-op once the deviceID already
+            // matches, so retries here are cheap format reads with no route touch.
             markFormatUnreadyAndPublish()
             schedulePrewarmRetry()
             return
@@ -1508,7 +1514,8 @@ class ParakeetEngine: ObservableObject {
             // Avoid touching the current default input before the override is applied.
             // On AirPods routes, even a short read of the default input can briefly
             // pull playback toward headset-mode audio.
-            ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0
+            ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
+                + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
         }
 
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
@@ -1796,7 +1803,36 @@ class ParakeetEngine: ObservableObject {
         isEnginePrewarmed = false
     }
 
+    /// Tracks rebuild frequency and reports once if rebuilds are churning —
+    /// a guardrail against a route-settling loop silently re-knocking Bluetooth
+    /// audio instead of surfacing as a diagnosable failure.
+    private func trackAudioEngineRebuildChurn(reason: String) {
+        let now = CFAbsoluteTimeGetCurrent()
+        recentAudioEngineRebuildTimestamps.append(now)
+        let windowStart = now - TranscriptedConstants.audioEngineRebuildChurnWindow
+        recentAudioEngineRebuildTimestamps.removeAll { $0 < windowStart }
+
+        guard recentAudioEngineRebuildTimestamps.count >= TranscriptedConstants.audioEngineRebuildChurnThreshold else {
+            didReportAudioEngineRebuildChurn = false
+            return
+        }
+        guard !didReportAudioEngineRebuildChurn else { return }
+        didReportAudioEngineRebuildChurn = true
+        EventReporter.shared.capture(
+            level: .error,
+            engine: "parakeet",
+            event: "audio_engine_rebuild_churn_detected",
+            message: "Audio engine rebuilt repeatedly in a short window — likely a route-settling loop",
+            context: [
+                "reason": reason,
+                "rebuild_count": "\(recentAudioEngineRebuildTimestamps.count)",
+                "window_seconds": "\(TranscriptedConstants.audioEngineRebuildChurnWindow)"
+            ]
+        )
+    }
+
     private func rebuildAudioEngine(reason: String) async {
+        trackAudioEngineRebuildChurn(reason: reason)
         audioGraphGeneration += 1
         removeAudioEngineConfigObserver()
         let retiredEngine = audioEngine
@@ -1828,6 +1864,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func abandonBlockedAudioEngine(reason: String) {
+        trackAudioEngineRebuildChurn(reason: reason)
         audioGraphGeneration += 1
         removeAudioEngineConfigObserver()
         let retiredEngine = audioEngine
@@ -2497,7 +2534,8 @@ class ParakeetEngine: ObservableObject {
             self.isRecording = false
             self.audioLevel = 0
             self.configChangeWasRecording = false
-            self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0
+            self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
+                + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
             await self.eouManager?.reset()
             await self.removeRecordingTap()
             await self.stopAudioEngine()

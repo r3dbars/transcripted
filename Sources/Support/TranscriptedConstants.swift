@@ -51,6 +51,26 @@ enum TranscriptedConstants {
     /// Delay for audio input readiness retry after device change (nanoseconds)
     static let audioRecoveryDelay: UInt64 = 300_000_000  // 300ms
 
+    /// Window (seconds) during which Parakeet ignores its own config-change
+    /// notifications after intentionally touching the input graph (applying
+    /// the built-in-mic override, or resetting a zombie engine). Bluetooth
+    /// route renegotiation after that kind of touch commonly takes longer
+    /// than 1s, so this must outlast typical AirPods HFP/A2DP settling —
+    /// otherwise the self-induced notification re-enters the device-change
+    /// handler and triggers an unnecessary rebuild.
+    static let selfInducedConfigChangeIgnoreWindow: TimeInterval = 2.5
+
+    /// Rolling window (seconds) used to detect a rebuild-churn loop — repeated
+    /// full audio-engine rebuilds in quick succession, which on Bluetooth routes
+    /// audibly disrupts other apps' playback each time. This should never fire
+    /// under normal device-change recovery; it exists as a guardrail so a
+    /// regression here shows up in telemetry instead of only as "my music keeps
+    /// cutting out."
+    static let audioEngineRebuildChurnWindow: TimeInterval = 10.0
+
+    /// Rebuild count within `audioEngineRebuildChurnWindow` that counts as churn.
+    static let audioEngineRebuildChurnThreshold: Int = 5
+
     /// Watchdog timeout — if no audio samples arrive within this window after starting
     /// recording, the engine is likely a zombie (running but disconnected from hardware)
     static let audioWatchdogTimeout: UInt64 = 2_000_000_000  // 2 seconds

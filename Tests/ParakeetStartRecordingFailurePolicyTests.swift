@@ -650,7 +650,7 @@ func testParakeetStartRecordingFailurePolicy() {
         guard let markRestartPending = watchdog.range(of: "self.zombieRecoveryRestartPending = true"),
               let markIdle = watchdog.range(of: "self.isRecording = false"),
               let clearRestartFlag = watchdog.range(of: "self.configChangeWasRecording = false"),
-              let suppressConfigChanges = watchdog.range(of: "self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent() + 1.0"),
+              let suppressConfigChanges = watchdog.range(of: "self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()"),
               let pendingRestartGuard = watchdog.range(of: "self.zombieRecoveryRestartPending else"),
               let clearPendingBeforeRetry = watchdog.range(of: "self.zombieRecoveryRestartPending = false", range: pendingRestartGuard.upperBound..<watchdog.endIndex),
               let retryStart = watchdog.range(of: "await self.startRecording(isRecoveryAttempt: true)"),
