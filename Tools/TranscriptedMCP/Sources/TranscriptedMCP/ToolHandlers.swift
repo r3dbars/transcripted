@@ -658,7 +658,7 @@ private func handleWhoIs(params: CallTool.Parameters, index: TranscriptIndex) th
 
 // MARK: - recap
 
-private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     // Use local calendar so "today" matches transcript dates (which are stored in local time)
     let today = DateFormatter.localYYYYMMDD.string(from: Date())
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? String(today)
@@ -673,7 +673,6 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
     var recapParts: [RecapEntry] = []
 
     for meeting in meetings {
-        // Read first ~200 words of transcript as preview
         guard case .valid(let mdURL) = PathSecurity.resolveReadableFile(
             named: meeting.filename,
             appendingExtension: "md",
@@ -681,9 +680,23 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
         ) else { continue }
         var preview = ""
         var title = meeting.filename
+        var decisions: [String] = []
+        var actionItems: [RecapActionItem] = []
+        var openQuestions: [String] = []
+        var summarySource = "transcript_fallback"
+
         if let content = try? String(contentsOf: mdURL, encoding: .utf8) {
             title = extractTitle(from: content) ?? meeting.filename
-            preview = extractDialogueLines(from: content).prefix(15).joined(separator: "\n")
+            if let summary = TranscriptLoader.loadMeetingSummary(forTranscript: mdURL) {
+                title = summary.title ?? title
+                decisions = summary.decisions
+                actionItems = summary.actionItems.map { RecapActionItem(owner: $0.owner, text: $0.text) }
+                openQuestions = summary.openQuestions
+                preview = summaryPreview(decisions: decisions, actionItems: actionItems, openQuestions: openQuestions)
+                summarySource = "summary"
+            } else {
+                preview = extractDialogueLines(from: content).prefix(15).joined(separator: "\n")
+            }
         }
 
         recapParts.append(RecapEntry(
@@ -694,7 +707,11 @@ private func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, me
             durationFormatted: formatDuration(meeting.durationSeconds),
             speakers: meeting.speakers.map { $0.name },
             wordCount: meeting.wordCount,
-            preview: preview
+            preview: preview,
+            decisions: decisions,
+            actionItems: actionItems,
+            openQuestions: openQuestions,
+            summarySource: summarySource
         ))
     }
 
@@ -796,6 +813,15 @@ struct RecapEntry: Codable {
     let speakers: [String]
     let wordCount: Int
     let preview: String
+    let decisions: [String]
+    let actionItems: [RecapActionItem]
+    let openQuestions: [String]
+    let summarySource: String
+}
+
+struct RecapActionItem: Codable, Equatable {
+    let owner: String?
+    let text: String
 }
 
 struct RecapResult: Codable {
@@ -880,6 +906,33 @@ private func formatDuration(_ seconds: Int) -> String {
     let m = (seconds % 3600) / 60
     if h > 0 { return "\(h)h \(m)m" }
     return "\(m)m"
+}
+
+private func summaryPreview(
+    decisions: [String],
+    actionItems: [RecapActionItem],
+    openQuestions: [String]
+) -> String {
+    var sections: [String] = []
+    appendSummarySection("Decisions", decisions, to: &sections)
+    appendSummarySection(
+        "Action Items",
+        actionItems.map { item in
+            if let owner = item.owner, !owner.isEmpty {
+                return "\(owner): \(item.text)"
+            }
+            return item.text
+        },
+        to: &sections
+    )
+    appendSummarySection("Open Questions", openQuestions, to: &sections)
+    return sections.joined(separator: "\n\n")
+}
+
+private func appendSummarySection(_ title: String, _ items: [String], to sections: inout [String]) {
+    guard !items.isEmpty else { return }
+    let body = items.map { "- \($0)" }.joined(separator: "\n")
+    sections.append("## \(title)\n\(body)")
 }
 
 private func latestMeetingDate(in results: [MeetingSummary]) -> Date? {
