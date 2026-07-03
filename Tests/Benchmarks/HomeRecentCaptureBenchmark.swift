@@ -60,15 +60,18 @@ struct HomeRecentCaptureBenchmark {
         _ = await task.value
         let cancellationDuration = milliseconds(since: cancellationStart)
 
-        print(
-            BenchmarkResult(
-                captures: configuration.captures,
-                meetings: fixture.meetingCount,
-                dictations: fixture.dictationCount,
-                repetitions: configuration.repetitions,
-                loadDurations: loadDurations,
-                cancellationDuration: cancellationDuration
-            ).markdownRow
+        let result = BenchmarkResult(
+            captures: configuration.captures,
+            meetings: fixture.meetingCount,
+            dictations: fixture.dictationCount,
+            repetitions: configuration.repetitions,
+            loadDurations: loadDurations,
+            cancellationDuration: cancellationDuration
+        )
+        print(result.markdownRow)
+        try result.validateBudget(
+            maxAverageLoadMS: configuration.maxAverageLoadMS,
+            maxCancellationMS: configuration.maxCancellationMS
         )
     }
 
@@ -111,13 +114,23 @@ private struct BenchmarkConfiguration {
     let captures: Int
     let repetitions: Int
     let visibleLimit: Int
+    let maxAverageLoadMS: Double?
+    let maxCancellationMS: Double?
 
     init(arguments: [String]) throws {
         captures = try Self.intValue(for: "--captures", in: arguments) ?? 1_000
         repetitions = try Self.intValue(for: "--repetitions", in: arguments) ?? 3
         visibleLimit = try Self.intValue(for: "--visible-limit", in: arguments) ?? 10
+        maxAverageLoadMS = try Self.doubleValue(for: "--max-average-load-ms", in: arguments)
+        maxCancellationMS = try Self.doubleValue(for: "--max-cancellation-ms", in: arguments)
         guard captures > 0, repetitions > 0, visibleLimit > 0 else {
             throw BenchmarkError.configuration("captures, repetitions, and visible-limit must be positive")
+        }
+        if let maxAverageLoadMS, maxAverageLoadMS <= 0 {
+            throw BenchmarkError.configuration("max-average-load-ms must be positive")
+        }
+        if let maxCancellationMS, maxCancellationMS <= 0 {
+            throw BenchmarkError.configuration("max-cancellation-ms must be positive")
         }
     }
 
@@ -126,6 +139,15 @@ private struct BenchmarkConfiguration {
         let valueIndex = arguments.index(after: index)
         guard arguments.indices.contains(valueIndex), let value = Int(arguments[valueIndex]) else {
             throw BenchmarkError.configuration("missing integer value for \(flag)")
+        }
+        return value
+    }
+
+    private static func doubleValue(for flag: String, in arguments: [String]) throws -> Double? {
+        guard let index = arguments.firstIndex(of: flag) else { return nil }
+        let valueIndex = arguments.index(after: index)
+        guard arguments.indices.contains(valueIndex), let value = Double(arguments[valueIndex]) else {
+            throw BenchmarkError.configuration("missing numeric value for \(flag)")
         }
         return value
     }
@@ -271,9 +293,26 @@ private struct BenchmarkResult {
 
     var markdownRow: String {
         let raw = loadDurations.map { String(format: "%.1f", $0) }.joined(separator: ", ")
-        let average = loadDurations.reduce(0, +) / Double(loadDurations.count)
+        let average = averageLoadDuration
         let best = loadDurations.min() ?? 0
         return "| \(captures) | \(meetings) | \(dictations) | \(repetitions) | \(raw) | \(String(format: "%.1f", average)) | \(String(format: "%.1f", best)) | \(String(format: "%.1f", cancellationDuration)) |"
+    }
+
+    private var averageLoadDuration: Double {
+        loadDurations.reduce(0, +) / Double(loadDurations.count)
+    }
+
+    func validateBudget(maxAverageLoadMS: Double?, maxCancellationMS: Double?) throws {
+        var failures: [String] = []
+        if let maxAverageLoadMS, averageLoadDuration > maxAverageLoadMS {
+            failures.append("average load \(String(format: "%.1f", averageLoadDuration))ms > \(String(format: "%.1f", maxAverageLoadMS))ms")
+        }
+        if let maxCancellationMS, cancellationDuration > maxCancellationMS {
+            failures.append("cancel \(String(format: "%.1f", cancellationDuration))ms > \(String(format: "%.1f", maxCancellationMS))ms")
+        }
+        guard failures.isEmpty else {
+            throw BenchmarkError.validation("performance budget failed for \(captures) captures: \(failures.joined(separator: ", "))")
+        }
     }
 }
 
