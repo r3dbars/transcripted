@@ -219,6 +219,229 @@ func testLiveMeetingCodexSession() {
         let watcherStateText = (try? String(contentsOf: reopenedSession.watcherStateURL, encoding: .utf8)) ?? ""
         assertTrue(watcherStateText.contains("already handled"), "reopened workspace should preserve agent watcher state")
     }
+
+    runSuite("LiveMeetingCodexSession preview - append repair uses cached transcript text") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedLiveMeetingCodex-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let session = LiveMeetingCodexSession(workspaceRoot: root)
+        try? session.start(
+            title: "Repair Meeting",
+            startedAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+        try? session.append(
+            LiveMeetingCodexTranscriptEntry(
+                source: .microphone,
+                text: "first cached line",
+                timestampSeconds: 1,
+                createdAt: Date(timeIntervalSince1970: 1_765_994_401)
+            )
+        )
+        try? FileManager.default.removeItem(at: session.liveTranscriptURL)
+        try? session.append(
+            LiveMeetingCodexTranscriptEntry(
+                source: .system,
+                text: "second cached line",
+                timestampSeconds: 2,
+                createdAt: Date(timeIntervalSince1970: 1_765_994_402)
+            )
+        )
+
+        let liveText = (try? String(contentsOf: session.liveTranscriptURL, encoding: .utf8)) ?? ""
+        assertTrue(liveText.contains("first cached line"), "workspace repair should restore cached transcript text")
+        assertTrue(liveText.contains("second cached line"), "new append should be added after repair")
+
+        try? session.finish(
+            status: .stopped,
+            at: Date(timeIntervalSince1970: 1_765_994_430)
+        )
+        let previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
+        assertTrue(previewText.contains("first cached line"), "preview should render from the cached transcript snapshot")
+        assertTrue(previewText.contains("second cached line"), "preview should include the latest append after lifecycle refresh")
+    }
+
+    runSuite("LiveMeetingCodexSession preview - append refreshes throttled file snapshot") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedLiveMeetingCodex-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let session = LiveMeetingCodexSession(workspaceRoot: root)
+        try? session.start(
+            title: "Preview Meeting",
+            startedAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+        try? FileManager.default.removeItem(at: session.previewURL)
+        try? session.append(
+            LiveMeetingCodexTranscriptEntry(
+                source: .microphone,
+                text: "visible in direct preview",
+                timestampSeconds: 1,
+                createdAt: Date(timeIntervalSince1970: 1_765_994_401)
+            )
+        )
+
+        let previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
+        assertTrue(previewText.contains("visible in direct preview"), "append should refresh direct preview.html snapshots")
+    }
+
+    runSuite("LiveMeetingCodexSession append failures - surface failed sidecar state") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedLiveMeetingCodex-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let session = LiveMeetingCodexSession(workspaceRoot: root)
+        try? session.start(
+            title: "Failure Meeting",
+            startedAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+        let error = NSError(domain: "LiveSidecarAppendTest", code: 7, userInfo: [
+            NSLocalizedDescriptionKey: "simulated append failure"
+        ])
+        try? session.markAppendFailed(
+            consecutiveFailures: 3,
+            error: error,
+            at: Date(timeIntervalSince1970: 1_765_994_430)
+        )
+
+        let state = decodeLiveMeetingCodexState(at: session.stateURL)
+        assertEqual(state?.status, .recording, "append failures should keep the meeting recording state")
+        assertEqual(
+            state?.streamingBackendStatus,
+            "live_sidecar_append_failed",
+            "failed state should explain that the sidecar append path broke"
+        )
+        assertTrue(
+            state?.note.contains("simulated append failure") == true,
+            "state note should keep the append error visible"
+        )
+
+        let liveText = (try? String(contentsOf: session.liveTranscriptURL, encoding: .utf8)) ?? ""
+        assertTrue(liveText.contains("Status: recording"), "live transcript should keep the meeting recording status")
+        assertTrue(liveText.contains("simulated append failure"), "live transcript should include the failure note when writable")
+
+        let previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
+        assertTrue(previewText.contains("Needs attention"), "preview should surface failed status")
+        assertTrue(previewText.contains("live_sidecar_append_failed"), "preview status title should expose append failure reason")
+    }
+
+    runSuite("LiveMeetingCodexSession append failures - state survives broken transcript path") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedLiveMeetingCodex-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let session = LiveMeetingCodexSession(workspaceRoot: root)
+        try? session.start(
+            title: "Broken Path Meeting",
+            startedAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+        try? FileManager.default.removeItem(at: session.liveTranscriptURL)
+        try? FileManager.default.createDirectory(at: session.liveTranscriptURL, withIntermediateDirectories: false)
+
+        let entry = LiveMeetingCodexTranscriptEntry(
+            source: .microphone,
+            text: "this append should fail",
+            timestampSeconds: 1,
+            createdAt: Date(timeIntervalSince1970: 1_765_994_401)
+        )
+
+        do {
+            try session.append(entry)
+            assertTrue(false, "append should fail when live transcript path is not a file")
+        } catch {
+            try? session.markAppendFailed(
+                consecutiveFailures: 3,
+                error: error,
+                at: Date(timeIntervalSince1970: 1_765_994_430)
+            )
+        }
+
+        let state = decodeLiveMeetingCodexState(at: session.stateURL)
+        assertEqual(state?.status, .recording, "broken transcript path should not mark the whole meeting failed")
+        assertEqual(
+            state?.streamingBackendStatus,
+            "live_sidecar_append_failed",
+            "failed state should preserve the append failure reason"
+        )
+
+        let previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
+        assertTrue(previewText.contains("Needs attention"), "preview should still render when live transcript path is broken")
+        assertTrue(previewText.contains("live_sidecar_append_failed"), "preview should expose the append failure status")
+    }
+
+    runSuite("LiveMeetingCodexSession append failures - recovered append clears failed state") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedLiveMeetingCodex-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let session = LiveMeetingCodexSession(workspaceRoot: root)
+        try? session.start(
+            title: "Recovery Meeting",
+            startedAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+        let error = NSError(domain: "LiveSidecarAppendTest", code: 8, userInfo: [
+            NSLocalizedDescriptionKey: "temporary append failure"
+        ])
+        try? session.markAppendFailed(
+            consecutiveFailures: 3,
+            error: error,
+            at: Date(timeIntervalSince1970: 1_765_994_430)
+        )
+
+        try? session.append(
+            LiveMeetingCodexTranscriptEntry(
+                source: .microphone,
+                text: "append path recovered",
+                timestampSeconds: 31,
+                createdAt: Date(timeIntervalSince1970: 1_765_994_431)
+            )
+        )
+        try? session.markAppendRecovered(at: Date(timeIntervalSince1970: 1_765_994_432))
+
+        let state = decodeLiveMeetingCodexState(at: session.stateURL)
+        assertEqual(state?.status, .recording, "a recovered append should restore recording state")
+        assertEqual(
+            state?.streamingBackendStatus,
+            "local_streaming_asr_running",
+            "a recovered append should restore the running backend status"
+        )
+
+        let previewText = (try? String(contentsOf: session.previewURL, encoding: .utf8)) ?? ""
+        assertTrue(previewText.contains("recording - local_streaming_asr_running"), "preview should clear the failed append status")
+        assertTrue(previewText.contains("append path recovered"), "preview should include transcript text after recovery")
+    }
+
+    runSuite("LiveMeetingCodexSession append failures - late failure preserves terminal state") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedLiveMeetingCodex-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let session = LiveMeetingCodexSession(workspaceRoot: root)
+        try? session.start(
+            title: "Stopped Meeting",
+            startedAt: Date(timeIntervalSince1970: 1_765_994_400)
+        )
+        try? session.finish(
+            status: .stopped,
+            at: Date(timeIntervalSince1970: 1_765_994_430)
+        )
+        let error = NSError(domain: "LiveSidecarAppendTest", code: 9, userInfo: [
+            NSLocalizedDescriptionKey: "late append failure"
+        ])
+        try? session.markAppendFailed(
+            consecutiveFailures: 3,
+            error: error,
+            at: Date(timeIntervalSince1970: 1_765_994_431)
+        )
+
+        let state = decodeLiveMeetingCodexState(at: session.stateURL)
+        assertEqual(state?.status, .stopped, "late append failures should not reopen terminal sidecar state")
+        assertEqual(
+            state?.streamingBackendStatus,
+            "local_streaming_asr_stopped",
+            "late append failures should preserve the terminal backend status"
+        )
+    }
 }
 
 private func decodeLiveMeetingCodexState(at url: URL) -> LiveMeetingCodexState? {
