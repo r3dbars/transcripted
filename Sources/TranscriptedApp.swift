@@ -82,6 +82,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     @available(macOS 14.0, *)
     lazy var meetingOverlayController = MeetingOverlayController()
     @available(macOS 14.0, *)
+    lazy var capturePillController = CapturePillController()
+    @available(macOS 14.0, *)
     lazy var meetingPromptDetector = MeetingPromptDetector()
     @available(macOS 14.0, *)
     lazy var micActivityMonitor = MicActivityMonitor()
@@ -140,7 +142,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 ).allowsDetectedMeetingPrompt
             }
             meetingOverlayController.setup(meetingSession: meetingSession)
-            meetingOverlayController.onPromptRecord = { [weak self] candidate in
+            let recordPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 AnalyticsReporter.track(
                     "meeting_prompt_record_selected",
@@ -161,7 +163,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     }
                 }
             }
-            meetingOverlayController.onPromptDismiss = { [weak self] candidate in
+            let dismissPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
                 AnalyticsReporter.track(
@@ -206,6 +208,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
+            meetingOverlayController.onPromptRecord = recordPrompt
+            meetingOverlayController.onPromptDismiss = dismissPrompt
             meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
                 guard let self else { return }
                 let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
@@ -228,6 +232,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
+            capturePillController.onRecord = recordPrompt
+            capturePillController.onDismiss = dismissPrompt
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
                 AnalyticsReporter.track(
@@ -251,7 +257,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
                 guard PermissionsOnboardingPreferences.hasCompleted() else { return false }
                 guard let self else { return false }
-                let presented = self.meetingOverlayController.presentDetectedMeetingPrompt(candidate)
+                let presented = self.capturePillController.present(candidate: candidate)
                 if presented {
                     AnalyticsReporter.track(
                         "meeting_prompt_shown",
