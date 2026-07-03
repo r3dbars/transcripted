@@ -10,6 +10,16 @@ enum HomeCaptureListCopy {
     static let noMeetingMatches = "No meetings match your search. Older meetings load with Show more."
 }
 
+// MARK: - Meeting rename affordance
+
+/// Pinned copy and identifiers for the Home meeting-title rename control.
+enum HomeMeetingRenameAffordance {
+    static let title = "Rename"
+    static let help = "Rename meeting"
+    static let symbolName = "pencil"
+    static let automationIdentifier = "transcripted.home.meeting-preview.rename"
+}
+
 // MARK: - Day section labels
 
 /// Foundation-pure day-section label derivation for the Home capture lists.
