@@ -64,4 +64,27 @@ func testHomeRootAlertPolicy() {
             "failure outranks audio retention"
         )
     }
+
+    runSuite("HomeActionFailureCopy normalizes raw delete and rename errors") {
+        assertEqual(
+            HomeActionFailureCopy.retryTitle,
+            "Try again",
+            "Home failure alerts should expose a retry action"
+        )
+        assertEqual(
+            HomeActionFailureCopy.detailsTitle,
+            "Copy Details",
+            "technical details should be behind an explicit affordance"
+        )
+        assertEqual(
+            HomeActionFailureCopy.message(forFailureTitle: "Could not delete meeting"),
+            "Transcripted couldn't remove this item. Check that your capture folder is available, then try again.",
+            "delete failures should not show raw filesystem errors"
+        )
+        assertEqual(
+            HomeActionFailureCopy.message(forFailureTitle: "Could not rename meeting"),
+            "Transcripted couldn't rename this meeting. Check that the file is still in your capture folder, then try again.",
+            "rename failures should explain the action without exposing raw NSError text"
+        )
+    }
 }

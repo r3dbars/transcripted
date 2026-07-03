@@ -254,7 +254,14 @@ struct TranscriptedSettingsView: View {
                 return Alert(
                     title: Text(failure.title),
                     message: Text(failure.message),
-                    dismissButton: .default(Text("OK"))
+                    primaryButton: .default(Text(failure.retryTitle)) {
+                        failure.retry()
+                    },
+                    secondaryButton: .cancel(Text(failure.details == nil ? "Dismiss" : HomeActionFailureCopy.detailsTitle)) {
+                        if let details = failure.details {
+                            copyHomeFailureDetails(details)
+                        }
+                    }
                 )
             case .audioRetention(let window):
                 return Alert(
@@ -867,7 +874,10 @@ struct TranscriptedSettingsView: View {
         guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
             presentHomeActionFailure(
                 title: "Could not copy meeting",
-                message: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app."
+                message: "Transcripted couldn't find this meeting's transcript on disk. It may have been moved, renamed, or deleted outside the app.",
+                retry: {
+                    handleCopyMeeting(item)
+                }
             )
             return
         }
@@ -884,7 +894,10 @@ struct TranscriptedSettingsView: View {
         } else {
             presentHomeActionFailure(
                 title: "Could not copy meeting",
-                message: "Transcripted found this meeting's transcript but couldn't read it. The file may be open exclusively elsewhere or corrupted."
+                message: "Transcripted found this meeting's transcript but couldn't read it. The file may be open exclusively elsewhere or corrupted.",
+                retry: {
+                    handleCopyMeeting(item)
+                }
             )
             return
         }
@@ -934,7 +947,10 @@ struct TranscriptedSettingsView: View {
         guard let input = item.audio?.retranscriptionInput else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
-                message: "Transcripted couldn't find the retained audio for this meeting. It may have been recompressed or removed by the audio-retention setting."
+                message: "Transcripted couldn't find the retained audio for this meeting. It may have been recompressed or removed by the audio-retention setting.",
+                retry: {
+                    handleRetranscribeMeeting(item)
+                }
             )
             return
         }
@@ -947,7 +963,10 @@ struct TranscriptedSettingsView: View {
         guard let systemURL = OwnFileResolver.resolveExistingFile(candidateURLs: [input.systemURL]) else {
             presentHomeActionFailure(
                 title: "Could not re-transcribe meeting",
-                message: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting."
+                message: "Transcripted couldn't find this meeting's retained audio on disk. It may have been moved, recompressed, or removed by the audio-retention setting.",
+                retry: {
+                    handleRetranscribeMeeting(item)
+                }
             )
             return
         }
@@ -964,7 +983,10 @@ struct TranscriptedSettingsView: View {
             if !didStart {
                 presentHomeActionFailure(
                     title: "Could not re-transcribe meeting",
-                    message: "Transcripted couldn't start re-transcription from the retained audio. The saved files may be incomplete or already in use."
+                    message: "Transcripted couldn't start re-transcription from the retained audio. The saved files may be incomplete or already in use.",
+                    retry: {
+                        handleRetranscribeMeeting(item)
+                    }
                 )
             }
         }
@@ -1006,7 +1028,14 @@ struct TranscriptedSettingsView: View {
             trackLocalSummaryAbandoned(reason: .blocked, stage: "start", priorReadyState: "not_ready")
             homeDeleteFailure = HomeDeleteFailure(
                 title: "Could not summarize meeting",
-                message: unavailableReason
+                message: unavailableReason,
+                retry: {
+                    generateLocalSummary(
+                        transcriptURL: transcriptURL,
+                        title: title,
+                        hasExistingSummary: hasExistingSummary
+                    )
+                }
             )
             return
         }
@@ -1279,7 +1308,20 @@ struct TranscriptedSettingsView: View {
                     } catch {
                         presentHomeDeleteFailure(
                             title: "Could not delete dictation",
-                            error: error
+                            error: error,
+                            retry: {
+                                trackSettingsAction("delete_dictation_retry", page: .home)
+                                do {
+                                    try DictationTranscriptStore.deleteEntry(entry)
+                                    refreshRecentCaptures(force: true)
+                                } catch {
+                                    presentHomeDeleteFailure(
+                                        title: "Could not delete dictation",
+                                        error: error,
+                                        retry: { refreshRecentCaptures(force: true) }
+                                    )
+                                }
+                            }
                         )
                     }
                 }
@@ -1513,14 +1555,20 @@ struct TranscriptedSettingsView: View {
                    FileManager.default.fileExists(atPath: item.transcriptURL.path) {
                     presentHomeActionFailure(
                         title: "Could not delete meeting",
-                        message: "Transcripted couldn't remove this meeting's files. They may have been moved or renamed outside the app — reopen Settings and try again."
+                        message: "Transcripted couldn't remove this meeting's files. They may have been moved or renamed outside the app. Reopen Settings, then try again.",
+                        retry: {
+                            deleteMeeting(item)
+                        }
                     )
                 }
             } catch {
                 refreshRecentCaptures(force: true)
                 presentHomeDeleteFailure(
                     title: "Could not delete meeting",
-                    error: error
+                    error: error,
+                    retry: {
+                        deleteMeeting(item)
+                    }
                 )
             }
         }
@@ -1559,7 +1607,10 @@ struct TranscriptedSettingsView: View {
                 refreshRecentCaptures(force: true)
                 presentHomeDeleteFailure(
                     title: "Could not rename meeting",
-                    error: error
+                    error: error,
+                    retry: {
+                        renameMeetingPreview(preview, to: rawTitle)
+                    }
                 )
             }
         }
@@ -1617,7 +1668,10 @@ struct TranscriptedSettingsView: View {
         if !didClear {
             presentHomeActionFailure(
                 title: failureTitle,
-                message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again."
+                message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again.",
+                retry: {
+                    clearFailedMeeting(item)
+                }
             )
         } else {
             ActivationTelemetry.trackWorkflowAbandoned(
@@ -1643,7 +1697,17 @@ struct TranscriptedSettingsView: View {
         case .reveal(let urls):
             NSWorkspace.shared.activateFileViewerSelecting(urls)
         case .unavailable:
-            presentHomeActionFailure(title: failureTitle, message: failureMessage)
+            presentHomeActionFailure(
+                title: failureTitle,
+                message: failureMessage,
+                retry: {
+                    revealOwnFile(
+                        candidateURLs: candidateURLs,
+                        failureTitle: failureTitle,
+                        failureMessage: failureMessage
+                    )
+                }
+            )
         }
     }
 
@@ -1658,26 +1722,61 @@ struct TranscriptedSettingsView: View {
         failureMessage: String
     ) -> Bool {
         guard let url = OwnFileResolver.resolveExistingFile(candidateURLs: candidateURLs) else {
-            presentHomeActionFailure(title: failureTitle, message: failureMessage)
+            presentHomeActionFailure(
+                title: failureTitle,
+                message: failureMessage,
+                retry: {
+                    _ = openOwnFile(
+                        candidateURLs: candidateURLs,
+                        failureTitle: failureTitle,
+                        failureMessage: failureMessage
+                    )
+                }
+            )
             return false
         }
         NSWorkspace.shared.open(url)
         return true
     }
 
-    private func presentHomeDeleteFailure(title: String, error: Error) {
-        presentHomeActionFailure(title: title, message: error.localizedDescription)
+    private func presentHomeDeleteFailure(
+        title: String,
+        error: Error,
+        retry: @escaping () -> Void
+    ) {
+        presentHomeActionFailure(
+            title: title,
+            message: HomeActionFailureCopy.message(forFailureTitle: title),
+            details: error.localizedDescription,
+            retry: retry
+        )
     }
 
-    private func presentHomeActionFailure(title: String, message: String) {
+    private func presentHomeActionFailure(
+        title: String,
+        message: String,
+        details: String? = nil,
+        retry: @escaping () -> Void
+    ) {
         NSSound.beep()
         // Defer to the next runloop turn so a failure raised synchronously inside
         // an alert's confirm action lands after that alert finishes dismissing.
         // SwiftUI won't present a second alert during the first one's dismissal,
         // and the shared binding clears the dismissed alert on the same turn.
         DispatchQueue.main.async {
-            homeDeleteFailure = HomeDeleteFailure(title: title, message: message)
+            homeDeleteFailure = HomeDeleteFailure(
+                title: title,
+                message: message,
+                details: details,
+                retry: retry
+            )
         }
+    }
+
+    private func copyHomeFailureDetails(_ details: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(details, forType: .string)
     }
 
     private func retryFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
@@ -1686,7 +1785,10 @@ struct TranscriptedSettingsView: View {
             presentHomeActionFailure(
                 title: "Could not retry meeting",
                 message: failedMeetingRetryUnavailableReason
-                    ?? "Transcripted could not start that retry. The saved audio may already be cleared."
+                    ?? "Transcripted could not start that retry. The saved audio may already be cleared.",
+                retry: {
+                    retryFailedMeeting(item)
+                }
             )
         }
     }
