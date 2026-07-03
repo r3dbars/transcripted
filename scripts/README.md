@@ -36,7 +36,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
 - `scripts/dev/check-build-source-lists.py` — fast raw-`swiftc` guardrail for app, fast-test, and smoke source-list drift
-- `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark
+- `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark; pass `--max-average-load-ms` and `--max-cancellation-ms` to fail on regression
 - `scripts/download_ami.sh` — fetch the gitignored AMI ES2002 audio/RTTM subset used by `Tools/SpeakerEvalHarness`
 - `scripts/run_speaker_eval.sh` — build and run the AMI speaker-naming sweep, writing local reports under `data/eval/`
 - `scripts/score_speaker_eval.py` — score speaker-eval hypotheses against AMI RTTM labels without printing private transcript text
@@ -113,6 +113,8 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Optional strict dictation stop proof: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --require-dictation-stop-latency-samples 3`
   - Fresh-window verification: `scripts/ops/performance-budget.rb --events "$HOME/Library/Application Support/Transcripted/logs/events.jsonl" --events-since 2026-06-01T01:13:00Z --require-dictation-stop-latency-samples 3`
   - Optional meeting throughput verification: `scripts/ops/performance-budget.rb --stats "$HOME/Library/Application Support/Transcripted/state/stats.sqlite"` (defaults to recordings 30s or longer)
+  - CI-safe Home list/action budget: `scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80`
+  - Manual hardware proof still owns meeting-list 120fps on Apple Silicon; CI checks deterministic loader latency (<500 ms for the 10k stress fixture) and cancellation acknowledgement (<100 ms) only.
 - `scripts/ops/dictation-stop-autoeval.sh` — synthetic local-audio benchmark for dictation stop-to-text, stop-to-saved, and stop-to-delivery timing
   - Usage: `bash scripts/ops/dictation-stop-autoeval.sh --label baseline --variant native`
   - Writes ignored scratch output under `.autoeval/dictation-stop/`

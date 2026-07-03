@@ -13,9 +13,11 @@ swiftc \
   "$ROOT_DIR/Sources/Dictation/DictationStoragePaths.swift" \
   "$ROOT_DIR/Sources/Dictation/DictationTranscriptWriter.swift" \
   "$ROOT_DIR/Sources/Dictation/DictationTranscriptStore.swift" \
+  "$ROOT_DIR/Sources/Meeting/MeetingArtifactRenamer.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingStoragePaths.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingTranscriptStyler.swift" \
   "$ROOT_DIR/Sources/Meeting/LocalMeetingSummarizer.swift" \
+  "$ROOT_DIR/Sources/Support/LocalMeetingSummaryPreferences.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Speaker/SpeakerProfile.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Models/TranscriptionTypes.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift" \
@@ -28,5 +30,5 @@ swiftc \
 
 echo "| captures | meetings | dictations | reps | raw load ms | avg load ms | best load ms | cancel ms |"
 echo "|---:|---:|---:|---:|---|---:|---:|---:|"
-"$BINARY" --captures 1000 --repetitions "${REPETITIONS:-3}"
-"$BINARY" --captures 10000 --repetitions "${REPETITIONS:-3}"
+"$BINARY" --captures 1000 --repetitions "${REPETITIONS:-3}" "$@"
+"$BINARY" --captures 10000 --repetitions "${REPETITIONS:-3}" "$@"
