@@ -327,43 +327,43 @@ final class ClipboardRestoringTextPaster {
 
         let accessibilityConfirmation = FocusedTextPasteConfirmation.capture()
         let savedItems = snapshotPasteboardItems(from: pasteboard)
-        guard savedItems.isComplete else {
-            guard copyTextToClipboard(text, to: pasteboard) else {
-                return .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.")
-            }
-            return .copied(
-                "Couldn't paste automatically without risking your current clipboard. The text was copied instead.",
-                reason: .pasteNotConfirmed
-            )
-        }
+        let canRestoreClipboard = savedItems.isComplete
         pasteGeneration += 1
         let generation = pasteGeneration
         var temporaryChangeCount = 0
 
-        pasteboard.clearContents()
-        let wroteTemporaryString = writeTemporaryString(text, to: pasteboard)
-        let activeTemporaryProvider = wroteTemporaryString ? temporaryPasteboardDataProvider : nil
-
-        if !wroteTemporaryString {
+        if canRestoreClipboard {
             pasteboard.clearContents()
-            guard pasteboard.setString(text, forType: .string),
-                  pasteboard.string(forType: .string) == text else {
+            let wroteTemporaryString = writeTemporaryString(text, to: pasteboard)
+            if !wroteTemporaryString {
+                pasteboard.clearContents()
+                guard pasteboard.setString(text, forType: .string),
+                      pasteboard.string(forType: .string) == text else {
+                    return .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run.")
+                }
+            }
+        } else {
+            guard copyTextToClipboard(text, to: pasteboard) else {
                 return .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run.")
             }
         }
         temporaryChangeCount = pasteboard.changeCount
 
-        scheduleClipboardRestore(
-            savedItems,
-            temporaryString: text,
-            temporaryChangeCount: temporaryChangeCount,
-            to: pasteboard,
-            generation: generation,
-            delay: fallbackRestoreDelay
-        )
+        if canRestoreClipboard {
+            scheduleClipboardRestore(
+                savedItems,
+                temporaryString: text,
+                temporaryChangeCount: temporaryChangeCount,
+                to: pasteboard,
+                generation: generation,
+                delay: fallbackRestoreDelay
+            )
+        }
 
         guard pasteDispatcher() else {
-            restorePendingClipboardNow()
+            if canRestoreClipboard {
+                restorePendingClipboardNow()
+            }
             guard copyTextToClipboard(text, to: pasteboard) else {
                 return .failed("Couldn't prepare the clipboard for automatic paste. The dictation was saved, but paste-back did not run.")
             }
@@ -380,7 +380,7 @@ final class ClipboardRestoringTextPaster {
             if accessibilityConfirmation?.canObserveTextValue == true {
                 return false
             }
-            return activeTemporaryProvider?.didProvideData == true
+            return false
         }
 
         guard waitForPasteConfirmation(
@@ -388,7 +388,10 @@ final class ClipboardRestoringTextPaster {
             pasteConfirmed: confirmPasteReceived,
             timeout: pasteConfirmationWait
         ) else {
-            guard leaveTemporaryClipboardAvailable() else {
+            let keptCopied = canRestoreClipboard
+                ? leaveTemporaryClipboardAvailable()
+                : copyTextToClipboard(text, to: pasteboard)
+            guard keptCopied else {
                 return .failed("Couldn't keep the dictation copied after paste-back was unconfirmed. The dictation was saved, but paste-back did not run.")
             }
             return .copied(
@@ -397,14 +400,18 @@ final class ClipboardRestoringTextPaster {
             )
         }
 
-        scheduleClipboardRestore(
-            savedItems,
-            temporaryString: text,
-            temporaryChangeCount: temporaryChangeCount,
-            to: pasteboard,
-            generation: generation,
-            delay: restoreDelay
-        )
+        if canRestoreClipboard {
+            scheduleClipboardRestore(
+                savedItems,
+                temporaryString: text,
+                temporaryChangeCount: temporaryChangeCount,
+                to: pasteboard,
+                generation: generation,
+                delay: restoreDelay
+            )
+        } else {
+            _ = copyTextToClipboard(text, to: pasteboard)
+        }
         return .pasted
     }
 

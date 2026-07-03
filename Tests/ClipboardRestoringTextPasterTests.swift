@@ -103,7 +103,7 @@ func testClipboardRestoringTextPaster() async {
             assertNil(restoredItems.first?.data(forType: customType), "custom data should not be eagerly snapshotted")
         }
 
-        runSuite("ClipboardRestoringTextPaster.paste — incomplete snapshots fall back to copied text") {
+        runSuite("ClipboardRestoringTextPaster.paste — incomplete snapshots still dispatch without restore") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
             let customType = NSPasteboard.PasteboardType("com.transcripted.clipboard-test")
@@ -112,27 +112,26 @@ func testClipboardRestoringTextPaster() async {
             customItem.setData(customData, forType: customType)
             pasteboard.clearContents()
             pasteboard.writeObjects([customItem])
+            var dispatchCount = 0
 
             let outcome = paster.paste(
                 "synthetic just-finished dictation",
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true }
+                pasteDispatcher: {
+                    dispatchCount += 1
+                    return true
+                },
+                pasteConfirmed: { true }
             )
 
-            assertEqual(
-                outcome,
-                .copied(
-                    "Couldn't paste automatically without risking your current clipboard. The text was copied instead.",
-                    reason: .pasteNotConfirmed
-                ),
-                "unsupported clipboard contents should skip paste-back but keep the dictation copied"
-            )
+            assertEqual(outcome, .pasted, "unsupported clipboard contents should not block confirmed paste-back")
+            assertEqual(dispatchCount, 1, "unsupported clipboard contents should still dispatch Cmd+V")
             assertEqual(
                 pasteboard.string(forType: .string),
                 "synthetic just-finished dictation",
-                "unsupported clipboard contents should be replaced by the copied dictation fallback"
+                "unsupported clipboard contents should leave the dictation copied instead of restoring an incomplete snapshot"
             )
         }
 
