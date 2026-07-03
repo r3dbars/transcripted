@@ -74,6 +74,19 @@ Current `transcripted-mcp` capabilities:
 These tools are read-only, but they are not redacted. `read_meeting` and
 `read_dictation` can return local transcript text to the agent you connected.
 
+### Anonymous Usage Ping
+
+Like the app, the MCP helper can send one anonymous analytics event per
+successful tool call (`agent_capture_query_observed`) so we can tell whether
+the agent connection gets used. It carries only bucketed metadata: which kind
+of tool ran, meeting vs. dictation, rough capture age, and rough source count.
+It never includes transcript text, queries, titles, speaker names, file paths,
+or audio, and your captures still never leave your Mac.
+
+It follows the same anonymous analytics switch as the app: turn off analytics
+in Settings > Privacy and the helper sends nothing. Source builds send nothing
+by default because they ship without an analytics key.
+
 ## Local Coding Agents
 
 Claude Code, Codex, and Cursor get the same one-click `Connect` as Claude
