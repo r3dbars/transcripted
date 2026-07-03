@@ -27,6 +27,8 @@ SENSITIVE_KEY_FRAGMENTS = (
     "name",
     "password",
     "path",
+    "screen",
+    "screenshot",
     "speaker",
     "source_app",
     "secret",
@@ -42,12 +44,15 @@ SAFE_PLACEHOLDERS = {
     "audio_reference": "[redacted-audio-reference]",
     "absolute_path": "[redacted-path]",
     "raw_device_name": "[redacted-device]",
+    "screen_derived_text": "[redacted-screen-text]",
+    "screenshot_path": "[redacted-screenshot-path]",
     "token_secret": "[redacted-secret]",
     "email": "[redacted-email]",
     "raw_url": "[redacted-url]",
     "meeting_title": "[redacted-title]",
     "speaker_name": "[redacted-speaker]",
     "source_app_identifier": "[redacted-source-app]",
+    "window_title": "[redacted-title]",
     "shared_corpus": "[redacted-sensitive-value]",
 }
 
@@ -176,6 +181,27 @@ def synthetic_leak_classes(corpus: dict[str, Any]) -> tuple[LeakClass, ...]:
             (
                 "Synthetic Private Notes",
                 "com.synthetic.private-notes",
+            ),
+        ),
+        LeakClass(
+            "window_title",
+            (
+                "Synthetic Customer Roadmap - Private Notes",
+                "Synthetic Browser Tab With Private URL",
+            ),
+        ),
+        LeakClass(
+            "screen_derived_text",
+            (
+                "Synthetic OCR text from a private roadmap screen",
+                "Synthetic screen summary with customer names and decisions",
+            ),
+        ),
+        LeakClass(
+            "screenshot_path",
+            (
+                "/Users/synthetic/Library/Application Support/Transcripted/recordings/screenshots/2026-09-01/1788271200000.jpg",
+                "file:///Users/synthetic/Library/Application%20Support/Transcripted/recordings/screenshots/private.jpg",
             ),
         ),
         LeakClass("shared_corpus", shared),
@@ -340,6 +366,32 @@ def build_synthetic_surfaces(leak_classes: tuple[LeakClass, ...]) -> dict[str, d
             "- Release notes were checked with synthetic leak markers only.",
         ]
     )
+    timeline_card_export = "\n".join(
+        [
+            "# Timeline - 2026-09-01",
+            "",
+            "1. **9:00 AM - 10:00 AM - Synthetic focused work**",
+            "   - Category: Work",
+            "   - Summary: [redacted-screen-text]",
+            "   - App/site: [redacted-source-app]",
+            "   - Window: [redacted-title]",
+            "   - Screenshot: [redacted-screenshot-path]",
+        ]
+    )
+    timeline_day = json_line(
+        sanitize_value(
+            {
+                "timeline_day": "2026-09-01",
+                "card_count": 1,
+                "screen_derived_text": secret["screen_derived_text"],
+                "window_title": secret["window_title"],
+                "source_app_identifier": secret["source_app_identifier"],
+                "screenshot_path": secret["screenshot_path"],
+            },
+            leak_classes,
+            drop_sensitive_keys=False,
+        )
+    )
 
     scanner_report = {
         "status": "pass",
@@ -349,6 +401,7 @@ def build_synthetic_surfaces(leak_classes: tuple[LeakClass, ...]) -> dict[str, d
             "sentry-posthog-payloads",
             "qa-report-artifacts",
             "pr-release-docs",
+            "timeline-artifacts",
             "automated-scanner-test-pr",
         ],
         "leak_classes": [item.id for item in leak_classes],
@@ -370,6 +423,10 @@ def build_synthetic_surfaces(leak_classes: tuple[LeakClass, ...]) -> dict[str, d
         "pr-release-docs": {
             "pull-request-body.md": pr_body,
             "release-note.md": release_note,
+        },
+        "timeline-artifacts": {
+            "timeline-card.md": timeline_card_export,
+            "timeline-day.json": timeline_day,
         },
         "automated-scanner-test-pr": {
             "privacy-leak-sweep-report.json": json.dumps(scanner_report, indent=2, sort_keys=True),

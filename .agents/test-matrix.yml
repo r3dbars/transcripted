@@ -14,6 +14,18 @@ rules:
       - "bash run-tests.sh"
 
   - paths:
+      - "Sources/Timeline/**"
+      - "Sources/UI/Timeline/**"
+      - "Tests/TimelineQAContractTests.swift"
+      - "Tests/Fixtures/timeline-qa-contract-fixture.json"
+      - "docs/qa/dayflow-timeline-manual-qa.md"
+    checks:
+      - "python3 scripts/dev/check-build-source-lists.py"
+      - "bash build.sh --no-open"
+      - "bash run-tests.sh"
+      - "python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json"
+
+  - paths:
       - "Sources/Meeting/**"
       - "Sources/TranscriptedCore/**"
       - "Tests/Integration/**"
