@@ -4,12 +4,12 @@ func testAuditRegressionCoverageContract() {
     runSuite("AuditRegressionCoverageContract — meeting overlay duration updates are whole-second throttled") {
         let source = readAuditContractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
         assertTrue(
-            source.contains("let previousDisplay = MeetingDurationFormatter.formatDuration(self.currentDuration)"),
-            "meeting overlay should compare the rendered timer text before pushing a full layout update"
+            source.contains("session.$recordingDuration"),
+            "meeting overlay should subscribe to the recording-duration publisher directly"
         )
         assertTrue(
-            source.contains("guard MeetingDurationFormatter.formatDuration(duration) != previousDisplay else { return }"),
-            "5 Hz recording-duration ticks must not trigger 5 Hz full overlay layout work"
+            source.contains(".map { Int($0) }") && source.contains(".removeDuplicates()"),
+            "5 Hz recording-duration ticks must be collapsed to whole seconds before pushing a full overlay layout update"
         )
     }
 
