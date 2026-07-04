@@ -166,6 +166,10 @@ allowlist.
 - `meeting_file_imported`
 - `meeting_file_import_failed`
 - `meeting_live_transcript_drawer_actioned`
+- `local_summary_requested`
+- `local_summary_finished`
+- `local_summary_failed`
+- `local_summary_cancelled`
 - `meeting_transcript_saved`
 - `local_meeting_summary_started`
 - `local_meeting_summary_completed`

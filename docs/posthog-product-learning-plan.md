@@ -313,11 +313,12 @@ Use `workflow_recovery_finished` for terminal retry/recovery totals, then
 
 ### Local Summary Beta Funnel
 
-`meeting_transcript_saved` -> `local_meeting_summary_started` ->
-`local_meeting_summary_completed` / `local_meeting_summary_failed` ->
+`meeting_transcript_saved` -> `local_summary_requested` ->
+`local_summary_finished` / `local_summary_failed` / `local_summary_cancelled` ->
 `workflow_recovery_finished` / `workflow_recovery_failed` for retry from the failure notice ->
 opened/copied/applied summary. Track provider, runtime, duration bucket, result,
-and failure kind only.
+and failure kind only. Legacy `local_meeting_summary_*` events may still appear
+during compatibility windows.
 
 ### Agent And Markdown Value Loop
 
