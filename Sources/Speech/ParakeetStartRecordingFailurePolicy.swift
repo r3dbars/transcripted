@@ -4,6 +4,7 @@ enum ParakeetStartRecordingFailureReason: Equatable {
     case invalidAudioFormat
     case audioRouteNotSettled
     case audioEngineStartFailed
+    case audioEngineStartTimedOut
 }
 
 struct ParakeetStartRecordingFailureAction: Equatable {
@@ -40,7 +41,7 @@ enum ParakeetStartRecordingFailurePolicy {
     ) -> ParakeetStartRecordingFailureAction {
         let shouldScheduleRetry: Bool
         switch reason {
-        case .invalidAudioFormat, .audioRouteNotSettled, .audioEngineStartFailed:
+        case .invalidAudioFormat, .audioRouteNotSettled, .audioEngineStartFailed, .audioEngineStartTimedOut:
             shouldScheduleRetry = !isRecoveryAttempt
         }
 

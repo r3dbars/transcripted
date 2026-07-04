@@ -2350,7 +2350,7 @@ class ParakeetEngine: ObservableObject {
                 }
             } catch {
                 let operationTimedOut = error is ParakeetAudioEngineWorkError
-                let context = audioStartContext(
+                var context = audioStartContext(
                     attempt: attempt,
                     isRecoveryAttempt: isRecoveryAttempt,
                     engineWasRunning: snapshot.engineWasRunning,
@@ -2359,8 +2359,10 @@ class ParakeetEngine: ObservableObject {
                     error: error
                 )
                 let failureReason = operationTimedOut
-                    ? ParakeetStartRecordingFailureReason.audioEngineStartFailed
+                    ? ParakeetStartRecordingFailureReason.audioEngineStartTimedOut
                     : ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error as NSError)
+                context["failure_kind"] = operationTimedOut ? "audio_engine_start_timeout" : "audio_engine_start_failed"
+                context["sample_flow_started"] = "\(didReceiveAudioSamples)"
                 let shouldRetry = !operationTimedOut
                     && failureReason == .audioEngineStartFailed
                     && ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(
@@ -2421,7 +2423,7 @@ class ParakeetEngine: ObservableObject {
                         context: context
                     )
                     let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
-                        for: .audioEngineStartFailed,
+                        for: .audioEngineStartTimedOut,
                         isRecoveryAttempt: isRecoveryAttempt
                     )
                     if startFailureAction.markFormatUnready {
