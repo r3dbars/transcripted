@@ -256,8 +256,10 @@ public class TranscriptSaver {
             formatOptions: formatOptions
         )
 
-        // Serialize file writes to prevent concurrent corruption with retroactive speaker updates
-        let savedURL: URL? = fileUpdateQueue.sync {
+        // Serialize file writes to prevent concurrent corruption with retroactive speaker updates.
+        // Uses the reentrancy-safe wrapper (not a raw `.sync`) so this cannot deadlock if it is
+        // ever invoked while already running inside a `serializeTranscriptFileUpdate` block.
+        let savedURL: URL? = serializeTranscriptFileUpdate {
             do {
                 try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
                 FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)

@@ -58,6 +58,16 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     private var isWaitingForTimedOutStopCallback = false
     private var recoveryAttempts = 0
     private var isRecovering = false
+    // Guards `_isCapturing`, `recoveryAttempts`, and `isRecovering` so the
+    // buffer-stall watchdog (`checkWatchdog`, on `watchdogQueue`), the
+    // `SCStreamDelegate` callback (on ScreenCaptureKit's delegate queue), and
+    // the recovery block they spawn (on a `.userInitiated` global queue)
+    // cannot race each other's guard-check-then-set of these fields — e.g.
+    // both a buffer-stall and a `didStopWithError` callback observing
+    // "not yet recovering" and both kicking off a recovery attempt.
+    // NOTE: this does not yet give full cross-file coordination with
+    // `Audio.swift`'s stop path — see the recovery block below.
+    private let captureStateLock = NSLock()
     private static let callbackTimeoutSeconds = 8
     private static let permissionPromptCallbackTimeoutSeconds = 120
     private static let callbackTimeout: DispatchTimeInterval = .seconds(callbackTimeoutSeconds)
@@ -173,7 +183,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
             AppLogger.audioSystem.warning("SCKAudioCapture: refusing to start stream while previous stop is still pending")
             throw SCKCaptureTimeoutError(operation: "previous stop cleanup")
         }
-        guard !_isCapturing else {
+        guard !isCurrentlyCapturing() else {
             AppLogger.audioSystem.warning("SCKAudioCapture: refusing to start stream because capture is already active")
             throw "SCKAudioCapture: capture already active"
         }
@@ -187,9 +197,11 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
 
         self.bufferCallback = bufferCallback
         resetBufferWatchdogState()
+        captureStateLock.lock()
         if !isRecovering {
             recoveryAttempts = 0
         }
+        captureStateLock.unlock()
         publishErrorMessage(nil)
 
         // Output handler converts CMSampleBuffer → AVAudioPCMBuffer
@@ -227,7 +239,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
             guard currentGeneration() == startGeneration, self.stream === stream else {
                 throw AudioCaptureStaleSessionError()
             }
-            _isCapturing = true
+            setCapturing(true)
             startWatchdog(generation: startGeneration)
             AppLogger.audioSystem.info("SCKAudioCapture: now capturing system audio")
         } catch {
@@ -246,12 +258,11 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     func stop() {
         guard let stream = stream else { return }
         let stopGeneration = currentGeneration()
-        guard _isCapturing else {
+        guard transitionToStopped() else {
             cleanupIfCurrent(generation: stopGeneration, stream: stream)
             return
         }
 
-        _isCapturing = false
         stopWatchdog()
         stream.stopCapture { [weak self, stream] error in
             if let error = error {
@@ -268,12 +279,11 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
             return
         }
         let stopGeneration = currentGeneration()
-        guard _isCapturing else {
+        guard transitionToStopped() else {
             cleanupIfCurrent(generation: stopGeneration, stream: stream)
             return
         }
 
-        _isCapturing = false
         stopWatchdog()
         if stopStreamSynchronously(stream, cleanupAfterLateCallback: { [weak self, stream] in
             self?.cleanupIfCurrent(generation: stopGeneration, stream: stream)
@@ -319,6 +329,29 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         }
     }
 
+    private func isCurrentlyCapturing() -> Bool {
+        captureStateLock.lock()
+        defer { captureStateLock.unlock() }
+        return _isCapturing
+    }
+
+    private func setCapturing(_ value: Bool) {
+        captureStateLock.lock()
+        _isCapturing = value
+        captureStateLock.unlock()
+    }
+
+    /// Atomically checks that capture is currently active and flips it to
+    /// inactive. Returns false (leaving state unchanged) if capture was
+    /// already inactive.
+    private func transitionToStopped() -> Bool {
+        captureStateLock.lock()
+        defer { captureStateLock.unlock() }
+        guard _isCapturing else { return false }
+        _isCapturing = false
+        return true
+    }
+
     private func cleanupIfCurrent(generation: UInt64, stream expectedStream: SCStream) {
         guard currentGeneration() == generation,
               let currentStream = stream,
@@ -355,7 +388,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
             return
         }
 
-        _isCapturing = true
+        setCapturing(true)
         isWaitingForTimedOutStopCallback = true
         startWatchdog(generation: currentGeneration())
         AppLogger.audioSystem.warning("SCKAudioCapture: keeping stream reference after stop timeout")
@@ -410,7 +443,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     private func cleanup() {
         AppLogger.audioSystem.info("SCKAudioCapture: cleanup")
         logStats()
-        _isCapturing = false
+        setCapturing(false)
         isWaitingForTimedOutStopCallback = false
         stopWatchdog()
         stream = nil
@@ -497,7 +530,7 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     }
 
     private func checkWatchdog(generation: UInt64) {
-        guard currentGeneration() == generation, _isCapturing else { return }
+        guard currentGeneration() == generation, isCurrentlyCapturing() else { return }
         watchdogLock.lock()
         let hasReceivedFirstBuffer = _hasReceivedFirstBuffer
         let elapsed = CACurrentMediaTime() - _lastBufferTime
@@ -519,20 +552,38 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         generation: UInt64,
         attemptRestart: Bool
     ) {
-        guard currentGeneration() == generation, _isCapturing else { return }
+        guard currentGeneration() == generation, isCurrentlyCapturing() else { return }
         publishErrorMessage(message)
-        guard attemptRestart,
-              recoveryAttempts < Self.maxRecoveryAttempts,
-              !isRecovering,
-              let callback = bufferCallback else {
+        guard attemptRestart, let callback = bufferCallback else { return }
+
+        // Atomically check-and-set the recovery guards under one lock so two
+        // concurrent triggers (the buffer-stall watchdog and
+        // `didStopWithError`) cannot both observe "not yet recovering" and
+        // both kick off a recovery attempt.
+        captureStateLock.lock()
+        guard recoveryAttempts < Self.maxRecoveryAttempts, !isRecovering else {
+            captureStateLock.unlock()
             return
         }
-
         recoveryAttempts += 1
         isRecovering = true
+        captureStateLock.unlock()
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            defer { self.isRecovering = false }
+            defer {
+                self.captureStateLock.lock()
+                self.isRecovering = false
+                self.captureStateLock.unlock()
+            }
+            // NOTE: this only prevents two recovery attempts from racing each
+            // other (above). It does not yet fully coordinate with an
+            // official stop initiated from Audio.swift's stop()/stopSync()
+            // path — if such a stop completes while this recovery is between
+            // its own stopSync()/prepare()/start() calls, the recovery can
+            // still restart capture after the caller believed capture had
+            // stopped. Full cross-file coordination with Audio.swift's stop
+            // path is a larger follow-up.
             do {
                 AppLogger.audioSystem.info("SCKAudioCapture: attempting stream recovery", [
                     "attempt": "\(self.recoveryAttempts)"

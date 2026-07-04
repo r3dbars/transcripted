@@ -2583,23 +2583,28 @@ class ParakeetEngine: ObservableObject {
                 EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zombie_engine_recovery_failed",
                     message: "Audio engine could not recover after reset",
                     context: ["audio_device": self.inputDeviceName])
-                self.interruptRecordingAndClearRecoveredTimeline()
+                self.interruptRecordingPreservingRecoveredTimeline()
             }
         }
     }
 
     func stopRecording() async {
         guard isRecording else {
-            // A zombie reset marks recording idle while it waits to retry. Treat a
-            // user stop in that window as cancellation of the pending restart.
+            // Genuinely preserved/recovered audio (e.g. real pre-sleep audio held
+            // across a wake-recovery gap) must win over a merely-pending zombie
+            // restart — checking this first ensures a stop during an in-flight
+            // zombie retry drains real audio instead of discarding it.
+            if preservingRecordingAcrossRecovery || !recoveredRecordingTimeline.isEmpty {
+                cancelPendingRecordingRecovery()
+                return
+            }
+            // A zombie reset marks recording idle while it waits to retry, with
+            // nothing preserved worth keeping. Treat a user stop in that window
+            // as cancellation of the pending restart.
             if zombieRecoveryRestartPending {
                 audioGraphGeneration += 1
                 cancelAudioWatchdog()
                 clearRecoveredRecordingTimeline(keepingCapacity: true)
-                return
-            }
-            if preservingRecordingAcrossRecovery || !recoveredRecordingTimeline.isEmpty {
-                cancelPendingRecordingRecovery()
                 return
             }
             if audioStartInProgress {

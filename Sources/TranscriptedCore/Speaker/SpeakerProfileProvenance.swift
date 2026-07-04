@@ -588,16 +588,24 @@ extension SpeakerDatabase {
         return row
     }
 
+    /// LIFO safety check for un-merge: true if either (a) a newer non-undone merge
+    /// still targets `targetId` (restoring the older snapshot would drop it), or
+    /// (b) `targetId` was itself later absorbed as the *source* of a newer
+    /// non-undone merge (its contributions were already re-pointed onward, so
+    /// resurrecting it here would leave a stale, orphaned profile row — the
+    /// merge that consumed it must be undone first).
     private func hasNewerUndoneMergeImpl(targetId: UUID, afterRowid rowid: Int64) -> Bool {
         let sql = """
         SELECT COUNT(*) FROM speaker_merge_events
-        WHERE target_id = ? AND undone_at IS NULL AND rowid > ?;
+        WHERE undone_at IS NULL AND rowid > ?
+          AND (target_id = ? OR source_id = ?);
         """
         var statement: OpaquePointer?
         var count: Int32 = 0
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (targetId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_int64(statement, 2, rowid)
+            sqlite3_bind_int64(statement, 1, rowid)
+            sqlite3_bind_text(statement, 2, (targetId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 3, (targetId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
             if sqlite3_step(statement) == SQLITE_ROW {
                 count = sqlite3_column_int(statement, 0)
             }
