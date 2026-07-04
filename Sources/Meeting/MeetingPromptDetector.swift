@@ -54,8 +54,10 @@ final class MeetingPromptDetector {
     // the recording-start title closure), so they read this cache instead of querying
     // EKEventStore on the main actor.
     private var calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = []
+    private var lastCalendarEventRefreshAt: Date?
     private var pollingTask: Task<Void, Never>?
     private var workspaceObservers: [NSObjectProtocol] = []
+    private var calendarChangeObserver: NSObjectProtocol?
     private var snoozedUntil: [String: Date] = [:]
     private var pendingUntil: [String: Date] = [:]
     private var recentNativeActivity: [MeetingPromptProvider: Date] = [:]
@@ -101,6 +103,10 @@ final class MeetingPromptDetector {
     // Single fetch window covering both the near-term prompt window and the
     // farthest lookahead used for runtime-dismiss resume dates.
     private let calendarLookaheadInterval: TimeInterval = 12 * 60 * 60
+    // Calendar queries are synchronous XPC work behind EventKit. Keep the 20s
+    // prompt loop in-memory most of the time and refresh the EventKit snapshot
+    // on a minutes-scale TTL or when EventKit tells us the calendar changed.
+    private let calendarSnapshotRefreshInterval: TimeInterval = 5 * 60
 
     init(
         calendarAccessGranted: @escaping () -> Bool = { TranscriptedPermissionAccess.calendarAccessGranted() },
@@ -115,6 +121,7 @@ final class MeetingPromptDetector {
     func start() {
         guard pollingTask == nil else { return }
         installWorkspaceObservers()
+        installCalendarChangeObserver()
 
         pollingTask = Task { [weak self] in
             guard let self else { return }
@@ -136,6 +143,10 @@ final class MeetingPromptDetector {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
         workspaceObservers.removeAll()
+        if let calendarChangeObserver {
+            NotificationCenter.default.removeObserver(calendarChangeObserver)
+            self.calendarChangeObserver = nil
+        }
     }
 
     @discardableResult
@@ -382,14 +393,36 @@ final class MeetingPromptDetector {
         guard refreshesCalendarEventSnapshots else { return }
         guard calendarAccessGranted() else {
             calendarEventSnapshots = []
+            lastCalendarEventRefreshAt = nil
             return
         }
 
         let now = Date()
+        if let lastCalendarEventRefreshAt,
+           now.timeIntervalSince(lastCalendarEventRefreshAt) < calendarSnapshotRefreshInterval {
+            return
+        }
+
         calendarEventSnapshots = await calendarReader.fetchMeetingEventSnapshots(
             start: now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
             end: now.addingTimeInterval(calendarLookaheadInterval)
         )
+        lastCalendarEventRefreshAt = now
+    }
+
+    private func installCalendarChangeObserver() {
+        guard calendarChangeObserver == nil else { return }
+        calendarChangeObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.lastCalendarEventRefreshAt = nil
+                await self.evaluate()
+            }
+        }
     }
 
     private func installWorkspaceObservers() {

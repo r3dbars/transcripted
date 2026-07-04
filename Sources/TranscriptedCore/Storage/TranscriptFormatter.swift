@@ -135,6 +135,9 @@ extension TranscriptSaver {
                     yaml += "\nmic_boost_prompt: \"\(Self.escapeYAML(prompt))\""
                 }
             }
+            if health.systemAudioMissing == true {
+                yaml += "\nsystem_audio_missing: true"
+            }
         }
 
         // Add speaker identification metadata.

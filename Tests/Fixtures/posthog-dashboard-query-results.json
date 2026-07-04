@@ -49,49 +49,111 @@
       ]
     },
     {
-      "id": "reliability.workflow_failure_rates",
+      "id": "meeting_prompt_quality.prompt_outcomes",
+      "rows": [
+        {"provider": "zoom", "source": "active_call", "prompt_reason": "call_detected", "route_ready": true, "choice_kind": null, "outcome_kind": null, "elapsed_bucket": null, "shown_events": 12, "choice_events": 0, "record_selected_events": 5, "outcome_events": 0, "dismissed_events": 3, "suppressed_events": 1, "missed_call_nudges": 2, "devices": 9},
+        {"provider": "zoom", "source": "runtime_app", "prompt_reason": "call_detected", "route_ready": "true", "choice_kind": "record", "outcome_kind": "transcript_saved", "elapsed_bucket": "10_29s", "shown_events": 0, "choice_events": 8, "record_selected_events": 0, "outcome_events": 6, "dismissed_events": 0, "suppressed_events": 0, "missed_call_nudges": 0, "devices": 5}
+      ]
+    },
+    {
+      "id": "meeting_prompt_quality.suppression_reasons",
+      "rows": [
+        {"event": "meeting_prompt_suppressed", "suppression_reason": "active_capture", "cooldown_reason": null, "missing_permission": null, "backoff_kind": "cooldown", "events": 2, "devices": 2}
+      ]
+    },
+    {
+      "id": "artifact_usefulness.saved_and_used_artifacts",
+      "rows": [
+        {"artifact_kind": "meeting", "surface": "home", "saved_events": 19, "second_artifact_events": 6, "action_events": 11, "return_proxy_events": 7, "devices": 23}
+      ]
+    },
+    {
+      "id": "artifact_usefulness.second_value_moment",
+      "rows": [
+        {"first_artifact_kind": "dictation", "second_artifact_kind": "meeting", "days_since_first_bucket": "same_day", "surface": "save_path", "events": 6, "devices": 5}
+      ]
+    },
+    {
+      "id": "agent_payoff.agent_loop",
+      "rows": [
+        {"event": "agent_capture_query_observed", "agent_target": "claude", "query_kind": "search", "result": "success", "surface": "mcp", "events": 9, "devices": 4}
+      ]
+    },
+    {
+      "id": "agent_payoff.capture_query_quality",
+      "rows": [
+        {"agent_target": "claude", "query_kind": "search", "source_count_bucket": "2_5", "capture_age_bucket": "same_day", "return_window_bucket": "next_day", "result": "success", "events": 9, "devices": 4}
+      ]
+    },
+    {
+      "id": "speaker_trust.review_outcomes",
+      "rows": [
+        {"event": "meeting_speaker_match_reviewed", "channel": "mic", "review_action": "confirmed", "completion_kind": null, "result": null, "had_suggestion": true, "similarity_bucket": "high", "margin_bucket": "wide", "events": 8, "devices": 5}
+      ]
+    },
+    {
+      "id": "speaker_trust.finalization_failures",
+      "rows": [
+        {"failure_kind": "rewrite_failed", "session_stage": "save", "trigger": "speaker_review", "queue_depth_bucket": "one", "events": 1, "devices": 1}
+      ]
+    },
+    {
+      "id": "retry_recovery.workflow_recovery",
+      "rows": [
+        {"event": "workflow_recovery_finished", "workflow_kind": "meeting_transcript", "failure_kind": "model_unavailable", "retry_source": "home", "artifact_retained": true, "result": "success", "attempt_bucket": "second", "events": 3, "devices": 2}
+      ]
+    },
+    {
+      "id": "retry_recovery.failure_rates",
       "rows": [
         {
           "dictation_starts": 64,
           "dictation_start_failures": 2,
           "dictation_completed": 57,
           "dictation_no_speech": 3,
+          "dictation_recovery_timeouts": 1,
           "meeting_starts": 22,
           "meeting_start_failures": 1,
           "meeting_saved": 19,
-          "meeting_failed_or_skipped": 2
+          "meeting_failed_or_skipped": 2,
+          "recovery_finished": 3
         }
       ]
     },
     {
-      "id": "reliability.failure_kinds",
+      "id": "retry_recovery.failure_kinds",
       "rows": [
         {"event": "meeting_transcript_failed", "failure_kind": "model_unavailable", "events": 2, "devices": 2}
       ]
     },
     {
-      "id": "reliability.latency_buckets",
+      "id": "retry_recovery.latency_buckets",
       "rows": [
         {"stop_to_done_bucket": "under_5s", "decode_bucket": "under_2s", "save_bucket": "under_500ms", "paste_bucket": "under_500ms", "outcome": "completed", "events": 30, "devices": 18}
       ]
     },
     {
-      "id": "feature_adoption.artifact_and_agent_actions",
+      "id": "onboarding_friction.step_friction",
       "rows": [
-        {"event": "activation_agent_prompt_action_clicked", "surface": "home", "artifact_kind": "meeting", "action_kind": "copy_prompt", "agent_target": "claude", "result": "copied", "events": 11, "devices": 6}
+        {"event": "workflow_abandoned", "step_id": "permissions", "step_index": 3, "stage": "permissions", "reason_kind": "window_closed", "permission_kind": "microphone", "model_state": "ready", "events": 4, "devices": 3}
       ]
     },
     {
-      "id": "feature_adoption.meeting_prompts",
+      "id": "onboarding_friction.permission_readiness",
       "rows": [
-        {"event": "meeting_prompt_choice_made", "provider": "zoom", "source": "runtime_app", "route_ready": "true", "choice_kind": "record", "outcome_kind": null, "elapsed_bucket": "10_29s", "suppression_reason": null, "cooldown_reason": null, "events": 8, "devices": 5},
-        {"event": "meeting_prompt_outcome_recorded", "provider": "zoom", "source": "runtime_app", "route_ready": "true", "choice_kind": null, "outcome_kind": "transcript_saved", "elapsed_bucket": "10_29m", "suppression_reason": null, "cooldown_reason": null, "events": 6, "devices": 4}
+        {"completion_flow": "required_permissions", "meeting_recording_ready": true, "calendar_status": "authorized", "permission_kind": null, "to_status": null, "events": 13, "devices": 11}
       ]
     },
     {
-      "id": "feature_adoption.settings_discovery",
+      "id": "timeline_dayflow.dayflow_events",
       "rows": [
-        {"event": "settings_page_viewed", "page_id": "agent", "action_id": null, "setting_id": null, "enabled": null, "events": 16, "devices": 10}
+        {"event": "timeline_viewed", "provider": "localFoundation", "mode": "day", "result": "shown", "events": 7, "devices": 3, "first_seen": "2026-06-18T00:10:00Z", "last_seen": "2026-06-19T12:00:00Z"}
+      ]
+    },
+    {
+      "id": "timeline_dayflow.data_quality",
+      "rows": [
+        {"event": "timeline_batch_completed", "provider": "localFoundation", "failure_kind": null, "events": 5, "devices": 3}
       ]
     },
     {

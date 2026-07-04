@@ -975,10 +975,10 @@
               <td>Separates permission completion from first action.</td>
             </tr>
             <tr>
-              <td><code>onboarding_dismissed</code></td>
-              <td>When the window closes before completion.</td>
-              <td><code>close_source</code>, <code>required_missing_count</code>, <code>model_state</code>, <code>duration_bucket</code></td>
-              <td>Captures abandonments that are invisible today.</td>
+              <td><code>workflow_abandoned</code></td>
+              <td>When a confident workflow exit is tracked.</td>
+              <td><code>workflow_kind</code>, <code>stage</code>, <code>reason_kind</code>, <code>elapsed_bucket</code></td>
+              <td>Captures coarse abandonments without adding a separate dismissed event.</td>
             </tr>
             <tr>
               <td><code>onboarding_completed</code></td>

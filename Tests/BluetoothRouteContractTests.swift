@@ -325,7 +325,8 @@ func testBluetoothRouteContract() {
         }
         let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
 
-        guard let loadSelection = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
+        guard let loadSelection = snapshotBody.range(of: "let selection = await Task.detached"),
+              let detachedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
               let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
               let applyOverride = snapshotBody.range(of: "Self.applyPreferredDictationInputDevice(selection, to: inputNode)"),
               let outputFormatRead = snapshotBody.range(of: "inputNode.outputFormat(forBus: 0)"),
@@ -334,7 +335,8 @@ func testBluetoothRouteContract() {
             return
         }
 
-        assertTrue(loadSelection.lowerBound < avoidDefaultRead.lowerBound, "selection should be loaded before the no-default-read guard")
+        assertTrue(loadSelection.lowerBound < detachedSelectionLookup.lowerBound, "selection should be loaded through detached CoreAudio lookup")
+        assertTrue(detachedSelectionLookup.lowerBound < avoidDefaultRead.lowerBound, "selection should be loaded before the no-default-read guard")
         assertTrue(avoidDefaultRead.lowerBound < applyOverride.lowerBound, "override guard should be set before touching the input node")
         assertTrue(applyOverride.lowerBound < outputFormatRead.lowerBound, "forced input override should happen before output format reads")
         assertTrue(applyOverride.lowerBound < inputFormatRead.lowerBound, "forced input override should happen before hardware input format reads")

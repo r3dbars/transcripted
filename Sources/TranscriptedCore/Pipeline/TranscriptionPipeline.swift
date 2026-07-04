@@ -656,6 +656,122 @@ extension Transcription {
         }
     }
 
+    /// Recover/transcribe a live meeting when only the microphone WAV survived.
+    /// This intentionally uses the single-"You" mic path: the speaker-review flow
+    /// currently owns system-audio cleanup, so mic-only recovery should save a
+    /// trustworthy transcript instead of opening a review sheet it cannot clean up.
+    nonisolated func transcribeMicrophoneOnly(
+        micURL: URL,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> TranscriptionResult {
+        let parakeet = await MainActor.run { self.parakeet }
+
+        await MainActor.run {
+            self.isProcessing = true
+            self.error = nil
+            self.processingStatus = "Preparing microphone audio..."
+        }
+
+        let processingStartTime = Date()
+
+        do {
+            onProgress?(0.0)
+            await MainActor.run {
+                self.processingStatus = "Loading microphone audio..."
+            }
+
+            var micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
+            let duration = try Self.audioDuration(at: micURL)
+            guard micSamples.count >= 16000 else {
+                throw PipelineError.recordingTooShort(duration: Double(micSamples.count) / 16000.0)
+            }
+
+            await MainActor.run {
+                self.processingStatus = "Transcribing microphone audio..."
+            }
+
+            let micSegments = Self.detectSpeechSegments(samples: micSamples, sampleRate: 16000)
+            AppLogger.transcription.info("Mic-only audio segmented by silence", [
+                "segments": "\(micSegments.count)"
+            ])
+
+            var micUtterances: [TranscriptionUtterance] = []
+            var droppedSegments = 0
+            for (index, segment) in micSegments.enumerated() {
+                try Task.checkCancellation()
+                let segmentSamples = AudioResampler.extractSlice(
+                    from: micSamples,
+                    sampleRate: 16000,
+                    startTime: segment.start,
+                    endTime: segment.end
+                )
+                guard let preparedSegment = Self.prepareMicSegmentForTranscription(
+                    samples: segmentSamples,
+                    sampleRate: 16000
+                ) else {
+                    droppedSegments += 1
+                    continue
+                }
+
+                let text = try await parakeet.transcribeSegment(
+                    samples: preparedSegment.samples,
+                    source: .microphone
+                )
+                guard !text.isEmpty else {
+                    droppedSegments += 1
+                    continue
+                }
+
+                micUtterances.append(TranscriptionUtterance(
+                    start: segment.start,
+                    end: segment.end,
+                    channel: 0,
+                    speakerId: 0,
+                    persistentSpeakerId: nil,
+                    matchSimilarity: nil,
+                    transcript: text
+                ))
+
+                let progress = 0.10 + (Double(index + 1) / Double(max(1, micSegments.count))) * 0.85
+                onProgress?(progress)
+            }
+
+            micSamples = []
+            let mergedMicUtterances = Self.mergeConsecutiveUtterances(micUtterances, maxGap: 1.5)
+            guard !mergedMicUtterances.isEmpty else {
+                throw PipelineError.noSpeechDetected
+            }
+
+            let processingTime = Date().timeIntervalSince(processingStartTime)
+            await MainActor.run {
+                self.processingStatus = "Transcription complete!"
+                self.isProcessing = false
+            }
+            onProgress?(1.0)
+
+            AppLogger.transcription.info("Mic-only transcription complete", [
+                "micUtterances": "\(mergedMicUtterances.count)",
+                "processingTime": "\(String(format: "%.1f", processingTime))s",
+                "droppedSegments": "\(droppedSegments)"
+            ])
+
+            return TranscriptionResult(
+                micUtterances: mergedMicUtterances,
+                systemUtterances: [],
+                duration: duration,
+                processingTime: processingTime,
+                droppedSegments: droppedSegments
+            )
+        } catch {
+            await MainActor.run {
+                self.error = "Transcription failed: \(error.localizedDescription)"
+                self.isProcessing = false
+                self.processingStatus = ""
+            }
+            throw error
+        }
+    }
+
     nonisolated private static func longestAudioDuration(micURL: URL?, systemURL: URL) throws -> TimeInterval {
         var durations = [try audioDuration(at: systemURL)]
         if let micURL {

@@ -310,6 +310,12 @@ func testRepoCommandContract() {
             buildDepsScript.contains("The SPM-path archive is contaminated with TranscriptedCore objects"),
             "build-deps.sh should fail with an actionable message when libExternalDeps.a contains Core symbols"
         )
+        assertTrue(
+            buildDepsScript.contains("assert_mlx_swift_lm_revision")
+                && buildDepsScript.contains("mlx-swift-lm revision mismatch")
+                && buildDepsScript.contains("\"$MLX_SWIFT_LM_REVISION\"*"),
+            "build-deps.sh should verify the resolved mlx-swift-lm checkout still matches the pinned revision"
+        )
     }
 
     runSuite("Repo command contract - fast test runner generation is per-process") {
@@ -1734,7 +1740,7 @@ func testRepoCommandContract() {
         )
         let delayRange = autoEnterBlock.range(of: "Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)")
         let readinessRange = autoEnterBlock.range(of: "await textPaster.waitForClipboardReadyForAutoEnter()")
-        let sendRange = autoEnterBlock.range(of: "return autoSender.send(DictationAutoSendPreferences.sendKey())")
+        let sendRange = autoEnterBlock.range(of: "return autoSender.send(DictationAutoSendPreferences.sendKey(), target: sessionPasteTarget)")
 
         assertTrue(
             contents.contains("overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? \"Pasted\")")
@@ -3464,6 +3470,85 @@ func testRepoCommandContract() {
         assertFalse(
             settingsContents.contains("TranscriptedPermissionAccess.openSettings(for: kind)\n                        refreshPermissions()"),
             "settings should not immediately refresh after a fire-and-forget permission action"
+        )
+    }
+
+    runSuite("Repo command contract - audit prompt and onboarding UX guards") {
+        let appContents = readRepoTextFile("Sources/TranscriptedApp.swift")
+        let pillContents = readRepoTextFile("Sources/UI/Overlay/CapturePillController.swift")
+        let meetingOverlayContents = readRepoTextFile("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let floatingOverlayContents = readRepoTextFile("Sources/UI/Overlay/FloatingOverlayController.swift")
+        let overlayDraftingContents = readRepoTextFile("Sources/UI/Overlay/OverlayDraftingView.swift")
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let onboardingContents = readRepoTextFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
+        let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
+        let permissionAccessContents = readRepoTextFile("Sources/Support/TranscriptedPermissionAccess.swift")
+        let permissionKindContents = readRepoTextFile("Sources/Support/TranscriptedPermissionKind.swift")
+
+        assertTrue(
+            pillContents.contains("var onRemind")
+                && pillContents.contains("var onExpired")
+                && pillContents.contains("Remind me soon"),
+            "capture pill should keep Record, Not now, and Remind me soon outcomes"
+        )
+        assertTrue(
+            appContents.contains("MeetingPromptHeuristics.promptTimeoutSeconds")
+                && appContents.contains("capturePillController.onRemind")
+                && appContents.contains("capturePillController.onExpired"),
+            "capture pill prompts should use heuristic timeouts and route remind/expiry distinctly"
+        )
+        assertTrue(
+            pillContents.contains("event.window === panel || panel.isKeyWindow")
+                && !pillContents.contains("panel.makeKey()")
+                && pillContents.contains("NSMouseInRect(mouseLocation"),
+            "capture pill should not hijack app-wide keys or force primary-display placement"
+        )
+        assertTrue(
+            floatingOverlayContents.contains("func dismissError()")
+                && floatingOverlayContents.contains("onErrorDismiss:")
+                && overlayDraftingContents.contains("errorDismissButton"),
+            "actionable dictation errors should be explicitly dismissible"
+        )
+        let meetingErrorBlock = sourceSlice(
+            meetingOverlayContents,
+            from: "case .error(let message):\n            cancelRest()",
+            to: "pushToView()"
+        )
+        assertTrue(
+            meetingErrorBlock.contains("autoHideTask?.cancel()")
+                && !meetingErrorBlock.contains("scheduleAutoHide(after: 5)")
+                && meetingOverlayContents.contains("closeButton.attributedTitle = buttonTitle(\"Dismiss\""),
+            "meeting failures should stay visible until acknowledged"
+        )
+        assertTrue(
+            settingsContents.contains("TranscriptedPermissionKind.requiredForCurrentUse(")
+                && permissionKindContents.contains("return [.microphone, .systemAudioRecording]")
+                && menuContents.contains("HotkeyPreferences.dictationShortcutsEnabled() ? appState.contextCapture.hotkeyError : nil"),
+            "meetings-first users should not be nagged for Accessibility while System Audio Recording is the missing blocker"
+        )
+        assertTrue(
+            settingsContents.contains("resetCaptureLibraryToDefault()")
+                && settingsContents.contains("Copy to Default Folder")
+                && settingsContents.contains("applyCaptureLibraryChoice(nil)"),
+            "resetting the capture library should confirm/copy/switch like choosing a folder"
+        )
+        assertTrue(
+            onboardingContents.contains("revalidateSystemAudioPermissionNow")
+                && settingsContents.contains("revalidateSystemAudioRecordingStatus()")
+                && permissionAccessContents.contains("static func revalidateSystemAudioRecordingStatus() async -> Bool"),
+            "onboarding and Settings should revalidate the System Audio Recording cache"
+        )
+        assertTrue(
+            sourceOrder(
+                in: permissionAccessContents,
+                needles: [
+                    "case .systemAudioRecording:",
+                    "let granted = await requestSystemAudioRecordingAccessIfNeeded(forceRefresh: true)",
+                    "notifyPermissionsDidChange(kind: .systemAudioRecording)",
+                    "if granted {",
+                ]
+            ),
+            "the System Audio CTA should force a fresh grant check instead of trusting a stale cached status"
         )
     }
 }

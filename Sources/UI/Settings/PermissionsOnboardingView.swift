@@ -113,6 +113,7 @@ struct PermissionsOnboardingView: View {
                 flowStartedAt = CFAbsoluteTimeGetCurrent()
             }
             checkAllPermissions(trackChanges: false)
+            revalidateSystemAudioPermission(trackChanges: false)
             trackCurrentStepViewed()
             startPolling()
         }
@@ -249,12 +250,12 @@ struct PermissionsOnboardingView: View {
         case .meetingStart:
             SplitStage {
                 Kicker("Meetings first")
-                Headline(primary: "Start from Transcripted.", emphasis: "No shortcut needed.", size: 42, alignment: .leading)
-                BodyCopy("When a call starts, click Transcripted in the menu bar and choose Start Meeting. That's the whole path.")
+                Headline(primary: "Transcripted notices\nwhen a call starts.", emphasis: "Then it asks, once.", size: 42, alignment: .leading)
+                BodyCopy("Any app or browser tab using your mic counts — Zoom, Meet, whatever — no calendar invite required. Prefer to start it yourself? Click Transcripted in the menu bar and choose Start Meeting.")
                 BulletList([
                     leaveDictationShortcutsOff ? "Dictation shortcuts are off for this setup" : "Dictation shortcuts stay available",
-                    "Meeting recording starts from the app",
-                    "You can change this later in Settings"
+                    "Works with any call, calendar invite or not",
+                    "Turn auto-detect off anytime in Settings"
                 ])
             } right: {
                 MeetingStartPathCard(dictationShortcutsOff: leaveDictationShortcutsOff)
@@ -290,11 +291,11 @@ struct PermissionsOnboardingView: View {
         case .calendar:
             SplitStage {
                 Kicker("Calendar")
-                Headline(primary: "Want meeting\nreminders?", size: 42, alignment: .leading)
-                BodyCopy("Transcripted can look at your calendar and offer a quiet prompt when a call is about to start. Spontaneous calls — like a Google Meet with no invite — are detected automatically too, and you can turn that off anytime in Settings.")
+                Headline(primary: "Calendar adds\nan early nudge.", size: 42, alignment: .leading)
+                BodyCopy("Transcripted already notices when a call starts — any app or browser tab using your mic, no invite required — and asks once. Add calendar access and it can nudge you a few minutes before a scheduled meeting even begins.")
                 ToggleCard(
-                    title: "Meeting reminders",
-                    detail: "Use read-only calendar access to notice upcoming calls.",
+                    title: "Calendar reminders",
+                    detail: "Use read-only calendar access for a heads-up before scheduled calls.",
                     isOn: $meetingPromptsEnabled,
                     automationIdentifier: "transcripted.onboarding.calendar.meeting-reminders"
                 )
@@ -592,7 +593,7 @@ struct PermissionsOnboardingView: View {
             // user has the System Settings menu open. A Task-driven loop keeps
             // polling regardless and dies cleanly when onDisappear cancels it.
             while !Task.isCancelled {
-                checkAllPermissions(trackChanges: true)
+                await revalidateSystemAudioPermissionNow(trackChanges: true)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -603,6 +604,23 @@ struct PermissionsOnboardingView: View {
         pollTask = nil
         permissionRevalidationTask?.cancel()
         permissionRevalidationTask = nil
+    }
+
+    private func revalidateSystemAudioPermission(trackChanges: Bool) {
+        Task { @MainActor in
+            await revalidateSystemAudioPermissionNow(trackChanges: trackChanges)
+        }
+    }
+
+    private func revalidateSystemAudioPermissionNow(trackChanges: Bool) async {
+        guard currentStep.kind == .permissions
+            || TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown
+        else {
+            checkAllPermissions(trackChanges: trackChanges)
+            return
+        }
+        _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
+        checkAllPermissions(trackChanges: trackChanges)
     }
 
     private func completeOnboarding() {

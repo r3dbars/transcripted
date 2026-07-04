@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import UniformTypeIdentifiers
 
 func testMeetingImportedAudioPreparer() async {
     await runSuite("MeetingImportedAudioPreparer gives a stable missing-file error") {
@@ -81,6 +82,87 @@ func testMeetingImportedAudioPreparer() async {
             importedAudioFilePermissions(of: sourceURL),
             NSNumber(value: 0o644),
             "preparing imported audio should not mutate the user's source file permissions"
+        )
+    }
+
+    runSuite("MeetingImportedAudioPreparer accepts common movie recording types") {
+        assertEqual(
+            try! MeetingImportedAudioPreparer.importMediaKind(for: .mpeg4Movie),
+            .audiovisual,
+            "MP4 movie recordings should be eligible for audio extraction"
+        )
+        assertEqual(
+            try! MeetingImportedAudioPreparer.importMediaKind(for: .quickTimeMovie),
+            .audiovisual,
+            "MOV movie recordings should be eligible for audio extraction"
+        )
+        assertEqual(
+            try! MeetingImportedAudioPreparer.importMediaKind(for: .mpeg4Audio),
+            .audio,
+            "M4A audio imports should keep the normal copy path"
+        )
+    }
+
+    await runSuite("MeetingImportedAudioPreparer extracts audio-bearing movie containers into scratch") {
+        let root = temporaryImportAudioPreparerRoot()
+        let sourceURL = root.appendingPathComponent("Zoom_Local_Recording.mp4")
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let sourceRecordingDate = Date(timeIntervalSince1970: 1_704_153_600)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try! writeSilentMPEG4AudioFixture(toMovieURL: sourceURL)
+        try! FileManager.default.setAttributes(
+            [
+                .creationDate: sourceRecordingDate,
+                .modificationDate: sourceRecordingDate,
+                .posixPermissions: 0o644
+            ],
+            ofItemAtPath: sourceURL.path
+        )
+
+        let prepared = try! await MeetingImportedAudioPreparer.prepareImportedAudio(
+            from: sourceURL,
+            scratchDirectory: scratchURL
+        )
+
+        assertTrue(
+            FileManager.default.fileExists(atPath: prepared.copiedAudioURL.path),
+            "movie import should write an extracted audio file into app-owned scratch"
+        )
+        assertEqual(prepared.copiedAudioURL.pathExtension.lowercased(), "m4a", "movie imports should transcode to m4a for transcription")
+        assertEqual(prepared.suggestedTitle, "Zoom Local Recording", "import title should still come from the selected movie filename")
+        assertEqual(
+            importedAudioFilePermissions(of: prepared.copiedAudioURL),
+            NSNumber(value: 0o600),
+            "extracted movie audio should be restricted to the owner"
+        )
+        assertEqual(
+            importedAudioFilePermissions(of: sourceURL),
+            NSNumber(value: 0o644),
+            "preparing movie imports should not mutate the user's source file permissions"
+        )
+
+        let extractedAsset = AVURLAsset(url: prepared.copiedAudioURL)
+        let extractedTracks = try! await extractedAsset.loadTracks(withMediaType: .audio)
+        assertFalse(extractedTracks.isEmpty, "extracted scratch audio should have a readable audio track")
+    }
+
+    await runSuite("MeetingImportedAudioPreparer rejects movie containers without audio") {
+        let root = temporaryImportAudioPreparerRoot()
+        let sourceURL = root.appendingPathComponent("screen_share_only.mov")
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: sourceURL.path, contents: Data())
+
+        await assertImportedAudioPreparationError(
+            .unsupportedAudioType,
+            sourceURL: sourceURL,
+            scratchURL: scratchURL
+        )
+
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: scratchURL.path)) ?? []
+        assertTrue(
+            leftovers.filter { $0.hasPrefix("imported-") }.isEmpty,
+            "unsupported movie imports must not leave scratch audio behind"
         )
     }
 
@@ -450,4 +532,24 @@ private func temporaryImportAudioPreparerRoot() -> URL {
 private func importedAudioFilePermissions(of url: URL) -> NSNumber? {
     let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
     return attributes?[.posixPermissions] as? NSNumber
+}
+
+private func writeSilentMPEG4AudioFixture(toMovieURL movieURL: URL) throws {
+    let fixtureURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/imported-movie-audio-track.mp4.base64")
+    let encoded = try String(contentsOf: fixtureURL, encoding: .utf8)
+    let compactEncoded = encoded.replacingOccurrences(
+        of: "\\s",
+        with: "",
+        options: .regularExpression
+    )
+    guard let data = Data(base64Encoded: compactEncoded) else {
+        throw NSError(
+            domain: "MeetingImportedAudioPreparerTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Invalid MPEG-4 audio fixture"]
+        )
+    }
+    try data.write(to: movieURL, options: .atomic)
 }

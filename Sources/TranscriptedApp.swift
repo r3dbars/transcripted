@@ -14,6 +14,12 @@ import UniformTypeIdentifiers
 struct TranscriptedApp: App {
     @NSApplicationDelegateAdaptor(TranscriptedAppDelegate.self) var appDelegate
 
+    init() {
+        // Set this before app startup creates logs, scratch files, or atomic-write
+        // temp files so new app-owned files default to owner-only permissions.
+        umask(0o077)
+    }
+
     var body: some Scene {
         Settings { EmptyView() }
             .commands {
@@ -294,6 +300,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             capturePillController.onRecord = recordPrompt
             capturePillController.onDismiss = dismissPrompt
+            capturePillController.onRemind = meetingOverlayController.onPromptRemindSoon
+            capturePillController.onExpired = meetingOverlayController.onPromptExpired
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
@@ -327,7 +335,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
                 guard PermissionsOnboardingPreferences.hasCompleted() else { return false }
                 guard let self else { return false }
-                let presented = self.capturePillController.present(candidate: candidate)
+                let timeout = MeetingPromptHeuristics.promptTimeoutSeconds(
+                    for: candidate.reason,
+                    calendarDefault: 30
+                )
+                let presented = self.capturePillController.present(candidate: candidate, timeout: TimeInterval(timeout))
                 if presented {
                     self.meetingPromptShownAtByCandidateID[candidate.id] = Date()
                     AnalyticsReporter.track(
@@ -1161,9 +1173,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.audio]
+        panel.allowedContentTypes = [.audio, .audiovisualContent]
         panel.prompt = "Transcribe"
-        panel.message = "Choose a WAV, MP3, M4A, AAC, AIFF, or other macOS-readable audio file."
+        panel.message = "Choose an audio file or a Zoom/Teams recording with an audio track."
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 

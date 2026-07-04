@@ -39,7 +39,7 @@ class TranscriptedAppState: ObservableObject {
             self?.contextCapture.registerHotkey()
         },
         currentHotkeyError: { [weak self] in
-            self?.contextCapture.hotkeyError
+            self?.contextCapture.hotkeyRegistrationError
         },
         onHotkeyAttempt: { [weak self] attempt, error in
             guard let self else { return }

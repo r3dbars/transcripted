@@ -162,7 +162,7 @@ func testOverlayScreenSharePrivacy() async {
             to: "// Ad-hoc call detection:"
         )
         assertTrue(
-            promptRequest.contains("capturePillController.present(candidate: candidate)"),
+            promptRequest.contains("capturePillController.present(candidate: candidate, timeout:"),
             "detected meeting prompts should use the floating capture pill"
         )
         assertFalse(

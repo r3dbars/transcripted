@@ -666,7 +666,16 @@ final class MeetingOverlayRootView: NSView {
         statusDot.frame = NSRect(x: pad, y: topY - dotSize / 2, width: dotSize, height: dotSize)
 
         let titleX = statusDot.frame.maxX + 8
-        let titleWidth = max(0, bounds.width - titleX - pad)
+        let closeWidth: CGFloat = 70
+        let closeHeight: CGFloat = 24
+        closeButton.frame = NSRect(
+            x: bounds.width - pad - closeWidth,
+            y: topY - closeHeight / 2,
+            width: closeWidth,
+            height: closeHeight
+        )
+
+        let titleWidth = max(0, closeButton.frame.minX - titleX - 8)
         let titleSize = titleLabel.fittingSize
         titleLabel.frame = NSRect(
             x: titleX,
@@ -675,11 +684,12 @@ final class MeetingOverlayRootView: NSView {
             height: titleSize.height
         )
 
+        detailLabel.maximumNumberOfLines = 2
         detailLabel.frame = NSRect(
             x: pad,
-            y: 16,
+            y: 12,
             width: bounds.width - pad * 2,
-            height: 16
+            height: 32
         )
         refreshTooltipTrackingAreas()
     }
@@ -747,7 +757,7 @@ final class MeetingOverlayRootView: NSView {
         } else {
             audioWaveform.isHidden = true
             audioWaveform.alphaValue = 1
-            closeButton.isHidden = isPreparing || !isPrompting
+            closeButton.isHidden = isPreparing || !(isPrompting || isErrorState)
             closeButton.alphaValue = 1
         }
         pillBodyView.isHidden = state != .recording || liveView == nil
@@ -833,6 +843,15 @@ final class MeetingOverlayRootView: NSView {
                 isRetryable: true
             )
             titleLabel.stringValue = copy.title
+            closeButton.attributedTitle = buttonTitle("Dismiss", size: 11, weight: .semibold)
+            closeButton.image = nil
+            closeButton.imagePosition = .noImage
+            closeButton.toolTip = nil
+            closeButton.setAccessibilityLabel("Dismiss meeting failure")
+            closeButton.setAccessibilityHelp("Hides this meeting failure notice. Recovery remains available from Home.")
+            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+            closeButton.layer?.cornerRadius = 8
+            closeButton.layer?.borderWidth = 0
             updateStatusDot(
                 color: failureKind == .recordingTooShort
                     ? MeetingOverlayTokens.dotIdle
@@ -1562,31 +1581,29 @@ final class MeetingOverlayController: NSObject {
 
     private func wireSubscriptions(to session: MeetingSessionController) {
         session.$state
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] sessionState in
                 self?.applySessionState(sessionState)
             }
             .store(in: &subscriptions)
 
         session.$recordingDuration
-            .receive(on: RunLoop.main)
-            .sink { [weak self] duration in
+            .map { Int($0) }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] wholeSecond in
                 guard let self else { return }
-                let previousDisplay = MeetingDurationFormatter.formatDuration(self.currentDuration)
-                self.currentDuration = duration
-                // The strip timer renders whole seconds (mm:ss). The full
-                // push rebuilds attributed titles, accessibility labels, and
-                // runs the resize check, so skip it while the displayed
-                // duration is unchanged — every other state change keeps its
-                // own pushToView() call, and any of those pushes picks up
-                // the exact currentDuration stored above.
-                guard MeetingDurationFormatter.formatDuration(duration) != previousDisplay else { return }
+                // The strip timer renders whole seconds (mm:ss). Collapse the
+                // 5Hz capture duration publisher before the full view push so
+                // recording does not rebuild attributed titles/layouts five
+                // times for the same visible label.
+                self.currentDuration = TimeInterval(wholeSecond)
                 self.pushToView()
             }
             .store(in: &subscriptions)
 
         session.$audioLevel
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] level in
                 self?.currentMicLevel = level
                 self?.pushAudioLevelsToView()
@@ -1594,7 +1611,7 @@ final class MeetingOverlayController: NSObject {
             .store(in: &subscriptions)
 
         session.$systemLevel
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] level in
                 self?.currentSystemLevel = level
                 self?.pushAudioLevelsToView()
@@ -1602,7 +1619,7 @@ final class MeetingOverlayController: NSObject {
             .store(in: &subscriptions)
 
         session.$warmupStatus
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.currentWarmupStatus = status
                 self?.pushToView()
@@ -1610,14 +1627,14 @@ final class MeetingOverlayController: NSObject {
             .store(in: &subscriptions)
 
         session.$audioInactivityWarning
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] warning in
                 self?.applyAudioInactivityWarning(warning)
             }
             .store(in: &subscriptions)
 
         session.$isMicBoostPromptVisible
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] visible in
                 self?.applyMicBoostPrompt(visible)
             }
@@ -1631,8 +1648,8 @@ final class MeetingOverlayController: NSObject {
             // relayouts the text view. Throttling with `latest: true` caps
             // that at ~5Hz while guaranteeing the newest finals/partials and
             // phase still land after the last emission in a window.
-            .throttle(for: .milliseconds(200), scheduler: RunLoop.main, latest: true)
-            .receive(on: RunLoop.main)
+            .throttle(for: .milliseconds(200), scheduler: DispatchQueue.main, latest: true)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] finals, partials, phase in
                 self?.latestTranscriptFinals = finals
                 self?.latestTranscriptPartials = partials
@@ -1819,8 +1836,8 @@ final class MeetingOverlayController: NSObject {
             promptCandidate = nil
             promptKind = nil
             promptCountdownTask?.cancel()
+            autoHideTask?.cancel()
             showPanel()
-            scheduleAutoHide(after: 5)
         }
         pushToView()
     }
