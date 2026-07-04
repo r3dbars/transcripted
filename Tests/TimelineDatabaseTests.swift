@@ -128,6 +128,67 @@ func testTimelineDatabase() {
         }
     }
 
+    runSuite("TimelineRetentionManager rejects traversal-shaped file paths instead of deleting outside the root") {
+        let fixture = TimelineDatabaseFixture()
+        defer { fixture.cleanup() }
+
+        do {
+            let db = try TimelineDatabase(databaseURL: fixture.databaseURL)
+            let escapeID = try db.insertScreenshot(NewTimelineScreenshot(
+                capturedAt: 10,
+                filePath: "../escape.jpg",
+                fileSize: 4,
+                idleSecondsAtCapture: 0
+            ))
+            try fixture.writeScreenshot(relativePath: "2026-07-03/good.jpg", bytes: 4)
+            let goodID = try db.insertScreenshot(NewTimelineScreenshot(
+                capturedAt: 20,
+                filePath: "2026-07-03/good.jpg",
+                fileSize: 4,
+                idleSecondsAtCapture: 0
+            ))
+
+            let manager = TimelineRetentionManager(database: db, screenshotsRoot: fixture.screenshotsRoot)
+            let summary = try manager.runRetentionPass(storageCapBytes: 0)
+            let rows = try db.screenshots()
+
+            assertEqual(summary.deletedFiles, 1, "only the well-formed candidate should be purged")
+            assertEqual(rows.map(\.id), [escapeID], "the traversal-shaped row should be skipped, not purged")
+            assertFalse(
+                FileManager.default.fileExists(atPath: fixture.url("2026-07-03/good.jpg").path),
+                "the legitimate file should still be purged over the cap"
+            )
+            _ = goodID
+        } catch {
+            assertTrue(false, "traversal-path purge should not throw: \(error)")
+        }
+    }
+
+    runSuite("TimelineRetentionManager does no work when maxFilesPerPass is zero") {
+        let fixture = TimelineDatabaseFixture()
+        defer { fixture.cleanup() }
+
+        do {
+            let db = try TimelineDatabase(databaseURL: fixture.databaseURL)
+            try fixture.writeScreenshot(relativePath: "2026-07-03/001.jpg", bytes: 4)
+            _ = try db.insertScreenshot(NewTimelineScreenshot(capturedAt: 10, filePath: "2026-07-03/001.jpg", fileSize: 4, idleSecondsAtCapture: 0))
+
+            let manager = TimelineRetentionManager(database: db, screenshotsRoot: fixture.screenshotsRoot)
+            let summary = try manager.runRetentionPass(storageCapBytes: 0, maxFilesPerPass: 0)
+            let rows = try db.screenshots()
+
+            assertEqual(summary.deletedFiles, 0, "a zero file budget should purge nothing even over the cap")
+            assertEqual(summary.deletedOrphanFiles, 0, "a zero file budget should also skip orphan cleanup")
+            assertEqual(rows.count, 1, "the screenshot row should remain untouched")
+            assertTrue(
+                FileManager.default.fileExists(atPath: fixture.url("2026-07-03/001.jpg").path),
+                "the file should remain untouched"
+            )
+        } catch {
+            assertTrue(false, "zero-budget retention pass should not throw: \(error)")
+        }
+    }
+
     runSuite("TimelineRetentionManager removes orphan files") {
         let fixture = TimelineDatabaseFixture()
         defer { fixture.cleanup() }
