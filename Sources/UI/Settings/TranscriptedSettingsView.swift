@@ -605,10 +605,17 @@ struct TranscriptedSettingsView: View {
                         } else {
                             trackSettingsAction("open_local_meeting_summary_notice", page: .home)
                             clearHomeLocalSummaryNotice(id: notice.id)
-                            openOwnFile(
+                            let opened = openOwnFile(
                                 candidateURLs: [notice.transcriptURL],
                                 failureTitle: "Could not open transcript",
                                 failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
+                            )
+                            ActivationTelemetry.trackArtifactAction(
+                                artifactKind: .meeting,
+                                actionKind: .localSummary,
+                                surface: .homeCurrentActivity,
+                                result: opened ? .success : .failed,
+                                trigger: "notice_open"
                             )
                         }
                     },
@@ -906,6 +913,14 @@ struct TranscriptedSettingsView: View {
                 artifactDate: item.date,
                 result: .failed
             )
+            ActivationTelemetry.trackAgentPromptAction(
+                promptKind: .meetingBundle,
+                actionKind: .copied,
+                agentTarget: .localAgent,
+                surface: .homeRow,
+                result: .failed,
+                artifactKind: .meeting
+            )
             presentHomeActionFailure(
                 title: "Could not copy meeting",
                 message: SettingsArtifactMessage.meetingTranscriptNotFound,
@@ -917,14 +932,17 @@ struct TranscriptedSettingsView: View {
         }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
+        let usedBundle: Bool
         if let bundle = AgentConnectionGuide.portableMeetingBundle(
             title: item.title,
             date: item.date,
             transcriptURL: transcriptURL
         ) {
             pasteboard.setString(bundle, forType: .string)
+            usedBundle = true
         } else if let raw = try? String(contentsOf: transcriptURL, encoding: .utf8) {
             pasteboard.setString(raw, forType: .string)
+            usedBundle = false
         } else {
             ActivationTelemetry.trackHabitLoopAction(
                 actionKind: .whatDidIPromise,
@@ -932,6 +950,14 @@ struct TranscriptedSettingsView: View {
                 artifactKind: .meeting,
                 artifactDate: item.date,
                 result: .failed
+            )
+            ActivationTelemetry.trackAgentPromptAction(
+                promptKind: .meetingBundle,
+                actionKind: .copied,
+                agentTarget: .localAgent,
+                surface: .homeRow,
+                result: .failed,
+                artifactKind: .meeting
             )
             presentHomeActionFailure(
                 title: "Could not copy meeting",
@@ -947,6 +973,14 @@ struct TranscriptedSettingsView: View {
             surface: .homeRow,
             artifactKind: .meeting,
             artifactDate: item.date
+        )
+        ActivationTelemetry.trackAgentPromptAction(
+            promptKind: usedBundle ? .meetingBundle : .meetingMarkdown,
+            actionKind: .copied,
+            agentTarget: .localAgent,
+            surface: .homeRow,
+            result: usedBundle ? .success : .fallbackCopied,
+            artifactKind: .meeting
         )
         flashCopied(rowID: item.id)
     }
@@ -1063,7 +1097,7 @@ struct TranscriptedSettingsView: View {
 
         if item.summaryPreview != nil {
             trackSettingsAction("open_local_meeting_summary", page: .home)
-            let didOpen = openOwnFile(
+            let opened = openOwnFile(
                 candidateURLs: [item.transcriptURL],
                 failureTitle: "Could not open transcript",
                 failureMessage: "Transcripted couldn't find this meeting's enhanced transcript on disk. It may have been moved, renamed, or deleted outside the app."
@@ -1073,7 +1107,16 @@ struct TranscriptedSettingsView: View {
                 surface: .homeRow,
                 artifactKind: .meeting,
                 artifactDate: item.date,
-                result: didOpen ? .success : .failed
+                result: opened ? .success : .failed
+            )
+            ActivationTelemetry.trackArtifactAction(
+                artifactKind: .meeting,
+                actionKind: .localSummary,
+                surface: .homeMenu,
+                artifactDate: item.date,
+                result: opened ? .success : .failed,
+                trigger: "open_existing",
+                durationBucket: localSummaryMeetingDurationBucket(for: item)
             )
             return
         }
@@ -1085,7 +1128,9 @@ struct TranscriptedSettingsView: View {
         generateLocalSummary(
             transcriptURL: item.transcriptURL,
             title: item.title,
-            hasExistingSummary: item.summaryPreview != nil
+            hasExistingSummary: item.summaryPreview != nil,
+            artifactDate: item.date,
+            durationBucket: localSummaryMeetingDurationBucket(for: item)
         )
     }
 
@@ -1093,12 +1138,23 @@ struct TranscriptedSettingsView: View {
         transcriptURL: URL,
         title: String,
         hasExistingSummary: Bool,
+        artifactDate: Date? = nil,
+        durationBucket: String? = nil,
         recoveryFailureKind: String? = nil
     ) {
         guard localMeetingSummariesEnabled else { return }
         let summaryID = transcriptURL.path
         guard homeLocalSummaryTasks[summaryID] == nil else { return }
         if let unavailableReason = localMeetingSummaryUnavailableReason {
+            ActivationTelemetry.trackArtifactAction(
+                artifactKind: .meeting,
+                actionKind: .localSummary,
+                surface: .homeMenu,
+                artifactDate: artifactDate,
+                result: .blocked,
+                trigger: hasExistingSummary ? "regenerate" : "generate",
+                durationBucket: durationBucket
+            )
             trackLocalSummaryAbandoned(reason: .blocked, stage: "start", priorReadyState: "not_ready")
             homeDeleteFailure = HomeDeleteFailure(
                 title: "Could not summarize meeting",
@@ -1108,6 +1164,8 @@ struct TranscriptedSettingsView: View {
                         transcriptURL: transcriptURL,
                         title: title,
                         hasExistingSummary: hasExistingSummary,
+                        artifactDate: artifactDate,
+                        durationBucket: durationBucket,
                         recoveryFailureKind: recoveryFailureKind
                     )
                 }
@@ -1132,7 +1190,10 @@ struct TranscriptedSettingsView: View {
                     generateLocalSummary(
                         transcriptURL: transcriptURL,
                         title: title,
-                        hasExistingSummary: hasExistingSummary
+                        hasExistingSummary: hasExistingSummary,
+                        artifactDate: artifactDate,
+                        durationBucket: durationBucket,
+                        recoveryFailureKind: recoveryFailureKind
                     )
                 }
             )
@@ -1142,6 +1203,15 @@ struct TranscriptedSettingsView: View {
         let provider = localMeetingSummaryProvider
         let summaryAction = hasExistingSummary ? "regenerate" : "generate"
         let summaryStartedAt = CFAbsoluteTimeGetCurrent()
+        ActivationTelemetry.trackArtifactAction(
+            artifactKind: .meeting,
+            actionKind: .localSummary,
+            surface: .homeMenu,
+            artifactDate: artifactDate,
+            result: .started,
+            trigger: summaryAction,
+            durationBucket: durationBucket
+        )
         if let recoveryFailureKind {
             WorkflowRecoveryTelemetry.attempted(
                 workflowKind: "local_summary",
@@ -1235,6 +1305,15 @@ struct TranscriptedSettingsView: View {
                         "duration_bucket": localSummaryRunDurationBucket(since: summaryStartedAt),
                     ]
                 )
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .meeting,
+                    actionKind: .localSummary,
+                    surface: .homeMenu,
+                    artifactDate: artifactDate,
+                    result: .success,
+                    trigger: summaryAction,
+                    durationBucket: durationBucket
+                )
                 trackLocalSummaryRecoveryFinished(
                     failureKind: recoveryFailureKind,
                     result: "success",
@@ -1287,6 +1366,15 @@ struct TranscriptedSettingsView: View {
                         "stage": "generate",
                         "duration_bucket": localSummaryRunDurationBucket(since: summaryStartedAt),
                     ]
+                )
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .meeting,
+                    actionKind: .localSummary,
+                    surface: .homeMenu,
+                    artifactDate: artifactDate,
+                    result: .failed,
+                    trigger: summaryAction,
+                    durationBucket: durationBucket
                 )
                 NSSound.beep()
                 presentHomeLocalSummaryNotice(
@@ -1909,8 +1997,7 @@ struct TranscriptedSettingsView: View {
             )
             return false
         }
-        NSWorkspace.shared.open(url)
-        return true
+        return NSWorkspace.shared.open(url)
     }
 
     private func presentHomeDeleteFailure(
@@ -3997,6 +4084,14 @@ struct TranscriptedSettingsView: View {
 
     private func localSummaryRunDurationBucket(since start: CFAbsoluteTime) -> String {
         AnalyticsReporter.durationBucket(seconds: max(0, CFAbsoluteTimeGetCurrent() - start))
+    }
+
+    private func localSummaryMeetingDurationBucket(for item: RecentMeetingItem) -> String? {
+        guard let start = item.startDate,
+              let end = item.endDate else {
+            return nil
+        }
+        return AnalyticsReporter.durationBucket(seconds: max(0, end.timeIntervalSince(start)))
     }
 
     private func localSummaryFailureKind(_ error: Error) -> String {
