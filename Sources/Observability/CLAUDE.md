@@ -26,6 +26,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `ActivationTelemetry.swift` — centralized activation analytics helpers for artifact actions, agent prompt/setup CTAs, and saved-recent artifact return-proxy buckets
 - `SpeakerRecognitionTelemetry.swift` — similarity/margin bucketing for speaker-recognition accuracy analytics, aligned with the matcher's decision thresholds
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
+- `TimelineAnalyticsTelemetry.swift` — centralized timeline analytics helper with coarse enum/bucket payloads only
 - `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
 - `ObservabilityTextRedactor.swift` — shared text redactor for support-facing and diagnostic strings before they leave local-only surfaces
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
@@ -49,6 +50,7 @@ anonymous analytics, and Sparkle update plumbing.
 - PostHog config is read from `Info.plist` (`TranscriptedPostHogAPIKey`, `TranscriptedPostHogHost`) or process environment (`POSTHOG_API_KEY`, `POSTHOG_HOST`), and anonymous analytics must stay event-allowlisted and bucketed rather than sending raw payloads
 - New analytics events should be added to `Resources/analytics-events.psv`; new reviewed non-bucket property names should be added to `Resources/analytics-reviewed-properties.psv`; run `python3 scripts/ops/normalize-analytics-taxonomy.py --check` after edits or union merges.
 - Activation analytics should route through `ActivationTelemetry` so artifact action, agent prompt/setup, and saved-recent artifact return-proxy events keep stable names, targets, result enums, and coarse age/window buckets.
+- Timeline analytics should route through `TimelineAnalyticsTelemetry` so future Dayflow events keep screen-derived data local and only send coarse enum/bucket payloads.
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 - `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.
 - `ReliabilityPacketRecorder` derives packets from already-reviewed observability events. Keep its context allowlist coarse and bucketed; do not add raw error text, transcript text, raw audio, file paths, device names, meeting titles, speaker names, emails, tokens, or source app names.
