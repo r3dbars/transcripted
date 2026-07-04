@@ -69,6 +69,7 @@ CORE_EVENTS = (
     "local_meeting_summary_completed",
     "local_meeting_summary_failed",
     "meeting_saved_audio_retranscription_requested",
+    "meeting_live_transcript_drawer_actioned",
     "timeline_onboarding_completed",
     "timeline_viewed",
     "timeline_card_opened",
@@ -238,7 +239,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'activation_habit_loop_actioned', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened', 'local_meeting_summary_started', 'local_meeting_summary_completed', 'local_meeting_summary_failed')
+  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'activation_habit_loop_actioned', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'meeting_live_transcript_drawer_actioned', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened', 'local_meeting_summary_started', 'local_meeting_summary_completed', 'local_meeting_summary_failed')
   {app_version_filter(app_version)}
 GROUP BY event, surface, artifact_kind, action_kind, agent_target, query_kind, source_count_bucket, result, page_id
 ORDER BY devices DESC, events DESC
@@ -608,6 +609,7 @@ def build_under_discovered_feature(data: dict[str, Any]) -> Finding:
         ("Daily habit loop", devices.get("activation_habit_loop_actioned", 0), 4, "Make Review yesterday / What did I promise obvious after save and on return."),
         ("Local summary", max(devices.get("local_meeting_summary_started", 0), devices.get("local_meeting_summary_completed", 0)), 3, "Make the saved-meeting summary action clearer on Home."),
         ("Meeting import", devices.get("meeting_file_imported", 0), 3, "Expose imported-audio transcription from Home for users who missed live capture."),
+        ("Live transcript drawer", devices.get("meeting_live_transcript_drawer_actioned", 0), 3, "Make the in-meeting transcript drawer easier to discover and use during recording."),
         ("Saved-audio retranscription", devices.get("meeting_saved_audio_retranscription_requested", 0), 2, "Make retry from retained meeting audio clearer after transcript failure."),
         ("Meeting prompt acceptance", max(devices.get("meeting_prompt_record_selected", 0), devices.get("meeting_prompt_choice_made", 0)), 2, "Clarify detected-meeting prompts, route readiness, and save outcomes."),
     ]

@@ -2064,6 +2064,10 @@ final class MeetingOverlayController: NSObject {
         if LiveMeetingCodexPreferences.isEnabled() {
             isTranscriptExpanded.toggle()
             LiveMeetingCodexPreferences.setDrawerOpenPreferred(isTranscriptExpanded)
+            trackLiveTranscriptDrawerAction(
+                actionKind: isTranscriptExpanded ? "open" : "close",
+                trigger: "overlay_button"
+            )
             if isTranscriptExpanded {
                 bloomFromRest()
                 flushPendingTranscriptIfNeeded()
@@ -2081,6 +2085,10 @@ final class MeetingOverlayController: NSObject {
             _ = try LiveMeetingPreviewServer.shared.start(workspaceURL: workspaceURL)
             isTranscriptExpanded = true
             LiveMeetingCodexPreferences.setDrawerOpenPreferred(true)
+            trackLiveTranscriptDrawerAction(
+                actionKind: "enable_and_open",
+                trigger: "overlay_button"
+            )
             bloomFromRest()
             flushPendingTranscriptIfNeeded()
             ActivationTelemetry.trackAgentSetupCTA(
@@ -2107,6 +2115,22 @@ final class MeetingOverlayController: NSObject {
         }
 
         pushToView()
+    }
+
+    private func trackLiveTranscriptDrawerAction(
+        actionKind: String,
+        trigger: String,
+        result: String = "success"
+    ) {
+        AnalyticsReporter.track(
+            "meeting_live_transcript_drawer_actioned",
+            properties: [
+                "action_kind": actionKind,
+                "result": result,
+                "surface": "meeting_overlay",
+                "trigger": trigger,
+            ]
+        )
     }
 
     // MARK: - Rest / wake
