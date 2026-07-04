@@ -4,7 +4,7 @@ _Last updated: 2026-06-20. Source: verified engineering audit of the current tre
 
 ## State of the product (honest)
 
-Transcripted works, but it leaks trust and quietly drops content at the edges. The core capture-and-transcribe loop is solid and the model now ships bundled (no first-run download race). The real problems are threefold: (1) **a serious privacy regression** — the live overlay and transcript drawer are screen-share-visible, so during a recorded call the other party's just-spoken words can get broadcast back onto the shared screen with no macOS warning; (2) **silent data loss** in a handful of paths — a system-audio tap that installs but never streams is marked "recording," a >5-minute dictation is discarded on timeout, and non-disk-full write stalls keep the duration timer ticking while audio dies; and (3) **activation gaps** — the meetings-first onboarding never records a real meeting, never teaches the default-on auto-detect, and there's no terminal event for the permission-bounce drop-off. The speaker-identity subsystem has two real-but-bounded accuracy holes (write-time voiceprint contamination, sub-naming-bar cluster fusion) that should ride behind the existing eval harness. Nothing here is a rewrite. Most of the highest-value fixes are small.
+Transcripted works, but it leaks trust and quietly drops content at the edges. The core capture-and-transcribe loop is solid and the model now ships bundled (no first-run download race). The real problems are threefold: (1) **a serious privacy regression** — the live overlay and transcript drawer are screen-share-visible, so during a recorded call the other party's just-spoken words can get broadcast back onto the shared screen with no macOS warning; (2) **silent data loss** in a handful of paths — a system-audio tap that installs but never streams is marked "recording," and a >5-minute dictation is discarded on timeout (non-disk-full write stalls are now fixed — see #9); and (3) **activation gaps** — the meetings-first onboarding never records a real meeting, never teaches the default-on auto-detect, and there's no terminal event for the permission-bounce drop-off. The speaker-identity subsystem has two real-but-bounded accuracy holes (write-time voiceprint contamination, sub-naming-bar cluster fusion) that should ride behind the existing eval harness. Nothing here is a rewrite. Most of the highest-value fixes are small.
 
 ---
 
@@ -73,11 +73,8 @@ Two distinct people each landing 0.70–0.92 against the same profile (and no ru
 - Separation guard: `SpeakerMatchingService.swift:106`
 - Fix: decouple a stricter link/merge floor from the looser per-utterance attach; add eval coverage.
 
-### 9. Disk-full / write errors silently kill audio while recording keeps "running"
-**Impact 5 · Effort S**
-After 10 consecutive write errors the writer drops every later buffer, but `isRecording` stays true and the duration timer keeps counting. The common case (full disk) is *already* handled by a 30s disk-space check; the residual gap is non-disk-full stalls (permission/sandbox loss, file deleted under the handle).
-- `AudioFileManager.swift:383`, `:399-405` (cap, no external consumer)
-- Fix: mirror the existing disk-full pattern (`:487-491`) — at the cap, hop to main, set `self.error`, call `stop()`.
+### 9. ~~Disk-full / write errors silently kill audio while recording keeps "running"~~ — SHIPPED
+**Status: done, verified on `main`.** Fixed via PR #1235 (`f484c462`, mic write-error path) and extended to the system-audio write path in `40cf3531`. Both `recordMicWriteFailure`/`recordSystemWriteFailure` now mirror the disk-full stop pattern at the write-error cap: hop to main, set `self.error`, call `stop()` (`surfaceWriteFailureAndStop`/`surfaceSystemWriteFailureAndStop` in `AudioFileManager.swift`). Covered by `testMicWriteErrorCapStopsRecordingAndSurfacesError` and `testMicWriteFailuresBelowCapKeepRecording` in `Tests/TranscriptedCoreTests/AudioInitializationTests.swift`. This entry's original line citations (`AudioFileManager.swift:383`, `:399-405`, `:487-491`) are stale — kept for audit-trail only. Don't re-implement.
 
 ### 10. Permission-bounce drop-off has no stage-attributed terminal event
 **Impact 5.5 · Effort S**
