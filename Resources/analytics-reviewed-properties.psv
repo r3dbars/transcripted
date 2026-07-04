@@ -37,6 +37,7 @@ captured_input_volume_before
 captured_input_volume_changed
 captured_input_volume_dropped
 captured_input_volume_during
+card_kind
 channel
 cleanup_changed
 cleanup_enabled
@@ -110,7 +111,9 @@ output_signal
 page_id
 paste_available
 pasteback_status
+pause_reason
 permission_kind
+permission_state
 previous_clean_shutdown
 previous_version
 prior_artifact_kind
@@ -120,6 +123,7 @@ prompt_kind
 prompt_outcome
 prompt_reason
 provider
+provider_kind
 proxy_kind
 query_kind
 quiet_mic_recovered

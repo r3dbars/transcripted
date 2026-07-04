@@ -50,7 +50,7 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    runSuite("ContextCaptureEngine hotkey debounce — tracks independent actions separately") {
+    runSuite("ContextCaptureEngine hotkey debounce — tracks toggle actions and exempts push-to-talk press") {
         let source = readContextCaptureEngineSource()
 
         assertTrue(
@@ -61,9 +61,9 @@ func testContextCaptureEnginePolicy() {
             source.contains("shouldAcceptHotkeyAction(\"dictation_hands_free\")"),
             "hands-free dictation should have its own debounce key"
         )
-        assertTrue(
+        assertFalse(
             source.contains("shouldAcceptHotkeyAction(\"dictation_push_to_talk\")"),
-            "push-to-talk dictation should have its own debounce key"
+            "push-to-talk press should not use toggle debounce because release is paired to the physical key hold"
         )
         assertTrue(
             source.contains("shouldAcceptHotkeyAction(\"meeting_physical_trigger\")"),
@@ -88,6 +88,29 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
+    runSuite("ContextCaptureEngine tap re-enable — reconciles missed push-to-talk release") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("reconcileActivePushToTalkAfterTapDisabled()"),
+            "tapDisabledByTimeout/userInput should reconcile active push-to-talk state before re-enabling the tap"
+        )
+        assertTrue(
+            source.contains("PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease("),
+            "the detector should use the pure missed-release policy before synthesizing release"
+        )
+        assertTrue(
+            source.contains("CGEventSource.flagsState(.combinedSessionState)")
+                && source.contains("CGEventSource.keyState(.combinedSessionState"),
+            "reconciliation should query the real physical modifier/key state"
+        )
+        assertTrue(
+            source.contains("consumedKeyCodes.remove(releasedKeyCode)")
+                && source.contains("onShortcut?(.dictationPushToTalk, .release)"),
+            "synthesized release should clear the consumed key and route the normal release callback"
+        )
+    }
+
     // MARK: - Notification.Name.hotkeysDidChange
     // The engine subscribes to this notification to re-register hotkeys when
     // HotkeyRecorderView writes new bindings. Renaming the notification would
@@ -104,7 +127,7 @@ func testContextCaptureEnginePolicy() {
     }
 
     // MARK: - Cached binding snapshot
-    // The CGEventTap callback runs on the main run loop for every system-wide
+    // The CGEventTap callback runs for every system-wide
     // keyDown/keyUp/flagsChanged. It must read a cached binding snapshot —
     // rebuilt on .hotkeysDidChange — instead of hitting UserDefaults (4 binding
     // lookups plus migration fallbacks) per keystroke, which added latency to
@@ -114,12 +137,103 @@ func testContextCaptureEnginePolicy() {
         let source = readContextCaptureEngineSource()
 
         assertTrue(
-            source.contains("physicalShortcutDetector.shortcutBindings = Self.currentShortcutBindings()"),
+            source.contains("physicalShortcutDetector.updateShortcutBindings(Self.currentShortcutBindings())"),
             "engine should rebuild the detector's cached binding snapshot when it (re)configures the detector"
         )
         assertFalse(
             source.contains("bindingProvider"),
             "per-event binding provider closure must stay removed — the tap callback reads the cached snapshot instead of resolving preferences per keystroke"
+        )
+    }
+
+    runSuite("ContextCaptureEngine event tap — serviced on dedicated run loop instead of main") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("TranscriptedPhysicalShortcutTap"),
+            "physical shortcut event tap should run on its own named thread"
+        )
+        assertTrue(
+            source.contains("CFRunLoopAddSource(runLoop, source, .commonModes)"),
+            "event tap source should be installed on the dedicated thread run loop"
+        )
+        assertFalse(
+            source.contains("CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)"),
+            "system-wide keyboard events must not be serviced on the app's main run loop"
+        )
+    }
+
+    runSuite("ContextCaptureEngine tap-disabled recovery — reconciles missed push-to-talk release") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("reconcileActivePushToTalkAfterTapDisabled()"),
+            "tap-disabled events should reconcile detector state before re-enabling the tap"
+        )
+        assertTrue(
+            source.contains("cancelPendingModifierShortcut()")
+                && source.contains("func reconcileActivePushToTalkAfterTapDisabled"),
+            "reconciliation should cancel any pending modifier-chord shortcut before re-enabling the tap"
+        )
+        assertTrue(
+            source.contains("consumedKeyCodes = consumedKeyCodes.filter { Self.isPhysicalKeyDown($0) }"),
+            "reconciliation should drop consumed key codes that are no longer physically down"
+        )
+        assertTrue(
+            source.contains("CGEventSource.keyState(.combinedSessionState"),
+            "reconciliation should check the physical key state for a missed keyUp"
+        )
+        assertTrue(
+            source.contains("onShortcut?(.dictationPushToTalk, .release)"),
+            "a released push-to-talk key should synthesize the missing release callback"
+        )
+    }
+
+    runSuite("ContextCaptureEngine Accessibility retry — re-registers after permission is granted") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("accessibilityRetryTask"),
+            "engine should keep a lightweight retry task while Accessibility is missing"
+        )
+        assertTrue(
+            source.contains("TranscriptedPermissionAccess.isGranted(.accessibility)"),
+            "retry task should poll the real Accessibility grant state"
+        )
+        assertTrue(
+            source.contains("self.reRegisterHotkeys()"),
+            "granting Accessibility should re-attempt physical trigger registration without waiting for wake or relaunch"
+        )
+    }
+
+    runSuite("TranscriptedAppState wake recovery — uses registration error, not advisory warning") {
+        let appStateSource = readRepoSource("Sources/TranscriptedAppState.swift")
+        let contextSource = readContextCaptureEngineSource()
+
+        assertTrue(
+            contextSource.contains("var hotkeyRegistrationError: String?"),
+            "ContextCaptureEngine should expose the real registration failure separately from advisory banner text"
+        )
+        assertTrue(
+            appStateSource.contains("self?.contextCapture.hotkeyRegistrationError"),
+            "wake recovery should ignore Fn-conflict advisory warnings when deciding whether registration succeeded"
+        )
+        assertFalse(
+            appStateSource.contains("self?.contextCapture.hotkeyError"),
+            "wake recovery must not treat advisory hotkeyError banner text as registration failure"
+        )
+    }
+
+    runSuite("DictationSessionController finishing hotkey — shows visible feedback instead of silent swallow") {
+        let source = readRepoSource("Sources/UI/Overlay/DictationSessionController.swift")
+
+        assertTrue(
+            source.contains("if overlayController.state == .drafting"),
+            "ignored stop/start intent during the drafting/transcribing window should be surfaced to the user"
+        )
+        assertTrue(
+            source.contains("overlayController.showError(\"Still finishing the last dictation. Try again in a moment.\")"),
+            "finishing-window hotkey press should reuse the existing visible finishing message"
         )
     }
 
@@ -686,7 +800,11 @@ private func makeContextCaptureDefaults() -> (UserDefaults, String) {
 }
 
 private func readContextCaptureEngineSource() -> String {
+    readRepoSource("Sources/Capture/ContextCaptureEngine.swift")
+}
+
+private func readRepoSource(_ path: String) -> String {
     let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent("Sources/Capture/ContextCaptureEngine.swift")
+        .appendingPathComponent(path)
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 }

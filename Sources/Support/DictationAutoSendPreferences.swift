@@ -122,9 +122,13 @@ enum DictationAutoSendOutcome: Equatable {
 
 @MainActor
 final class DictationAutoSender {
-    func send(_ key: DictationAutoSendKey) -> DictationAutoSendOutcome {
+    func send(_ key: DictationAutoSendKey, target: DictationPasteTarget? = nil) -> DictationAutoSendOutcome {
         guard AXIsProcessTrusted() else {
             return .failed("Accessibility is off, so Transcripted could not send automatically.")
+        }
+
+        guard target?.matchesCurrentFrontmostApp() != false else {
+            return .failed("Target app changed before Auto Enter, so Transcripted did not press Return.")
         }
 
         guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: true),

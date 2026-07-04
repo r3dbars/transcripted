@@ -3,12 +3,17 @@
 `scripts/ops/posthog-dashboard-queries.py` is the shared query catalog for
 Transcripted product-learning dashboards and health checks.
 
-It covers five dashboard families:
+It covers ten dashboard families:
 
-- `100_wau` - WAU, DAU, first-value devices, second artifact, agent payoff, return proxy, habit actions, and version mix
-- `activation` - launch -> onboarding -> saved Markdown -> second artifact -> agent payoff -> next-day/7-day return
-- `reliability` - dictation and meeting failure rates, failure kinds, latency buckets
-- `feature_adoption` - artifact actions, agent setup, meeting prompts, settings discovery
+- `100_wau` - WAU, DAU, first-value devices, return proxy, and version mix
+- `activation` - launch -> onboarding -> saved Markdown -> agent proxy -> return
+- `meeting_prompt_quality` - detected-meeting prompt reach, acceptance, dismissal, suppression, and missed-call nudges
+- `artifact_usefulness` - saved artifacts, second artifacts, artifact actions, and return proxy
+- `agent_payoff` - agent setup/prompt intent, saved-capture query proof, and local summary outcomes
+- `speaker_trust` - speaker review, auto-recognition, corrections, deferrals, and finalization failures
+- `retry_recovery` - workflow retry/recovery, failure kinds, and dictation latency buckets
+- `onboarding_friction` - first-run steps, permission readiness, dismissals, abandonment, and product friction
+- `timeline_dayflow` - planned timeline/dayflow adoption and data-quality rows when those events ship
 - `release_health` - release-scoped workflow and Sparkle update health
 
 All query outputs are aggregate, bucketed, and privacy-safe. The helpers do not
@@ -66,7 +71,7 @@ Dry-run output includes stable query IDs, output columns, and HogQL:
 ```text
 ### activation.reach_ladder
 
-One-row reach table for launch through saved Markdown, second artifact, agent payoff, next-day/7-day return, and habit-loop actions.
+One-row reach table for launch through saved Markdown, agent proxy, true agent-use, and return proxy.
 
 Output columns: `launch_devices`, `onboarding_devices`, `permission_ready_devices`, ...
 ```
@@ -132,17 +137,31 @@ proxy rows. Agent setup/prompt rows are intent signals only; the stronger proof
 is `agent_capture_query_observed`, which confirms a saved-capture MCP query but
 still does not measure answer quality.
 
-`activation.habit_loop_summary` is the coordinator shortcut for the daily return
-loop: first artifact, second artifact, agent payoff, next-day return, 7-day
-return, Review yesterday, What did I promise, open recent meeting, and daily
-digest viewed/exported. Daily digest counts remain zero until a real UI seam
-emits the existing `activation_habit_loop_actioned` helper for those actions.
+`meeting_prompt_quality` uses coarse meeting-provider, source, route-ready,
+prompt-reason, suppression, cooldown, and permission buckets. It does not expose
+calendar titles, app names, raw meeting URLs, or participant data.
 
-`reliability` uses coarse failure kinds and latency buckets. It does not expose
+`artifact_usefulness` proves saves, second saves, artifact actions, habit-loop
+actions, and return proxy rows. It does not inspect transcript contents or
+artifact text quality.
+
+`agent_payoff` separates setup/prompt intent from `agent_capture_query_observed`,
+the stronger privacy-safe saved-capture query proof. It still does not measure
+answer quality.
+
+`speaker_trust` uses review, correction, auto-recognition, and finalization
+buckets. It does not export speaker names, samples, clip references, or transcript
+text.
+
+`retry_recovery` uses coarse failure kinds and latency buckets. It does not expose
 raw error strings, device names, app names, or audio details.
 
-`feature_adoption` tracks feature discovery through stable surfaces, action IDs,
-agent targets, and prompt buckets.
+`onboarding_friction` tracks step, permission, abandonment, and product-friction
+buckets only.
+
+`timeline_dayflow` is intentionally separate because timeline analytics may be
+empty until that surface ships. It must not export screen text, screenshots, app
+names, file paths, or raw timeline rows.
 
 `release_health` accepts `--app-version`. Workflow events use `app_version`;
 update events use `version`, so the helper filters both.

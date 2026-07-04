@@ -1,5 +1,36 @@
 # Issue 500 Meeting Audio QA
 
+## 2026-07-03 status update
+
+GitHub issue #500 is closed (2026-06-12), but that reflects code landing, not
+a completed run of the matrix below — every row in the Results Sheet is still
+an unfilled template. Since the 1.1.47 release-candidate notes were written:
+
+- `v1.1.47` (2026-06-08) shipped the baseline fixes: the mic downmix fix
+  (PR #959) and a higher software AGC gain cap, 12x → 25x (PR #960).
+- `v1.1.48` (2026-06-13) shipped the real follow-through: live quiet-mic
+  attenuation detection with a consent-based "Boost Mic" prompt (PR #1075),
+  plus about two weeks of self-audit hardening passes (edge-case/race fixes,
+  wording clarification, applying the same boost preference to dictation).
+  None of those follow-ups trace back to a new user report — the original
+  reporter (LeonStaufer) has not commented since the closing comment, and no
+  regression has resurfaced on the issue thread.
+- The in-repo automation (`scripts/ops/daily-audio-reliability-check.sh`)
+  generates its own report saying, verbatim: "Manual route proof still
+  required before issue #500 can be called green" and lists the exact gaps —
+  real Safari/Firefox/Chrome Meet and Zoom audio, AirPods/Bluetooth/USB
+  routes, user-perceived volume, and saved-transcript proof that the
+  processed mic path was used. The most recent local run of that script
+  (2026-07-02) was `--synthetic`-only; no real-hardware run is on record.
+
+**Bottom line:** the code and automated-test coverage are meaningfully
+stronger than at 1.1.47, and the shipped fix has had ~3 weeks of real usage
+in `v1.1.48` with no negative follow-up. That is a reasonable signal, but it
+is not the same as running this matrix for real. Treat #500 as
+code-complete-but-not-manually-validated until someone actually runs the
+matrix below (or a Sentry/PostHog meeting-audio-health check scoped to
+`v1.1.48`+ is done and comes back clean).
+
 Use this checklist before changing meeting mic processing again.
 
 The goal is to prove three things:

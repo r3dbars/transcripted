@@ -363,7 +363,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "list_action_items",
-                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status ('open' by default, or 'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Depends on the meeting summary index.",
+                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status ('open' by default, 'done', or 'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Depends on the meeting summary index.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -373,11 +373,11 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         ]),
                         "status": .object([
                             "type": .string("string"),
-                            "description": .string("Which items to return: 'open' (default) or 'all'. 'done' is not supported — saved summaries do not track completion state yet.")
+                            "description": .string("Which items to return: 'open' (default), 'done', or 'all'.")
                         ]),
                         "query": .object([
                             "type": .string("string"),
-                            "description": .string("Optional full-text filter on the action item text")
+                            "description": .string("Optional full-text filter on the action item text, owner, status, or due metadata")
                         ]),
                         "date_from": .object([
                             "type": .string("string"),
@@ -1076,7 +1076,9 @@ func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDir
             if let summary = TranscriptLoader.loadMeetingSummary(forTranscript: mdURL) {
                 title = summary.title ?? title
                 decisions = summary.decisions
-                actionItems = summary.actionItems.map { RecapActionItem(owner: $0.owner, text: $0.text) }
+                actionItems = summary.actionItems.map {
+                    RecapActionItem(owner: $0.owner, text: $0.text, status: $0.status, due: $0.due)
+                }
                 openQuestions = summary.openQuestions
                 let hasStructuredFacts = !decisions.isEmpty || !actionItems.isEmpty || !openQuestions.isEmpty
                 if hasStructuredFacts {
@@ -1133,15 +1135,6 @@ func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, 
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
     let count = params.arguments?["count"]?.intValue ?? 50
-
-    // Saved summaries do not track completion state, so a done filter would
-    // always be a silent empty set — fail loudly instead.
-    if status == .done {
-        return textResult(
-            "Unsupported status filter: \"\(rawStatus ?? "done")\". Saved meeting summaries do not track done/completed state yet, so this filter would always return nothing. Use status \"open\" (the default) or \"all\".",
-            isError: true
-        )
-    }
 
     var result = try index.listActionItems(
         owner: owner, query: query, status: status,
@@ -1389,6 +1382,15 @@ struct RecapEntry: Codable {
 struct RecapActionItem: Codable, Equatable {
     let owner: String?
     let text: String
+    let status: String?
+    let due: String?
+
+    init(owner: String?, text: String, status: String? = nil, due: String? = nil) {
+        self.owner = owner
+        self.text = text
+        self.status = status
+        self.due = due
+    }
 }
 
 struct RecapResult: Codable {

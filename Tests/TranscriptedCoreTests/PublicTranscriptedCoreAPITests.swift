@@ -18,7 +18,7 @@ final class PublicTranscriptedCoreAPITests: XCTestCase {
         )
 
         XCTAssertEqual(paths.transcripts.lastPathComponent, "meetings")
-        XCTAssertEqual(RecordingValidator.minimumDiskSpace, 100 * 1024 * 1024)
+        XCTAssertEqual(RecordingValidator.minimumDiskSpace, 1024 * 1024 * 1024)
         XCTAssertTrue(RecordingValidator.validateSavePath(paths.transcripts).isValid)
     }
 

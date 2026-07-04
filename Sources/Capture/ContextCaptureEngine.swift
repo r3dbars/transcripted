@@ -81,17 +81,16 @@ private enum PhysicalShortcutPhase {
 
 private final class PhysicalShortcutDetector {
     /// Cached binding snapshot, rebuilt by ContextCaptureEngine on
-    /// .hotkeysDidChange. The tap callback runs on the main run loop for every
-    /// system-wide keyDown/keyUp/flagsChanged, so it must read this cache
-    /// instead of hitting UserDefaults per keystroke — per-event preference
-    /// reads add latency to all typing on the machine and raise the
-    /// tapDisabledByTimeout risk. Both the tap callback and the engine's
-    /// configure path run on the main thread, so a plain property is safe.
-    var shortcutBindings: [PhysicalShortcutBinding] = []
+    /// .hotkeysDidChange. The event tap runs on a dedicated run loop so
+    /// Transcripted main-thread work cannot delay global keyboard delivery.
+    private var shortcutBindings: [PhysicalShortcutBinding] = []
     var onShortcut: ((PhysicalShortcutAction, PhysicalShortcutPhase) -> Void)?
 
+    private let stateLock = NSRecursiveLock()
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var tapRunLoop: CFRunLoop?
+    private var tapThread: Thread?
     private var activePushToTalkKeyCode: UInt32?
     private var consumedKeyCodes: Set<UInt32> = []
     private var pendingModifierShortcut: PendingModifierShortcut?
@@ -110,6 +109,12 @@ private final class PhysicalShortcutDetector {
             .fromOpaque(userInfo)
             .takeUnretainedValue()
         return detector.handle(type: type, event: event)
+    }
+
+    func updateShortcutBindings(_ bindings: [PhysicalShortcutBinding]) {
+        stateLock.lock()
+        shortcutBindings = bindings
+        stateLock.unlock()
     }
 
     func install() -> String? {
@@ -143,22 +148,66 @@ private final class PhysicalShortcutDetector {
 
         eventTap = tap
         runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
+        startTapThread(tap: tap, source: source)
         return nil
     }
 
     func remove() {
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        stateLock.lock()
+        let source = runLoopSource
+        let eventTap = eventTap
+        let tapRunLoop = tapRunLoop
+        runLoopSource = nil
+        self.eventTap = nil
+        self.tapRunLoop = nil
+        self.tapThread = nil
+        stateLock.unlock()
+
+        if let source {
+            CFRunLoopRemoveSource(tapRunLoop ?? CFRunLoopGetMain(), source, .commonModes)
         }
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
             CFMachPortInvalidate(eventTap)
         }
-        runLoopSource = nil
-        eventTap = nil
+        if let tapRunLoop {
+            CFRunLoopStop(tapRunLoop)
+        }
+
+        stateLock.lock()
         resetState()
+        stateLock.unlock()
+    }
+
+    private func startTapThread(tap: CFMachPort, source: CFRunLoopSource) {
+        let ready = DispatchSemaphore(value: 0)
+        let thread = Thread { [weak self] in
+            autoreleasepool {
+                guard let self else {
+                    ready.signal()
+                    return
+                }
+
+                let runLoop = CFRunLoopGetCurrent()
+                self.stateLock.lock()
+                self.tapRunLoop = runLoop
+                self.stateLock.unlock()
+
+                CFRunLoopAddSource(runLoop, source, .commonModes)
+                CGEvent.tapEnable(tap: tap, enable: true)
+                ready.signal()
+                CFRunLoopRun()
+            }
+        }
+        thread.name = "TranscriptedPhysicalShortcutTap"
+        thread.qualityOfService = .userInteractive
+
+        stateLock.lock()
+        tapThread = thread
+        stateLock.unlock()
+
+        thread.start()
+        ready.wait()
     }
 
     private func resetState() {
@@ -169,7 +218,11 @@ private final class PhysicalShortcutDetector {
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            reconcileActivePushToTalkAfterTapDisabled()
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
@@ -339,8 +392,10 @@ private final class PhysicalShortcutDetector {
                     return
                 }
 
+                self.stateLock.lock()
                 self.pendingModifierShortcut = nil
                 self.activePushToTalkKeyCode = keyCode
+                self.stateLock.unlock()
                 self.onShortcut?(action, .press)
             }
             workItem = delayedWorkItem
@@ -360,6 +415,33 @@ private final class PhysicalShortcutDetector {
         pendingModifierShortcut?.workItem?.cancel()
         pendingModifierShortcut = nil
     }
+
+    private func reconcileActivePushToTalkAfterTapDisabled() {
+        cancelPendingModifierShortcut()
+
+        if PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease(
+            activeKeyCode: activePushToTalkKeyCode,
+            isPhysicallyDown: Self.isPhysicalKeyDown
+        ), let releasedKeyCode = activePushToTalkKeyCode {
+            activePushToTalkKeyCode = nil
+            consumedKeyCodes.remove(releasedKeyCode)
+            onShortcut?(.dictationPushToTalk, .release)
+        }
+
+        consumedKeyCodes = consumedKeyCodes.filter { Self.isPhysicalKeyDown($0) }
+    }
+
+    private static func isPhysicalKeyDown(_ keyCode: UInt32) -> Bool {
+        if PhysicalDictationTriggerPreferences.isModifierKey(keyCode),
+           let modifier = PhysicalDictationTriggerPreferences.primaryModifierMask(for: keyCode) {
+            let modifiers = PhysicalDictationTriggerPreferences.modifiers(
+                from: CGEventSource.flagsState(.combinedSessionState)
+            )
+            return (modifiers & modifier) != 0
+        }
+
+        return CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
+    }
 }
 
 // MARK: - Context Capture Engine
@@ -367,6 +449,7 @@ private final class PhysicalShortcutDetector {
 @MainActor
 class ContextCaptureEngine: ObservableObject {
     private var hotkeyChangeObserver: NSObjectProtocol?
+    private var accessibilityRetryTask: Task<Void, Never>?
     private let physicalShortcutDetector = PhysicalShortcutDetector()
     private var physicalTriggerError: String?
 
@@ -378,6 +461,10 @@ class ContextCaptureEngine: ObservableObject {
 
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
     @Published var hotkeyError: String?
+
+    var hotkeyRegistrationError: String? {
+        physicalTriggerError
+    }
 
     /// Set by TranscriptedAppDelegate to wire the hotkey to the session controller
     var sessionController: DictationSessionController? {
@@ -471,7 +558,7 @@ class ContextCaptureEngine: ObservableObject {
         // here through reRegisterHotkeys(), so the detector's cache never goes
         // stale — and the per-keystroke tap callback stays free of
         // UserDefaults reads and migration-fallback work.
-        physicalShortcutDetector.shortcutBindings = Self.currentShortcutBindings()
+        physicalShortcutDetector.updateShortcutBindings(Self.currentShortcutBindings())
         physicalShortcutDetector.onShortcut = { [weak self] action, phase in
             Task { @MainActor [weak self] in
                 self?.handlePhysicalShortcut(action, phase: phase)
@@ -492,6 +579,7 @@ class ContextCaptureEngine: ObservableObject {
             )
         }
         updateHotkeyError()
+        updateAccessibilityRetryMonitor()
     }
 
     private static func currentShortcutBindings() -> [PhysicalShortcutBinding] {
@@ -542,6 +630,27 @@ class ContextCaptureEngine: ObservableObject {
         }
     }
 
+    private func updateAccessibilityRetryMonitor() {
+        guard physicalTriggerError == "Shortcut trigger needs Accessibility permission" else {
+            accessibilityRetryTask?.cancel()
+            accessibilityRetryTask = nil
+            return
+        }
+
+        guard accessibilityRetryTask == nil else { return }
+        accessibilityRetryTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                guard TranscriptedPermissionAccess.isGranted(.accessibility) else { continue }
+                self.accessibilityRetryTask?.cancel()
+                self.accessibilityRetryTask = nil
+                self.reRegisterHotkeys()
+                return
+            }
+        }
+    }
+
     private func handlePhysicalShortcut(_ action: PhysicalShortcutAction, phase: PhysicalShortcutPhase) {
         switch (action, phase) {
         case (.dictationPushToTalk, .press):
@@ -581,22 +690,6 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func handlePhysicalDictationPushToTalkPress() {
-        guard shouldAcceptHotkeyAction("dictation_push_to_talk") else {
-            DiagnosticsTrail.record(
-                logger: sessionController?.appState?.logger,
-                level: .info,
-                engine: "capture",
-                event: "hotkey_repeat_ignored",
-                message: "Ignored rapid repeat push-to-talk dictation trigger",
-                context: [
-                    "hotkey_id": "dictation_push_to_talk",
-                    "session_state": dictationSessionStateName(sessionController),
-                    "overlay_state": overlayStateName(sessionController?.overlayController?.state)
-                ]
-            )
-            return
-        }
-
         let frontApp = NSWorkspace.shared.frontmostApplication
         guard let session = sessionController else { return }
         DiagnosticsTrail.record(
@@ -674,6 +767,8 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     func unregisterHotkey() {
+        accessibilityRetryTask?.cancel()
+        accessibilityRetryTask = nil
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
             hotkeyChangeObserver = nil

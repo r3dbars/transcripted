@@ -7,6 +7,37 @@ plus targeted verification.
 > merger salvage, failed-queue heal-on-load, explicit writer `close()`, diarization
 > init dedup, `MeetingRecordingJournal` + launch recovery scan. Phase 3 (section 4)
 > and the open items in section 6 remain the live backlog.
+>
+> **2026-07-03 update:** GitHub issue #825 shows closed, but it was auto-closed by
+> PR #1074's merge (2026-06-12), not by an explicit human sign-off — the owner's
+> last comment on the thread (2026-05-21) said the issue would stay open for the
+> larger save-as-recorded/chunked-processing follow-up. That follow-up (Phase 3
+> below, and the section 6 open items) has not landed. Phase 0–2 shipped to real
+> users in `v1.1.48` (2026-06-13) and has had ~3 weeks of production usage with no
+> reopened "meeting disappeared" reports so far — a reasonable but informal signal,
+> not a confirmed validation (no Sentry/PostHog check of stop-timeout frequency has
+> been run, per the section 6 caveat, and no manual long-meeting QA pass is on
+> record).
+>
+> Since then, three more meeting-reliability PRs merged to `main` (none yet in a
+> shipped release — `v1.1.48` is still the latest tag): **#1398** "Fix meeting
+> capture failure recovery" (SCK mid-recording failure detection, system-audio
+> disk-write-failure handling, mic-only recovery with `system_audio_missing`
+> metadata), **#1402** "Improve audio recovery and failed archive handling", and
+> **#1406** "Fix audit performance hotspots" (unrelated perf work, bundled here only
+> because it touches the same test suites). All three are automated-test-only —
+> PR #1398 says so explicitly: "Deterministic/local proof only. No live meeting,
+> hardware, or real ScreenCaptureKit failure injection was performed." A fourth PR,
+> **#1404** "Preserve dictation recovery audio", is still an **open draft**, not
+> merged — it addresses dictation audio recovery, not meeting long-recording
+> recovery, and should not be counted as landed reliability work for this issue.
+>
+> None of the Phase 3 backlog below (auto-retry-once, moving merge off the stop
+> path, sleep-gap insertion, Home fallback for unparseable transcripts) or the
+> section 6 open items (AVAudioFile header semantics on macOS 26, merge wall-time
+> on low-power machines, real-world stop-timeout frequency) appear to have shipped
+> yet — `meeting_recovered_at_launch`-style auto-retry logic is not present in
+> `FailedTranscriptionManager` as of this update.
 
 ## 1. Where the issue actually stands
 

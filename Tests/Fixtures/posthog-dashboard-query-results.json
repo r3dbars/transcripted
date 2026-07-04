@@ -3,13 +3,13 @@
     {
       "id": "wau.active_devices_by_week",
       "rows": [
-        {"week": "2026-06-15", "active_devices": 87, "workflow_events": 420, "first_value_devices": 31, "second_artifact_devices": 14, "agent_payoff_devices": 6, "return_proxy_devices": 12, "habit_loop_devices": 9}
+        {"week": "2026-06-15", "active_devices": 87, "workflow_events": 420, "first_value_devices": 31, "return_proxy_devices": 12}
       ]
     },
     {
       "id": "wau.daily_active_devices",
       "rows": [
-        {"day": "2026-06-18", "active_devices": 24, "launch_events": 28, "workflow_events": 91, "first_value_devices": 9, "second_artifact_devices": 4, "agent_payoff_devices": 2, "habit_loop_devices": 5}
+        {"day": "2026-06-18", "active_devices": 24, "launch_events": 28, "workflow_events": 91, "first_value_devices": 9}
       ]
     },
     {
@@ -30,11 +30,8 @@
           "saved_markdown_or_dictation_proxy_devices": 35,
           "artifact_action_devices": 18,
           "agent_proxy_devices": 9,
-          "second_artifact_devices": 11,
-          "habit_loop_devices": 6,
-          "next_day_return_devices": 4,
-          "seven_day_return_devices": 3,
           "true_agent_query_devices": 0,
+          "habit_loop_devices": 5,
           "return_proxy_devices": 7
         }
       ]
@@ -53,61 +50,110 @@
       ]
     },
     {
-      "id": "activation.habit_loop_summary",
+      "id": "meeting_prompt_quality.prompt_outcomes",
       "rows": [
-        {"first_artifact_devices": 23, "second_artifact_devices": 11, "agent_payoff_devices": 6, "next_day_return_devices": 4, "seven_day_return_devices": 3, "review_yesterday_devices": 3, "promise_review_devices": 2, "open_recent_meeting_devices": 5, "daily_digest_devices": 0}
+        {"provider": "zoom", "source": "active_call", "prompt_reason": "call_detected", "route_ready": true, "shown_events": 12, "record_selected_events": 5, "dismissed_events": 3, "suppressed_events": 1, "missed_call_nudges": 2, "devices": 9}
       ]
     },
     {
-      "id": "activation.habit_loop_actions",
+      "id": "meeting_prompt_quality.suppression_reasons",
       "rows": [
-        {"action_kind": "open_recent_meeting", "artifact_kind": "meeting", "return_window_bucket": "18_36h", "surface": "home_row", "result": "success", "events": 7, "devices": 5},
-        {"action_kind": "review_yesterday", "artifact_kind": "dictation", "return_window_bucket": "3_7d", "surface": "home_menu", "result": "success", "events": 4, "devices": 3}
+        {"event": "meeting_prompt_suppressed", "suppression_reason": "active_capture", "cooldown_reason": null, "missing_permission": null, "backoff_kind": "cooldown", "events": 2, "devices": 2}
       ]
     },
     {
-      "id": "reliability.workflow_failure_rates",
+      "id": "artifact_usefulness.saved_and_used_artifacts",
+      "rows": [
+        {"artifact_kind": "meeting", "surface": "home", "saved_events": 19, "second_artifact_events": 6, "action_events": 11, "habit_loop_events": 5, "return_proxy_events": 7, "devices": 23}
+      ]
+    },
+    {
+      "id": "artifact_usefulness.second_value_moment",
+      "rows": [
+        {"first_artifact_kind": "dictation", "second_artifact_kind": "meeting", "days_since_first_bucket": "same_day", "surface": "save_path", "events": 6, "devices": 5}
+      ]
+    },
+    {
+      "id": "agent_payoff.agent_loop",
+      "rows": [
+        {"event": "agent_capture_query_observed", "agent_target": "claude", "query_kind": "search", "result": "success", "surface": "mcp", "events": 9, "devices": 4}
+      ]
+    },
+    {
+      "id": "agent_payoff.capture_query_quality",
+      "rows": [
+        {"agent_target": "claude", "query_kind": "search", "source_count_bucket": "2_5", "capture_age_bucket": "same_day", "return_window_bucket": "next_day", "result": "success", "events": 9, "devices": 4}
+      ]
+    },
+    {
+      "id": "speaker_trust.review_outcomes",
+      "rows": [
+        {"event": "meeting_speaker_match_reviewed", "channel": "mic", "review_action": "confirmed", "completion_kind": null, "result": null, "had_suggestion": true, "similarity_bucket": "high", "margin_bucket": "wide", "events": 8, "devices": 5}
+      ]
+    },
+    {
+      "id": "speaker_trust.finalization_failures",
+      "rows": [
+        {"failure_kind": "rewrite_failed", "session_stage": "save", "trigger": "speaker_review", "queue_depth_bucket": "one", "events": 1, "devices": 1}
+      ]
+    },
+    {
+      "id": "retry_recovery.workflow_recovery",
+      "rows": [
+        {"event": "workflow_recovery_finished", "workflow_kind": "meeting_transcript", "failure_kind": "model_unavailable", "retry_source": "home", "artifact_retained": true, "result": "success", "recovery_attempt_bucket": "second", "events": 3, "devices": 2}
+      ]
+    },
+    {
+      "id": "retry_recovery.failure_rates",
       "rows": [
         {
           "dictation_starts": 64,
           "dictation_start_failures": 2,
           "dictation_completed": 57,
           "dictation_no_speech": 3,
+          "dictation_recovery_timeouts": 1,
           "meeting_starts": 22,
           "meeting_start_failures": 1,
           "meeting_saved": 19,
-          "meeting_failed_or_skipped": 2
+          "meeting_failed_or_skipped": 2,
+          "recovery_finished": 3
         }
       ]
     },
     {
-      "id": "reliability.failure_kinds",
+      "id": "retry_recovery.failure_kinds",
       "rows": [
         {"event": "meeting_transcript_failed", "failure_kind": "model_unavailable", "events": 2, "devices": 2}
       ]
     },
     {
-      "id": "reliability.latency_buckets",
+      "id": "retry_recovery.latency_buckets",
       "rows": [
         {"stop_to_done_bucket": "under_5s", "decode_bucket": "under_2s", "save_bucket": "under_500ms", "paste_bucket": "under_500ms", "outcome": "completed", "events": 30, "devices": 18}
       ]
     },
     {
-      "id": "feature_adoption.artifact_and_agent_actions",
+      "id": "onboarding_friction.step_friction",
       "rows": [
-        {"event": "activation_agent_prompt_action_clicked", "surface": "home", "artifact_kind": "meeting", "action_kind": "copy_prompt", "agent_target": "claude", "result": "copied", "events": 11, "devices": 6}
+        {"event": "workflow_abandoned", "step_id": "permissions", "step_index": 3, "stage": "permissions", "reason_kind": "window_closed", "permission_kind": "microphone", "model_state": "ready", "events": 4, "devices": 3}
       ]
     },
     {
-      "id": "feature_adoption.meeting_prompts",
+      "id": "onboarding_friction.permission_readiness",
       "rows": [
-        {"event": "meeting_prompt_record_selected", "provider": "zoom", "source": "active_call", "route_ready": true, "suppression_reason": null, "cooldown_reason": null, "events": 8, "devices": 5}
+        {"completion_flow": "required_permissions", "meeting_recording_ready": true, "calendar_status": "authorized", "permission_kind": null, "to_status": null, "events": 13, "devices": 11}
       ]
     },
     {
-      "id": "feature_adoption.settings_discovery",
+      "id": "timeline_dayflow.dayflow_events",
       "rows": [
-        {"event": "settings_page_viewed", "page_id": "agent", "action_id": null, "setting_id": null, "enabled": null, "events": 16, "devices": 10}
+        {"event": "timeline_viewed", "provider": "localFoundation", "mode": "day", "result": "shown", "events": 7, "devices": 3, "first_seen": "2026-06-18T00:10:00Z", "last_seen": "2026-06-19T12:00:00Z"}
+      ]
+    },
+    {
+      "id": "timeline_dayflow.data_quality",
+      "rows": [
+        {"event": "timeline_batch_completed", "provider": "localFoundation", "failure_kind": null, "events": 5, "devices": 3}
       ]
     },
     {

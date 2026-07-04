@@ -135,4 +135,30 @@ func testPhysicalShortcutMatcher() {
         )
         assertTrue(!nonModifier, "a typing key has no shared-modifier chord to guard")
     }
+
+    runSuite("PhysicalShortcutMatcher — tap re-enable synthesizes missed push-to-talk release only when key is up") {
+        let activeKey = UInt32(kVK_Function)
+
+        assertFalse(
+            PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease(
+                activeKeyCode: nil,
+                isPhysicallyDown: { _ in false }
+            ),
+            "no active push-to-talk key means there is no release to synthesize"
+        )
+        assertFalse(
+            PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease(
+                activeKeyCode: activeKey,
+                isPhysicallyDown: { _ in true }
+            ),
+            "a still-held push-to-talk key must keep recording after tap re-enable"
+        )
+        assertTrue(
+            PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease(
+                activeKeyCode: activeKey,
+                isPhysicallyDown: { _ in false }
+            ),
+            "a released push-to-talk key must synthesize release if macOS dropped keyUp while the tap was disabled"
+        )
+    }
 }

@@ -31,6 +31,8 @@ public struct RecordingHealthInfo: Sendable {
     public let micAttenuatedByCallApp: Bool?
     /// MeetingMicBoostPromptOutcome rawValue from the host's in-meeting prompt.
     public let micBoostPrompt: String?
+    /// True when only microphone audio was available for recovery/transcription.
+    public let systemAudioMissing: Bool?
 
     public init(
         captureQuality: CaptureQuality,
@@ -38,7 +40,8 @@ public struct RecordingHealthInfo: Sendable {
         deviceSwitches: Int,
         gapDescriptions: [String],
         micAttenuatedByCallApp: Bool? = nil,
-        micBoostPrompt: String? = nil
+        micBoostPrompt: String? = nil,
+        systemAudioMissing: Bool? = nil
     ) {
         self.captureQuality = captureQuality
         self.audioGaps = audioGaps
@@ -46,6 +49,19 @@ public struct RecordingHealthInfo: Sendable {
         self.gapDescriptions = gapDescriptions
         self.micAttenuatedByCallApp = micAttenuatedByCallApp
         self.micBoostPrompt = micBoostPrompt
+        self.systemAudioMissing = systemAudioMissing
+    }
+
+    public func markingSystemAudioMissing() -> RecordingHealthInfo {
+        RecordingHealthInfo(
+            captureQuality: captureQuality == .excellent ? .degraded : captureQuality,
+            audioGaps: audioGaps,
+            deviceSwitches: deviceSwitches,
+            gapDescriptions: gapDescriptions,
+            micAttenuatedByCallApp: micAttenuatedByCallApp,
+            micBoostPrompt: micBoostPrompt,
+            systemAudioMissing: true
+        )
     }
 
     /// Create health info from Audio instance.

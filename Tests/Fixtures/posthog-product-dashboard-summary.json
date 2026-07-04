@@ -134,6 +134,21 @@
         "events": 0
       },
       {
+        "devices": 5,
+        "event": "activation_second_artifact_saved",
+        "events": 6
+      },
+      {
+        "devices": 3,
+        "event": "workflow_abandoned",
+        "events": 4
+      },
+      {
+        "devices": 2,
+        "event": "workflow_recovery_finished",
+        "events": 3
+      },
+      {
         "devices": 7,
         "event": "meeting_recording_started",
         "events": 11
@@ -147,6 +162,26 @@
         "devices": 5,
         "event": "meeting_transcript_failed",
         "events": 7
+      },
+      {
+        "devices": 2,
+        "event": "meeting_prompt_shown",
+        "events": 5
+      },
+      {
+        "devices": 1,
+        "event": "meeting_prompt_record_selected",
+        "events": 2
+      },
+      {
+        "devices": 2,
+        "event": "meeting_speaker_match_reviewed",
+        "events": 4
+      },
+      {
+        "devices": 1,
+        "event": "timeline_viewed",
+        "events": 3
       },
       {
         "devices": 1,
@@ -186,6 +221,65 @@
         "events": 2,
         "failure_kind": "quiet_input",
         "trigger": "hotkey"
+      }
+    ],
+    "meeting_prompt_quality": [
+      {
+        "devices": 4,
+        "dismissed_events": 2,
+        "missed_call_nudges": 1,
+        "prompt_reason": "call_detected",
+        "provider": "zoom",
+        "record_selected_events": 3,
+        "route_ready": true,
+        "shown_events": 6,
+        "source": "active_call",
+        "suppressed_events": 1
+      }
+    ],
+    "speaker_trust": [
+      {
+        "completion_kind": null,
+        "devices": 2,
+        "event": "meeting_speaker_match_reviewed",
+        "events": 3,
+        "had_suggestion": true,
+        "margin_bucket": "wide",
+        "result": null,
+        "review_action": "confirmed",
+        "similarity_bucket": "high"
+      },
+      {
+        "completion_kind": "review_later",
+        "devices": 1,
+        "event": "meeting_speaker_review_submitted",
+        "events": 1,
+        "had_suggestion": null,
+        "margin_bucket": null,
+        "result": "deferred",
+        "review_action": null,
+        "similarity_bucket": null
+      }
+    ],
+    "onboarding_friction": [
+      {
+        "devices": 3,
+        "event": "workflow_abandoned",
+        "events": 4,
+        "permission_kind": "microphone",
+        "reason_kind": "window_closed",
+        "stage": "permissions",
+        "step_id": "permissions"
+      }
+    ],
+    "timeline_dayflow": [
+      {
+        "devices": 1,
+        "event": "timeline_viewed",
+        "events": 3,
+        "mode": "day",
+        "provider": "localFoundation",
+        "result": "shown"
       }
     ]
   },

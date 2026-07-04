@@ -730,6 +730,7 @@ class DictationSessionController: ObservableObject {
                         )
                     }
                 case .denied, .restricted:
+                    overlayController.dismissError()
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 case .authorized:
                     self.startDictation(
@@ -738,6 +739,7 @@ class DictationSessionController: ObservableObject {
                         anchorRect: self.sessionAnchorRect
                     )
                 @unknown default:
+                    overlayController.dismissError()
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 }
             } : nil
@@ -795,11 +797,18 @@ class DictationSessionController: ObservableObject {
         )
 
         if stopDecision == .cancelPendingStart {
+            if trigger == .physicalKey {
+                cancelPendingDictationStartAfterEarlyRelease(appState: appState, overlayController: overlayController)
+                return
+            }
             cancelDictation()
             return
         }
 
         guard stopDecision == .stopRecording else {
+            if overlayController.state == .drafting || appState.sttRouter.isTranscribing {
+                overlayController.showError("Still finishing the last dictation. Try again in a moment.")
+            }
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: .warning,
@@ -816,7 +825,8 @@ class DictationSessionController: ObservableObject {
             )
             return
         }
-        guard appState.sttRouter.isRecording else {
+        let hasRecoverableRecording = appState.sttRouter.hasRecoverableRecording
+        guard appState.sttRouter.isRecording || hasRecoverableRecording else {
             recordingStartRetryTask?.cancel()
             recordingStartRetryTask = nil
             appState.sttRouter.cancel()
@@ -865,7 +875,9 @@ class DictationSessionController: ObservableObject {
         streamingTask = Task {
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
-            await appState.sttRouter.stopRecording()
+            if appState.sttRouter.isRecording || appState.sttRouter.hasRecoverableRecording {
+                await appState.sttRouter.stopRecording()
+            }
             stopTiming.micStoppedAt = CFAbsoluteTimeGetCurrent()
             guard !Task.isCancelled,
                   self.isDictating,
@@ -1488,10 +1500,24 @@ class DictationSessionController: ObservableObject {
         var timeout = DictationSessionTimeout(timeoutInterval: Self.sessionTimeoutInterval)
         timeout.start(at: ProcessInfo.processInfo.systemUptime)
         sessionTimeoutTask = Task { [weak self] in
+            var didWarnSessionCap = false
             while !Task.isCancelled {
                 let now = ProcessInfo.processInfo.systemUptime
                 if timeout.isExpired(at: now) { break }
                 let remainingSeconds = timeout.remaining(at: now) ?? 0
+                if !didWarnSessionCap, remainingSeconds <= 30 {
+                    didWarnSessionCap = true
+                    self?.overlayController?.showLoadingState(
+                        near: self?.sessionSourceApp,
+                        presentation: .init(
+                            title: "Long dictation",
+                            detail: "Wrapping up soon. Release the key to finish now.",
+                            progress: 0.94,
+                            status: "30 seconds left"
+                        ),
+                        anchorRect: self?.sessionAnchorRect
+                    )
+                }
                 let remainingNanos = UInt64((remainingSeconds * 1_000_000_000).rounded(.up))
                 let sleepNanos = min(remainingNanos, Self.sessionTimeoutPollIntervalNanos)
                 if sleepNanos == 0 { break }
@@ -1499,15 +1525,43 @@ class DictationSessionController: ObservableObject {
             }
             guard !Task.isCancelled, let self = self else { return }
             if self.isDictating {
-                self.appState?.logger.log("DICTATION | session cap reached, finalizing without paste")
+                let shouldAutoPaste = self.sessionPasteTarget?.matchesCurrentFrontmostApp() ?? false
+                self.appState?.logger.log(
+                    shouldAutoPaste
+                        ? "DICTATION | session cap reached, finalizing with original paste target still active"
+                        : "DICTATION | session cap reached, finalizing without paste"
+                )
                 EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_timeout",
-                    message: "Dictation reached the 5-minute cap; saving without paste")
-                // Recover the work instead of discarding it: finalize and save,
-                // but suppress auto-paste because the cap fires on walked-away
-                // sessions where the focused app may have changed.
-                self.stopDictationAndPaste(trigger: .sessionCap, autoPaste: false)
+                    message: shouldAutoPaste
+                        ? "Dictation reached the 5-minute cap; pasting because the original target is still active"
+                        : "Dictation reached the 5-minute cap; saving without paste")
+                self.stopDictationAndPaste(trigger: .sessionCap, autoPaste: shouldAutoPaste)
             }
         }
+    }
+
+    private func cancelPendingDictationStartAfterEarlyRelease(
+        appState: TranscriptedAppState,
+        overlayController: FloatingOverlayController
+    ) {
+        cancelActiveTasks(cancelRecording: true)
+        AppSoundPlayer.shared.play(.dictationCancelled)
+        isDictating = false
+        appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "microphone_not_ready")
+        DiagnosticsTrail.record(
+            logger: appState.logger,
+            level: .info,
+            engine: "dictation",
+            event: "dictation_cancelled_before_microphone_ready",
+            message: "Push-to-talk release cancelled before microphone capture started",
+            context: dictationContext(
+                extra: [
+                    "trigger": currentDictationTrigger.rawValue,
+                    "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - sessionStartTime) * 1000))"
+                ]
+            )
+        )
+        overlayController.showError("Mic wasn't ready yet. Nothing was recorded. Try again.")
     }
 
     private func overlayStateName(_ state: FloatingOverlayController.OverlayState) -> String {
@@ -1538,7 +1592,7 @@ class DictationSessionController: ObservableObject {
             streamingTask?.cancel()
             streamingTask = nil
         }
-        textPaster.cancelPendingClipboardRestore()
+        textPaster.restorePendingClipboardNow()
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
@@ -1550,7 +1604,8 @@ class DictationSessionController: ObservableObject {
     }
 
     private func handleDictationInterruption() {
-        cancelActiveTasks(cancelRecording: true)
+        let hasRecoverableRecording = appState?.sttRouter.hasRecoverableRecording ?? false
+        cancelActiveTasks(cancelRecording: !hasRecoverableRecording)
         isDictating = false
         appState?.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "interrupted")
         appState?.logger.log("DICTATION | interrupted")
@@ -1568,14 +1623,23 @@ class DictationSessionController: ObservableObject {
             )
         )
         overlayController?.showError(
-            "Recording was interrupted. Check your microphone or audio device, then try again.",
-            actionTitle: "Retry Dictation",
+            hasRecoverableRecording
+                ? "Recording was interrupted. Transcripted kept the audio captured so far."
+                : "Recording was interrupted. Check your microphone or audio device, then try again.",
+            actionTitle: hasRecoverableRecording ? "Transcribe Captured Audio" : "Retry Dictation",
             action: { [weak self] in
-                self?.startDictation(
-                    sourceApp: self?.sessionSourceApp,
-                    trigger: self?.currentDictationTrigger ?? .unknown,
-                    anchorRect: self?.sessionAnchorRect
-                )
+                guard let self else { return }
+                if hasRecoverableRecording {
+                    self.isDictating = true
+                    self.overlayController?.state = .listening
+                    self.stopDictationAndPaste(trigger: .unknown, autoPaste: false)
+                } else {
+                    self.startDictation(
+                        sourceApp: self.sessionSourceApp,
+                        trigger: self.currentDictationTrigger,
+                        anchorRect: self.sessionAnchorRect
+                    )
+                }
             }
         )
     }
@@ -1624,6 +1688,14 @@ class DictationSessionController: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_target_changed",
                 message: "Focus changed before dictation paste")
             appState?.logger.log("DICTATION | focus changed, copying text instead")
+        case .pasteNotConfirmed:
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_not_confirmed",
+                message: "Paste-back was dispatched but the target did not confirm reading the borrowed clipboard")
+            appState?.logger.log("DICTATION | paste not confirmed, keeping text on clipboard")
+        case .pasteConfirmationUnavailable:
+            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
+                message: "Paste-back was dispatched but the target did not expose confirmation")
+            appState?.logger.log("DICTATION | paste confirmation unavailable, keeping text on clipboard")
         case nil:
             break
         }
@@ -1653,7 +1725,7 @@ class DictationSessionController: ObservableObject {
             await textPaster.waitForClipboardReadyForAutoEnter()
         }
         guard !Task.isCancelled else { return .disabled }
-        return autoSender.send(DictationAutoSendPreferences.sendKey())
+        return autoSender.send(DictationAutoSendPreferences.sendKey(), target: sessionPasteTarget)
     }
 
     @discardableResult
@@ -2043,6 +2115,10 @@ private extension TextPasteCopyReason {
             return "paste_event_creation_failed"
         case .focusChanged:
             return "focus_changed"
+        case .pasteNotConfirmed:
+            return "paste_not_confirmed"
+        case .pasteConfirmationUnavailable:
+            return "paste_confirmation_unavailable"
         }
     }
 }

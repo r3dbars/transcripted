@@ -94,6 +94,34 @@ Practical implications for users:
 
 If a future version of the ML stack supports team-id-consistent signing for all
 embedded dylibs, the `disable-library-validation` entitlement will be removed.
+The shipped distribution entitlement profile currently shares this library
+validation exception for the same ML-loading reason; the mitigation is Developer
+ID signing and notarization of the full app bundle.
+
+## Permissions and TCC prompts
+
+Screen Recording (`NSScreenCaptureUsageDescription`) is requested only so
+meeting capture can capture system audio through ScreenCaptureKit. macOS uses
+the same TCC prompt for system-audio capture and screen capture, so the prompt
+mentions screen recording even though Transcripted does not read, store, or
+transmit screen pixels.
+
+## Companion MCP server trust model
+
+The companion MCP server (`Tools/TranscriptedMCP`) is a local, read-only stdio
+binary. It has no per-caller authentication: any local process that can launch
+it can read saved transcripts, dictations, and sidecars from the capture
+library. Treat adding it to an agent or editor as granting that client read
+access to your saved captures.
+
+## Update feed integrity
+
+Sparkle reads the appcast from a raw GitHub URL, but update integrity does not
+depend only on that hosting path. Each update is verified with Sparkle's EdDSA
+signature against the public key embedded in the app, so a tampered feed cannot
+install an unsigned or wrong-key build. Keep the signing key, GitHub account,
+and branch protections locked down because they are the trust roots for the
+published feed and artifacts.
 
 ## Supported Versions
 

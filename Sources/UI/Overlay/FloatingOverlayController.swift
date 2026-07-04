@@ -224,6 +224,7 @@ class FloatingOverlayController {
             errorActionTitle: errorActionTitle,
             onErrorAction: errorActionHandler,
             messageTone: messageTone,
+            onErrorDismiss: { [weak self] in self?.dismissError() },
             loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
             successTitle: successTitle,
@@ -605,6 +606,16 @@ class FloatingOverlayController {
         }
     }
 
+    func dismissError() {
+        guard state == .drafting, !errorMessage.isEmpty else { return }
+        errorDismissTask?.cancel()
+        errorDismissTask = nil
+        errorMessage = ""
+        errorActionTitle = nil
+        errorActionHandler = nil
+        hideWithCancelAnimation()
+    }
+
     /// Fast dismiss for empty dictation audio — brief flash then clean fade (no shake).
     func showNoSpeechAndDismiss(trigger: String = "unknown") {
         errorDismissTask?.cancel()
@@ -699,6 +710,10 @@ class FloatingOverlayController {
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 guard self.state == .starting || self.state == .loading || self.state == .listening || self.state == .drafting else { return }
+                if self.state == .drafting, !self.errorMessage.isEmpty {
+                    self.dismissError()
+                    return
+                }
                 self.onEscapeDuringSession?()
             }
         }

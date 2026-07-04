@@ -97,7 +97,7 @@ final class MenuBarPanelController: NSViewController {
 
         content.headerView.update(
             warmupStatus: warmupStatus,
-            hotkeyError: appState.contextCapture.hotkeyError,
+            hotkeyError: HotkeyPreferences.dictationShortcutsEnabled() ? appState.contextCapture.hotkeyError : nil,
             isMeetingRecording: isMeetingRecording
         )
 
@@ -275,7 +275,7 @@ final class MenuBarPanelController: NSViewController {
     }
 
     func prepareForClose() {
-        textPaster.cancelPendingClipboardRestore()
+        textPaster.restorePendingClipboardNow()
         contentView?.utilityActionsView.dismissTransientUI()
         contentView?.scrollToTop()
     }
