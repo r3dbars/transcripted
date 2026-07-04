@@ -360,4 +360,36 @@ func testTranscriptedPermissionAccess() async {
             "cached positive result should stay granted"
         )
     }
+
+    await runSuite("TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus — refreshes stale cache") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+
+        UserDefaults.standard.set(true, forKey: knownKey)
+        UserDefaults.standard.set(false, forKey: grantedKey)
+        let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus {
+            true
+        }
+
+        assertTrue(granted, "revalidation should return the fresh requester result")
+        assertEqual(
+            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
+            .granted,
+            "revalidation should replace stale denied cache with the fresh grant"
+        )
+
+        let denied = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus {
+            false
+        }
+        assertFalse(denied, "revalidation should also report revocations")
+        assertEqual(
+            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
+            .denied,
+            "revalidation should replace stale granted cache after revocation"
+        )
+    }
 }

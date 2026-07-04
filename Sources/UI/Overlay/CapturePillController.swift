@@ -11,6 +11,8 @@ final class CapturePillController {
 
     var onRecord: ((MeetingPromptDetector.Candidate) -> Void)?
     var onDismiss: ((MeetingPromptDetector.Candidate) -> Void)?
+    var onRemind: ((MeetingPromptDetector.Candidate) -> Void)?
+    var onExpired: ((MeetingPromptDetector.Candidate) -> Void)?
 
     deinit {
         dismissTask?.cancel()
@@ -34,7 +36,6 @@ final class CapturePillController {
 
         position(panel: panel)
         panel.orderFrontRegardless()
-        panel.makeKey()
 
         installEventMonitor()
         scheduleDismiss(timeout: timeout)
@@ -73,6 +74,7 @@ final class CapturePillController {
         pillView.autoresizingMask = [.width, .height]
         pillView.onRecord = { [weak self] in self?.record() }
         pillView.onDismiss = { [weak self] in self?.dismiss(notify: true) }
+        pillView.onRemind = { [weak self] in self?.remind() }
         panel.contentView = pillView
 
         self.panel = panel
@@ -85,20 +87,29 @@ final class CapturePillController {
         onRecord?(candidate)
     }
 
+    private func remind() {
+        guard let candidate = representedCandidate else { return }
+        dismiss(notify: false)
+        onRemind?(candidate)
+    }
+
     private func scheduleDismiss(timeout: TimeInterval) {
         dismissTask?.cancel()
         dismissTask = Task { @MainActor [weak self] in
             let nanoseconds = UInt64(max(1, timeout) * 1_000_000_000)
             try? await Task.sleep(nanoseconds: nanoseconds)
             guard !Task.isCancelled else { return }
-            self?.dismiss(notify: true)
+            guard let self, let candidate = self.representedCandidate else { return }
+            self.dismiss(notify: false)
+            self.onExpired?(candidate)
         }
     }
 
     private func installEventMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.panel?.isVisible == true else { return event }
+            guard let self, let panel = self.panel, panel.isVisible else { return event }
+            guard event.window === panel || panel.isKeyWindow else { return event }
             switch event.keyCode {
             case 36:
                 self.record()
@@ -113,7 +124,10 @@ final class CapturePillController {
     }
 
     private func position(panel: NSPanel) {
-        let screen = NSScreen.main ?? NSScreen.screens.first
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) }
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
         let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let size = panel.frame.size
         let inset: CGFloat = 18
@@ -176,15 +190,17 @@ final class CapturePillPanel: NSPanel {
 
 @available(macOS 14.0, *)
 private final class CapturePillView: NSView {
-    static let preferredSize = NSSize(width: 430, height: 74)
+    static let preferredSize = NSSize(width: 540, height: 74)
 
     var onRecord: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onRemind: (() -> Void)?
 
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
     private let dismissButton = NSButton(title: "Not now", target: nil, action: nil)
+    private let remindButton = NSButton(title: "Remind me soon", target: nil, action: nil)
     private let recordButton = NSButton(title: "Record", target: nil, action: nil)
 
     override init(frame frameRect: NSRect) {
@@ -211,6 +227,7 @@ private final class CapturePillView: NSView {
         addSubview(detailLabel)
 
         configureButton(dismissButton, title: "Not now", isPrimary: false, action: #selector(dismissTapped))
+        configureButton(remindButton, title: "Remind me soon", isPrimary: false, action: #selector(remindTapped))
         configureButton(recordButton, title: "Record", isPrimary: true, action: #selector(recordTapped))
 
         setAccessibilityElement(true)
@@ -230,6 +247,7 @@ private final class CapturePillView: NSView {
         iconView.frame = NSRect(x: pad, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize)
 
         let recordSize = NSSize(width: 72, height: 32)
+        let remindSize = NSSize(width: 118, height: 32)
         let dismissSize = NSSize(width: 82, height: 32)
         recordButton.frame = NSRect(
             x: bounds.width - pad - recordSize.width,
@@ -237,8 +255,14 @@ private final class CapturePillView: NSView {
             width: recordSize.width,
             height: recordSize.height
         )
+        remindButton.frame = NSRect(
+            x: recordButton.frame.minX - 8 - remindSize.width,
+            y: (bounds.height - remindSize.height) / 2,
+            width: remindSize.width,
+            height: remindSize.height
+        )
         dismissButton.frame = NSRect(
-            x: recordButton.frame.minX - 8 - dismissSize.width,
+            x: remindButton.frame.minX - 8 - dismissSize.width,
             y: (bounds.height - dismissSize.height) / 2,
             width: dismissSize.width,
             height: dismissSize.height
@@ -286,5 +310,9 @@ private final class CapturePillView: NSView {
 
     @objc private func dismissTapped() {
         onDismiss?()
+    }
+
+    @objc private func remindTapped() {
+        onRemind?()
     }
 }

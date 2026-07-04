@@ -740,9 +740,9 @@ enum MeetingPromptSessionPromptState: Equatable {
 
     var allowsDetectedMeetingPrompt: Bool {
         switch self {
-        case .idle, .ready, .error:
+        case .idle, .ready, .transcribing, .error:
             return true
-        case .loadingModels, .recording, .transcribing:
+        case .loadingModels, .recording:
             return false
         }
     }
