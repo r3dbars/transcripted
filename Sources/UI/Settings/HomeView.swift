@@ -226,6 +226,16 @@ final class HomeViewModel: ObservableObject {
             priorArtifactDate: latest.date,
             surface: .home
         )
+        if didTrackActivationReturnProxy {
+            let artifactCount = dictations.count + meetings.count
+            ActivationTelemetry.trackHabitLoopAction(
+                actionKind: artifactCount >= 2 ? .returnAfterSecondArtifact : .returnAfterFirstArtifact,
+                surface: .home,
+                artifactKind: latest.kind,
+                artifactDate: latest.date,
+                artifactCount: artifactCount
+            )
+        }
     }
 
 }

@@ -410,6 +410,27 @@ func testAnalyticsEventPolicy() {
             "unknown",
             "legacy installs without first-save date should not invent a raw timestamp"
         )
+        assertEqual(
+            ActivationTelemetry.artifactCountBucket(0),
+            "0",
+            "empty artifact counts should stay bucketed"
+        )
+        assertEqual(
+            ActivationTelemetry.artifactCountBucket(4),
+            "3_5",
+            "mid-sized artifact counts should stay bucketed"
+        )
+        assertEqual(
+            ActivationTelemetry.artifactCountBucket(9),
+            "6_plus",
+            "large artifact counts should stay capped"
+        )
+        let habitPolicy = AnalyticsEventPolicy.policy(forEvent: "activation_habit_loop_actioned")
+        assertEqual(
+            habitPolicy?.allowedProperties ?? Set<String>(),
+            ["action_kind", "artifact_count_bucket", "artifact_kind", "result", "return_window_bucket", "surface"],
+            "habit loop telemetry should stay enum and bucket only"
+        )
     }
 
     runSuite("ActivationTelemetry emits second artifact for legacy first-artifact installs") {

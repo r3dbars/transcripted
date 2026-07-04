@@ -16,6 +16,7 @@ analytics_available
 anonymous_usage_enabled
 app_signal
 app_version
+artifact_count_bucket
 artifact_kind
 artifact_retained
 attenuation_kind
