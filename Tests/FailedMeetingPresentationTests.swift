@@ -68,6 +68,33 @@ func testFailedMeetingPresentation() {
         assertEqual(copy.detail, "Could not write transcript to meetings", "save failures should preserve the short write error")
     }
 
+    runSuite("FailedMeetingPresentation no-speech failures point to Home recovery") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "No speech detected",
+            shortErrorMessage: "No speech detected",
+            isRetryable: true
+        )
+
+        assertEqual(copy.title, "No speech found", "no-speech outcomes should be named plainly")
+        assertEqual(
+            copy.detail,
+            "Transcripted found audio, but not enough spoken words to write a transcript. Open Home to retry, or record again with clearer voices.",
+            "no-speech outcomes should point to a visible recovery path"
+        )
+    }
+
+    runSuite("MeetingSessionController surfaces skipped no-speech outcomes visibly") {
+        let source = (try? String(
+            contentsOf: repoFixtureURL("Sources/Meeting/MeetingSessionController.swift"),
+            encoding: .utf8
+        )) ?? ""
+
+        assertTrue(
+            source.contains("lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)\n                state = .error(diagnosticMessage)"),
+            "skipped no-speech transcripts should still publish a visible recovery notice"
+        )
+    }
+
     runSuite("HomeFailedMeetingInlinePresentation shows details for non-retryable failures") {
         let presentation = HomeFailedMeetingInlinePresentation.make(
             isRetryable: false,

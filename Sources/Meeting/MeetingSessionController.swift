@@ -2993,6 +2993,8 @@ final class MeetingSessionController: ObservableObject {
                     failureKind: failureKind.rawValue,
                     modelState: state.diagnosticName
                 )
+                lastTerminalTranscriptionOutcome = .failed(diagnosticMessage)
+                state = .error(diagnosticMessage)
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind.rawValue)
                 handleBackgroundTranscriptionWorkChanged()
