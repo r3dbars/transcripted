@@ -166,13 +166,13 @@
     {
       "id": "timeline_dayflow.dayflow_events",
       "rows": [
-        {"event": "timeline_viewed", "provider": "localFoundation", "mode": "day", "result": "shown", "events": 7, "devices": 3, "first_seen": "2026-06-18T00:10:00Z", "last_seen": "2026-06-19T12:00:00Z"}
+        {"event": "timeline_card_opened", "provider_kind": null, "surface": "home", "card_kind": "daily_digest", "result": "success", "events": 7, "devices": 3, "first_seen": "2026-06-18T00:10:00Z", "last_seen": "2026-06-19T12:00:00Z"}
       ]
     },
     {
       "id": "timeline_dayflow.data_quality",
       "rows": [
-        {"event": "timeline_batch_completed", "provider": "localFoundation", "failure_kind": null, "events": 5, "devices": 3}
+        {"event": "timeline_card_generated", "provider_kind": "local_foundation", "permission_state": null, "card_kind": "daily_digest", "result": "success", "events": 5, "devices": 3}
       ]
     },
     {

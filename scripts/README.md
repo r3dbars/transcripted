@@ -77,6 +77,8 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Dry-run specs: `python3 scripts/ops/posthog-dashboard-queries.py --dry-run`
   - One family: `python3 scripts/ops/posthog-dashboard-queries.py --family activation --dry-run`
   - Live aggregate query: `python3 scripts/ops/posthog-dashboard-queries.py --family 100_wau --days 30`
+  - Live taxonomy check: `python3 scripts/ops/posthog-dashboard-queries.py --taxonomy-check --days 30`
+  - Fixture taxonomy check: `python3 scripts/ops/posthog-dashboard-queries.py --taxonomy-check --observed-fixture Tests/Fixtures/posthog-observed-event-taxonomy.json --json-only`
   - CI/offline proof: `python3 scripts/ops/posthog-dashboard-queries.py --self-test`
   - Machine output for health agents: `python3 scripts/ops/posthog-dashboard-queries.py --family all --json-only`
 - `scripts/ops/posthog-product-dashboard-summary.py` — turn the five PostHog product-learning dashboard families into ranked product tasks, with release-regression watch rows grouped by full build identity
