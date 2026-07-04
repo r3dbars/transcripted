@@ -245,6 +245,73 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 
+    runSuite("AnalyticsEventPolicy allows Dayflow timeline scaffold events without screen content") {
+        let expected: [(String, Set<String>)] = [
+            ("timeline_enabled", ["permission_state", "provider_kind", "result", "surface"]),
+            ("timeline_screen_permission_ready", ["permission_state", "result", "surface"]),
+            ("timeline_screen_permission_denied", ["permission_state", "result", "surface"]),
+            ("timeline_capture_paused", ["pause_reason", "result", "surface"]),
+            ("timeline_capture_resumed", ["pause_reason", "result", "surface"]),
+            ("timeline_card_generated", ["card_kind", "count_bucket", "duration_bucket", "provider_kind", "result", "surface"]),
+            ("timeline_card_opened", ["card_kind", "result", "surface"]),
+            ("timeline_daily_markdown_written", ["count_bucket", "duration_bucket", "result", "surface"]),
+            ("timeline_used_again", ["return_window_bucket", "surface"]),
+        ]
+
+        for (event, properties) in expected {
+            assertEqual(
+                AnalyticsEventPolicy.policy(forEvent: event)?.allowedProperties ?? Set<String>(),
+                properties,
+                "\(event) should stay coarse and privacy-reviewed"
+            )
+        }
+
+        let generatedProperties: [String: String] = [
+            "surface": TimelineAnalyticsTelemetry.Surface.timelineHome.rawValue,
+            "result": TimelineAnalyticsTelemetry.Result.success.rawValue,
+            "provider_kind": TimelineAnalyticsTelemetry.ProviderKind.localLLM.rawValue,
+            "card_kind": TimelineAnalyticsTelemetry.CardKind.activity.rawValue,
+            "duration_bucket": AnalyticsReporter.durationBucket(seconds: 42),
+            "count_bucket": AnalyticsReporter.countBucket(5),
+            "ocr_text": "private screen words",
+            "screenshot_path": "/Users/redbars/private.png",
+            "app_name": "Safari",
+            "window_title": "Customer dashboard",
+            "url": "https://example.com/private",
+            "bundle_id": "com.private.app",
+            "person_id": "person_123",
+        ]
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            generatedProperties,
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "timeline_card_generated")?.allowedProperties ?? Set<String>()
+        )
+
+        assertEqual(sanitized["surface"], "timeline_home", "timeline surface should survive as an enum")
+        assertEqual(sanitized["result"], "success", "timeline result should survive as an enum")
+        assertEqual(sanitized["provider_kind"], "local_llm", "provider kind should stay coarse")
+        assertEqual(sanitized["card_kind"], "activity", "card kind should stay coarse")
+        assertEqual(sanitized["duration_bucket"], "30_119s", "duration should stay bucketed")
+        assertEqual(sanitized["count_bucket"], "4_9", "counts should stay bucketed")
+        assertNil(sanitized["ocr_text"], "OCR text must not be sent")
+        assertNil(sanitized["screenshot_path"], "screenshot paths must not be sent")
+        assertNil(sanitized["app_name"], "app names must not be sent")
+        assertNil(sanitized["window_title"], "window titles must not be sent")
+        assertNil(sanitized["url"], "URLs must not be sent")
+        assertNil(sanitized["bundle_id"], "raw bundle IDs must not be sent")
+        assertNil(sanitized["person_id"], "personal identifiers must not be sent")
+
+        let now = Date(timeIntervalSinceReferenceDate: 5_000_000)
+        assertNil(
+            TimelineAnalyticsTelemetry.returnWindowBucket(since: now.addingTimeInterval(-2 * 3_600), now: now),
+            "immediate same-session timeline reuse should not emit a return bucket"
+        )
+        assertEqual(
+            TimelineAnalyticsTelemetry.returnWindowBucket(since: now.addingTimeInterval(-24 * 3_600), now: now),
+            "18_36h",
+            "next-day timeline reuse should use a coarse return bucket"
+        )
+    }
+
     runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, dictation artifacts, and next-day return proxy") {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
         let suiteName = "ActivationTelemetryTests.first-artifact.\(UUID().uuidString)"
