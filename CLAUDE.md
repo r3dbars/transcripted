@@ -10,7 +10,7 @@ For day-to-day agent work, start with `AGENT_START.md` and treat `AGENTS.md` as 
 
 - dictation capture with paste-back into the focused editor
 - meeting capture (local mic + system audio) with local transcription
-- imported-audio transcription
+- imported-audio and imported-video transcription (video imports extract the audio track; see `MeetingImportedAudioPreparer`)
 - optional local-speaker review for people sharing the room mic
 - agent-readable Markdown output saved to disk
 
@@ -103,7 +103,7 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | `Sources/Beta/` | beta-build configuration |
 | `Sources/Capture/` | physical dictation trigger capture, meeting hotkey routing, `ContextCaptureEngine` |
 | `Sources/Dictation/` | dictation transcript persistence, daily Markdown files, timeout helpers |
-| `Sources/Meeting/` | app-side bridge into `TranscriptedCore`; live capture, imported-audio, queued meeting transcription, `MeetingSTTAdapter` |
+| `Sources/Meeting/` | app-side bridge into `TranscriptedCore`; live capture, imported-audio/video prep, queued meeting transcription, `MeetingSTTAdapter` |
 | `Sources/Observability/` | events, debug log, Sentry, anonymous PostHog analytics, Sparkle updater, crash reporting |
 | `Sources/Reliability/` | wake/sleep recovery for hotkeys and active capture |
 | `Sources/Speech/` | local STT engines (`ParakeetEngine`), `STTRouter`, recorded-audio buffering, dictation audio recovery |
