@@ -425,6 +425,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return
         }
 
+        if onboardingWindowController.isVisible {
+            NotificationCenter.default.post(name: .transcriptedOnboardingWillTerminate, object: nil)
+        }
+
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }

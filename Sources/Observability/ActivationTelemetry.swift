@@ -43,6 +43,7 @@ enum ActivationTelemetry {
     }
 
     enum WorkflowAbandonmentReasonKind: String {
+        case backgrounded
         case blocked
         case cancelled
         case deleted
