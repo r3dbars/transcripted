@@ -1581,31 +1581,29 @@ final class MeetingOverlayController: NSObject {
 
     private func wireSubscriptions(to session: MeetingSessionController) {
         session.$state
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] sessionState in
                 self?.applySessionState(sessionState)
             }
             .store(in: &subscriptions)
 
         session.$recordingDuration
-            .receive(on: RunLoop.main)
-            .sink { [weak self] duration in
+            .map { Int($0) }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] wholeSecond in
                 guard let self else { return }
-                let previousDisplay = MeetingDurationFormatter.formatDuration(self.currentDuration)
-                self.currentDuration = duration
-                // The strip timer renders whole seconds (mm:ss). The full
-                // push rebuilds attributed titles, accessibility labels, and
-                // runs the resize check, so skip it while the displayed
-                // duration is unchanged — every other state change keeps its
-                // own pushToView() call, and any of those pushes picks up
-                // the exact currentDuration stored above.
-                guard MeetingDurationFormatter.formatDuration(duration) != previousDisplay else { return }
+                // The strip timer renders whole seconds (mm:ss). Collapse the
+                // 5Hz capture duration publisher before the full view push so
+                // recording does not rebuild attributed titles/layouts five
+                // times for the same visible label.
+                self.currentDuration = TimeInterval(wholeSecond)
                 self.pushToView()
             }
             .store(in: &subscriptions)
 
         session.$audioLevel
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] level in
                 self?.currentMicLevel = level
                 self?.pushAudioLevelsToView()
@@ -1613,7 +1611,7 @@ final class MeetingOverlayController: NSObject {
             .store(in: &subscriptions)
 
         session.$systemLevel
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] level in
                 self?.currentSystemLevel = level
                 self?.pushAudioLevelsToView()
@@ -1621,7 +1619,7 @@ final class MeetingOverlayController: NSObject {
             .store(in: &subscriptions)
 
         session.$warmupStatus
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 self?.currentWarmupStatus = status
                 self?.pushToView()
@@ -1629,14 +1627,14 @@ final class MeetingOverlayController: NSObject {
             .store(in: &subscriptions)
 
         session.$audioInactivityWarning
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] warning in
                 self?.applyAudioInactivityWarning(warning)
             }
             .store(in: &subscriptions)
 
         session.$isMicBoostPromptVisible
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] visible in
                 self?.applyMicBoostPrompt(visible)
             }
@@ -1650,8 +1648,8 @@ final class MeetingOverlayController: NSObject {
             // relayouts the text view. Throttling with `latest: true` caps
             // that at ~5Hz while guaranteeing the newest finals/partials and
             // phase still land after the last emission in a window.
-            .throttle(for: .milliseconds(200), scheduler: RunLoop.main, latest: true)
-            .receive(on: RunLoop.main)
+            .throttle(for: .milliseconds(200), scheduler: DispatchQueue.main, latest: true)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] finals, partials, phase in
                 self?.latestTranscriptFinals = finals
                 self?.latestTranscriptPartials = partials
