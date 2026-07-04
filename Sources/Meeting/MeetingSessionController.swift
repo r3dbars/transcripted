@@ -240,6 +240,8 @@ final class MeetingSessionController: ObservableObject {
     private var activeQueuedTranscriptionJobID: UUID?
     private var failedAudioCompressionTask: Task<Void, Never>?
     private var failedAudioCompressionNeedsReschedule = false
+    private var lastObservedSpeakerNamingRequest: SpeakerNamingRequest?
+    private var speakerFinalizationFailureReportedTranscriptIds: Set<UUID> = []
 
     var shouldConfirmQuitForActiveCapture: Bool {
         isCaptureSessionActive || isFinishingRecording
@@ -1808,6 +1810,7 @@ final class MeetingSessionController: ObservableObject {
             .combineLatest(taskManager.$speakerNamingRequest)
             .sink { [weak self] activeCount, speakerNamingRequest in
                 guard let self else { return }
+                self.handleSpeakerNamingRequestTransition(to: speakerNamingRequest)
                 self.handleBackgroundTranscriptionWorkChanged(
                     snapshot: BackgroundTranscriptionWorkSnapshot(
                         activeCount: activeCount,
@@ -2790,7 +2793,6 @@ final class MeetingSessionController: ObservableObject {
                     "trigger": transcriptionTrigger.rawValue,
                 ]
             )
-            trackSpeakerFinalizationSucceeded()
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_saved")
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
             activeQueuedTranscriptionJobID = nil
@@ -2839,6 +2841,16 @@ final class MeetingSessionController: ObservableObject {
             }
 
             if failureKind == .speakerFinalizationFailed || failureKind == .speakerNameFinalizationFailed {
+                // Record that this transcript's finalization already reported a
+                // failure outcome before the request is cleared (see
+                // `handleSpeakerNamingRequestTransition`), so the later
+                // speakerNamingRequest -> nil transition doesn't also fire a
+                // "succeeded" event for the same attempt.
+                let pendingRequest = taskManager.speakerNamingRequest
+                if let transcriptId = pendingRequest?.transcriptId {
+                    speakerFinalizationFailureReportedTranscriptIds.insert(transcriptId)
+                }
+                let reviewItemCountBucket = AnalyticsReporter.countBucket(pendingRequest?.speakers.count ?? 0)
                 finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded(
                     failedJobID: activeQueuedTranscriptionJobID,
                     allowLastSavedTranscriptOwner: true
@@ -2867,7 +2879,7 @@ final class MeetingSessionController: ObservableObject {
                         "session_stage": CaptureFailureStage.save.rawValue,
                         "failure_kind": failureKind.rawValue,
                         "queue_depth_bucket": queueDepthBucket,
-                        "review_item_count_bucket": "0",
+                        "review_item_count_bucket": reviewItemCountBucket,
                         "surface": "meeting_save",
                         "trigger": transcriptionTrigger.rawValue,
                     ]
@@ -3105,13 +3117,35 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    private func trackSpeakerFinalizationSucceeded() {
-        let request = taskManager.speakerNamingRequest
+    /// Speaker naming requests are cleared (`taskManager.speakerNamingRequest`
+    /// transitions to `nil`) exactly when the real async finalization
+    /// write-back in `TranscriptionTaskManager.finishNamingFlow` (Core)
+    /// completes — whether it succeeded or failed. The failure case already
+    /// records the transcript's id in `speakerFinalizationFailureReportedTranscriptIds`
+    /// via the `.failed(message:)` branch above, and that always happens before
+    /// the request is cleared because both run synchronously on the main actor
+    /// inside `finishNamingFlow`. So if a request disappears without a matching
+    /// failure recorded for it, that's the real "succeeded" signal — this is
+    /// also naturally scoped to meetings that actually needed a speaker review,
+    /// since `previousRequest` is only non-nil when one was requested.
+    private func handleSpeakerNamingRequestTransition(to newRequest: SpeakerNamingRequest?) {
+        defer { lastObservedSpeakerNamingRequest = newRequest }
+        guard let previousRequest = lastObservedSpeakerNamingRequest,
+              newRequest?.transcriptId != previousRequest.transcriptId else {
+            return
+        }
+        if speakerFinalizationFailureReportedTranscriptIds.remove(previousRequest.transcriptId) != nil {
+            return
+        }
+        trackSpeakerFinalizationSucceeded(request: previousRequest)
+    }
+
+    private func trackSpeakerFinalizationSucceeded(request: SpeakerNamingRequest) {
         AnalyticsReporter.track(
             "meeting_speaker_finalization_succeeded",
             properties: [
                 "result": "succeeded",
-                "review_item_count_bucket": AnalyticsReporter.countBucket(request?.speakers.count ?? 0),
+                "review_item_count_bucket": AnalyticsReporter.countBucket(request.speakers.count),
                 "review_reason": Self.speakerReviewReason(for: request),
                 "surface": "meeting_save",
             ]
