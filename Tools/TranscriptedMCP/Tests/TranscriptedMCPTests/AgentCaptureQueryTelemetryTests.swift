@@ -65,7 +65,7 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
     }
 
     func testTelemetryPolicyAllowsOrientationQueryKinds() throws {
-        for queryKind in ["list", "recent"] {
+        for queryKind in ["action_items", "commitments", "decisions", "digest", "list", "open_questions", "recent"] {
             let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize([
                 "agent_target": "mcp_client",
                 "artifact_kind": "meeting",

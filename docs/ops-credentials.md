@@ -71,7 +71,10 @@ export distinct IDs, person rows, transcript text, file paths, meeting titles,
 raw URLs, or raw payload rows. Treat the agent setup and prompt-copy rows as
 proxies only; they are not proof that an agent answered from a saved artifact.
 The true-use event is `agent_capture_query_observed`, emitted by successful MCP
-reads/searches with enum and bucket properties only.
+reads/searches and local-summary rollups with enum and bucket properties only.
+Use `query_kind`, `artifact_kind`, `source_count_bucket`, `capture_age_bucket`,
+and `return_window_bucket` to ask whether an agent used sourced local memory
+from saved artifacts. It still does not prove answer quality.
 
 For an AI-agent-ready product context pack, run:
 

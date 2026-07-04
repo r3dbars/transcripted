@@ -228,6 +228,8 @@ SELECT
   properties['artifact_kind'] AS artifact_kind,
   properties['action_kind'] AS action_kind,
   properties['agent_target'] AS agent_target,
+  properties['query_kind'] AS query_kind,
+  properties['source_count_bucket'] AS source_count_bucket,
   properties['page_id'] AS page_id,
   count() AS events,
   uniq(distinct_id) AS devices
@@ -235,7 +237,7 @@ FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened')
   {app_version_filter(app_version)}
-GROUP BY event, artifact_kind, action_kind, agent_target, page_id
+GROUP BY event, artifact_kind, action_kind, agent_target, query_kind, source_count_bucket, page_id
 ORDER BY devices DESC, events DESC
 LIMIT 50
 """
@@ -545,7 +547,14 @@ def build_adoption_signal(data: dict[str, Any]) -> Finding:
     if rows:
         top = max(rows, key=lambda row: (as_int(row.get("devices")), as_int(row.get("events"))))
         event = top.get("event") or "unknown"
-        detail = top.get("action_kind") or top.get("agent_target") or top.get("page_id") or top.get("artifact_kind") or "all"
+        detail = (
+            top.get("query_kind")
+            or top.get("action_kind")
+            or top.get("agent_target")
+            or top.get("page_id")
+            or top.get("artifact_kind")
+            or "all"
+        )
         devices = as_int(top.get("devices"))
         return Finding(
             "Strongest adoption signal",
@@ -833,7 +842,7 @@ def render_markdown(data: dict[str, Any], findings: dict[str, Finding]) -> str:
         "## Privacy Boundary",
         "",
         "- Aggregate only. No raw rows or user-level forensics.",
-        "- Treat agent setup, prompt copy, and return events as proxies; `agent_capture_query_observed` is the stronger saved-capture query proof, but not answer-quality proof.",
+        "- Treat agent setup, prompt copy, and return events as proxies; `agent_capture_query_observed` is the stronger saved-capture query proof, especially when grouped by query kind and source-count bucket, but not answer-quality proof.",
         "",
     ])
     return "\n".join(lines)

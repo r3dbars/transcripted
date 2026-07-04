@@ -138,6 +138,106 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertNotEqual(observation.captureAgeBucket, "unknown")
     }
 
+    func testSummaryRollupsTrackSourcedAgentQueryTelemetry() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                date: "2026-04-18",
+                time: "09:15:00",
+                decisions: ["Ship the beta on Friday", "Keep onboarding unchanged"],
+                actionItems: ["Jenny: send the revised spec", "Robin: prep launch notes"],
+                openQuestions: ["Do we need a migration window?", "Who owns the support note?"]
+            ),
+            filename: "Call_2026-04-18_09-15-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        _ = try handleListActionItems(
+            params: CallTool.Parameters(name: "list_action_items", arguments: ["count": .int(10)]),
+            index: index,
+            meetingDirs: [tempDir]
+        )
+        XCTAssertEqual(telemetry.observations.last?.queryKind, "action_items")
+        XCTAssertEqual(telemetry.observations.last?.artifactKind, "meeting")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
+
+        _ = try handleListDecisions(
+            params: CallTool.Parameters(name: "list_decisions", arguments: ["count": .int(10)]),
+            index: index,
+            meetingDirs: [tempDir]
+        )
+        XCTAssertEqual(telemetry.observations.last?.queryKind, "decisions")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
+
+        _ = try handleDigest(
+            params: CallTool.Parameters(name: "digest", arguments: ["date_from": .string("2026-04-18"), "date_to": .string("2026-04-18")]),
+            index: index,
+            meetingDirs: [tempDir]
+        )
+        XCTAssertEqual(telemetry.observations.last?.queryKind, "digest")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
+    }
+
+    func testReceiptToolsTrackSourcedAgentQueryTelemetry() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                date: "2026-04-18",
+                time: "09:15:00",
+                decisions: ["Ship the beta on Friday", "Keep onboarding unchanged"],
+                actionItems: ["Jenny: send the revised spec", "Robin: prep launch notes"],
+                openQuestions: ["Do we need a migration window?", "Who owns the support note?"]
+            ),
+            filename: "Call_2026-04-18_09-15-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        _ = try handleDecisions(
+            params: CallTool.Parameters(name: "decisions", arguments: ["count": .int(10)]),
+            index: index,
+            meetingDirs: [tempDir]
+        )
+        XCTAssertEqual(telemetry.observations.last?.queryKind, "decisions")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
+
+        _ = try handleCommitments(
+            params: CallTool.Parameters(name: "commitments", arguments: ["count": .int(10)]),
+            index: index,
+            meetingDirs: [tempDir]
+        )
+        XCTAssertEqual(telemetry.observations.last?.queryKind, "commitments")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
+
+        _ = try handleOpenQuestions(
+            params: CallTool.Parameters(name: "open_questions", arguments: ["count": .int(10)]),
+            index: index,
+            meetingDirs: [tempDir]
+        )
+        XCTAssertEqual(telemetry.observations.last?.queryKind, "open_questions")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
+
+        try writeFixture(
+            makeFixtureJSON(
+                date: "2026-04-19T09:15:00-0500",
+                utterances: [
+                    ("mic_0", 0.0, 5.0, "Pricing receipt needs a product follow-up"),
+                    ("mic_0", 10.0, 15.0, "Pricing receipt also needs a support follow-up"),
+                ]
+            ),
+            filename: "Call_2026-04-19_09-15-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        _ = try handleSearchMeetings(
+            params: CallTool.Parameters(name: "search_meetings", arguments: ["query": .string("pricing receipt")]),
+            index: index,
+            meetingDirs: [tempDir]
+        )
+        XCTAssertEqual(telemetry.observations.last?.queryKind, "search")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
+    }
+
     func testRecapReturnsStructuredSummaryWhenPresent() throws {
         try writeFixture(
             makeMeetingWithInlineSummary(

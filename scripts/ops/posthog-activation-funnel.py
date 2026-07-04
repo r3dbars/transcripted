@@ -381,6 +381,29 @@ LIMIT 60
 """
 
 
+def agent_query_breakdown_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  properties['query_kind'] AS query_kind,
+  properties['artifact_kind'] AS artifact_kind,
+  properties['capture_age_bucket'] AS capture_age_bucket,
+  properties['return_window_bucket'] AS return_window_bucket,
+  properties['source_count_bucket'] AS source_count_bucket,
+  properties['agent_target'] AS agent_target,
+  properties['result'] AS result,
+  properties['surface'] AS surface,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event = 'agent_capture_query_observed'
+  {app_version_filter(app_version)}
+GROUP BY query_kind, artifact_kind, capture_age_bucket, return_window_bucket, source_count_bucket, agent_target, result, surface
+ORDER BY devices DESC, events DESC
+LIMIT 80
+"""
+
+
 def workflow_abandonment_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT
@@ -500,6 +523,7 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "artifact_actions": artifact_actions_query(days, app_version),
         "second_artifacts": second_artifact_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
+        "agent_query_breakdown": agent_query_breakdown_query(days, app_version),
         "workflow_abandonment": workflow_abandonment_query(days, app_version),
         "meeting_prompt_quality": meeting_prompt_quality_query(days, app_version),
         "speaker_trust": speaker_trust_query(days, app_version),
@@ -655,7 +679,7 @@ def render_report(data: dict[str, Any]) -> str:
         "`dictation_artifact_saved`, `dictation_completed`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are included only in the broader proxy row for dictation volume and legacy continuity.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`activation_second_artifact_saved` proves a second durable artifact save on the same anonymous device, but does not inspect artifact content or join identity.",
-        "`agent_capture_query_observed` is the strongest current true-agent-use signal, but it still only proves a saved-capture read/search, not answer quality.",
+        "`agent_capture_query_observed` is the strongest current true-agent-use signal. Its query/source/age buckets prove saved local capture use, not answer quality.",
         "`workflow_abandoned` is a conservative exit map. It should not be read as every possible drop-off or every click.",
     ]
     if strict_guard:
@@ -671,7 +695,7 @@ def render_report(data: dict[str, Any]) -> str:
         "Agent bridge: setup kind, agent target, prompt kind, result, and surface.",
         "Abandonment exits: workflow kind, stage, reason kind, surface, and prior-ready state.",
         "Return loop: `activation_return_proxy_observed` by return-window bucket.",
-        "Data quality: true-agent-use event volume, answer-quality UNKNOWNs, and the dictation completion-vs-saved-artifact split.",
+        "Data quality: true-agent-use event volume by query/source/age buckets, answer-quality UNKNOWNs, and the dictation completion-vs-saved-artifact split.",
     ]
 
     lines = [
@@ -762,6 +786,11 @@ def render_report(data: dict[str, Any]) -> str:
             ["event", "prompt_kind", "setup_kind", "agent_target", "result", "surface", "events", "devices"],
         ),
         render_top_rows(
+            "True Agent Query Proof",
+            data["results"].get("agent_query_breakdown", []),
+            ["query_kind", "artifact_kind", "capture_age_bucket", "return_window_bucket", "source_count_bucket", "agent_target", "result", "surface", "events", "devices"],
+        ),
+        render_top_rows(
             "Workflow Abandonment Exits",
             data["results"].get("workflow_abandonment", []),
             ["workflow_kind", "stage", "reason_kind", "surface", "prior_ready_state", "events", "devices"],
@@ -796,7 +825,7 @@ def render_report(data: dict[str, Any]) -> str:
         "",
         "## Next Best Action",
         "",
-        "Verify `activation_first_artifact_saved`, `activation_second_artifact_saved`, and `agent_capture_query_observed` reach live PostHog for current builds, then use the agent-query rows to separate repeated saved-artifact value from true sourced-agent-use.",
+        "Verify `activation_first_artifact_saved`, `activation_second_artifact_saved`, and `agent_capture_query_observed` reach live PostHog for current builds, then use the agent-query bucket rows to separate repeated saved-artifact value from true sourced local-memory use.",
         "",
     ]
     return "\n".join(lines)
@@ -851,6 +880,18 @@ def run_self_test() -> int:
             "artifact_actions": [],
             "second_artifacts": [],
             "agent_signals": [],
+            "agent_query_breakdown": [{
+                "query_kind": "decisions",
+                "artifact_kind": "meeting",
+                "capture_age_bucket": "2_7d",
+                "return_window_bucket": "3_7d",
+                "source_count_bucket": "1",
+                "agent_target": "mcp_client",
+                "result": "success",
+                "surface": "mcp",
+                "events": 1,
+                "devices": 1,
+            }],
             "workflow_abandonment": [{
                 "workflow_kind": "onboarding",
                 "stage": "permissions",
@@ -924,6 +965,7 @@ def run_self_test() -> int:
         artifact_actions_query(30, None),
         second_artifact_query(30, None),
         agent_signals_query(30, None),
+        agent_query_breakdown_query(30, None),
         workflow_abandonment_query(30, None),
         meeting_prompt_quality_query(30, None),
         speaker_trust_query(30, None),
