@@ -17,7 +17,7 @@ enum TimelineHomePreviewFlag {
     }
 }
 
-extension TimelineCardKind: CaseIterable {
+extension TimelineCardKind {
     var label: String {
         switch self {
         case .activity: return "Activity"
