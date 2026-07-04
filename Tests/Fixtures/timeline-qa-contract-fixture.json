@@ -1,0 +1,91 @@
+{
+  "captures": [
+    {
+      "id": "shot-0900",
+      "captured_at": 1788271200,
+      "relative_screenshot_path": "recordings/screenshots/2026-09-01/1788271200000.jpg",
+      "app_bundle_id": "com.synthetic.editor",
+      "app_name": "[redacted-source-app]",
+      "window_title": "[redacted-title]",
+      "screen_derived_text": "[redacted-screen-text]",
+      "screen_recording_was_used": false
+    },
+    {
+      "id": "shot-0910",
+      "captured_at": 1788271800,
+      "relative_screenshot_path": "recordings/screenshots/2026-09-01/1788271800000.jpg",
+      "app_bundle_id": "com.synthetic.browser",
+      "app_name": "[redacted-source-app]",
+      "window_title": "[redacted-title]",
+      "screen_derived_text": "[redacted-screen-text]",
+      "screen_recording_was_used": false
+    },
+    {
+      "id": "shot-1015",
+      "captured_at": 1788275700,
+      "relative_screenshot_path": "recordings/screenshots/2026-09-01/1788275700000.jpg",
+      "app_bundle_id": "com.synthetic.notes",
+      "app_name": "[redacted-source-app]",
+      "window_title": "[redacted-title]",
+      "screen_derived_text": "[redacted-screen-text]",
+      "screen_recording_was_used": false
+    }
+  ],
+  "cards": [
+    {
+      "id": "activity-0900",
+      "day": "2026-09-01",
+      "start_ts": 1788271200,
+      "end_ts": 1788274800,
+      "kind": "activity",
+      "capture_id": null,
+      "title": "Synthetic focused work",
+      "summary": "Synthetic local-only activity summary.",
+      "category": "Work",
+      "screenshot_ids": ["shot-0900", "shot-0910"]
+    },
+    {
+      "id": "meeting-1000",
+      "day": "2026-09-01",
+      "start_ts": 1788274800,
+      "end_ts": 1788275700,
+      "kind": "meeting",
+      "capture_id": "meeting-synthetic-001",
+      "title": "Synthetic meeting",
+      "summary": "Synthetic meeting projection from fixture Markdown.",
+      "category": "Meetings",
+      "screenshot_ids": []
+    },
+    {
+      "id": "idle-1015",
+      "day": "2026-09-01",
+      "start_ts": 1788275700,
+      "end_ts": 1788276600,
+      "kind": "idle",
+      "capture_id": null,
+      "title": "Idle",
+      "summary": "Synthetic idle block.",
+      "category": "Idle",
+      "screenshot_ids": ["shot-1015"]
+    },
+    {
+      "id": "dictation-1030",
+      "day": "2026-09-01",
+      "start_ts": 1788276600,
+      "end_ts": 1788277200,
+      "kind": "dictation",
+      "capture_id": "dictation-synthetic-001",
+      "title": "Synthetic dictation",
+      "summary": "Synthetic dictation projection from fixture Markdown.",
+      "category": "Meetings",
+      "screenshot_ids": []
+    }
+  ],
+  "manual_checklist": [
+    "Enable Timeline from onboarding/settings and confirm Screen Recording permission is requested only after opt-in.",
+    "Run for at least 30 minutes and confirm screenshot cadence, pause/resume, and timeline card generation without raw text in logs.",
+    "Record one meeting and one dictation and confirm both project into the same day timeline.",
+    "Revoke Screen Recording permission and confirm capture pauses with recoverable UI instead of crashing.",
+    "Run privacy leak sweep before sharing PR notes, QA reports, or release notes."
+  ]
+}
