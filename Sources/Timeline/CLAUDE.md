@@ -5,9 +5,12 @@
 `Sources/Timeline/` owns the Dayflow-style timeline engine: capture plumbing
 (screenshot cadence, display selection, foreground-app metadata, idle
 snapshots, local screenshot writes, and pause/resume state exposed for future
-UI), the app-owned timeline database and storage-cap retention cleanup, and
+UI), the app-owned timeline database and storage-cap retention cleanup,
+deterministic analysis seams (batching, observation building, card
+generation, category normalization, provider stubs, and scheduling), and
 projection logic that joins saved meeting/dictation artifacts into timeline
-card records. It is app-side code, not part of `Sources/TranscriptedCore/`.
+card records. It is app-side code, not part of `Sources/TranscriptedCore/`,
+and should stay off-main for capture, analysis, and database work.
 
 ## Files
 
@@ -17,9 +20,15 @@ card records. It is app-side code, not part of `Sources/TranscriptedCore/`.
 - `ForegroundAppSampler.swift` - frontmost app plus best-effort window title
 - `TimelineDatabase.swift` - raw SQLite3 storage for screenshots, batches, observations, timeline cards, LLM call logs, and future timeline chat rows
 - `TimelineRetentionManager.swift` - storage-cap cleanup for timeline screenshots
-- `TimelineDayBoundary.swift` - 4 AM logical-day assignment.
-- `TimelineCaptureJoiner.swift` - projects saved meeting and dictation artifacts
-  into timeline card records without changing the capture source of truth.
+- `TimelineModels.swift` - shared screenshots, observations, cards, and provider metadata
+- `TimelineDayBoundary.swift` - 4 AM logical-day assignment
+- `BatchPlanner.swift` - pure screenshot batching rules
+- `ObservationBuilder.swift` - observation-building protocol seam and text condenser
+- `CardGenerator.swift` - pure card validation and normalization rules
+- `TimelineCategoryStore.swift` - category defaults and normalization
+- `TimelineLLMProvider.swift` - provider protocol and safe inert stubs
+- `AnalysisScheduler.swift` - single-flight in-memory scheduler harness for the pure pipeline
+- `TimelineCaptureJoiner.swift` - projects saved meeting and dictation artifacts into timeline card records without changing the capture source of truth
 
 ## Guardrails
 
@@ -33,12 +42,16 @@ card records. It is app-side code, not part of `Sources/TranscriptedCore/`.
 - Do not put timeline code in `Sources/TranscriptedCore/`; Core remains the meeting transcription library boundary.
 - Meeting and dictation Markdown remain the source of truth; timeline rows are projections and must tolerate missing, moved, or renamed artifacts.
 - Do not change meeting capture or dictation save behavior from this subsystem.
-- UI, analysis, cards, OCR, and LLM providers belong to later phases.
+- Keep screenshots, OCR text, app names, URLs, and window titles local unless a later user-facing preference explicitly enables a cloud provider.
+- Provider stubs must not make network calls by default.
+- Pure rules need fast tests before being wired into capture, storage, or UI.
+- UI, cards-facing OCR, and full LLM provider wiring belong to later phases.
 
 ## Verify
 
 ```bash
 python3 scripts/dev/check-build-source-lists.py
 bash build.sh --no-open
+bash run-tests.sh --filter TimelineAnalysis
 bash run-tests.sh
 ```

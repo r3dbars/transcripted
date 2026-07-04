@@ -269,6 +269,7 @@ APP_SOURCES=(
     "Sources/Support/CustomDictionaryPreferences.swift"
     "Sources/Support/SpeakerEmbedderPreferences.swift"
     "Sources/Support/DockVisibilityPreferences.swift"
+    "Sources/Support/TimelinePreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/QuitConfirmationPreferences.swift"
     "Sources/Support/AutoCallDetectionPreferences.swift"
@@ -278,7 +279,6 @@ APP_SOURCES=(
     "Sources/Support/CaptureLibraryMigrationPlanner.swift"
     "Sources/Support/LiveMeetingCodexPreferences.swift"
     "Sources/Support/LocalMeetingSummaryPreferences.swift"
-    "Sources/Support/TimelinePreferences.swift"
     "Sources/Support/SpeechModelBetaPreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"
@@ -429,6 +429,13 @@ APP_SOURCES=(
     "Sources/UI/Timeline/TimelineHomePresentation.swift"
     "Sources/UI/Settings/HomeSearchMatching.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
+    "Sources/Timeline/TimelineModels.swift"
+    "Sources/Timeline/TimelineCategoryStore.swift"
+    "Sources/Timeline/BatchPlanner.swift"
+    "Sources/Timeline/TimelineLLMProvider.swift"
+    "Sources/Timeline/ObservationBuilder.swift"
+    "Sources/Timeline/CardGenerator.swift"
+    "Sources/Timeline/AnalysisScheduler.swift"
 )
 
 # Fail early on a stale APP_SOURCES entry (renamed or deleted source) so the

@@ -28,6 +28,7 @@ Important entry points:
 - `Support/TranscriptionModelPreferences.swift` — persisted local model selection shared by dictation and meetings (`Parakeet`, `Whisper Large V3 Turbo`, `Whisper Large V3`, plus beta-gated `Nemotron Streaming`)
 - `Support/ActivationPolicyController.swift` — main-actor policy for combining the Dock toggle with recording-state safety so active capture stays force-quit-visible
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
+- `Timeline/BatchPlanner.swift` + `Timeline/CardGenerator.swift` — Dayflow-style timeline analysis rules, currently pure and disabled until timeline capture/UI wiring ships
 - `Capture/ContextCaptureEngine.swift` — configurable physical-key dictation handling, meeting trigger routing, and trigger error surfacing
 - `Timeline/TimelineCaptureJoiner.swift` — projects saved meeting and dictation artifacts into timeline card records without changing capture behavior
 - `UI/Overlay/DictationSessionController.swift` — dictation session orchestration
@@ -45,7 +46,7 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
-- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the app-owned timeline database, screenshot storage retention, and capture-library projection logic; capture-library artifacts remain the source of truth
+- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the app-owned timeline database, screenshot storage retention, analysis scheduling, provider seams, category rules, day-boundary math, and capture-library projection logic; capture-library artifacts remain the source of truth
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, and `Timeline/`
@@ -64,7 +65,7 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching meeting flow, imported-audio transcription, or meeting UI: `Sources/Meeting/CLAUDE.md`
 - touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
 - touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/CLAUDE.md`
-- touching timeline capture, local screenshot metadata, timeline pause/resume state, the timeline database, or screenshot retention: `Sources/Timeline/CLAUDE.md`
+- touching timeline capture, local screenshot metadata, timeline pause/resume state, the timeline database, screenshot retention, analysis, provider seams, or card rules: `Sources/Timeline/CLAUDE.md`
 - touching app-wide support utilities: `Sources/Support/CLAUDE.md`
 - touching timeline UI scaffolding: `Sources/UI/Timeline/CLAUDE.md`
 - touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/CLAUDE.md`

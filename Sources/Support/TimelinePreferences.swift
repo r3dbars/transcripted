@@ -6,6 +6,10 @@ enum TimelineProvider: String, CaseIterable, Equatable, Hashable, Sendable {
     case gemini
 
     static let defaultProvider: TimelineProvider = .localFoundation
+
+    var isCloudProvider: Bool {
+        self == .gemini
+    }
 }
 
 enum TimelinePreferences {
@@ -15,6 +19,7 @@ enum TimelinePreferences {
     static let storageCapBytesKey = "timelineStorageCapBytes"
     static let blockedBundleIDsKey = "timelineBlockedBundleIDs"
     static let onboardingCompletedKey = "timelineOnboardingCompleted"
+    static let cloudProviderConsentKey = "timelineCloudProviderConsent"
 
     static let defaultEnabled = false
     static let defaultOllamaEndpoint = "http://localhost:1234"
@@ -106,6 +111,15 @@ enum TimelinePreferences {
     static func setOnboardingCompleted(_ completed: Bool, userDefaults: UserDefaults = .standard) {
         userDefaults.set(completed, forKey: onboardingCompletedKey)
         postChange(for: onboardingCompletedKey)
+    }
+
+    static func hasCloudProviderConsent(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: cloudProviderConsentKey)
+    }
+
+    static func setCloudProviderConsent(_ consent: Bool, userDefaults: UserDefaults = .standard) {
+        userDefaults.set(consent, forKey: cloudProviderConsentKey)
+        postChange(for: cloudProviderConsentKey)
     }
 
     private static func postChange(for key: String) {
