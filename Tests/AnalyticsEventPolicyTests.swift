@@ -92,7 +92,6 @@ func testAnalyticsEventPolicy() {
         let meetingDryRun = AnalyticsEventPolicy.policy(forEvent: "onboarding_meeting_dry_run_clicked")
         let agentClicked = AnalyticsEventPolicy.policy(forEvent: "onboarding_agent_cta_clicked")
         let completed = AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")
-        let dismissed = AnalyticsEventPolicy.policy(forEvent: "onboarding_dismissed")
 
         assertEqual(shown?.allowedProperties.contains("meeting_recording_ready"), true, "onboarding shown should preserve meeting-readiness attribution")
         assertEqual(stepViewed?.allowedProperties.contains("flow_elapsed_bucket"), true, "step views should preserve coarse elapsed time")
@@ -104,7 +103,6 @@ func testAnalyticsEventPolicy() {
         assertEqual(agentClicked?.allowedProperties.contains("agent_cta"), true, "agent CTAs should preserve the action id")
         assertEqual(completed?.allowedProperties.contains("first_dictation_saved"), true, "completion should preserve whether first value happened")
         assertEqual(completed?.allowedProperties.contains("flow_elapsed_bucket"), true, "completion should preserve coarse time to finish")
-        assertEqual(dismissed?.allowedProperties.contains("step_index"), true, "dismissal should preserve where users dropped")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [

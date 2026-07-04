@@ -250,7 +250,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('onboarding_dismissed', 'onboarding_permission_cta_clicked', 'onboarding_permission_status_changed', 'onboarding_primary_cta_clicked', 'product_friction_observed', 'workflow_abandoned')
+  AND event IN ('onboarding_permission_cta_clicked', 'onboarding_permission_status_changed', 'onboarding_primary_cta_clicked', 'product_friction_observed', 'workflow_abandoned')
   {app_version_filter(app_version)}
 GROUP BY event, step_id, stage, reason_kind, permission_kind
 ORDER BY events DESC
