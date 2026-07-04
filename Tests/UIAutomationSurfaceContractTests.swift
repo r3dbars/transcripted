@@ -224,6 +224,8 @@ func testUIAutomationSurfaceContract() {
         for requiredSourceHook in [
             "title: \"Transcribe audio file\"",
             "actions.importAudioFile()",
+            "secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\"",
+            "trackSettingsAction(\"empty_import_audio\", page: .home)",
             "title: \"AI meeting summaries\"",
             "title: \"Live meeting sidecar\"",
             "trackSettingsToggle(\"local_ai_meeting_summaries\"",

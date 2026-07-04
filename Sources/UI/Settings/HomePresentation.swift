@@ -5,7 +5,7 @@ import Foundation
 /// Empty-state copy for the Home capture lists. Foundation-pure constants so the
 /// strings can be pinned by fast tests; `HomeView` reads them directly.
 enum HomeCaptureListCopy {
-    static let emptyMeetings = "No recent meetings. Record one or transcribe an audio file from General."
+    static let emptyMeetings = "No recent meetings. Record one or transcribe an existing audio file."
     static let emptyDictations = "No recent dictations."
     static let noMeetingMatches = "No meetings match your search. Older meetings load with Show more."
 }
