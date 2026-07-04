@@ -560,6 +560,11 @@ struct TranscriptedSettingsView: View {
                                 actionKind: .openMarkdown,
                                 surface: .homeCurrentActivity
                             )
+                            ActivationTelemetry.trackHabitLoopAction(
+                                actionKind: .openRecentMeeting,
+                                surface: .homeCurrentActivity,
+                                artifactKind: .meeting
+                            )
                             openOwnFile(
                                 candidateURLs: [transcriptURL],
                                 failureTitle: "Could not open transcript",
@@ -782,6 +787,12 @@ struct TranscriptedSettingsView: View {
                         surface: .homeRow,
                         artifactDate: entry.createdAt
                     )
+                    ActivationTelemetry.trackHabitLoopAction(
+                        actionKind: .reviewYesterday,
+                        surface: .homeRow,
+                        artifactKind: .dictation,
+                        artifactDate: entry.createdAt
+                    )
                     openOwnFile(
                         candidateURLs: [entry.url],
                         failureTitle: "Could not open dictation",
@@ -869,6 +880,12 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeeting(_ item: RecentMeetingItem) {
         trackSettingsAction("copy_meeting", page: .home)
+        ActivationTelemetry.trackHabitLoopAction(
+            actionKind: .whatDidIPromise,
+            surface: .homeRow,
+            artifactKind: .meeting,
+            artifactDate: item.date
+        )
         ActivationTelemetry.trackAgentPromptAction(
             promptKind: .meetingBundle,
             actionKind: .copied,
@@ -914,6 +931,12 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
         trackSettingsAction("copy_meeting_preview", page: .home)
+        ActivationTelemetry.trackHabitLoopAction(
+            actionKind: .whatDidIPromise,
+            surface: .homePreview,
+            artifactKind: .meeting,
+            artifactDate: preview.date
+        )
         let bundle = AgentConnectionGuide.portableMeetingBundle(
             title: preview.title,
             date: preview.date,
@@ -1005,6 +1028,12 @@ struct TranscriptedSettingsView: View {
 
         if item.summaryPreview != nil {
             trackSettingsAction("open_local_meeting_summary", page: .home)
+            ActivationTelemetry.trackHabitLoopAction(
+                actionKind: .reviewYesterday,
+                surface: .homeRow,
+                artifactKind: .meeting,
+                artifactDate: item.date
+            )
             openOwnFile(
                 candidateURLs: [item.transcriptURL],
                 failureTitle: "Could not open transcript",
@@ -1249,6 +1278,12 @@ struct TranscriptedSettingsView: View {
             surface: .homeRow,
             artifactDate: item.date
         )
+        ActivationTelemetry.trackHabitLoopAction(
+            actionKind: .openRecentMeeting,
+            surface: .homeRow,
+            artifactKind: .meeting,
+            artifactDate: item.date
+        )
         homeMeetingPreviewLoadTask?.cancel()
         homeMeetingPreviewLoadTask = Task { @MainActor in
             let readResult = await Self.readMeetingMarkdown(at: item.transcriptURL)
@@ -1342,6 +1377,12 @@ struct TranscriptedSettingsView: View {
                     artifactKind: .dictation,
                     actionKind: .openMarkdown,
                     surface: .homeMenu,
+                    artifactDate: entry.createdAt
+                )
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .reviewYesterday,
+                    surface: .homeMenu,
+                    artifactKind: .dictation,
                     artifactDate: entry.createdAt
                 )
                 openOwnFile(
@@ -1443,6 +1484,12 @@ struct TranscriptedSettingsView: View {
                     artifactKind: .meeting,
                     actionKind: .revealFolder,
                     surface: .homeMenu,
+                    artifactDate: item.date
+                )
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .openRecentMeeting,
+                    surface: .homeMenu,
+                    artifactKind: .meeting,
                     artifactDate: item.date
                 )
                 revealOwnFile(

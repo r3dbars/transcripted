@@ -33,9 +33,11 @@ ACTIVE_WORKFLOW_EVENTS = (
     "meeting_recording_started",
     "meeting_transcript_saved",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
+    "activation_habit_loop_actioned",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
     "activation_second_artifact_saved",
@@ -58,6 +60,7 @@ ACTIVATION_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "onboarding_agent_cta_clicked",
     "agent_capture_query_observed",
+    "activation_habit_loop_actioned",
     "activation_return_proxy_observed",
     "activation_second_artifact_saved",
     "workflow_abandoned",
@@ -222,14 +225,17 @@ def query_specs(days: int, app_version: str | None) -> list[QuerySpec]:
             family="100_wau",
             title="Weekly active workflow devices",
             description="Counts anonymous active devices by PostHog UTC week from workflow and first-value events.",
-            columns=("week", "active_devices", "workflow_events", "first_value_devices", "return_proxy_devices"),
+            columns=("week", "active_devices", "workflow_events", "first_value_devices", "second_artifact_devices", "agent_payoff_devices", "return_proxy_devices", "habit_loop_devices"),
             sql=f"""
 SELECT
   toStartOfWeek(timestamp) AS week,
   uniq(distinct_id) AS active_devices,
   count() AS workflow_events,
   uniqIf(distinct_id, event IN ('activation_first_artifact_saved', 'meeting_transcript_saved', 'onboarding_first_dictation_saved')) AS first_value_devices,
-  uniqIf(distinct_id, event = 'activation_return_proxy_observed') AS return_proxy_devices
+  uniqIf(distinct_id, event = 'activation_second_artifact_saved') AS second_artifact_devices,
+  uniqIf(distinct_id, event = 'agent_capture_query_observed') AS agent_payoff_devices,
+  uniqIf(distinct_id, event = 'activation_return_proxy_observed') AS return_proxy_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned') AS habit_loop_devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND {event_filter(ACTIVE_WORKFLOW_EVENTS)}
@@ -244,14 +250,17 @@ ORDER BY week ASC
             family="100_wau",
             title="Daily active workflow devices",
             description="Shows DAU, launches, workflow events, and first-value devices for trend cards.",
-            columns=("day", "active_devices", "launch_events", "workflow_events", "first_value_devices"),
+            columns=("day", "active_devices", "launch_events", "workflow_events", "first_value_devices", "second_artifact_devices", "agent_payoff_devices", "habit_loop_devices"),
             sql=f"""
 SELECT
   toDate(timestamp) AS day,
   uniq(distinct_id) AS active_devices,
   countIf(event = 'app_launched') AS launch_events,
   count() AS workflow_events,
-  uniqIf(distinct_id, event IN ('activation_first_artifact_saved', 'meeting_transcript_saved', 'onboarding_first_dictation_saved')) AS first_value_devices
+  uniqIf(distinct_id, event IN ('activation_first_artifact_saved', 'meeting_transcript_saved', 'onboarding_first_dictation_saved')) AS first_value_devices,
+  uniqIf(distinct_id, event = 'activation_second_artifact_saved') AS second_artifact_devices,
+  uniqIf(distinct_id, event = 'agent_capture_query_observed') AS agent_payoff_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned') AS habit_loop_devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND {event_filter(ACTIVE_WORKFLOW_EVENTS)}
@@ -297,6 +306,10 @@ LIMIT 20
                 "artifact_action_devices",
                 "agent_proxy_devices",
                 "true_agent_query_devices",
+                "second_artifact_devices",
+                "habit_loop_devices",
+                "next_day_return_devices",
+                "seven_day_return_devices",
                 "return_proxy_devices",
             ),
             sql=f"""
@@ -310,6 +323,10 @@ SELECT
   uniqIf(distinct_id, event = 'activation_artifact_action_clicked') AS artifact_action_devices,
   uniqIf(distinct_id, event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')) AS agent_proxy_devices,
   uniqIf(distinct_id, event = 'agent_capture_query_observed') AS true_agent_query_devices,
+  uniqIf(distinct_id, event = 'activation_second_artifact_saved') AS second_artifact_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned') AS habit_loop_devices,
+  uniqIf(distinct_id, event = 'activation_return_proxy_observed' AND properties['return_window_bucket'] = '18_36h') AS next_day_return_devices,
+  uniqIf(distinct_id, event = 'activation_return_proxy_observed' AND properties['return_window_bucket'] IN ('36_72h', '3_7d')) AS seven_day_return_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed') AS return_proxy_devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
@@ -419,6 +436,64 @@ WHERE timestamp >= now() - INTERVAL {days} DAY
 GROUP BY event, suppression_reason, cooldown_reason, missing_permission, backoff_kind
 ORDER BY events DESC
 LIMIT 80
+""",
+        ),
+        QuerySpec(
+            id="activation.habit_loop_summary",
+            family="activation",
+            title="Post-save habit loop summary",
+            description="Answers daily-return loop questions from aggregate first/second artifact, agent payoff, and return action events.",
+            columns=(
+                "first_artifact_devices",
+                "second_artifact_devices",
+                "agent_payoff_devices",
+                "next_day_return_devices",
+                "seven_day_return_devices",
+                "review_yesterday_devices",
+                "promise_review_devices",
+                "open_recent_meeting_devices",
+                "daily_digest_devices",
+            ),
+            sql=f"""
+SELECT
+  uniqIf(distinct_id, event = 'activation_first_artifact_saved') AS first_artifact_devices,
+  uniqIf(distinct_id, event = 'activation_second_artifact_saved') AS second_artifact_devices,
+  uniqIf(distinct_id, event = 'agent_capture_query_observed') AS agent_payoff_devices,
+  uniqIf(distinct_id, event = 'activation_return_proxy_observed' AND properties['return_window_bucket'] = '18_36h') AS next_day_return_devices,
+  uniqIf(distinct_id, event = 'activation_return_proxy_observed' AND properties['return_window_bucket'] IN ('36_72h', '3_7d')) AS seven_day_return_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'review_yesterday') AS review_yesterday_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'what_did_i_promise') AS promise_review_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'open_recent_meeting') AS open_recent_meeting_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] IN ('daily_digest_viewed', 'daily_digest_exported')) AS daily_digest_devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event IN ('activation_first_artifact_saved', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'activation_return_proxy_observed', 'activation_habit_loop_actioned')
+  {app_version_filter(app_version)}
+""",
+            notes=("Daily digest rows stay zero until a UI seam calls ActivationTelemetry.trackHabitLoopAction for viewed/exported.",),
+        ),
+        QuerySpec(
+            id="activation.habit_loop_actions",
+            family="activation",
+            title="Post-save habit loop actions",
+            description="Breaks review-yesterday, promise-review, recent-meeting, digest, and return-after-artifact actions by coarse buckets.",
+            columns=("action_kind", "artifact_kind", "return_window_bucket", "surface", "result", "events", "devices"),
+            sql=f"""
+SELECT
+  properties['action_kind'] AS action_kind,
+  properties['artifact_kind'] AS artifact_kind,
+  properties['return_window_bucket'] AS return_window_bucket,
+  properties['surface'] AS surface,
+  properties['result'] AS result,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event = 'activation_habit_loop_actioned'
+  {app_version_filter(app_version)}
+GROUP BY action_kind, artifact_kind, return_window_bucket, surface, result
+ORDER BY devices DESC, events DESC
+LIMIT 60
 """,
         ),
         QuerySpec(
