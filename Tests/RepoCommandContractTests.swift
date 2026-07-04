@@ -2197,6 +2197,28 @@ func testRepoCommandContract() {
             controllerContents.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
             "queued meeting jobs should reload the STT model selected when the audio was queued"
         )
+        let visibleWarmupBlock = sourceSlice(
+            controllerContents,
+            from: "let task = Task<Result<Void, Error>, Never> { [downloader] in",
+            to: "modelPreparationTask = task"
+        )
+        assertTrue(
+            visibleWarmupBlock.contains("TranscriptedConstants.withDetachedTimeout")
+                && visibleWarmupBlock.contains("TranscriptedConstants.modelLoadWaitBudget")
+                && visibleWarmupBlock.contains("downloader.ensureModelsReady()"),
+            "visible meeting model warmup should fail through the existing model-load budget instead of staying stuck in loadingModels"
+        )
+        let queuedRecoveryBlock = sourceSlice(
+            controllerContents,
+            from: "private func ensureModelsReadyForQueuedTranscription(_ job: QueuedTranscriptionJob) async -> Bool {",
+            to: "let ready = sttAdapter.isReady && diarization.isReady"
+        )
+        assertTrue(
+            queuedRecoveryBlock.contains("TranscriptedConstants.withDetachedTimeout")
+                && queuedRecoveryBlock.contains("TranscriptedConstants.modelLoadWaitBudget")
+                && queuedRecoveryBlock.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
+            "queued meeting model recovery should use the same bounded readiness wait as visible first-run warmup"
+        )
         assertTrue(
             controllerContents.contains("preparingQueuedTranscriptionJob")
                 && controllerContents.contains("isPreparingQueuedTranscriptionStart")
