@@ -449,10 +449,7 @@ struct DictationDayPage: Codable {
 
 // MARK: - Summary-Fact Rollups (cross-meeting tools)
 
-/// Open/all filter for `list_action_items`.
-/// Current saved meeting summaries do not carry done/due metadata; the tool
-/// handler rejects "done" with an explicit error instead of returning a
-/// silent empty set.
+/// Open/done/all filter for `list_action_items`.
 enum ActionItemStatusFilter: String {
     case open
     case done

@@ -8,10 +8,14 @@ public struct ParsedMeetingSummary: Equatable {
         /// to nil so rollups don't treat them as a person.
         public let owner: String?
         public let text: String
+        public let status: String?
+        public let due: String?
 
-        public init(owner: String?, text: String) {
+        public init(owner: String?, text: String, status: String? = nil, due: String? = nil) {
             self.owner = owner
             self.text = text
+            self.status = status
+            self.due = due
         }
     }
 
@@ -143,20 +147,60 @@ public enum CaptureSummaryParser {
     ]
 
     private static func actionItem(from text: String) -> ParsedMeetingSummary.ActionItem {
+        let (stripped, status, due) = extractTrailingMarkers(from: text)
         // The summarizer prompts action bullets as "<Owner if named: follow-up>".
         // Treat a short leading segment before the first ": " as the owner only
         // when it reads like a name/team — a Title-Case noun phrase. Sentence
         // fragments ("Discuss the new API: ...") carry lowercase function words,
         // so we keep them as plain text instead of shredding a fake owner out.
-        if let colon = text.range(of: ": ") {
-            let owner = String(text[..<colon.lowerBound]).trimmingCharacters(in: .whitespaces)
-            let rest = String(text[colon.upperBound...]).trimmingCharacters(in: .whitespaces)
+        if let colon = stripped.range(of: ": ") {
+            let owner = String(stripped[..<colon.lowerBound]).trimmingCharacters(in: .whitespaces)
+            let rest = String(stripped[colon.upperBound...]).trimmingCharacters(in: .whitespaces)
             if !rest.isEmpty, looksLikeOwner(owner) {
                 let normalized = placeholderOwners.contains(owner.lowercased()) ? nil : owner
-                return ParsedMeetingSummary.ActionItem(owner: normalized, text: rest)
+                return ParsedMeetingSummary.ActionItem(owner: normalized, text: rest, status: status, due: due)
             }
         }
-        return ParsedMeetingSummary.ActionItem(owner: nil, text: text)
+        return ParsedMeetingSummary.ActionItem(owner: nil, text: stripped, status: status, due: due)
+    }
+
+    private static let bareStatusTokens: Set<String> = [
+        "open", "done", "complete", "completed", "resolved", "closed",
+        "cancelled", "canceled",
+    ]
+
+    private static func extractTrailingMarkers(
+        from raw: String
+    ) -> (text: String, status: String?, due: String?) {
+        var text = raw.trimmingCharacters(in: .whitespaces)
+        var status: String?
+        var due: String?
+
+        for _ in 0..<2 {
+            guard text.hasSuffix(")"), let open = text.lastIndex(of: "(") else { break }
+            let inner = String(text[text.index(after: open)..<text.index(before: text.endIndex)])
+                .trimmingCharacters(in: .whitespaces)
+            let lowered = inner.lowercased()
+
+            let marker: (String) -> String? = { prefix in
+                guard lowered.hasPrefix(prefix) else { return nil }
+                let value = String(inner.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+                return value.isEmpty ? nil : value
+            }
+
+            if status == nil, let value = marker("status:") {
+                status = value.lowercased()
+            } else if due == nil, let value = marker("due:") {
+                due = value
+            } else if status == nil, bareStatusTokens.contains(lowered) {
+                status = lowered
+            } else {
+                break
+            }
+            text = String(text[..<open]).trimmingCharacters(in: .whitespaces)
+        }
+
+        return (text, status, due)
     }
 
     private static func looksLikeOwner(_ candidate: String) -> Bool {
