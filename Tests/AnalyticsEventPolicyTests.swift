@@ -638,6 +638,7 @@ func testAnalyticsEventPolicy() {
         let updateAction = AnalyticsEventPolicy.policy(forEvent: "update_action_clicked")
         let updateSetting = AnalyticsEventPolicy.policy(forEvent: "update_setting_changed")
         let updateCheckFinished = AnalyticsEventPolicy.policy(forEvent: "update_check_finished")
+        let liveTranscriptDrawer = AnalyticsEventPolicy.policy(forEvent: "meeting_live_transcript_drawer_actioned")
 
         assertEqual(menuOpened?.allowedProperties.contains("paste_available"), true, "menu opens should preserve whether paste has value")
         assertEqual(menuAction?.allowedProperties.contains("action_id"), true, "menu clicks should preserve the clicked action")
@@ -654,10 +655,12 @@ func testAnalyticsEventPolicy() {
         assertEqual(updateCheckFinished?.allowedProperties.contains("result"), true, "update checks should preserve the coarse outcome")
         assertEqual(updateCheckFinished?.allowedProperties.contains("failure_kind"), true, "update failures should preserve the normalized failure kind")
         assertEqual(updateCheckFinished?.allowedProperties.contains("failure_code"), true, "update failures should preserve coarse error-code buckets")
+        assertEqual(liveTranscriptDrawer?.allowedProperties ?? Set<String>(), ["action_kind", "result", "surface", "trigger"], "live transcript drawer adoption should stay enum-only")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_id": "start_dictation",
+                "action_kind": "open",
                 "automatic_downloads_enabled": "true",
                 "failure_code": "sparkle_2003",
                 "failure_kind": "feed_unreachable",
@@ -667,10 +670,13 @@ func testAnalyticsEventPolicy() {
                 "source": "menu_bar",
                 "state": "ready_to_install",
                 "surface": "settings_about",
+                "trigger": "overlay_button",
+                "transcript_text": "private live transcript",
             ],
-            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_code", "failure_kind", "feature_area", "page_id", "setting_id", "source", "state", "surface"]
+            allowedKeys: ["action_id", "action_kind", "automatic_downloads_enabled", "failure_code", "failure_kind", "feature_area", "page_id", "setting_id", "source", "state", "surface", "trigger"]
         )
         assertEqual(sanitized["action_id"], "start_dictation", "action ids should survive sanitization")
+        assertEqual(sanitized["action_kind"], "open", "drawer actions should survive as coarse enums")
         assertEqual(sanitized["automatic_downloads_enabled"], "true", "automatic update download state should survive sanitization")
         assertEqual(sanitized["failure_code"], "sparkle_2003", "coarse update failure codes should survive sanitization")
         assertEqual(sanitized["failure_kind"], "feed_unreachable", "update failure kind should survive sanitization")
@@ -680,6 +686,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["source"], "menu_bar", "source enums should survive sanitization")
         assertEqual(sanitized["state"], "ready_to_install", "update state should survive sanitization")
         assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
+        assertEqual(sanitized["trigger"], "overlay_button", "drawer triggers should survive as coarse enums")
+        assertNil(sanitized["transcript_text"], "live transcript text must not be sent")
     }
 
     runSuite("FeatureDiscoveryTelemetry tracks each high-leverage feature once") {

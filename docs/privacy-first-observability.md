@@ -163,6 +163,7 @@ allowlist.
 - `meeting_recording_cancelled`
 - `meeting_file_imported`
 - `meeting_file_import_failed`
+- `meeting_live_transcript_drawer_actioned`
 - `meeting_transcript_saved`
 - `local_meeting_summary_started`
 - `local_meeting_summary_completed`
@@ -198,6 +199,8 @@ allowlist.
   `surface`, `artifact_age_bucket`, `result`, `trigger`,
   `word_count_bucket`, and `duration_bucket`; local-summary runs reuse this
   shape for the saved-meeting -> summary -> return loop
+- live transcript drawer analytics limited to `action_kind`, `surface`,
+  `trigger`, and `result`; never live transcript text or meeting context
 - local meeting summary analytics limited to `provider`, `summary_action`,
   `setup_ready`, `runtime`, `queue_depth_bucket`, `chunk_count_bucket`,
   `duration_bucket`, `failure_kind`, and `stage`
