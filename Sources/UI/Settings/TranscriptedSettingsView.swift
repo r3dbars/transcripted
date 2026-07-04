@@ -555,15 +555,16 @@ struct TranscriptedSettingsView: View {
                     action: activity.transcriptURL.map { transcriptURL in
                         {
                             trackSettingsAction("open_current_activity", page: .home)
-                            ActivationTelemetry.trackArtifactAction(
-                                artifactKind: .meeting,
-                                actionKind: .openMarkdown,
-                                surface: .homeCurrentActivity
-                            )
                             let didOpen = openOwnFile(
                                 candidateURLs: [transcriptURL],
                                 failureTitle: "Could not open transcript",
                                 failureMessage: "Transcripted couldn't find this meeting's transcript on disk yet. If the recording is still finishing, try again in a moment."
+                            )
+                            ActivationTelemetry.trackArtifactAction(
+                                artifactKind: .meeting,
+                                actionKind: .openMarkdown,
+                                surface: .homeCurrentActivity,
+                                result: didOpen ? .success : .failed
                             )
                             ActivationTelemetry.trackHabitLoopAction(
                                 actionKind: .openRecentMeeting,
@@ -789,16 +790,17 @@ struct TranscriptedSettingsView: View {
                 isCopied: homeCopiedRowID == entry.id,
                 onOpen: {
                     trackSettingsAction("open_recent_dictation", page: navigation.selectedPage)
-                    ActivationTelemetry.trackArtifactAction(
-                        artifactKind: .dictation,
-                        actionKind: .openMarkdown,
-                        surface: .homeRow,
-                        artifactDate: entry.createdAt
-                    )
                     let didOpen = openOwnFile(
                         candidateURLs: [entry.url],
                         failureTitle: "Could not open dictation",
                         failureMessage: SettingsArtifactMessage.dictationFileNotFound
+                    )
+                    ActivationTelemetry.trackArtifactAction(
+                        artifactKind: .dictation,
+                        actionKind: .openMarkdown,
+                        surface: .homeRow,
+                        artifactDate: entry.createdAt,
+                        result: didOpen ? .success : .failed
                     )
                     ActivationTelemetry.trackHabitLoopAction(
                         actionKind: .reviewYesterday,
@@ -889,19 +891,6 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeeting(_ item: RecentMeetingItem) {
         trackSettingsAction("copy_meeting", page: .home)
-        ActivationTelemetry.trackHabitLoopAction(
-            actionKind: .whatDidIPromise,
-            surface: .homeRow,
-            artifactKind: .meeting,
-            artifactDate: item.date
-        )
-        ActivationTelemetry.trackAgentPromptAction(
-            promptKind: .meetingBundle,
-            actionKind: .copied,
-            agentTarget: .localAgent,
-            surface: .homeRow,
-            artifactKind: .meeting
-        )
         // Resolve the transcript first so a row whose path drifted (restyle/
         // rename after scanning) still copies, and a genuinely missing file
         // surfaces an error instead of silently no-op'ing on the empty clipboard.
@@ -987,12 +976,6 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
         trackSettingsAction("copy_meeting_preview", page: .home)
-        ActivationTelemetry.trackHabitLoopAction(
-            actionKind: .whatDidIPromise,
-            surface: .homePreview,
-            artifactKind: .meeting,
-            artifactDate: preview.date
-        )
         let bundle = AgentConnectionGuide.portableMeetingBundle(
             title: preview.title,
             date: preview.date,
@@ -1396,18 +1379,6 @@ struct TranscriptedSettingsView: View {
 
     private func presentHomeMeetingPreview(_ item: RecentMeetingItem) {
         trackSettingsAction("preview_recent_meeting", page: .home)
-        ActivationTelemetry.trackArtifactAction(
-            artifactKind: .meeting,
-            actionKind: .preview,
-            surface: .homeRow,
-            artifactDate: item.date
-        )
-        ActivationTelemetry.trackHabitLoopAction(
-            actionKind: .openRecentMeeting,
-            surface: .homeRow,
-            artifactKind: .meeting,
-            artifactDate: item.date
-        )
         homeMeetingPreviewLoadTask?.cancel()
         homeMeetingPreviewLoadTask = Task { @MainActor in
             let readResult = await Self.readMeetingMarkdown(at: item.transcriptURL)
@@ -1423,6 +1394,13 @@ struct TranscriptedSettingsView: View {
                         isEnabled: localMeetingSummariesEnabled
                     )
                 )
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .meeting,
+                    actionKind: .preview,
+                    surface: .homeRow,
+                    artifactDate: item.date,
+                    result: .success
+                )
                 ActivationTelemetry.trackHabitLoopAction(
                     actionKind: .openRecentMeeting,
                     surface: .homeRow,
@@ -1434,6 +1412,13 @@ struct TranscriptedSettingsView: View {
                     item: item,
                     markdown: "",
                     readError: message
+                )
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .meeting,
+                    actionKind: .preview,
+                    surface: .homeRow,
+                    artifactDate: item.date,
+                    result: .failed
                 )
                 ActivationTelemetry.trackHabitLoopAction(
                     actionKind: .openRecentMeeting,
@@ -1510,16 +1495,17 @@ struct TranscriptedSettingsView: View {
         [
             HomeRowMenuItem(title: "Open Markdown", symbolName: "doc.text") {
                 trackSettingsAction("open_recent_dictation_file", page: .home)
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .dictation,
-                    actionKind: .openMarkdown,
-                    surface: .homeMenu,
-                    artifactDate: entry.createdAt
-                )
                 let didOpen = openOwnFile(
                     candidateURLs: [entry.url],
                     failureTitle: "Could not open dictation",
                     failureMessage: SettingsArtifactMessage.dictationFileNotFound
+                )
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .dictation,
+                    actionKind: .openMarkdown,
+                    surface: .homeMenu,
+                    artifactDate: entry.createdAt,
+                    result: didOpen ? .success : .failed
                 )
                 ActivationTelemetry.trackHabitLoopAction(
                     actionKind: .reviewYesterday,
@@ -1535,16 +1521,17 @@ struct TranscriptedSettingsView: View {
             },
             HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder") {
                 trackSettingsAction("reveal_dictation_in_finder", page: .home)
+                let didReveal = revealOwnFile(
+                    candidateURLs: [entry.url],
+                    failureTitle: "Could not show dictation",
+                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
+                )
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .dictation,
                     actionKind: .revealFolder,
                     surface: .homeMenu,
-                    artifactDate: entry.createdAt
-                )
-                revealOwnFile(
-                    candidateURLs: [entry.url],
-                    failureTitle: "Could not show dictation",
-                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
+                    artifactDate: entry.createdAt,
+                    result: didReveal ? .success : .failed
                 )
             },
             HomeRowMenuItem(title: "Delete dictation", symbolName: "trash", isDestructive: true) {
@@ -1618,16 +1605,17 @@ struct TranscriptedSettingsView: View {
             },
             HomeRowMenuItem(title: "Show transcript in Finder", symbolName: "doc.text") {
                 trackSettingsAction("reveal_meeting_in_finder", page: .home)
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .meeting,
-                    actionKind: .revealFolder,
-                    surface: .homeMenu,
-                    artifactDate: item.date
-                )
                 let didReveal = revealOwnFile(
                     candidateURLs: HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
                     failureTitle: "Could not show transcript",
                     failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
+                )
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .meeting,
+                    actionKind: .revealFolder,
+                    surface: .homeMenu,
+                    artifactDate: item.date,
+                    result: didReveal ? .success : .failed
                 )
                 ActivationTelemetry.trackHabitLoopAction(
                     actionKind: .openRecentMeeting,

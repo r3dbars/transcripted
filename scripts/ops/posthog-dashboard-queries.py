@@ -468,16 +468,19 @@ SELECT
   uniqIf(distinct_id, event = 'agent_capture_query_observed') AS agent_payoff_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed' AND properties['return_window_bucket'] = '18_36h') AS next_day_return_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed' AND properties['return_window_bucket'] IN ('36_72h', '3_7d')) AS seven_day_return_devices,
-  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'review_yesterday') AS review_yesterday_devices,
-  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'what_did_i_promise') AS promise_review_devices,
-  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'open_recent_meeting') AS open_recent_meeting_devices,
-  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] IN ('daily_digest_viewed', 'daily_digest_exported')) AS daily_digest_devices
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'review_yesterday' AND properties['result'] IN ('success', 'fallback')) AS review_yesterday_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'what_did_i_promise' AND properties['result'] IN ('success', 'fallback')) AS promise_review_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'open_recent_meeting' AND properties['result'] IN ('success', 'fallback')) AS open_recent_meeting_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] IN ('daily_digest_viewed', 'daily_digest_exported') AND properties['result'] IN ('success', 'fallback')) AS daily_digest_devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND event IN ('activation_first_artifact_saved', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'activation_return_proxy_observed', 'activation_habit_loop_actioned')
   {app_version_filter(app_version)}
 """,
-            notes=("Daily digest rows stay zero until a UI seam calls ActivationTelemetry.trackHabitLoopAction for viewed/exported.",),
+            notes=(
+                "Daily digest rows stay zero until a UI seam calls ActivationTelemetry.trackHabitLoopAction for viewed/exported.",
+                "The summary counts only success/fallback habit-loop outcomes; failed attempts remain visible in activation.habit_loop_actions.",
+            ),
         ),
         QuerySpec(
             id="activation.habit_loop_actions",
@@ -1215,6 +1218,13 @@ def run_self_test() -> int:
     for query_id in required:
         if query_id not in rendered:
             errors.append(f"fixture render missing {query_id}")
+    habit_summary = next((spec for spec in specs if spec.id == "activation.habit_loop_summary"), None)
+    if habit_summary and "properties['result'] IN ('success', 'fallback')" not in habit_summary.sql:
+        errors.append("habit-loop summary must exclude failed outcomes from success shortcut counts")
+    habit_actions = next((query for query in payload.get("queries", []) if query.get("id") == "activation.habit_loop_actions"), None)
+    action_rows = habit_actions.get("rows", []) if isinstance(habit_actions, dict) else []
+    if not any(row.get("result") == "failed" for row in action_rows):
+        errors.append("fixture must include a failed habit-loop action row so result breakdown stays exercised")
     forbidden_output = ("transcript_text", "audio_path", "meeting_title", "raw_url", "email", "token")
     lowered = rendered.lower()
     leaked = [fragment for fragment in forbidden_output if fragment in lowered]

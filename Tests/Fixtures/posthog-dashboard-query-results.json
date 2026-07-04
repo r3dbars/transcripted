@@ -117,6 +117,7 @@
       "id": "activation.habit_loop_actions",
       "rows": [
         {"action_kind": "open_recent_meeting", "artifact_kind": "meeting", "return_window_bucket": "18_36h", "surface": "home_row", "result": "success", "events": 7, "devices": 5},
+        {"action_kind": "open_recent_meeting", "artifact_kind": "meeting", "return_window_bucket": "18_36h", "surface": "home_row", "result": "failed", "events": 2, "devices": 2},
         {"action_kind": "review_yesterday", "artifact_kind": "dictation", "return_window_bucket": "3_7d", "surface": "home_menu", "result": "success", "events": 4, "devices": 3}
       ]
     },
