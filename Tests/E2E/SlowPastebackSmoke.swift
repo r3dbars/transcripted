@@ -15,37 +15,35 @@ struct SlowPastebackSmoke {
         let scenarios = [
             SmokeScenario(
                 id: "production-950ms-slow-target",
-                title: "Production fallback keeps fresh dictation for a 950ms Cmd+V reader",
+                title: "Unconfirmed 950ms target keeps fresh dictation copied for manual recovery",
                 readDelay: .milliseconds(950),
                 restoreDelay: .milliseconds(120),
                 fallbackDelay: .nanoseconds(TranscriptedConstants.clipboardRestoreFallbackDelay),
-                expectation: .freshInserted,
-                probeAutoEnter: true
+                expectation: .unconfirmedFreshCopied
             ),
             SmokeScenario(
                 id: "production-2300ms-near-limit",
-                title: "Production fallback keeps fresh dictation near the 2.5s boundary",
+                title: "Unconfirmed target near the old fallback limit keeps fresh dictation copied",
                 readDelay: .milliseconds(2_300),
                 restoreDelay: .milliseconds(120),
                 fallbackDelay: .nanoseconds(TranscriptedConstants.clipboardRestoreFallbackDelay),
-                expectation: .freshInserted,
-                probeAutoEnter: true
+                expectation: .unconfirmedFreshCopied
             ),
             SmokeScenario(
-                id: "old-900ms-control-detects-stale",
-                title: "Old 900ms fallback control detects stale clipboard insertion",
+                id: "old-900ms-control-keeps-fresh-copied",
+                title: "Old 900ms fallback control no longer restores away unconfirmed dictation",
                 readDelay: .milliseconds(950),
                 restoreDelay: .milliseconds(120),
                 fallbackDelay: .milliseconds(900),
-                expectation: .staleDetected
+                expectation: .unconfirmedFreshCopied
             ),
             SmokeScenario(
-                id: "beyond-production-fallback-detects-stale",
-                title: "Reader beyond the production fallback is detected as stale",
+                id: "beyond-production-fallback-keeps-fresh-copied",
+                title: "Reader beyond the old production fallback keeps fresh dictation copied",
                 readDelay: .milliseconds(2_700),
                 restoreDelay: .milliseconds(120),
                 fallbackDelay: .nanoseconds(TranscriptedConstants.clipboardRestoreFallbackDelay),
-                expectation: .staleDetected
+                expectation: .unconfirmedFreshCopied
             ),
             SmokeScenario(
                 id: "dispatcher-failure-copies-fresh",
@@ -59,7 +57,7 @@ struct SlowPastebackSmoke {
             SmokeScenario(
                 id: "user-copy-restore-safety",
                 title: "Clipboard restore does not overwrite a user copy after pasteback",
-                readDelay: .milliseconds(300),
+                readDelay: .milliseconds(0),
                 restoreDelay: .milliseconds(120),
                 fallbackDelay: .milliseconds(800),
                 expectation: .userCopyPreserved,
@@ -112,6 +110,8 @@ struct SlowPastebackSmoke {
 
         let startedAt = Date()
         var targetReadTask: Task<String?, Never>?
+        var immediateTargetRead: String?
+        var pasteConfirmed = false
         var userCopyTask: Task<Void, Never>?
         var autoEnterTask: Task<TimeInterval, Never>?
 
@@ -123,10 +123,15 @@ struct SlowPastebackSmoke {
             pasteDispatcher: {
                 if scenario.dispatcherSucceeds {
                     if let readDelay = scenario.readDelay {
-                        targetReadTask = Task {
-                            try? await Task.sleep(nanoseconds: readDelay.nanoseconds)
-                            return await MainActor.run {
-                                pasteboard.string(forType: .string)
+                        if readDelay.nanoseconds == 0 {
+                            immediateTargetRead = pasteboard.string(forType: .string)
+                            pasteConfirmed = immediateTargetRead == freshDictation
+                        } else {
+                            targetReadTask = Task {
+                                try? await Task.sleep(nanoseconds: readDelay.nanoseconds)
+                                return await MainActor.run {
+                                    pasteboard.string(forType: .string)
+                                }
                             }
                         }
                     }
@@ -151,11 +156,17 @@ struct SlowPastebackSmoke {
                 }
                 return scenario.dispatcherSucceeds
             },
+            pasteConfirmed: { pasteConfirmed },
             restoreDelay: scenario.restoreDelay.nanoseconds,
             fallbackRestoreDelay: scenario.fallbackDelay.nanoseconds
         )
 
-        let inserted = await targetReadTask?.value
+        let inserted: String?
+        if let immediateTargetRead {
+            inserted = immediateTargetRead
+        } else {
+            inserted = await targetReadTask?.value
+        }
         await userCopyTask?.value
         let autoEnterReadyAt = await autoEnterTask?.value
         await paster.waitForPendingClipboardRestore()
@@ -179,7 +190,7 @@ struct SlowPastebackSmoke {
         let originalClipboard = "synthetic original clipboard \(UUID().uuidString)"
         let firstDictation = "synthetic first dictation \(UUID().uuidString)"
         let retryDictation = "synthetic retry dictation \(UUID().uuidString)"
-        let readDelay = SmokeDelay.milliseconds(300)
+        let readDelay = SmokeDelay.milliseconds(0)
         let retryFallbackDelay = SmokeDelay.milliseconds(800)
 
         pasteboard.clearContents()
@@ -190,7 +201,11 @@ struct SlowPastebackSmoke {
             pasteboard: pasteboard,
             accessibilityTrusted: { true },
             requestAccessibilityTrust: {},
-            pasteDispatcher: { true },
+            pasteDispatcher: {
+                _ = pasteboard.string(forType: .string)
+                return true
+            },
+            pasteConfirmed: { true },
             restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
             fallbackRestoreDelay: SmokeDelay.milliseconds(1_000).nanoseconds
         )
@@ -198,6 +213,8 @@ struct SlowPastebackSmoke {
 
         let retryStartedAt = Date()
         var retryReadTask: Task<String?, Never>?
+        var immediateRetryRead: String?
+        var retryPasteConfirmed = false
         var autoEnterTask: Task<TimeInterval, Never>?
         let retryOutcome = paster.paste(
             retryDictation,
@@ -205,10 +222,15 @@ struct SlowPastebackSmoke {
             accessibilityTrusted: { true },
             requestAccessibilityTrust: {},
             pasteDispatcher: {
-                retryReadTask = Task {
-                    try? await Task.sleep(nanoseconds: readDelay.nanoseconds)
-                    return await MainActor.run {
-                        pasteboard.string(forType: .string)
+                if readDelay.nanoseconds == 0 {
+                    immediateRetryRead = pasteboard.string(forType: .string)
+                    retryPasteConfirmed = immediateRetryRead == retryDictation
+                } else {
+                    retryReadTask = Task {
+                        try? await Task.sleep(nanoseconds: readDelay.nanoseconds)
+                        return await MainActor.run {
+                            pasteboard.string(forType: .string)
+                        }
                     }
                 }
                 autoEnterTask = Task {
@@ -220,11 +242,17 @@ struct SlowPastebackSmoke {
                 }
                 return true
             },
+            pasteConfirmed: { retryPasteConfirmed },
             restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
             fallbackRestoreDelay: retryFallbackDelay.nanoseconds
         )
 
-        let inserted = await retryReadTask?.value
+        let inserted: String?
+        if let immediateRetryRead {
+            inserted = immediateRetryRead
+        } else {
+            inserted = await retryReadTask?.value
+        }
         let autoEnterReadyAt = await autoEnterTask?.value
         await paster.waitForPendingClipboardRestore()
         let finalClipboard = pasteboard.string(forType: .string)
@@ -286,7 +314,11 @@ struct SlowPastebackSmoke {
             pasteboard: pasteboard,
             accessibilityTrusted: { true },
             requestAccessibilityTrust: {},
-            pasteDispatcher: { true },
+            pasteDispatcher: {
+                _ = pasteboard.string(forType: .string)
+                return true
+            },
+            pasteConfirmed: { true },
             restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
             fallbackRestoreDelay: fallbackDelay.nanoseconds
         )
@@ -306,7 +338,7 @@ struct SlowPastebackSmoke {
         if waitMS > 100 {
             failures.append("cancelled restore still waited \(waitMS)ms")
         }
-        if finalClipboard != freshDictation {
+        if finalClipboard != originalClipboard {
             failures.append("cancelled restore left \(category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: nil))")
         }
 
@@ -320,7 +352,7 @@ struct SlowPastebackSmoke {
             finalClipboardCategory: category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: nil),
             autoEnterReadyMS: nil,
             detail: failures.isEmpty
-                ? "Cancellation clears pending restore work and prevents a delayed stale restore"
+                ? "Cancellation restores the user's original clipboard immediately and clears delayed restore work"
                 : failures.joined(separator: "; ")
         )
     }
@@ -430,6 +462,7 @@ private struct SmokeScenario {
         case freshInserted
         case staleDetected
         case freshCopied
+        case unconfirmedFreshCopied
         case userCopyPreserved
     }
 
@@ -481,6 +514,16 @@ private struct SmokeScenario {
             }
             if finalClipboard != freshDictation {
                 failures.append("copied fallback left \(category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: userCopy))")
+            }
+        case .unconfirmedFreshCopied:
+            if outcome != .copied("Transcripted tried to paste, but could not confirm the target received it. The text stays copied.", reason: .pasteNotConfirmed) {
+                failures.append("paste outcome was \(outcome.diagnosticName)")
+            }
+            if inserted != freshDictation {
+                failures.append("target inserted \(category(for: inserted, original: originalClipboard, fresh: freshDictation, userCopy: userCopy))")
+            }
+            if finalClipboard != freshDictation {
+                failures.append("unconfirmed paste left \(category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: userCopy))")
             }
         case .userCopyPreserved:
             if outcome != .pasted {
