@@ -1046,6 +1046,30 @@ struct TranscriptedSettingsView: View {
             )
             return
         }
+        // The recorded transcript URL can drift after scanning (restyle rename,
+        // preview rename) the same way copy/open/re-transcribe do, so resolve it
+        // through OwnFileResolver before handing it to the summarizer — otherwise
+        // a moved/renamed file surfaces a raw read error instead of the same
+        // friendly failure those other actions give.
+        guard let resolvedTranscriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [transcriptURL]) else {
+            trackLocalSummaryAbandoned(
+                reason: .unavailable,
+                stage: "start",
+                priorReadyState: selectedLocalSummaryProviderIsReady ? "ready" : "not_ready"
+            )
+            presentHomeActionFailure(
+                title: "Could not summarize meeting",
+                message: SettingsArtifactMessage.meetingTranscriptNotFound,
+                retry: {
+                    generateLocalSummary(
+                        transcriptURL: transcriptURL,
+                        title: title,
+                        hasExistingSummary: hasExistingSummary
+                    )
+                }
+            )
+            return
+        }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
         let provider = localMeetingSummaryProvider
         let summaryAction = hasExistingSummary ? "regenerate" : "generate"
@@ -1077,12 +1101,12 @@ struct TranscriptedSettingsView: View {
             switch provider {
             case .gemmaMLX:
                 return try await LocalMeetingSummarizer().summarize(
-                    transcriptURL: transcriptURL,
+                    transcriptURL: resolvedTranscriptURL,
                     title: title
                 )
             case .appleFoundation:
                 return try await AppleFoundationMeetingSummarizer().summarize(
-                    transcriptURL: transcriptURL,
+                    transcriptURL: resolvedTranscriptURL,
                     title: title
                 )
             }
