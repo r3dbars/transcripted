@@ -120,6 +120,27 @@ func testFirstRunExperience() {
         )
     }
 
+    runSuite("FirstRunExperience.onboardingPermissions — meetings-first setup does not hard-block on System Audio") {
+        assertTrue(
+            FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: true),
+            "meetings-first onboarding should let users continue after Microphone so System Audio can be explained in context"
+        )
+        assertFalse(
+            FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: false),
+            "meetings-first onboarding still needs Microphone before call detection or recording can work"
+        )
+        assertEqual(
+            FirstRunExperience.onboardingRequiredPermissions(completionPath: .meetings),
+            [.microphone],
+            "meetings-first onboarding should not trap users on System Audio before showing the meeting value path"
+        )
+        assertEqual(
+            FirstRunExperience.onboardingRequiredPermissions(completionPath: .dictation),
+            [.microphone, .accessibility],
+            "dictation onboarding should still require paste-back readiness"
+        )
+    }
+
     runSuite("FirstRunExperience.onboardingCompletionAnalyticsProperties — keeps completion payload coarse") {
         let properties = FirstRunExperience.onboardingCompletionAnalyticsProperties(
             completionPath: .meetings,
