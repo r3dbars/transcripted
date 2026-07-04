@@ -310,6 +310,12 @@ func testRepoCommandContract() {
             buildDepsScript.contains("The SPM-path archive is contaminated with TranscriptedCore objects"),
             "build-deps.sh should fail with an actionable message when libExternalDeps.a contains Core symbols"
         )
+        assertTrue(
+            buildDepsScript.contains("assert_mlx_swift_lm_revision")
+                && buildDepsScript.contains("mlx-swift-lm revision mismatch")
+                && buildDepsScript.contains("\"$MLX_SWIFT_LM_REVISION\"*"),
+            "build-deps.sh should verify the resolved mlx-swift-lm checkout still matches the pinned revision"
+        )
     }
 
     runSuite("Repo command contract - fast test runner generation is per-process") {

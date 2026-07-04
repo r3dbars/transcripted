@@ -63,7 +63,7 @@ enum WorkflowRecoveryTelemetry {
             "workflow_kind": workflowKind,
             "failure_kind": failureKind,
             "retry_source": retrySource,
-            "attempt_bucket": AnalyticsReporter.countBucket(attempt),
+            "recovery_attempt_bucket": AnalyticsReporter.countBucket(attempt),
             "surface": surface,
             "artifact_retained": artifactRetained ? "true" : "false",
         ]

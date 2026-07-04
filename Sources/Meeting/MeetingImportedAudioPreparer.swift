@@ -447,7 +447,11 @@ enum MeetingImportedAudioPreparer {
         let readHandle = try FileHandle(forReadingFrom: sourceURL)
         defer { try? readHandle.close() }
 
-        guard fileManager.createFile(atPath: destinationURL.path, contents: nil) else {
+        guard fileManager.createFile(
+            atPath: destinationURL.path,
+            contents: nil,
+            attributes: [.posixPermissions: 0o600]
+        ) else {
             throw MeetingImportedAudioPreparationError.copyFailed
         }
 
