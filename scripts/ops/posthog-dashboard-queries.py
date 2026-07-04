@@ -119,6 +119,10 @@ RETRY_RECOVERY_EVENTS = (
     "meeting_transcript_skipped",
     "meeting_file_import_failed",
     "meeting_saved_audio_retranscription_requested",
+    "local_meeting_summary_started",
+    "local_meeting_summary_completed",
+    "local_meeting_summary_failed",
+    "workflow_abandoned",
     "workflow_recovery_attempted",
     "workflow_recovery_finished",
 )
@@ -129,7 +133,6 @@ ONBOARDING_FRICTION_EVENTS = (
     "onboarding_permission_status_changed",
     "onboarding_permission_cta_clicked",
     "onboarding_primary_cta_clicked",
-    "onboarding_dismissed",
     "onboarding_completed",
     "onboarding_first_dictation_started",
     "onboarding_first_dictation_saved",
@@ -631,7 +634,7 @@ WHERE timestamp >= now() - INTERVAL {days} DAY
             id="retry_recovery.failure_kinds",
             family="retry_recovery",
             title="Failure kinds",
-            description="Ranks coarse failure_kind buckets for failed start/transcript/import outcomes.",
+            description="Ranks coarse failure_kind buckets for failed start/transcript/import/summary outcomes.",
             columns=("event", "failure_kind", "events", "devices"),
             sql=f"""
 SELECT
@@ -641,12 +644,61 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed')
+  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'local_meeting_summary_failed')
   {app_version_filter(app_version)}
 GROUP BY event, failure_kind
 ORDER BY events DESC
 LIMIT 40
 """,
+        ),
+        QuerySpec(
+            id="reliability.recovery_outcomes",
+            family="reliability",
+            title="Recovery and retry outcomes",
+            description="Shows whether coarse recovery/retry paths reached success, failed, cancelled, or were superseded.",
+            columns=("workflow_kind", "failure_kind", "retry_source", "recovery_attempt_bucket", "result", "events", "devices"),
+            sql=f"""
+SELECT
+  properties['workflow_kind'] AS workflow_kind,
+  properties['failure_kind'] AS failure_kind,
+  properties['retry_source'] AS retry_source,
+  properties['recovery_attempt_bucket'] AS recovery_attempt_bucket,
+  properties['result'] AS result,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event = 'workflow_recovery_finished'
+  {app_version_filter(app_version)}
+GROUP BY workflow_kind, failure_kind, retry_source, recovery_attempt_bucket, result
+ORDER BY events DESC
+LIMIT 50
+""",
+            notes=("Terminal results are expected to be success, failed, cancelled, or superseded.",),
+        ),
+        QuerySpec(
+            id="reliability.abandonment_exits",
+            family="reliability",
+            title="Workflow abandonment exits",
+            description="Maps coarse places where users left blocked, failed, cancelled, or dismissed workflows.",
+            columns=("workflow_kind", "stage", "reason_kind", "elapsed_bucket", "events", "devices"),
+            sql=f"""
+SELECT
+  properties['workflow_kind'] AS workflow_kind,
+  properties['stage'] AS stage,
+  properties['reason_kind'] AS reason_kind,
+  properties['elapsed_bucket'] AS elapsed_bucket,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event = 'workflow_abandoned'
+  {app_version_filter(app_version)}
+GROUP BY workflow_kind, stage, reason_kind, elapsed_bucket
+ORDER BY events DESC
+LIMIT 50
+""",
+            notes=("This is an exit map, not a complete clickstream.",),
         ),
         QuerySpec(
             id="retry_recovery.latency_buckets",

@@ -593,7 +593,8 @@ struct TranscriptedSettingsView: View {
                             generateLocalSummary(
                                 transcriptURL: notice.transcriptURL,
                                 title: notice.meetingTitle,
-                                hasExistingSummary: false
+                                hasExistingSummary: false,
+                                recoveryFailureKind: notice.failureKind
                             )
                         } else {
                             trackSettingsAction("open_local_meeting_summary_notice", page: .home)
@@ -1066,7 +1067,8 @@ struct TranscriptedSettingsView: View {
         title: String,
         hasExistingSummary: Bool,
         artifactDate: Date? = nil,
-        durationBucket: String? = nil
+        durationBucket: String? = nil,
+        recoveryFailureKind: String? = nil
     ) {
         guard localMeetingSummariesEnabled else { return }
         let summaryID = transcriptURL.path
@@ -1091,7 +1093,8 @@ struct TranscriptedSettingsView: View {
                         title: title,
                         hasExistingSummary: hasExistingSummary,
                         artifactDate: artifactDate,
-                        durationBucket: durationBucket
+                        durationBucket: durationBucket,
+                        recoveryFailureKind: recoveryFailureKind
                     )
                 }
             )
@@ -1115,7 +1118,10 @@ struct TranscriptedSettingsView: View {
                     generateLocalSummary(
                         transcriptURL: transcriptURL,
                         title: title,
-                        hasExistingSummary: hasExistingSummary
+                        hasExistingSummary: hasExistingSummary,
+                        artifactDate: artifactDate,
+                        durationBucket: durationBucket,
+                        recoveryFailureKind: recoveryFailureKind
                     )
                 }
             )
@@ -1134,6 +1140,15 @@ struct TranscriptedSettingsView: View {
             trigger: summaryAction,
             durationBucket: durationBucket
         )
+        if let recoveryFailureKind {
+            WorkflowRecoveryTelemetry.attempted(
+                workflowKind: "local_summary",
+                failureKind: recoveryFailureKind,
+                retrySource: "summary_failure_notice",
+                surface: "home",
+                artifactRetained: true
+            )
+        }
         trackLocalSummaryAnalytics(
             event: "local_meeting_summary_started",
             properties: [
@@ -1186,7 +1201,14 @@ struct TranscriptedSettingsView: View {
 
             do {
                 let result = try await task.value
-                guard localMeetingSummariesEnabled else { return }
+                guard localMeetingSummariesEnabled else {
+                    trackLocalSummaryRecoveryFinished(
+                        failureKind: recoveryFailureKind,
+                        result: "cancelled",
+                        elapsedSeconds: CFAbsoluteTimeGetCurrent() - summaryStartedAt
+                    )
+                    return
+                }
                 presentHomeLocalSummaryNotice(HomeLocalSummaryNotice(
                     transcriptURL: result.transcriptURL,
                     meetingTitle: title,
@@ -1220,11 +1242,21 @@ struct TranscriptedSettingsView: View {
                     trigger: summaryAction,
                     durationBucket: durationBucket
                 )
+                trackLocalSummaryRecoveryFinished(
+                    failureKind: recoveryFailureKind,
+                    result: "success",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - summaryStartedAt
+                )
                 refreshRecentCapturesAfterLocalSummary()
             } catch is CancellationError {
                 if homeLocalSummaryTaskTokens[summaryID] == taskToken {
                     trackLocalSummaryAbandoned(reason: .cancelled, stage: "generate", priorReadyState: "running")
                 }
+                trackLocalSummaryRecoveryFinished(
+                    failureKind: recoveryFailureKind,
+                    result: "cancelled",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - summaryStartedAt
+                )
                 recordLocalSummaryEvent(
                     event: "local_meeting_summary_cancelled",
                     message: "\(provider.title) meeting summary cancelled",
@@ -1234,8 +1266,15 @@ struct TranscriptedSettingsView: View {
                 )
                 return
             } catch {
-                guard localMeetingSummariesEnabled else { return }
                 let failureKind = localSummaryFailureKind(error)
+                guard localMeetingSummariesEnabled else {
+                    trackLocalSummaryRecoveryFinished(
+                        failureKind: recoveryFailureKind,
+                        result: "cancelled",
+                        elapsedSeconds: CFAbsoluteTimeGetCurrent() - summaryStartedAt
+                    )
+                    return
+                }
                 trackLocalSummaryAbandoned(reason: .failed, stage: "generate", priorReadyState: "ready")
                 recordLocalSummaryEvent(
                     level: .error,
@@ -1270,8 +1309,14 @@ struct TranscriptedSettingsView: View {
                     HomeLocalSummaryNotice(
                         transcriptURL: transcriptURL,
                         meetingTitle: title,
-                        failureMessage: error.localizedDescription
+                        failureMessage: error.localizedDescription,
+                        failureKind: failureKind
                     )
+                )
+                trackLocalSummaryRecoveryFinished(
+                    failureKind: recoveryFailureKind,
+                    result: "failed",
+                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - summaryStartedAt
                 )
             }
         }
@@ -3981,6 +4026,23 @@ struct TranscriptedSettingsView: View {
             reasonKind: reason,
             surface: .home,
             priorReadyState: priorReadyState
+        )
+    }
+
+    private func trackLocalSummaryRecoveryFinished(
+        failureKind: String?,
+        result: String,
+        elapsedSeconds: TimeInterval
+    ) {
+        guard let failureKind else { return }
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "local_summary",
+            failureKind: failureKind,
+            retrySource: "summary_failure_notice",
+            result: result,
+            elapsedSeconds: elapsedSeconds,
+            surface: "home",
+            artifactRetained: true
         )
     }
 

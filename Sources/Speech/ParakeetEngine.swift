@@ -22,6 +22,10 @@ class ParakeetEngine: ObservableObject {
     @Published var isRecovering = false
     @Published var inputFormatReady = true
 
+    var hasRecoverableRecording: Bool {
+        !recoveredRecordingTimeline.isEmpty
+    }
+
     private var audioEngine = AVAudioEngine()
     private var audioEngineQueue = ParakeetEngine.makeAudioEngineQueue()
     private var audioGraphGeneration = 0
@@ -1147,7 +1151,7 @@ class ParakeetEngine: ObservableObject {
                                     "reason": "recording_restart_budget_exhausted"
                                 ]
                             ))
-                        finishWorkflowRecovery(result: "gave_up", artifactRetained: false)
+                        finishWorkflowRecovery(result: "failed", artifactRetained: false)
                     }
                 } else {
                     finishWorkflowRecovery(result: "success", artifactRetained: false)
@@ -1257,7 +1261,7 @@ class ParakeetEngine: ObservableObject {
                 workflowKind: "dictation",
                 failureKind: "route_changed",
                 retrySource: "audio_route_recovery",
-                result: "gave_up",
+                result: "failed",
                 elapsedSeconds: Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000,
                 surface: "runtime",
                 artifactRetained: wasRecording
@@ -1904,9 +1908,7 @@ class ParakeetEngine: ObservableObject {
         let wasRecording = isRecording
         cancelAudioWatchdog()
         if isRecording {
-            pendingSamplesLock.withLock {
-                pendingSamples.removeAll(keepingCapacity: true)
-            }
+            preserveCurrentRecordingBuffersForRecovery()
             streamingSamplesLock.withLock {
                 streamingSampleBuffer.removeAll(keepingCapacity: true)
             }
@@ -1920,7 +1922,7 @@ class ParakeetEngine: ObservableObject {
         isEnginePrewarmed = false
 
         if wasRecording {
-            interruptRecordingAndClearRecoveredTimeline()
+            interruptRecordingPreservingRecoveredTimeline()
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "recording_interrupted",
                 message: "Recording interrupted by system sleep/wake")
         }
@@ -2575,6 +2577,10 @@ class ParakeetEngine: ObservableObject {
                 clearRecoveredRecordingTimeline(keepingCapacity: true)
                 return
             }
+            if preservingRecordingAcrossRecovery || !recoveredRecordingTimeline.isEmpty {
+                cancelPendingRecordingRecovery()
+                return
+            }
             if audioStartInProgress {
                 audioGraphGeneration += 1
             } else {
@@ -2641,7 +2647,33 @@ class ParakeetEngine: ObservableObject {
 
     private func interruptRecordingAndClearRecoveredTimeline() {
         clearRecoveredRecordingTimeline(keepingCapacity: true)
+        markRecordingInterrupted()
+    }
+
+    private func interruptRecordingPreservingRecoveredTimeline() {
+        preservingRecordingAcrossRecovery = !recoveredRecordingTimeline.isEmpty
+        markRecordingInterrupted()
+    }
+
+    private func markRecordingInterrupted() {
         recordingInterrupted = true
+    }
+
+    private func cancelPendingRecordingRecovery() {
+        audioGraphGeneration += 1
+        cancelAudioWatchdog()
+        prewarmRetryTask?.cancel()
+        prewarmRetryTask = nil
+        configChangeDebounceTask?.cancel()
+        configChangeDebounceTask = nil
+        configRecoveryTask?.cancel()
+        configRecoveryTask = nil
+        cancelConfigRecoveryTimeout()
+        configChangeWasRecording = false
+        recoveryState.reset()
+        publishRecoveryState()
+        isRecording = false
+        audioLevel = 0
     }
 
     func loadRecordedSamplesForDictationBenchmark(_ samples: [Float], sampleRate: Double) {

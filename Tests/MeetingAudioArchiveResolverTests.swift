@@ -3,6 +3,8 @@ import Foundation
 func testMeetingAudioArchiveResolver() {
     runSuite("MeetingAudioArchiveResolverTests") {
         testResolverUsesCanonicalMeetingArtifactAudioDirectory()
+        testMeetingArtifactRenamerStripsLeadingDots()
+        testMeetingArtifactRenamerFallsBackForAllDots()
         testResolverKeepsLiveMeetingAudioPairButUsesSinglePlaybackSource()
         testResolverFallsBackToMicrophonePlayback()
         testAttachmentPlaybackPrefersSystemForFailedMeetingAudio()
@@ -17,6 +19,22 @@ func testMeetingAudioArchiveResolver() {
         testRetranscriptionInputMapsLiveSplitStreams()
         testRetranscriptionInputMapsSingleRecording()
     }
+}
+
+private func testMeetingArtifactRenamerStripsLeadingDots() {
+    assertEqual(
+        MeetingArtifactRenamer.sanitizedTitleStem(for: "... Quarterly Planning", fallback: "Untitled Meeting"),
+        "Quarterly Planning",
+        "Meeting title fragments should not create hidden dot-prefixed artifact names"
+    )
+}
+
+private func testMeetingArtifactRenamerFallsBackForAllDots() {
+    assertEqual(
+        MeetingArtifactRenamer.sanitizedTitleStem(for: "...", fallback: "Untitled Meeting"),
+        "Untitled Meeting",
+        "All-dot meeting titles should fall back to a visible artifact name"
+    )
 }
 
 private func testResolverUsesCanonicalMeetingArtifactAudioDirectory() {
