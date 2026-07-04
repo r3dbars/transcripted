@@ -1142,36 +1142,20 @@ extension TranscriptSaver {
             replacementPlans.append((prefix: prefix, oldName: update.oldName, newName: update.newName))
         }
 
-        guard !hasCascadingScopedNameReplacement(in: replacementPlans) else {
-            return false
-        }
-
-        for plan in replacementPlans {
+        var deferredReplacements: [(token: String, newName: String)] = []
+        for (index, plan) in replacementPlans.enumerated() {
+            let token = scopedReplacementToken(kind: "transcript", index: index)
             let replaced = replaceTranscriptSpeakerLabels(
                 in: &content,
                 prefix: plan.prefix,
                 oldName: plan.oldName,
-                newName: plan.newName
+                newName: token
             )
             guard replaced > 0 else { return false }
+            deferredReplacements.append((token: token, newName: plan.newName))
         }
+        applyDeferredScopedReplacements(in: &content, replacements: deferredReplacements)
         return true
-    }
-
-    private static func hasCascadingScopedNameReplacement(
-        in plans: [(prefix: String, oldName: String, newName: String)]
-    ) -> Bool {
-        for plan in plans {
-            guard plan.oldName != plan.newName else { continue }
-            if plans.contains(where: {
-                $0.prefix == plan.prefix
-                    && $0.oldName != $0.newName
-                    && $0.oldName == plan.newName
-            }) {
-                return true
-            }
-        }
-        return false
     }
 
     private static func applyScopedBreakdownNameReplacements(
@@ -1207,12 +1191,6 @@ extension TranscriptSaver {
             replacementPlans.append((prefix: prefix, oldName: update.oldName, newName: update.newName, channel: target.channel))
         }
 
-        guard !hasCascadingScopedNameReplacement(in: replacementPlans.map {
-            (prefix: $0.prefix, oldName: $0.oldName, newName: $0.newName)
-        }) else {
-            return false
-        }
-
         for plan in replacementPlans {
             guard countSpeakerBreakdownRows(
                 in: content,
@@ -1223,16 +1201,33 @@ extension TranscriptSaver {
             }
         }
 
-        for plan in replacementPlans {
+        var deferredReplacements: [(token: String, newName: String)] = []
+        for (index, plan) in replacementPlans.enumerated() {
+            let token = scopedReplacementToken(kind: "breakdown", index: index)
             let replaced = replaceSpeakerBreakdownName(
                 in: &content,
                 oldName: plan.oldName,
-                newName: plan.newName,
+                newName: token,
                 channel: plan.channel
             )
             guard replaced == 1 else { return false }
+            deferredReplacements.append((token: token, newName: plan.newName))
         }
+        applyDeferredScopedReplacements(in: &content, replacements: deferredReplacements)
         return true
+    }
+
+    private static func scopedReplacementToken(kind: String, index: Int) -> String {
+        "__TRANSCRIPTED_SCOPED_\(kind.uppercased())_\(index)_\(UUID().uuidString)__"
+    }
+
+    private static func applyDeferredScopedReplacements(
+        in content: inout String,
+        replacements: [(token: String, newName: String)]
+    ) {
+        for replacement in replacements {
+            content = content.replacingOccurrences(of: replacement.token, with: replacement.newName)
+        }
     }
 
     private static func channelAndDiarizerID(forSpeakerKey key: String) -> (channel: UtteranceChannel, diarizerSpeakerId: Int)? {
