@@ -530,6 +530,7 @@ class DictationSessionController: ObservableObject {
                     return
                 }
 
+                readinessRefreshes = 0
                 if readinessRefresher.start(appState: appState) {
                     readinessRefreshes += 1
                 }

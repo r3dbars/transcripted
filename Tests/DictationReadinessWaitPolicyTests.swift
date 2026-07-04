@@ -261,6 +261,20 @@ func testDictationReadinessWaitPolicy() {
         assertEqual(action, .refreshInputReadiness, "after one recovery start attempt the loop should refresh until a hard recovery is attempted")
     }
 
+    runSuite("DictationReadinessWaitPolicy — failed recovery start requires fresh cooldown refreshes") {
+        let action = DictationReadinessWaitPolicy.action(
+            isRecovering: false,
+            inputFormatReady: false,
+            readinessRefreshes: 1,
+            forcedRecoveryAttempts: 0,
+            forcedRecoveryRefreshThreshold: 5,
+            maxForcedRecoveryAttempts: 2,
+            recoveryStartAttempts: 1
+        )
+
+        assertEqual(action, .refreshInputReadiness, "after a guarded recovery-start retry fails, one fresh refresh should not immediately force hard recovery")
+    }
+
     runSuite("DictationReadinessWaitPolicy — second recovery start is bounded") {
         let action = DictationReadinessWaitPolicy.action(
             isRecovering: false,
