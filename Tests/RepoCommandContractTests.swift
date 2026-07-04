@@ -437,6 +437,8 @@ func testRepoCommandContract() {
             "python3 -m py_compile scripts/ops/nightly-security-check.py",
             "python3 -m py_compile scripts/ops/release-gate-report.py",
             "python3 scripts/ops/release-gate-report.py --self-test",
+            "python3 -m py_compile scripts/release/sentry-release-dry-run.py",
+            "python3 scripts/release/sentry-release-dry-run.py --self-test",
             "python3 -m py_compile scripts/ops/build-codex-memory-index.py",
             "bash -n scripts/ops/nightly-transcripted-archive-miner.sh",
             "ruby -c scripts/ops/performance-budget.rb",
@@ -851,7 +853,9 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - Sentry release registration requires matching dSYM") {
         let buildBeta = readRepoTextFile("scripts/entrypoints/build-beta.sh")
         let registerSentry = readRepoTextFile("scripts/release/register-sentry-release.sh")
+        let dryRun = readRepoTextFile("scripts/release/sentry-release-dry-run.py")
         let releaseDocs = readRepoTextFile("docs/release-packaging.md")
+        let scriptsReadme = readRepoTextFile("scripts/README.md")
 
         assertTrue(
             buildBeta.contains("GENERATE_DSYM=\"${GENERATE_DSYM:-1}\"")
@@ -886,6 +890,25 @@ func testRepoCommandContract() {
                 && releaseDocs.contains("SENTRY_APP_BINARY_PATH=/path/to/Transcripted.app/Contents/MacOS/Transcripted")
                 && releaseDocs.contains("call the release yellow"),
             "release docs should tell future workers how to register a reused artifact without stale symbols"
+        )
+        assertTrue(
+            dryRun.contains("This checker does not create/finalize Sentry releases, set commits, or upload debug files.")
+                && dryRun.contains(#""sentry-cli","#)
+                && dryRun.contains(#""releases","#)
+                && dryRun.contains(#""info","#)
+                && dryRun.contains(#"--require-debug-files"#)
+                && !dryRun.contains(#""sentry-cli", "releases", "new""#)
+                && !dryRun.contains(#""sentry-cli", "debug-files", "upload""#),
+            "Sentry dry run should stay read-only while checking env/tooling, release info, and local dSYM readiness"
+        )
+        assertTrue(
+            releaseDocs.contains("scripts/release/sentry-release-dry-run.py --version <version>")
+                && releaseDocs.contains("It does not create or finalize a Sentry")
+                && releaseDocs.contains("--check-sentry-release")
+                && releaseDocs.contains("--require-sentry-release")
+                && releaseDocs.contains("--require-debug-files")
+                && scriptsReadme.contains("scripts/release/sentry-release-dry-run.py"),
+            "release docs should steer prep work to the read-only Sentry dry run instead of the mutating registration script"
         )
     }
 

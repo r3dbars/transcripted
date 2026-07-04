@@ -215,6 +215,12 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 scripts/release/post-dmg-release-audit.py --self-test"
         fi
 
+        if matches_any "$path" "scripts/release/sentry-release-dry-run.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/release/sentry-release-dry-run.py"
+            add_command "python3 scripts/release/sentry-release-dry-run.py --self-test"
+        fi
+
         if matches_any "$path" "scripts/ops/packaged-app-smoke.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/packaged-app-smoke.py"

@@ -199,6 +199,22 @@ also requires and uploads `build/Transcripted.app.dSYM` by default:
 SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>
 ```
 
+For a no-upload prep pass before Justin approves the release cut, use the
+read-only dry run instead:
+
+```bash
+python3 scripts/release/sentry-release-dry-run.py --version <version>
+```
+
+That checker validates the intended Sentry release name, local tooling/auth
+surface, release-tag commit association readiness, and the local app/dSYM UUID
+pair when the build artifacts exist. It does not create or finalize a Sentry
+release, set commits, or upload debug files. Add `--check-sentry-release` only
+when you want a read-only `sentry-cli releases info` probe, add
+`--require-sentry-release` when the remote release must already exist, and use
+`--require-debug-files` after packaging when a missing app/dSYM pair should block
+the handoff.
+
 Prefer this post-publish registration path. `build-beta.sh` also supports
 `REGISTER_SENTRY_RELEASE=1`, but use that only when the tag, app binary, dSYM,
 and release artifact are already final and match the GitHub release you intend
