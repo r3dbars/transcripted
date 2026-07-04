@@ -1064,7 +1064,8 @@ class DictationSessionController: ObservableObject {
                 }
             )
             let autoSendOutcome = finalization.autoEnterOutcome
-            let saveFailureMessage = finalization.saveFailure
+            let saveResult = finalization.saveResult
+            let saveFailureMessage = saveResult.failureMessage
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             stopTiming.completedAt = CFAbsoluteTimeGetCurrent()
             let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
@@ -1149,8 +1150,9 @@ class DictationSessionController: ObservableObject {
                     ]
                 )
             )
-            if saveFailureMessage == nil {
+            if let saved = saveResult.saved {
                 ActivationTelemetry.trackDictationArtifactSaved(
+                    saved: saved,
                     delivery: pasteOutcome.delivery.rawValue,
                     durationBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     trigger: currentDictationTrigger.rawValue,
@@ -1182,7 +1184,8 @@ class DictationSessionController: ObservableObject {
         sessionID: UUID
     ) {
         lastCompletedText = text
-        let saveFailureMessage = persistDictationTranscript(text: text, delivery: .savedWithoutPaste)
+        let saveResult = persistDictationTranscript(text: text, delivery: .savedWithoutPaste)
+        let saveFailureMessage = saveResult.failureMessage
         let wordCount = text.split(whereSeparator: \.isWhitespace).count
         let durationSeconds = CFAbsoluteTimeGetCurrent() - sessionStartTime
         appState.logger.log("DICTATION | session cap reached, saved \(text.count) chars without pasting")
@@ -1234,12 +1237,15 @@ class DictationSessionController: ObservableObject {
                     }
                 }
             )
-            ActivationTelemetry.trackDictationArtifactSaved(
-                delivery: DictationDelivery.savedWithoutPaste.rawValue,
-                durationBucket: AnalyticsReporter.durationBucket(seconds: durationSeconds),
-                trigger: currentDictationTrigger.rawValue,
-                wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)
-            )
+            if let saved = saveResult.saved {
+                ActivationTelemetry.trackDictationArtifactSaved(
+                    saved: saved,
+                    delivery: DictationDelivery.savedWithoutPaste.rawValue,
+                    durationBucket: AnalyticsReporter.durationBucket(seconds: durationSeconds),
+                    trigger: currentDictationTrigger.rawValue,
+                    wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)
+                )
+            }
             ActivationTelemetry.trackFirstArtifactSavedIfNeeded(
                 artifactKind: .dictation,
                 surface: .dictationSave,
@@ -1745,8 +1751,26 @@ class DictationSessionController: ObservableObject {
         return autoSender.send(DictationAutoSendPreferences.sendKey(), target: sessionPasteTarget)
     }
 
+    private struct DictationTranscriptPersistenceResult {
+        let saved: SavedDictationTranscript?
+        let failureMessage: String?
+        let failureError: Error?
+
+        static func success(_ saved: SavedDictationTranscript) -> Self {
+            Self(saved: saved, failureMessage: nil, failureError: nil)
+        }
+
+        static func failure(_ message: String) -> Self {
+            Self(saved: nil, failureMessage: message, failureError: nil)
+        }
+
+        static func failure(_ error: Error) -> Self {
+            Self(saved: nil, failureMessage: nil, failureError: error)
+        }
+    }
+
     @discardableResult
-    private func persistDictationTranscript(text: String, delivery: DictationDelivery) -> String? {
+    private func persistDictationTranscript(text: String, delivery: DictationDelivery) -> DictationTranscriptPersistenceResult {
         do {
             let saved = try DictationTranscriptStore.save(
                 text: text,
@@ -1754,43 +1778,49 @@ class DictationSessionController: ObservableObject {
                 delivery: delivery
             )
             recordDictationTranscriptSaved(saved, delivery: delivery)
-            return nil
+            return .success(saved)
         } catch {
-            return recordDictationTranscriptSaveFailed(error)
+            return .failure(recordDictationTranscriptSaveFailed(error))
         }
     }
 
     private func startPersistingDictationTranscript(
         text: String,
         delivery: DictationDelivery
-    ) -> Task<Result<SavedDictationTranscript, Error>, Never> {
+    ) -> Task<DictationTranscriptPersistenceResult, Never> {
         let sourceAppName = sessionSourceApp?.localizedName ?? "Unknown"
         let sourceBundleID = sessionSourceApp?.bundleIdentifier
 
         return Task.detached(priority: .utility) {
-            Result {
-                try DictationTranscriptWriter.save(
+            do {
+                let saved = try DictationTranscriptWriter.save(
                     text: text,
                     sourceAppName: sourceAppName,
                     sourceBundleID: sourceBundleID,
                     delivery: delivery
                 )
+                return .success(saved)
+            } catch {
+                return .failure(error)
             }
         }
     }
 
     private func finishPersistingDictationTranscript(
-        _ task: Task<Result<SavedDictationTranscript, Error>, Never>,
+        _ task: Task<DictationTranscriptPersistenceResult, Never>,
         delivery: DictationDelivery
-    ) async -> String? {
-        switch await task.value {
-        case .success(let saved):
+    ) async -> DictationTranscriptPersistenceResult {
+        let result = await task.value
+        if let saved = result.saved {
             NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: saved.url)
             recordDictationTranscriptSaved(saved, delivery: delivery)
-            return nil
-        case .failure(let error):
-            return recordDictationTranscriptSaveFailed(error)
+            return result
         }
+
+        if let error = result.failureError {
+            return .failure(recordDictationTranscriptSaveFailed(error))
+        }
+        return result
     }
 
     private func recordDictationTranscriptSaved(

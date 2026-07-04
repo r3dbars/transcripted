@@ -25,35 +25,35 @@ enum DictationStopFinalizationPolicy {
     static let order: DictationStopFinalizationOrder = .saveBeforeAutoEnter
 }
 
-struct DictationStopFinalizationResult<AutoEnterOutcome, SaveFailure> {
+struct DictationStopFinalizationResult<AutoEnterOutcome, SaveResult> {
     let autoEnterOutcome: AutoEnterOutcome
-    let saveFailure: SaveFailure?
+    let saveResult: SaveResult
 }
 
 enum DictationStopFinalizer {
     @MainActor
-    static func finalize<SaveValue, AutoEnterOutcome, SaveFailure>(
+    static func finalize<SaveResult, AutoEnterOutcome>(
         order: DictationStopFinalizationOrder,
-        startSaving: () -> Task<Result<SaveValue, Error>, Never>,
-        finishSaving: (Task<Result<SaveValue, Error>, Never>) async -> SaveFailure?,
-        saveSynchronously: () -> SaveFailure?,
+        startSaving: () -> Task<SaveResult, Never>,
+        finishSaving: (Task<SaveResult, Never>) async -> SaveResult,
+        saveSynchronously: () -> SaveResult,
         performAutoEnter: () async -> AutoEnterOutcome
-    ) async -> DictationStopFinalizationResult<AutoEnterOutcome, SaveFailure> {
+    ) async -> DictationStopFinalizationResult<AutoEnterOutcome, SaveResult> {
         switch order {
         case .saveAfterAutoEnter:
             let autoEnterOutcome = await performAutoEnter()
-            let saveFailure = saveSynchronously()
+            let saveResult = saveSynchronously()
             return DictationStopFinalizationResult(
                 autoEnterOutcome: autoEnterOutcome,
-                saveFailure: saveFailure
+                saveResult: saveResult
             )
         case .saveBeforeAutoEnter:
             let saveTask = startSaving()
             let autoEnterOutcome = await performAutoEnter()
-            let saveFailure = await finishSaving(saveTask)
+            let saveResult = await finishSaving(saveTask)
             return DictationStopFinalizationResult(
                 autoEnterOutcome: autoEnterOutcome,
-                saveFailure: saveFailure
+                saveResult: saveResult
             )
         }
     }

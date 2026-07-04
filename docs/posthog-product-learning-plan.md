@@ -211,12 +211,14 @@ aggregate reliability sizing and should not be expanded to raw device names.
   now covers sourced local-memory rollups, but PostHog still cannot judge
   whether the sourced answer was useful.
 - General dictation saved-Markdown writes now have `dictation_artifact_saved`;
-  keep `dictation_completed` as completion-volume context, not strict saved-artifact proof.
+  it fires only after the daily Markdown file is confirmed on disk. Keep
+  `dictation_completed` as completion-volume context, not strict saved-artifact proof.
 - `agent_capture_query_observed` proves successful saved-capture reads,
   searches, and summary-memory rollups through MCP, but it still cannot judge
   answer quality.
-- General dictation saved-Markdown writes still rely on `dictation_completed`
-  as a proxy, while onboarding dictation and meeting saves have stricter events.
+- General dictation completion volume can be larger than saved-artifact volume;
+  investigate any sustained gap between `dictation_completed` and
+  `dictation_artifact_saved` as a save-proof or telemetry-delivery problem.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
 - Local summary beta behavior now has artifact-action, start, completion,
@@ -237,7 +239,7 @@ Prefer a small number of lifecycle events over broad click tracking.
 | `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures or sourced local summary memory | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 | `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_habit_loop_actioned` | A user takes a post-save or daily-return action like Review yesterday, What did I promise, open recent meeting, daily digest viewed/exported, or return after first/second artifact | `action_kind`, `artifact_kind`, `artifact_count_bucket`, `return_window_bucket`, `surface`, `result` |
-| `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
+| `dictation_artifact_saved` | Any normal dictation Markdown is durably saved and confirmed as an on-disk `.md` artifact | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_retry_started` | User retries after a failed or empty dictation | `failure_kind`, `retry_source`, `route_shape`, `trigger` |
 | `meeting_speaker_auto_recognized` | A returning speaker was silently recognized without review; `graduated` marks a profile's first-ever auto-recognition | `similarity_bucket`, `margin_bucket`, `call_count_bucket`, `channel`, `graduated`, `surface` |
 | `meeting_speaker_match_reviewed` | One review verdict joining match confidence to the user's answer (confirmed = right, corrected = wrong) | `review_action`, `similarity_bucket`, `margin_bucket`, `call_count_bucket`, `channel`, `had_suggestion`, `surface` |
