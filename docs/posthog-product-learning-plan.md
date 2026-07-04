@@ -101,9 +101,9 @@ Operational scripts query aggregate counts only:
 | `workflow_recovery_attempted` | `artifact_retained`, `failure_kind`, `recovery_attempt_bucket`, `retry_source`, `surface`, `workflow_kind` |
 | `workflow_recovery_failed` | `artifact_retained`, `elapsed_bucket`, `failure_kind`, `recovery_attempt_bucket`, `result`, `retry_source`, `surface`, `workflow_kind` |
 | `workflow_recovery_finished` | `artifact_retained`, `elapsed_bucket`, `failure_kind`, `recovery_attempt_bucket`, `result`, `retry_source`, `surface`, `workflow_kind` |
-| `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
+| `agent_capture_query_observed` | `client_family`, `tool_kind`, `capture_kind`, `result`, `source_count_bucket` |
 
-`agent_capture_query_observed.query_kind` is a reviewed enum. It includes
+`agent_capture_query_observed.tool_kind` is a reviewed enum. It includes
 orientation reads (`list`, `recent`), direct artifact reads/searches
 (`read`, `search`, `speaker_lookup`, `recap`), and sourced local-memory rollups
 (`action_items`, `commitments`, `decisions`, `digest`, `open_questions`).
@@ -235,7 +235,7 @@ Prefer a small number of lifecycle events over broad click tracking.
 
 | Event | When to fire | Properties |
 | --- | --- | --- |
-| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures or sourced local summary memory | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
+| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures or sourced local summary memory | `client_family`, `tool_kind`, `capture_kind`, `result`, `source_count_bucket` |
 | `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_habit_loop_actioned` | A user takes a post-save or daily-return action like Review yesterday, What did I promise, open recent meeting, daily digest viewed/exported, or return after first/second artifact | `action_kind`, `artifact_kind`, `artifact_count_bucket`, `return_window_bucket`, `surface`, `result` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |

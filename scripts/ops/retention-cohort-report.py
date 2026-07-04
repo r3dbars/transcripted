@@ -584,7 +584,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "## Blind Spots",
         "",
         "- Return proxy means Home observed a prior saved artifact after 18h+. It is not proof of a sourced agent answer.",
-        "- `agent_capture_query_observed` is the true agent-use cohort. Its query/source/age buckets can prove sourced local-memory use, but not answer quality. Agent prompt/setup actions are still proxy intent.",
+        "- `agent_capture_query_observed` is the true agent-use cohort. Its client/tool/capture/source-count buckets can prove sourced local-memory use, but not answer quality. Agent prompt/setup actions are still proxy intent.",
         "- Summary repeat is unsupported until a privacy-safe PostHog summary-finished event is allowlisted and emitted.",
         f"- First-artifact and first-run cohorts use first observed events in the last {report['first_seen_lookback_days']} days, so older telemetry gaps can misclassify returning devices as new.",
         "- Counts are anonymous-device aggregates. Do not join them to transcript text, file paths, titles, names, emails, tokens, raw URLs, or person records.",
