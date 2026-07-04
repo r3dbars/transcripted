@@ -70,6 +70,7 @@ final class AudioStateTransitionTests: XCTestCase {
 
         audio.updateSystemAudioStatus(fromError: "capture failed unexpectedly")
         XCTAssertEqual(audio.systemAudioStatus, .failed)
+        XCTAssertTrue(audio.systemAudioFailed)
     }
 
     func testUpdateSystemAudioStatusKeepsSilentWhenClearedDuringRecording() {
@@ -231,6 +232,17 @@ final class AudioStateTransitionTests: XCTestCase {
                      "system file URL from a stale session must not leak into the active session")
         XCTAssertEqual(audio.systemAudioStatus, .unknown,
                        "status repair must not fire for stale assignments")
+    }
+
+    func testSystemWriteFailureCapReturnsTerminalFailure() {
+        let audio = makeAudio()
+
+        for _ in 1..<audio.maxConsecutiveWriteErrors {
+            XCTAssertFalse(audio.recordSystemWriteFailure(NSError(domain: "test", code: 1)))
+        }
+
+        XCTAssertTrue(audio.recordSystemWriteFailure(NSError(domain: "test", code: 1)))
+        XCTAssertEqual(audio.consecutiveSystemWriteErrors, audio.maxConsecutiveWriteErrors)
     }
 
     // MARK: - createRouteVolumeDiagnosticsContext multi-phase

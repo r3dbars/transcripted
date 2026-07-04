@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import CoreMedia
+import QuartzCore
 import ScreenCaptureKit
 
 /// ScreenCaptureKit-based system audio capture (macOS 26+).
@@ -44,7 +45,7 @@ private final class SCKStopCallbackState {
 }
 
 @available(macOS 26.0, *)
-final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchecked Sendable {
+final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngine, SCStreamDelegate, @unchecked Sendable {
     @Published var errorMessage: String?
 
     private var stream: SCStream?
@@ -55,10 +56,19 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
     private var _generation: UInt64 = 0
     private let generationLock = NSLock()
     private var isWaitingForTimedOutStopCallback = false
+    private var recoveryAttempts = 0
+    private var isRecovering = false
     private static let callbackTimeoutSeconds = 8
     private static let permissionPromptCallbackTimeoutSeconds = 120
     private static let callbackTimeout: DispatchTimeInterval = .seconds(callbackTimeoutSeconds)
     private static let permissionPromptCallbackTimeout: DispatchTimeInterval = .seconds(permissionPromptCallbackTimeoutSeconds)
+    private static let maxRecoveryAttempts = 1
+    private static let bufferStallTimeoutSeconds: CFTimeInterval = 5
+    private let watchdogQueue = DispatchQueue(label: "SCKAudioCapture.watchdog", qos: .utility)
+    private var watchdogTimer: DispatchSourceTimer?
+    private let watchdogLock = NSLock()
+    private var _lastBufferTime: CFTimeInterval = CACurrentMediaTime()
+    private var _hasReceivedFirstBuffer = false
 
     var diagnosticBackendName: String { "screen_capture_kit" }
 
@@ -144,7 +154,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             interleaved: false
         )
 
-        let preparedStream = SCStream(filter: filter, configuration: config, delegate: nil)
+        let preparedStream = SCStream(filter: filter, configuration: config, delegate: self)
         guard currentGeneration() == prepareGeneration else {
             stopStreamSynchronously(preparedStream)
             throw AudioCaptureStaleSessionError()
@@ -176,6 +186,10 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         let startGeneration = currentGeneration()
 
         self.bufferCallback = bufferCallback
+        resetBufferWatchdogState()
+        if !isRecovering {
+            recoveryAttempts = 0
+        }
         publishErrorMessage(nil)
 
         // Output handler converts CMSampleBuffer → AVAudioPCMBuffer
@@ -186,6 +200,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
             self._totalBuffers += 1
             self._buffersWithData += 1
             self.statsLock.unlock()
+            self.markBufferReceived()
             bufferCallback(buffer)
         }
         self.streamOutput = output
@@ -213,6 +228,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
                 throw AudioCaptureStaleSessionError()
             }
             _isCapturing = true
+            startWatchdog(generation: startGeneration)
             AppLogger.audioSystem.info("SCKAudioCapture: now capturing system audio")
         } catch {
             AppLogger.audioSystem.error("SCKAudioCapture: start failed", ["error": error.localizedDescription])
@@ -236,6 +252,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         }
 
         _isCapturing = false
+        stopWatchdog()
         stream.stopCapture { [weak self, stream] error in
             if let error = error {
                 AppLogger.audioSystem.warning("SCKAudioCapture: stop error", ["error": error.localizedDescription])
@@ -257,6 +274,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         }
 
         _isCapturing = false
+        stopWatchdog()
         if stopStreamSynchronously(stream, cleanupAfterLateCallback: { [weak self, stream] in
             self?.cleanupIfCurrent(generation: stopGeneration, stream: stream)
         }) {
@@ -339,6 +357,7 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
 
         _isCapturing = true
         isWaitingForTimedOutStopCallback = true
+        startWatchdog(generation: currentGeneration())
         AppLogger.audioSystem.warning("SCKAudioCapture: keeping stream reference after stop timeout")
     }
 
@@ -393,11 +412,24 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         logStats()
         _isCapturing = false
         isWaitingForTimedOutStopCallback = false
+        stopWatchdog()
         stream = nil
         streamOutput = nil
         bufferCallback = nil
         _audioFormat = nil
         resetStats()
+        resetBufferWatchdogState()
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        AppLogger.audioSystem.error("SCKAudioCapture: stream stopped with error", [
+            "error": error.localizedDescription
+        ])
+        handleMidRecordingFailure(
+            "System audio failed - ScreenCaptureKit stopped delivering audio.",
+            generation: currentGeneration(),
+            attemptRestart: true
+        )
     }
 
     private func logStats() {
@@ -424,6 +456,96 @@ final class SCKAudioCapture: ObservableObject, SystemAudioCaptureEngine, @unchec
         } else {
             DispatchQueue.main.async { [weak self] in
                 self?.errorMessage = message
+            }
+        }
+    }
+
+    private func resetBufferWatchdogState() {
+        watchdogLock.lock()
+        _lastBufferTime = CACurrentMediaTime()
+        _hasReceivedFirstBuffer = false
+        watchdogLock.unlock()
+    }
+
+    private func markBufferReceived() {
+        watchdogLock.lock()
+        _lastBufferTime = CACurrentMediaTime()
+        _hasReceivedFirstBuffer = true
+        watchdogLock.unlock()
+    }
+
+    private func startWatchdog(generation: UInt64) {
+        stopWatchdog()
+        let timer = DispatchSource.makeTimerSource(queue: watchdogQueue)
+        let interval = DispatchTimeInterval.milliseconds(Int(Self.bufferStallTimeoutSeconds * 1000))
+        timer.schedule(deadline: .now() + interval, repeating: interval)
+        timer.setEventHandler { [weak self] in
+            self?.checkWatchdog(generation: generation)
+        }
+        watchdogLock.lock()
+        watchdogTimer = timer
+        watchdogLock.unlock()
+        timer.resume()
+    }
+
+    private func stopWatchdog() {
+        watchdogLock.lock()
+        let timer = watchdogTimer
+        watchdogTimer = nil
+        watchdogLock.unlock()
+        timer?.cancel()
+    }
+
+    private func checkWatchdog(generation: UInt64) {
+        guard currentGeneration() == generation, _isCapturing else { return }
+        watchdogLock.lock()
+        let hasReceivedFirstBuffer = _hasReceivedFirstBuffer
+        let elapsed = CACurrentMediaTime() - _lastBufferTime
+        watchdogLock.unlock()
+
+        guard hasReceivedFirstBuffer, elapsed >= Self.bufferStallTimeoutSeconds else { return }
+        AppLogger.audioSystem.error("SCKAudioCapture: buffer watchdog timed out", [
+            "elapsedSeconds": String(format: "%.1f", elapsed)
+        ])
+        handleMidRecordingFailure(
+            "System audio failed - ScreenCaptureKit stopped sending audio buffers.",
+            generation: generation,
+            attemptRestart: true
+        )
+    }
+
+    private func handleMidRecordingFailure(
+        _ message: String,
+        generation: UInt64,
+        attemptRestart: Bool
+    ) {
+        guard currentGeneration() == generation, _isCapturing else { return }
+        publishErrorMessage(message)
+        guard attemptRestart,
+              recoveryAttempts < Self.maxRecoveryAttempts,
+              !isRecovering,
+              let callback = bufferCallback else {
+            return
+        }
+
+        recoveryAttempts += 1
+        isRecovering = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            defer { self.isRecovering = false }
+            do {
+                AppLogger.audioSystem.info("SCKAudioCapture: attempting stream recovery", [
+                    "attempt": "\(self.recoveryAttempts)"
+                ])
+                self.stopSync()
+                try self.prepare()
+                try self.start(bufferCallback: callback)
+                AppLogger.audioSystem.info("SCKAudioCapture: stream recovery succeeded")
+            } catch {
+                AppLogger.audioSystem.error("SCKAudioCapture: stream recovery failed", [
+                    "error": error.localizedDescription
+                ])
+                self.publishErrorMessage("System audio failed - ScreenCaptureKit could not restart audio capture.")
             }
         }
     }

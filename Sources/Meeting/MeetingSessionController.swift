@@ -339,6 +339,10 @@ final class MeetingSessionController: ObservableObject {
         // Model downloader — coordinates selected STT + PyAnnote readiness.
         self.downloader = MeetingModelDownloader(stt: sttAdapter, diarization: diarization)
 
+        capture.onUnexpectedRecordingComplete = { [weak self] result in
+            self?.handleUnexpectedCaptureStop(result)
+        }
+
         wireSubscriptions()
 
         // Recover recordings orphaned by a crash before any failed-queue entry
@@ -1481,6 +1485,73 @@ final class MeetingSessionController: ObservableObject {
         while isFinishingRecording && Date() < deadline {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
+    }
+
+    private func handleUnexpectedCaptureStop(_ stopResult: CaptureStopResult) {
+        guard case .recording = state, !isFinishingRecording else { return }
+
+        _ = audioInactivityDetector.stopRecording()
+        audioInactivityWarning = nil
+        isMicBoostPromptVisible = false
+
+        let recordingSnapshot = makeRecordingStopSnapshot()
+        let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
+        let failureMessage = capture.errorMessage
+            ?? "Recording stopped unexpectedly. Open Transcripted Home to retry the saved audio."
+
+        finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
+        clearActiveRecordingIdentity()
+        activeRecordingTrigger = .unknown
+        activeRecordingSuggestedTitle = nil
+        activeRecordingStartedAt = nil
+
+        let preserved = preserveFailedMeetingForRetry(
+            micAudioURL: files.micURL,
+            systemAudioURL: files.systemURL,
+            errorMessage: failureMessage,
+            meetingTitle: recordingSnapshot.suggestedTitle,
+            recordingDate: recordingSnapshot.recordingStartedAt
+        )
+
+        DiagnosticsTrail.record(
+            level: .error,
+            engine: "meeting",
+            event: "meeting_capture_stopped_under_controller",
+            message: "Meeting capture stopped before the app stop path ran",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "mic_file_present": boolString(files.micURL != nil),
+                    "system_file_present": boolString(files.systemURL != nil),
+                    "preserved_for_retry": boolString(preserved),
+                    "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
+                    "audio_gaps": "\(recordingSnapshot.healthInfo.audioGaps)",
+                    "device_switches": "\(recordingSnapshot.healthInfo.deviceSwitches)"
+                ]
+            )
+        )
+
+        AnalyticsReporter.track(
+            "meeting_capture_stopped_under_controller",
+            properties: MeetingCaptureHealthTelemetry.snapshotProperties(
+                .init(
+                    captureDiagnostics: meetingCaptureAnalyticsProperties(snapshot: recordingSnapshot.pipelineSnapshot),
+                    health: captureHealthFacts(from: recordingSnapshot.healthInfo),
+                    trigger: recordingSnapshot.trigger.rawValue,
+                    reason: "internal_stop",
+                    durationSeconds: recordingSnapshot.durationSeconds,
+                    systemStreamPresent: files.systemURL != nil,
+                    stopTimedOut: stopResult.didTimeOut
+                )
+            )
+        )
+
+        state = preserved
+            ? .error("Recording stopped early. Open Transcripted Home to retry the saved audio.")
+            : .error("Recording stopped early and no meeting audio was saved.")
+        Self.runtimeDiagnosticsRecorder?.clearSession(
+            kind: "meeting",
+            outcome: preserved ? "capture_stopped_under_controller" : "capture_stopped_no_audio"
+        )
     }
 
     private func preserveQueuedTranscriptionJobsForShutdown(errorMessage: String) -> Int {

@@ -85,17 +85,12 @@ extension TranscriptionTaskManager {
         removeSourceAudioAfterArchive: Bool = true
     ) async throws -> URL {
 
-        guard let systemURL = systemURL else {
-            AppLogger.pipeline.warning("Transcribing mic-only failed meeting audio through single-track path", [
-                "taskId": taskId.uuidString
-            ])
-            return try await transcribeMultichannelPipeline(
-                micURL: nil,
-                systemURL: micURL,
+        guard let systemURL else {
+            return try await transcribeMicrophoneOnlyPipeline(
+                micURL: micURL,
                 outputFolder: outputFolder,
                 taskId: taskId,
                 healthInfo: healthInfo,
-                splitLocalSpeakers: false,
                 meetingTitle: meetingTitle,
                 recordingDate: recordingDate,
                 sourceFailedTranscriptionId: sourceFailedTranscriptionId,
@@ -115,6 +110,116 @@ extension TranscriptionTaskManager {
             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
             removeSourceAudioAfterArchive: removeSourceAudioAfterArchive
         )
+    }
+
+    nonisolated func transcribeMicrophoneOnlyPipeline(
+        micURL: URL,
+        outputFolder: URL,
+        taskId: UUID,
+        healthInfo: RecordingHealthInfo?,
+        meetingTitle: String? = nil,
+        recordingDate: Date? = nil,
+        sourceFailedTranscriptionId: UUID? = nil,
+        removeSourceAudioAfterArchive: Bool = true
+    ) async throws -> URL {
+        let transcription = await MainActor.run { self.transcription }
+        try await transcription.ensureModelsReadyForPipeline()
+
+        let speechEngine = await MainActor.run {
+            transcription.parakeet.transcriptionEngineDescriptor
+        }
+
+        AppLogger.pipeline.info("Using local \(speechEngine.displayName) mic-only recovery pipeline", [
+            "transcription_engine": speechEngine.identifier
+        ])
+
+        let result = try await transcription.transcribeMicrophoneOnly(
+            micURL: micURL,
+            onProgress: { [weak self] progress in
+                Task { @MainActor in
+                    self?.displayStatus = .transcribing(progress: progress)
+                }
+            }
+        )
+
+        let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: nil)
+        let transcriptId = UUID()
+        try Task.checkCancellation()
+
+        let notifier: TranscriptNotifier? = await MainActor.run {
+            self.displayStatus = .finishing
+            return self.notifier
+        }
+        let formatOptions = await MainActor.run {
+            self.resolvedTranscriptFormatOptions(hasMicAudio: true, hasSystemAudio: false)
+        }
+
+        let transcriptDate = recordingDate ?? Date()
+        let micOnlyHealth = healthInfo?.markingSystemAudioMissing()
+            ?? RecordingHealthInfo(
+                captureQuality: .degraded,
+                audioGaps: 0,
+                deviceSwitches: 0,
+                gapDescriptions: [],
+                systemAudioMissing: true
+            )
+        guard let savedURL = TranscriptSaver.saveTranscript(
+            result,
+            transcriptId: transcriptId,
+            speakerMappings: [:],
+            speakerSources: [:],
+            speakerDbIds: [:],
+            directory: outputFolder,
+            meetingTitle: meetingTitle,
+            healthInfo: micOnlyHealth,
+            notifier: nil,
+            speakerStore: nil,
+            statsStore: DeferredTranscriptStatsStore(),
+            recordingDate: transcriptDate,
+            transcriptionEngine: speechEngine,
+            formatOptions: formatOptions
+        ) else {
+            throw PipelineError.saveFailed(detail: "Could not write mic-only transcript to \(outputFolder.lastPathComponent)")
+        }
+        let deleteSavedTranscriptOnCancellation = replacementTranscriptRollback == nil
+        try await checkCancellationAfterTranscriptSideEffects(
+            savedURL: savedURL,
+            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+            replacementTranscriptRollback: replacementTranscriptRollback
+        )
+
+        let archiveOutcome = await archiveRecordingAudioIfConfigured(
+            micURL: micURL,
+            systemURL: nil,
+            savedURL: savedURL
+        )
+        try await checkCancellationAfterTranscriptSideEffects(
+            savedURL: savedURL,
+            retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
+            retainedAudioURLs: archiveOutcome.retainedAudioURLs,
+            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+            replacementTranscriptRollback: replacementTranscriptRollback
+        )
+
+        try await commitSavedTranscriptSideEffectsUnlessCancelled(
+            taskId: taskId,
+            savedURL: savedURL,
+            result: result,
+            transcriptId: transcriptId,
+            meetingTitle: meetingTitle,
+            transcriptDate: transcriptDate,
+            notifier: notifier,
+            retainedAudioDirectory: archiveOutcome.retainedAudioDirectory,
+            retainedAudioURLs: archiveOutcome.retainedAudioURLs,
+            deleteSavedTranscriptOnCancellation: deleteSavedTranscriptOnCancellation,
+            replacementTranscriptRollback: replacementTranscriptRollback
+        )
+
+        if archiveOutcome.didArchiveRecordingAudio && removeSourceAudioAfterArchive && sourceFailedTranscriptionId == nil {
+            removeManagedCleanupFile(micURL, label: "completed mic-only scratch")
+        }
+
+        return savedURL
     }
 
     /// Transcribe an imported audio file through the system-audio speaker path.
@@ -396,7 +501,7 @@ extension TranscriptionTaskManager {
             return self.notifier
         }
         let formatOptions = await MainActor.run {
-            self.resolvedTranscriptFormatOptions(hasMicAudio: micURL != nil)
+            self.resolvedTranscriptFormatOptions(hasMicAudio: micURL != nil, hasSystemAudio: true)
         }
 
         let transcriptDate = recordingDate ?? Date()
@@ -772,7 +877,7 @@ extension TranscriptionTaskManager {
 
     nonisolated private func archiveRecordingAudioIfConfigured(
         micURL: URL?,
-        systemURL: URL,
+        systemURL: URL?,
         savedURL: URL
     ) async -> RecordingAudioArchiveOutcome {
         let retainedAudioDirectory = await MainActor.run { self.resolvedRetainedAudioDirectory() }
@@ -803,7 +908,7 @@ extension TranscriptionTaskManager {
         } catch {
             AppLogger.pipeline.warning("Failed to retain meeting audio; leaving scratch files in place", [
                 "hasMic": "\(micURL != nil)",
-                "hasSystem": "true",
+                "hasSystem": "\(systemURL != nil)",
                 "errorType": "\(type(of: error))"
             ])
             return RecordingAudioArchiveOutcome(
