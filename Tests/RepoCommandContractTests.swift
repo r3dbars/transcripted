@@ -3477,6 +3477,7 @@ func testRepoCommandContract() {
         let onboardingContents = readRepoTextFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
         let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
         let permissionAccessContents = readRepoTextFile("Sources/Support/TranscriptedPermissionAccess.swift")
+        let permissionKindContents = readRepoTextFile("Sources/Support/TranscriptedPermissionKind.swift")
 
         assertTrue(
             pillContents.contains("var onRemind")
@@ -3514,15 +3515,15 @@ func testRepoCommandContract() {
             "meeting failures should stay visible until acknowledged"
         )
         assertTrue(
-            settingsContents.contains("requiredPermissionsForCurrentUsage")
-                && settingsContents.contains("return [.microphone, .systemAudioRecording]")
+            settingsContents.contains("TranscriptedPermissionKind.requiredForCurrentUse(")
+                && permissionKindContents.contains("return [.microphone, .systemAudioRecording]")
                 && menuContents.contains("HotkeyPreferences.dictationShortcutsEnabled() ? appState.contextCapture.hotkeyError : nil"),
             "meetings-first users should not be nagged for Accessibility while System Audio Recording is the missing blocker"
         )
         assertTrue(
             settingsContents.contains("resetCaptureLibraryToDefault()")
                 && settingsContents.contains("Copy to Default Folder")
-                && settingsContents.contains("applyDefaultCaptureLibraryChoice()"),
+                && settingsContents.contains("applyCaptureLibraryChoice(nil)"),
             "resetting the capture library should confirm/copy/switch like choosing a folder"
         )
         assertTrue(
@@ -3536,13 +3537,12 @@ func testRepoCommandContract() {
                 in: permissionAccessContents,
                 needles: [
                     "case .systemAudioRecording:",
-                    "if systemAudioRecordingStatus() == .granted",
-                    "let stillGranted = await revalidateSystemAudioRecordingStatus()",
-                    "return stillGranted",
-                    "let granted = await requestSystemAudioRecordingAccessIfNeeded()",
+                    "let granted = await requestSystemAudioRecordingAccessIfNeeded(forceRefresh: true)",
+                    "notifyPermissionsDidChange(kind: .systemAudioRecording)",
+                    "if granted {",
                 ]
             ),
-            "the System Audio CTA should revalidate cached grants without opening Settings after a successful first-time grant"
+            "the System Audio CTA should force a fresh grant check instead of trusting a stale cached status"
         )
     }
 }
