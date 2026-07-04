@@ -85,6 +85,7 @@ REQUIRED_RELEASE_DEBUG_CHECK_IDS = {
 RELEASE_HEALTH_BLOCKING_WATCH_IDS = {
     "appcast-release-candidate",
 }
+SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 
 
 def parse_args() -> argparse.Namespace:
@@ -222,6 +223,14 @@ def git_tag_exists(root: Path, tag_name: str) -> bool:
     return result.returncode == 0
 
 
+def is_unreleased_patch_candidate(root: Path, candidate: str, published: str) -> bool:
+    return (
+        is_next_patch_version(candidate, published)
+        and git_tag_exists(root, f"v{published}")
+        and not git_tag_exists(root, f"v{candidate}")
+    )
+
+
 def scan_tracked_files(root: Path, manifest: dict) -> list[dict]:
     allowlist = manifest["secret_scan"]["tracked_file_allowlist_globs"]
     result = run(["git", "ls-files", "-z"], cwd=root)
@@ -356,6 +365,20 @@ def check_info_plist(root: Path, manifest: dict) -> list[dict]:
                 )
             )
 
+    short_version = str(plist.get("CFBundleShortVersionString", "")).strip()
+    build_version = str(plist.get("CFBundleVersion", "")).strip()
+    if short_version != build_version:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "info-version-build-mismatch",
+                "Info.plist release version drifted from the bundle build version.",
+                f"CFBundleShortVersionString={short_version!r}, CFBundleVersion={build_version!r}.",
+                manifest["paths"]["info_plist"],
+            )
+        )
+
     dsn = str(plist.get("TranscriptedSentryDSN", "")).strip()
     if not dsn.startswith("https://"):
         findings.append(
@@ -378,7 +401,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
     with info_path.open("rb") as handle:
         plist = plistlib.load(handle)
 
-    namespaces = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+    namespaces = {"sparkle": SPARKLE_NS}
     tree = ET.parse(appcast_path)
     channel = tree.getroot().find("channel")
     findings: list[dict] = []
@@ -410,18 +433,35 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
         )
         return findings, watch_items
 
-    version = (
-        latest.findtext("sparkle:shortVersionString", namespaces=namespaces)
-        or latest.findtext("sparkle:version", namespaces=namespaces)
-        or ""
-    ).strip()
+    short_version = (latest.findtext("sparkle:shortVersionString", namespaces=namespaces) or "").strip()
+    build_version = (latest.findtext("sparkle:version", namespaces=namespaces) or "").strip()
+    version = short_version or build_version
+    if not short_version or not build_version:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "high",
+                "appcast-version-field-missing",
+                "Latest appcast item is missing a Sparkle version field.",
+                "Both sparkle:shortVersionString and sparkle:version should be present.",
+                manifest["paths"]["appcast"],
+            )
+        )
+    elif short_version != build_version:
+        findings.append(
+            make_finding(
+                "release_integrity",
+                "medium",
+                "appcast-version-build-mismatch",
+                "Latest appcast release version drifted from its build version.",
+                f"sparkle:shortVersionString={short_version!r}, sparkle:version={build_version!r}.",
+                manifest["paths"]["appcast"],
+            )
+        )
+
     info_version = str(plist.get("CFBundleShortVersionString", "")).strip()
     if version != info_version:
-        unreleased_candidate = (
-            is_next_patch_version(info_version, version)
-            and git_tag_exists(root, f"v{version}")
-            and not git_tag_exists(root, f"v{info_version}")
-        )
+        unreleased_candidate = is_unreleased_patch_candidate(root, info_version, version)
         if unreleased_candidate:
             watch_items.append(
                 make_watch_item(
@@ -527,17 +567,13 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
 
 
 def appcast_item_metadata(item: ET.Element | None) -> dict[str, str] | None:
-    namespaces = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
+    namespaces = {"sparkle": SPARKLE_NS}
     if item is None:
         return None
 
     enclosure = item.find("enclosure")
     return {
-        "version": (
-            item.findtext("sparkle:shortVersionString", namespaces=namespaces)
-            or item.findtext("sparkle:version", namespaces=namespaces)
-            or ""
-        ).strip(),
+        "version": (item.findtext("sparkle:shortVersionString", namespaces=namespaces) or "").strip(),
         "build": (item.findtext("sparkle:version", namespaces=namespaces) or "").strip(),
         "minimum_system_version": (
             item.findtext("sparkle:minimumSystemVersion", namespaces=namespaces) or ""
@@ -548,7 +584,7 @@ def appcast_item_metadata(item: ET.Element | None) -> dict[str, str] | None:
         "url": enclosure.attrib.get("url", "") if enclosure is not None else "",
         "length": enclosure.attrib.get("length", "") if enclosure is not None else "",
         "signature": (
-            enclosure.attrib.get("{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature", "")
+            enclosure.attrib.get(f"{{{SPARKLE_NS}}}edSignature", "")
             if enclosure is not None
             else ""
         ),

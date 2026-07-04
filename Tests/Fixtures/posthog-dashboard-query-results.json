@@ -55,8 +55,8 @@
     {
       "id": "meeting_prompt_quality.prompt_outcomes",
       "rows": [
-        {"provider": "zoom", "source": "active_call", "prompt_reason": "call_detected", "route_ready": true, "choice_kind": null, "outcome_kind": null, "elapsed_bucket": null, "shown_events": 12, "choice_events": 0, "record_selected_events": 5, "outcome_events": 0, "dismissed_events": 3, "suppressed_events": 1, "missed_call_nudges": 2, "devices": 9},
-        {"provider": "zoom", "source": "runtime_app", "prompt_reason": "call_detected", "route_ready": "true", "choice_kind": "record", "outcome_kind": "transcript_saved", "elapsed_bucket": "10_29s", "shown_events": 0, "choice_events": 8, "record_selected_events": 0, "outcome_events": 6, "dismissed_events": 0, "suppressed_events": 0, "missed_call_nudges": 0, "devices": 5}
+        {"provider": "zoom", "source": "runtime_app", "prompt_reason": "mic_input", "route_ready": "true", "choice_kind": null, "outcome_kind": null, "elapsed_bucket": null, "shown_events": 12, "choice_events": 0, "record_selected_events": 5, "outcome_events": 0, "dismissed_events": 3, "suppressed_events": 1, "missed_call_nudges": 2, "devices": 9},
+        {"provider": "zoom", "source": "runtime_app", "prompt_reason": "mic_input", "route_ready": "true", "choice_kind": "record", "outcome_kind": "transcript_saved", "elapsed_bucket": "10_29s", "shown_events": 0, "choice_events": 8, "record_selected_events": 0, "outcome_events": 6, "dismissed_events": 0, "suppressed_events": 0, "missed_call_nudges": 0, "devices": 5}
       ]
     },
     {
@@ -104,7 +104,8 @@
     {
       "id": "retry_recovery.workflow_recovery",
       "rows": [
-        {"event": "workflow_recovery_finished", "workflow_kind": "meeting_transcript", "failure_kind": "model_unavailable", "retry_source": "home", "artifact_retained": true, "result": "success", "recovery_attempt_bucket": "second", "events": 3, "devices": 2}
+        {"event": "workflow_recovery_finished", "workflow_kind": "meeting_transcript", "failure_kind": "model_unavailable", "retry_source": "home", "artifact_retained": true, "result": "success", "recovery_attempt_bucket": "second", "events": 3, "devices": 2},
+        {"event": "workflow_recovery_failed", "workflow_kind": "local_summary", "failure_kind": "timeout", "retry_source": "summary_failure_notice", "artifact_retained": true, "result": "failed", "recovery_attempt_bucket": "1", "events": 1, "devices": 1}
       ]
     },
     {
@@ -117,6 +118,7 @@
       "id": "activation.habit_loop_actions",
       "rows": [
         {"action_kind": "open_recent_meeting", "artifact_kind": "meeting", "return_window_bucket": "18_36h", "surface": "home_row", "result": "success", "events": 7, "devices": 5},
+        {"action_kind": "open_recent_meeting", "artifact_kind": "meeting", "return_window_bucket": "18_36h", "surface": "home_row", "result": "failed", "events": 2, "devices": 2},
         {"action_kind": "review_yesterday", "artifact_kind": "dictation", "return_window_bucket": "3_7d", "surface": "home_menu", "result": "success", "events": 4, "devices": 3}
       ]
     },
@@ -164,19 +166,46 @@
     {
       "id": "timeline_dayflow.dayflow_events",
       "rows": [
-        {"event": "timeline_viewed", "provider": "localFoundation", "mode": "day", "result": "shown", "events": 7, "devices": 3, "first_seen": "2026-06-18T00:10:00Z", "last_seen": "2026-06-19T12:00:00Z"}
+        {"event": "timeline_card_opened", "provider_kind": null, "surface": "home", "card_kind": "daily_digest", "result": "success", "events": 7, "devices": 3, "first_seen": "2026-06-18T00:10:00Z", "last_seen": "2026-06-19T12:00:00Z"}
       ]
     },
     {
       "id": "timeline_dayflow.data_quality",
       "rows": [
-        {"event": "timeline_batch_completed", "provider": "localFoundation", "failure_kind": null, "events": 5, "devices": 3}
+        {"event": "timeline_card_generated", "provider_kind": "local_foundation", "permission_state": null, "card_kind": "daily_digest", "result": "success", "events": 5, "devices": 3}
       ]
     },
     {
-      "id": "release_health.version_event_counts",
+      "id": "release_health.installed_build_outcomes",
       "rows": [
-        {"event": "app_launched", "events": 82, "devices": 41, "first_seen": "2026-06-18T00:10:00Z", "last_seen": "2026-06-19T12:00:00Z"}
+        {
+          "app_version": "1.1.48",
+          "build_version": "536174328",
+          "build_channel": "release",
+          "build_revision": "releaseabc",
+          "launch_events": 82,
+          "launch_devices": 41,
+          "success_events": 37,
+          "success_devices": 22,
+          "failure_events": 3,
+          "failure_devices": 3,
+          "first_seen": "2026-06-18T00:10:00Z",
+          "last_seen": "2026-06-19T12:00:00Z"
+        },
+        {
+          "app_version": "1.1.49",
+          "build_version": "main-20260704",
+          "build_channel": "local",
+          "build_revision": "localmain",
+          "launch_events": 6,
+          "launch_devices": 2,
+          "success_events": 1,
+          "success_devices": 1,
+          "failure_events": 2,
+          "failure_devices": 1,
+          "first_seen": "2026-07-04T15:00:00Z",
+          "last_seen": "2026-07-04T15:30:00Z"
+        }
       ]
     },
     {

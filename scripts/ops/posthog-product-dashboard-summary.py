@@ -35,6 +35,7 @@ CORE_EVENTS = (
     "agent_capture_query_observed",
     "workflow_abandoned",
     "workflow_recovery_attempted",
+    "workflow_recovery_failed",
     "workflow_recovery_finished",
     "product_friction_observed",
     "dictation_start_failed",
@@ -69,6 +70,7 @@ CORE_EVENTS = (
     "local_meeting_summary_completed",
     "local_meeting_summary_failed",
     "meeting_saved_audio_retranscription_requested",
+    "meeting_live_transcript_drawer_actioned",
     "timeline_onboarding_completed",
     "timeline_viewed",
     "timeline_card_opened",
@@ -175,7 +177,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('dictation_start_failed', 'dictation_no_speech', 'dictation_audio_route_recovery_timeout', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'meeting_speaker_finalization_failed', 'local_meeting_summary_failed', 'workflow_recovery_finished')
+  AND event IN ('dictation_start_failed', 'dictation_no_speech', 'dictation_audio_route_recovery_timeout', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'meeting_speaker_finalization_failed', 'local_meeting_summary_failed', 'workflow_recovery_failed', 'workflow_recovery_finished')
   {app_version_filter(app_version)}
 GROUP BY event, failure_kind, trigger
 ORDER BY events DESC
@@ -238,7 +240,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'activation_habit_loop_actioned', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened', 'local_meeting_summary_started', 'local_meeting_summary_completed', 'local_meeting_summary_failed')
+  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'activation_habit_loop_actioned', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'meeting_live_transcript_drawer_actioned', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened', 'local_meeting_summary_started', 'local_meeting_summary_completed', 'local_meeting_summary_failed')
   {app_version_filter(app_version)}
 GROUP BY event, surface, artifact_kind, action_kind, agent_target, query_kind, source_count_bucket, result, page_id
 ORDER BY devices DESC, events DESC
@@ -253,17 +255,22 @@ SELECT
   properties['source'] AS source,
   properties['prompt_reason'] AS prompt_reason,
   properties['route_ready'] AS route_ready,
+  properties['choice_kind'] AS choice_kind,
+  properties['outcome_kind'] AS outcome_kind,
+  properties['elapsed_bucket'] AS elapsed_bucket,
   countIf(event = 'meeting_prompt_shown') AS shown_events,
+  countIf(event = 'meeting_prompt_choice_made') AS choice_events,
   countIf(event = 'meeting_prompt_record_selected') AS record_selected_events,
+  countIf(event = 'meeting_prompt_outcome_recorded') AS outcome_events,
   countIf(event = 'meeting_prompt_dismissed') AS dismissed_events,
   countIf(event = 'meeting_prompt_suppressed') AS suppressed_events,
   countIf(event = 'meeting_missed_call_nudge') AS missed_call_nudges,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('meeting_prompt_shown', 'meeting_prompt_record_selected', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
+  AND event IN ('meeting_prompt_shown', 'meeting_prompt_choice_made', 'meeting_prompt_record_selected', 'meeting_prompt_outcome_recorded', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
   {app_version_filter(app_version)}
-GROUP BY provider, source, prompt_reason, route_ready
+GROUP BY provider, source, prompt_reason, route_ready, choice_kind, outcome_kind, elapsed_bucket
 ORDER BY shown_events DESC, devices DESC
 LIMIT 50
 """
@@ -334,7 +341,12 @@ def release_breakdown_query(days: int) -> str:
     return f"""
 SELECT
   properties['app_version'] AS app_version,
+  properties['build_version'] AS build_version,
+  properties['build_channel'] AS build_channel,
+  properties['build_revision'] AS build_revision,
+  countIf(event = 'app_launched') AS launch_events,
   uniqIf(distinct_id, event = 'app_launched') AS launch_devices,
+  countIf(event IN ('dictation_completed', 'meeting_transcript_saved', 'activation_first_artifact_saved')) AS success_events,
   uniqIf(distinct_id, event IN ('dictation_completed', 'meeting_transcript_saved', 'activation_first_artifact_saved')) AS success_devices,
   countIf(event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped')) AS failure_events,
   uniqIf(distinct_id, event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped')) AS failure_devices,
@@ -342,8 +354,9 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(CORE_EVENTS)})
-GROUP BY app_version
-ORDER BY last_seen DESC
+  AND properties['app_version'] IS NOT NULL
+GROUP BY app_version, build_version, build_channel, build_revision
+ORDER BY launch_devices DESC, launch_events DESC, last_seen DESC
 LIMIT 20
 """
 
@@ -597,6 +610,7 @@ def build_under_discovered_feature(data: dict[str, Any]) -> Finding:
         ("Daily habit loop", devices.get("activation_habit_loop_actioned", 0), 4, "Make Review yesterday / What did I promise obvious after save and on return."),
         ("Local summary", max(devices.get("local_meeting_summary_started", 0), devices.get("local_meeting_summary_completed", 0)), 3, "Make the saved-meeting summary action clearer on Home."),
         ("Meeting import", devices.get("meeting_file_imported", 0), 3, "Expose imported-audio transcription from Home for users who missed live capture."),
+        ("Live transcript drawer", devices.get("meeting_live_transcript_drawer_actioned", 0), 3, "Make the in-meeting transcript drawer easier to discover and use during recording."),
         ("Saved-audio retranscription", devices.get("meeting_saved_audio_retranscription_requested", 0), 2, "Make retry from retained meeting audio clearer after transcript failure."),
         ("Meeting prompt acceptance", max(devices.get("meeting_prompt_record_selected", 0), devices.get("meeting_prompt_choice_made", 0)), 2, "Clarify detected-meeting prompts, route readiness, and save outcomes."),
     ]
@@ -617,7 +631,14 @@ def build_under_discovered_feature(data: dict[str, Any]) -> Finding:
 def build_prompt_quality(data: dict[str, Any]) -> Finding:
     rows = data["results"].get("meeting_prompt_quality", [])
     shown = sum(as_int(row.get("shown_events")) for row in rows)
-    accepted = sum(as_int(row.get("record_selected_events")) for row in rows)
+    record_selected = sum(as_int(row.get("record_selected_events")) for row in rows)
+    record_choices = sum(
+        as_int(row.get("choice_events"))
+        for row in rows
+        if row.get("choice_kind") == "record"
+    )
+    accepted = max(record_selected, record_choices)
+    terminal = sum(as_int(row.get("outcome_events")) for row in rows)
     dismissed = sum(as_int(row.get("dismissed_events")) for row in rows)
     suppressed = sum(as_int(row.get("suppressed_events")) for row in rows)
     if shown <= 0 and accepted <= 0:
@@ -631,7 +652,7 @@ def build_prompt_quality(data: dict[str, Any]) -> Finding:
     friction = dismissed + suppressed
     return Finding(
         "Meeting prompt quality",
-        f"shown={shown}, accepted={accepted}, dismissed_or_suppressed={friction}, acceptance={pct(accepted, shown)}.",
+        f"shown={shown}, accepted_or_choice={accepted}, terminal_outcomes={terminal}, dismissed_or_suppressed={friction}, acceptance={pct(accepted, shown)}.",
         "If dismissal/suppression beats acceptance, inspect route-ready and missing-permission buckets before changing prompt copy.",
         "high" if shown >= 10 else "medium",
         float(friction - accepted),
@@ -729,15 +750,20 @@ def build_release_watch(data: dict[str, Any]) -> Finding:
     successes = as_int(watched.get("success_devices"))
     failures = as_int(watched.get("failure_events"))
     version = watched.get("app_version")
+    build_version = watched.get("build_version") or "unknown"
+    build_channel = watched.get("build_channel") or "unknown"
+    build_revision = watched.get("build_revision") or "unknown"
     if launches and successes == 0:
         recommendation = "Watch this version for install/update friction: launch exists but no first success signal yet."
     elif failures:
         recommendation = "Compare this version against Sentry and recent PRs before calling the release clean."
     else:
         recommendation = "No release regression from aggregate PostHog counts; keep watching Sentry for sparse fatals."
+    if str(build_channel).lower() in {"local", "dev", "debug", "main", "nightly"}:
+        recommendation = "Treat this as current-main/local telemetry, not shipped-release proof. Keep it separate from shipped app_version rows."
     return Finding(
         "Release regression watch",
-        f"{version}: launches={launches}, success_devices={successes}, failure_events={failures}.",
+        f"{version} ({build_version}, {build_channel}, {build_revision}): launches={launches}, success_devices={successes}, failure_events={failures}.",
         recommendation,
         "medium" if launches < 10 or failures else "high",
         (failures / max(launches, 1)) * 1000 + max(0, launches - successes),
@@ -931,6 +957,15 @@ def run_self_test() -> int:
     if "Meeting transcript failure" not in mismatch_metric or "meeting_transcript_failed" not in mismatch_metric or "dictation_no_speech" in mismatch_metric:
         print("self-test failed: reliability breakdown did not stay tied to selected leak", file=sys.stderr)
         return 1
+    split_prompt_data = json.loads(json.dumps(data))
+    split_prompt_data["results"]["meeting_prompt_quality"] = [
+        {"shown_events": 10, "record_selected_events": 4, "choice_events": 0, "dismissed_events": 0, "suppressed_events": 0},
+        {"shown_events": 0, "record_selected_events": 0, "choice_events": 4, "choice_kind": "record", "dismissed_events": 0, "suppressed_events": 0},
+    ]
+    split_prompt_metric = build_prompt_quality(split_prompt_data).metric
+    if "accepted_or_choice=4" not in split_prompt_metric:
+        print("self-test failed: prompt quality double-counted split record choice/selected rows", file=sys.stderr)
+        return 1
     for query in (
         event_counts_query(30, None),
         daily_active_query(30, None),
@@ -945,6 +980,18 @@ def run_self_test() -> int:
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)
             return 1
+    release_query = release_breakdown_query(30)
+    if "GROUP BY app_version, build_version, build_channel, build_revision" not in release_query:
+        print("self-test failed: release breakdown must group by full build identity", file=sys.stderr)
+        return 1
+    release_rows = data["results"].get("release_breakdown", [])
+    if not any(row.get("build_channel") == "release" for row in release_rows) or not any(row.get("build_channel") == "local" for row in release_rows):
+        print("self-test failed: release fixture must include shipped and local/current-main build rows", file=sys.stderr)
+        return 1
+    release_metric = findings["release"].metric
+    if "localmain" not in release_metric:
+        print("self-test failed: release watch must print selected build revision/channel", file=sys.stderr)
+        return 1
     print("self-test passed")
     return 0
 

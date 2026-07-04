@@ -1846,6 +1846,9 @@ struct HomeListEmptyState {
     let actionTitle: String
     let automationIdentifier: String
     let action: () -> Void
+    var secondaryActionTitle: String? = nil
+    var secondaryAutomationIdentifier: String? = nil
+    var secondaryAction: (() -> Void)? = nil
 }
 
 private struct HomeEmptyStateView: View {
@@ -1870,13 +1873,26 @@ private struct HomeEmptyStateView: View {
                     .frame(maxWidth: 360)
             }
 
-            Button(action: state.action) {
-                Text(state.actionTitle)
+            HStack(spacing: 8) {
+                Button(action: state.action) {
+                    Text(state.actionTitle)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .accessibilityIdentifier(state.automationIdentifier)
+
+                if let secondaryTitle = state.secondaryActionTitle,
+                   let secondaryAutomationIdentifier = state.secondaryAutomationIdentifier,
+                   let secondaryAction = state.secondaryAction {
+                    Button(action: secondaryAction) {
+                        Text(secondaryTitle)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityIdentifier(secondaryAutomationIdentifier)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
             .padding(.top, 2)
-            .accessibilityIdentifier(state.automationIdentifier)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)

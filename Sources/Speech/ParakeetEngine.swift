@@ -21,6 +21,7 @@ class ParakeetEngine: ObservableObject {
     @Published var recordingInterrupted = false
     @Published var isRecovering = false
     @Published var inputFormatReady = true
+    private(set) var lastEmptyTranscriptionReason: DictationEmptyTranscriptionReason?
 
     var hasRecoverableRecording: Bool {
         !recoveredRecordingTimeline.isEmpty
@@ -2349,7 +2350,7 @@ class ParakeetEngine: ObservableObject {
                 }
             } catch {
                 let operationTimedOut = error is ParakeetAudioEngineWorkError
-                let context = audioStartContext(
+                var context = audioStartContext(
                     attempt: attempt,
                     isRecoveryAttempt: isRecoveryAttempt,
                     engineWasRunning: snapshot.engineWasRunning,
@@ -2358,8 +2359,10 @@ class ParakeetEngine: ObservableObject {
                     error: error
                 )
                 let failureReason = operationTimedOut
-                    ? ParakeetStartRecordingFailureReason.audioEngineStartFailed
+                    ? ParakeetStartRecordingFailureReason.audioEngineStartTimedOut
                     : ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error as NSError)
+                context["failure_kind"] = operationTimedOut ? "audio_engine_start_timeout" : "audio_engine_start_failed"
+                context["sample_flow_started"] = "\(didReceiveAudioSamples)"
                 let shouldRetry = !operationTimedOut
                     && failureReason == .audioEngineStartFailed
                     && ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(
@@ -2420,7 +2423,7 @@ class ParakeetEngine: ObservableObject {
                         context: context
                     )
                     let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
-                        for: .audioEngineStartFailed,
+                        for: .audioEngineStartTimedOut,
                         isRecoveryAttempt: isRecoveryAttempt
                     )
                     if startFailureAction.markFormatUnready {
@@ -2775,6 +2778,7 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Transcription
 
     func drainRecordedSamplesForExternalTranscription(engineName: String) async -> RecordedSpeechSamples? {
+        lastEmptyTranscriptionReason = nil
         guard !isTranscribing else {
             EventReporter.shared.capture(
                 level: .warning,
@@ -2788,6 +2792,7 @@ class ParakeetEngine: ObservableObject {
         drainPendingSamplesIntoSampleBuffer()
 
         guard !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
+            lastEmptyTranscriptionReason = .recordingTooShort
             EventReporter.shared.capture(
                 level: .warning,
                 engine: engineName,
@@ -2811,6 +2816,7 @@ class ParakeetEngine: ObservableObject {
             resampledSampleCount: resampled.count
         )
         guard shortAudioDecision.shouldTranscribe else {
+            lastEmptyTranscriptionReason = .recordingTooShort
             let audioDuration = shortAudioDecision.context["audio_duration_s"] ?? "0.00"
             print("⚠️ \(engineName.uppercased()) | skipping transcription for short audio (\(audioDuration)s)")
             EventReporter.shared.capture(
@@ -2912,6 +2918,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func transcribe() async -> String? {
+        lastEmptyTranscriptionReason = nil
         guard !isTranscribing else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_already_active",
                 message: "transcribe() called while transcription already in progress")
@@ -2919,6 +2926,7 @@ class ParakeetEngine: ObservableObject {
         }
         drainPendingSamplesIntoSampleBuffer()
         guard !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
+            lastEmptyTranscriptionReason = .recordingTooShort
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
                 message: "No audio samples in buffer when transcribe() called")
             return nil
@@ -2946,6 +2954,7 @@ class ParakeetEngine: ObservableObject {
             resampledSampleCount: resampled.count
         )
         guard shortAudioDecision.shouldTranscribe else {
+            lastEmptyTranscriptionReason = .recordingTooShort
             let audioDuration = shortAudioDecision.context["audio_duration_s"] ?? "0.00"
             print("⚠️ PARAKEET | skipping transcription for short audio (\(audioDuration)s)")
             EventReporter.shared.capture(
@@ -3043,6 +3052,7 @@ class ParakeetEngine: ObservableObject {
                 EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_empty",
                     message: "Parakeet returned no text after \(String(format: "%.1f", elapsed))s inference",
                     context: emptyContext)
+                lastEmptyTranscriptionReason = .noSpeech
                 finishTranscription()
                 return nil
             }
@@ -3075,6 +3085,7 @@ class ParakeetEngine: ObservableObject {
                     message: fallbackDecision.message ?? "Dictation audio too short for transcription",
                     context: fallbackContext
                 )
+                lastEmptyTranscriptionReason = .recordingTooShort
                 finishTranscription()
                 return nil
             }

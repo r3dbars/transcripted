@@ -535,6 +535,13 @@ func testAnalyticsEventPolicy() {
             "workflow recovery terminal events should preserve only buckets and terminal result"
         )
 
+        let failed = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_failed")
+        assertEqual(
+            failed?.allowedProperties ?? Set<String>(),
+            ["artifact_retained", "elapsed_bucket", "failure_kind", "recovery_attempt_bucket", "result", "retry_source", "surface", "workflow_kind"],
+            "workflow recovery failed events should match the terminal payload without adding raw failure details"
+        )
+
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "workflow_kind": "local_summary",
@@ -578,6 +585,10 @@ func testAnalyticsEventPolicy() {
         assertFalse(
             source.contains("\"attempt_bucket\""),
             "workflow recovery helper should not emit the legacy attempt bucket key"
+        )
+        assertTrue(
+            source.contains("\"workflow_recovery_failed\""),
+            "workflow recovery helper should emit a dedicated failed terminal event for failure drill-down"
         )
     }
 
@@ -638,6 +649,7 @@ func testAnalyticsEventPolicy() {
         let updateAction = AnalyticsEventPolicy.policy(forEvent: "update_action_clicked")
         let updateSetting = AnalyticsEventPolicy.policy(forEvent: "update_setting_changed")
         let updateCheckFinished = AnalyticsEventPolicy.policy(forEvent: "update_check_finished")
+        let liveTranscriptDrawer = AnalyticsEventPolicy.policy(forEvent: "meeting_live_transcript_drawer_actioned")
 
         assertEqual(menuOpened?.allowedProperties.contains("paste_available"), true, "menu opens should preserve whether paste has value")
         assertEqual(menuAction?.allowedProperties.contains("action_id"), true, "menu clicks should preserve the clicked action")
@@ -654,10 +666,12 @@ func testAnalyticsEventPolicy() {
         assertEqual(updateCheckFinished?.allowedProperties.contains("result"), true, "update checks should preserve the coarse outcome")
         assertEqual(updateCheckFinished?.allowedProperties.contains("failure_kind"), true, "update failures should preserve the normalized failure kind")
         assertEqual(updateCheckFinished?.allowedProperties.contains("failure_code"), true, "update failures should preserve coarse error-code buckets")
+        assertEqual(liveTranscriptDrawer?.allowedProperties ?? Set<String>(), ["action_kind", "result", "surface", "trigger"], "live transcript drawer adoption should stay enum-only")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "action_id": "start_dictation",
+                "action_kind": "open",
                 "automatic_downloads_enabled": "true",
                 "failure_code": "sparkle_2003",
                 "failure_kind": "feed_unreachable",
@@ -667,10 +681,13 @@ func testAnalyticsEventPolicy() {
                 "source": "menu_bar",
                 "state": "ready_to_install",
                 "surface": "settings_about",
+                "trigger": "overlay_button",
+                "transcript_text": "private live transcript",
             ],
-            allowedKeys: ["action_id", "automatic_downloads_enabled", "failure_code", "failure_kind", "feature_area", "page_id", "setting_id", "source", "state", "surface"]
+            allowedKeys: ["action_id", "action_kind", "automatic_downloads_enabled", "failure_code", "failure_kind", "feature_area", "page_id", "setting_id", "source", "state", "surface", "trigger"]
         )
         assertEqual(sanitized["action_id"], "start_dictation", "action ids should survive sanitization")
+        assertEqual(sanitized["action_kind"], "open", "drawer actions should survive as coarse enums")
         assertEqual(sanitized["automatic_downloads_enabled"], "true", "automatic update download state should survive sanitization")
         assertEqual(sanitized["failure_code"], "sparkle_2003", "coarse update failure codes should survive sanitization")
         assertEqual(sanitized["failure_kind"], "feed_unreachable", "update failure kind should survive sanitization")
@@ -680,6 +697,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["source"], "menu_bar", "source enums should survive sanitization")
         assertEqual(sanitized["state"], "ready_to_install", "update state should survive sanitization")
         assertEqual(sanitized["surface"], "settings_about", "update surface should survive sanitization")
+        assertEqual(sanitized["trigger"], "overlay_button", "drawer triggers should survive as coarse enums")
+        assertNil(sanitized["transcript_text"], "live transcript text must not be sent")
     }
 
     runSuite("FeatureDiscoveryTelemetry tracks each high-leverage feature once") {
@@ -1030,6 +1049,7 @@ func testAnalyticsEventPolicy() {
         let dictationArtifactSaved = AnalyticsEventPolicy.policy(forEvent: "dictation_artifact_saved")
         let dictationStopLatency = AnalyticsEventPolicy.policy(forEvent: "dictation_stop_latency_measured")
         let dictationNoSpeech = AnalyticsEventPolicy.policy(forEvent: "dictation_no_speech")
+        let dictationRecordingTooShort = AnalyticsEventPolicy.policy(forEvent: "dictation_recording_too_short")
         let meetingFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
         let meetingSkipped = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_skipped")
@@ -1041,6 +1061,8 @@ func testAnalyticsEventPolicy() {
         assertEqual(dictationStopLatency?.allowedProperties.contains("stop_to_paste_bucket"), true, "dictation stop latency should allow only bucketed stop-to-paste timing")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("duration_bucket"), true, "dictation no-speech should keep a coarse duration bucket")
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")
+        assertEqual(dictationRecordingTooShort?.allowedProperties.contains("duration_bucket"), true, "dictation too-short should keep a coarse duration bucket")
+        assertEqual(dictationRecordingTooShort?.allowedProperties.contains("trigger"), true, "dictation too-short should preserve trigger attribution")
         assertEqual(meetingFailed?.allowedProperties.contains("failure_kind"), true, "meeting failures should allow normalized failure kinds")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("failure_kind"), true, "speaker finalization failures should allow normalized failure kinds")
         assertEqual(meetingSkipped?.allowedProperties.contains("failure_kind"), true, "skipped meeting transcripts should allow normalized reasons")
@@ -1530,6 +1552,46 @@ func testAnalyticsEventPolicy() {
         assertNil(privatePromptFields["transcript_text"], "transcript text must not be sent")
     }
 
+    runSuite("AnalyticsEventPolicy pins meeting prompt telemetry firing paths") {
+        let appSource = readAnalyticsPolicyRepoTextFile("Sources/TranscriptedApp.swift")
+        let meetingSessionSource = readAnalyticsPolicyRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_shown\"", in: appSource),
+            1,
+            "shown telemetry should fire once, only after the detected prompt is actually presented"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_record_selected\"", in: appSource),
+            1,
+            "selected telemetry should fire once on the explicit record choice"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_suppressed\"", in: appSource),
+            1,
+            "suppression telemetry should fire once from the detector suppression hook"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_choice_made\"", in: appSource),
+            4,
+            "choice telemetry should cover record, dismiss, remind-later, and expiry actions without counting shown inventory"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: appSource),
+            2,
+            "app-level outcomes should cover ignored expiry and pre-prompt suppression only"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: meetingSessionSource),
+            2,
+            "session-level outcomes should stay centralized for start/save/fail terminal recording results"
+        )
+        assertTrue(
+            meetingSessionSource.contains("guard let properties = promptProperties else { return }"),
+            "manual and hotkey meetings must not inherit stale detected-prompt properties"
+        )
+    }
+
     runSuite("AnalyticsEventPolicy keeps mic boost prompt events narrow") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_mic_boost_prompt_shown")
         let actioned = AnalyticsEventPolicy.policy(forEvent: "meeting_mic_boost_prompt_actioned")
@@ -1564,6 +1626,17 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive sanitization")
         assertNil(sanitized["app_name"], "unallowlisted properties must be dropped")
     }
+}
+
+private func analyticsPolicyOccurrenceCount(of needle: String, in haystack: String) -> Int {
+    guard !needle.isEmpty else { return 0 }
+    var count = 0
+    var searchRange = haystack.startIndex..<haystack.endIndex
+    while let range = haystack.range(of: needle, range: searchRange) {
+        count += 1
+        searchRange = range.upperBound..<haystack.endIndex
+    }
+    return count
 }
 
 private func readAnalyticsPolicyRepoTextFile(_ relativePath: String) -> String {

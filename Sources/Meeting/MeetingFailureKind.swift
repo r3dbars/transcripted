@@ -43,8 +43,16 @@ enum MeetingFailureKind: String {
                 || normalized.contains("at least one second")
                 || normalized.contains("at least two seconds")
         ) && (normalized.contains("audio") || normalized.contains("recording"))
+        let mentionsTooShortAudio = (
+            normalized.contains("audio file is too short")
+                || normalized.contains("saved audio is too short")
+                || normalized.contains("audio is too short")
+                || normalized.contains("recording is too short")
+                || normalized.contains("too short to transcribe")
+        )
 
         return normalized.contains("recording too short")
+            || mentionsTooShortAudio
             || mentionsAudioMinimum
     }
 

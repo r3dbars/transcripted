@@ -191,10 +191,11 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 scripts/ops/posthog-product-context-pack.py --fixture Tests/Fixtures/posthog-product-context-pack-fixture.json --write-dir build/posthog-product-context-sample"
         fi
 
-        if matches_any "$path" "scripts/ops/posthog-dashboard-queries.py" "Tests/Fixtures/posthog-dashboard-query-results.json" "docs/posthog-dashboard-query-helpers.md"; then
+        if matches_any "$path" "scripts/ops/posthog-dashboard-queries.py" "Tests/Fixtures/posthog-dashboard-query-results.json" "Tests/Fixtures/posthog-observed-event-taxonomy.json" "docs/posthog-dashboard-query-helpers.md"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/ops/posthog-dashboard-queries.py"
             add_command "python3 scripts/ops/posthog-dashboard-queries.py --self-test"
+            add_command "python3 scripts/ops/posthog-dashboard-queries.py --taxonomy-check --observed-fixture Tests/Fixtures/posthog-observed-event-taxonomy.json --json-only"
         fi
 
         if matches_any "$path" "scripts/ops/nightly-security-check.py"; then
@@ -220,6 +221,12 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 -m py_compile scripts/release/bump-release-version.py"
             add_command "python3 scripts/release/bump-release-version.py --self-test"
             add_command "python3 scripts/release/bump-release-version.py --version 1.1.49 --dry-run"
+        fi
+
+        if matches_any "$path" "scripts/release/sentry-release-dry-run.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/release/sentry-release-dry-run.py"
+            add_command "python3 scripts/release/sentry-release-dry-run.py --self-test"
         fi
 
         if matches_any "$path" "scripts/ops/packaged-app-smoke.py"; then

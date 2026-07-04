@@ -154,11 +154,13 @@ rules:
   - paths:
       - "scripts/ops/posthog-dashboard-queries.py"
       - "Tests/Fixtures/posthog-dashboard-query-results.json"
+      - "Tests/Fixtures/posthog-observed-event-taxonomy.json"
       - "docs/posthog-dashboard-query-helpers.md"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/posthog-dashboard-queries.py"
       - "python3 scripts/ops/posthog-dashboard-queries.py --self-test"
+      - "python3 scripts/ops/posthog-dashboard-queries.py --taxonomy-check --observed-fixture Tests/Fixtures/posthog-observed-event-taxonomy.json --json-only"
 
   - paths:
       - "scripts/ops/nightly-security-check.py"
@@ -187,6 +189,13 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/release/post-dmg-release-audit.py"
       - "python3 scripts/release/post-dmg-release-audit.py --self-test"
+
+  - paths:
+      - "scripts/release/sentry-release-dry-run.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/release/sentry-release-dry-run.py"
+      - "python3 scripts/release/sentry-release-dry-run.py --self-test"
 
   - paths:
       - "scripts/ops/packaged-app-smoke.py"

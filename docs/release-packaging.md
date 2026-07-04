@@ -159,6 +159,7 @@ NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
 Before you publish a user-facing release note, sanity-check the release state:
 
 - compare `Info.plist` `CFBundleShortVersionString` against the latest GitHub release tag
+- run `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.48.json --write-report build/nightly-security-report.json` before a preparatory version bump so bundle version fields, the latest appcast item, and the Homebrew cask cannot silently drift
 - confirm the build output prints the expected Sentry release and dist
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
 - if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
@@ -198,6 +199,22 @@ also requires and uploads `build/Transcripted.app.dSYM` by default:
 ```bash
 SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh <version>
 ```
+
+For a no-upload prep pass before Justin approves the release cut, use the
+read-only dry run instead:
+
+```bash
+python3 scripts/release/sentry-release-dry-run.py --version <version>
+```
+
+That checker validates the intended Sentry release name, local tooling/auth
+surface, release-tag commit association readiness, and the local app/dSYM UUID
+pair when the build artifacts exist. It does not create or finalize a Sentry
+release, set commits, or upload debug files. Add `--check-sentry-release` only
+when you want a read-only `sentry-cli releases info` probe, add
+`--require-sentry-release` when the remote release must already exist, and use
+`--require-debug-files` after packaging when a missing app/dSYM pair should block
+the handoff.
 
 Prefer this post-publish registration path. `build-beta.sh` also supports
 `REGISTER_SENTRY_RELEASE=1`, but use that only when the tag, app binary, dSYM,

@@ -530,6 +530,7 @@ class DictationSessionController: ObservableObject {
                     return
                 }
 
+                readinessRefreshes = 0
                 if readinessRefresher.start(appState: appState) {
                     readinessRefreshes += 1
                 }
@@ -964,21 +965,23 @@ class DictationSessionController: ObservableObject {
             }
             stopTiming.cleanedAt = CFAbsoluteTimeGetCurrent()
             guard let text = cleanupResult?.text, !text.isEmpty else {
-                appState.logger.log("DICTATION | no transcription, cancelling")
+                let emptyReason = appState.sttRouter.lastEmptyTranscriptionReason ?? .noSpeech
+                appState.logger.log("DICTATION | no transcription (\(emptyReason.rawValue)), cancelling")
                 EventReporter.shared.capture(
                     level: .warning,
                     engine: "overlay",
-                    event: "no_voice_input",
-                    message: "Dictation transcription empty",
+                    event: emptyReason.localEventName,
+                    message: emptyReason.localEventMessage,
                     context: self.dictationContext(
                         extra: [
                             "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))",
-                            "trigger": self.currentDictationTrigger.rawValue
+                            "trigger": self.currentDictationTrigger.rawValue,
+                            "reason": emptyReason.rawValue
                         ]
                     )
                 )
                 AnalyticsReporter.track(
-                    "dictation_no_speech",
+                    emptyReason.analyticsEventName,
                     properties: self.dictationAnalyticsProperties(
                         extra: [
                             "duration_bucket": AnalyticsReporter.durationBucket(
@@ -992,16 +995,16 @@ class DictationSessionController: ObservableObject {
                     surface: .dictation,
                     stage: "dictation_transcribe",
                     result: .giveUp,
-                    failureKind: "no_speech",
+                    failureKind: emptyReason.frictionFailureKind,
                     elapsedBucket: AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
                     routeShape: self.dictationAnalyticsProperties()["route_shape"],
                     modelState: ProductFrictionTelemetry.modelState(isReady: appState.sttRouter.isModelLoaded)
                 )
                 NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
                 AppSoundPlayer.shared.play(.noSpeech)
-                overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue)
+                overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)
                 isDictating = false
-                appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "no_speech")
+                appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: emptyReason.runtimeOutcome)
                 return
             }
 

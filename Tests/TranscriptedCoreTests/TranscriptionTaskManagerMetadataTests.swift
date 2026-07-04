@@ -510,6 +510,34 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Mic only recovery worked."))
     }
 
+    func testStartTranscriptionRejectsTooShortLiveAudioWithoutQueueingRetry() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: micURL, duration: 1.0)
+        try writeMonoWAV(to: systemURL, duration: 1.0)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "too-short live mic scratch audio should be cleaned up")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "too-short live system scratch audio should be cleaned up")
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Recording too short")
+        guard case .failed(let message) = manager.displayStatus else {
+            return XCTFail("Expected too-short live audio to publish a failed status")
+        }
+        XCTAssertEqual(message, "Recording too short")
+    }
+
     func testMicOnlyTranscriptionRetainsMicAudioAndRemovesScratch() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
@@ -599,6 +627,38 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should be removed after archive")
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after archive")
+    }
+
+    func testAsyncFailedQueueArchivesBeforePersistingFailedRow() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        let didQueue = await manager.addFailedTranscriptionRetainingAvailableAudioAfterArchive(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Transcription inference failed",
+            taskId: UUID(uuidString: "00000000-0000-0000-0000-000000000149")!,
+            meetingTitle: "Recovery Check",
+            recordingDate: Date(timeIntervalSince1970: 1_797_000_000)
+        )
+
+        XCTAssertTrue(didQueue)
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.meetingTitle, "Recovery Check")
+        XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.systemAudioURL?.path ?? ""))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should be removed after retained archive is persisted")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after retained archive is persisted")
     }
 
     func testManualFailedQueueRemovesRetainedAudioWhenQueuePersistenceFails() throws {
@@ -1617,6 +1677,34 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertNil(manager.lastSavedTranscriptURL)
     }
 
+    func testStartImportedTranscriptionRejectsTooShortAudioWithClearCopy() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let scratchURL = scratchDirectory.appendingPathComponent("imported-too-short.wav")
+        try writeMonoWAV(to: scratchURL, duration: 1.0)
+
+        manager.startImportedTranscription(
+            audioURL: scratchURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Short import"
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scratchURL.path), "app-managed short import scratch audio should be removed after rejection")
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Recording too short")
+        guard case .failed(let message) = manager.displayStatus else {
+            return XCTFail("Expected too-short imported audio to publish a failed status")
+        }
+        XCTAssertEqual(
+            message,
+            "That audio file is too short to transcribe. Choose audio that is at least two seconds long."
+        )
+    }
+
     func testSavedAudioRetranscriptionRunsSpeakerIdentificationAndKeepsSourceAudio() async throws {
         let speech = MetadataStubSpeechToTextEngine(transcript: "Thanks for joining.")
         let diarization = MetadataStubDiarizationEngine(segments: [
@@ -2281,6 +2369,34 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(failed.id, failedId)
         XCTAssertEqual(failed.meetingTitle, "Customer call")
         XCTAssertEqual(failed.errorMessage, "Retry failed: Parakeet inference failed")
+    }
+
+    func testFinalizedFailedAudioPromotionPreservesExistingSystemAudioWhenCallbackHasOnlyMic() throws {
+        let manager = makeManager()
+        let failedId = UUID()
+        let originalMicURL = tempDirectory.appendingPathComponent("audio/timeout-mic.wav")
+        let finalizedMicURL = tempDirectory.appendingPathComponent("audio/timeout-mic-final.wav")
+        let existingSystemURL = tempDirectory.appendingPathComponent("audio/timeout-system.wav")
+        FileManager.default.createFile(atPath: originalMicURL.path, contents: Data("mic".utf8))
+        FileManager.default.createFile(atPath: finalizedMicURL.path, contents: Data("final-mic".utf8))
+        FileManager.default.createFile(atPath: existingSystemURL.path, contents: Data("system".utf8))
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            id: failedId,
+            micAudioURL: originalMicURL,
+            systemAudioURL: existingSystemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+
+        XCTAssertTrue(manager.promoteFinalizedFailedTranscriptionAudio(
+            id: failedId,
+            micAudioURL: finalizedMicURL,
+            systemAudioURL: nil
+        ))
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.micAudioURL, finalizedMicURL)
+        XCTAssertEqual(failed.systemAudioURL, existingSystemURL)
     }
 
     private func makeManager(
