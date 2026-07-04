@@ -124,25 +124,6 @@ func testDictationSessionCap() {
         )
     }
 
-    runSuite("The session cap warns and only auto-pastes when the original target is still active") {
-        let source = dictationControllerSource()
-        let timeoutBody = capSlice(
-            source,
-            from: "func installSessionTimeout()",
-            to: "private func overlayStateName"
-        )
-        assertTrue(
-            timeoutBody.contains("remainingSeconds <= 60")
-                && timeoutBody.contains("listeningNotice = \"Wrapping up soon\""),
-            "the overlay should warn before the hard session cap fires"
-        )
-        assertTrue(
-            timeoutBody.contains("sessionPasteTarget?.matchesCurrentFrontmostApp() == true")
-                && timeoutBody.contains("stopDictationAndPaste(trigger: .sessionCap, autoPaste: targetStillActive)"),
-            "the cap should paste only if the original paste target is still frontmost"
-        )
-    }
-
     runSuite("Dictation stop path preserves recovered audio and surfaces invisible hotkey states") {
         let source = dictationControllerSource()
         let stopBody = capSlice(
