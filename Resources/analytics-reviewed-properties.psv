@@ -32,6 +32,7 @@ calendar_status
 call_state
 camera_signal
 capture_activity
+capture_kind
 capture_quality
 captured_input_volume_before
 captured_input_volume_changed
@@ -42,6 +43,7 @@ channel
 choice_kind
 cleanup_changed
 cleanup_enabled
+client_family
 completion_flow
 completion_kind
 cooldown_reason
@@ -178,6 +180,7 @@ system_rate_hz
 system_status
 system_stream_present
 to_status
+tool_kind
 trigger
 update_state
 version
