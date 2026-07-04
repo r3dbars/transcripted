@@ -66,6 +66,13 @@ extension ParakeetModelState {
         case .failed: return "failed"
         }
     }
+
+    var isReady: Bool {
+        if case .ready = self {
+            return true
+        }
+        return false
+    }
 }
 
 struct RecordedSpeechSamples {

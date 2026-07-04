@@ -4465,17 +4465,6 @@ struct TranscriptedSettingsView: View {
         return "PostHog is not configured in this build. Usage stats stay off."
     }
 
-    private func homeModelDetail(from modelCard: FirstRunModelCardState) -> String {
-        switch modelCard.tone {
-        case .ready:
-            return "\(effectiveTranscriptionModel.title) is ready on this Mac."
-        case .working:
-            return modelCard.title
-        case .failed:
-            return modelCard.detail
-        }
-    }
-
     private func tone(for tone: FirstRunModelCardState.Tone) -> SettingsStatusCard.Tone {
         switch tone {
         case .ready:
@@ -5338,19 +5327,6 @@ struct TranscriptedSettingsView: View {
             return .readyToInstall
         }
     }
-
-    private func formattedRecentDate(_ date: Date) -> String {
-        Self.recentCaptureDateFormatter.string(from: date)
-    }
-
-    private static let recentCaptureDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.doesRelativeDateFormatting = true
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
 }
 
 private struct PendingCaptureLibraryChoice: Equatable {
