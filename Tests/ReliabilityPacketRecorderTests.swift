@@ -170,6 +170,45 @@ func testReliabilityPacketRecorder() {
         assertNil(packet?.context["transcript_text"], "transcript text should not be copied into reliability packets")
     }
 
+    runSuite("ReliabilityPacketRecorder maps Parakeet audio engine start timeout as retryable startup failure") {
+        let event = ObservabilityEvent(
+            timestamp: "2026-07-04T11:58:00.000Z",
+            level: "error",
+            engine: "parakeet",
+            event: "audio_engine_start_timeout",
+            message: "Audio engine start timed out; abandoned blocked microphone graph",
+            context: [
+                "audio_device": "Private AirPods",
+                "default_input_class": "bluetooth",
+                "default_output_class": "bluetooth",
+                "failure_kind": "audio_engine_start_timeout",
+                "format_ready": "false",
+                "input_device_class": "built_in",
+                "output_device_class": "bluetooth",
+                "sample_flow_started": "false",
+                "selected_input_class": "built_in",
+                "selection_overrode_default": "true",
+                "selection_reason": "preferredBuiltInForBluetoothHeadset",
+                "status_domain": "private raw domain",
+                "transcript_text": "private words",
+            ],
+            appVersion: "1.1.49",
+            osVersion: "Version 26.5.0"
+        )
+
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+
+        assertNotNil(packet, "Parakeet audio start timeout should produce a reliability packet")
+        assertEqual(packet?.feature, "dictation", "packet feature should classify dictation startup")
+        assertEqual(packet?.stage, "start", "packet stage should classify startup")
+        assertEqual(packet?.outcome, "failed_retryable", "audio engine start timeout should be retryable")
+        assertEqual(packet?.context["failure_kind"], "audio_engine_start_timeout", "timeout kind should stay queryable")
+        assertEqual(packet?.context["sample_flow_started"], "false", "sample-flow state should stay queryable")
+        assertNil(packet?.context["audio_device"], "raw device names should not be copied into reliability packets")
+        assertNil(packet?.context["status_domain"], "raw status details should not be copied into reliability packets")
+        assertNil(packet?.context["transcript_text"], "transcript text should not be copied into reliability packets")
+    }
+
     runSuite("ReliabilityPacketRecorder preserves coarse runtime shutdown duration") {
         let event = ObservabilityEvent(
             timestamp: "2026-05-03T01:15:11.605Z",

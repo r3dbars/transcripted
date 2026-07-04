@@ -36,6 +36,7 @@ RELEVANT_EVENTS = (
     "workflow_abandoned",
     "product_friction_observed",
     "workflow_recovery_attempted",
+    "workflow_recovery_failed",
     "workflow_recovery_finished",
     "meeting_prompt_shown",
     "meeting_prompt_record_selected",
@@ -431,17 +432,22 @@ SELECT
   properties['source'] AS source,
   properties['prompt_reason'] AS prompt_reason,
   properties['route_ready'] AS route_ready,
+  properties['choice_kind'] AS choice_kind,
+  properties['outcome_kind'] AS outcome_kind,
+  properties['elapsed_bucket'] AS elapsed_bucket,
   countIf(event = 'meeting_prompt_shown') AS shown_events,
+  countIf(event = 'meeting_prompt_choice_made') AS choice_events,
   countIf(event = 'meeting_prompt_record_selected') AS record_selected_events,
+  countIf(event = 'meeting_prompt_outcome_recorded') AS outcome_events,
   countIf(event = 'meeting_prompt_dismissed') AS dismissed_events,
   countIf(event = 'meeting_prompt_suppressed') AS suppressed_events,
   countIf(event = 'meeting_missed_call_nudge') AS missed_call_nudges,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('meeting_prompt_shown', 'meeting_prompt_record_selected', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
+  AND event IN ('meeting_prompt_shown', 'meeting_prompt_choice_made', 'meeting_prompt_record_selected', 'meeting_prompt_outcome_recorded', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
   {app_version_filter(app_version)}
-GROUP BY provider, source, prompt_reason, route_ready
+GROUP BY provider, source, prompt_reason, route_ready, choice_kind, outcome_kind, elapsed_bucket
 ORDER BY shown_events DESC, devices DESC
 LIMIT 40
 """
@@ -482,7 +488,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished')
+  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished', 'workflow_recovery_failed')
   {app_version_filter(app_version)}
 GROUP BY event, workflow_kind, failure_kind, retry_source, artifact_retained, result
 ORDER BY events DESC
@@ -675,7 +681,7 @@ def render_report(data: dict[str, Any]) -> str:
 
     limitations = [
         "`permission ready` uses `onboarding_completed` as a proxy. The app guards completion on required dictation permissions, but this does not count users who became ready outside onboarding.",
-        "`strict saved Markdown` counts `activation_first_artifact_saved`, emitted once per install from successful dictation and meeting Markdown save paths.",
+        "`strict saved Markdown` counts `activation_first_artifact_saved`, emitted once per install from successful dictation, live meeting, and imported meeting Markdown save paths.",
         "`dictation_artifact_saved`, `onboarding_first_dictation_saved`, and `meeting_transcript_saved` are broader saved-artifact proof signals; `dictation_completed` is included only for completion-volume continuity.",
         "Agent setup and prompt-copy events prove intent. They do not prove the user asked an agent a sourced question or got a useful answer.",
         "`activation_second_artifact_saved` proves a second durable artifact save on the same anonymous device, but does not inspect artifact content or join identity.",
@@ -798,7 +804,7 @@ def render_report(data: dict[str, Any]) -> str:
         render_top_rows(
             "Meeting Prompt Quality",
             data["results"].get("meeting_prompt_quality", []),
-            ["provider", "source", "prompt_reason", "route_ready", "shown_events", "record_selected_events", "dismissed_events", "suppressed_events", "missed_call_nudges", "devices"],
+            ["provider", "source", "prompt_reason", "route_ready", "choice_kind", "outcome_kind", "elapsed_bucket", "shown_events", "choice_events", "record_selected_events", "outcome_events", "dismissed_events", "suppressed_events", "missed_call_nudges", "devices"],
         ),
         render_top_rows(
             "Speaker Trust",

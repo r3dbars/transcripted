@@ -49,6 +49,13 @@ enum WorkflowRecoveryTelemetry {
             "workflow_recovery_finished",
             properties: properties
         )
+
+        if result == "failed" {
+            AnalyticsReporter.track(
+                "workflow_recovery_failed",
+                properties: properties
+            )
+        }
     }
 
     private static func baseProperties(

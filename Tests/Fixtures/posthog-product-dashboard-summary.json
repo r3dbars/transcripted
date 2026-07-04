@@ -149,6 +149,11 @@
         "events": 3
       },
       {
+        "devices": 1,
+        "event": "workflow_recovery_failed",
+        "events": 1
+      },
+      {
         "devices": 7,
         "event": "meeting_recording_started",
         "events": 11
@@ -192,18 +197,41 @@
     "release_breakdown": [
       {
         "app_version": "1.1.48",
+        "build_channel": "release",
+        "build_revision": "releaseabc",
+        "build_version": "536174328",
         "failure_devices": 5,
         "failure_events": 7,
         "last_seen": "2026-06-19T00:00:00",
+        "launch_events": 52,
         "launch_devices": 34,
+        "success_events": 18,
         "success_devices": 14
       },
       {
+        "app_version": "1.1.49",
+        "build_channel": "local",
+        "build_revision": "localmain",
+        "build_version": "main-20260704",
+        "failure_devices": 2,
+        "failure_events": 3,
+        "last_seen": "2026-07-04T15:30:00",
+        "launch_events": 4,
+        "launch_devices": 2,
+        "success_events": 1,
+        "success_devices": 1
+      },
+      {
         "app_version": "1.1.47",
+        "build_channel": "release",
+        "build_revision": "oldrelease",
+        "build_version": "534000111",
         "failure_devices": 0,
         "failure_events": 0,
         "last_seen": "2026-06-18T00:00:00",
+        "launch_events": 11,
         "launch_devices": 8,
+        "success_events": 7,
         "success_devices": 5
       }
     ],
@@ -225,15 +253,20 @@
     ],
     "meeting_prompt_quality": [
       {
+        "choice_events": 3,
+        "choice_kind": "record",
         "devices": 4,
         "dismissed_events": 2,
+        "elapsed_bucket": "10_29s",
         "missed_call_nudges": 1,
-        "prompt_reason": "call_detected",
+        "outcome_events": 2,
+        "outcome_kind": "transcript_saved",
+        "prompt_reason": "mic_input",
         "provider": "zoom",
         "record_selected_events": 3,
-        "route_ready": true,
+        "route_ready": "true",
         "shown_events": 6,
-        "source": "active_call",
+        "source": "runtime_app",
         "suppressed_events": 1
       }
     ],

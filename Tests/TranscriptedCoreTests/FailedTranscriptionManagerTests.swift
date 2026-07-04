@@ -273,6 +273,38 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(persisted.first?.meetingTitle, "Design review")
     }
 
+    func testUpdateFailedTranscriptionErrorRollsBackMemoryWhenPersistenceFails() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+
+        let micURL = paths.audioCaptures.appendingPathComponent("safe-mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedId = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedId,
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure",
+            meetingTitle: "Queue retry"
+        ))
+        let original = try XCTUnwrap(manager.failedTranscriptions.first)
+
+        try FileManager.default.removeItem(at: paths.failedQueue)
+        try FileManager.default.createDirectory(at: paths.failedQueue, withIntermediateDirectories: true)
+
+        XCTAssertFalse(manager.updateFailedTranscriptionError(
+            id: failedId,
+            errorMessage: "Retry failed: model not ready"
+        ))
+        XCTAssertEqual(
+            manager.failedTranscriptions.first,
+            original,
+            "the visible failed queue should not drift from durable storage when retry-state persistence fails"
+        )
+    }
+
     func testUpdateFailedTranscriptionAudioPreservesRetryMetadata() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

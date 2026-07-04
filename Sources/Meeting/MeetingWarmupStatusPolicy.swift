@@ -84,12 +84,13 @@ enum MeetingWarmupStatusPolicy {
 
         switch dictationState {
         case .downloading(let progress):
+            let percentage = clampedDownloadPercentage(progress)
             return MeetingWarmupStatus(
                 title: "Getting Transcripted ready",
                 subtitle: "Downloading local dictation model",
                 detail: "One-time local model download. Keep Transcripted open; future app updates should reuse the cached model.",
                 progress: max(0.08, min(0.62, 0.08 + progress * 0.54)),
-                dictationStatus: progress > 0 ? "Downloading \(Int(progress * 100))%" : "Downloading",
+                dictationStatus: percentage > 0 ? "Downloading \(percentage)%" : "Downloading",
                 meetingsStatus: "Waiting"
             )
         case .loading:
@@ -128,6 +129,10 @@ enum MeetingWarmupStatusPolicy {
         case .notLoaded:
             return .modelsOnDemand
         }
+    }
+
+    private static func clampedDownloadPercentage(_ progress: Double) -> Int {
+        max(0, min(100, Int(progress * 100)))
     }
 
     private static func meetingStatus(

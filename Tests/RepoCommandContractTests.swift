@@ -437,6 +437,8 @@ func testRepoCommandContract() {
             "python3 -m py_compile scripts/ops/nightly-security-check.py",
             "python3 -m py_compile scripts/ops/release-gate-report.py",
             "python3 scripts/ops/release-gate-report.py --self-test",
+            "python3 -m py_compile scripts/release/sentry-release-dry-run.py",
+            "python3 scripts/release/sentry-release-dry-run.py --self-test",
             "python3 -m py_compile scripts/ops/build-codex-memory-index.py",
             "bash -n scripts/ops/nightly-transcripted-archive-miner.sh",
             "ruby -c scripts/ops/performance-budget.rb",
@@ -851,7 +853,9 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - Sentry release registration requires matching dSYM") {
         let buildBeta = readRepoTextFile("scripts/entrypoints/build-beta.sh")
         let registerSentry = readRepoTextFile("scripts/release/register-sentry-release.sh")
+        let dryRun = readRepoTextFile("scripts/release/sentry-release-dry-run.py")
         let releaseDocs = readRepoTextFile("docs/release-packaging.md")
+        let scriptsReadme = readRepoTextFile("scripts/README.md")
 
         assertTrue(
             buildBeta.contains("GENERATE_DSYM=\"${GENERATE_DSYM:-1}\"")
@@ -886,6 +890,25 @@ func testRepoCommandContract() {
                 && releaseDocs.contains("SENTRY_APP_BINARY_PATH=/path/to/Transcripted.app/Contents/MacOS/Transcripted")
                 && releaseDocs.contains("call the release yellow"),
             "release docs should tell future workers how to register a reused artifact without stale symbols"
+        )
+        assertTrue(
+            dryRun.contains("This checker does not create/finalize Sentry releases, set commits, or upload debug files.")
+                && dryRun.contains(#""sentry-cli","#)
+                && dryRun.contains(#""releases","#)
+                && dryRun.contains(#""info","#)
+                && dryRun.contains(#"--require-debug-files"#)
+                && !dryRun.contains(#""sentry-cli", "releases", "new""#)
+                && !dryRun.contains(#""sentry-cli", "debug-files", "upload""#),
+            "Sentry dry run should stay read-only while checking env/tooling, release info, and local dSYM readiness"
+        )
+        assertTrue(
+            releaseDocs.contains("scripts/release/sentry-release-dry-run.py --version <version>")
+                && releaseDocs.contains("It does not create or finalize a Sentry")
+                && releaseDocs.contains("--check-sentry-release")
+                && releaseDocs.contains("--require-sentry-release")
+                && releaseDocs.contains("--require-debug-files")
+                && scriptsReadme.contains("scripts/release/sentry-release-dry-run.py"),
+            "release docs should steer prep work to the read-only Sentry dry run instead of the mutating registration script"
         )
     }
 
@@ -1987,6 +2010,18 @@ func testRepoCommandContract() {
             contents.contains("hasStartupTask: startupTask != nil"),
             "mini cursor model warmup should remain cancellable before the delayed loading reveal"
         )
+        let recoveryStartFailedBlock = sourceSlice(
+            contents,
+            from: "case .startRecoveryRecording:",
+            to: "case .startRecording:"
+        )
+        assertTrue(
+            recoveryStartFailedBlock.contains("if started {")
+                && recoveryStartFailedBlock.contains("return")
+                && recoveryStartFailedBlock.contains("readinessRefreshes = 0")
+                && recoveryStartFailedBlock.contains("if readinessRefresher.start(appState: appState)"),
+            "failed recovery-start attempts should reset stale refresh counters before the next cooldown refresh"
+        )
         let lifecycleContents = readRepoTextFile("Sources/UI/Overlay/DictationRecordingStartOverlayPolicy.swift")
         assertTrue(
             lifecycleContents.contains("hasStartupTask || hasRecordingStartTask"),
@@ -2161,6 +2196,28 @@ func testRepoCommandContract() {
         assertTrue(
             controllerContents.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
             "queued meeting jobs should reload the STT model selected when the audio was queued"
+        )
+        let visibleWarmupBlock = sourceSlice(
+            controllerContents,
+            from: "let task = Task<Result<Void, Error>, Never> { [downloader] in",
+            to: "modelPreparationTask = task"
+        )
+        assertTrue(
+            visibleWarmupBlock.contains("TranscriptedConstants.withDetachedTimeout")
+                && visibleWarmupBlock.contains("TranscriptedConstants.modelLoadWaitBudget")
+                && visibleWarmupBlock.contains("downloader.ensureModelsReady()"),
+            "visible meeting model warmup should fail through the existing model-load budget instead of staying stuck in loadingModels"
+        )
+        let queuedRecoveryBlock = sourceSlice(
+            controllerContents,
+            from: "private func ensureModelsReadyForQueuedTranscription(_ job: QueuedTranscriptionJob) async -> Bool {",
+            to: "let ready = sttAdapter.isReady && diarization.isReady"
+        )
+        assertTrue(
+            queuedRecoveryBlock.contains("TranscriptedConstants.withDetachedTimeout")
+                && queuedRecoveryBlock.contains("TranscriptedConstants.modelLoadWaitBudget")
+                && queuedRecoveryBlock.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
+            "queued meeting model recovery should use the same bounded readiness wait as visible first-run warmup"
         )
         assertTrue(
             controllerContents.contains("preparingQueuedTranscriptionJob")
@@ -2458,6 +2515,53 @@ func testRepoCommandContract() {
         assertTrue(
             countOccurrences(of: "handleBackgroundTranscriptionWorkChanged()", in: failureBlock) >= 3,
             "terminal failed statuses should wake the queued-transcription drain even when a task was rejected before activeCount changed"
+        )
+    }
+
+    runSuite("Repo command contract - first artifact telemetry covers dictation meeting and import saves once") {
+        let dictationContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let meetingContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let activationContents = readRepoTextFile("Sources/Observability/ActivationTelemetry.swift")
+        let importBlock = sourceSlice(
+            meetingContents,
+            from: "func importAudioFile(from sourceURL: URL) async -> Bool {",
+            to: "private func importPreparationFailureKind"
+        )
+        let savedAnalyticsBlock = sourceSlice(
+            meetingContents,
+            from: "private func trackSavedTranscriptAnalyticsInBackground(",
+            to: "/// One bucketed event per auto-recognized *person*"
+        )
+
+        assertTrue(
+            dictationContents.contains("ActivationTelemetry.trackFirstArtifactSavedIfNeeded(\n                    artifactKind: .dictation")
+                && dictationContents.contains("surface: .dictationSave")
+                && dictationContents.contains("trigger: currentDictationTrigger.rawValue")
+                && dictationContents.contains("wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)")
+                && dictationContents.contains("durationBucket: AnalyticsReporter.durationBucket(seconds:"),
+            "successful dictation Markdown saves should emit first-artifact telemetry with only enum and bucket properties"
+        )
+        assertTrue(
+            importBlock.contains("startTrigger: .fileImport")
+                && importBlock.contains("enqueueImportedAudioJob("),
+            "imported recordings should enter the shared meeting transcription/save pipeline with a coarse file_import trigger"
+        )
+        assertTrue(
+            savedAnalyticsBlock.contains("ActivationTelemetry.trackFirstArtifactSavedIfNeeded(")
+                && savedAnalyticsBlock.contains("artifactKind: .meeting")
+                && savedAnalyticsBlock.contains("surface: .meetingSave")
+                && savedAnalyticsBlock.contains("trigger: properties[\"trigger\"] ?? StartTrigger.unknown.rawValue")
+                && savedAnalyticsBlock.contains("wordCountBucket: properties[\"word_count_bucket\"]")
+                && savedAnalyticsBlock.contains("durationBucket: properties[\"duration_bucket\"]")
+                && savedAnalyticsBlock.contains("AnalyticsReporter.track(\n                    \"meeting_transcript_saved\""),
+            "live and imported meeting Markdown saves should share the same first-artifact telemetry seam before the broader meeting-saved proxy event"
+        )
+        assertTrue(
+            activationContents.contains("guard !userDefaults.bool(forKey: firstArtifactSavedTrackedKey) else { return false }")
+                && activationContents.contains("userDefaults.set(true, forKey: firstArtifactSavedTrackedKey)")
+                && activationContents.contains("AnalyticsReporter.track(\"activation_first_artifact_saved\"")
+                && activationContents.contains("AnalyticsReporter.track(\n                \"activation_second_artifact_saved\""),
+            "ActivationTelemetry should keep first artifact once-per-install while preserving the second-artifact follow-up event"
         )
     }
 

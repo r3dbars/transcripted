@@ -71,6 +71,28 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(action.rebuildAudioEngine, "engine start failure should rebuild the stale audio engine")
     }
 
+    runSuite("ParakeetStartRecordingFailurePolicy engine start timeout stays explicit and retryable") {
+        let action = ParakeetStartRecordingFailurePolicy.action(
+            for: .audioEngineStartTimedOut,
+            isRecoveryAttempt: false
+        )
+
+        assertTrue(action.markFormatUnready, "timed-out engine starts should hold new starts until recovery refreshes readiness")
+        assertTrue(action.schedulePrewarmRetry, "a timed-out first start should still schedule readiness recovery for Try Again")
+        assertTrue(action.rebuildAudioEngine, "timed-out starts should keep using the graph recovery action")
+    }
+
+    runSuite("ParakeetStartRecordingFailurePolicy engine start timeout on recovery does not chain retries") {
+        let action = ParakeetStartRecordingFailurePolicy.action(
+            for: .audioEngineStartTimedOut,
+            isRecoveryAttempt: true
+        )
+
+        assertTrue(action.markFormatUnready, "recovery timeout should keep input marked unready")
+        assertFalse(action.schedulePrewarmRetry, "recovery timeout should not recursively schedule more recovery starts")
+        assertTrue(action.rebuildAudioEngine, "recovery timeout should keep graph recovery enabled")
+    }
+
     runSuite("ParakeetStartRecordingFailurePolicy route-not-settled schedules prewarm") {
         let action = ParakeetStartRecordingFailurePolicy.action(
             for: .audioRouteNotSettled,

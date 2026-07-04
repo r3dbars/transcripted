@@ -113,8 +113,15 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
                 || message.contains("at least one second")
                 || message.contains("at least two seconds")
         ) && (message.contains("audio") || message.contains("recording"))
+        let mentionsTooShortAudio = (
+            message.contains("audio file is too short")
+                || message.contains("saved audio is too short")
+                || message.contains("audio is too short")
+                || message.contains("recording is too short")
+                || message.contains("too short to transcribe")
+        )
 
-        return message.contains("recording too short") || mentionsAudioMinimum
+        return message.contains("recording too short") || mentionsTooShortAudio || mentionsAudioMinimum
     }
 
     /// Checks if the audio files still exist on disk

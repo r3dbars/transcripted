@@ -20,4 +20,17 @@ func testDictationNoSpeechPresentationPolicy() {
             "non-physical-key dictation should explain the next retry action"
         )
     }
+
+    runSuite("DictationNoSpeechPresentationPolicy separates too-short recordings from silence") {
+        let message = DictationNoSpeechPresentationPolicy.message(
+            trigger: "menu",
+            reason: .recordingTooShort
+        )
+
+        assertEqual(
+            message,
+            "Recording ended too soon. Try again and speak for at least a second.",
+            "too-short dictation should explain the recording length problem instead of blaming silence"
+        )
+    }
 }

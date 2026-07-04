@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -129,6 +130,7 @@ RETRY_RECOVERY_EVENTS = (
     "local_meeting_summary_failed",
     "workflow_abandoned",
     "workflow_recovery_attempted",
+    "workflow_recovery_failed",
     "workflow_recovery_finished",
 )
 
@@ -149,14 +151,15 @@ ONBOARDING_FRICTION_EVENTS = (
 )
 
 TIMELINE_DAYFLOW_EVENTS = (
-    "timeline_onboarding_completed",
-    "timeline_viewed",
-    "timeline_mode_changed",
+    "timeline_enabled",
+    "timeline_screen_permission_ready",
+    "timeline_screen_permission_denied",
+    "timeline_capture_paused",
+    "timeline_capture_resumed",
+    "timeline_card_generated",
     "timeline_card_opened",
-    "timeline_provider_selected",
-    "timeline_chat_question_asked",
-    "timeline_batch_completed",
-    "timeline_batch_failed",
+    "timeline_daily_markdown_written",
+    "timeline_used_again",
 )
 
 RELEASE_EVENTS = (
@@ -172,6 +175,15 @@ RELEASE_EVENTS = (
     "update_ready_to_install",
     "update_relaunching",
     "update_installed",
+)
+
+RELEASE_WORKFLOW_EVENTS = (
+    "app_launched",
+    "dictation_started",
+    "dictation_completed",
+    "meeting_recording_started",
+    "meeting_transcript_saved",
+    "meeting_transcript_failed",
 )
 
 DISALLOWED_OUTPUT_FRAGMENTS = (
@@ -190,6 +202,34 @@ DISALLOWED_OUTPUT_FRAGMENTS = (
 )
 
 FIXTURE_PATH = Path("Tests/Fixtures/posthog-dashboard-query-results.json")
+OBSERVED_FIXTURE_PATH = Path("Tests/Fixtures/posthog-observed-event-taxonomy.json")
+ANALYTICS_EVENTS_PATH = Path("Resources/analytics-events.psv")
+
+EVENT_LITERAL_RE = re.compile(r"\b(?:event|e\.event)\s*=\s*'([a-z][a-z0-9_]+)'|\b(?:event|e\.event)\s+IN\s*\(([^)]*)\)")
+STRING_LITERAL_RE = re.compile(r"'([^']+)'")
+
+REQUIRED_TAXONOMY_EVENTS = (
+    "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
+    "dictation_artifact_saved",
+    "activation_artifact_action_clicked",
+    "workflow_recovery_attempted",
+    "workflow_recovery_finished",
+    "activation_agent_prompt_action_clicked",
+    "activation_agent_setup_cta_clicked",
+    "agent_capture_query_observed",
+    "activation_habit_loop_actioned",
+    "activation_return_proxy_observed",
+    "meeting_prompt_shown",
+    "meeting_prompt_choice_made",
+    "meeting_prompt_record_selected",
+    "meeting_prompt_outcome_recorded",
+    "meeting_prompt_dismissed",
+    "meeting_prompt_suppressed",
+    "onboarding_completed",
+    "product_friction_observed",
+    "workflow_abandoned",
+)
 
 
 @dataclass(frozen=True)
@@ -468,16 +508,19 @@ SELECT
   uniqIf(distinct_id, event = 'agent_capture_query_observed') AS agent_payoff_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed' AND properties['return_window_bucket'] = '18_36h') AS next_day_return_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed' AND properties['return_window_bucket'] IN ('36_72h', '3_7d')) AS seven_day_return_devices,
-  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'review_yesterday') AS review_yesterday_devices,
-  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'what_did_i_promise') AS promise_review_devices,
-  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'open_recent_meeting') AS open_recent_meeting_devices,
-  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] IN ('daily_digest_viewed', 'daily_digest_exported')) AS daily_digest_devices
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'review_yesterday' AND properties['result'] IN ('success', 'fallback')) AS review_yesterday_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'what_did_i_promise' AND properties['result'] IN ('success', 'fallback')) AS promise_review_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] = 'open_recent_meeting' AND properties['result'] IN ('success', 'fallback')) AS open_recent_meeting_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned' AND properties['action_kind'] IN ('daily_digest_viewed', 'daily_digest_exported') AND properties['result'] IN ('success', 'fallback')) AS daily_digest_devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND event IN ('activation_first_artifact_saved', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'activation_return_proxy_observed', 'activation_habit_loop_actioned')
   {app_version_filter(app_version)}
 """,
-            notes=("Daily digest rows stay zero until a UI seam calls ActivationTelemetry.trackHabitLoopAction for viewed/exported.",),
+            notes=(
+                "Daily digest rows stay zero until a UI seam calls ActivationTelemetry.trackHabitLoopAction for viewed/exported.",
+                "The summary counts only success/fallback habit-loop outcomes; failed attempts remain visible in activation.habit_loop_actions.",
+            ),
         ),
         QuerySpec(
             id="activation.habit_loop_actions",
@@ -671,7 +714,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished', 'meeting_saved_audio_retranscription_requested')
+  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished', 'workflow_recovery_failed', 'meeting_saved_audio_retranscription_requested')
   {app_version_filter(app_version)}
 GROUP BY event, workflow_kind, failure_kind, retry_source, artifact_retained, result, recovery_attempt_bucket
 ORDER BY events DESC
@@ -694,6 +737,7 @@ LIMIT 80
                 "meeting_saved",
                 "meeting_failed_or_skipped",
                 "recovery_finished",
+                "recovery_failed",
             ),
             sql=f"""
 SELECT
@@ -706,7 +750,8 @@ SELECT
   countIf(event = 'meeting_recording_start_failed') AS meeting_start_failures,
   countIf(event = 'meeting_transcript_saved') AS meeting_saved,
   countIf(event IN ('meeting_transcript_failed', 'meeting_transcript_skipped')) AS meeting_failed_or_skipped,
-  countIf(event = 'workflow_recovery_finished') AS recovery_finished
+  countIf(event = 'workflow_recovery_finished') AS recovery_finished,
+  countIf(event = 'workflow_recovery_failed') AS recovery_failed
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND {event_filter(RETRY_RECOVERY_EVENTS)}
@@ -863,13 +908,14 @@ LIMIT 80
             id="timeline_dayflow.dayflow_events",
             family="timeline_dayflow",
             title="Timeline Dayflow adoption",
-            description="Queries planned timeline/dayflow analytics by coarse timeline action buckets when those events are present.",
-            columns=("event", "provider", "mode", "result", "events", "devices", "first_seen", "last_seen"),
+            description="Queries shipped timeline/dayflow analytics by coarse provider, surface, card, and result buckets when those events are present.",
+            columns=("event", "provider_kind", "surface", "card_kind", "result", "events", "devices", "first_seen", "last_seen"),
             sql=f"""
 SELECT
   event,
-  properties['provider'] AS provider,
-  properties['mode'] AS mode,
+  properties['provider_kind'] AS provider_kind,
+  properties['surface'] AS surface,
+  properties['card_kind'] AS card_kind,
   properties['result'] AS result,
   count() AS events,
   uniq(distinct_id) AS devices,
@@ -879,56 +925,82 @@ FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND {event_filter(TIMELINE_DAYFLOW_EVENTS)}
   {app_version_filter(app_version)}
-GROUP BY event, provider, mode, result
+GROUP BY event, provider_kind, surface, card_kind, result
 ORDER BY events DESC
 LIMIT 80
 """,
-            notes=("These rows may be empty until timeline analytics ship; keep this family separate from shipped release health.",),
+            notes=("Keep this family separate from shipped release health; Dayflow rows can be sparse by design.",),
         ),
         QuerySpec(
             id="timeline_dayflow.data_quality",
             family="timeline_dayflow",
             title="Timeline Dayflow data quality",
-            description="Counts timeline batch completions/failures by provider/result without screen text, screenshots, app names, or paths.",
-            columns=("event", "provider", "failure_kind", "events", "devices"),
+            description="Counts timeline enablement, screen permission, card generation, and markdown write outcomes without screen text, screenshots, app names, or paths.",
+            columns=("event", "provider_kind", "permission_state", "card_kind", "result", "events", "devices"),
             sql=f"""
 SELECT
   event,
-  properties['provider'] AS provider,
-  properties['failure_kind'] AS failure_kind,
+  properties['provider_kind'] AS provider_kind,
+  properties['permission_state'] AS permission_state,
+  properties['card_kind'] AS card_kind,
+  properties['result'] AS result,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('timeline_batch_completed', 'timeline_batch_failed')
+  AND event IN ('timeline_enabled', 'timeline_screen_permission_ready', 'timeline_screen_permission_denied', 'timeline_card_generated', 'timeline_daily_markdown_written')
   {app_version_filter(app_version)}
-GROUP BY event, provider, failure_kind
+GROUP BY event, provider_kind, permission_state, card_kind, result
 ORDER BY events DESC
 LIMIT 50
 """,
         ),
         QuerySpec(
-            id="release_health.version_event_counts",
+            id="release_health.installed_build_outcomes",
             family="release_health",
-            title="Release event counts",
-            description="Counts workflow and update events for a release-scoped health card.",
-            columns=("event", "events", "devices", "first_seen", "last_seen"),
+            title="Installed build launch and outcome counts",
+            description="Groups launch, success, and failure events by installed app/build identity so shipped and local/current-main rows stay separate.",
+            columns=(
+                "app_version",
+                "build_version",
+                "build_channel",
+                "build_revision",
+                "launch_events",
+                "launch_devices",
+                "success_events",
+                "success_devices",
+                "failure_events",
+                "failure_devices",
+                "first_seen",
+                "last_seen",
+            ),
             sql=f"""
 SELECT
-  event,
-  count() AS events,
-  uniq(distinct_id) AS devices,
+  properties['app_version'] AS app_version,
+  properties['build_version'] AS build_version,
+  properties['build_channel'] AS build_channel,
+  properties['build_revision'] AS build_revision,
+  countIf(event = 'app_launched') AS launch_events,
+  uniqIf(distinct_id, event = 'app_launched') AS launch_devices,
+  countIf(event IN ('dictation_completed', 'meeting_transcript_saved')) AS success_events,
+  uniqIf(distinct_id, event IN ('dictation_completed', 'meeting_transcript_saved')) AS success_devices,
+  countIf(event = 'meeting_transcript_failed') AS failure_events,
+  uniqIf(distinct_id, event = 'meeting_transcript_failed') AS failure_devices,
   min(timestamp) AS first_seen,
   max(timestamp) AS last_seen
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND {event_filter(RELEASE_EVENTS)}
-  {version_or_app_version_filter(app_version)}
-GROUP BY event
-ORDER BY event ASC
+  AND {event_filter(RELEASE_WORKFLOW_EVENTS)}
+  AND properties['app_version'] IS NOT NULL
+  {app_version_filter(app_version)}
+GROUP BY app_version, build_version, build_channel, build_revision
+ORDER BY launch_devices DESC, launch_events DESC, app_version ASC, build_channel ASC
 LIMIT 100
 """,
-            notes=("Pass --app-version for a specific release. Update events use properties['version']; workflow events use app_version.",),
+            notes=(
+                "This is installed build health only. Rows with build_channel local/dev/main/nightly are current-main proof, not shipped-release proof.",
+                "Use update_results for Sparkle target-version health; update events use properties['version'], not installed app_version.",
+            ),
         ),
         QuerySpec(
             id="release_health.update_results",
@@ -953,6 +1025,7 @@ GROUP BY event, result, state, failure_kind, version
 ORDER BY events DESC
 LIMIT 80
 """,
+            notes=("Pass --app-version to filter update target `version`. Keep this separate from installed build health rows.",),
         ),
     ]
 
@@ -990,6 +1063,58 @@ def unsafe_columns(columns: list[str] | tuple[str, ...]) -> list[str]:
         for column in columns
         if any(fragment in str(column).lower() for fragment in DISALLOWED_OUTPUT_FRAGMENTS)
     ]
+
+
+def load_allowed_events(path: Path = ANALYTICS_EVENTS_PATH) -> set[str]:
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[2] / path
+    allowed: set[str] = set()
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        event_name = line.split("|", 1)[0].strip()
+        if event_name:
+            allowed.add(event_name)
+    return allowed
+
+
+def sql_event_literals(sql: str) -> set[str]:
+    events: set[str] = set()
+    for match in EVENT_LITERAL_RE.finditer(sql):
+        single, in_list = match.groups()
+        if single:
+            events.add(single)
+        if in_list:
+            events.update(STRING_LITERAL_RE.findall(in_list))
+    return events
+
+
+def referenced_events(specs: list[QuerySpec]) -> set[str]:
+    events: set[str] = set()
+    for spec in specs:
+        events.update(sql_event_literals(spec.sql))
+    return events
+
+
+def event_taxonomy_errors(
+    specs: list[QuerySpec],
+    allowed_events: set[str],
+    require_required_coverage: bool,
+) -> list[str]:
+    errors: list[str] = []
+    referenced = referenced_events(specs)
+    missing = sorted(referenced - allowed_events)
+    if missing:
+        errors.append("query catalog references event(s) outside analytics-events.psv: " + ", ".join(missing))
+    missing_required = sorted(event for event in REQUIRED_TAXONOMY_EVENTS if event not in allowed_events)
+    if missing_required:
+        errors.append("required product-learning event(s) missing from analytics-events.psv: " + ", ".join(missing_required))
+    if require_required_coverage:
+        unqueried_required = sorted(event for event in REQUIRED_TAXONOMY_EVENTS if event not in referenced)
+        if unqueried_required:
+            errors.append("required product-learning event(s) missing from dashboard query catalog: " + ", ".join(unqueried_required))
+    return errors
 
 
 def spec_payload(specs: list[QuerySpec], days: int, app_version: str | None) -> dict[str, Any]:
@@ -1046,6 +1171,83 @@ def execute_payload(specs: list[QuerySpec], days: int, app_version: str | None) 
         "families": sorted({spec.family for spec in specs}),
         "queries": queries,
     }
+
+
+def observed_events_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  event,
+  count() AS events,
+  uniq(distinct_id) AS devices,
+  min(timestamp) AS first_seen,
+  max(timestamp) AS last_seen
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  {app_version_filter(app_version)}
+GROUP BY event
+ORDER BY event ASC
+LIMIT 1000
+"""
+
+
+def observed_event_rows_from_response(response: dict[str, Any]) -> list[dict[str, Any]]:
+    return posthog.rows_as_dicts(
+        response,
+        DISALLOWED_OUTPUT_FRAGMENTS,
+        PostHogDashboardError,
+        declared_columns=("event", "events", "devices", "first_seen", "last_seen"),
+    )
+
+
+def observed_event_rows_from_fixture(path: Path) -> list[dict[str, Any]]:
+    fixture = load_fixture(path)
+    rows = fixture.get("observed_events")
+    if rows is None:
+        rows = fixture.get("events")
+    if not isinstance(rows, list):
+        raise PostHogDashboardError(f"observed-event fixture must contain an observed_events array: {path}")
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("event"):
+            raise PostHogDashboardError(f"observed-event fixture row is missing event: {row!r}")
+    return rows
+
+
+def observed_taxonomy_payload(
+    rows: list[dict[str, Any]],
+    days: int,
+    app_version: str | None,
+    mode: str,
+) -> dict[str, Any]:
+    allowed_events = load_allowed_events()
+    unknown = sorted({str(row.get("event")) for row in rows if str(row.get("event")) not in allowed_events})
+    required_present = sorted(event for event in REQUIRED_TAXONOMY_EVENTS if event in allowed_events)
+    observed_required = sorted(event for event in required_present if any(row.get("event") == event for row in rows))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": mode,
+        "window_days": days,
+        "app_version": app_version,
+        "source": {
+            "kind": "fixture_observed_event_aggregates" if mode == "fixture" else "posthog_hogql_event_name_aggregates",
+        },
+        "privacy": "Observed-event taxonomy checks use aggregate event-name rows only: event name, event count, anonymous device count, and first/last seen timestamps. They never request people rows, distinct IDs, transcripts, audio references, titles, paths, URLs, emails, or tokens.",
+        "allowed_event_count": len(allowed_events),
+        "observed_event_count": len({str(row.get("event")) for row in rows}),
+        "unknown_events": unknown,
+        "required_taxonomy_events": required_present,
+        "observed_required_taxonomy_events": observed_required,
+        "observed_events": rows,
+    }
+
+
+def execute_taxonomy_payload(days: int, app_version: str | None) -> dict[str, Any]:
+    load_env()
+    host, project_id, token = posthog_config()
+    response = run_hogql(host, project_id, token, observed_events_query(days, app_version))
+    payload = observed_taxonomy_payload(observed_event_rows_from_response(response), days, app_version, "live")
+    payload["source"]["host"] = host
+    payload["source"]["project"] = "configured PostHog project"
+    return payload
 
 
 def clean_sql(sql: str) -> str:
@@ -1117,6 +1319,58 @@ def render_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_taxonomy_markdown(payload: dict[str, Any]) -> str:
+    unknown = payload.get("unknown_events") or []
+    rows = payload.get("observed_events") or []
+    required_observed = set(payload.get("observed_required_taxonomy_events") or [])
+    required_rows = [
+        [
+            event,
+            "observed" if event in required_observed else "not observed",
+        ]
+        for event in payload.get("required_taxonomy_events") or []
+    ]
+    event_rows = [
+        [
+            row.get("event"),
+            row.get("events"),
+            row.get("devices"),
+            row.get("first_seen"),
+            row.get("last_seen"),
+        ]
+        for row in rows[:80]
+    ]
+    lines = [
+        "# Transcripted PostHog Observed Event Taxonomy Check",
+        "",
+        f"Generated: {payload['generated_at']}",
+        f"Mode: {payload['mode']}",
+        f"Window: last {payload['window_days']} days",
+        f"App version: {payload.get('app_version') or 'all app versions'}",
+        "",
+        payload["privacy"],
+        "",
+        f"Allowed events: {payload['allowed_event_count']}",
+        f"Observed events: {payload['observed_event_count']}",
+        f"Unknown observed events: {len(unknown)}",
+        "",
+    ]
+    if unknown:
+        lines.extend(["## Unknown Observed Events", "", md_table(["event"], [[event] for event in unknown]), ""])
+    else:
+        lines.extend(["No unknown observed event names.", ""])
+    lines.extend(["## Recently Merged Product-Learning Events", "", md_table(["event", "fixture/live status"], required_rows), ""])
+    if event_rows:
+        lines.extend(["## Observed Event Aggregates", "", md_table(["event", "events", "devices", "first_seen", "last_seen"], event_rows), ""])
+    return "\n".join(lines)
+
+
+def render_payload(payload: dict[str, Any]) -> str:
+    if "unknown_events" in payload:
+        return render_taxonomy_markdown(payload)
+    return render_markdown(payload)
+
+
 def write_outputs(payload: dict[str, Any], markdown: str, write_dir: Path | None) -> tuple[Path, Path]:
     output_dir = write_dir or Path("/tmp/transcripted-posthog-dashboard-queries") / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1163,6 +1417,7 @@ def fixture_payload(path: Path, family: str, days: int, app_version: str | None)
 
 def validate_specs(specs: list[QuerySpec], require_all_families: bool = False) -> list[str]:
     errors: list[str] = []
+    allowed_events = load_allowed_events()
     seen: set[str] = set()
     for spec in specs:
         if spec.id in seen:
@@ -1180,6 +1435,7 @@ def validate_specs(specs: list[QuerySpec], require_all_families: bool = False) -
         missing = sorted(set(FAMILIES) - {spec.family for spec in specs})
         if missing:
             errors.append("missing family specs: " + ", ".join(missing))
+    errors.extend(event_taxonomy_errors(specs, allowed_events, require_required_coverage=require_all_families))
     return errors
 
 
@@ -1191,6 +1447,23 @@ def run_self_test() -> int:
     except PostHogDashboardError as exc:
         errors.append(str(exc))
         payload = {"queries": []}
+    try:
+        taxonomy_payload = observed_taxonomy_payload(
+            observed_event_rows_from_fixture(OBSERVED_FIXTURE_PATH),
+            30,
+            "1.1.48",
+            "fixture",
+        )
+        if taxonomy_payload["unknown_events"]:
+            errors.append("observed-event fixture contains event(s) outside analytics-events.psv: " + ", ".join(taxonomy_payload["unknown_events"]))
+        if "agent_capture_query_observed" not in taxonomy_payload["observed_required_taxonomy_events"]:
+            errors.append("observed-event fixture should include agent_capture_query_observed")
+        if "workflow_recovery_finished" not in taxonomy_payload["observed_required_taxonomy_events"]:
+            errors.append("observed-event fixture should include workflow_recovery_finished")
+        if "meeting_prompt_outcome_recorded" not in taxonomy_payload["observed_required_taxonomy_events"]:
+            errors.append("observed-event fixture should include meeting_prompt_outcome_recorded")
+    except PostHogDashboardError as exc:
+        errors.append(str(exc))
     fallback_rows = posthog.rows_as_dicts(
         {"results": [["2026-06-18", 24]]},
         DISALLOWED_OUTPUT_FRAGMENTS,
@@ -1210,11 +1483,18 @@ def run_self_test() -> int:
         "retry_recovery.failure_rates",
         "onboarding_friction.step_friction",
         "timeline_dayflow.dayflow_events",
-        "release_health.version_event_counts",
+        "release_health.installed_build_outcomes",
     )
     for query_id in required:
         if query_id not in rendered:
             errors.append(f"fixture render missing {query_id}")
+    habit_summary = next((spec for spec in specs if spec.id == "activation.habit_loop_summary"), None)
+    if habit_summary and "properties['result'] IN ('success', 'fallback')" not in habit_summary.sql:
+        errors.append("habit-loop summary must exclude failed outcomes from success shortcut counts")
+    habit_actions = next((query for query in payload.get("queries", []) if query.get("id") == "activation.habit_loop_actions"), None)
+    action_rows = habit_actions.get("rows", []) if isinstance(habit_actions, dict) else []
+    if not any(row.get("result") == "failed" for row in action_rows):
+        errors.append("fixture must include a failed habit-loop action row so result breakdown stays exercised")
     forbidden_output = ("transcript_text", "audio_path", "meeting_title", "raw_url", "email", "token")
     lowered = rendered.lower()
     leaked = [fragment for fragment in forbidden_output if fragment in lowered]
@@ -1236,6 +1516,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--app-version", help="Optional app_version/version filter, e.g. 1.1.48.")
     parser.add_argument("--dry-run", action="store_true", help="Print query specs without requiring PostHog credentials.")
     parser.add_argument("--fixture", type=Path, help="Render synthetic fixture rows instead of querying PostHog.")
+    parser.add_argument("--taxonomy-check", action="store_true", help="Compare observed PostHog event names against Resources/analytics-events.psv.")
+    parser.add_argument("--observed-fixture", type=Path, help="Run --taxonomy-check against a synthetic observed-event aggregate fixture.")
     parser.add_argument("--json-only", action="store_true", help="Print JSON instead of Markdown.")
     parser.add_argument("--write-dir", type=Path, help="Directory for posthog-dashboard-queries.md/json outputs.")
     parser.add_argument("--self-test", action="store_true", help="Run offline fixture/spec/privacy checks.")
@@ -1250,26 +1532,39 @@ def main() -> int:
         print("ERROR: --days must be positive", file=sys.stderr)
         return 2
 
-    specs = selected_specs(args.family, args.days, args.app_version)
-    if not specs:
-        print("ERROR: no query specs selected", file=sys.stderr)
-        return 2
-
     try:
-        spec_errors = validate_specs(specs)
-        if spec_errors:
-            raise PostHogDashboardError("; ".join(spec_errors))
-        if args.fixture:
-            payload = fixture_payload(args.fixture, args.family, args.days, args.app_version)
-        elif args.dry_run:
-            payload = spec_payload(specs, args.days, args.app_version)
+        if args.taxonomy_check:
+            if args.observed_fixture:
+                payload = observed_taxonomy_payload(
+                    observed_event_rows_from_fixture(args.observed_fixture),
+                    args.days,
+                    args.app_version,
+                    "fixture",
+                )
+            else:
+                payload = execute_taxonomy_payload(args.days, args.app_version)
+            if payload["unknown_events"]:
+                raise PostHogDashboardError("observed event(s) outside analytics-events.psv: " + ", ".join(payload["unknown_events"]))
         else:
-            payload = execute_payload(specs, args.days, args.app_version)
+            specs = selected_specs(args.family, args.days, args.app_version)
+            if not specs:
+                print("ERROR: no query specs selected", file=sys.stderr)
+                return 2
+
+            spec_errors = validate_specs(specs)
+            if spec_errors:
+                raise PostHogDashboardError("; ".join(spec_errors))
+            if args.fixture:
+                payload = fixture_payload(args.fixture, args.family, args.days, args.app_version)
+            elif args.dry_run:
+                payload = spec_payload(specs, args.days, args.app_version)
+            else:
+                payload = execute_payload(specs, args.days, args.app_version)
     except PostHogDashboardError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 3
 
-    markdown = render_markdown(payload)
+    markdown = render_payload(payload)
     if args.write_dir:
         markdown_path, json_path = write_outputs(payload, markdown, args.write_dir)
     else:

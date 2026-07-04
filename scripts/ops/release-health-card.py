@@ -49,6 +49,7 @@ POSTHOG_UPDATE_TARGET_EVENTS = (
     "update_relaunching",
     "update_installed",
 )
+POSTHOG_LOCAL_BUILD_CHANNELS = ("local", "dev", "debug", "main", "nightly", "unknown")
 POSTHOG_FAILURE_EVENTS = (
     "app_unclean_shutdown_detected",
     "app_session_stall_detected",
@@ -216,6 +217,7 @@ def posthog_release_health(version: str, hours: int) -> dict[str, Any]:
         for event in POSTHOG_ACTIVE_EVENTS
         if event not in POSTHOG_UPDATE_TARGET_EVENTS
     )
+    local_channels = ", ".join(sql_quote(channel) for channel in POSTHOG_LOCAL_BUILD_CHANNELS)
     query = (
         "SELECT event, count() AS events, uniq(distinct_id) AS devices, "
         "min(timestamp) AS first_seen, max(timestamp) AS last_seen "
@@ -223,7 +225,8 @@ def posthog_release_health(version: str, hours: int) -> dict[str, Any]:
         f"WHERE timestamp >= now() - INTERVAL {int(hours)} HOUR "
         f"AND event IN ({events}) "
         "AND ("
-        f"(event IN ({workflow_events}) AND properties['app_version'] = {sql_quote(version)}) "
+        f"(event IN ({workflow_events}) AND properties['app_version'] = {sql_quote(version)} "
+        f"AND coalesce(properties['build_channel'], 'unknown') NOT IN ({local_channels})) "
         f"OR (event IN ({update_events}) AND properties['version'] = {sql_quote(version)})"
         ") "
         "GROUP BY event ORDER BY event ASC LIMIT 100"
@@ -281,6 +284,8 @@ def posthog_version_health(hours: int, limit: int) -> dict[str, Any]:
         "SELECT "
         "properties['app_version'] AS app_version, "
         "properties['build_version'] AS build_version, "
+        "properties['build_channel'] AS build_channel, "
+        "properties['build_revision'] AS build_revision, "
         "countIf(event = 'app_launched') AS launches, "
         "uniqIf(distinct_id, event = 'app_launched') AS launch_devices, "
         "countIf(event = 'activation_first_artifact_saved') AS first_artifacts, "
@@ -305,8 +310,8 @@ def posthog_version_health(hours: int, limit: int) -> dict[str, Any]:
         "FROM events "
         f"WHERE timestamp >= now() - INTERVAL {int(hours)} HOUR "
         f"AND event IN ({events}) "
-        "GROUP BY app_version, build_version "
-        "ORDER BY launch_devices DESC, launches DESC "
+        "GROUP BY app_version, build_version, build_channel, build_revision "
+        "ORDER BY launch_devices DESC, launches DESC, app_version ASC, build_channel ASC "
         f"LIMIT {int(limit)}"
     )
     payload = {
@@ -343,6 +348,8 @@ def version_health_row(row: list[Any]) -> dict[str, Any]:
     fields = (
         "app_version",
         "build_version",
+        "build_channel",
+        "build_revision",
         "launches",
         "launch_devices",
         "first_artifacts",
@@ -368,7 +375,9 @@ def version_health_row(row: list[Any]) -> dict[str, Any]:
     item = dict(zip(fields, row))
     item["app_version"] = str(item.get("app_version") or "unknown")
     item["build_version"] = str(item.get("build_version") or "unknown")
-    for field in fields[2:-1]:
+    item["build_channel"] = str(item.get("build_channel") or "unknown")
+    item["build_revision"] = str(item.get("build_revision") or "unknown")
+    for field in fields[4:-1]:
         item[field] = int(item.get(field) or 0)
     return item
 
@@ -398,16 +407,31 @@ def shipped_scope_label(app_version: str, target_version: str, gh_release: dict[
     return "other installed version"
 
 
+def build_scope_label(row: dict[str, Any], target_version: str, gh_release: dict[str, Any], surfaces: dict[str, Any]) -> str:
+    app_scope = shipped_scope_label(str(row["app_version"]), target_version, gh_release, surfaces)
+    channel = str(row.get("build_channel") or "unknown").lower()
+    revision = str(row.get("build_revision") or "unknown")
+    if channel in POSTHOG_LOCAL_BUILD_CHANNELS:
+        return f"source/local target; not shipped proof ({channel})"
+    if app_scope == "shipped/live target" and channel in {"release", "stable", "appstore"}:
+        return "shipped/live target"
+    if app_scope == "shipped/live target":
+        return f"{app_scope}; verify build_channel={channel}"
+    if revision not in {"", "unknown"}:
+        return f"source/local target; not shipped proof ({channel})"
+    return app_scope
+
+
 def version_health_line(row: dict[str, Any], target_version: str, gh_release: dict[str, Any], surfaces: dict[str, Any]) -> str:
     launches = int(row["launches"])
     failures = int(row["failures"])
-    scope = shipped_scope_label(str(row["app_version"]), target_version, gh_release, surfaces)
+    scope = build_scope_label(row, target_version, gh_release, surfaces)
     updates = (
         f"checks {row['update_checks']}, available {row['update_available']}, "
         f"ready {row['update_ready_to_install']}, installed {row['update_installed']}, failed {row['update_check_failures'] + row['update_download_failed']}"
     )
     return (
-        f"{row['app_version']} ({row['build_version']}, {scope}): "
+        f"{row['app_version']} ({row['build_version']}, {row['build_channel']}, {row['build_revision']}, {scope}): "
         f"launches {launches} / {row['launch_devices']} devices; "
         f"first_artifact {row['first_artifacts']}; "
         f"dictations {row['dictation_completions']}; "
@@ -421,6 +445,8 @@ def run_self_test() -> int:
     sample = version_health_row([
         "1.2.3",
         "456",
+        "release",
+        "release123",
         10,
         4,
         3,
@@ -455,9 +481,52 @@ def run_self_test() -> int:
     if "failures 2 (20.0% of launches)" not in line:
         print("self-test failed: missing failure rate", file=sys.stderr)
         return 1
-    query_guard = posthog_version_health.__code__.co_consts
+    local_sample = version_health_row([
+        "1.2.3",
+        "456",
+        "local",
+        "main123",
+        2,
+        1,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        "2026-06-19T00:00:00",
+    ])
+    local_line = version_health_line(
+        local_sample,
+        "1.2.3",
+        {"available": True},
+        {"appcast_matches": True, "download_matches": True},
+    )
+    if "not shipped proof" not in local_line:
+        print("self-test failed: local build row should not be shipped proof", file=sys.stderr)
+        return 1
+    query_guard = posthog_version_health.__code__.co_consts + posthog_release_health.__code__.co_consts
     if any(isinstance(value, str) and "SELECT *" in value.upper() for value in query_guard):
         print("self-test failed: query uses SELECT *", file=sys.stderr)
+        return 1
+    query_text = " ".join(value for value in query_guard if isinstance(value, str))
+    if "GROUP BY app_version, build_version, build_channel, build_revision" not in query_text:
+        print("self-test failed: version health query must group by full build identity", file=sys.stderr)
+        return 1
+    if "coalesce(properties['build_channel'], 'unknown') NOT IN" not in query_text:
+        print("self-test failed: release health query must exclude local/unknown workflow channels", file=sys.stderr)
         return 1
     print("self-test passed")
     return 0
