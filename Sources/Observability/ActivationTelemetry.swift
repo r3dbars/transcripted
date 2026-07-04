@@ -303,13 +303,17 @@ enum ActivationTelemetry {
         ]
     }
 
+    @discardableResult
     static func trackDictationArtifactSaved(
+        saved: SavedDictationTranscript,
         delivery: String,
         durationBucket: String,
         surface: Surface = .dictationSave,
         trigger: String,
         wordCountBucket: String
-    ) {
+    ) -> Bool {
+        guard savedDictationArtifactExists(saved) else { return false }
+
         AnalyticsReporter.track(
             "dictation_artifact_saved",
             properties: dictationArtifactSavedProperties(
@@ -321,6 +325,23 @@ enum ActivationTelemetry {
                 wordCountBucket: wordCountBucket
             )
         )
+        return true
+    }
+
+    static func savedDictationArtifactExists(
+        _ saved: SavedDictationTranscript,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        guard saved.url.pathExtension.lowercased() == "md" else { return false }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: saved.url.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue,
+              let attributes = try? fileManager.attributesOfItem(atPath: saved.url.path),
+              let fileSize = attributes[.size] as? NSNumber else {
+            return false
+        }
+        return fileSize.intValue > 0
     }
 
     static func trackAgentPromptAction(
