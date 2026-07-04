@@ -81,6 +81,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Sources/Support/` — shared app utilities such as paths, permissions, hotkeys, and constants
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
 - `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, and `Timeline/`
+- `Sources/UI/Timeline/` — preview-gated SwiftUI timeline home components
 - `Tests/` — fast tests, package tests, and integration smoke sources
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
 - `docs/` — live project docs
