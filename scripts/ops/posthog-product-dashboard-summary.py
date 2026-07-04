@@ -23,6 +23,7 @@ CORE_EVENTS = (
     "meeting_recording_started",
     "onboarding_first_dictation_saved",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "dictation_completed",
     "meeting_transcript_saved",
     "activation_artifact_action_clicked",
@@ -31,7 +32,6 @@ CORE_EVENTS = (
     "onboarding_agent_cta_clicked",
     "activation_habit_loop_actioned",
     "activation_return_proxy_observed",
-    "activation_second_artifact_saved",
     "agent_capture_query_observed",
     "workflow_abandoned",
     "workflow_recovery_attempted",
@@ -81,12 +81,12 @@ WORKFLOW_EVENTS = (
     "meeting_recording_started",
     "meeting_transcript_saved",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_habit_loop_actioned",
     "activation_return_proxy_observed",
-    "activation_second_artifact_saved",
     "agent_capture_query_observed",
 )
 
@@ -224,9 +224,11 @@ def adoption_breakdown_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT
   event,
+  properties['surface'] AS surface,
   properties['artifact_kind'] AS artifact_kind,
   properties['action_kind'] AS action_kind,
   properties['agent_target'] AS agent_target,
+  properties['result'] AS result,
   properties['page_id'] AS page_id,
   count() AS events,
   uniq(distinct_id) AS devices
@@ -234,7 +236,7 @@ FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'activation_habit_loop_actioned', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened')
   {app_version_filter(app_version)}
-GROUP BY event, artifact_kind, action_kind, agent_target, page_id
+GROUP BY event, surface, artifact_kind, action_kind, agent_target, result, page_id
 ORDER BY devices DESC, events DESC
 LIMIT 50
 """
@@ -443,6 +445,11 @@ def build_activation_leak(data: dict[str, Any]) -> Finding:
             "Make saved Markdown visible immediately after capture.",
         ),
         (
+            "second saved artifact",
+            devices.get("activation_second_artifact_saved", 0),
+            "Give users a reason to create or return to one more saved artifact.",
+        ),
+        (
             "artifact action",
             devices.get("activation_artifact_action_clicked", 0),
             "Add a stronger open/copy/reveal moment after save.",
@@ -547,7 +554,7 @@ def build_adoption_signal(data: dict[str, Any]) -> Finding:
     if rows:
         top = max(rows, key=lambda row: (as_int(row.get("devices")), as_int(row.get("events"))))
         event = top.get("event") or "unknown"
-        detail = top.get("action_kind") or top.get("agent_target") or top.get("page_id") or top.get("artifact_kind") or "all"
+        detail = top.get("action_kind") or top.get("result") or top.get("agent_target") or top.get("page_id") or top.get("artifact_kind") or top.get("surface") or "all"
         devices = as_int(top.get("devices"))
         return Finding(
             "Strongest adoption signal",
@@ -574,6 +581,7 @@ def build_under_discovered_feature(data: dict[str, Any]) -> Finding:
     candidates = [
         ("Agent setup", max(devices.get("activation_agent_setup_cta_clicked", 0), devices.get("onboarding_agent_cta_clicked", 0)), 5, "Surface Claude/MCP setup immediately after the first saved artifact."),
         ("Agent prompt copy", devices.get("activation_agent_prompt_action_clicked", 0), 4, "Put the first sourced question beside Open Markdown."),
+        ("Daily habit loop", devices.get("activation_habit_loop_actioned", 0), 4, "Make Review yesterday / What did I promise obvious after save and on return."),
         ("Meeting import", devices.get("meeting_file_imported", 0), 3, "Expose imported-audio transcription from Home for users who missed live capture."),
         ("Saved-audio retranscription", devices.get("meeting_saved_audio_retranscription_requested", 0), 2, "Make retry from retained meeting audio clearer after transcript failure."),
         ("Meeting prompt acceptance", devices.get("meeting_prompt_record_selected", 0), 2, "Clarify detected-meeting prompts and route readiness."),
@@ -754,12 +762,13 @@ def dashboard_lines(data: dict[str, Any], findings: dict[str, Finding]) -> list[
         f"- 100 WAU Operating: {wau} active launch devices; latest DAU row is {latest_dau}.",
         f"- Activation: {activation.metric}",
         f"- Meeting Prompt Quality: {findings['prompt'].metric}",
-        f"- Artifact Usefulness: {adoption.metric}",
+        f"- Artifact Usefulness: {adoption.metric} Under-discovered: {under.metric}",
         f"- Agent Payoff: true_agent_query_devices={devices.get('agent_capture_query_observed', 0)}, agent_prompt_devices={devices.get('activation_agent_prompt_action_clicked', 0)}, return_or_habit_devices={max(devices.get('activation_return_proxy_observed', 0), devices.get('activation_habit_loop_actioned', 0))}.",
         f"- Speaker Trust: {findings['speaker'].metric}",
         f"- Retry Recovery: {reliability.metric}",
         f"- Onboarding Friction: {findings['onboarding'].metric}",
         f"- Timeline Dayflow: {findings['timeline'].metric}",
+        f"- Habit Loop: first_artifact={devices.get('activation_first_artifact_saved', 0)}, second_artifact={devices.get('activation_second_artifact_saved', 0)}, agent_payoff={devices.get('agent_capture_query_observed', 0)}, return_or_habit={max(devices.get('activation_return_proxy_observed', 0), devices.get('activation_habit_loop_actioned', 0))}.",
         f"- Release Health: {release.metric}",
         f"- Core event volume: launches={events.get('app_launched', 0)}, dictations_completed={events.get('dictation_completed', 0)}, meetings_saved={events.get('meeting_transcript_saved', 0)}.",
     ]

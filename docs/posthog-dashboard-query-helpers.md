@@ -6,7 +6,7 @@ Transcripted product-learning dashboards and health checks.
 It covers ten dashboard families:
 
 - `100_wau` - WAU, DAU, first-value devices, return proxy, and version mix
-- `activation` - launch -> onboarding -> saved Markdown -> agent proxy -> return
+- `activation` - launch -> onboarding -> saved Markdown -> agent proxy -> return, plus the post-save habit loop (review-yesterday, promise-review, recent-meeting, daily digest)
 - `meeting_prompt_quality` - detected-meeting prompt reach, acceptance, dismissal, suppression, and missed-call nudges
 - `artifact_usefulness` - saved artifacts, second artifacts, artifact actions, and return proxy
 - `agent_payoff` - agent setup/prompt intent, saved-capture query proof, and local summary outcomes
@@ -71,7 +71,7 @@ Dry-run output includes stable query IDs, output columns, and HogQL:
 ```text
 ### activation.reach_ladder
 
-One-row reach table for launch through saved Markdown, agent proxy, true agent-use, and return proxy.
+One-row reach table for launch through saved Markdown, second artifact, agent payoff, next-day/7-day return, and habit-loop actions.
 
 Output columns: `launch_devices`, `onboarding_devices`, `permission_ready_devices`, ...
 ```
@@ -152,6 +152,12 @@ answer quality.
 `speaker_trust` uses review, correction, auto-recognition, and finalization
 buckets. It does not export speaker names, samples, clip references, or transcript
 text.
+
+`activation.habit_loop_summary` is the coordinator shortcut for the daily return
+loop: first artifact, second artifact, agent payoff, next-day return, 7-day
+return, Review yesterday, What did I promise, open recent meeting, and daily
+digest viewed/exported. Daily digest counts remain zero until a real UI seam
+emits the existing `activation_habit_loop_actioned` helper for those actions.
 
 `retry_recovery` uses coarse failure kinds and latency buckets. It does not expose
 raw error strings, device names, app names, or audio details.

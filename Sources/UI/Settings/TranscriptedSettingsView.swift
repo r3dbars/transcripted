@@ -882,6 +882,12 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeeting(_ item: RecentMeetingItem) {
         trackSettingsAction("copy_meeting", page: .home)
+        ActivationTelemetry.trackHabitLoopAction(
+            actionKind: .whatDidIPromise,
+            surface: .homeRow,
+            artifactKind: .meeting,
+            artifactDate: item.date
+        )
         ActivationTelemetry.trackAgentPromptAction(
             promptKind: .meetingBundle,
             actionKind: .copied,
@@ -947,6 +953,12 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
         trackSettingsAction("copy_meeting_preview", page: .home)
+        ActivationTelemetry.trackHabitLoopAction(
+            actionKind: .whatDidIPromise,
+            surface: .homePreview,
+            artifactKind: .meeting,
+            artifactDate: preview.date
+        )
         let bundle = AgentConnectionGuide.portableMeetingBundle(
             title: preview.title,
             date: preview.date,
@@ -1300,6 +1312,12 @@ struct TranscriptedSettingsView: View {
             artifactKind: .meeting,
             actionKind: .preview,
             surface: .homeRow,
+            artifactDate: item.date
+        )
+        ActivationTelemetry.trackHabitLoopAction(
+            actionKind: .openRecentMeeting,
+            surface: .homeRow,
+            artifactKind: .meeting,
             artifactDate: item.date
         )
         homeMeetingPreviewLoadTask?.cancel()
