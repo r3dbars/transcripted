@@ -88,6 +88,29 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
+    runSuite("ContextCaptureEngine tap re-enable — reconciles missed push-to-talk release") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("reconcileActivePushToTalkAfterTapDisabled()"),
+            "tapDisabledByTimeout/userInput should reconcile active push-to-talk state before re-enabling the tap"
+        )
+        assertTrue(
+            source.contains("PhysicalShortcutMatcher.shouldSynthesizePushToTalkRelease("),
+            "the detector should use the pure missed-release policy before synthesizing release"
+        )
+        assertTrue(
+            source.contains("CGEventSource.flagsState(.combinedSessionState)")
+                && source.contains("CGEventSource.keyState(.combinedSessionState"),
+            "reconciliation should query the real physical modifier/key state"
+        )
+        assertTrue(
+            source.contains("consumedKeyCodes.remove(releasedKeyCode)")
+                && source.contains("onShortcut?(.dictationPushToTalk, .release)"),
+            "synthesized release should clear the consumed key and route the normal release callback"
+        )
+    }
+
     // MARK: - Notification.Name.hotkeysDidChange
     // The engine subscribes to this notification to re-register hotkeys when
     // HotkeyRecorderView writes new bindings. Renaming the notification would
@@ -144,8 +167,17 @@ func testContextCaptureEnginePolicy() {
         let source = readContextCaptureEngineSource()
 
         assertTrue(
-            source.contains("reconcileStateAfterTapWasDisabled()"),
+            source.contains("reconcileActivePushToTalkAfterTapDisabled()"),
             "tap-disabled events should reconcile detector state before re-enabling the tap"
+        )
+        assertTrue(
+            source.contains("cancelPendingModifierShortcut()")
+                && source.contains("func reconcileActivePushToTalkAfterTapDisabled"),
+            "reconciliation should cancel any pending modifier-chord shortcut before re-enabling the tap"
+        )
+        assertTrue(
+            source.contains("consumedKeyCodes = consumedKeyCodes.filter { Self.isPhysicalKeyDown($0) }"),
+            "reconciliation should drop consumed key codes that are no longer physically down"
         )
         assertTrue(
             source.contains("CGEventSource.keyState(.combinedSessionState"),
