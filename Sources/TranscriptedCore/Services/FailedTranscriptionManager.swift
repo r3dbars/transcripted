@@ -185,7 +185,23 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         if hasUnavailableAudio {
-            return (entry, didHeal, true)
+            // Return the already-healed micURL/systemURL (e.g. a merge-heal that
+            // repointed micURL to `<stem>_merged.wav`) rather than the stale
+            // original `entry`, so a later retry doesn't see a no-longer-existing
+            // audio path and wrongly delete a recoverable entry. `hasUnavailableAudio`
+            // still tells the caller not to persist this reconciliation to disk.
+            guard didHeal else { return (entry, false, true) }
+            return (FailedTranscription(
+                id: entry.id,
+                timestamp: entry.timestamp,
+                recordingDate: entry.recordingDate,
+                micAudioURL: micURL,
+                systemAudioURL: systemURL,
+                errorMessage: entry.errorMessage,
+                meetingTitle: entry.meetingTitle,
+                retryCount: entry.retryCount,
+                lastRetryDate: entry.lastRetryDate
+            ), true, true)
         }
 
         // Audio preserved during a quit that interrupted finalization can have

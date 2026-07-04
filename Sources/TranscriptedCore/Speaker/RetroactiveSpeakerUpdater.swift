@@ -10,14 +10,14 @@ extension TranscriptSaver {
     /// Thread-safe: serialized via fileUpdateQueue to prevent concurrent file corruption.
     /// Satisfies the `TranscriptStorage` protocol — uses `defaultSaveDirectory`.
     public static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String) {
-        fileUpdateQueue.sync {
+        serializeTranscriptFileUpdate {
             _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: defaultSaveDirectory)
         }
     }
 
     /// Internal overload for tests — scans a specific directory instead of `defaultSaveDirectory`.
     static func retroactivelyUpdateSpeaker(dbId: UUID, newName: String, in directory: URL) {
-        fileUpdateQueue.sync {
+        serializeTranscriptFileUpdate {
             _retroactivelyUpdateSpeakerImpl(dbId: dbId, newName: newName, directory: directory)
         }
     }
@@ -36,7 +36,7 @@ extension TranscriptSaver {
         channel: UtteranceChannel,
         newName: String
     ) -> Bool {
-        fileUpdateQueue.sync {
+        serializeTranscriptFileUpdate {
             _updateDeferredSpeakerNameImpl(
                 transcriptURL: transcriptURL,
                 dbId: dbId,
@@ -50,7 +50,7 @@ extension TranscriptSaver {
     /// After Settings merges two people, rewrite old source profile references to the
     /// kept profile id so future renames of the kept person still reach older transcripts.
     public static func retroactivelyMergeSpeaker(sourceDbId: UUID, targetDbId: UUID, targetName: String) {
-        fileUpdateQueue.sync {
+        serializeTranscriptFileUpdate {
             _retroactivelyMergeSpeakerImpl(
                 sourceDbId: sourceDbId,
                 targetDbId: targetDbId,
@@ -62,7 +62,7 @@ extension TranscriptSaver {
 
     /// Internal overload for tests — scans a specific directory instead of `defaultSaveDirectory`.
     static func retroactivelyMergeSpeaker(sourceDbId: UUID, targetDbId: UUID, targetName: String, in directory: URL) {
-        fileUpdateQueue.sync {
+        serializeTranscriptFileUpdate {
             _retroactivelyMergeSpeakerImpl(
                 sourceDbId: sourceDbId,
                 targetDbId: targetDbId,
@@ -446,7 +446,7 @@ extension TranscriptSaver {
     ) -> Bool {
         guard !entries.isEmpty else { return true }
 
-        return fileUpdateQueue.sync {
+        return serializeTranscriptFileUpdate {
             guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
                 AppLogger.pipeline.error("Failed to read transcript for deferred speaker review", ["path": transcriptURL.path])
                 return false
@@ -493,7 +493,7 @@ extension TranscriptSaver {
     ) -> Bool {
         guard !updates.isEmpty else { return true }
 
-        return fileUpdateQueue.sync {
+        return serializeTranscriptFileUpdate {
             guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
                 AppLogger.pipeline.error("Failed to read transcript for name update (generic)", ["path": transcriptURL.path])
                 return false
@@ -544,7 +544,7 @@ extension TranscriptSaver {
     ) -> Bool {
         guard !updates.isEmpty else { return true }
 
-        return fileUpdateQueue.sync {
+        return serializeTranscriptFileUpdate {
             guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
                 AppLogger.pipeline.error("Failed to read transcript for name update", ["path": transcriptURL.path])
                 return false
@@ -672,7 +672,7 @@ extension TranscriptSaver {
     ) -> Bool {
         guard !collapsedUpdates.isEmpty else { return true }
 
-        return fileUpdateQueue.sync {
+        return serializeTranscriptFileUpdate {
             guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
                 AppLogger.pipeline.error("Failed to read transcript for mic collapse", ["path": transcriptURL.path])
                 return false
@@ -740,7 +740,7 @@ extension TranscriptSaver {
     ) -> Bool {
         guard !discardedUpdates.isEmpty else { return true }
 
-        return fileUpdateQueue.sync {
+        return serializeTranscriptFileUpdate {
             guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
                 AppLogger.pipeline.error("Failed to read transcript for speaker discard", ["path": transcriptURL.path])
                 return false
