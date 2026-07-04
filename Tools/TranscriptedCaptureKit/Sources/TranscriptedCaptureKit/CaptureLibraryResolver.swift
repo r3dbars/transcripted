@@ -8,6 +8,7 @@ private struct CaptureDirectoryManifest: Decodable {
 }
 
 private struct ConfiguredCaptureDirectories {
+    let captureLibrary: URL
     let meetings: URL
     let dictations: URL
     let source: CaptureLibraryResolutionSource
@@ -28,6 +29,7 @@ public enum CaptureLibraryResolutionSource: String, Codable, Sendable {
 public struct ResolvedCaptureDirectories {
     public let meetingDirs: [URL]
     public let dictationDirs: [URL]
+    public let timelineDirs: [URL]
     /// Set when resolution used an explicit shared data directory
     /// (a `--data-dir` style argument or `TRANSCRIPTED_DATA_DIR`).
     public let sharedDataRoot: URL?
@@ -40,12 +42,14 @@ public struct ResolvedCaptureDirectories {
     public init(
         meetingDirs: [URL],
         dictationDirs: [URL],
+        timelineDirs: [URL] = [],
         sharedDataRoot: URL? = nil,
         resolutionSource: CaptureLibraryResolutionSource = .defaultCaptures,
         legacyFallbackAppended: Bool = false
     ) {
         self.meetingDirs = meetingDirs
         self.dictationDirs = dictationDirs
+        self.timelineDirs = timelineDirs
         self.sharedDataRoot = sharedDataRoot
         self.resolutionSource = resolutionSource
         self.legacyFallbackAppended = legacyFallbackAppended
@@ -69,6 +73,7 @@ public enum CaptureLibraryResolver {
         dataDir: String? = nil,
         meetingsDir: String? = nil,
         dictationsDir: String? = nil,
+        timelineDir: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default,
         homeDirectory: URL? = nil
@@ -79,11 +84,14 @@ public enum CaptureLibraryResolver {
             let sharedURL = URL(fileURLWithPath: sharedPath)
             let sharedMeetings = sharedURL.appendingPathComponent("meetings", isDirectory: true)
             let sharedDictations = sharedURL.appendingPathComponent("dictations", isDirectory: true)
+            let sharedTimeline = sharedURL.appendingPathComponent("timeline", isDirectory: true)
             if fileManager.fileExists(atPath: sharedMeetings.path)
-                || fileManager.fileExists(atPath: sharedDictations.path) {
+                || fileManager.fileExists(atPath: sharedDictations.path)
+                || fileManager.fileExists(atPath: sharedTimeline.path) {
                 return ResolvedCaptureDirectories(
                     meetingDirs: [sharedMeetings],
                     dictationDirs: [sharedDictations],
+                    timelineDirs: [sharedTimeline],
                     sharedDataRoot: sharedURL,
                     resolutionSource: .envDataDir
                 )
@@ -91,6 +99,7 @@ public enum CaptureLibraryResolver {
             return ResolvedCaptureDirectories(
                 meetingDirs: [sharedURL],
                 dictationDirs: [sharedURL],
+                timelineDirs: [sharedURL],
                 sharedDataRoot: sharedURL,
                 resolutionSource: .envDataDir
             )
@@ -104,6 +113,7 @@ public enum CaptureLibraryResolver {
         let defaultCaptures = transcriptedRoot.appendingPathComponent("captures", isDirectory: true)
         let defaultMeetings = defaultCaptures.appendingPathComponent("meetings", isDirectory: true)
         let defaultDictations = defaultCaptures.appendingPathComponent("dictations", isDirectory: true)
+        let defaultTimeline = defaultCaptures.appendingPathComponent("timeline", isDirectory: true)
 
         let draftRoot = home
             .appendingPathComponent("Library", isDirectory: true)
@@ -127,6 +137,8 @@ public enum CaptureLibraryResolver {
             ?? environment["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
         let dictationsOverride = dictationsDir.map(URL.init(fileURLWithPath:))
             ?? environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
+        let timelineOverride = timelineDir.map(URL.init(fileURLWithPath:))
+            ?? environment["TRANSCRIPTED_TIMELINE_DIR"].map(URL.init(fileURLWithPath:))
 
         let meetingDirs = meetingsOverride.map { [$0] }
             ?? appConfigured.map {
@@ -154,12 +166,17 @@ public enum CaptureLibraryResolver {
                 legacyCandidates: [legacyDraftDictations, legacyShared],
                 fileManager: fileManager
             )
+        let timelineDirs = timelineOverride.map { [$0] }
+            ?? appConfigured.map {
+                [$0.captureLibrary.appendingPathComponent("timeline", isDirectory: true)]
+            }
+            ?? [defaultTimeline]
 
         // When only one kind is overridden, the other still resolves through
         // the manifest/preference/default chain; report the override tier as
         // the winning rule since it took precedence for the kind it covers.
         let resolutionSource: CaptureLibraryResolutionSource
-        if meetingsOverride != nil || dictationsOverride != nil {
+        if meetingsOverride != nil || dictationsOverride != nil || timelineOverride != nil {
             resolutionSource = .envKindDirs
         } else if let appConfigured {
             resolutionSource = appConfigured.source
@@ -174,6 +191,7 @@ public enum CaptureLibraryResolver {
         return ResolvedCaptureDirectories(
             meetingDirs: meetingDirs,
             dictationDirs: dictationDirs,
+            timelineDirs: timelineDirs,
             sharedDataRoot: nil,
             resolutionSource: resolutionSource,
             legacyFallbackAppended: legacyFallbackAppended
@@ -225,7 +243,7 @@ public enum CaptureLibraryResolver {
             return nil
         }
 
-        return ConfiguredCaptureDirectories(meetings: meetings, dictations: dictations, source: .appManifest)
+        return ConfiguredCaptureDirectories(captureLibrary: captureLibrary, meetings: meetings, dictations: dictations, source: .appManifest)
     }
 
     private static func appPreferenceCaptureDirectories(homeDirectory home: URL) -> ConfiguredCaptureDirectories? {
@@ -244,6 +262,7 @@ public enum CaptureLibraryResolver {
             }
 
             return ConfiguredCaptureDirectories(
+                captureLibrary: captureLibrary,
                 meetings: captureLibrary.appendingPathComponent("meetings", isDirectory: true),
                 dictations: captureLibrary.appendingPathComponent("dictations", isDirectory: true),
                 source: .appPreference

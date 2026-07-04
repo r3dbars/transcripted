@@ -1,4 +1,5 @@
 import XCTest
+import TranscriptedCaptureKit
 @testable import transcripted_qa
 
 final class ValidatorTests: XCTestCase {
@@ -237,17 +238,52 @@ final class ValidatorTests: XCTestCase {
         XCTAssertFalse(results.contains { $0.status == .fail })
     }
 
+    func testTimelineValidatorAcceptsTimelineMarkdownAndRejectsOCRReferences() throws {
+        let timelineDir = tempRoot.appendingPathComponent("timeline", isDirectory: true)
+        try FileManager.default.createDirectory(at: timelineDir, withIntermediateDirectories: true)
+        let date = "2026-03-20"
+        let start = Date(timeIntervalSince1970: 1_774_164_600)
+        let markdown = TimelineMarkdownFormat.markdown(
+            date: date,
+            cards: [
+                TimelineMarkdownFormat.Card(
+                    start: start,
+                    end: start.addingTimeInterval(900),
+                    title: "Roadmap review",
+                    category: "Meetings",
+                    summary: "Reviewed launch milestones.",
+                    details: "Timeline summary only.",
+                    kind: "meeting",
+                    transcriptFilename: nil
+                )
+            ]
+        )
+        try markdown.write(to: timelineDir.appendingPathComponent("\(date).md"), atomically: true, encoding: .utf8)
+
+        var results = TimelineValidator(directory: timelineDir).validate()
+        XCTAssertTrue(results.contains { $0.status == .pass && $0.check == "timeline/parseable" })
+        XCTAssertTrue(results.contains { $0.status == .pass && $0.check == "timeline/privacy-safe" })
+
+        let unsafe = markdown + "\nRaw OCR: hidden text\n"
+        try unsafe.write(to: timelineDir.appendingPathComponent("2026-03-21.md"), atomically: true, encoding: .utf8)
+        results = TimelineValidator(directory: timelineDir).validate()
+        XCTAssertTrue(results.contains { $0.status == .fail && $0.check == "timeline/privacy-safe" })
+    }
+
     func testPathOptionsInferSiblingDictationsForExplicitMeetingsPath() throws {
         let captureRoot = tempRoot.appendingPathComponent("captures", isDirectory: true)
         let meetingsDir = captureRoot.appendingPathComponent("meetings", isDirectory: true)
         let dictationsDir = captureRoot.appendingPathComponent("dictations", isDirectory: true)
+        let timelineDir = captureRoot.appendingPathComponent("timeline", isDirectory: true)
         try FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: dictationsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: timelineDir, withIntermediateDirectories: true)
 
         let resolved = QADataDirectories.resolve(meetingsDir: meetingsDir.path, fileManager: .default)
 
         XCTAssertEqual(resolved.meetingsDir.path, meetingsDir.path)
         XCTAssertEqual(resolved.dictationsDir.path, dictationsDir.path)
+        XCTAssertEqual(resolved.timelineDir.path, timelineDir.path)
     }
 
     func testPathOptionsInferChildDictationsForFixtureRootPath() throws {

@@ -13,11 +13,14 @@ It does not build or run the app target.
 - `transcripted-cli read-meeting <filename>` — read one saved meeting transcript
 - `transcripted-cli list-dictations` — list saved dictation day files
 - `transcripted-cli read-dictation <filename>` — read one dictation day or one entry
+- `transcripted-cli list-timelines` — list saved timeline day files
+- `transcripted-cli read-timeline <filename>` — read one saved timeline day file
 
 By default these commands read:
 
 - meetings: the app-selected capture library when available, otherwise `~/Library/Application Support/Transcripted/captures/meetings`
 - dictations: the app-selected capture library when available, otherwise `~/Library/Application Support/Transcripted/captures/dictations`
+- timeline: the app-selected capture library when available, otherwise `~/Library/Application Support/Transcripted/captures/timeline`
 
 Read order for default local context:
 
@@ -31,16 +34,18 @@ They also honor:
 - `--data-dir`
 - `--meetings-dir`
 - `--dictations-dir`
+- `--timeline-dir`
 - `TRANSCRIPTED_DATA_DIR`
 - `TRANSCRIPTED_MEETINGS_DIR`
 - `TRANSCRIPTED_DICTATIONS_DIR`
+- `TRANSCRIPTED_TIMELINE_DIR`
 
 ### Output Shapes
 
 - `context-recent`, `context-search`, and `list-dictations` print a bare JSON array with `--json` when there are results; with zero results they emit `{"results": [], "searched_directories": [...], "hint": "..."}` instead, and in text mode print `No results. Searched: <dirs>` to stderr
 - `context-search --speaker` with `--kind all` or `--kind dictation` skips dictations by design; text mode prints a one-line note to stderr, `--json` wraps the results as `{"results": [...], "notes": [...]}`
 - `--count` values are clamped to 1-50
-- `read-meeting --json` includes `recording`, `speakers`, and `utterances` (parsed transcript structure) alongside the raw `markdown`; `read-dictation --json` includes `date` and `entries` (entry id, captured timestamp, source app, title, text) alongside `markdown`
+- `read-meeting --json` includes `recording`, `speakers`, and `utterances` (parsed transcript structure) alongside the raw `markdown`; `read-dictation --json` includes `date` and `entries` (entry id, captured timestamp, source app, title, text) alongside `markdown`; `read-timeline --json` includes `date`, `cards`, `card_count`, `active_minutes`, and `categories` alongside `markdown`
 
 ### Offline Audio
 
@@ -120,6 +125,8 @@ on SwiftPM again:
 ./.build/debug/transcripted-cli read-meeting "Call_2026-04-29_09-15-00" --json
 ./.build/debug/transcripted-cli list-dictations --date-from 2026-04-29 --date-to 2026-04-29
 ./.build/debug/transcripted-cli read-dictation Dictations_2026-04-29 --json
+./.build/debug/transcripted-cli list-timelines --date-from 2026-04-29 --date-to 2026-04-29
+./.build/debug/transcripted-cli read-timeline 2026-04-29 --json
 ```
 
 What these are good for:
@@ -129,6 +136,7 @@ What these are good for:
 - full meeting markdown: `read-meeting` with the filename returned by `context-recent --kind meeting`
 - meetings by speaker or topic: `context-search <query> --kind meeting --speaker <name>`
 - dictations by day: `list-dictations --date-from YYYY-MM-DD --date-to YYYY-MM-DD`, then `read-dictation`
+- timeline by day: `list-timelines --date-from YYYY-MM-DD --date-to YYYY-MM-DD`, then `read-timeline`
 - machine-readable full reads: add `--json` to `read-meeting` or `read-dictation`
 
 Binary path after build:
