@@ -17,80 +17,34 @@ private struct PostHogCaptureRequest: Encodable {
 }
 
 struct AgentCaptureQueryObservation: Equatable {
-    let agentTarget: String
-    let queryKind: String
-    let artifactKind: String
+    let clientFamily: String
+    let toolKind: String
+    let captureKind: String
     let result: String
-    let surface: String
-    let returnWindowBucket: String
-    let captureAgeBucket: String
     let sourceCountBucket: String
 
     init(
-        queryKind: String,
-        artifactKind: String,
+        toolKind: String,
+        captureKind: String,
         result: String = "success",
-        surface: String = "mcp",
-        agentTarget: String = "mcp_client",
-        captureDate: Date? = nil,
-        sourceCount: Int? = nil,
-        now: Date = Date()
+        clientFamily: String = "mcp",
+        sourceCount: Int? = nil
     ) {
-        self.agentTarget = agentTarget
-        self.queryKind = queryKind
-        self.artifactKind = artifactKind
+        self.clientFamily = clientFamily
+        self.toolKind = toolKind
+        self.captureKind = captureKind
         self.result = result
-        self.surface = surface
-        self.returnWindowBucket = Self.returnWindowBucket(since: captureDate, now: now)
-        self.captureAgeBucket = Self.captureAgeBucket(since: captureDate, now: now)
         self.sourceCountBucket = Self.sourceCountBucket(sourceCount)
     }
 
     var properties: [String: String] {
         [
-            "agent_target": agentTarget,
-            "artifact_kind": artifactKind,
-            "capture_age_bucket": captureAgeBucket,
-            "query_kind": queryKind,
+            "client_family": clientFamily,
+            "capture_kind": captureKind,
             "result": result,
-            "return_window_bucket": returnWindowBucket,
             "source_count_bucket": sourceCountBucket,
-            "surface": surface,
+            "tool_kind": toolKind,
         ]
-    }
-
-    private static func captureAgeBucket(since date: Date?, now: Date) -> String {
-        guard let date else { return "unknown" }
-        let hours = max(0, now.timeIntervalSince(date)) / 3_600
-        switch hours {
-        case ..<12:
-            return "lt_12h"
-        case ..<24:
-            return "12_24h"
-        case ..<48:
-            return "24_48h"
-        case ..<168:
-            return "2_7d"
-        default:
-            return "older"
-        }
-    }
-
-    private static func returnWindowBucket(since date: Date?, now: Date) -> String {
-        guard let date else { return "unknown" }
-        let hours = max(0, now.timeIntervalSince(date)) / 3_600
-        switch hours {
-        case ..<18:
-            return "same_day"
-        case ..<36:
-            return "18_36h"
-        case ..<72:
-            return "36_72h"
-        case ..<168:
-            return "3_7d"
-        default:
-            return "older"
-        }
     }
 
     private static func sourceCountBucket(_ count: Int?) -> String {
@@ -116,14 +70,11 @@ enum AgentCaptureQueryTelemetryPolicy {
     // mirrors AnalyticsEventPolicy.agentCaptureQueryProperties. Keep the root
     // AnalyticsEventPolicy parity test green when changing either side.
     static let allowedProperties: Set<String> = [
-        "agent_target",
-        "artifact_kind",
-        "capture_age_bucket",
-        "query_kind",
+        "client_family",
+        "capture_kind",
         "result",
-        "return_window_bucket",
         "source_count_bucket",
-        "surface",
+        "tool_kind",
     ]
     private static let sensitiveKeyFragments = [
         "audio",
@@ -146,14 +97,11 @@ enum AgentCaptureQueryTelemetryPolicy {
         "url",
     ]
     private static let allowedValues: [String: Set<String>] = [
-        "agent_target": ["mcp_client"],
-        "artifact_kind": ["dictation", "meeting", "mixed"],
-        "capture_age_bucket": ["lt_12h", "12_24h", "24_48h", "2_7d", "older", "unknown"],
-        "query_kind": ["action_items", "commitments", "decisions", "digest", "list", "open_questions", "read", "recap", "recent", "search", "speaker_lookup"],
+        "client_family": ["mcp"],
+        "capture_kind": ["dictation", "meeting", "mixed"],
         "result": ["success"],
-        "return_window_bucket": ["same_day", "18_36h", "36_72h", "3_7d", "older", "unknown"],
         "source_count_bucket": ["0", "1", "2_3", "4_9", "10_plus", "unknown"],
-        "surface": ["mcp"],
+        "tool_kind": ["action_items", "commitments", "decisions", "digest", "list", "open_questions", "read", "recap", "recent", "search", "speaker_lookup"],
     ]
 
     static func sanitize(_ properties: [String: String]) -> [String: String] {
@@ -339,50 +287,15 @@ enum AgentCaptureQueryTelemetryRuntime {
 }
 
 func trackAgentCaptureQueryObserved(
-    queryKind: String,
-    artifactKind: String,
-    captureDate: Date?,
+    toolKind: String,
+    captureKind: String,
     sourceCount: Int?
 ) {
     AgentCaptureQueryTelemetryRuntime.recorder.track(
         AgentCaptureQueryObservation(
-            queryKind: queryKind,
-            artifactKind: artifactKind,
-            captureDate: captureDate,
+            toolKind: toolKind,
+            captureKind: captureKind,
             sourceCount: sourceCount
         )
     )
-}
-
-func parseCaptureDate(_ raw: String?) -> Date? {
-    guard let raw, !raw.isEmpty else { return nil }
-
-    for options in [
-        ISO8601DateFormatter.Options.withInternetDateTime,
-        [.withInternetDateTime, .withFractionalSeconds],
-    ] {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = options
-        if let date = iso.date(from: raw) {
-            return date
-        }
-    }
-
-    let formats = [
-        "yyyy-MM-dd'T'HH:mm:ssZ",
-        "yyyy-MM-dd'T'HH:mm:ssZZZZZ",
-        "yyyy-MM-dd'T'HH:mm:ss",
-        "yyyy-MM-dd HH:mm:ss",
-        "yyyy-MM-dd",
-    ]
-    for format in formats {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = format
-        if let date = formatter.date(from: raw) {
-            return date
-        }
-    }
-
-    return nil
 }

@@ -557,21 +557,22 @@ LIMIT 60
             family="agent_payoff",
             title="Agent payoff loop",
             description="Compares agent setup/prompt intent to true saved-capture query observations and local meeting-summary outcomes.",
-            columns=("event", "agent_target", "query_kind", "result", "surface", "events", "devices"),
+            columns=("event", "agent_target", "client_family", "tool_kind", "capture_kind", "result", "events", "devices"),
             sql=f"""
 SELECT
   event,
   properties['agent_target'] AS agent_target,
-  properties['query_kind'] AS query_kind,
+  properties['client_family'] AS client_family,
+  properties['tool_kind'] AS tool_kind,
+  properties['capture_kind'] AS capture_kind,
   properties['result'] AS result,
-  properties['surface'] AS surface,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND {event_filter(AGENT_PAYOFF_EVENTS)}
   {app_version_filter(app_version)}
-GROUP BY event, agent_target, query_kind, result, surface
+GROUP BY event, agent_target, client_family, tool_kind, capture_kind, result
 ORDER BY devices DESC, events DESC
 LIMIT 80
 """,
@@ -581,15 +582,14 @@ LIMIT 80
             id="agent_payoff.capture_query_quality",
             family="agent_payoff",
             title="Saved-capture query quality proxy",
-            description="Breaks true agent saved-capture query observations by source-count, return-window, capture-age, and result buckets.",
-            columns=("agent_target", "query_kind", "source_count_bucket", "capture_age_bucket", "return_window_bucket", "result", "events", "devices"),
+            description="Breaks true agent saved-capture query observations by client, tool, capture, source-count, and result buckets.",
+            columns=("client_family", "tool_kind", "capture_kind", "source_count_bucket", "result", "events", "devices"),
             sql=f"""
 SELECT
-  properties['agent_target'] AS agent_target,
-  properties['query_kind'] AS query_kind,
+  properties['client_family'] AS client_family,
+  properties['tool_kind'] AS tool_kind,
+  properties['capture_kind'] AS capture_kind,
   properties['source_count_bucket'] AS source_count_bucket,
-  properties['capture_age_bucket'] AS capture_age_bucket,
-  properties['return_window_bucket'] AS return_window_bucket,
   properties['result'] AS result,
   count() AS events,
   uniq(distinct_id) AS devices
@@ -597,7 +597,7 @@ FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND event = 'agent_capture_query_observed'
   {app_version_filter(app_version)}
-GROUP BY agent_target, query_kind, source_count_bucket, capture_age_bucket, return_window_bucket, result
+GROUP BY client_family, tool_kind, capture_kind, source_count_bucket, result
 ORDER BY devices DESC, events DESC
 LIMIT 80
 """,

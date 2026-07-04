@@ -80,13 +80,13 @@
     {
       "id": "agent_payoff.agent_loop",
       "rows": [
-        {"event": "agent_capture_query_observed", "agent_target": "claude", "query_kind": "search", "result": "success", "surface": "mcp", "events": 9, "devices": 4}
+        {"event": "agent_capture_query_observed", "agent_target": null, "client_family": "mcp", "tool_kind": "search", "capture_kind": "mixed", "result": "success", "events": 9, "devices": 4}
       ]
     },
     {
       "id": "agent_payoff.capture_query_quality",
       "rows": [
-        {"agent_target": "claude", "query_kind": "search", "source_count_bucket": "2_5", "capture_age_bucket": "same_day", "return_window_bucket": "next_day", "result": "success", "events": 9, "devices": 4}
+        {"client_family": "mcp", "tool_kind": "search", "capture_kind": "mixed", "source_count_bucket": "2_3", "result": "success", "events": 9, "devices": 4}
       ]
     },
     {
