@@ -36,7 +36,7 @@ enum HomeMeetingSummaryBetaPresentationPolicy {
 
 enum HomeLocalSummaryNoticeKind: Equatable {
     case saved(chunkCount: Int)
-    case failed(message: String)
+    case failed(message: String, failureKind: String)
 }
 
 struct HomeLocalSummaryNotice: Identifiable, Equatable {
@@ -51,10 +51,13 @@ struct HomeLocalSummaryNotice: Identifiable, Equatable {
         self.kind = .saved(chunkCount: chunkCount)
     }
 
-    init(transcriptURL: URL, meetingTitle: String, failureMessage: String) {
+    init(transcriptURL: URL, meetingTitle: String, failureMessage: String, failureKind: String) {
         self.transcriptURL = transcriptURL
         self.meetingTitle = meetingTitle
-        self.kind = .failed(message: Self.normalizedFailureMessage(failureMessage))
+        self.kind = .failed(
+            message: Self.normalizedFailureMessage(failureMessage),
+            failureKind: failureKind
+        )
     }
 
     var title: String {
@@ -87,12 +90,17 @@ struct HomeLocalSummaryNotice: Identifiable, Equatable {
         return false
     }
 
+    var failureKind: String? {
+        if case .failed(_, let failureKind) = kind { return failureKind }
+        return nil
+    }
+
     var detail: String {
         switch kind {
         case .saved(let chunkCount):
             let passText = chunkCount == 1 ? "one local Gemma pass" : "\(chunkCount) local Gemma passes"
             return "The meeting Markdown was enhanced with a generated title and summary preview using \(passText)."
-        case .failed(let message):
+        case .failed(let message, _):
             return "The local AI summary did not finish: \(message) Nothing was changed. Retry when setup is ready."
         }
     }
