@@ -61,11 +61,18 @@ CORE_EVENTS = (
     "meeting_prompt_suppressed",
     "meeting_missed_call_nudge",
     "meeting_file_imported",
+    "meeting_file_import_failed",
+    "local_meeting_summary_started",
+    "local_meeting_summary_completed",
+    "local_meeting_summary_failed",
     "meeting_saved_audio_retranscription_requested",
     "timeline_onboarding_completed",
     "timeline_viewed",
     "timeline_card_opened",
     "timeline_chat_question_asked",
+    "workflow_abandoned",
+    "workflow_recovery_attempted",
+    "workflow_recovery_finished",
 )
 
 WORKFLOW_EVENTS = (
@@ -93,7 +100,9 @@ DISALLOWED_OUTPUT_COLUMNS = {
     "path",
     "title",
     "transcript",
+    "audio",
     "url",
+    "token",
     "raw",
     "audio",
     "token",
@@ -165,9 +174,48 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('dictation_start_failed', 'dictation_no_speech', 'dictation_audio_route_recovery_timeout', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_speaker_finalization_failed', 'workflow_recovery_finished')
+  AND event IN ('dictation_start_failed', 'dictation_no_speech', 'dictation_audio_route_recovery_timeout', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'meeting_speaker_finalization_failed', 'local_meeting_summary_failed', 'workflow_recovery_finished')
   {app_version_filter(app_version)}
 GROUP BY event, failure_kind, trigger
+ORDER BY events DESC
+LIMIT 30
+"""
+
+
+def recovery_outcomes_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  properties['workflow_kind'] AS workflow_kind,
+  properties['failure_kind'] AS failure_kind,
+  properties['retry_source'] AS retry_source,
+  properties['recovery_attempt_bucket'] AS recovery_attempt_bucket,
+  properties['result'] AS result,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event = 'workflow_recovery_finished'
+  {app_version_filter(app_version)}
+GROUP BY workflow_kind, failure_kind, retry_source, recovery_attempt_bucket, result
+ORDER BY events DESC
+LIMIT 30
+"""
+
+
+def abandonment_breakdown_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  properties['workflow_kind'] AS workflow_kind,
+  properties['stage'] AS stage,
+  properties['reason_kind'] AS reason_kind,
+  properties['elapsed_bucket'] AS elapsed_bucket,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event = 'workflow_abandoned'
+  {app_version_filter(app_version)}
+GROUP BY workflow_kind, stage, reason_kind, elapsed_bucket
 ORDER BY events DESC
 LIMIT 30
 """
@@ -250,7 +298,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('onboarding_dismissed', 'onboarding_permission_cta_clicked', 'onboarding_permission_status_changed', 'onboarding_primary_cta_clicked', 'product_friction_observed', 'workflow_abandoned')
+  AND event IN ('onboarding_permission_cta_clicked', 'onboarding_permission_status_changed', 'onboarding_primary_cta_clicked', 'product_friction_observed', 'workflow_abandoned')
   {app_version_filter(app_version)}
 GROUP BY event, step_id, stage, reason_kind, permission_kind
 ORDER BY events DESC
@@ -302,6 +350,8 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "event_counts": event_counts_query(days, app_version),
         "daily_active": daily_active_query(days, app_version),
         "reliability_breakdown": reliability_breakdown_query(days, app_version),
+        "recovery_outcomes": recovery_outcomes_query(days, app_version),
+        "abandonment_breakdown": abandonment_breakdown_query(days, app_version),
         "adoption_breakdown": adoption_breakdown_query(days, app_version),
         "meeting_prompt_quality": meeting_prompt_quality_query(days, app_version),
         "speaker_trust": speaker_trust_query(days, app_version),

@@ -98,7 +98,6 @@ allowlist.
 - `onboarding_agent_cta_clicked`
 - `onboarding_reporting_toggle_changed`
 - `onboarding_completed`
-- `onboarding_dismissed`
 - `activation_artifact_action_clicked`
 - `activation_first_artifact_saved`
 - `activation_second_artifact_saved`
@@ -185,8 +184,8 @@ allowlist.
 - feature discovery enums like `agent_setup`, `beta_summaries`,
   `capture_library`, `permissions`, `speaker_review`, and `update_settings`
 - workflow recovery fields limited to `workflow_kind`, `failure_kind`,
-  `retry_source`, `attempt_bucket`, `surface`, `artifact_retained`, `result`,
-  and `elapsed_bucket`
+  `retry_source`, `recovery_attempt_bucket`, `surface`, `artifact_retained`,
+  `result`, and `elapsed_bucket`
 - product friction fields limited to `surface`, `stage`, `result`,
   `failure_kind`, `elapsed_bucket`, `route_shape`, and `model_state`
 - local meeting summary analytics limited to `provider`, `summary_action`,
