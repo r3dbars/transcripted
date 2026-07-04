@@ -114,6 +114,12 @@ final class OverlayRootView: NSView {
 
     // MARK: - State Updates
 
+    // @_optimize(none): the -O SimplifyCFG pass crashes on this function's
+    // parameter/closure shape under swiftlang-6.3.2.1.108 (SIL/BorrowUtils.swift:542,
+    // "cannot get borrow introducers for unknown guaranteed value"). This is a
+    // compiler bug, not a correctness issue — disable optimization here until upstream
+    // fixes it. Reproduced in CI at github.com/r3dbars/transcripted actions run 28685559441.
+    @_optimize(none)
     func updateForState(
         _ state: FloatingOverlayController.OverlayState,
         dictationShortcutHint: String,
