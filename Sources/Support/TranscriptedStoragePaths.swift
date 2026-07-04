@@ -245,6 +245,10 @@ extension FileManager {
         return ensuredPrivateDirectory(at: url, context: "Transcripted temporary recordings")
     }
 
+    var transcriptedTimelineCapturesDir: URL {
+        transcriptedCaptureLibrarySubdirectory("timeline")
+    }
+
     var transcriptedTimelineRecordingsDir: URL {
         let url = transcriptedAppSupportDir.appendingPathComponent("recordings", isDirectory: true)
         return ensuredPrivateDirectory(at: url, context: "Transcripted timeline recordings")

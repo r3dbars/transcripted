@@ -125,6 +125,23 @@ delete their scratch audio.
 These paths are defined on the app side in `Sources/Meeting/MeetingStoragePaths.swift`
 and then injected into `TranscriptedCore` through `CoreStoragePaths`.
 
+## Timeline
+
+Timeline is opt-in and disabled by default. When enabled, app-owned raw state
+stays under the Transcripted Application Support root:
+
+- timeline database: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
+- raw screenshots: `~/Library/Application Support/Transcripted/recordings/screenshots/`
+
+Only future human/agent-readable timeline Markdown belongs in the relocatable
+capture library:
+
+- timeline Markdown: `<capture-library>/timeline/`
+
+The Timeline settings delete action removes only the timeline database, raw
+screenshots, and timeline Markdown. Meeting and dictation captures stay in
+place.
+
 ## Logs And Events
 
 App-side observability output currently lives under:
