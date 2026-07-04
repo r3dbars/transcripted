@@ -1889,8 +1889,7 @@ struct TranscriptedSettingsView: View {
             )
             return false
         }
-        NSWorkspace.shared.open(url)
-        return true
+        return NSWorkspace.shared.open(url)
     }
 
     private func presentHomeDeleteFailure(
