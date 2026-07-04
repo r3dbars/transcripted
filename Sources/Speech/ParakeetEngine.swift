@@ -38,6 +38,7 @@ class ParakeetEngine: ObservableObject {
     private nonisolated(unsafe) var audioStartReferenceTime: CFAbsoluteTime?
     private let pendingSamplesLock = NSLock()
     private var pendingSamples: [Float] = []
+    private var didReportPendingSampleTruncation = false
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
     private var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
@@ -1693,15 +1694,33 @@ class ParakeetEngine: ObservableObject {
                     }
                 }
 
-                self.pendingSamplesLock.withLock {
+                let truncatedSamples: Int = self.pendingSamplesLock.withLock {
                     self.pendingSamples.append(contentsOf: monoSamples)
                     let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
                         sampleRate: effectiveSampleRate,
                         seconds: TranscriptedConstants.audioBufferCapacitySeconds
                     )
                     let overflowMargin = Int(effectiveSampleRate)
-                    if self.pendingSamples.count > maxSamples + overflowMargin {
-                        self.pendingSamples.removeFirst(self.pendingSamples.count - maxSamples)
+                    guard self.pendingSamples.count > maxSamples + overflowMargin else { return 0 }
+                    let dropped = self.pendingSamples.count - maxSamples
+                    self.pendingSamples.removeFirst(dropped)
+                    guard !self.didReportPendingSampleTruncation else { return 0 }
+                    self.didReportPendingSampleTruncation = true
+                    return dropped
+                }
+                if truncatedSamples > 0 {
+                    let droppedSeconds = Double(truncatedSamples) / effectiveSampleRate
+                    Task { @MainActor in
+                        EventReporter.shared.capture(
+                            level: .warning,
+                            engine: "parakeet",
+                            event: "audio_buffer_truncated",
+                            message: "Recording exceeded the audio buffer capacity; oldest audio was dropped",
+                            context: [
+                                "dropped_seconds": String(format: "%.1f", droppedSeconds),
+                                "capacity_seconds": "\(Int(TranscriptedConstants.audioBufferCapacitySeconds))",
+                            ]
+                        )
                     }
                 }
 
@@ -2174,6 +2193,7 @@ class ParakeetEngine: ObservableObject {
         }
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
+            didReportPendingSampleTruncation = false
         }
         sampleBuffer.removeAll(keepingCapacity: true)
         reserveNativeSampleBufferCapacity()
@@ -2533,6 +2553,7 @@ class ParakeetEngine: ObservableObject {
             }
             self.pendingSamplesLock.withLock {
                 self.pendingSamples.removeAll(keepingCapacity: true)
+                self.didReportPendingSampleTruncation = false
             }
             self.zombieRecoveryRestartPending = true
             self.isRecording = false

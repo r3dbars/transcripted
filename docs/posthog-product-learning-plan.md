@@ -89,7 +89,7 @@ Operational scripts query aggregate counts only:
 
 | Event | Captured properties |
 | --- | --- |
-| `activation_artifact_action_clicked` | `action_kind`, `artifact_age_bucket`, `artifact_kind`, `surface` |
+| `activation_artifact_action_clicked` | `action_kind`, `artifact_age_bucket`, `artifact_kind`, `duration_bucket`, `result`, `surface`, `trigger`, `word_count_bucket` |
 | `activation_first_artifact_saved` | `artifact_kind`, `duration_bucket`, `surface`, `trigger`, `word_count_bucket` |
 | `dictation_artifact_saved` | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
 | `activation_second_artifact_saved` | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
@@ -190,7 +190,7 @@ aggregate reliability sizing and should not be expanded to raw device names.
   speaker-finalization failure, and saved-audio retranscription request.
 - First saved artifact across dictation and meeting with coarse artifact kind,
   trigger, duration bucket, and word-count bucket.
-- Artifact open/reveal/preview actions and agent setup or prompt-copy intent.
+- Artifact open/reveal/preview/local-summary actions and agent setup or prompt-copy intent.
 - Confident workflow abandonment for onboarding close, meeting-prompt dismissal
   or suppression, local-summary/model-prep block/cancel/fail, failed agent setup
   or artifact handoff, and failed-meeting retry dismissal/delete.
@@ -209,10 +209,9 @@ aggregate reliability sizing and should not be expanded to raw device names.
   as a proxy, while onboarding dictation and meeting saves have stricter events.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
-- Local summary beta behavior now has abandonment shape, but not a full success
-  funnel. Summary attempts, generated results, failure kind, model readiness,
-  and latency buckets should be captured when the summary flow is product-ready
-  enough to learn from.
+- Local summary beta behavior now has artifact-action, start, completion,
+  failure, and abandonment shape. It still cannot judge whether the generated
+  summary was useful.
 - Speaker review now has a narrow prompt/submission funnel, but final transcript
   rewrite quality is still visible mainly through meeting outcome and
   finalization failure events.
@@ -233,8 +232,6 @@ Prefer a small number of lifecycle events over broad click tracking.
 | `meeting_speaker_match_reviewed` | One review verdict joining match confidence to the user's answer (confirmed = right, corrected = wrong) | `review_action`, `similarity_bucket`, `margin_bucket`, `call_count_bucket`, `channel`, `had_suggestion`, `surface` |
 | `meeting_speaker_review_shown` | A saved meeting has review work surfaced | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `surface` |
 | `meeting_speaker_review_submitted` | User saves or defers speaker review | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `completion_kind`, `result`, `updates_submitted_bucket`, `surface` |
-| `meeting_summary_requested` | User asks for a local summary | `artifact_age_bucket`, `model_state`, `surface` |
-| `meeting_summary_finished` | Summary succeeds or fails | `duration_bucket`, `failure_kind`, `latency_bucket`, `model_state`, `result`, `surface` |
 | `settings_feature_discovered` | A high-leverage feature panel is first viewed | `feature_area`, `page_id`, `source` |
 | `workflow_abandoned` | App can confidently infer abandonment without content | `workflow_kind`, `stage`, `reason_kind`, `elapsed_bucket`, `surface`, optional `prior_ready_state` |
 
@@ -312,7 +309,7 @@ and failure kind only.
 
 ### Agent And Markdown Value Loop
 
-`activation_first_artifact_saved` -> open/reveal/preview ->
+`activation_first_artifact_saved` -> open/reveal/preview/local summary ->
 agent prompt/setup -> `agent_capture_query_observed` -> next-day return ->
 second artifact saved.
 

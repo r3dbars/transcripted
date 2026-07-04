@@ -53,7 +53,7 @@ enum MeetingQuickSummaryExtractor {
                 if matchesAny(decisionCues, in: normalized) {
                     append(sentence, to: &decisions)
                 } else if matchesAny(actionCues, in: normalized) {
-                    append(ownerPrefixed(sentence, owner: owner), to: &actionItems)
+                    append(actionBullet(sentence, owner: owner, normalized: normalized), to: &actionItems)
                 } else if isOpenQuestion(sentence, normalized: normalized) {
                     append(sentence, to: &openQuestions)
                 }
@@ -269,6 +269,36 @@ enum MeetingQuickSummaryExtractor {
     private static func ownerPrefixed(_ sentence: String, owner: String) -> String {
         let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(owner): \(trimmed)"
+    }
+
+    private static let dueCues: [(cue: String, due: String)] = [
+        ("by end of day", "end of day"),
+        ("by end of the day", "end of day"),
+        ("by eod", "end of day"),
+        ("by end of week", "end of week"),
+        ("by end of the week", "end of week"),
+        ("by eow", "end of week"),
+        ("by end of month", "end of month"),
+        ("by end of the month", "end of month"),
+        ("by tomorrow", "tomorrow"),
+        ("by tonight", "tonight"),
+        ("by next week", "next week"),
+        ("by next month", "next month"),
+        ("by monday", "Monday"),
+        ("by tuesday", "Tuesday"),
+        ("by wednesday", "Wednesday"),
+        ("by thursday", "Thursday"),
+        ("by friday", "Friday"),
+        ("by saturday", "Saturday"),
+        ("by sunday", "Sunday"),
+    ]
+
+    static func actionBullet(_ sentence: String, owner: String, normalized: String) -> String {
+        let bullet = ownerPrefixed(sentence, owner: owner)
+        guard let match = dueCues.first(where: { normalized.contains($0.cue) }) else {
+            return bullet
+        }
+        return "\(bullet) (due: \(match.due))"
     }
 
     private static func bulletList(_ items: [String]) -> String {

@@ -193,6 +193,10 @@ allowlist.
 - meeting prompt decision/outcome fields limited to `prompt_reason`, `source`,
   `provider`, `call_state`, `route_ready`, `calendar_confidence`,
   `choice_kind`, `outcome_kind`, `elapsed_bucket`, and `suppression_reason`
+- artifact-action analytics limited to `artifact_kind`, `action_kind`,
+  `surface`, `artifact_age_bucket`, `result`, `trigger`,
+  `word_count_bucket`, and `duration_bucket`; local-summary runs reuse this
+  shape for the saved-meeting -> summary -> return loop
 - local meeting summary analytics limited to `provider`, `summary_action`,
   `setup_ready`, `runtime`, `queue_depth_bucket`, `chunk_count_bucket`,
   `duration_bucket`, `failure_kind`, and `stage`

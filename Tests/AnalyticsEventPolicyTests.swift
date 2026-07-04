@@ -155,7 +155,7 @@ func testAnalyticsEventPolicy() {
         let agentQuery = AnalyticsEventPolicy.policy(forEvent: "agent_capture_query_observed")
         let returnProxy = AnalyticsEventPolicy.policy(forEvent: "activation_return_proxy_observed")
 
-        assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "surface"], "artifact actions should stay bucketed")
+        assertEqual(artifact?.allowedProperties ?? Set<String>(), ["action_kind", "artifact_age_bucket", "artifact_kind", "duration_bucket", "result", "surface", "trigger", "word_count_bucket"], "artifact actions should stay bucketed")
         assertEqual(firstArtifact?.allowedProperties ?? Set<String>(), ["artifact_kind", "duration_bucket", "surface", "trigger", "word_count_bucket"], "first artifact saves should stay bucketed")
         assertEqual(dictationArtifact?.allowedProperties ?? Set<String>(), ["delivery", "duration_bucket", "save_outcome", "surface", "trigger", "word_count_bucket"], "dictation saved-artifact events should stay bucketed and enum-only")
         assertEqual(secondArtifact?.allowedProperties ?? Set<String>(), ["days_since_first_bucket", "first_artifact_kind", "second_artifact_kind", "surface", "trigger"], "second artifact saves should stay bucketed")
