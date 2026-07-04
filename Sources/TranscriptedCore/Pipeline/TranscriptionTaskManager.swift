@@ -674,7 +674,7 @@ public class TranscriptionTaskManager: ObservableObject {
         micAudioURL: URL,
         systemAudioURL: URL?
     ) -> Bool {
-        guard failedTranscriptionManager.failedTranscriptions.contains(where: { $0.id == id }) else {
+        guard let existingFailure = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == id }) else {
             AppLogger.pipeline.warning("Failed transcription audio promotion skipped because entry was missing", [
                 "id": id.uuidString
             ])
@@ -682,16 +682,17 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         let retryIsUsingOriginalAudio = activeTasks[id] != nil
+        let promotedSystemAudioURL = systemAudioURL ?? existingFailure.systemAudioURL
         let didPersist = failedTranscriptionManager.updateFailedTranscriptionAudio(
             id: id,
             micAudioURL: micAudioURL,
-            systemAudioURL: systemAudioURL
+            systemAudioURL: promotedSystemAudioURL
         )
         guard didPersist else { return false }
 
         scheduleFailedRecordingAudioArchive(
             micURL: micAudioURL,
-            systemURL: systemAudioURL,
+            systemURL: promotedSystemAudioURL,
             taskId: id,
             removeOriginalsAfterArchive: !retryIsUsingOriginalAudio,
             originalMicCleanupLabel: "finalized failed mic scratch",
