@@ -181,7 +181,7 @@ enum DictationInputDeviceSelectionPolicy {
     }
 
     private static func isBluetoothHeadsetInput(_ device: DictationAudioDevice) -> Bool {
-        isBluetoothTransport(device.transport) || isBluetoothHeadsetName(normalize(device.name))
+        isBluetoothAudioDevice(device)
     }
 
     private static func isBluetoothAudioDevice(_ device: DictationAudioDevice) -> Bool {

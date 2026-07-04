@@ -248,12 +248,3 @@ final class NemotronEngine: ObservableObject {
         return buffer
     }
 }
-
-private extension ParakeetModelState {
-    var isReady: Bool {
-        if case .ready = self {
-            return true
-        }
-        return false
-    }
-}

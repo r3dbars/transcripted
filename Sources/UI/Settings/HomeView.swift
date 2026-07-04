@@ -2834,7 +2834,7 @@ private struct HomeMeetingSpeakerPill: View {
     }
 }
 
-private enum HomeMeetingSpeakerColor {
+enum HomeMeetingSpeakerColor {
     static func color(for speaker: String) -> Color {
         let palette: [NSColor] = [
             .systemBlue,
