@@ -846,6 +846,15 @@ final class MeetingOverlayRootView: NSView {
                 isRetryable: true
             )
             titleLabel.stringValue = copy.title
+            closeButton.attributedTitle = buttonTitle("Dismiss", size: 11, weight: .semibold)
+            closeButton.image = nil
+            closeButton.imagePosition = .noImage
+            closeButton.toolTip = nil
+            closeButton.setAccessibilityLabel("Dismiss meeting failure")
+            closeButton.setAccessibilityHelp("Hides this meeting failure notice. Recovery remains available from Home.")
+            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+            closeButton.layer?.cornerRadius = 8
+            closeButton.layer?.borderWidth = 0
             updateStatusDot(
                 color: failureKind == .recordingTooShort
                     ? MeetingOverlayTokens.dotIdle
