@@ -102,6 +102,7 @@ allowlist.
 - `activation_artifact_action_clicked`
 - `activation_first_artifact_saved`
 - `activation_second_artifact_saved`
+- `activation_habit_loop_actioned`
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
 - `agent_capture_query_observed`

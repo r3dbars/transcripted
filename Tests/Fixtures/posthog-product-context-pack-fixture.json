@@ -11,9 +11,11 @@
       {
         "launch_devices": 214,
         "first_artifact_devices": 37,
+        "second_artifact_devices": 14,
         "agent_prompt_devices": 28,
         "agent_setup_devices": 32,
         "true_agent_query_devices": 0,
+        "habit_loop_devices": 19,
         "return_proxy_devices": 17,
         "dictation_completed_devices": 43,
         "meeting_saved_devices": 12,
@@ -32,6 +34,11 @@
         "devices": 37
       },
       {
+        "event": "activation_second_artifact_saved",
+        "events": 17,
+        "devices": 14
+      },
+      {
         "event": "activation_agent_prompt_action_clicked",
         "events": 43,
         "devices": 28
@@ -45,6 +52,11 @@
         "event": "activation_return_proxy_observed",
         "events": 31,
         "devices": 17
+      },
+      {
+        "event": "activation_habit_loop_actioned",
+        "events": 25,
+        "devices": 19
       },
       {
         "event": "agent_capture_query_observed",
@@ -129,6 +141,11 @@
         "devices": 38
       },
       {
+        "feature": "habit_loop",
+        "events": 25,
+        "devices": 19
+      },
+      {
         "feature": "artifact_actions",
         "events": 67,
         "devices": 31
@@ -149,6 +166,11 @@
         "signal": "activation_return_proxy_observed",
         "events": 31,
         "devices": 17
+      },
+      {
+        "signal": "habit_loop_action",
+        "events": 25,
+        "devices": 19
       },
       {
         "signal": "multi_artifact_proxy",

@@ -10,7 +10,9 @@
         "devices": 7,
         "event": "activation_artifact_action_clicked",
         "events": 8,
-        "page_id": null
+        "page_id": null,
+        "result": null,
+        "surface": "home_row"
       },
       {
         "action_kind": "copy_prompt",
@@ -19,7 +21,20 @@
         "devices": 3,
         "event": "activation_agent_prompt_action_clicked",
         "events": 3,
-        "page_id": null
+        "page_id": null,
+        "result": "success",
+        "surface": "home_row"
+      },
+      {
+        "action_kind": "what_did_i_promise",
+        "agent_target": null,
+        "artifact_kind": "meeting",
+        "devices": 5,
+        "event": "activation_habit_loop_actioned",
+        "events": 7,
+        "page_id": null,
+        "result": "success",
+        "surface": "home_row"
       },
       {
         "action_kind": null,
@@ -28,7 +43,9 @@
         "devices": 1,
         "event": "meeting_file_imported",
         "events": 1,
-        "page_id": null
+        "page_id": null,
+        "result": null,
+        "surface": null
       }
     ],
     "daily_active": [
@@ -82,6 +99,11 @@
         "events": 18
       },
       {
+        "devices": 6,
+        "event": "activation_second_artifact_saved",
+        "events": 8
+      },
+      {
         "devices": 8,
         "event": "activation_artifact_action_clicked",
         "events": 10
@@ -100,6 +122,11 @@
         "devices": 2,
         "event": "activation_return_proxy_observed",
         "events": 2
+      },
+      {
+        "devices": 5,
+        "event": "activation_habit_loop_actioned",
+        "events": 7
       },
       {
         "devices": 0,
