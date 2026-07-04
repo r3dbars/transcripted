@@ -108,6 +108,7 @@ allowlist.
 - `activation_return_proxy_observed`
 - `workflow_abandoned`
 - `workflow_recovery_attempted`
+- `workflow_recovery_failed`
 - `workflow_recovery_finished`
 - `product_friction_observed`
 - `menu_bar_opened`

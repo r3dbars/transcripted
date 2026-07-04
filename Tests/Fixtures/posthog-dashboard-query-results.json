@@ -104,7 +104,8 @@
     {
       "id": "retry_recovery.workflow_recovery",
       "rows": [
-        {"event": "workflow_recovery_finished", "workflow_kind": "meeting_transcript", "failure_kind": "model_unavailable", "retry_source": "home", "artifact_retained": true, "result": "success", "recovery_attempt_bucket": "second", "events": 3, "devices": 2}
+        {"event": "workflow_recovery_finished", "workflow_kind": "meeting_transcript", "failure_kind": "model_unavailable", "retry_source": "home", "artifact_retained": true, "result": "success", "recovery_attempt_bucket": "second", "events": 3, "devices": 2},
+        {"event": "workflow_recovery_failed", "workflow_kind": "local_summary", "failure_kind": "timeout", "retry_source": "summary_failure_notice", "artifact_retained": true, "result": "failed", "recovery_attempt_bucket": "1", "events": 1, "devices": 1}
       ]
     },
     {

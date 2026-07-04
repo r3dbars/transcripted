@@ -149,6 +149,11 @@
         "events": 3
       },
       {
+        "devices": 1,
+        "event": "workflow_recovery_failed",
+        "events": 1
+      },
+      {
         "devices": 7,
         "event": "meeting_recording_started",
         "events": 11

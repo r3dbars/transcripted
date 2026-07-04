@@ -129,6 +129,7 @@ RETRY_RECOVERY_EVENTS = (
     "local_meeting_summary_failed",
     "workflow_abandoned",
     "workflow_recovery_attempted",
+    "workflow_recovery_failed",
     "workflow_recovery_finished",
 )
 
@@ -671,7 +672,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished', 'meeting_saved_audio_retranscription_requested')
+  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished', 'workflow_recovery_failed', 'meeting_saved_audio_retranscription_requested')
   {app_version_filter(app_version)}
 GROUP BY event, workflow_kind, failure_kind, retry_source, artifact_retained, result, recovery_attempt_bucket
 ORDER BY events DESC
@@ -694,6 +695,7 @@ LIMIT 80
                 "meeting_saved",
                 "meeting_failed_or_skipped",
                 "recovery_finished",
+                "recovery_failed",
             ),
             sql=f"""
 SELECT
@@ -706,7 +708,8 @@ SELECT
   countIf(event = 'meeting_recording_start_failed') AS meeting_start_failures,
   countIf(event = 'meeting_transcript_saved') AS meeting_saved,
   countIf(event IN ('meeting_transcript_failed', 'meeting_transcript_skipped')) AS meeting_failed_or_skipped,
-  countIf(event = 'workflow_recovery_finished') AS recovery_finished
+  countIf(event = 'workflow_recovery_finished') AS recovery_finished,
+  countIf(event = 'workflow_recovery_failed') AS recovery_failed
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND {event_filter(RETRY_RECOVERY_EVENTS)}
