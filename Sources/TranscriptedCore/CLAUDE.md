@@ -115,8 +115,13 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/SpeakerNamingSimulationRunnerTests.swift`
 - `Tests/SpeakerPeopleReviewPolicyTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerProfileMergerTests.swift`
+- `Tests/TranscriptedCoreTests/SpeakerProfileProvenanceTests.swift`
 - `Tests/TranscriptedCoreTests/SpeakerProvenanceTests.swift`
 - `Tests/TranscriptedCoreTests/StatsDatabaseTests.swift`
+- `Tests/TranscriptedCoreTests/StatsDatabaseQueriesTests.swift`
+- `Tests/TranscriptedCoreTests/StatsDatabaseModelsTests.swift`
+- `Tests/TranscriptedCoreTests/StatsServiceTests.swift`
+- `Tests/TranscriptedCoreTests/LogPrivacySanitizerTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptFormatVersionTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptFrontmatterTests.swift`
 - `Tests/TranscriptedCoreTests/TranscriptMetadataBuilderTests.swift`
