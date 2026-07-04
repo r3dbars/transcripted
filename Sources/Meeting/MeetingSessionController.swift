@@ -408,7 +408,11 @@ final class MeetingSessionController: ObservableObject {
         )
         let task = Task<Result<Void, Error>, Never> { [downloader] in
             do {
-                try await downloader.ensureModelsReady()
+                try await TranscriptedConstants.withDetachedTimeout(
+                    seconds: TranscriptedConstants.modelLoadWaitBudget
+                ) {
+                    try await downloader.ensureModelsReady()
+                }
                 return .success(())
             } catch {
                 return .failure(error)
@@ -2671,7 +2675,11 @@ final class MeetingSessionController: ObservableObject {
         )
 
         do {
-            try await downloader.ensureModelsReady(sttModel: job.sttModel)
+            try await TranscriptedConstants.withDetachedTimeout(
+                seconds: TranscriptedConstants.modelLoadWaitBudget
+            ) {
+                try await self.downloader.ensureModelsReady(sttModel: job.sttModel)
+            }
             sttAdapter.selectPreparedModel(job.sttModel)
         } catch {
             DiagnosticsTrail.record(

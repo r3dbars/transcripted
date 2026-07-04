@@ -131,4 +131,26 @@ func testTranscriptedConstants() async {
 
         assertNil(result, "timeout should return through the throwing path instead of hanging")
     }
+
+    await runSuite("TranscriptedConstants.withDetachedTimeout — returns completed work before deadline") {
+        let result = try? await TranscriptedConstants.withDetachedTimeout(seconds: 1) {
+            "ok"
+        }
+
+        assertEqual(result, "ok", "detached timeout should return completed async work")
+    }
+
+    await runSuite("TranscriptedConstants.withDetachedTimeout — returns even when work ignores cancellation") {
+        let startedAt = Date()
+        let result = try? await TranscriptedConstants.withDetachedTimeout(seconds: 0.01) {
+            for _ in 0..<1_000 {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+            }
+            return "late"
+        }
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        assertNil(result, "detached timeout should throw on deadline")
+        assertTrue(elapsed < 0.5, "detached timeout should not wait for non-cooperative model work to unwind")
+    }
 }
