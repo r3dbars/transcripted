@@ -233,6 +233,28 @@ func testFailedMeetingPresentation() {
             "failed meeting metadata should label retained WAVs as raw audio"
         )
     }
+
+    runSuite("FailedMeetingPresentation exposes queued retry state in row metadata") {
+        let source = (try? String(
+            contentsOf: repoFixtureURL("Sources/Meeting/FailedMeetingPresentation.swift"),
+            encoding: .utf8
+        )) ?? ""
+
+        assertTrue(
+            source.contains("title(for: failed, fallback: copy.title)"),
+            "failed meeting rows should keep the queued meeting title when one exists"
+        )
+        assertTrue(
+            source.contains("if failed.retryCount > 0")
+                && source.contains("failed.retryCount == 1 ? \"1 retry\" : \"\\(failed.retryCount) retries\""),
+            "retry attempts should stay visible in failed meeting metadata"
+        )
+        assertTrue(
+            source.contains("if isRetrying")
+                && source.contains("parts.append(\"Retrying now\")"),
+            "active retry progress should stay visible in failed meeting metadata"
+        )
+    }
 }
 
 private func makeFailedMeetingPresentationTestDirectory() -> URL {
