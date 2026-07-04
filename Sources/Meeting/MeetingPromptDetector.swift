@@ -59,6 +59,14 @@ final class MeetingPromptDetector {
     private var lastCalendarSnapshotRefreshAt: Date?
     private var lastCalendarAccessGranted: Bool?
     private var calendarSnapshotsNeedRefresh = true
+    // Guards against redundant concurrent EKEventStore queries: evaluate() is invoked
+    // from several independent, unstructured Task{} sources (poll loop, workspace
+    // notifications, mic/camera/audio signal changes, .EKEventStoreChanged). Two of
+    // those firing close together while a fetch is already in flight would otherwise
+    // both pass the guard below (the need-refresh flags only clear after the await),
+    // issuing a second redundant query. Callers don't need synchronously up-to-date
+    // state on return — the same assumption the existing TTL-based skip already relies on.
+    private var isFetchingCalendarSnapshots = false
     private var pollingTask: Task<Void, Never>?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var calendarStoreObserver: NSObjectProtocol?
@@ -414,14 +422,18 @@ final class MeetingPromptDetector {
         let refreshExpired = lastCalendarSnapshotRefreshAt.map {
             now.timeIntervalSince($0) >= calendarSnapshotRefreshInterval
         } ?? true
-        guard force || accessChanged || calendarSnapshotsNeedRefresh || refreshExpired else { return }
+        guard !isFetchingCalendarSnapshots,
+              force || accessChanged || calendarSnapshotsNeedRefresh || refreshExpired
+        else { return }
 
+        isFetchingCalendarSnapshots = true
         calendarEventSnapshots = await fetchCalendarEventSnapshots(
             now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
             now.addingTimeInterval(calendarLookaheadInterval)
         )
         lastCalendarSnapshotRefreshAt = now
         calendarSnapshotsNeedRefresh = false
+        isFetchingCalendarSnapshots = false
     }
 
     private func installCalendarStoreObserver() {
