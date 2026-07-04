@@ -10,6 +10,11 @@ logs, and writes one local report under:
 /tmp/transcripted-qa-bench/<run-id>/qa-report.md
 ```
 
+For a short human pass after launching the local app, use
+`docs/qa/manual-10-minute-checklist.md`. It keeps live app, TCC, pasteback,
+meeting prompt, update UI, and Bluetooth/AirPods proof separate from automated
+bench results.
+
 ## Quick Run
 
 ```bash
