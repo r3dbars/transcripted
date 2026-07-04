@@ -9,6 +9,24 @@ struct MeetingPromptTelemetryReadiness: Equatable {
 
 @available(macOS 14.0, *)
 enum MeetingPromptTelemetry {
+    enum ChoiceKind: String {
+        case record
+        case dismiss
+        case remindLater = "remind_later"
+        case expired
+    }
+
+    enum OutcomeKind: String {
+        case recordingStarted = "recording_started"
+        case recordingStartFailed = "recording_start_failed"
+        case transcriptSaved = "transcript_saved"
+        case transcriptFailed = "transcript_failed"
+        case transcriptSkipped = "transcript_skipped"
+        case speakerFinalizationFailed = "speaker_finalization_failed"
+        case ignored
+        case suppressed
+    }
+
     static func properties(
         for candidate: MeetingPromptDetector.Candidate,
         readiness: MeetingPromptTelemetryReadiness,
@@ -43,6 +61,59 @@ enum MeetingPromptTelemetry {
         if let dismissStreak {
             properties["dismiss_streak_bucket"] = MeetingPromptCallTelemetry.dismissStreakBucket(dismissStreak)
         }
+        return properties
+    }
+
+    static func funnelProperties(
+        for candidate: MeetingPromptDetector.Candidate,
+        readiness: MeetingPromptTelemetryReadiness
+    ) -> [String: String] {
+        [
+            "calendar_confidence": candidate.analyticsCalendarConfidence,
+            "call_state": candidate.analyticsCallState,
+            "prompt_reason": candidate.reason.rawValue,
+            "provider": candidate.provider.rawValue,
+            "route_ready": routeReady(readiness: readiness) ? "true" : "false",
+            "source": candidate.source.analyticsValue,
+        ]
+    }
+
+    static func choiceProperties(
+        for candidate: MeetingPromptDetector.Candidate,
+        readiness: MeetingPromptTelemetryReadiness,
+        choiceKind: ChoiceKind,
+        elapsedSeconds: TimeInterval?
+    ) -> [String: String] {
+        var properties = funnelProperties(for: candidate, readiness: readiness)
+        properties["choice_kind"] = choiceKind.rawValue
+        properties["elapsed_bucket"] = elapsedBucket(elapsedSeconds)
+        return properties
+    }
+
+    static func outcomeProperties(
+        for candidate: MeetingPromptDetector.Candidate,
+        readiness: MeetingPromptTelemetryReadiness,
+        outcomeKind: OutcomeKind,
+        elapsedSeconds: TimeInterval? = nil,
+        suppressionReason: MeetingPromptSuppressionReason? = nil
+    ) -> [String: String] {
+        var properties = funnelProperties(for: candidate, readiness: readiness)
+        properties["elapsed_bucket"] = elapsedBucket(elapsedSeconds)
+        properties["outcome_kind"] = outcomeKind.rawValue
+        if let suppressionReason {
+            properties["suppression_reason"] = suppressionReason.rawValue
+        }
+        return properties
+    }
+
+    static func outcomeProperties(
+        promptProperties: [String: String],
+        outcomeKind: OutcomeKind,
+        elapsedSeconds: TimeInterval? = nil
+    ) -> [String: String] {
+        var properties = promptProperties
+        properties["elapsed_bucket"] = elapsedBucket(elapsedSeconds)
+        properties["outcome_kind"] = outcomeKind.rawValue
         return properties
     }
 
@@ -87,6 +158,13 @@ enum MeetingPromptTelemetry {
 
     private static func routeReady(readiness: MeetingPromptTelemetryReadiness) -> Bool {
         readiness.microphoneGranted && readiness.systemAudioRecordingGranted
+    }
+
+    private static func elapsedBucket(_ seconds: TimeInterval?) -> String {
+        guard let seconds, seconds >= 0 else {
+            return "unknown"
+        }
+        return AnalyticsReporter.durationBucket(seconds: seconds)
     }
 
     private static func missingRoutePermission(readiness: MeetingPromptTelemetryReadiness) -> String {

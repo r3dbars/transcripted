@@ -39,6 +39,7 @@ captured_input_volume_dropped
 captured_input_volume_during
 card_kind
 channel
+choice_kind
 cleanup_changed
 cleanup_enabled
 completion_flow
@@ -103,6 +104,7 @@ missing_permission
 model_state
 os_major
 outcome
+outcome_kind
 output_channels
 output_device_class
 output_ducking_detected

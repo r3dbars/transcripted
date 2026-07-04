@@ -150,7 +150,9 @@ allowlist.
 - `meeting_recording_start_failed`
 - `meeting_detected_call_ended`
 - `meeting_prompt_shown`
+- `meeting_prompt_choice_made`
 - `meeting_prompt_dismissed`
+- `meeting_prompt_outcome_recorded`
 - `meeting_prompt_record_selected`
 - `meeting_prompt_suppressed`
 - `meeting_mic_boost_prompt_shown`
@@ -189,6 +191,9 @@ allowlist.
   `result`, and `elapsed_bucket`
 - product friction fields limited to `surface`, `stage`, `result`,
   `failure_kind`, `elapsed_bucket`, `route_shape`, and `model_state`
+- meeting prompt decision/outcome fields limited to `prompt_reason`, `source`,
+  `provider`, `call_state`, `route_ready`, `calendar_confidence`,
+  `choice_kind`, `outcome_kind`, `elapsed_bucket`, and `suppression_reason`
 - artifact-action analytics limited to `artifact_kind`, `action_kind`,
   `surface`, `artifact_age_bucket`, `result`, `trigger`,
   `word_count_bucket`, and `duration_bucket`; local-summary runs reuse this

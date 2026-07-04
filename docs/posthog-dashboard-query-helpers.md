@@ -138,8 +138,9 @@ is `agent_capture_query_observed`, which confirms a saved-capture MCP query but
 still does not measure answer quality.
 
 `meeting_prompt_quality` uses coarse meeting-provider, source, route-ready,
-prompt-reason, suppression, cooldown, and permission buckets. It does not expose
-calendar titles, app names, raw meeting URLs, or participant data.
+prompt-reason, choice/outcome, elapsed, suppression, cooldown, and permission
+buckets. It does not expose calendar titles, app names, raw meeting URLs, or
+participant data.
 
 `artifact_usefulness` proves saves, second saves, artifact actions, habit-loop
 actions, and return proxy rows. It does not inspect transcript contents or

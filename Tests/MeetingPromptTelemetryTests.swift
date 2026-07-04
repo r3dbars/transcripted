@@ -181,4 +181,53 @@ func testMeetingPromptTelemetry() async {
         assertEqual(properties["signal_kinds"], "mic+output", "signal kinds should pass through as the stable enum string")
         assertEqual(properties.count, 5, "the funnel event must carry exactly its five coarse properties")
     }
+
+    runSuite("MeetingPromptTelemetry decision and outcome properties stay enum and bucket only") {
+        let candidate = makeTelemetryPromptCandidate(reason: .micInput, source: .runtimeApp)
+        let readiness = MeetingPromptTelemetryReadiness(
+            microphoneGranted: true,
+            systemAudioRecordingGranted: true,
+            meetingRecordingActive: false,
+            dictationRecordingActive: false
+        )
+
+        let choice = MeetingPromptTelemetry.choiceProperties(
+            for: candidate,
+            readiness: readiness,
+            choiceKind: .record,
+            elapsedSeconds: 12
+        )
+        assertEqual(choice["choice_kind"], "record", "choice kind should be a stable enum")
+        assertEqual(choice["elapsed_bucket"], "10_29s", "choice latency should be bucketed")
+        assertEqual(choice["prompt_reason"], "mic_input", "prompt reason should stay coarse")
+        assertEqual(choice["source"], "runtime_app", "source should stay coarse")
+        assertEqual(choice["provider"], "zoom", "provider should stay enum-shaped")
+        assertEqual(choice["route_ready"], "true", "route readiness should be a boolean string")
+        assertEqual(choice["calendar_confidence"], "none", "calendar confidence should be coarse")
+        assertEqual(choice["call_state"], "mic_active", "call state should be coarse")
+        assertEqual(choice["meeting_title"], nil, "choice telemetry must not include titles")
+        assertEqual(choice["meeting_url"], nil, "choice telemetry must not include URLs")
+        assertEqual(choice.count, 8, "choice telemetry should keep only the reviewed prompt fields plus choice and elapsed")
+
+        let outcome = MeetingPromptTelemetry.outcomeProperties(
+            for: candidate,
+            readiness: readiness,
+            outcomeKind: .transcriptSaved,
+            elapsedSeconds: 180
+        )
+        assertEqual(outcome["outcome_kind"], "transcript_saved", "outcome kind should be a stable enum")
+        assertEqual(outcome["elapsed_bucket"], "2_9m", "outcome latency should be bucketed")
+        assertEqual(outcome["choice_kind"], nil, "outcome telemetry should not duplicate choice kind")
+        assertEqual(outcome.count, 8, "outcome telemetry should keep only reviewed prompt fields plus outcome and elapsed")
+
+        let suppressed = MeetingPromptTelemetry.outcomeProperties(
+            for: candidate,
+            readiness: readiness,
+            outcomeKind: .suppressed,
+            suppressionReason: .ownCaptureActive
+        )
+        assertEqual(suppressed["outcome_kind"], "suppressed", "suppression should be an outcome enum")
+        assertEqual(suppressed["suppression_reason"], "own_capture_active", "suppression reason should stay enum-shaped")
+        assertEqual(suppressed["elapsed_bucket"], "unknown", "missing anchors should report unknown instead of raw time")
+    }
 }

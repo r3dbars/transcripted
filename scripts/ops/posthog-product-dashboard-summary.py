@@ -57,7 +57,9 @@ CORE_EVENTS = (
     "settings_page_viewed",
     "settings_action_clicked",
     "meeting_prompt_shown",
+    "meeting_prompt_choice_made",
     "meeting_prompt_record_selected",
+    "meeting_prompt_outcome_recorded",
     "meeting_prompt_dismissed",
     "meeting_prompt_suppressed",
     "meeting_missed_call_nudge",
@@ -596,7 +598,7 @@ def build_under_discovered_feature(data: dict[str, Any]) -> Finding:
         ("Local summary", max(devices.get("local_meeting_summary_started", 0), devices.get("local_meeting_summary_completed", 0)), 3, "Make the saved-meeting summary action clearer on Home."),
         ("Meeting import", devices.get("meeting_file_imported", 0), 3, "Expose imported-audio transcription from Home for users who missed live capture."),
         ("Saved-audio retranscription", devices.get("meeting_saved_audio_retranscription_requested", 0), 2, "Make retry from retained meeting audio clearer after transcript failure."),
-        ("Meeting prompt acceptance", devices.get("meeting_prompt_record_selected", 0), 2, "Clarify detected-meeting prompts and route readiness."),
+        ("Meeting prompt acceptance", max(devices.get("meeting_prompt_record_selected", 0), devices.get("meeting_prompt_choice_made", 0)), 2, "Clarify detected-meeting prompts, route readiness, and save outcomes."),
     ]
     under = [
         item for item in candidates
