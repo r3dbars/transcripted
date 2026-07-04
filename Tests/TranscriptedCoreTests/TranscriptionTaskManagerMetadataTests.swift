@@ -523,11 +523,11 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         let micURL = micScratchDirectory.appendingPathComponent("mic.wav")
         try writeMonoWAV(to: micURL, duration: 2.5)
 
-        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
-            micAudioURL: micURL,
-            systemAudioURL: nil,
-            errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
-        ))
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: nil,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
 
         try await waitUntil {
             manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
@@ -543,6 +543,37 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             retainedFiles.contains { $0.lastPathComponent == "microphone.wav" },
             "successful mic-only transcription should retain the microphone WAV beside the transcript"
         )
+    }
+
+    func testMicOnlyFailedQueueRetainsArchiveAndRemovesScratch() throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let micScratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: micScratchDirectory, withIntermediateDirectories: true)
+        let micURL = micScratchDirectory.appendingPathComponent("mic.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
+        ))
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(
+            failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"),
+            "failed queue should point at retained archive audio, not scratch audio"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should be removed after archiving")
+
+        let archivedDirectory = failed.micAudioURL.deletingLastPathComponent()
+        manager.failedTranscriptionManager.deleteFailedTranscription(id: failed.id)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: failed.micAudioURL.path), "delete should remove archived failed audio")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: archivedDirectory.path), "delete should remove the empty failed-audio directory")
     }
 
     func testManualFailedQueueRetainsAudioBeforeRemovingScratch() throws {
