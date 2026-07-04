@@ -55,7 +55,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/ops/health-probe.sh` — run health checks for observability lanes (Sentry, PostHog, GitHub, Cloudflare)
   - Usage: `bash scripts/ops/health-probe.sh <github|sentry|posthog|cloudflare|all>`
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
-- `scripts/ops/release-health-card.py` — print a compact release-health card for one app version by combining local release metadata, GitHub downloads, live public release surfaces, and PostHog update/workflow counts when credentials are present
+- `scripts/ops/release-health-card.py` — print a compact release-health card for one app version by combining local release metadata, GitHub downloads, live public release surfaces, and PostHog update/workflow counts when credentials are present; installed workflow rows are grouped by `app_version`, `build_version`, `build_channel`, and `build_revision` so local/current-main builds cannot be counted as shipped-release proof
   - Usage: `python3 scripts/ops/release-health-card.py --version 1.1.47`
 - `scripts/ops/retention-cohort-report.py` — print a privacy-safe PostHog retention cohort report for first/second artifact, next-day and 7-day return, repeat dictation/meeting/agent/summary use, 3-days-this-week, version adoption, and first-run drop-off
   - Usage: `python3 scripts/ops/retention-cohort-report.py`
@@ -72,13 +72,13 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Writes local Markdown and JSON under `/tmp/transcripted-posthog-product-context/<run-id>/`
   - Missing PostHog credentials produce explicit `UNKNOWN` states unless `--strict` is passed
   - Self-test: `python3 scripts/ops/posthog-product-context-pack.py --self-test`
-- `scripts/ops/posthog-dashboard-queries.py` — reusable PostHog aggregate query catalog for the 100 WAU, activation, reliability, feature-adoption, and release-health dashboard families
+- `scripts/ops/posthog-dashboard-queries.py` — reusable PostHog aggregate query catalog for the 100 WAU, activation, reliability, feature-adoption, and release-health dashboard families; release-health keeps installed build outcomes separate from update target-version outcomes
   - Dry-run specs: `python3 scripts/ops/posthog-dashboard-queries.py --dry-run`
   - One family: `python3 scripts/ops/posthog-dashboard-queries.py --family activation --dry-run`
   - Live aggregate query: `python3 scripts/ops/posthog-dashboard-queries.py --family 100_wau --days 30`
   - CI/offline proof: `python3 scripts/ops/posthog-dashboard-queries.py --self-test`
   - Machine output for health agents: `python3 scripts/ops/posthog-dashboard-queries.py --family all --json-only`
-- `scripts/ops/posthog-product-dashboard-summary.py` — turn the five PostHog product-learning dashboard families into ranked product tasks
+- `scripts/ops/posthog-product-dashboard-summary.py` — turn the five PostHog product-learning dashboard families into ranked product tasks, with release-regression watch rows grouped by full build identity
   - Usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --days 30`
   - Fixture usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json`
   - Writes local Markdown and JSON under `/tmp/transcripted-posthog-product-tasks/<run-id>/`

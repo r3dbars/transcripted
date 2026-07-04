@@ -174,6 +174,15 @@ RELEASE_EVENTS = (
     "update_installed",
 )
 
+RELEASE_WORKFLOW_EVENTS = (
+    "app_launched",
+    "dictation_started",
+    "dictation_completed",
+    "meeting_recording_started",
+    "meeting_transcript_saved",
+    "meeting_transcript_failed",
+)
+
 DISALLOWED_OUTPUT_FRAGMENTS = (
     "distinct_id",
     "person",
@@ -908,27 +917,51 @@ LIMIT 50
 """,
         ),
         QuerySpec(
-            id="release_health.version_event_counts",
+            id="release_health.installed_build_outcomes",
             family="release_health",
-            title="Release event counts",
-            description="Counts workflow and update events for a release-scoped health card.",
-            columns=("event", "events", "devices", "first_seen", "last_seen"),
+            title="Installed build launch and outcome counts",
+            description="Groups launch, success, and failure events by installed app/build identity so shipped and local/current-main rows stay separate.",
+            columns=(
+                "app_version",
+                "build_version",
+                "build_channel",
+                "build_revision",
+                "launch_events",
+                "launch_devices",
+                "success_events",
+                "success_devices",
+                "failure_events",
+                "failure_devices",
+                "first_seen",
+                "last_seen",
+            ),
             sql=f"""
 SELECT
-  event,
-  count() AS events,
-  uniq(distinct_id) AS devices,
+  properties['app_version'] AS app_version,
+  properties['build_version'] AS build_version,
+  properties['build_channel'] AS build_channel,
+  properties['build_revision'] AS build_revision,
+  countIf(event = 'app_launched') AS launch_events,
+  uniqIf(distinct_id, event = 'app_launched') AS launch_devices,
+  countIf(event IN ('dictation_completed', 'meeting_transcript_saved')) AS success_events,
+  uniqIf(distinct_id, event IN ('dictation_completed', 'meeting_transcript_saved')) AS success_devices,
+  countIf(event = 'meeting_transcript_failed') AS failure_events,
+  uniqIf(distinct_id, event = 'meeting_transcript_failed') AS failure_devices,
   min(timestamp) AS first_seen,
   max(timestamp) AS last_seen
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND {event_filter(RELEASE_EVENTS)}
-  {version_or_app_version_filter(app_version)}
-GROUP BY event
-ORDER BY event ASC
+  AND {event_filter(RELEASE_WORKFLOW_EVENTS)}
+  AND properties['app_version'] IS NOT NULL
+  {app_version_filter(app_version)}
+GROUP BY app_version, build_version, build_channel, build_revision
+ORDER BY launch_devices DESC, launch_events DESC, app_version ASC, build_channel ASC
 LIMIT 100
 """,
-            notes=("Pass --app-version for a specific release. Update events use properties['version']; workflow events use app_version.",),
+            notes=(
+                "This is installed build health only. Rows with build_channel local/dev/main/nightly are current-main proof, not shipped-release proof.",
+                "Use update_results for Sparkle target-version health; update events use properties['version'], not installed app_version.",
+            ),
         ),
         QuerySpec(
             id="release_health.update_results",
@@ -953,6 +986,7 @@ GROUP BY event, result, state, failure_kind, version
 ORDER BY events DESC
 LIMIT 80
 """,
+            notes=("Pass --app-version to filter update target `version`. Keep this separate from installed build health rows.",),
         ),
     ]
 
@@ -1210,7 +1244,7 @@ def run_self_test() -> int:
         "retry_recovery.failure_rates",
         "onboarding_friction.step_friction",
         "timeline_dayflow.dayflow_events",
-        "release_health.version_event_counts",
+        "release_health.installed_build_outcomes",
     )
     for query_id in required:
         if query_id not in rendered:

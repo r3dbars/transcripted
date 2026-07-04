@@ -350,7 +350,11 @@ diagnosis.
 
 ### Release Health By App Version
 
-- active devices by `app_version`
+- launch, success, and failure rows by `app_version`, `build_version`,
+  `build_channel`, and `build_revision`
+- shipped-release reads must not merge `build_channel = release` rows with
+  local/current-main rows such as `local`, `dev`, `main`, `nightly`, or
+  `unknown`
 - first successful `dictation_artifact_saved`
 - useful dictation completion volume via `dictation_completed`
 - first successful `meeting_transcript_saved`

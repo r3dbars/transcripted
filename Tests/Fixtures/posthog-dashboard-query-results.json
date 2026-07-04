@@ -174,9 +174,36 @@
       ]
     },
     {
-      "id": "release_health.version_event_counts",
+      "id": "release_health.installed_build_outcomes",
       "rows": [
-        {"event": "app_launched", "events": 82, "devices": 41, "first_seen": "2026-06-18T00:10:00Z", "last_seen": "2026-06-19T12:00:00Z"}
+        {
+          "app_version": "1.1.48",
+          "build_version": "536174328",
+          "build_channel": "release",
+          "build_revision": "releaseabc",
+          "launch_events": 82,
+          "launch_devices": 41,
+          "success_events": 37,
+          "success_devices": 22,
+          "failure_events": 3,
+          "failure_devices": 3,
+          "first_seen": "2026-06-18T00:10:00Z",
+          "last_seen": "2026-06-19T12:00:00Z"
+        },
+        {
+          "app_version": "1.1.49",
+          "build_version": "main-20260704",
+          "build_channel": "local",
+          "build_revision": "localmain",
+          "launch_events": 6,
+          "launch_devices": 2,
+          "success_events": 1,
+          "success_devices": 1,
+          "failure_events": 2,
+          "failure_devices": 1,
+          "first_seen": "2026-07-04T15:00:00Z",
+          "last_seen": "2026-07-04T15:30:00Z"
+        }
       ]
     },
     {
