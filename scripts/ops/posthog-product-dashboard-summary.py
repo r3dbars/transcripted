@@ -232,7 +232,9 @@ SELECT
   properties['artifact_kind'] AS artifact_kind,
   properties['action_kind'] AS action_kind,
   properties['agent_target'] AS agent_target,
-  properties['query_kind'] AS query_kind,
+  properties['client_family'] AS client_family,
+  properties['tool_kind'] AS tool_kind,
+  properties['capture_kind'] AS capture_kind,
   properties['source_count_bucket'] AS source_count_bucket,
   properties['result'] AS result,
   properties['page_id'] AS page_id,
@@ -242,7 +244,7 @@ FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'activation_habit_loop_actioned', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'meeting_live_transcript_drawer_actioned', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened', 'local_meeting_summary_started', 'local_meeting_summary_completed', 'local_meeting_summary_failed')
   {app_version_filter(app_version)}
-GROUP BY event, surface, artifact_kind, action_kind, agent_target, query_kind, source_count_bucket, result, page_id
+GROUP BY event, surface, artifact_kind, action_kind, agent_target, client_family, tool_kind, capture_kind, source_count_bucket, result, page_id
 ORDER BY devices DESC, events DESC
 LIMIT 50
 """
@@ -572,7 +574,9 @@ def build_adoption_signal(data: dict[str, Any]) -> Finding:
         top = max(rows, key=lambda row: (as_int(row.get("devices")), as_int(row.get("events"))))
         event = top.get("event") or "unknown"
         detail = (
-            top.get("query_kind")
+            top.get("tool_kind")
+            or top.get("capture_kind")
+            or top.get("client_family")
             or top.get("action_kind")
             or top.get("result")
             or top.get("agent_target")
@@ -884,7 +888,7 @@ def render_markdown(data: dict[str, Any], findings: dict[str, Finding]) -> str:
         "## Privacy Boundary",
         "",
         "- Aggregate only. No raw rows or user-level forensics.",
-        "- Treat agent setup, prompt copy, and return events as proxies; `agent_capture_query_observed` is the stronger saved-capture query proof, especially when grouped by query kind and source-count bucket, but not answer-quality proof.",
+        "- Treat agent setup, prompt copy, and return events as proxies; `agent_capture_query_observed` is the stronger saved-capture query proof, especially when grouped by client, tool, capture kind, and source-count bucket, but not answer-quality proof.",
         "",
     ])
     return "\n".join(lines)

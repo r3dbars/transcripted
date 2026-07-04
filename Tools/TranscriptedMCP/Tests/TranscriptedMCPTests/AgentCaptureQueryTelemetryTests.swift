@@ -4,35 +4,32 @@ import XCTest
 
 final class AgentCaptureQueryTelemetryTests: XCTestCase {
     func testObservationKeepsOnlyBucketedPayload() throws {
-        let now = Date(timeIntervalSince1970: 1_766_102_400)
-        let captureDate = now.addingTimeInterval(-72 * 3_600)
         let observation = AgentCaptureQueryObservation(
-            queryKind: "search",
-            artifactKind: "mixed",
-            captureDate: captureDate,
-            sourceCount: 4,
-            now: now
+            toolKind: "search",
+            captureKind: "mixed",
+            sourceCount: 4
         )
 
-        XCTAssertEqual(observation.properties["agent_target"], "mcp_client")
-        XCTAssertEqual(observation.properties["query_kind"], "search")
-        XCTAssertEqual(observation.properties["artifact_kind"], "mixed")
+        XCTAssertEqual(observation.properties["client_family"], "mcp")
+        XCTAssertEqual(observation.properties["tool_kind"], "search")
+        XCTAssertEqual(observation.properties["capture_kind"], "mixed")
         XCTAssertEqual(observation.properties["result"], "success")
-        XCTAssertEqual(observation.properties["surface"], "mcp")
-        XCTAssertEqual(observation.properties["return_window_bucket"], "3_7d")
-        XCTAssertEqual(observation.properties["capture_age_bucket"], "2_7d")
         XCTAssertEqual(observation.properties["source_count_bucket"], "4_9")
+        XCTAssertEqual(Set(observation.properties.keys), AgentCaptureQueryTelemetryPolicy.allowedProperties)
     }
 
     func testTelemetryPolicyStripsForbiddenPayloads() throws {
         let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize([
+            "client_family": "mcp",
+            "capture_kind": "meeting",
+            "result": "success",
+            "source_count_bucket": "1",
+            "tool_kind": "read",
             "agent_target": "mcp_client",
             "artifact_kind": "meeting",
             "capture_age_bucket": "24_48h",
             "query_kind": "read",
-            "result": "success",
             "return_window_bucket": "18_36h",
-            "source_count_bucket": "1",
             "surface": "mcp",
             "query_text": "what did Alice say about the roadmap?",
             "transcript_text": "private transcript words",
@@ -45,14 +42,17 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
             "token": "secret",
         ])
 
-        XCTAssertEqual(sanitized["agent_target"], "mcp_client")
-        XCTAssertEqual(sanitized["artifact_kind"], "meeting")
-        XCTAssertEqual(sanitized["capture_age_bucket"], "24_48h")
-        XCTAssertEqual(sanitized["query_kind"], "read")
+        XCTAssertEqual(sanitized["client_family"], "mcp")
+        XCTAssertEqual(sanitized["capture_kind"], "meeting")
         XCTAssertEqual(sanitized["result"], "success")
-        XCTAssertEqual(sanitized["return_window_bucket"], "18_36h")
         XCTAssertEqual(sanitized["source_count_bucket"], "1")
-        XCTAssertEqual(sanitized["surface"], "mcp")
+        XCTAssertEqual(sanitized["tool_kind"], "read")
+        XCTAssertNil(sanitized["agent_target"])
+        XCTAssertNil(sanitized["artifact_kind"])
+        XCTAssertNil(sanitized["capture_age_bucket"])
+        XCTAssertNil(sanitized["query_kind"])
+        XCTAssertNil(sanitized["return_window_bucket"])
+        XCTAssertNil(sanitized["surface"])
         XCTAssertNil(sanitized["query_text"])
         XCTAssertNil(sanitized["transcript_text"])
         XCTAssertNil(sanitized["speaker_name"])
@@ -64,38 +64,32 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertNil(sanitized["token"])
     }
 
-    func testTelemetryPolicyAllowsOrientationQueryKinds() throws {
-        for queryKind in ["action_items", "commitments", "decisions", "digest", "list", "open_questions", "recent"] {
+    func testTelemetryPolicyAllowsOrientationToolKinds() throws {
+        for toolKind in ["action_items", "commitments", "decisions", "digest", "list", "open_questions", "recent"] {
             let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize([
-                "agent_target": "mcp_client",
-                "artifact_kind": "meeting",
-                "capture_age_bucket": "lt_12h",
-                "query_kind": queryKind,
+                "client_family": "mcp",
+                "capture_kind": "meeting",
                 "result": "success",
-                "return_window_bucket": "same_day",
                 "source_count_bucket": "1",
-                "surface": "mcp",
+                "tool_kind": toolKind,
             ])
 
-            XCTAssertEqual(sanitized["query_kind"], queryKind)
+            XCTAssertEqual(sanitized["tool_kind"], toolKind)
         }
     }
 
     func testTelemetryPolicyRejectsUnexpectedEnumValues() throws {
         let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize([
-            "agent_target": "raw-agent-name",
-            "artifact_kind": "meeting",
-            "capture_age_bucket": "24_48h",
-            "query_kind": "raw prompt: customer roadmap",
+            "client_family": "raw-agent-name",
+            "capture_kind": "meeting",
             "result": "success",
-            "return_window_bucket": "18_36h",
             "source_count_bucket": "1",
-            "surface": "mcp",
+            "tool_kind": "raw prompt: customer roadmap",
         ])
 
-        XCTAssertNil(sanitized["agent_target"])
-        XCTAssertNil(sanitized["query_kind"])
-        XCTAssertEqual(sanitized["artifact_kind"], "meeting")
+        XCTAssertNil(sanitized["client_family"])
+        XCTAssertNil(sanitized["tool_kind"])
+        XCTAssertEqual(sanitized["capture_kind"], "meeting")
     }
 
     func testReporterBuildsPostHogCaptureWithoutPrivateFields() throws {
@@ -107,9 +101,8 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         let reporter = AgentCaptureQueryTelemetry(configuration: configuration)
         let request = try XCTUnwrap(reporter.makeRequest(
             for: AgentCaptureQueryObservation(
-                queryKind: "read",
-                artifactKind: "dictation",
-                captureDate: nil,
+                toolKind: "read",
+                captureKind: "dictation",
                 sourceCount: 1
             ),
             now: Date(timeIntervalSince1970: 1_766_102_400)
@@ -123,11 +116,14 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertEqual(object?["event"] as? String, "agent_capture_query_observed")
 
         let properties = try XCTUnwrap(object?["properties"] as? [String: String])
-        XCTAssertEqual(properties["agent_target"], "mcp_client")
-        XCTAssertEqual(properties["artifact_kind"], "dictation")
-        XCTAssertEqual(properties["query_kind"], "read")
-        XCTAssertEqual(properties["surface"], "mcp")
+        XCTAssertEqual(properties["client_family"], "mcp")
+        XCTAssertEqual(properties["capture_kind"], "dictation")
+        XCTAssertEqual(properties["tool_kind"], "read")
         XCTAssertEqual(properties["source_count_bucket"], "1")
+        XCTAssertNil(properties["agent_target"])
+        XCTAssertNil(properties["artifact_kind"])
+        XCTAssertNil(properties["query_kind"])
+        XCTAssertNil(properties["surface"])
         XCTAssertNil(properties["query_text"])
         XCTAssertNil(properties["transcript_text"])
         XCTAssertNil(properties["file_path"])
@@ -146,9 +142,8 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
             enabled ? configuration : nil
         })
         let observation = AgentCaptureQueryObservation(
-            queryKind: "read",
-            artifactKind: "meeting",
-            captureDate: nil,
+            toolKind: "read",
+            captureKind: "meeting",
             sourceCount: 1
         )
 
@@ -159,34 +154,6 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
             reporter.makeRequest(for: observation),
             "long-running MCP servers must honor analytics opt-out changes before sending the next event"
         )
-    }
-
-    func testParseCaptureDateAcceptsMeetingDateTimeWithoutZone() throws {
-        let date = try XCTUnwrap(parseCaptureDate("2026-04-18T09:15:00"))
-        let observation = AgentCaptureQueryObservation(
-            queryKind: "read",
-            artifactKind: "meeting",
-            captureDate: date,
-            sourceCount: 1,
-            now: Date(timeIntervalSince1970: 1_766_102_400)
-        )
-
-        XCTAssertNotEqual(observation.properties["capture_age_bucket"], "unknown")
-        XCTAssertNotEqual(observation.properties["return_window_bucket"], "unknown")
-    }
-
-    func testParseCaptureDateAcceptsDictationFractionalISO() throws {
-        let date = try XCTUnwrap(parseCaptureDate("2026-04-18T09:15:00.123Z"))
-        let observation = AgentCaptureQueryObservation(
-            queryKind: "search",
-            artifactKind: "dictation",
-            captureDate: date,
-            sourceCount: 1,
-            now: Date(timeIntervalSince1970: 1_766_102_400)
-        )
-
-        XCTAssertNotEqual(observation.properties["capture_age_bucket"], "unknown")
-        XCTAssertNotEqual(observation.properties["return_window_bucket"], "unknown")
     }
 
     func testConfigurationUsesOverridesAndHonorsAnalyticsOptOut() throws {
