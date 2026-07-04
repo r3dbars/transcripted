@@ -168,6 +168,7 @@ allowlist.
 - `meeting_live_transcript_drawer_actioned`
 - `meeting_transcript_saved`
 - `local_meeting_summary_started`
+- `local_meeting_summary_cancelled`
 - `local_meeting_summary_completed`
 - `local_meeting_summary_failed`
 - `meeting_transcript_failed`

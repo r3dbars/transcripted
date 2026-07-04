@@ -95,6 +95,7 @@ AGENT_PAYOFF_EVENTS = (
     "onboarding_agent_cta_clicked",
     "agent_capture_query_observed",
     "local_meeting_summary_started",
+    "local_meeting_summary_cancelled",
     "local_meeting_summary_completed",
     "local_meeting_summary_failed",
 )
@@ -126,6 +127,7 @@ RETRY_RECOVERY_EVENTS = (
     "meeting_file_import_failed",
     "meeting_saved_audio_retranscription_requested",
     "local_meeting_summary_started",
+    "local_meeting_summary_cancelled",
     "local_meeting_summary_completed",
     "local_meeting_summary_failed",
     "workflow_abandoned",
@@ -772,7 +774,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'local_meeting_summary_failed')
+  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'local_meeting_summary_cancelled', 'local_meeting_summary_failed')
   {app_version_filter(app_version)}
 GROUP BY event, failure_kind
 ORDER BY events DESC

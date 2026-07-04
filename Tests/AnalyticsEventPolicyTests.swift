@@ -592,6 +592,65 @@ func testAnalyticsEventPolicy() {
         )
     }
 
+    runSuite("AnalyticsEventPolicy allows local summary proof events") {
+        let started = AnalyticsEventPolicy.policy(forEvent: LocalSummaryTelemetry.startedEvent)
+        let completed = AnalyticsEventPolicy.policy(forEvent: LocalSummaryTelemetry.completedEvent)
+        let failed = AnalyticsEventPolicy.policy(forEvent: LocalSummaryTelemetry.failedEvent)
+        let cancelled = AnalyticsEventPolicy.policy(forEvent: LocalSummaryTelemetry.cancelledEvent)
+
+        assertEqual(
+            started?.allowedProperties ?? Set<String>(),
+            ["provider", "queue_depth_bucket", "runtime", "setup_ready", "summary_action"],
+            "local summary starts should expose only setup and queue buckets"
+        )
+        assertEqual(
+            completed?.allowedProperties ?? Set<String>(),
+            ["chunk_count_bucket", "duration_bucket", "provider", "runtime", "summary_action"],
+            "local summary completion should expose only runtime, action, duration, and chunk buckets"
+        )
+        assertEqual(
+            failed?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "failure_kind", "provider", "runtime", "stage", "summary_action"],
+            "local summary failures should expose only normalized failure shape"
+        )
+        assertEqual(
+            cancelled?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "provider", "runtime", "stage", "summary_action"],
+            "local summary cancellations should not include raw errors or artifact paths"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            LocalSummaryTelemetry.failedProperties(
+                provider: "gemmaMLX",
+                summaryAction: "generate",
+                failureKind: "timeout",
+                stage: "generate",
+                runtime: "gemma-local",
+                durationBucket: "30_119s"
+            ).merging(
+                [
+                    "meeting_title": "Private roadmap",
+                    "transcript_text": "private transcript",
+                    "file_path": "/Users/jane/Private/Meeting.md",
+                    "raw_error": "private model error",
+                ],
+                uniquingKeysWith: { _, new in new }
+            ),
+            allowedKeys: failed?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["provider"], "gemmaMLX", "provider enum should survive")
+        assertEqual(sanitized["summary_action"], "generate", "summary action should survive")
+        assertEqual(sanitized["failure_kind"], "timeout", "failure kind should survive")
+        assertEqual(sanitized["runtime"], "gemma-local", "runtime/profile enum should survive")
+        assertEqual(sanitized["stage"], "generate", "stage should survive")
+        assertEqual(sanitized["duration_bucket"], "30_119s", "duration should stay bucketed")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["transcript_text"], "transcript text must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["raw_error"], "raw errors must not be sent")
+    }
+
     runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {
         let friction = AnalyticsEventPolicy.policy(forEvent: "product_friction_observed")
         assertEqual(
