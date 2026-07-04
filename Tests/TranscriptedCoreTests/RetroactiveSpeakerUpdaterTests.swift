@@ -1653,7 +1653,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertEqual(markdown, originalMarkdown)
     }
 
-    func testUpdateSpeakerNamesFallbackFailsClosedForOverlappingRenames() throws {
+    func testUpdateSpeakerNamesFallbackAppliesOverlappingRenamesSimultaneously() throws {
         let firstId = UUID()
         let secondId = UUID()
         let transcriptURL = tempDirectory.appendingPathComponent("overlapping-renames.md")
@@ -1696,12 +1696,16 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             transcriptionResult: driftedResult
         )
 
-        XCTAssertFalse(didUpdate)
+        XCTAssertTrue(didUpdate)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertEqual(markdown, originalMarkdown)
+        XCTAssertTrue(markdown.contains("[00:01] [System/Sarah] First speaker."), markdown)
+        XCTAssertTrue(markdown.contains("[00:05] [System/Jamie] Second speaker."), markdown)
+        XCTAssertFalse(markdown.contains("[00:01] [System/Jamie] First speaker."), markdown)
+        XCTAssertTrue(markdown.contains(#"name: "Sarah""#), markdown)
+        XCTAssertTrue(markdown.contains(#"name: "Jamie""#), markdown)
     }
 
-    func testUpdateSpeakerNamesBreakdownFallbackFailsClosedForOverlappingRenames() throws {
+    func testUpdateSpeakerNamesBreakdownFallbackAppliesOverlappingRenamesSimultaneously() throws {
         let firstId = UUID()
         let secondId = UUID()
         let transcriptURL = tempDirectory.appendingPathComponent("overlapping-breakdown-renames.md")
@@ -1757,9 +1761,12 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             transcriptionResult: result
         )
 
-        XCTAssertFalse(didUpdate)
+        XCTAssertTrue(didUpdate)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertEqual(markdown, originalMarkdown)
+        XCTAssertTrue(markdown.contains("- **Sarah:** 1 utterances, ~2 words, 00:03"), markdown)
+        XCTAssertTrue(markdown.contains("- **Jamie:** 1 utterances, ~2 words, 00:03"), markdown)
+        XCTAssertFalse(markdown.contains("- **Matt:**"), markdown)
+        XCTAssertFalse(markdown.contains("- **Sarah:** 2 utterances"), markdown)
     }
 
     func testUpdateSpeakerNamesBreakdownFallbackFailsClosedWhenRowsCollide() throws {
