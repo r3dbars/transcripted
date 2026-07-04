@@ -86,7 +86,7 @@ func testHomePresentation() {
     runSuite("HomeCaptureListCopy — pinned empty-state strings") {
         assertEqual(
             HomeCaptureListCopy.emptyMeetings,
-            "No recent meetings. Record one or transcribe an audio file from General."
+            "No recent meetings. Record one or transcribe an existing audio file."
         )
         assertEqual(HomeCaptureListCopy.emptyDictations, "No recent dictations.")
     }

@@ -700,12 +700,18 @@ struct TranscriptedSettingsView: View {
             emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
                 symbolName: "waveform",
                 title: "No meetings yet",
-                message: "Record a meeting and Transcripted transcribes it, labels each speaker, and saves the transcript here. You can also transcribe an existing audio file from General.",
+                message: "Record a meeting or transcribe an existing audio file. Transcripted labels each speaker and saves the transcript here.",
                 actionTitle: "Start a meeting",
                 automationIdentifier: "transcripted.home.meetings.empty.start",
                 action: {
                     trackSettingsAction("empty_start_meeting", page: .home)
                     actions.startMeeting()
+                },
+                secondaryActionTitle: "Transcribe audio file",
+                secondaryAutomationIdentifier: "transcripted.home.meetings.empty.import-audio",
+                secondaryAction: {
+                    trackSettingsAction("empty_import_audio", page: .home)
+                    actions.importAudioFile()
                 }
             ),
             isLoading: homeViewModel.isLoading,
