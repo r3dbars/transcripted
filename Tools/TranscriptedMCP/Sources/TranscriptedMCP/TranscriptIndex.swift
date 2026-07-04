@@ -62,9 +62,10 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     /// Bump when the derived index shape changes so existing on-disk indexes are
-    /// rebuilt from disk on next open. v2 added `meeting_summary_items`; v3 adds
-    /// the meeting-summary FTS document used by general search.
-    private static let schemaVersion: Int32 = 3
+    /// rebuilt from disk on next open. v2 added `meeting_summary_items`; v3 added
+    /// the meeting-summary FTS document used by general search; v4 adds action
+    /// item `status` and `due` metadata.
+    private static let schemaVersion: Int32 = 4
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
@@ -222,7 +223,9 @@ final class TranscriptIndex: @unchecked Sendable {
                 kind TEXT NOT NULL,
                 position INTEGER NOT NULL,
                 owner TEXT,
-                text TEXT NOT NULL
+                text TEXT NOT NULL,
+                status TEXT,
+                due TEXT
             )
         """)
 
@@ -473,10 +476,12 @@ final class TranscriptIndex: @unchecked Sendable {
         }
         for (position, item) in summary.actionItems.enumerated() {
             try bindExec(
-                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
+                "INSERT INTO meeting_summary_items (filename, kind, position, owner, text, status, due) VALUES (?,?,?,?,?,?,?)",
                 bindings: [
                     .text(filename), .text(SummaryItemKind.actionItem), .int(position),
-                    item.owner.map { .text($0) } ?? .null, .text(item.text)
+                    item.owner.map { .text($0) } ?? .null, .text(item.text),
+                    item.status.map { .text($0) } ?? .null,
+                    item.due.map { .text($0) } ?? .null
                 ]
             )
         }
@@ -1559,7 +1564,7 @@ final class TranscriptIndex: @unchecked Sendable {
         try queue.sync {
             let limit = max(1, min(maxItems, 200))
             var sql = """
-                SELECT s.filename, s.text, s.owner, m.date, m.datetime
+                SELECT s.filename, s.text, s.owner, s.status, s.due, m.date, m.datetime
                 FROM meeting_summary_items s
                 JOIN meetings m ON m.filename = s.filename
                 WHERE s.kind = ?
@@ -1573,10 +1578,12 @@ final class TranscriptIndex: @unchecked Sendable {
             }
 
             switch status {
-            case .open, .all:
+            case .open:
+                sql += " AND (s.status IS NULL OR s.status = '' OR lower(s.status) NOT IN ('done', 'complete', 'completed', 'resolved', 'closed', 'cancelled', 'canceled'))"
+            case .all:
                 break
             case .done:
-                sql += " AND 1=0"
+                sql += " AND lower(s.status) IN ('done', 'complete', 'completed', 'resolved', 'closed', 'cancelled', 'canceled')"
             }
 
             if let dateFrom { sql += " AND m.date >= ?"; bindings.append(.text(dateFrom)) }
@@ -1603,12 +1610,12 @@ final class TranscriptIndex: @unchecked Sendable {
                 rows.append(ActionItemRecord(
                     filename: filename,
                     meetingTitle: filename,
-                    date: colText(stmt, 3),
-                    datetime: colText(stmt, 4),
+                    date: colText(stmt, 5),
+                    datetime: colText(stmt, 6),
                     text: colText(stmt, 1),
                     owner: colTextOptional(stmt, 2),
-                    status: nil,
-                    due: nil
+                    status: colTextOptional(stmt, 3),
+                    due: colTextOptional(stmt, 4)
                 ))
             }
 
@@ -1789,7 +1796,7 @@ final class TranscriptIndex: @unchecked Sendable {
     private func fetchActionSummaryItems(filenames: [String]) throws -> [String: [DigestActionItem]] {
         let placeholders = filenames.map { _ in "?" }.joined(separator: ", ")
         let sql = """
-            SELECT filename, text, owner FROM meeting_summary_items
+            SELECT filename, text, owner, status, due FROM meeting_summary_items
             WHERE kind = ? AND filename IN (\(placeholders))
             ORDER BY filename, position ASC
         """
@@ -1807,8 +1814,8 @@ final class TranscriptIndex: @unchecked Sendable {
             result[colText(stmt, 0), default: []].append(DigestActionItem(
                 text: colText(stmt, 1),
                 owner: colTextOptional(stmt, 2),
-                status: nil,
-                due: nil
+                status: colTextOptional(stmt, 3),
+                due: colTextOptional(stmt, 4)
             ))
         }
         return result

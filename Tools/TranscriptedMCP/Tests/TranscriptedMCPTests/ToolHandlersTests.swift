@@ -526,17 +526,29 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertFalse(text.contains("total_entries"))
     }
 
-    func testListActionItemsDoneStatusReturnsExplicitError() throws {
+    func testListActionItemsDoneStatusReturnsStructuredEmptyResult() throws {
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                actionItems: ["Jenny: Confirm the venue (done)"]
+            ),
+            filename: "Call_2026-04-18_09-15-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
         let result = try handleListActionItems(
             params: CallTool.Parameters(name: "list_action_items", arguments: ["status": .string("done")]),
             index: index,
             meetingDirs: [tempDir]
         )
 
-        XCTAssertEqual(result.isError, true)
+        XCTAssertNotEqual(result.isError, true)
         let text = try resultText(result)
-        XCTAssertTrue(text.contains("done"))
-        XCTAssertTrue(text.contains("\"all\""))
+        let decoded = try JSONDecoder().decode(ActionItemsResult.self, from: Data(text.utf8))
+        XCTAssertEqual(decoded.status, "done")
+        XCTAssertEqual(decoded.count, 1)
+        XCTAssertEqual(decoded.items.first?.text, "Confirm the venue")
+        XCTAssertEqual(decoded.items.first?.status, "done")
     }
 
     func testDecisionsToolReturnsStructuredReceipts() throws {

@@ -363,7 +363,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "list_action_items",
-                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status ('open' by default, or 'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Depends on the meeting summary index.",
+                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status ('open' by default, 'done', or 'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Depends on the meeting summary index.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -1133,15 +1133,6 @@ func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, 
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
     let count = params.arguments?["count"]?.intValue ?? 50
-
-    // Saved summaries do not track completion state, so a done filter would
-    // always be a silent empty set — fail loudly instead.
-    if status == .done {
-        return textResult(
-            "Unsupported status filter: \"\(rawStatus ?? "done")\". Saved meeting summaries do not track done/completed state yet, so this filter would always return nothing. Use status \"open\" (the default) or \"all\".",
-            isError: true
-        )
-    }
 
     var result = try index.listActionItems(
         owner: owner, query: query, status: status,
