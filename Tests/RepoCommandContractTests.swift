@@ -2010,6 +2010,18 @@ func testRepoCommandContract() {
             contents.contains("hasStartupTask: startupTask != nil"),
             "mini cursor model warmup should remain cancellable before the delayed loading reveal"
         )
+        let recoveryStartFailedBlock = sourceSlice(
+            contents,
+            from: "case .startRecoveryRecording:",
+            to: "case .startRecording:"
+        )
+        assertTrue(
+            recoveryStartFailedBlock.contains("if started {")
+                && recoveryStartFailedBlock.contains("return")
+                && recoveryStartFailedBlock.contains("readinessRefreshes = 0")
+                && recoveryStartFailedBlock.contains("if readinessRefresher.start(appState: appState)"),
+            "failed recovery-start attempts should reset stale refresh counters before the next cooldown refresh"
+        )
         let lifecycleContents = readRepoTextFile("Sources/UI/Overlay/DictationRecordingStartOverlayPolicy.swift")
         assertTrue(
             lifecycleContents.contains("hasStartupTask || hasRecordingStartTask"),
