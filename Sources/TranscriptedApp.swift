@@ -14,6 +14,12 @@ import UniformTypeIdentifiers
 struct TranscriptedApp: App {
     @NSApplicationDelegateAdaptor(TranscriptedAppDelegate.self) var appDelegate
 
+    init() {
+        // Set this before app startup creates logs, scratch files, or atomic-write
+        // temp files so new app-owned files default to owner-only permissions.
+        umask(0o077)
+    }
+
     var body: some Scene {
         Settings { EmptyView() }
             .commands {
@@ -1092,9 +1098,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.audio]
+        panel.allowedContentTypes = [.audio, .audiovisualContent]
         panel.prompt = "Transcribe"
-        panel.message = "Choose a WAV, MP3, M4A, AAC, AIFF, or other macOS-readable audio file."
+        panel.message = "Choose an audio file or a Zoom/Teams recording with an audio track."
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 

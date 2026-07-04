@@ -25,6 +25,14 @@ struct PhysicalShortcutBinding {
 }
 
 enum PhysicalShortcutMatcher {
+    static func shouldSynthesizePushToTalkRelease(
+        activeKeyCode: UInt32?,
+        isPhysicallyDown: (UInt32) -> Bool
+    ) -> Bool {
+        guard let activeKeyCode else { return false }
+        return !isPhysicallyDown(activeKeyCode)
+    }
+
     static func matchingKeyDownShortcut(
         _ shortcuts: [PhysicalShortcutBinding],
         keyCode: UInt32,

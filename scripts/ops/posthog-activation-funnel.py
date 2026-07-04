@@ -34,6 +34,23 @@ RELEVANT_EVENTS = (
     "activation_second_artifact_saved",
     "agent_capture_query_observed",
     "workflow_abandoned",
+    "product_friction_observed",
+    "workflow_recovery_attempted",
+    "workflow_recovery_finished",
+    "meeting_prompt_shown",
+    "meeting_prompt_record_selected",
+    "meeting_prompt_dismissed",
+    "meeting_prompt_suppressed",
+    "meeting_missed_call_nudge",
+    "meeting_speaker_review_shown",
+    "meeting_speaker_review_submitted",
+    "meeting_speaker_match_reviewed",
+    "meeting_speaker_auto_recognized",
+    "meeting_speaker_finalization_failed",
+    "timeline_onboarding_completed",
+    "timeline_viewed",
+    "timeline_card_opened",
+    "timeline_chat_question_asked",
 )
 
 WORKFLOW_EVENTS = (
@@ -50,6 +67,7 @@ WORKFLOW_EVENTS = (
     "activation_return_proxy_observed",
     "activation_second_artifact_saved",
     "workflow_abandoned",
+    "workflow_recovery_finished",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {
@@ -383,6 +401,91 @@ LIMIT 80
 """
 
 
+def meeting_prompt_quality_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  properties['provider'] AS provider,
+  properties['source'] AS source,
+  properties['prompt_reason'] AS prompt_reason,
+  properties['route_ready'] AS route_ready,
+  countIf(event = 'meeting_prompt_shown') AS shown_events,
+  countIf(event = 'meeting_prompt_record_selected') AS record_selected_events,
+  countIf(event = 'meeting_prompt_dismissed') AS dismissed_events,
+  countIf(event = 'meeting_prompt_suppressed') AS suppressed_events,
+  countIf(event = 'meeting_missed_call_nudge') AS missed_call_nudges,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ('meeting_prompt_shown', 'meeting_prompt_record_selected', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
+  {app_version_filter(app_version)}
+GROUP BY provider, source, prompt_reason, route_ready
+ORDER BY shown_events DESC, devices DESC
+LIMIT 40
+"""
+
+
+def speaker_trust_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  event,
+  properties['review_action'] AS review_action,
+  properties['completion_kind'] AS completion_kind,
+  properties['result'] AS result,
+  properties['had_suggestion'] AS had_suggestion,
+  properties['similarity_bucket'] AS similarity_bucket,
+  properties['margin_bucket'] AS margin_bucket,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ('meeting_speaker_review_shown', 'meeting_speaker_review_submitted', 'meeting_speaker_match_reviewed', 'meeting_speaker_auto_recognized', 'meeting_speaker_finalization_failed')
+  {app_version_filter(app_version)}
+GROUP BY event, review_action, completion_kind, result, had_suggestion, similarity_bucket, margin_bucket
+ORDER BY events DESC
+LIMIT 40
+"""
+
+
+def recovery_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  event,
+  properties['workflow_kind'] AS workflow_kind,
+  properties['failure_kind'] AS failure_kind,
+  properties['retry_source'] AS retry_source,
+  properties['artifact_retained'] AS artifact_retained,
+  properties['result'] AS result,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished')
+  {app_version_filter(app_version)}
+GROUP BY event, workflow_kind, failure_kind, retry_source, artifact_retained, result
+ORDER BY events DESC
+LIMIT 40
+"""
+
+
+def timeline_dayflow_query(days: int, app_version: str | None) -> str:
+    return f"""
+SELECT
+  event,
+  properties['provider'] AS provider,
+  properties['mode'] AS mode,
+  properties['result'] AS result,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+  AND event IN ('timeline_onboarding_completed', 'timeline_viewed', 'timeline_mode_changed', 'timeline_card_opened', 'timeline_provider_selected', 'timeline_chat_question_asked', 'timeline_batch_completed', 'timeline_batch_failed')
+  {app_version_filter(app_version)}
+GROUP BY event, provider, mode, result
+ORDER BY events DESC
+LIMIT 40
+"""
+
+
 def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
     load_env()
     host, project_id, token = posthog_config()
@@ -398,6 +501,10 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "second_artifacts": second_artifact_query(days, app_version),
         "agent_signals": agent_signals_query(days, app_version),
         "workflow_abandonment": workflow_abandonment_query(days, app_version),
+        "meeting_prompt_quality": meeting_prompt_quality_query(days, app_version),
+        "speaker_trust": speaker_trust_query(days, app_version),
+        "retry_recovery": recovery_query(days, app_version),
+        "timeline_dayflow": timeline_dayflow_query(days, app_version),
     }
 
     results = {
@@ -659,6 +766,26 @@ def render_report(data: dict[str, Any]) -> str:
             data["results"].get("workflow_abandonment", []),
             ["workflow_kind", "stage", "reason_kind", "surface", "prior_ready_state", "events", "devices"],
         ),
+        render_top_rows(
+            "Meeting Prompt Quality",
+            data["results"].get("meeting_prompt_quality", []),
+            ["provider", "source", "prompt_reason", "route_ready", "shown_events", "record_selected_events", "dismissed_events", "suppressed_events", "missed_call_nudges", "devices"],
+        ),
+        render_top_rows(
+            "Speaker Trust",
+            data["results"].get("speaker_trust", []),
+            ["event", "review_action", "completion_kind", "result", "had_suggestion", "similarity_bucket", "margin_bucket", "events", "devices"],
+        ),
+        render_top_rows(
+            "Retry Recovery",
+            data["results"].get("retry_recovery", []),
+            ["event", "workflow_kind", "failure_kind", "retry_source", "artifact_retained", "result", "events", "devices"],
+        ),
+        render_top_rows(
+            "Timeline Dayflow",
+            data["results"].get("timeline_dayflow", []),
+            ["event", "provider", "mode", "result", "events", "devices"],
+        ),
         "## Data Limitations",
         "",
         "\n".join(f"- {item}" for item in limitations),
@@ -733,6 +860,10 @@ def run_self_test() -> int:
                 "events": 1,
                 "devices": 1,
             }],
+            "meeting_prompt_quality": [],
+            "speaker_trust": [],
+            "retry_recovery": [],
+            "timeline_dayflow": [],
         },
     }
     report = render_report(sample)
@@ -794,6 +925,10 @@ def run_self_test() -> int:
         second_artifact_query(30, None),
         agent_signals_query(30, None),
         workflow_abandonment_query(30, None),
+        meeting_prompt_quality_query(30, None),
+        speaker_trust_query(30, None),
+        recovery_query(30, None),
+        timeline_dayflow_query(30, None),
     ):
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)

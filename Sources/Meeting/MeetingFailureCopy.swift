@@ -50,17 +50,17 @@ struct MeetingFailureCopy: Equatable {
         case .importFileUnreadable:
             return MeetingFailureCopy(
                 title: "Can't read that file",
-                detail: "Try moving the audio file to a folder you can access, then import it again."
+                detail: "Try moving the recording to a folder you can access, then import it again."
             )
         case .importUnsupportedFile:
             return MeetingFailureCopy(
-                title: "Choose an audio file",
-                detail: "Transcripted can import common audio files like WAV, MP3, M4A, AAC, and AIFF."
+                title: "Choose a recording with audio",
+                detail: "Transcripted can import common audio files plus MP4 or MOV recordings with an audio track."
             )
         case .importCopyFailed:
             return MeetingFailureCopy(
                 title: "Couldn't prepare the file",
-                detail: "Check disk space, then try importing the audio file again."
+                detail: "Check disk space, then try importing the recording again."
             )
         case .speakerNameFinalizationFailed,
              .speakerFinalizationFailed:

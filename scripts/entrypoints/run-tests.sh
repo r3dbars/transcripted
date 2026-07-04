@@ -345,6 +345,7 @@ APP_SOURCES=(
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"
     "Sources/Observability/ActivationTelemetry.swift"
+    "Sources/Observability/TimelineAnalyticsTelemetry.swift"
     "Sources/Observability/FeatureDiscoveryTelemetry.swift"
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/JSONLWriter.swift"

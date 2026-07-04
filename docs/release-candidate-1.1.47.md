@@ -47,6 +47,19 @@ long-meeting retry visibility, and the reported speaker-collapse fix.
 - Open issues #500 and #825 remain open until the fixes are validated in use.
 - The `1.1.47` appcast entry and Homebrew cask metadata are now committed.
 
+### 2026-07-03 status update
+
+Both GitHub issues are now closed (#500 closed 2026-06-12, #825 closed
+2026-06-12 — the latter auto-closed by the merge of PR #1074, not by an
+explicit human confirmation that the bigger follow-up work was done). Closure
+is not the same as real-world validation; see
+[`docs/qa-issue-500-meeting-audio.md`](qa-issue-500-meeting-audio.md) and
+[`docs/issue-825-long-meetings-investigation-2026-06-11.md`](issue-825-long-meetings-investigation-2026-06-11.md)
+for the current, honest read on each: real hardware/manual QA is still
+outstanding for both, even though the core architectural fixes have now had
+about three weeks of real usage in `v1.1.48` (released 2026-06-13) with no
+reopened reports.
+
 ## Release Verification Reference
 
 - `bash build-deps.sh --force`

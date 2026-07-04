@@ -180,9 +180,19 @@ func testMeetingFailureKind() {
             "unsupported import files should have a stable bucket"
         )
         assertEqual(
+            MeetingFailureKind.classify(message: "That file does not include a readable audio track. Choose a WAV, MP3, M4A, AAC, AIFF, MP4, or MOV file."),
+            .importUnsupportedFile,
+            "movie imports without audio should have the same unsupported-file bucket"
+        )
+        assertEqual(
             MeetingFailureKind.classify(message: "Transcripted couldn't copy that audio file into its working area. Check disk space and try again."),
             .importCopyFailed,
             "copy failures should point to the working-area step"
+        )
+        assertEqual(
+            MeetingFailureKind.classify(message: "Transcripted couldn't copy or extract that recording into its working area. Check disk space and try again."),
+            .importCopyFailed,
+            "video extraction failures should point to the same working-area step"
         )
     }
 
@@ -193,7 +203,7 @@ func testMeetingFailureKind() {
             isRetryable: false
         )
 
-        assertEqual(copy.title, "Choose an audio file", "unsupported import files should get direct user guidance")
+        assertEqual(copy.title, "Choose a recording with audio", "unsupported import files should get direct user guidance")
     }
 
     runSuite("MeetingFailureCopy surfaces stop-timeout retry guidance") {

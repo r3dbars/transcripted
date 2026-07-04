@@ -16,8 +16,13 @@ import posthog_common as posthog
 FAMILIES = (
     "100_wau",
     "activation",
-    "reliability",
-    "feature_adoption",
+    "meeting_prompt_quality",
+    "artifact_usefulness",
+    "agent_payoff",
+    "speaker_trust",
+    "retry_recovery",
+    "onboarding_friction",
+    "timeline_dayflow",
     "release_health",
 )
 
@@ -33,6 +38,7 @@ ACTIVE_WORKFLOW_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
+    "activation_second_artifact_saved",
 )
 
 ACTIVATION_EVENTS = (
@@ -53,9 +59,49 @@ ACTIVATION_EVENTS = (
     "onboarding_agent_cta_clicked",
     "agent_capture_query_observed",
     "activation_return_proxy_observed",
+    "activation_second_artifact_saved",
+    "workflow_abandoned",
 )
 
-RELIABILITY_EVENTS = (
+MEETING_PROMPT_EVENTS = (
+    "meeting_prompt_shown",
+    "meeting_prompt_record_selected",
+    "meeting_prompt_dismissed",
+    "meeting_prompt_suppressed",
+    "meeting_missed_call_nudge",
+    "meeting_mic_boost_prompt_shown",
+    "meeting_mic_boost_prompt_actioned",
+)
+
+ARTIFACT_EVENTS = (
+    "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
+    "dictation_artifact_saved",
+    "dictation_completed",
+    "meeting_transcript_saved",
+    "activation_artifact_action_clicked",
+    "activation_return_proxy_observed",
+)
+
+AGENT_PAYOFF_EVENTS = (
+    "activation_agent_prompt_action_clicked",
+    "activation_agent_setup_cta_clicked",
+    "onboarding_agent_cta_clicked",
+    "agent_capture_query_observed",
+    "local_meeting_summary_started",
+    "local_meeting_summary_completed",
+    "local_meeting_summary_failed",
+)
+
+SPEAKER_TRUST_EVENTS = (
+    "meeting_speaker_review_shown",
+    "meeting_speaker_review_submitted",
+    "meeting_speaker_match_reviewed",
+    "meeting_speaker_auto_recognized",
+    "meeting_speaker_finalization_failed",
+)
+
+RETRY_RECOVERY_EVENTS = (
     "dictation_started",
     "dictation_start_failed",
     "dictation_completed",
@@ -72,26 +118,36 @@ RELIABILITY_EVENTS = (
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
     "meeting_file_import_failed",
+    "meeting_saved_audio_retranscription_requested",
+    "workflow_recovery_attempted",
+    "workflow_recovery_finished",
 )
 
-FEATURE_EVENTS = (
-    "activation_artifact_action_clicked",
-    "activation_agent_prompt_action_clicked",
-    "activation_agent_setup_cta_clicked",
-    "onboarding_agent_cta_clicked",
-    "meeting_prompt_shown",
-    "meeting_prompt_record_selected",
-    "meeting_prompt_dismissed",
-    "meeting_prompt_suppressed",
-    "meeting_mic_boost_prompt_shown",
-    "meeting_mic_boost_prompt_actioned",
-    "meeting_saved_audio_retranscription_requested",
-    "meeting_file_imported",
-    "settings_opened",
-    "settings_page_viewed",
-    "settings_action_clicked",
-    "settings_toggle_changed",
-    "update_action_clicked",
+ONBOARDING_FRICTION_EVENTS = (
+    "onboarding_shown",
+    "onboarding_step_viewed",
+    "onboarding_permission_status_changed",
+    "onboarding_permission_cta_clicked",
+    "onboarding_primary_cta_clicked",
+    "onboarding_completed",
+    "onboarding_first_dictation_started",
+    "onboarding_first_dictation_saved",
+    "onboarding_first_dictation_empty",
+    "onboarding_model_state_changed",
+    "onboarding_meeting_dry_run_clicked",
+    "product_friction_observed",
+    "workflow_abandoned",
+)
+
+TIMELINE_DAYFLOW_EVENTS = (
+    "timeline_onboarding_completed",
+    "timeline_viewed",
+    "timeline_mode_changed",
+    "timeline_card_opened",
+    "timeline_provider_selected",
+    "timeline_chat_question_asked",
+    "timeline_batch_completed",
+    "timeline_batch_failed",
 )
 
 RELEASE_EVENTS = (
@@ -311,19 +367,246 @@ LIMIT 40
 """,
         ),
         QuerySpec(
-            id="reliability.workflow_failure_rates",
-            family="reliability",
+            id="meeting_prompt_quality.prompt_outcomes",
+            family="meeting_prompt_quality",
+            title="Meeting prompt outcome quality",
+            description="Measures detected-meeting prompt reach, acceptance, dismissal, suppression, and missed-call nudges by coarse signal buckets.",
+            columns=("provider", "source", "prompt_reason", "route_ready", "shown_events", "record_selected_events", "dismissed_events", "suppressed_events", "missed_call_nudges", "devices"),
+            sql=f"""
+SELECT
+  properties['provider'] AS provider,
+  properties['source'] AS source,
+  properties['prompt_reason'] AS prompt_reason,
+  properties['route_ready'] AS route_ready,
+  countIf(event = 'meeting_prompt_shown') AS shown_events,
+  countIf(event = 'meeting_prompt_record_selected') AS record_selected_events,
+  countIf(event = 'meeting_prompt_dismissed') AS dismissed_events,
+  countIf(event = 'meeting_prompt_suppressed') AS suppressed_events,
+  countIf(event = 'meeting_missed_call_nudge') AS missed_call_nudges,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND {event_filter(MEETING_PROMPT_EVENTS)}
+  {app_version_filter(app_version)}
+GROUP BY provider, source, prompt_reason, route_ready
+ORDER BY shown_events DESC, devices DESC
+LIMIT 80
+""",
+        ),
+        QuerySpec(
+            id="meeting_prompt_quality.suppression_reasons",
+            family="meeting_prompt_quality",
+            title="Meeting prompt suppression and dismissal reasons",
+            description="Ranks coarse prompt suppression, cooldown, and missing-permission buckets.",
+            columns=("event", "suppression_reason", "cooldown_reason", "missing_permission", "backoff_kind", "events", "devices"),
+            sql=f"""
+SELECT
+  event,
+  properties['suppression_reason'] AS suppression_reason,
+  properties['cooldown_reason'] AS cooldown_reason,
+  properties['missing_permission'] AS missing_permission,
+  properties['backoff_kind'] AS backoff_kind,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event IN ('meeting_prompt_dismissed', 'meeting_prompt_suppressed')
+  {app_version_filter(app_version)}
+GROUP BY event, suppression_reason, cooldown_reason, missing_permission, backoff_kind
+ORDER BY events DESC
+LIMIT 80
+""",
+        ),
+        QuerySpec(
+            id="artifact_usefulness.saved_and_used_artifacts",
+            family="artifact_usefulness",
+            title="Saved artifact usefulness",
+            description="Compares saved durable artifacts, second artifacts, artifact actions, and return proxy by coarse artifact buckets.",
+            columns=("artifact_kind", "surface", "saved_events", "second_artifact_events", "action_events", "return_proxy_events", "devices"),
+            sql=f"""
+SELECT
+  coalesce(properties['artifact_kind'], properties['second_artifact_kind'], properties['prior_artifact_kind']) AS artifact_kind,
+  properties['surface'] AS surface,
+  countIf(event IN ('activation_first_artifact_saved', 'dictation_artifact_saved', 'dictation_completed', 'meeting_transcript_saved')) AS saved_events,
+  countIf(event = 'activation_second_artifact_saved') AS second_artifact_events,
+  countIf(event = 'activation_artifact_action_clicked') AS action_events,
+  countIf(event = 'activation_return_proxy_observed') AS return_proxy_events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND {event_filter(ARTIFACT_EVENTS)}
+  {app_version_filter(app_version)}
+GROUP BY artifact_kind, surface
+ORDER BY devices DESC, saved_events DESC
+LIMIT 80
+""",
+            notes=("This proves artifact saves/actions/returns, not transcript content quality.",),
+        ),
+        QuerySpec(
+            id="artifact_usefulness.second_value_moment",
+            family="artifact_usefulness",
+            title="Second saved artifact moment",
+            description="Shows second durable artifact saves by first/second kind and days-since-first bucket.",
+            columns=("first_artifact_kind", "second_artifact_kind", "days_since_first_bucket", "surface", "events", "devices"),
+            sql=f"""
+SELECT
+  properties['first_artifact_kind'] AS first_artifact_kind,
+  properties['second_artifact_kind'] AS second_artifact_kind,
+  properties['days_since_first_bucket'] AS days_since_first_bucket,
+  properties['surface'] AS surface,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event = 'activation_second_artifact_saved'
+  {app_version_filter(app_version)}
+GROUP BY first_artifact_kind, second_artifact_kind, days_since_first_bucket, surface
+ORDER BY devices DESC, events DESC
+LIMIT 60
+""",
+        ),
+        QuerySpec(
+            id="agent_payoff.agent_loop",
+            family="agent_payoff",
+            title="Agent payoff loop",
+            description="Compares agent setup/prompt intent to true saved-capture query observations and local meeting-summary outcomes.",
+            columns=("event", "agent_target", "query_kind", "result", "surface", "events", "devices"),
+            sql=f"""
+SELECT
+  event,
+  properties['agent_target'] AS agent_target,
+  properties['query_kind'] AS query_kind,
+  properties['result'] AS result,
+  properties['surface'] AS surface,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND {event_filter(AGENT_PAYOFF_EVENTS)}
+  {app_version_filter(app_version)}
+GROUP BY event, agent_target, query_kind, result, surface
+ORDER BY devices DESC, events DESC
+LIMIT 80
+""",
+            notes=("Prompt/setup rows are intent. `agent_capture_query_observed` is the stronger saved-capture query proof; answer quality remains unknown.",),
+        ),
+        QuerySpec(
+            id="agent_payoff.capture_query_quality",
+            family="agent_payoff",
+            title="Saved-capture query quality proxy",
+            description="Breaks true agent saved-capture query observations by source-count, return-window, capture-age, and result buckets.",
+            columns=("agent_target", "query_kind", "source_count_bucket", "capture_age_bucket", "return_window_bucket", "result", "events", "devices"),
+            sql=f"""
+SELECT
+  properties['agent_target'] AS agent_target,
+  properties['query_kind'] AS query_kind,
+  properties['source_count_bucket'] AS source_count_bucket,
+  properties['capture_age_bucket'] AS capture_age_bucket,
+  properties['return_window_bucket'] AS return_window_bucket,
+  properties['result'] AS result,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event = 'agent_capture_query_observed'
+  {app_version_filter(app_version)}
+GROUP BY agent_target, query_kind, source_count_bucket, capture_age_bucket, return_window_bucket, result
+ORDER BY devices DESC, events DESC
+LIMIT 80
+""",
+        ),
+        QuerySpec(
+            id="speaker_trust.review_outcomes",
+            family="speaker_trust",
+            title="Speaker review trust",
+            description="Counts speaker review shown/submitted/match-reviewed/auto-recognized outcomes by coarse confidence and review buckets.",
+            columns=("event", "channel", "review_action", "completion_kind", "result", "had_suggestion", "similarity_bucket", "margin_bucket", "events", "devices"),
+            sql=f"""
+SELECT
+  event,
+  properties['channel'] AS channel,
+  properties['review_action'] AS review_action,
+  properties['completion_kind'] AS completion_kind,
+  properties['result'] AS result,
+  properties['had_suggestion'] AS had_suggestion,
+  properties['similarity_bucket'] AS similarity_bucket,
+  properties['margin_bucket'] AS margin_bucket,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND {event_filter(SPEAKER_TRUST_EVENTS)}
+  {app_version_filter(app_version)}
+GROUP BY event, channel, review_action, completion_kind, result, had_suggestion, similarity_bucket, margin_bucket
+ORDER BY events DESC
+LIMIT 80
+""",
+        ),
+        QuerySpec(
+            id="speaker_trust.finalization_failures",
+            family="speaker_trust",
+            title="Speaker finalization failures",
+            description="Ranks coarse speaker finalization failure buckets without speaker names or transcript text.",
+            columns=("failure_kind", "session_stage", "trigger", "queue_depth_bucket", "events", "devices"),
+            sql=f"""
+SELECT
+  properties['failure_kind'] AS failure_kind,
+  properties['session_stage'] AS session_stage,
+  properties['trigger'] AS trigger,
+  properties['queue_depth_bucket'] AS queue_depth_bucket,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event = 'meeting_speaker_finalization_failed'
+  {app_version_filter(app_version)}
+GROUP BY failure_kind, session_stage, trigger, queue_depth_bucket
+ORDER BY events DESC
+LIMIT 50
+""",
+        ),
+        QuerySpec(
+            id="retry_recovery.workflow_recovery",
+            family="retry_recovery",
+            title="Workflow retry and recovery",
+            description="Tracks recovery attempts and outcomes by workflow, retry source, failure kind, and artifact-retained buckets.",
+            columns=("event", "workflow_kind", "failure_kind", "retry_source", "artifact_retained", "result", "attempt_bucket", "events", "devices"),
+            sql=f"""
+SELECT
+  event,
+  properties['workflow_kind'] AS workflow_kind,
+  properties['failure_kind'] AS failure_kind,
+  properties['retry_source'] AS retry_source,
+  properties['artifact_retained'] AS artifact_retained,
+  properties['result'] AS result,
+  properties['attempt_bucket'] AS attempt_bucket,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished', 'meeting_saved_audio_retranscription_requested')
+  {app_version_filter(app_version)}
+GROUP BY event, workflow_kind, failure_kind, retry_source, artifact_retained, result, attempt_bucket
+ORDER BY events DESC
+LIMIT 80
+""",
+        ),
+        QuerySpec(
+            id="retry_recovery.failure_rates",
+            family="retry_recovery",
             title="Workflow failure rates",
-            description="Top-level dictation and meeting reliability counters for health checks.",
+            description="Top-level dictation and meeting failure/recovery counters for health checks.",
             columns=(
                 "dictation_starts",
                 "dictation_start_failures",
                 "dictation_completed",
                 "dictation_no_speech",
+                "dictation_recovery_timeouts",
                 "meeting_starts",
                 "meeting_start_failures",
                 "meeting_saved",
                 "meeting_failed_or_skipped",
+                "recovery_finished",
             ),
             sql=f"""
 SELECT
@@ -331,19 +614,21 @@ SELECT
   countIf(event = 'dictation_start_failed') AS dictation_start_failures,
   countIf(event = 'dictation_completed') AS dictation_completed,
   countIf(event = 'dictation_no_speech') AS dictation_no_speech,
+  countIf(event = 'dictation_audio_route_recovery_timeout') AS dictation_recovery_timeouts,
   countIf(event = 'meeting_recording_started') AS meeting_starts,
   countIf(event = 'meeting_recording_start_failed') AS meeting_start_failures,
   countIf(event = 'meeting_transcript_saved') AS meeting_saved,
-  countIf(event IN ('meeting_transcript_failed', 'meeting_transcript_skipped')) AS meeting_failed_or_skipped
+  countIf(event IN ('meeting_transcript_failed', 'meeting_transcript_skipped')) AS meeting_failed_or_skipped,
+  countIf(event = 'workflow_recovery_finished') AS recovery_finished
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND {event_filter(RELIABILITY_EVENTS)}
+  AND {event_filter(RETRY_RECOVERY_EVENTS)}
   {app_version_filter(app_version)}
 """,
         ),
         QuerySpec(
-            id="reliability.failure_kinds",
-            family="reliability",
+            id="retry_recovery.failure_kinds",
+            family="retry_recovery",
             title="Failure kinds",
             description="Ranks coarse failure_kind buckets for failed start/transcript/import outcomes.",
             columns=("event", "failure_kind", "events", "devices"),
@@ -363,8 +648,8 @@ LIMIT 40
 """,
         ),
         QuerySpec(
-            id="reliability.latency_buckets",
-            family="reliability",
+            id="retry_recovery.latency_buckets",
+            family="retry_recovery",
             title="Dictation stop latency buckets",
             description="Counts coarse stop-to-done, save, paste, and decode buckets.",
             columns=("stop_to_done_bucket", "decode_bucket", "save_bucket", "paste_bucket", "outcome", "events", "devices"),
@@ -387,77 +672,101 @@ LIMIT 50
 """,
         ),
         QuerySpec(
-            id="feature_adoption.artifact_and_agent_actions",
-            family="feature_adoption",
-            title="Artifact and agent action adoption",
-            description="Shows open/reveal/copy/setup actions by surface and coarse artifact/agent fields.",
-            columns=("event", "surface", "artifact_kind", "action_kind", "agent_target", "result", "events", "devices"),
+            id="onboarding_friction.step_friction",
+            family="onboarding_friction",
+            title="Onboarding friction by step",
+            description="Counts onboarding views, CTAs, permission changes, dismissals, and product-friction events by coarse step/stage buckets.",
+            columns=("event", "step_id", "step_index", "stage", "reason_kind", "permission_kind", "model_state", "events", "devices"),
             sql=f"""
 SELECT
   event,
-  properties['surface'] AS surface,
-  properties['artifact_kind'] AS artifact_kind,
-  properties['action_kind'] AS action_kind,
-  properties['agent_target'] AS agent_target,
-  properties['result'] AS result,
+  properties['step_id'] AS step_id,
+  properties['step_index'] AS step_index,
+  properties['stage'] AS stage,
+  properties['reason_kind'] AS reason_kind,
+  properties['permission_kind'] AS permission_kind,
+  properties['model_state'] AS model_state,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')
+  AND {event_filter(ONBOARDING_FRICTION_EVENTS)}
   {app_version_filter(app_version)}
-GROUP BY event, surface, artifact_kind, action_kind, agent_target, result
+GROUP BY event, step_id, step_index, stage, reason_kind, permission_kind, model_state
 ORDER BY events DESC
-LIMIT 60
+LIMIT 100
 """,
         ),
         QuerySpec(
-            id="feature_adoption.meeting_prompts",
-            family="feature_adoption",
-            title="Meeting prompt adoption and suppression",
-            description="Measures prompt shown/accepted/dismissed/suppressed without app names or meeting titles.",
-            columns=("event", "provider", "source", "route_ready", "suppression_reason", "cooldown_reason", "events", "devices"),
+            id="onboarding_friction.permission_readiness",
+            family="onboarding_friction",
+            title="Onboarding permission readiness",
+            description="Shows onboarding completion and permission-status buckets that explain first-run readiness.",
+            columns=("completion_flow", "meeting_recording_ready", "calendar_status", "permission_kind", "to_status", "events", "devices"),
+            sql=f"""
+SELECT
+  properties['completion_flow'] AS completion_flow,
+  properties['meeting_recording_ready'] AS meeting_recording_ready,
+  properties['calendar_status'] AS calendar_status,
+  properties['permission_kind'] AS permission_kind,
+  properties['to_status'] AS to_status,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event IN ('onboarding_completed', 'onboarding_permission_status_changed')
+  {app_version_filter(app_version)}
+GROUP BY completion_flow, meeting_recording_ready, calendar_status, permission_kind, to_status
+ORDER BY events DESC
+LIMIT 80
+""",
+        ),
+        QuerySpec(
+            id="timeline_dayflow.dayflow_events",
+            family="timeline_dayflow",
+            title="Timeline Dayflow adoption",
+            description="Queries planned timeline/dayflow analytics by coarse timeline action buckets when those events are present.",
+            columns=("event", "provider", "mode", "result", "events", "devices", "first_seen", "last_seen"),
             sql=f"""
 SELECT
   event,
   properties['provider'] AS provider,
-  properties['source'] AS source,
-  properties['route_ready'] AS route_ready,
-  properties['suppression_reason'] AS suppression_reason,
-  properties['cooldown_reason'] AS cooldown_reason,
+  properties['mode'] AS mode,
+  properties['result'] AS result,
   count() AS events,
-  uniq(distinct_id) AS devices
+  uniq(distinct_id) AS devices,
+  min(timestamp) AS first_seen,
+  max(timestamp) AS last_seen
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('meeting_prompt_shown', 'meeting_prompt_record_selected', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed')
+  AND {event_filter(TIMELINE_DAYFLOW_EVENTS)}
   {app_version_filter(app_version)}
-GROUP BY event, provider, source, route_ready, suppression_reason, cooldown_reason
+GROUP BY event, provider, mode, result
 ORDER BY events DESC
 LIMIT 80
 """,
+            notes=("These rows may be empty until timeline analytics ship; keep this family separate from shipped release health.",),
         ),
         QuerySpec(
-            id="feature_adoption.settings_discovery",
-            family="feature_adoption",
-            title="Settings discovery",
-            description="Counts coarse settings pages and actions that can explain feature discovery.",
-            columns=("event", "page_id", "action_id", "setting_id", "enabled", "events", "devices"),
+            id="timeline_dayflow.data_quality",
+            family="timeline_dayflow",
+            title="Timeline Dayflow data quality",
+            description="Counts timeline batch completions/failures by provider/result without screen text, screenshots, app names, or paths.",
+            columns=("event", "provider", "failure_kind", "events", "devices"),
             sql=f"""
 SELECT
   event,
-  properties['page_id'] AS page_id,
-  properties['action_id'] AS action_id,
-  properties['setting_id'] AS setting_id,
-  properties['enabled'] AS enabled,
+  properties['provider'] AS provider,
+  properties['failure_kind'] AS failure_kind,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('settings_opened', 'settings_page_viewed', 'settings_action_clicked', 'settings_toggle_changed')
+  AND event IN ('timeline_batch_completed', 'timeline_batch_failed')
   {app_version_filter(app_version)}
-GROUP BY event, page_id, action_id, setting_id, enabled
+GROUP BY event, provider, failure_kind
 ORDER BY events DESC
-LIMIT 80
+LIMIT 50
 """,
         ),
         QuerySpec(
@@ -756,8 +1065,13 @@ def run_self_test() -> int:
     required = (
         "wau.active_devices_by_week",
         "activation.reach_ladder",
-        "reliability.workflow_failure_rates",
-        "feature_adoption.artifact_and_agent_actions",
+        "meeting_prompt_quality.prompt_outcomes",
+        "artifact_usefulness.saved_and_used_artifacts",
+        "agent_payoff.agent_loop",
+        "speaker_trust.review_outcomes",
+        "retry_recovery.failure_rates",
+        "onboarding_friction.step_friction",
+        "timeline_dayflow.dayflow_events",
         "release_health.version_event_counts",
     )
     for query_id in required:
