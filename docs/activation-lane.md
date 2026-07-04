@@ -53,7 +53,8 @@ python3 scripts/ops/posthog-activation-funnel.py --days 30
 The script writes a Markdown report and JSON data under
 `/tmp/transcripted-posthog-activation-funnel/<run-id>/`. It keeps output
 aggregate-only and separates strict saved-Markdown proof from proxy rows like
-`dictation_completed` completion volume, agent setup clicks, and copied starter prompts.
+`dictation_completed` completion volume, `meeting_file_imported` import activity,
+agent setup clicks, and copied starter prompts.
 
 For the broader 100 WAU dashboard, reliability funnels, local summary beta
 funnel, agent/Markdown value loop, and release-health view, use

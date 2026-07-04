@@ -2461,6 +2461,53 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - first artifact telemetry covers dictation meeting and import saves once") {
+        let dictationContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
+        let meetingContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let activationContents = readRepoTextFile("Sources/Observability/ActivationTelemetry.swift")
+        let importBlock = sourceSlice(
+            meetingContents,
+            from: "func importAudioFile(from sourceURL: URL) async -> Bool {",
+            to: "private func importPreparationFailureKind"
+        )
+        let savedAnalyticsBlock = sourceSlice(
+            meetingContents,
+            from: "private func trackSavedTranscriptAnalyticsInBackground(",
+            to: "/// One bucketed event per auto-recognized *person*"
+        )
+
+        assertTrue(
+            dictationContents.contains("ActivationTelemetry.trackFirstArtifactSavedIfNeeded(\n                    artifactKind: .dictation")
+                && dictationContents.contains("surface: .dictationSave")
+                && dictationContents.contains("trigger: currentDictationTrigger.rawValue")
+                && dictationContents.contains("wordCountBucket: AnalyticsReporter.wordCountBucket(wordCount)")
+                && dictationContents.contains("durationBucket: AnalyticsReporter.durationBucket(seconds:"),
+            "successful dictation Markdown saves should emit first-artifact telemetry with only enum and bucket properties"
+        )
+        assertTrue(
+            importBlock.contains("startTrigger: .fileImport")
+                && importBlock.contains("enqueueImportedAudioJob("),
+            "imported recordings should enter the shared meeting transcription/save pipeline with a coarse file_import trigger"
+        )
+        assertTrue(
+            savedAnalyticsBlock.contains("ActivationTelemetry.trackFirstArtifactSavedIfNeeded(")
+                && savedAnalyticsBlock.contains("artifactKind: .meeting")
+                && savedAnalyticsBlock.contains("surface: .meetingSave")
+                && savedAnalyticsBlock.contains("trigger: properties[\"trigger\"] ?? StartTrigger.unknown.rawValue")
+                && savedAnalyticsBlock.contains("wordCountBucket: properties[\"word_count_bucket\"]")
+                && savedAnalyticsBlock.contains("durationBucket: properties[\"duration_bucket\"]")
+                && savedAnalyticsBlock.contains("AnalyticsReporter.track(\n                    \"meeting_transcript_saved\""),
+            "live and imported meeting Markdown saves should share the same first-artifact telemetry seam before the broader meeting-saved proxy event"
+        )
+        assertTrue(
+            activationContents.contains("guard !userDefaults.bool(forKey: firstArtifactSavedTrackedKey) else { return false }")
+                && activationContents.contains("userDefaults.set(true, forKey: firstArtifactSavedTrackedKey)")
+                && activationContents.contains("AnalyticsReporter.track(\"activation_first_artifact_saved\"")
+                && activationContents.contains("AnalyticsReporter.track(\n                \"activation_second_artifact_saved\""),
+            "ActivationTelemetry should keep first artifact once-per-install while preserving the second-artifact follow-up event"
+        )
+    }
+
     runSuite("Repo command contract - shutdown preservation clears live sidecar waits") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let terminationBlock = sourceSlice(
