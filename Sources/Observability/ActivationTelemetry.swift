@@ -499,6 +499,79 @@ enum ActivationTelemetry {
     }
 }
 
+enum LocalSummaryTelemetry {
+    static let requestedEvent = "local_summary_requested"
+    static let finishedEvent = "local_summary_finished"
+    static let failedEvent = "local_summary_failed"
+    static let cancelledEvent = "local_summary_cancelled"
+
+    static func requestedProperties(
+        provider: String,
+        summaryAction: String,
+        setupReady: Bool,
+        runtime: String,
+        queueDepth: Int
+    ) -> [String: String] {
+        [
+            "provider": provider,
+            "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queueDepth),
+            "runtime": runtime,
+            "setup_ready": setupReady ? "true" : "false",
+            "summary_action": summaryAction,
+        ]
+    }
+
+    static func finishedProperties(
+        provider: String,
+        summaryAction: String,
+        chunkCount: Int,
+        runtime: String,
+        durationBucket: String
+    ) -> [String: String] {
+        [
+            "chunk_count_bucket": AnalyticsReporter.countBucket(chunkCount),
+            "duration_bucket": durationBucket,
+            "provider": provider,
+            "runtime": runtime,
+            "summary_action": summaryAction,
+        ]
+    }
+
+    static func failedProperties(
+        provider: String,
+        summaryAction: String,
+        failureKind: String,
+        stage: String,
+        runtime: String,
+        durationBucket: String
+    ) -> [String: String] {
+        [
+            "duration_bucket": durationBucket,
+            "failure_kind": failureKind,
+            "provider": provider,
+            "runtime": runtime,
+            "stage": stage,
+            "summary_action": summaryAction,
+        ]
+    }
+
+    static func cancelledProperties(
+        provider: String,
+        summaryAction: String,
+        stage: String,
+        runtime: String,
+        durationBucket: String
+    ) -> [String: String] {
+        [
+            "duration_bucket": durationBucket,
+            "provider": provider,
+            "runtime": runtime,
+            "stage": stage,
+            "summary_action": summaryAction,
+        ]
+    }
+}
+
 enum ProductFrictionTelemetry {
     enum Surface: String {
         case dictation

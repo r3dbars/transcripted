@@ -312,8 +312,8 @@ Use `workflow_recovery_finished` to split retry/recovery terminal results by
 
 ### Local Summary Beta Funnel
 
-`meeting_transcript_saved` -> `local_meeting_summary_started` ->
-`local_meeting_summary_completed` / `local_meeting_summary_failed` ->
+`meeting_transcript_saved` -> `local_summary_requested` ->
+`local_summary_finished` / `local_summary_failed` / `local_summary_cancelled` ->
 `workflow_recovery_finished` for retry from the failure notice ->
 opened/copied/applied summary. Track provider, runtime, duration bucket, result,
 and failure kind only.

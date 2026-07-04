@@ -1145,14 +1145,38 @@ struct TranscriptedSettingsView: View {
         guard localMeetingSummariesEnabled else { return }
         let summaryID = transcriptURL.path
         guard homeLocalSummaryTasks[summaryID] == nil else { return }
+        let provider = localMeetingSummaryProvider
+        let summaryAction = hasExistingSummary ? "regenerate" : "generate"
+        let summaryStartedAt = CFAbsoluteTimeGetCurrent()
+        let setupReady = selectedLocalSummaryProviderIsReady
+        let runtime = selectedLocalSummaryProviderProfileName
+        let queueDepth = homeLocalSummaryTasks.count
+        let requestedProperties = LocalSummaryTelemetry.requestedProperties(
+            provider: provider.rawValue,
+            summaryAction: summaryAction,
+            setupReady: setupReady,
+            runtime: runtime,
+            queueDepth: queueDepth
+        )
+        trackLocalSummaryAnalytics(event: LocalSummaryTelemetry.requestedEvent, properties: requestedProperties)
         if let unavailableReason = localMeetingSummaryUnavailableReason {
+            let failedProperties = LocalSummaryTelemetry.failedProperties(
+                provider: provider.rawValue,
+                summaryAction: summaryAction,
+                failureKind: localSummaryUnavailableFailureKind(),
+                stage: "start",
+                runtime: runtime,
+                durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
+            )
+            trackLocalSummaryAnalytics(event: LocalSummaryTelemetry.failedEvent, properties: failedProperties)
+            trackLocalSummaryAnalytics(event: "local_meeting_summary_failed", properties: failedProperties)
             ActivationTelemetry.trackArtifactAction(
                 artifactKind: .meeting,
                 actionKind: .localSummary,
                 surface: .homeMenu,
                 artifactDate: artifactDate,
                 result: .blocked,
-                trigger: hasExistingSummary ? "regenerate" : "generate",
+                trigger: summaryAction,
                 durationBucket: durationBucket
             )
             trackLocalSummaryAbandoned(reason: .blocked, stage: "start", priorReadyState: "not_ready")
@@ -1178,6 +1202,16 @@ struct TranscriptedSettingsView: View {
         // a moved/renamed file surfaces a raw read error instead of the same
         // friendly failure those other actions give.
         guard let resolvedTranscriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [transcriptURL]) else {
+            let failedProperties = LocalSummaryTelemetry.failedProperties(
+                provider: provider.rawValue,
+                summaryAction: summaryAction,
+                failureKind: "transcript_unavailable",
+                stage: "start",
+                runtime: runtime,
+                durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
+            )
+            trackLocalSummaryAnalytics(event: LocalSummaryTelemetry.failedEvent, properties: failedProperties)
+            trackLocalSummaryAnalytics(event: "local_meeting_summary_failed", properties: failedProperties)
             trackLocalSummaryAbandoned(
                 reason: .unavailable,
                 stage: "start",
@@ -1200,9 +1234,6 @@ struct TranscriptedSettingsView: View {
             return
         }
         trackSettingsAction("generate_local_meeting_summary", page: .home)
-        let provider = localMeetingSummaryProvider
-        let summaryAction = hasExistingSummary ? "regenerate" : "generate"
-        let summaryStartedAt = CFAbsoluteTimeGetCurrent()
         ActivationTelemetry.trackArtifactAction(
             artifactKind: .meeting,
             actionKind: .localSummary,
@@ -1223,13 +1254,7 @@ struct TranscriptedSettingsView: View {
         }
         trackLocalSummaryAnalytics(
             event: "local_meeting_summary_started",
-            properties: [
-                "provider": provider.rawValue,
-                "summary_action": summaryAction,
-                "setup_ready": selectedLocalSummaryProviderIsReady ? "true" : "false",
-                "runtime": selectedLocalSummaryProviderProfileName,
-                "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(homeLocalSummaryTasks.count),
-            ]
+            properties: requestedProperties
         )
         recordLocalSummaryEvent(
             event: "local_meeting_summary_started",
@@ -1274,6 +1299,16 @@ struct TranscriptedSettingsView: View {
             do {
                 let result = try await task.value
                 guard localMeetingSummariesEnabled else {
+                    trackLocalSummaryAnalytics(
+                        event: LocalSummaryTelemetry.cancelledEvent,
+                        properties: LocalSummaryTelemetry.cancelledProperties(
+                            provider: result.provider.rawValue,
+                            summaryAction: summaryAction,
+                            stage: "generate",
+                            runtime: result.profileName,
+                            durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
+                        )
+                    )
                     trackLocalSummaryRecoveryFinished(
                         failureKind: recoveryFailureKind,
                         result: "cancelled",
@@ -1295,15 +1330,17 @@ struct TranscriptedSettingsView: View {
                         "profile": result.profileName,
                     ]
                 )
+                let finishedProperties = LocalSummaryTelemetry.finishedProperties(
+                    provider: result.provider.rawValue,
+                    summaryAction: summaryAction,
+                    chunkCount: result.chunkCount,
+                    runtime: result.profileName,
+                    durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
+                )
+                trackLocalSummaryAnalytics(event: LocalSummaryTelemetry.finishedEvent, properties: finishedProperties)
                 trackLocalSummaryAnalytics(
                     event: "local_meeting_summary_completed",
-                    properties: [
-                        "provider": result.provider.rawValue,
-                        "summary_action": summaryAction,
-                        "chunk_count_bucket": AnalyticsReporter.countBucket(result.chunkCount),
-                        "runtime": result.profileName,
-                        "duration_bucket": localSummaryRunDurationBucket(since: summaryStartedAt),
-                    ]
+                    properties: finishedProperties
                 )
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .meeting,
@@ -1336,10 +1373,30 @@ struct TranscriptedSettingsView: View {
                         "provider": provider.rawValue,
                     ]
                 )
+                trackLocalSummaryAnalytics(
+                    event: LocalSummaryTelemetry.cancelledEvent,
+                    properties: LocalSummaryTelemetry.cancelledProperties(
+                        provider: provider.rawValue,
+                        summaryAction: summaryAction,
+                        stage: "generate",
+                        runtime: runtime,
+                        durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
+                    )
+                )
                 return
             } catch {
                 let failureKind = localSummaryFailureKind(error)
                 guard localMeetingSummariesEnabled else {
+                    trackLocalSummaryAnalytics(
+                        event: LocalSummaryTelemetry.cancelledEvent,
+                        properties: LocalSummaryTelemetry.cancelledProperties(
+                            provider: provider.rawValue,
+                            summaryAction: summaryAction,
+                            stage: "generate",
+                            runtime: runtime,
+                            durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
+                        )
+                    )
                     trackLocalSummaryRecoveryFinished(
                         failureKind: recoveryFailureKind,
                         result: "cancelled",
@@ -1357,15 +1414,18 @@ struct TranscriptedSettingsView: View {
                         "failure_kind": failureKind,
                     ]
                 )
+                let failedProperties = LocalSummaryTelemetry.failedProperties(
+                    provider: provider.rawValue,
+                    summaryAction: summaryAction,
+                    failureKind: failureKind,
+                    stage: "generate",
+                    runtime: runtime,
+                    durationBucket: localSummaryRunDurationBucket(since: summaryStartedAt)
+                )
+                trackLocalSummaryAnalytics(event: LocalSummaryTelemetry.failedEvent, properties: failedProperties)
                 trackLocalSummaryAnalytics(
                     event: "local_meeting_summary_failed",
-                    properties: [
-                        "provider": provider.rawValue,
-                        "summary_action": summaryAction,
-                        "failure_kind": failureKind,
-                        "stage": "generate",
-                        "duration_bucket": localSummaryRunDurationBucket(since: summaryStartedAt),
-                    ]
+                    properties: failedProperties
                 )
                 ActivationTelemetry.trackArtifactAction(
                     artifactKind: .meeting,
@@ -3986,8 +4046,6 @@ struct TranscriptedSettingsView: View {
             trackBetaModelPrepAbandoned(reason: .cancelled, stage: "prepare_model")
         }
         localSummaryModelPreparationTask?.cancel()
-        localSummaryModelPreparationTask = nil
-        localSummaryModelPreparationToken = nil
         isLocalSummaryModelPreparing = false
     }
 
@@ -4017,8 +4075,6 @@ struct TranscriptedSettingsView: View {
         for task in homeLocalSummaryTasks.values {
             task.cancel()
         }
-        homeLocalSummaryTasks.removeAll()
-        homeLocalSummaryTaskTokens.removeAll()
         homeLocalSummaryJobIDs.removeAll()
     }
 
@@ -4120,6 +4176,43 @@ struct TranscriptedSettingsView: View {
         case .outputMissing:
             return "output_missing"
         }
+    }
+
+    private func localSummaryUnavailableFailureKind() -> String {
+        if sttRouter.isRecording || sttRouter.isTranscribing {
+            return "dictation_active"
+        }
+        if meetingSession.isRecording {
+            return "meeting_recording"
+        }
+        if meetingSession.state == .loadingModels {
+            return "models_preparing"
+        }
+        if isLocalSummaryModelPreparing {
+            return "summary_model_preparing"
+        }
+        if meetingSession.hasRuntimeDiagnosticsWork {
+            return "meeting_work_active"
+        }
+        if meetingSession.isSpeakerReviewPending {
+            return "speaker_review_pending"
+        }
+
+        switch localMeetingSummaryProvider {
+        case .gemmaMLX:
+            if !localSummarySetupStatus.hasEnoughMemory {
+                return "insufficient_memory"
+            }
+            if !localSummarySetupStatus.hasRuntime {
+                return "runtime_unavailable"
+            }
+        case .appleFoundation:
+            if !appleSummarySetupStatus.isReady {
+                return "apple_foundation_unavailable"
+            }
+        }
+
+        return "blocked"
     }
 
     private func trackLocalSummaryAbandoned(
