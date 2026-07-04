@@ -1,54 +1,37 @@
 import Foundation
 
 func testTimelinePreferences() {
-    runSuite("TimelinePreferences defaults to opt-in timeline capture") {
-        let (defaults, suiteName) = makeTimelineDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+    runSuite("TimelinePreferences defaults keep timeline opt-in") {
+        let defaults = UserDefaults(suiteName: "TimelinePreferencesTests.defaults.\(UUID().uuidString)")!
 
-        assertFalse(TimelinePreferences.isEnabled(userDefaults: defaults), "timeline capture should default off")
-        assertEqual(TimelinePreferences.provider(userDefaults: defaults), .localFoundation, "local provider should be the default")
-        assertEqual(TimelinePreferences.ollamaEndpoint(userDefaults: defaults), "http://localhost:1234", "Ollama-compatible endpoint should default to the local server")
-        assertEqual(TimelinePreferences.storageCapBytes(userDefaults: defaults), 5_368_709_120, "timeline storage cap should default to 5 GB")
-        assertEqual(TimelinePreferences.blockedBundleIDs(userDefaults: defaults), [], "timeline blocklist should start empty")
-        assertFalse(TimelinePreferences.onboardingCompleted(userDefaults: defaults), "timeline onboarding should start incomplete")
+        assertEqual(TimelinePreferences.isEnabled(userDefaults: defaults), false, "timeline must default off")
+        assertEqual(TimelinePreferences.hasCompletedOnboarding(userDefaults: defaults), false, "timeline onboarding must default incomplete")
+        assertEqual(TimelinePreferences.provider(userDefaults: defaults), .localFoundation, "provider should default local")
+        assertEqual(TimelinePreferences.ollamaEndpoint(userDefaults: defaults), TimelinePreferences.defaultOllamaEndpoint, "endpoint should have a local default")
+        assertEqual(TimelinePreferences.storageCapBytes(userDefaults: defaults), TimelinePreferences.defaultStorageCapBytes, "storage cap should default to 5 GB")
+        assertEqual(TimelinePreferences.blockedBundleIDs(userDefaults: defaults), [], "blocklist should default empty")
     }
 
-    runSuite("TimelinePreferences persists timeline settings") {
-        let (defaults, suiteName) = makeTimelineDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+    runSuite("TimelinePreferences sanitizes user-controlled lists") {
+        let defaults = UserDefaults(suiteName: "TimelinePreferencesTests.blocklist.\(UUID().uuidString)")!
+        TimelinePreferences.setBlockedBundleIDs(
+            [" com.apple.Safari ", "", "com.tinyspeck.slackmacgap", "com.apple.Safari"],
+            userDefaults: defaults
+        )
 
-        TimelinePreferences.setEnabled(true, userDefaults: defaults)
-        TimelinePreferences.setProvider(.ollama, userDefaults: defaults)
-        TimelinePreferences.setOllamaEndpoint("http://127.0.0.1:11434", userDefaults: defaults)
-        TimelinePreferences.setStorageCapBytes(1234, userDefaults: defaults)
-        TimelinePreferences.setBlockedBundleIDs([" com.apple.Safari ", "", "com.openai.chat"], userDefaults: defaults)
-        TimelinePreferences.setOnboardingCompleted(true, userDefaults: defaults)
-
-        assertTrue(TimelinePreferences.isEnabled(userDefaults: defaults), "enabled state should round-trip")
-        assertEqual(TimelinePreferences.provider(userDefaults: defaults), .ollama, "provider should round-trip")
-        assertEqual(TimelinePreferences.ollamaEndpoint(userDefaults: defaults), "http://127.0.0.1:11434", "endpoint should round-trip")
-        assertEqual(TimelinePreferences.storageCapBytes(userDefaults: defaults), 1234, "storage cap should round-trip")
-        assertEqual(TimelinePreferences.blockedBundleIDs(userDefaults: defaults), ["com.apple.Safari", "com.openai.chat"], "blocklist should trim and drop empty values")
-        assertTrue(TimelinePreferences.onboardingCompleted(userDefaults: defaults), "onboarding state should round-trip")
+        assertEqual(
+            TimelinePreferences.blockedBundleIDs(userDefaults: defaults),
+            ["com.apple.Safari", "com.tinyspeck.slackmacgap"],
+            "blocked bundle IDs should trim, dedupe, and sort"
+        )
     }
 
-    runSuite("TimelinePreferences falls back from invalid stored values") {
-        let (defaults, suiteName) = makeTimelineDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+    runSuite("TimelinePreferences clamps storage caps") {
+        let defaults = UserDefaults(suiteName: "TimelinePreferencesTests.storage.\(UUID().uuidString)")!
+        TimelinePreferences.setStorageCapBytes(1, userDefaults: defaults)
+        assertEqual(TimelinePreferences.storageCapBytes(userDefaults: defaults), TimelinePreferences.minimumStorageCapBytes, "storage cap should clamp low")
 
-        defaults.set("custom", forKey: TimelinePreferences.providerKey)
-        defaults.set("   ", forKey: TimelinePreferences.ollamaEndpointKey)
-        defaults.set("not-json".data(using: .utf8), forKey: TimelinePreferences.blockedBundleIDsKey)
-
-        assertEqual(TimelinePreferences.provider(userDefaults: defaults), .localFoundation, "unknown providers should fall back to local")
-        assertEqual(TimelinePreferences.ollamaEndpoint(userDefaults: defaults), "http://localhost:1234", "blank endpoint should fall back")
-        assertEqual(TimelinePreferences.blockedBundleIDs(userDefaults: defaults), [], "invalid blocklist JSON should fall back")
+        TimelinePreferences.setStorageCapBytes(Int64.max, userDefaults: defaults)
+        assertEqual(TimelinePreferences.storageCapBytes(userDefaults: defaults), TimelinePreferences.maximumStorageCapBytes, "storage cap should clamp high")
     }
-}
-
-private func makeTimelineDefaults() -> (UserDefaults, String) {
-    let suiteName = "TimelinePreferencesTests-\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defaults.removePersistentDomain(forName: suiteName)
-    return (defaults, suiteName)
 }

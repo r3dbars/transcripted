@@ -84,6 +84,12 @@ allowlist.
 - `app_session_stall_detected`
 - `support_diagnostics_copied`
 - `support_diagnostic_event_sent`
+- `timeline_onboarding_completed`
+- `timeline_viewed`
+- `timeline_mode_changed`
+- `timeline_card_opened`
+- `timeline_provider_selected`
+- `timeline_chat_question_asked`
 - `onboarding_shown`
 - `onboarding_step_viewed`
 - `onboarding_permission_cta_clicked`

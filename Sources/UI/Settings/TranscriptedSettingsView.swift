@@ -26,6 +26,7 @@ struct TranscriptedSettingsView: View {
     @State private var showGeneralModelSettings = false
     @State private var showGeneralShortcutSettings = false
     @State private var showGeneralPrivacySettings = false
+    @State private var showGeneralTimelineSettings = false
     @State private var customDictionaryText = CustomDictionaryPreferences.rawText()
     @State private var customDictionaryRows = CorrectionDraftRow.rows(from: CustomDictionaryPreferences.rawText())
     @State private var customDictionaryPreviewInput = ""
@@ -73,6 +74,14 @@ struct TranscriptedSettingsView: View {
     @State private var missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
     @State private var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
+    @State private var timelineEnabled = TimelinePreferences.isEnabled()
+    @State private var timelineOnboardingCompleted = TimelinePreferences.hasCompletedOnboarding()
+    @State private var timelineProvider = TimelinePreferences.provider()
+    @State private var timelineOllamaEndpoint = TimelinePreferences.ollamaEndpoint()
+    @State private var timelineStorageCapGB = Double(TimelinePreferences.storageCapBytes() / 1024 / 1024 / 1024)
+    @State private var timelineBlockedBundleIDsText = TimelinePreferences.blockedBundleIDs().joined(separator: "\n")
+    @State private var timelinePromptOverride = TimelinePreferences.promptOverride(for: TimelinePreferences.provider())
+    @State private var timelineDataActionStatus: String?
     @StateObject private var homeViewModel = HomeViewModel()
     @State private var homeCopiedRowID: String?
     @State private var homeDeleteConfirmation: HomeDeleteConfirmation?
@@ -344,8 +353,12 @@ struct TranscriptedSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .transcriptedPermissionsDidChange)) { _ in
             refreshPermissions()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .timelinePreferencesDidChange)) { _ in
+            refreshTimelinePreferences()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
+            refreshTimelinePreferences()
             refreshRecentCaptures()
             refreshShortcutState()
         }
@@ -2402,6 +2415,22 @@ struct TranscriptedSettingsView: View {
                     }
 
                     GeneralDisclosureRow(
+                        title: "Timeline",
+                        value: timelineStatusLine,
+                        isExpanded: $showGeneralTimelineSettings,
+                        help: showGeneralTimelineSettings ? "Hide timeline settings." : "Show timeline settings.",
+                        automationIdentifier: "transcripted.settings.general.disclosure.timeline"
+                    ) {
+                        trackSettingsAction("toggle_timeline_settings", page: .general)
+                    }
+
+                    if showGeneralTimelineSettings {
+                        GeneralExpandedContent {
+                            generalTimelineSettingsEditor
+                        }
+                    }
+
+                    GeneralDisclosureRow(
                         title: "Privacy",
                         value: generalPrivacyStatusLine,
                         isExpanded: $showGeneralPrivacySettings,
@@ -2833,6 +2862,190 @@ struct TranscriptedSettingsView: View {
                 Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var generalTimelineSettingsEditor: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SettingsToggleRow(
+                title: "Timeline",
+                detail: timelineEnabled
+                    ? "On. Capture starts only when setup and Screen Recording are ready."
+                    : "Off. Transcripted captures no screen activity.",
+                isOn: Binding(
+                    get: { timelineEnabled },
+                    set: { newValue in
+                        timelineEnabled = newValue
+                        if newValue {
+                            timelineOnboardingCompleted = true
+                            TimelinePreferences.setOnboardingCompleted(true)
+                        }
+                        TimelinePreferences.setEnabled(newValue)
+                        trackSettingsToggle("timeline_enabled", enabled: newValue, page: .general)
+                    }
+                ),
+                help: "Turn Timeline screen-activity capture on or off.",
+                automationIdentifier: "transcripted.settings.general.timeline.enabled"
+            )
+
+            if let pausedCopy = TimelinePreferences.pausedCopy(screenRecordingGranted: permissionStates[.screenRecording] ?? false) {
+                SettingsStatusCard(
+                    title: "Timeline paused",
+                    status: "Paused",
+                    detail: pausedCopy,
+                    tone: .caution
+                )
+            } else {
+                SettingsStatusCard(
+                    title: "Timeline ready",
+                    status: "Ready",
+                    detail: "Timeline can run with your current settings.",
+                    tone: .ready
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Provider")
+                    .font(.subheadline.weight(.semibold))
+
+                Picker("Timeline provider", selection: Binding(
+                    get: { timelineProvider },
+                    set: { newValue in
+                        timelineProvider = newValue
+                        timelinePromptOverride = TimelinePreferences.promptOverride(for: newValue)
+                        TimelinePreferences.setProvider(newValue)
+                        AnalyticsReporter.track(
+                            "timeline_provider_selected",
+                            properties: [
+                                "provider": newValue.analyticsValue,
+                                "surface": "settings",
+                            ]
+                        )
+                    }
+                )) {
+                    ForEach(TimelineProvider.allCases) { provider in
+                        Text(provider.title).tag(provider)
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("transcripted.settings.general.timeline.provider")
+
+                Text(TimelinePreferences.degradedCopy(for: timelineProvider) ?? timelineProvider.detail)
+                    .font(.caption)
+                    .foregroundStyle(timelineProvider == .gemini ? Color.red.opacity(0.82) : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if timelineProvider == .ollama {
+                    TextField("Endpoint", text: Binding(
+                        get: { timelineOllamaEndpoint },
+                        set: { newValue in
+                            timelineOllamaEndpoint = newValue
+                            TimelinePreferences.setOllamaEndpoint(newValue)
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("transcripted.settings.general.timeline.ollama-endpoint")
+                }
+
+                TextEditor(text: Binding(
+                    get: { timelinePromptOverride },
+                    set: { newValue in
+                        timelinePromptOverride = newValue
+                        TimelinePreferences.setPromptOverride(newValue, for: timelineProvider)
+                    }
+                ))
+                .font(.system(size: 12, design: .monospaced))
+                .frame(minHeight: 72)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                )
+                .accessibilityIdentifier("transcripted.settings.general.timeline.prompt-override")
+
+                Text("Prompt override is optional. Do not paste private text here unless you mean to reuse it in timeline analysis.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Blocked apps")
+                    .font(.subheadline.weight(.semibold))
+                Text("One bundle ID per line. Timeline skips screenshots for these apps.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                TextEditor(text: Binding(
+                    get: { timelineBlockedBundleIDsText },
+                    set: { newValue in
+                        timelineBlockedBundleIDsText = newValue
+                        TimelinePreferences.setBlockedBundleIDs(bundleIDs(from: newValue))
+                    }
+                ))
+                .font(.system(size: 12, design: .monospaced))
+                .frame(minHeight: 86)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                )
+                .accessibilityIdentifier("transcripted.settings.general.timeline.blocked-bundle-ids")
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Storage cap")
+                    .font(.subheadline.weight(.semibold))
+                Slider(
+                    value: Binding(
+                        get: { timelineStorageCapGB },
+                        set: { newValue in
+                            let rounded = max(1, min(50, round(newValue)))
+                            timelineStorageCapGB = rounded
+                            TimelinePreferences.setStorageCapBytes(Int64(rounded) * 1024 * 1024 * 1024)
+                        }
+                    ),
+                    in: 1...50,
+                    step: 1
+                )
+                .accessibilityIdentifier("transcripted.settings.general.timeline.storage-cap")
+
+                Text("Keep up to \(Int(timelineStorageCapGB)) GB of raw screenshots. Cards and Markdown are tiny and stay until deleted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                SettingsInlineActionButton(
+                    title: permissionStates[.screenRecording] == true ? "Review Screen Recording" : "Allow Screen Recording",
+                    symbolName: "rectangle.on.rectangle",
+                    tone: permissionStates[.screenRecording] == true ? .neutral : .warning,
+                    automationIdentifier: "transcripted.settings.general.timeline.screen-recording"
+                ) {
+                    trackPermissionCTA(.screenRecording)
+                    Task { @MainActor in
+                        await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: .screenRecording)
+                        refreshPermissions()
+                    }
+                }
+
+                SettingsInlineActionButton(
+                    title: "Delete Timeline Data",
+                    symbolName: "trash",
+                    tone: .destructive,
+                    automationIdentifier: "transcripted.settings.general.timeline.delete-data"
+                ) {
+                    deleteTimelineData()
+                }
+            }
+
+            if let timelineDataActionStatus {
+                Text(timelineDataActionStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -4424,6 +4637,19 @@ struct TranscriptedSettingsView: View {
             : "Turn on \(permissions) to record meetings."
     }
 
+    private var timelineStatusLine: String {
+        if !timelineEnabled {
+            return "Off"
+        }
+        if !timelineOnboardingCompleted {
+            return "Setup needed"
+        }
+        if permissionStates[.screenRecording] != true {
+            return "Permission needed"
+        }
+        return timelineProvider.title
+    }
+
     private var isUsingDefaultCaptureLibrary: Bool {
         captureLibraryURL.standardizedFileURL == FileManager.default.transcriptedDefaultCaptureLibraryDir.standardizedFileURL
     }
@@ -4511,6 +4737,7 @@ struct TranscriptedSettingsView: View {
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
         splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
         missedCallNudgeEnabled = MissedCallNudgePreferences.isEnabled()
+        refreshTimelinePreferences()
         refreshLocalSummarySetupStatus()
         dictationShortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         refreshAutoEnterPreferences(includeCandidates: pageShowsAutoEnterSettings(navigation.selectedPage))
@@ -4631,9 +4858,61 @@ struct TranscriptedSettingsView: View {
         }
     }
 
+    private func refreshTimelinePreferences() {
+        timelineEnabled = TimelinePreferences.isEnabled()
+        timelineOnboardingCompleted = TimelinePreferences.hasCompletedOnboarding()
+        timelineProvider = TimelinePreferences.provider()
+        timelineOllamaEndpoint = TimelinePreferences.ollamaEndpoint()
+        timelineStorageCapGB = Double(TimelinePreferences.storageCapBytes() / 1024 / 1024 / 1024)
+        timelineBlockedBundleIDsText = TimelinePreferences.blockedBundleIDs().joined(separator: "\n")
+        timelinePromptOverride = TimelinePreferences.promptOverride(for: timelineProvider)
+    }
+
     private func refreshStoragePaths() {
         captureLibraryURL = FileManager.default.transcriptedCaptureLibraryDir
         unavailableCaptureLibraryPath = TranscriptedStoragePreferences.unavailableCustomCaptureLibraryPath()
+    }
+
+    private func bundleIDs(from text: String) -> [String] {
+        text
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func deleteTimelineData() {
+        let alert = NSAlert()
+        alert.messageText = "Delete timeline data?"
+        alert.informativeText = "This removes timeline screenshots, the timeline database, and timeline Markdown. Meetings and dictations stay."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let fileManager = FileManager.default
+        let targets = [
+            fileManager.transcriptedTimelineDatabaseURL,
+            fileManager.transcriptedTimelineScreenshotsRootURL,
+            fileManager.transcriptedTimelineCapturesDir,
+        ]
+
+        var failures: [String] = []
+        for target in targets {
+            guard fileManager.fileExists(atPath: target.path) else { continue }
+            do {
+                try fileManager.removeItem(at: target)
+            } catch {
+                failures.append(target.lastPathComponent)
+            }
+        }
+
+        _ = fileManager.transcriptedTimelineScreenshotsRootURL
+        _ = fileManager.transcriptedTimelineCapturesDir
+        trackSettingsAction("delete_timeline_data", page: .general)
+        timelineDataActionStatus = failures.isEmpty
+            ? "Timeline data deleted. Timeline remains \(timelineEnabled ? "on" : "off")."
+            : "Could not delete: \(failures.joined(separator: ", "))."
     }
 
     private func refreshModelCacheSnapshot() {

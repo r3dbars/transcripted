@@ -36,6 +36,7 @@ captured_input_volume_before
 captured_input_volume_changed
 captured_input_volume_dropped
 captured_input_volume_during
+card_kind
 channel
 cleanup_changed
 cleanup_enabled
@@ -98,6 +99,7 @@ mic_signal
 mic_status
 mic_stream_present
 missing_permission
+mode
 model_state
 os_major
 outcome
@@ -139,6 +141,7 @@ route_shape
 runtime
 sample_flow_started
 save_outcome
+screen_recording_status
 second_artifact_kind
 selected_input_class
 selection_overrode_default

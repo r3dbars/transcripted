@@ -81,7 +81,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .systemAudioRecording:
             return Self.systemAudioRecordingSummary
         case .screenRecording:
-            return "Optional. Lets Timeline save screen snapshots for local activity cards."
+            return "Optional. Lets Timeline capture lightweight screenshots on this Mac."
         case .calendar:
             return "Optional. Shows meeting prompts from synced calendars."
         }
