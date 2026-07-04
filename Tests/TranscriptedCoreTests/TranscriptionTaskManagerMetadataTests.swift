@@ -629,6 +629,38 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after archive")
     }
 
+    func testAsyncFailedQueueArchivesBeforePersistingFailedRow() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let manager = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        let didQueue = await manager.addFailedTranscriptionRetainingAvailableAudioAfterArchive(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Transcription inference failed",
+            taskId: UUID(uuidString: "00000000-0000-0000-0000-000000000149")!,
+            meetingTitle: "Recovery Check",
+            recordingDate: Date(timeIntervalSince1970: 1_797_000_000)
+        )
+
+        XCTAssertTrue(didQueue)
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.meetingTitle, "Recovery Check")
+        XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.systemAudioURL?.path ?? ""))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "scratch mic audio should be removed after retained archive is persisted")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "scratch system audio should be removed after retained archive is persisted")
+    }
+
     func testManualFailedQueueRemovesRetainedAudioWhenQueuePersistenceFails() throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
