@@ -7,6 +7,9 @@ answer one question: are users reaching the loop that matters?
 
 > speech or meeting -> saved Markdown -> one sourced agent answer -> return later
 
+For the sharper question-to-PR audit, use
+`docs/posthog-product-intelligence-map.md`.
+
 ## Privacy Contract
 
 Keep PostHog aggregate, bucketed, and opt-in. Do not collect:
