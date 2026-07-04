@@ -368,6 +368,42 @@ func testAnalyticsEventPolicy() {
             "dictation artifact save telemetry should not include raw text, paths, filenames, app names, titles, or counts"
         )
         assertEqual(dictationProperties["surface"], "dictation_save", "saved dictation surface should stay coarse")
+
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent(
+            "ActivationTelemetryTests.saved-dictation.\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let saved = try? DictationTranscriptStore.save(
+            text: "saved artifact proof",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: Date(timeIntervalSince1970: 1_800_000_000),
+            directory: outputDir
+        )
+        assertEqual(
+            saved.map { ActivationTelemetry.savedDictationArtifactExists($0) },
+            true,
+            "dictation_artifact_saved may fire only after a regular Markdown file exists on disk"
+        )
+
+        if let saved {
+            try? fm.removeItem(at: saved.url)
+            assertFalse(
+                ActivationTelemetry.trackDictationArtifactSaved(
+                    saved: saved,
+                    delivery: "pasted",
+                    durationBucket: "10_29s",
+                    trigger: "hotkey",
+                    wordCountBucket: "10_49"
+                ),
+                "missing saved Markdown must block dictation_artifact_saved even if a stale save result exists"
+            )
+        }
     }
 
     runSuite("ActivationTelemetry tracks first and second artifact saves once per install") {
