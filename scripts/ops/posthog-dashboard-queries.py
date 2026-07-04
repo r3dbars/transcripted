@@ -129,7 +129,6 @@ ONBOARDING_FRICTION_EVENTS = (
     "onboarding_permission_status_changed",
     "onboarding_permission_cta_clicked",
     "onboarding_primary_cta_clicked",
-    "onboarding_dismissed",
     "onboarding_completed",
     "onboarding_first_dictation_started",
     "onboarding_first_dictation_saved",
