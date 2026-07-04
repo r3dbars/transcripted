@@ -1409,7 +1409,7 @@ func handleSearchMeetings(params: CallTool.Parameters, index: TranscriptIndex, m
             queryKind: "search",
             artifactKind: "meeting",
             captureDate: latestReceiptDate(in: result.results),
-            sourceCount: groups.results.count
+            sourceCount: distinctReceiptSourceCount(in: result.results)
         )
     }
     return try encodedToolResult(result)
