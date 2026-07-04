@@ -2283,6 +2283,34 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(failed.errorMessage, "Retry failed: Parakeet inference failed")
     }
 
+    func testFinalizedFailedAudioPromotionPreservesExistingSystemAudioWhenCallbackHasOnlyMic() throws {
+        let manager = makeManager()
+        let failedId = UUID()
+        let originalMicURL = tempDirectory.appendingPathComponent("audio/timeout-mic.wav")
+        let finalizedMicURL = tempDirectory.appendingPathComponent("audio/timeout-mic-final.wav")
+        let existingSystemURL = tempDirectory.appendingPathComponent("audio/timeout-system.wav")
+        FileManager.default.createFile(atPath: originalMicURL.path, contents: Data("mic".utf8))
+        FileManager.default.createFile(atPath: finalizedMicURL.path, contents: Data("final-mic".utf8))
+        FileManager.default.createFile(atPath: existingSystemURL.path, contents: Data("system".utf8))
+
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            id: failedId,
+            micAudioURL: originalMicURL,
+            systemAudioURL: existingSystemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+
+        XCTAssertTrue(manager.promoteFinalizedFailedTranscriptionAudio(
+            id: failedId,
+            micAudioURL: finalizedMicURL,
+            systemAudioURL: nil
+        ))
+
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(failed.micAudioURL, finalizedMicURL)
+        XCTAssertEqual(failed.systemAudioURL, existingSystemURL)
+    }
+
     private func makeManager(
         speechToText: (any SpeechToTextEngine)? = nil,
         diarization: (any DiarizationEngine)? = nil,
