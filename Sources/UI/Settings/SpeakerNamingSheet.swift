@@ -56,10 +56,12 @@ final class SpeakerNamingSheet {
             self?.currentWindowController = nil
         }
         currentWindowController = controller
-        controller.showWindow(nil)
         controller.window?.center()
-        controller.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if NSApp.isActive {
+            controller.window?.makeKeyAndOrderFront(nil)
+        } else {
+            controller.window?.orderFrontRegardless()
+        }
     }
 
     private func dismissCurrentWindowBecauseRequestCleared() {

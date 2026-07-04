@@ -56,7 +56,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
             )
         case .transcriptSaved:
             let transcriptURL = lastSavedTranscriptURL
-            let transcriptName = resolvedTranscriptName(
+            let transcriptName = HomeTranscriptionActivityCopy.resolvedTranscriptName(
                 lastSavedTitle: lastSavedTitle,
                 transcriptURL: transcriptURL
             )
@@ -81,7 +81,7 @@ struct HomeTranscriptionActivityPresentation: Equatable {
                 symbolName: "exclamationmark.circle.fill",
                 title: "Couldn't finish transcript",
                 status: "Needs attention",
-                detail: failedTranscriptionDetail(for: message),
+                detail: HomeTranscriptionActivityCopy.failedTranscriptionDetail(for: message),
                 tone: .caution,
                 progress: nil,
                 transcriptURL: nil
@@ -127,29 +127,5 @@ struct HomeTranscriptionActivityPresentation: Equatable {
         case .idle, .ready, .transcribing:
             return nil
         }
-    }
-
-    private static func resolvedTranscriptName(lastSavedTitle: String?, transcriptURL: URL?) -> String? {
-        if let lastSavedTitle, !lastSavedTitle.isEmpty {
-            return lastSavedTitle
-        }
-
-        guard let transcriptURL else { return nil }
-        return transcriptURL.deletingPathExtension().lastPathComponent
-    }
-
-    private static func failedTranscriptionDetail(for message: String) -> String {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if normalized.contains("audio file")
-            || normalized.contains("convert")
-            || normalized.contains("choose audio") {
-            if normalized.contains("choose")
-                || normalized.contains("try ") {
-                return message
-            }
-            return "\(message) Choose another file, or convert it to WAV or M4A and import it again."
-        }
-
-        return "\(message) If audio was saved, the meeting row below will show Try again."
     }
 }

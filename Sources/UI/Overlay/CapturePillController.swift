@@ -109,6 +109,8 @@ final class CapturePillController {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, let panel = self.panel, panel.isVisible else { return event }
+            // Only handle Return/Escape once the pill itself owns the key event.
+            // Keystrokes aimed at Home, Settings, or a speaker-review field must pass through.
             guard event.window === panel || panel.isKeyWindow else { return event }
             switch event.keyCode {
             case 36:
@@ -125,16 +127,17 @@ final class CapturePillController {
 
     private func position(panel: NSPanel) {
         let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) }
-            ?? NSScreen.main
-            ?? NSScreen.screens.first
+        let selectedFrame = CapturePillPlacementPolicy.selectedScreenFrame(
+            mouseLocation: mouseLocation,
+            screenFrames: NSScreen.screens.map(\.frame),
+            fallbackScreenFrame: NSScreen.main?.frame
+        )
+        let screen = selectedFrame.flatMap { frame in
+            NSScreen.screens.first { $0.frame == frame }
+        } ?? NSScreen.main ?? NSScreen.screens.first
         let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let size = panel.frame.size
-        let inset: CGFloat = 18
-        let origin = NSPoint(
-            x: visibleFrame.midX - size.width / 2,
-            y: visibleFrame.maxY - size.height - inset
-        )
+        let origin = CapturePillPlacementPolicy.origin(panelSize: size, visibleFrame: visibleFrame)
         panel.setFrameOrigin(origin)
     }
 }
@@ -300,7 +303,16 @@ private final class CapturePillView: NSView {
             : NSColor.controlColor.withAlphaComponent(0.85).cgColor
         button.contentTintColor = isPrimary ? .white : .labelColor
         button.setAccessibilityLabel(title)
-        button.setAccessibilityHelp(isPrimary ? "Start recording this meeting." : "Dismiss this meeting prompt.")
+        let help: String
+        switch title {
+        case "Record":
+            help = "Start recording this meeting."
+        case "Remind me soon":
+            help = "Ask again soon."
+        default:
+            help = "Dismiss this meeting prompt."
+        }
+        button.setAccessibilityHelp(help)
         addSubview(button)
     }
 
@@ -308,11 +320,11 @@ private final class CapturePillView: NSView {
         onRecord?()
     }
 
-    @objc private func dismissTapped() {
-        onDismiss?()
-    }
-
     @objc private func remindTapped() {
         onRemind?()
+    }
+
+    @objc private func dismissTapped() {
+        onDismiss?()
     }
 }

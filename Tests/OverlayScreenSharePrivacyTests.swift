@@ -49,6 +49,32 @@ func testOverlayScreenSharePrivacy() async {
         assertTrue(panel.canBecomeKey, "the capture pill must be keyboard-dismissable")
     }
 
+    runSuite("CapturePillController scopes Return and Escape to the pill panel") {
+        let capturePill = overlayPrivacySource("Sources/UI/Overlay/CapturePillController.swift")
+        let presentBlock = overlayPrivacySlice(
+            capturePill,
+            from: "func present(",
+            to: "func dismiss(notify: Bool)"
+        )
+        let monitorBlock = overlayPrivacySlice(
+            capturePill,
+            from: "private func installEventMonitor()",
+            to: "private func position(panel: NSPanel)"
+        )
+
+        assertFalse(
+            presentBlock.contains("panel.makeKey()"),
+            "showing the detected-meeting pill must not steal key focus from the current Transcripted window"
+        )
+        assertTrue(
+            monitorBlock.contains("event.window === panel || panel.isKeyWindow")
+                && monitorBlock.contains("case 36:")
+                && monitorBlock.contains("case 53:")
+                && monitorBlock.contains("return event"),
+            "Return/Escape should be swallowed only when the key event belongs to the pill panel"
+        )
+    }
+
     // Source contract: most app surfaces live in files the fast runner cannot
     // compile in isolation, so guard their init bodies at the source level.
     runSuite("every Transcripted NSWindow/NSPanel init sets sharingType = .none") {
@@ -162,8 +188,20 @@ func testOverlayScreenSharePrivacy() async {
             to: "// Ad-hoc call detection:"
         )
         assertTrue(
-            promptRequest.contains("capturePillController.present(candidate: candidate, timeout:"),
+            promptRequest.contains("capturePillController.present("),
             "detected meeting prompts should use the floating capture pill"
+        )
+        assertTrue(
+            promptRequest.contains("MeetingPromptHeuristics.promptTimeoutSeconds"),
+            "detected meeting prompts should preserve calendar vs ad-hoc prompt timeouts"
+        )
+        assertTrue(
+            app.contains("capturePillController.onRemind = remindPrompt"),
+            "the capture pill should expose the short remind-soon path"
+        )
+        assertTrue(
+            app.contains("capturePillController.onExpired = expirePrompt"),
+            "the capture pill timeout should use the expiry path, not an explicit dismissal"
         )
         assertFalse(
             promptRequest.contains("meetingOverlayController.presentDetectedMeetingPrompt(candidate)"),

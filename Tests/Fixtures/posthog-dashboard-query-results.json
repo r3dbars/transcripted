@@ -3,13 +3,13 @@
     {
       "id": "wau.active_devices_by_week",
       "rows": [
-        {"week": "2026-06-15", "active_devices": 87, "workflow_events": 420, "first_value_devices": 31, "return_proxy_devices": 12}
+        {"week": "2026-06-15", "active_devices": 87, "workflow_events": 420, "first_value_devices": 31, "second_artifact_devices": 14, "agent_payoff_devices": 6, "return_proxy_devices": 12, "habit_loop_devices": 9}
       ]
     },
     {
       "id": "wau.daily_active_devices",
       "rows": [
-        {"day": "2026-06-18", "active_devices": 24, "launch_events": 28, "workflow_events": 91, "first_value_devices": 9}
+        {"day": "2026-06-18", "active_devices": 24, "launch_events": 28, "workflow_events": 91, "first_value_devices": 9, "second_artifact_devices": 4, "agent_payoff_devices": 2, "habit_loop_devices": 5}
       ]
     },
     {
@@ -30,6 +30,10 @@
           "saved_markdown_or_dictation_proxy_devices": 35,
           "artifact_action_devices": 18,
           "agent_proxy_devices": 9,
+          "second_artifact_devices": 11,
+          "habit_loop_devices": 6,
+          "next_day_return_devices": 4,
+          "seven_day_return_devices": 3,
           "true_agent_query_devices": 0,
           "return_proxy_devices": 7
         }
@@ -63,7 +67,7 @@
     {
       "id": "artifact_usefulness.saved_and_used_artifacts",
       "rows": [
-        {"artifact_kind": "meeting", "surface": "home", "saved_events": 19, "second_artifact_events": 6, "action_events": 11, "return_proxy_events": 7, "devices": 23}
+        {"artifact_kind": "meeting", "surface": "home", "saved_events": 19, "second_artifact_events": 6, "action_events": 11, "habit_loop_events": 5, "return_proxy_events": 7, "devices": 23}
       ]
     },
     {
@@ -99,7 +103,20 @@
     {
       "id": "retry_recovery.workflow_recovery",
       "rows": [
-        {"event": "workflow_recovery_finished", "workflow_kind": "meeting_transcript", "failure_kind": "model_unavailable", "retry_source": "home", "artifact_retained": true, "result": "success", "attempt_bucket": "second", "events": 3, "devices": 2}
+        {"event": "workflow_recovery_finished", "workflow_kind": "meeting_transcript", "failure_kind": "model_unavailable", "retry_source": "home", "artifact_retained": true, "result": "success", "recovery_attempt_bucket": "second", "events": 3, "devices": 2}
+      ]
+    },
+    {
+      "id": "activation.habit_loop_summary",
+      "rows": [
+        {"first_artifact_devices": 23, "second_artifact_devices": 11, "agent_payoff_devices": 6, "next_day_return_devices": 4, "seven_day_return_devices": 3, "review_yesterday_devices": 3, "promise_review_devices": 2, "open_recent_meeting_devices": 5, "daily_digest_devices": 0}
+      ]
+    },
+    {
+      "id": "activation.habit_loop_actions",
+      "rows": [
+        {"action_kind": "open_recent_meeting", "artifact_kind": "meeting", "return_window_bucket": "18_36h", "surface": "home_row", "result": "success", "events": 7, "devices": 5},
+        {"action_kind": "review_yesterday", "artifact_kind": "dictation", "return_window_bucket": "3_7d", "surface": "home_menu", "result": "success", "events": 4, "devices": 3}
       ]
     },
     {

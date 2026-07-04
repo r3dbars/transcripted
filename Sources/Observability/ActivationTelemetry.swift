@@ -19,6 +19,22 @@ enum ActivationTelemetry {
         case preview
     }
 
+    enum HabitLoopActionKind: String {
+        case dailyDigestExported = "daily_digest_exported"
+        case dailyDigestViewed = "daily_digest_viewed"
+        case openRecentMeeting = "open_recent_meeting"
+        case returnAfterFirstArtifact = "return_after_first_artifact"
+        case returnAfterSecondArtifact = "return_after_second_artifact"
+        case reviewYesterday = "review_yesterday"
+        case whatDidIPromise = "what_did_i_promise"
+    }
+
+    enum HabitLoopResult: String {
+        case success
+        case fallback
+        case failed
+    }
+
     enum ArtifactActionResult: String {
         case blocked
         case clicked
@@ -156,6 +172,30 @@ enum ActivationTelemetry {
             "activation_artifact_action_clicked",
             properties: properties
         )
+    }
+
+    static func trackHabitLoopAction(
+        actionKind: HabitLoopActionKind,
+        surface: Surface,
+        artifactKind: ArtifactKind = .unknown,
+        artifactDate: Date? = nil,
+        artifactCount: Int? = nil,
+        result: HabitLoopResult = .success,
+        now: Date = Date()
+    ) {
+        var properties = [
+            "action_kind": actionKind.rawValue,
+            "artifact_count_bucket": artifactCountBucket(artifactCount),
+            "artifact_kind": artifactKind.rawValue,
+            "result": result.rawValue,
+            "surface": surface.rawValue,
+        ]
+        if let artifactDate,
+           let returnWindowBucket = returnWindowBucket(since: artifactDate, now: now) {
+            properties["return_window_bucket"] = returnWindowBucket
+        }
+
+        AnalyticsReporter.track("activation_habit_loop_actioned", properties: properties)
     }
 
     @discardableResult
@@ -439,6 +479,22 @@ enum ActivationTelemetry {
             return "8_30d"
         default:
             return "older"
+        }
+    }
+
+    static func artifactCountBucket(_ count: Int?) -> String {
+        guard let count else { return "unknown" }
+        switch max(0, count) {
+        case 0:
+            return "0"
+        case 1:
+            return "1"
+        case 2:
+            return "2"
+        case 3...5:
+            return "3_5"
+        default:
+            return "6_plus"
         }
     }
 }
