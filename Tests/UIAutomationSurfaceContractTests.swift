@@ -396,6 +396,31 @@ func testUIAutomationSurfaceContract() {
             "copy-for-agent and re-transcribe should surface a failure alert when the own file is missing, instead of NSSound.beep()"
         )
 
+        // Local AI meeting summary must resolve the transcript before reading it,
+        // same as copy/open/re-transcribe (FIX_ROADMAP "Local AI summary path
+        // skips OwnFileResolver") — a raw scan-time URL surfaces an ugly read
+        // error instead of the friendly "Could not summarize meeting" alert when
+        // the file drifted (restyle/preview rename) since the row was scanned.
+        assertTrue(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("private func generateLocalSummary(")
+                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(
+                    "guard let resolvedTranscriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [transcriptURL])"
+                ),
+            "generateLocalSummary should resolve the transcript through OwnFileResolver before summarizing, not read the raw scan-time URL"
+        )
+        assertFalse(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(
+                "LocalMeetingSummarizer().summarize(\n                    transcriptURL: transcriptURL,"
+            ),
+            "the local summary provider dispatch must hand the OwnFileResolver-resolved URL to LocalMeetingSummarizer, not the raw unresolved transcriptURL"
+        )
+        assertFalse(
+            contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(
+                "AppleFoundationMeetingSummarizer().summarize(\n                    transcriptURL: transcriptURL,"
+            ),
+            "the local summary provider dispatch must hand the OwnFileResolver-resolved URL to AppleFoundationMeetingSummarizer, not the raw unresolved transcriptURL"
+        )
+
         // Retained-audio playback follows recompressed/moved files instead of going
         // silently Unavailable on a stale path.
         assertTrue(
