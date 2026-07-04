@@ -204,25 +204,32 @@ public class TranscriptionTaskManager: ObservableObject {
             } catch {
                 AppLogger.pipeline.error("Transcription task failed", ["taskId": "\(task.id)", "error": "\(error.localizedDescription)"])
 
-                await MainActor.run {
+                let shouldPreserveFailedAudio = await MainActor.run { () -> Bool in
                     if self.preservedTaskIdsForShutdown.remove(task.id) != nil {
                         self.handleTaskCompletion(taskId: task.id)
-                        return
+                        return false
                     }
-                    guard !self.finishCancelledTaskIfNeeded(taskId: task.id, error: error) else { return }
+                    guard !self.finishCancelledTaskIfNeeded(taskId: task.id, error: error) else { return false }
 
                     self.publishFailure(
                         displayMessage: "Transcription failed",
                         diagnosticMessage: Self.safeFailureDiagnosticMessage(for: error)
                     )
-                    self.addFailedTranscriptionRetainingAvailableAudio(
-                        micAudioURL: micURL,
-                        systemAudioURL: systemURL,
-                        errorMessage: error.localizedDescription,
-                        taskId: task.id,
-                        meetingTitle: task.meetingTitle,
-                        recordingDate: task.recordingDate
-                    )
+                    return true
+                }
+
+                guard shouldPreserveFailedAudio else { return }
+
+                _ = await self.addFailedTranscriptionRetainingAvailableAudioAfterArchive(
+                    micAudioURL: micURL,
+                    systemAudioURL: systemURL,
+                    errorMessage: error.localizedDescription,
+                    taskId: task.id,
+                    meetingTitle: task.meetingTitle,
+                    recordingDate: task.recordingDate
+                )
+
+                await MainActor.run {
                     self.sendFailureNotification(errorMessage: error.localizedDescription)
                     self.handleTaskCompletion(taskId: task.id)
                 }
@@ -230,6 +237,69 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         activeTasks[task.id] = asyncTask
+    }
+
+    /// Retains failed audio before writing the durable failed-queue row, without
+    /// doing large file copies on the main actor. This is for async failure paths
+    /// where losing the process mid-copy can still fall back to the recording
+    /// journal / scratch audio recovery on next launch.
+    @discardableResult
+    public func addFailedTranscriptionRetainingAvailableAudioAfterArchive(
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        errorMessage: String,
+        taskId: UUID = UUID(),
+        meetingTitle: String? = nil,
+        recordingDate: Date? = nil,
+        archiveAudio: Bool = true
+    ) async -> Bool {
+        guard micAudioURL != nil || systemAudioURL != nil else {
+            AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
+                "taskId": taskId.uuidString
+            ])
+            return false
+        }
+
+        if archiveAudio,
+           let retainedAudioDirectory = resolvedRetainedAudioDirectory() {
+            let failedStem = "Failed_\(DateFormattingHelper.formatFilename(Date()))_\(String(taskId.uuidString.prefix(8)))"
+            let placeholderTranscriptURL = retainedAudioDirectory
+                .appendingPathComponent(failedStem)
+                .appendingPathExtension("md")
+
+            let retainedAudio = await Task.detached(priority: .utility) {
+                Self.archiveFailedRecordingAudio(
+                    micURL: micAudioURL,
+                    systemURL: systemAudioURL,
+                    taskId: taskId,
+                    transcriptURL: placeholderTranscriptURL,
+                    archiveRoot: retainedAudioDirectory
+                )
+            }.value
+
+            if let retainedAudio {
+                return enqueueFailedTranscriptionAfterRetainingAudio(
+                    taskId: taskId,
+                    retainedAudio: retainedAudio,
+                    originalMicURL: micAudioURL,
+                    originalSystemURL: systemAudioURL,
+                    errorMessage: errorMessage,
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate,
+                    removeOriginalsAfterArchive: true
+                )
+            }
+        }
+
+        return addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: errorMessage,
+            taskId: taskId,
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate,
+            archiveAudio: archiveAudio
+        )
     }
 
     /// Start a new transcription task for an imported audio file.
@@ -844,7 +914,7 @@ public class TranscriptionTaskManager: ObservableObject {
                     "reason": reason
                 ])
             case .recover(let micURL, let systemURL, let startedAt):
-                let didPersist = addFailedTranscriptionRetainingAvailableAudio(
+                let didPersist = await addFailedTranscriptionRetainingAvailableAudioAfterArchive(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: "Recording was interrupted before it could be saved. The recovered audio is ready to transcribe.",
