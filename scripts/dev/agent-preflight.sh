@@ -210,6 +210,13 @@ if [ -n "$changed_paths" ]; then
             add_command "python3 scripts/ops/release-gate-report.py --self-test"
         fi
 
+        if matches_any "$path" "scripts/release/bump-release-version.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/release/bump-release-version.py"
+            add_command "python3 scripts/release/bump-release-version.py --self-test"
+            add_command "python3 scripts/release/bump-release-version.py --version 1.1.49 --dry-run"
+        fi
+
         if matches_any "$path" "scripts/release/post-dmg-release-audit.py"; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/release/post-dmg-release-audit.py"
