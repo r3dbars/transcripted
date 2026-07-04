@@ -66,12 +66,12 @@ The strongest zero-effort capture lever is on by default and never taught; onboa
 - Manual-path copy: `PermissionsOnboardingView.swift:251`; calendar-only framing `:288-318`
 - Feature is real and wired: `MicActivityMonitor.swift` → `MeetingPromptDetector`, gated at `TranscriptedApp.swift:237-244`
 
-### 8. Adaptive 0.70 match floor binds + merges clusters below the 0.92 naming bar, no per-utterance unmerge
-**Impact 6 · Effort M**
-Two distinct people each landing 0.70–0.92 against the same profile (and no runner-up within 0.05) get silently fused into one row; review then names the fused cluster and the mis-attribution survives. The 0.05 guard already catches the most ambiguous sub-case, so the window is narrow but real. **Same matching surface as #6 + the ladder/ERes2Net work — sequence together** to avoid a naive floor bump undoing the cross-cluster de-fragmentation those lines were written for.
-- `TranscriptionPipeline.swift:300-309`, merge at `:334-347`, baked onto utterances `:403-424`
-- Separation guard: `SpeakerMatchingService.swift:106`
-- Fix: decouple a stricter link/merge floor from the looser per-utterance attach; add eval coverage.
+### 8. ~~Adaptive 0.70 match floor binds + merges clusters below the 0.92 naming bar, no per-utterance unmerge~~ — RESOLVED
+**Verified fixed 2026-07-03 (re-audit; this doc was stale).** The link/merge floor is decoupled from the per-utterance attach floor exactly as prescribed below, and per-utterance unmerge shipped separately:
+- `SpeakerWritePathPolicy.crossClusterLinkFloor` (0.78) + `Transcription.planCrossClusterLinks` fuse same-profile clusters only when directly similar to *each other*, spinning distinct voices off to a fresh profile — [#1236](https://github.com/r3dbars/transcripted/pull/1236) (merged 2026-06-22). Wired in both pipeline paths: `TranscriptionPipeline.swift:343-410` (system), `:936-964` (mic); planner at `SpeakerMatchingService.swift:111-196`.
+- Per-utterance/per-contribution unmerge (`reassignContribution`, `unmergeMostRecent`) — [#1330](https://github.com/r3dbars/transcripted/pull/1330) (merged 2026-07-01), `SpeakerProfileProvenance.swift`.
+- Coverage: `SpeakerWritePathPolicyTests` (13 tests incl. the exact two-distinct-people-one-profile case), `SpeakerProvenanceTests` (8), `SpeakerWriteBackGateTests` (3) — all pass on current `main`. Independent codex-reviewer pass on #1236 (PASS, follow-up hardening applied same PR).
+- **Residual gap, not this item:** validated so far only on synthetic controlled-geometry corpora (`scripts/gen_synthetic_speaker_eval.py`); a real AMI/VoxCeleb sweep of `crossClusterLinkFloor=0.78` specifically (flagged as outstanding in #1236 itself) has not been run.
 
 ### 9. Disk-full / write errors silently kill audio while recording keeps "running"
 **Impact 5 · Effort S**
@@ -104,7 +104,7 @@ Return is purely observational (`trackReturnProxyIfEligible`); nothing *causes* 
 
 - **Meeting capture: calendar pre-arm + browser detection + one-tap** — `docs/MEETING_CAPTURE_PROMPTING.md` (design doc, commit e79cc462). Targets the *production* detection problem (off-by-default auto-record, browser blind spot, late start). Adjacent to onboarding #3/#7 but a different surface — sequence onboarding behind it.
 - **Recording-consent / disclosure model** — folded into the meeting-capture prompting design (section 4: all-party consent, per-recording verbal disclosure, consent log, Otter-case-aware). The standalone one-time-banner idea is the *weak* fix this work explicitly rejects. Do **not** spin up a parallel task.
-- **Speaker-naming certified ladder** (0.92/0.12 auto-name bar) + **ERes2Net #1175** (embedding-model swap). Both touch the matching surface that #6 and #8 ride behind. The ladder raises only the auto-*name* bar, not the upstream link/merge floor — so #6/#8 are real gaps it does not close.
+- **Speaker-naming certified ladder** (0.92/0.12 auto-name bar) + **ERes2Net #1175** (embedding-model swap, superseded/rebased as #1346). Both touch the matching surface that #6 and #8 ride behind. The ladder raises only the auto-*name* bar, not the upstream link/merge floor — but #6 and #8 are both now closed separately, by [#1236](https://github.com/r3dbars/transcripted/pull/1236) (write-path gate + link/merge floor decouple) and [#1330](https://github.com/r3dbars/transcripted/pull/1330) (per-utterance unmerge). See #8 above.
 - **Telemetry / triage PRs** (#1177, #1218, #1169, #1221, #1211). Measurement, not fixes. #11 depends on #1221/#1211 landing.
 - **Config-change audio-engine teardown hardening** — active workstream (commit 804617e7, AirPods/BT wedge). The teardown-timeout finding is **dropped**: no beachball (awaits suspend, not block the MainActor), a 4s watchdog already recovers, in-flight audio is snapshotted. File as a small follow-up to that line if at all.
 
