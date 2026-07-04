@@ -189,6 +189,13 @@ rules:
       - "python3 scripts/release/post-dmg-release-audit.py --self-test"
 
   - paths:
+      - "scripts/release/sentry-release-dry-run.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/release/sentry-release-dry-run.py"
+      - "python3 scripts/release/sentry-release-dry-run.py --self-test"
+
+  - paths:
       - "scripts/ops/packaged-app-smoke.py"
     checks:
       - "scripts/dev/agent-preflight.sh"

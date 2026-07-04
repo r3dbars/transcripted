@@ -47,6 +47,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
+- `scripts/release/sentry-release-dry-run.py` — read-only Sentry release/dSYM readiness check; it never creates/finalizes releases, sets commits, or uploads debug files
 - `scripts/release/register-sentry-release.sh` — create/finalize the matching Sentry release, verify the release dSYM matches the app binary, and upload it after a GitHub release is published
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
