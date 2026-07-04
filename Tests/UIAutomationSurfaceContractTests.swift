@@ -460,6 +460,25 @@ func testUIAutomationSurfaceContract() {
             assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(requiredOnboardingHook), "\(requiredOnboardingHook) should stay in onboarding automation scope")
         }
 
+        // Auto-detect calls is default-on (AutoCallDetectionPreferences) but onboarding
+        // used to teach only the manual menu-bar path and frame detection as
+        // calendar-only. These guard the copy fix: the meetingStart step should prime
+        // users that Transcripted notices a call starting in any app/browser using the
+        // mic and asks once, and the calendar step should frame calendar access as an
+        // addition to that always-on detection rather than the only way calls get noticed.
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Transcripted notices")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("when a call starts.")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("no calendar invite required")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Works with any call, calendar invite or not"),
+            "the meetingStart onboarding step should teach auto-detect calls instead of only the manual menu-bar path"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("already notices when a call starts")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Calendar reminders"),
+            "the calendar onboarding step should frame calendar access as an addition to always-on call detection, not the only way calls get noticed"
+        )
+
         for identifier in [
             "transcripted.speaker-review.save-names",
             "transcripted.speaker-review.review-later",
