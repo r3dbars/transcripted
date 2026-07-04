@@ -159,6 +159,7 @@ NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
 Before you publish a user-facing release note, sanity-check the release state:
 
 - compare `Info.plist` `CFBundleShortVersionString` against the latest GitHub release tag
+- run `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.48.json --write-report build/nightly-security-report.json` before a preparatory version bump so bundle version fields, the latest appcast item, and the Homebrew cask cannot silently drift
 - confirm the build output prints the expected Sentry release and dist
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
 - if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
