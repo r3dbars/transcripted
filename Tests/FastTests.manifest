@@ -1,6 +1,9 @@
 # Fast test manifest
 # Format: <TestFile.swift>:<top-level entry function>
 
+PayloadSanitizationCoreTests.swift:testPayloadSanitizationCore
+LocalObservabilityPayloadSanitizerTests.swift:testLocalObservabilityPayloadSanitizer
+TimelineCaptureStateMachineTests.swift:testTimelineCaptureStateMachine
 ActivationPolicyControllerTests.swift:testActivationPolicyController
 AccessibilityBridgeTests.swift:testAccessibilityBridge
 AuditRegressionCoverageContractTests.swift:testAuditRegressionCoverageContract
