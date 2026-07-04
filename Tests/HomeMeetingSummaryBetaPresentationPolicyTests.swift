@@ -171,12 +171,14 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
         let notice = HomeLocalSummaryNotice(
             transcriptURL: URL(fileURLWithPath: "/tmp/failed.md"),
             meetingTitle: "Failed Setup",
-            failureMessage: "model load failed:\nmissing model cache"
+            failureMessage: "model load failed:\nmissing model cache",
+            failureKind: "runtime_unavailable"
         )
 
         assertEqual(notice.title, "AI summary failed", "failure notice should be explicit")
         assertEqual(notice.status, "Needs retry", "failure notice should not look complete")
         assertEqual(notice.actionTitle, "Retry summary", "failure notice should offer retry")
+        assertEqual(notice.failureKind, "runtime_unavailable", "failure notice should retain the coarse failure kind for retry telemetry")
         assertFalse(notice.shouldAutoDismiss, "failure notice should persist until the user acts")
         assertFalse(notice.allowsManualDismiss, "failure notice should not hide behind a dismiss affordance")
         assertTrue(
@@ -193,7 +195,8 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
         let notice = HomeLocalSummaryNotice(
             transcriptURL: sampleHomeLocalSummaryNoticeURL("blank-failure.md"),
             meetingTitle: "Summary Notice",
-            failureMessage: " \n\t "
+            failureMessage: " \n\t ",
+            failureKind: "other"
         )
 
         assertEqual(notice.status, "Needs retry", "blank failure notices should still be actionable")
@@ -213,12 +216,14 @@ func testHomeMeetingSummaryBetaPresentationPolicy() {
         let notice = HomeLocalSummaryNotice(
             transcriptURL: sampleHomeLocalSummaryNoticeURL("long-failure.md"),
             meetingTitle: "Summary Notice",
-            failureMessage: rawMessage
+            failureMessage: rawMessage,
+            failureKind: "process_failed"
         )
 
-        if case .failed(let message) = notice.kind {
+        if case .failed(let message, let failureKind) = notice.kind {
             assertEqual(message.count, 183, "long failure messages should be capped to 180 characters plus an ellipsis")
             assertTrue(message.hasSuffix("..."), "truncated failure messages should be visibly abbreviated")
+            assertEqual(failureKind, "process_failed", "failure kind should not be derived from user-facing copy")
         } else {
             assertTrue(false, "long failure input should create a failure notice")
         }

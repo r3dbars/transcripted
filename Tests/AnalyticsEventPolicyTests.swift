@@ -501,6 +501,67 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["url"], "raw URLs must not be sent")
     }
 
+    runSuite("AnalyticsEventPolicy allows workflow recovery taxonomy") {
+        let attempted = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_attempted")
+        assertEqual(
+            attempted?.allowedProperties ?? Set<String>(),
+            ["artifact_retained", "failure_kind", "recovery_attempt_bucket", "retry_source", "surface", "workflow_kind"],
+            "workflow recovery attempts should stay coarse and enum-only"
+        )
+
+        let finished = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_finished")
+        assertEqual(
+            finished?.allowedProperties ?? Set<String>(),
+            ["artifact_retained", "elapsed_bucket", "failure_kind", "recovery_attempt_bucket", "result", "retry_source", "surface", "workflow_kind"],
+            "workflow recovery terminal events should preserve only buckets and terminal result"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "workflow_kind": "local_summary",
+                "failure_kind": "timeout",
+                "retry_source": "summary_failure_notice",
+                "recovery_attempt_bucket": "1",
+                "elapsed_bucket": "30_59s",
+                "result": "success",
+                "surface": "home",
+                "artifact_retained": "true",
+                "attempt_bucket": "1",
+                "meeting_title": "Customer call",
+                "audio_path": "/Users/redbars/private.wav",
+                "transcript_text": "private transcript",
+                "raw_error": "stack trace",
+            ],
+            allowedKeys: finished?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["workflow_kind"], "local_summary", "workflow kind should survive")
+        assertEqual(sanitized["failure_kind"], "timeout", "failure kind should survive")
+        assertEqual(sanitized["retry_source"], "summary_failure_notice", "retry source should survive")
+        assertEqual(sanitized["recovery_attempt_bucket"], "1", "recovery attempt bucket should survive")
+        assertEqual(sanitized["elapsed_bucket"], "30_59s", "elapsed bucket should survive")
+        assertEqual(sanitized["result"], "success", "terminal result should survive")
+        assertEqual(sanitized["surface"], "home", "surface should survive")
+        assertEqual(sanitized["artifact_retained"], "true", "artifact retention should survive as a boolean string")
+        assertNil(sanitized["attempt_bucket"], "legacy attempt bucket should not be allowlisted")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["audio_path"], "audio paths must not be sent")
+        assertNil(sanitized["transcript_text"], "transcript text must not be sent")
+        assertNil(sanitized["raw_error"], "raw errors must not be sent")
+    }
+
+    runSuite("WorkflowRecoveryTelemetry emits the allowlisted recovery attempt bucket") {
+        let source = readAnalyticsPolicyRepoTextFile("Sources/Observability/WorkflowRecoveryTelemetry.swift")
+        assertTrue(
+            source.contains("\"recovery_attempt_bucket\": AnalyticsReporter.countBucket(attempt)"),
+            "workflow recovery helper should emit the allowlisted recovery attempt bucket key"
+        )
+        assertFalse(
+            source.contains("\"attempt_bucket\""),
+            "workflow recovery helper should not emit the legacy attempt bucket key"
+        )
+    }
+
     runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {
         let friction = AnalyticsEventPolicy.policy(forEvent: "product_friction_observed")
         assertEqual(
@@ -1433,6 +1494,13 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive sanitization")
         assertNil(sanitized["app_name"], "unallowlisted properties must be dropped")
     }
+}
+
+private func readAnalyticsPolicyRepoTextFile(_ relativePath: String) -> String {
+    let path = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent(relativePath)
+        .path
+    return (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
 }
 
 private func documentedAnalyticsEvents() -> [String] {

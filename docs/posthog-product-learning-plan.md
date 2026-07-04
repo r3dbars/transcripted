@@ -97,6 +97,8 @@ Operational scripts query aggregate counts only:
 | `activation_agent_setup_cta_clicked` | `agent_target`, `prior_status`, `result`, `setup_kind`, `surface` |
 | `activation_return_proxy_observed` | `prior_artifact_kind`, `proxy_kind`, `return_window_bucket`, `surface` |
 | `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
+| `workflow_recovery_attempted` | `artifact_retained`, `failure_kind`, `recovery_attempt_bucket`, `retry_source`, `surface`, `workflow_kind` |
+| `workflow_recovery_finished` | `artifact_retained`, `elapsed_bucket`, `failure_kind`, `recovery_attempt_bucket`, `result`, `retry_source`, `surface`, `workflow_kind` |
 | `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 
 ### Menu, Settings, Updates
@@ -293,12 +295,17 @@ summary requested -> summary finished.
 
 Break down by provider, source, route readiness, missing permission, trigger,
 system stream present, capture quality, queue depth, and failure kind.
+Use `workflow_recovery_finished` to split retry/recovery terminal results by
+`workflow_kind`, `failure_kind`, `retry_source`, `recovery_attempt_bucket`, and
+`result`.
 
 ### Local Summary Beta Funnel
 
-`meeting_transcript_saved` -> summary CTA shown -> `meeting_summary_requested`
--> `meeting_summary_finished` -> opened/copied/applied summary. Track model
-state, latency bucket, result, and failure kind only.
+`meeting_transcript_saved` -> `local_meeting_summary_started` ->
+`local_meeting_summary_completed` / `local_meeting_summary_failed` ->
+`workflow_recovery_finished` for retry from the failure notice ->
+opened/copied/applied summary. Track provider, runtime, duration bucket, result,
+and failure kind only.
 
 ### Agent And Markdown Value Loop
 
