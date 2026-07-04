@@ -1327,20 +1327,11 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private func importPreparationFailureKind(for error: Error) -> String {
-        if let preparationError = error as? MeetingImportedAudioPreparationError {
-            return preparationError.diagnosticKind
-        }
-
-        return MeetingFailureKind.classify(message: error.localizedDescription).rawValue
+        MeetingImportPreparationFailureCopy.kind(for: error)
     }
 
     private func importPreparationFailureMessage(for error: Error) -> String {
-        if let preparationError = error as? MeetingImportedAudioPreparationError,
-           let description = preparationError.errorDescription {
-            return description
-        }
-
-        return "Transcripted couldn't prepare that audio file. Try choosing it again, or convert it to WAV or M4A first."
+        MeetingImportPreparationFailureCopy.message(for: error)
     }
 
     /// Cancel any in-progress pipeline. Does not cancel an active recording —

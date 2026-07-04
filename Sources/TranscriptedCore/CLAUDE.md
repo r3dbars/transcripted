@@ -92,6 +92,7 @@ Current direct core coverage includes:
 - `Tests/TranscriptedCoreTests/AudioLevelPublishGateTests.swift`
 - `Tests/TranscriptedCoreTests/AudioPipelineDiagnosticsSnapshotShapeTests.swift`
 - `Tests/TranscriptedCoreTests/AudioResamplerTests.swift`
+- `Tests/TranscriptedCoreTests/AudioSignalRecoveryTests.swift`
 - `Tests/TranscriptedCoreTests/BluetoothMeetingRouteContractTests.swift`
 - `Tests/TranscriptedCoreTests/CoreStoragePathsTests.swift`
 - `Tests/TranscriptedCoreTests/DatabaseFilePermissionsTests.swift`
