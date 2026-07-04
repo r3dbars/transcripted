@@ -1624,26 +1624,22 @@ struct HomeFailedMeetingInlineRow: View {
     }
 
     private var retryDisabled: Bool {
-        !canRetry || !item.isRetryable || !item.hasAudioFiles || item.isRetrying
+        FailedMeetingRecoveryPresentation.retryDisabled(
+            canRetry: canRetry,
+            isRetryable: item.isRetryable,
+            isRetrying: item.isRetrying,
+            hasAudioFiles: item.hasAudioFiles
+        )
     }
 
     private var retryHelp: String {
-        if item.isRetrying {
-            return "Retry is already running."
-        }
-        if !item.hasAudioFiles {
-            return "This meeting does not have enough saved audio to retry."
-        }
-        if !item.isRetryable {
-            return "This meeting does not have enough saved audio to retry."
-        }
-        if let retryUnavailableReason {
-            return retryUnavailableReason
-        }
-        if !canRetry {
-            return "Wait for the current meeting work to finish before retrying."
-        }
-        return "Transcribe this saved audio again."
+        FailedMeetingRecoveryPresentation.retryHelp(
+            canRetry: canRetry,
+            retryUnavailableReason: retryUnavailableReason,
+            isRetryable: item.isRetryable,
+            isRetrying: item.isRetrying,
+            hasAudioFiles: item.hasAudioFiles
+        )
     }
 
     private var hasRetainedAudioFiles: Bool {
