@@ -144,7 +144,7 @@ final class ToolHandlersTests: XCTestCase {
                 date: "2026-04-18",
                 time: "09:15:00",
                 decisions: ["Ship the beta on Friday"],
-                actionItems: ["Jenny: send the revised spec"],
+                actionItems: ["Jenny: send the revised spec (due: Friday)"],
                 openQuestions: ["Do we need a migration window?"]
             ),
             filename: "Call_2026-04-18_09-15-00",
@@ -158,7 +158,9 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(meeting.title, "Beta launch sync")
         XCTAssertEqual(meeting.summarySource, "summary")
         XCTAssertEqual(meeting.decisions, ["Ship the beta on Friday"])
-        XCTAssertEqual(meeting.actionItems, [RecapActionItem(owner: "Jenny", text: "send the revised spec")])
+        XCTAssertEqual(meeting.actionItems, [
+            RecapActionItem(owner: "Jenny", text: "send the revised spec", due: "Friday")
+        ])
         XCTAssertEqual(meeting.openQuestions, ["Do we need a migration window?"])
         XCTAssertTrue(meeting.preview.contains("## Decisions"))
         XCTAssertFalse(meeting.preview.contains("[00:00]"), "recap should not leak raw dialogue when a summary exists")

@@ -373,11 +373,11 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         ]),
                         "status": .object([
                             "type": .string("string"),
-                            "description": .string("Which items to return: 'open' (default) or 'all'. 'done' is not supported — saved summaries do not track completion state yet.")
+                            "description": .string("Which items to return: 'open' (default), 'done', or 'all'.")
                         ]),
                         "query": .object([
                             "type": .string("string"),
-                            "description": .string("Optional full-text filter on the action item text")
+                            "description": .string("Optional full-text filter on the action item text, owner, status, or due metadata")
                         ]),
                         "date_from": .object([
                             "type": .string("string"),
@@ -1076,7 +1076,9 @@ func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDir
             if let summary = TranscriptLoader.loadMeetingSummary(forTranscript: mdURL) {
                 title = summary.title ?? title
                 decisions = summary.decisions
-                actionItems = summary.actionItems.map { RecapActionItem(owner: $0.owner, text: $0.text) }
+                actionItems = summary.actionItems.map {
+                    RecapActionItem(owner: $0.owner, text: $0.text, status: $0.status, due: $0.due)
+                }
                 openQuestions = summary.openQuestions
                 let hasStructuredFacts = !decisions.isEmpty || !actionItems.isEmpty || !openQuestions.isEmpty
                 if hasStructuredFacts {
@@ -1380,6 +1382,15 @@ struct RecapEntry: Codable {
 struct RecapActionItem: Codable, Equatable {
     let owner: String?
     let text: String
+    let status: String?
+    let due: String?
+
+    init(owner: String?, text: String, status: String? = nil, due: String? = nil) {
+        self.owner = owner
+        self.text = text
+        self.status = status
+        self.due = due
+    }
 }
 
 struct RecapResult: Codable {

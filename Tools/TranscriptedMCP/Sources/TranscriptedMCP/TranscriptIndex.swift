@@ -64,8 +64,8 @@ final class TranscriptIndex: @unchecked Sendable {
     /// Bump when the derived index shape changes so existing on-disk indexes are
     /// rebuilt from disk on next open. v2 added `meeting_summary_items`; v3 added
     /// the meeting-summary FTS document used by general search; v4 adds action
-    /// item `status` and `due` metadata.
-    private static let schemaVersion: Int32 = 4
+    /// item `status` and `due` metadata; v5 makes that metadata searchable.
+    private static let schemaVersion: Int32 = 5
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
@@ -231,7 +231,7 @@ final class TranscriptIndex: @unchecked Sendable {
 
         exec("""
             CREATE VIRTUAL TABLE IF NOT EXISTS meeting_summary_items_fts USING fts5(
-                text, owner,
+                text, owner, status, due,
                 content='meeting_summary_items', content_rowid='rowid',
                 tokenize='porter unicode61'
             )
@@ -239,15 +239,15 @@ final class TranscriptIndex: @unchecked Sendable {
 
         exec("""
             CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ai AFTER INSERT ON meeting_summary_items BEGIN
-                INSERT INTO meeting_summary_items_fts(rowid, text, owner)
-                VALUES (new.rowid, new.text, new.owner);
+                INSERT INTO meeting_summary_items_fts(rowid, text, owner, status, due)
+                VALUES (new.rowid, new.text, new.owner, new.status, new.due);
             END
         """)
 
         exec("""
             CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ad AFTER DELETE ON meeting_summary_items BEGIN
-                INSERT INTO meeting_summary_items_fts(meeting_summary_items_fts, rowid, text, owner)
-                VALUES ('delete', old.rowid, old.text, old.owner);
+                INSERT INTO meeting_summary_items_fts(meeting_summary_items_fts, rowid, text, owner, status, due)
+                VALUES ('delete', old.rowid, old.text, old.owner, old.status, old.due);
             END
         """)
 

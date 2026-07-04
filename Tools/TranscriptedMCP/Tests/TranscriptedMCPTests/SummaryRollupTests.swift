@@ -111,6 +111,10 @@ final class SummaryRollupTests: XCTestCase {
         let all = try index.listActionItems(owner: nil, query: nil, status: .all, dateFrom: nil, dateTo: nil)
         XCTAssertEqual(all.count, 3)
 
+        let dueSearch = try index.listActionItems(owner: nil, query: "Friday", status: .all, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(dueSearch.items.map(\.text), ["Draft the launch email"])
+        XCTAssertEqual(dueSearch.items.first?.due, "Friday")
+
         let digest = try index.digest(dateFrom: "2026-05-01", dateTo: "2026-05-01")
         XCTAssertEqual(digest.actionItemCount, 3)
         XCTAssertEqual(digest.openActionItemCount, 1)
