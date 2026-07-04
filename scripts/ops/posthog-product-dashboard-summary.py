@@ -253,17 +253,22 @@ SELECT
   properties['source'] AS source,
   properties['prompt_reason'] AS prompt_reason,
   properties['route_ready'] AS route_ready,
+  properties['choice_kind'] AS choice_kind,
+  properties['outcome_kind'] AS outcome_kind,
+  properties['elapsed_bucket'] AS elapsed_bucket,
   countIf(event = 'meeting_prompt_shown') AS shown_events,
+  countIf(event = 'meeting_prompt_choice_made') AS choice_events,
   countIf(event = 'meeting_prompt_record_selected') AS record_selected_events,
+  countIf(event = 'meeting_prompt_outcome_recorded') AS outcome_events,
   countIf(event = 'meeting_prompt_dismissed') AS dismissed_events,
   countIf(event = 'meeting_prompt_suppressed') AS suppressed_events,
   countIf(event = 'meeting_missed_call_nudge') AS missed_call_nudges,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('meeting_prompt_shown', 'meeting_prompt_record_selected', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
+  AND event IN ('meeting_prompt_shown', 'meeting_prompt_choice_made', 'meeting_prompt_record_selected', 'meeting_prompt_outcome_recorded', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
   {app_version_filter(app_version)}
-GROUP BY provider, source, prompt_reason, route_ready
+GROUP BY provider, source, prompt_reason, route_ready, choice_kind, outcome_kind, elapsed_bucket
 ORDER BY shown_events DESC, devices DESC
 LIMIT 50
 """
@@ -623,7 +628,14 @@ def build_under_discovered_feature(data: dict[str, Any]) -> Finding:
 def build_prompt_quality(data: dict[str, Any]) -> Finding:
     rows = data["results"].get("meeting_prompt_quality", [])
     shown = sum(as_int(row.get("shown_events")) for row in rows)
-    accepted = sum(as_int(row.get("record_selected_events")) for row in rows)
+    record_selected = sum(as_int(row.get("record_selected_events")) for row in rows)
+    record_choices = sum(
+        as_int(row.get("choice_events"))
+        for row in rows
+        if row.get("choice_kind") == "record"
+    )
+    accepted = max(record_selected, record_choices)
+    terminal = sum(as_int(row.get("outcome_events")) for row in rows)
     dismissed = sum(as_int(row.get("dismissed_events")) for row in rows)
     suppressed = sum(as_int(row.get("suppressed_events")) for row in rows)
     if shown <= 0 and accepted <= 0:
@@ -637,7 +649,7 @@ def build_prompt_quality(data: dict[str, Any]) -> Finding:
     friction = dismissed + suppressed
     return Finding(
         "Meeting prompt quality",
-        f"shown={shown}, accepted={accepted}, dismissed_or_suppressed={friction}, acceptance={pct(accepted, shown)}.",
+        f"shown={shown}, accepted_or_choice={accepted}, terminal_outcomes={terminal}, dismissed_or_suppressed={friction}, acceptance={pct(accepted, shown)}.",
         "If dismissal/suppression beats acceptance, inspect route-ready and missing-permission buckets before changing prompt copy.",
         "high" if shown >= 10 else "medium",
         float(friction - accepted),
@@ -941,6 +953,15 @@ def run_self_test() -> int:
     mismatch_metric = build_reliability_leak(mismatch_data).metric
     if "Meeting transcript failure" not in mismatch_metric or "meeting_transcript_failed" not in mismatch_metric or "dictation_no_speech" in mismatch_metric:
         print("self-test failed: reliability breakdown did not stay tied to selected leak", file=sys.stderr)
+        return 1
+    split_prompt_data = json.loads(json.dumps(data))
+    split_prompt_data["results"]["meeting_prompt_quality"] = [
+        {"shown_events": 10, "record_selected_events": 4, "choice_events": 0, "dismissed_events": 0, "suppressed_events": 0},
+        {"shown_events": 0, "record_selected_events": 0, "choice_events": 4, "choice_kind": "record", "dismissed_events": 0, "suppressed_events": 0},
+    ]
+    split_prompt_metric = build_prompt_quality(split_prompt_data).metric
+    if "accepted_or_choice=4" not in split_prompt_metric:
+        print("self-test failed: prompt quality double-counted split record choice/selected rows", file=sys.stderr)
         return 1
     for query in (
         event_counts_query(30, None),

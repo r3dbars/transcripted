@@ -55,8 +55,8 @@
     {
       "id": "meeting_prompt_quality.prompt_outcomes",
       "rows": [
-        {"provider": "zoom", "source": "active_call", "prompt_reason": "call_detected", "route_ready": true, "choice_kind": null, "outcome_kind": null, "elapsed_bucket": null, "shown_events": 12, "choice_events": 0, "record_selected_events": 5, "outcome_events": 0, "dismissed_events": 3, "suppressed_events": 1, "missed_call_nudges": 2, "devices": 9},
-        {"provider": "zoom", "source": "runtime_app", "prompt_reason": "call_detected", "route_ready": "true", "choice_kind": "record", "outcome_kind": "transcript_saved", "elapsed_bucket": "10_29s", "shown_events": 0, "choice_events": 8, "record_selected_events": 0, "outcome_events": 6, "dismissed_events": 0, "suppressed_events": 0, "missed_call_nudges": 0, "devices": 5}
+        {"provider": "zoom", "source": "runtime_app", "prompt_reason": "mic_input", "route_ready": "true", "choice_kind": null, "outcome_kind": null, "elapsed_bucket": null, "shown_events": 12, "choice_events": 0, "record_selected_events": 5, "outcome_events": 0, "dismissed_events": 3, "suppressed_events": 1, "missed_call_nudges": 2, "devices": 9},
+        {"provider": "zoom", "source": "runtime_app", "prompt_reason": "mic_input", "route_ready": "true", "choice_kind": "record", "outcome_kind": "transcript_saved", "elapsed_bucket": "10_29s", "shown_events": 0, "choice_events": 8, "record_selected_events": 0, "outcome_events": 6, "dismissed_events": 0, "suppressed_events": 0, "missed_call_nudges": 0, "devices": 5}
       ]
     },
     {

@@ -431,17 +431,22 @@ SELECT
   properties['source'] AS source,
   properties['prompt_reason'] AS prompt_reason,
   properties['route_ready'] AS route_ready,
+  properties['choice_kind'] AS choice_kind,
+  properties['outcome_kind'] AS outcome_kind,
+  properties['elapsed_bucket'] AS elapsed_bucket,
   countIf(event = 'meeting_prompt_shown') AS shown_events,
+  countIf(event = 'meeting_prompt_choice_made') AS choice_events,
   countIf(event = 'meeting_prompt_record_selected') AS record_selected_events,
+  countIf(event = 'meeting_prompt_outcome_recorded') AS outcome_events,
   countIf(event = 'meeting_prompt_dismissed') AS dismissed_events,
   countIf(event = 'meeting_prompt_suppressed') AS suppressed_events,
   countIf(event = 'meeting_missed_call_nudge') AS missed_call_nudges,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('meeting_prompt_shown', 'meeting_prompt_record_selected', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
+  AND event IN ('meeting_prompt_shown', 'meeting_prompt_choice_made', 'meeting_prompt_record_selected', 'meeting_prompt_outcome_recorded', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
   {app_version_filter(app_version)}
-GROUP BY provider, source, prompt_reason, route_ready
+GROUP BY provider, source, prompt_reason, route_ready, choice_kind, outcome_kind, elapsed_bucket
 ORDER BY shown_events DESC, devices DESC
 LIMIT 40
 """
@@ -798,7 +803,7 @@ def render_report(data: dict[str, Any]) -> str:
         render_top_rows(
             "Meeting Prompt Quality",
             data["results"].get("meeting_prompt_quality", []),
-            ["provider", "source", "prompt_reason", "route_ready", "shown_events", "record_selected_events", "dismissed_events", "suppressed_events", "missed_call_nudges", "devices"],
+            ["provider", "source", "prompt_reason", "route_ready", "choice_kind", "outcome_kind", "elapsed_bucket", "shown_events", "choice_events", "record_selected_events", "outcome_events", "dismissed_events", "suppressed_events", "missed_call_nudges", "devices"],
         ),
         render_top_rows(
             "Speaker Trust",
