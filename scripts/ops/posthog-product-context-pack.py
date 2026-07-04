@@ -595,8 +595,8 @@ def build_recommendations(
         recs.append({
             "rank": len(recs) + 1,
             "title": "Verify privacy-safe sourced-agent-use proof",
-            "why": "`agent_capture_query_observed` is zero in this window, so agents still cannot tell from live aggregates whether saved Markdown produced a sourced answer.",
-            "suggested_pr": "Verify the read-only MCP/agent surface is emitting aggregate-only `agent_capture_query_observed` rows for current builds, with enum result, query kind, agent target, artifact kind, and age buckets.",
+            "why": "`agent_capture_query_observed` is zero in this window, so agents still cannot tell from live aggregates whether saved Markdown produced a sourced local-memory answer.",
+            "suggested_pr": "Verify the read-only MCP/agent surface is emitting aggregate-only `agent_capture_query_observed` rows for current builds, with enum result, query kind, agent target, artifact kind, source-count, return-window, and age buckets.",
         })
     elif launch > 0 and first_artifact / launch < 0.2:
         recs.append({

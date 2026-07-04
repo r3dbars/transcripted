@@ -102,6 +102,13 @@ Operational scripts query aggregate counts only:
 | `workflow_recovery_finished` | `artifact_retained`, `elapsed_bucket`, `failure_kind`, `recovery_attempt_bucket`, `result`, `retry_source`, `surface`, `workflow_kind` |
 | `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 
+`agent_capture_query_observed.query_kind` is a reviewed enum. It includes
+orientation reads (`list`, `recent`), direct artifact reads/searches
+(`read`, `search`, `speaker_lookup`, `recap`), and sourced local-memory rollups
+(`action_items`, `commitments`, `decisions`, `digest`, `open_questions`).
+Together with `source_count_bucket`, it can show that a saved artifact powered
+an agent answer without exporting query text or transcript content.
+
 ### Menu, Settings, Updates
 
 | Event | Captured properties |
@@ -198,12 +205,14 @@ aggregate reliability sizing and should not be expanded to raw device names.
 
 ## Biggest Blind Spots
 
-- `agent_capture_query_observed` exists in the read-only MCP/agent surface, but
-  PostHog still cannot judge whether the sourced answer was useful.
+- `agent_capture_query_observed` exists in the read-only MCP/agent surface and
+  now covers sourced local-memory rollups, but PostHog still cannot judge
+  whether the sourced answer was useful.
 - General dictation saved-Markdown writes now have `dictation_artifact_saved`;
   keep `dictation_completed` as completion-volume context, not strict saved-artifact proof.
-- `agent_capture_query_observed` proves successful saved-capture reads/searches
-  through MCP, but it still cannot judge answer quality.
+- `agent_capture_query_observed` proves successful saved-capture reads,
+  searches, and summary-memory rollups through MCP, but it still cannot judge
+  answer quality.
 - General dictation saved-Markdown writes still rely on `dictation_completed`
   as a proxy, while onboarding dictation and meeting saves have stricter events.
 - Settings/action tracking is broad enough to show discovery, but it does not
@@ -223,7 +232,7 @@ Prefer a small number of lifecycle events over broad click tracking.
 
 | Event | When to fire | Properties |
 | --- | --- | --- |
-| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
+| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures or sourced local summary memory | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 | `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_habit_loop_actioned` | A user takes a post-save or daily-return action like Review yesterday, What did I promise, open recent meeting, daily digest viewed/exported, or return after first/second artifact | `action_kind`, `artifact_kind`, `artifact_count_bucket`, `return_window_bucket`, `surface`, `result` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
@@ -362,6 +371,7 @@ prove the full saved-artifact -> sourced-agent-answer -> return loop.
 ## Smallest Next Implementation
 
 Keep `agent_capture_query_observed` live and narrow in the read-only MCP/agent
-surface: successful saved-capture reads/searches, enum values, source-count
-buckets, and coarse age/window buckets only. The next useful loop is live-proof
-verification and answer-quality UNKNOWN reporting, not richer content capture.
+surface: successful saved-capture reads/searches, sourced summary-memory
+rollups, enum values, source-count buckets, and coarse age/window buckets only.
+The next useful loop is live-proof verification and answer-quality UNKNOWN
+reporting, not richer content capture.

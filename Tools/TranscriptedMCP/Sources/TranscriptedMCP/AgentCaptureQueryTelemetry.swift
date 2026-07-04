@@ -149,7 +149,7 @@ enum AgentCaptureQueryTelemetryPolicy {
         "agent_target": ["mcp_client"],
         "artifact_kind": ["dictation", "meeting", "mixed"],
         "capture_age_bucket": ["lt_12h", "12_24h", "24_48h", "2_7d", "older", "unknown"],
-        "query_kind": ["list", "read", "recap", "recent", "search", "speaker_lookup"],
+        "query_kind": ["action_items", "commitments", "decisions", "digest", "list", "open_questions", "read", "recap", "recent", "search", "speaker_lookup"],
         "result": ["success"],
         "return_window_bucket": ["same_day", "18_36h", "36_72h", "3_7d", "older", "unknown"],
         "source_count_bucket": ["0", "1", "2_3", "4_9", "10_plus", "unknown"],

@@ -1149,11 +1149,18 @@ func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, 
         return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
     }
 
+    trackAgentCaptureQueryObserved(
+        queryKind: "action_items",
+        artifactKind: "meeting",
+        captureDate: latestActionItemDate(in: result.items),
+        sourceCount: distinctActionItemSourceCount(in: result.items)
+    )
+
     let json = try JSONEncoder.pretty.encode(result)
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
-private func handleListDecisions(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleListDecisions(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     let query = params.arguments?["query"]?.stringValue
     let dateFrom = params.arguments?["date_from"]?.stringValue
     let dateTo = params.arguments?["date_to"]?.stringValue
@@ -1169,11 +1176,18 @@ private func handleListDecisions(params: CallTool.Parameters, index: TranscriptI
         return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
     }
 
+    trackAgentCaptureQueryObserved(
+        queryKind: "decisions",
+        artifactKind: "meeting",
+        captureDate: latestDecisionDate(in: result.decisions),
+        sourceCount: distinctDecisionSourceCount(in: result.decisions)
+    )
+
     let json = try JSONEncoder.pretty.encode(result)
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
-private func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
+func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     // Default to today when no window is given, matching recap's behavior.
     let today = DateFormatter.localYYYYMMDD.string(from: Date())
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? today
@@ -1188,6 +1202,13 @@ private func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, m
     if result.meetings.isEmpty {
         return try emptyResult(scope: .summaries, searchedDirectories: meetingDirs, index: index)
     }
+
+    trackAgentCaptureQueryObserved(
+        queryKind: "digest",
+        artifactKind: "meeting",
+        captureDate: latestDigestMeetingDate(in: result.meetings),
+        sourceCount: result.meetings.count
+    )
 
     let json = try JSONEncoder.pretty.encode(result)
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
@@ -1248,6 +1269,14 @@ func handleDecisions(params: CallTool.Parameters, index: TranscriptIndex, meetin
         truncated: indexed.truncated || indexed.decisions.count > count,
         results: receipts
     )
+    if !receipts.isEmpty {
+        trackAgentCaptureQueryObserved(
+            queryKind: "decisions",
+            artifactKind: "meeting",
+            captureDate: latestReceiptDate(in: receipts),
+            sourceCount: distinctReceiptSourceCount(in: receipts)
+        )
+    }
     return try encodedToolResult(result)
 }
 
@@ -1283,6 +1312,14 @@ func handleCommitments(params: CallTool.Parameters, index: TranscriptIndex, meet
         truncated: indexed.truncated || indexed.items.count > count,
         results: receipts
     )
+    if !receipts.isEmpty {
+        trackAgentCaptureQueryObserved(
+            queryKind: "commitments",
+            artifactKind: "meeting",
+            captureDate: latestReceiptDate(in: receipts),
+            sourceCount: distinctReceiptSourceCount(in: receipts)
+        )
+    }
     return try encodedToolResult(result)
 }
 
@@ -1318,6 +1355,14 @@ func handleOpenQuestions(params: CallTool.Parameters, index: TranscriptIndex, me
         truncated: filtered.count > count,
         results: receipts
     )
+    if !receipts.isEmpty {
+        trackAgentCaptureQueryObserved(
+            queryKind: "open_questions",
+            artifactKind: "meeting",
+            captureDate: latestReceiptDate(in: receipts),
+            sourceCount: distinctReceiptSourceCount(in: receipts)
+        )
+    }
     return try encodedToolResult(result)
 }
 
@@ -1359,6 +1404,14 @@ func handleSearchMeetings(params: CallTool.Parameters, index: TranscriptIndex, m
         truncated: groups.truncated || receipts.count > count,
         results: Array(receipts.prefix(count))
     )
+    if !result.results.isEmpty {
+        trackAgentCaptureQueryObserved(
+            queryKind: "search",
+            artifactKind: "meeting",
+            captureDate: latestReceiptDate(in: result.results),
+            sourceCount: distinctReceiptSourceCount(in: result.results)
+        )
+    }
     return try encodedToolResult(result)
 }
 
@@ -1594,6 +1647,34 @@ private func latestRecentContextDate(in results: [RecentContextItem]) -> Date? {
 
 private func latestRecapDate(in results: [RecapEntry]) -> Date? {
     results.compactMap { parseCaptureDate($0.datetime) }.max()
+}
+
+private func latestActionItemDate(in results: [ActionItemRecord]) -> Date? {
+    results.compactMap { parseCaptureDate($0.datetime) }.max()
+}
+
+private func latestDecisionDate(in results: [DecisionRecord]) -> Date? {
+    results.compactMap { parseCaptureDate($0.datetime) }.max()
+}
+
+private func latestDigestMeetingDate(in results: [DigestMeeting]) -> Date? {
+    results.compactMap { parseCaptureDate($0.datetime) }.max()
+}
+
+private func latestReceiptDate(in results: [CrossMeetingReceipt]) -> Date? {
+    results.compactMap { parseCaptureDate($0.datetime) }.max()
+}
+
+private func distinctActionItemSourceCount(in results: [ActionItemRecord]) -> Int {
+    Set(results.map(\.filename)).count
+}
+
+private func distinctDecisionSourceCount(in results: [DecisionRecord]) -> Int {
+    Set(results.map(\.filename)).count
+}
+
+private func distinctReceiptSourceCount(in results: [CrossMeetingReceipt]) -> Int {
+    Set(results.map(\.meetingId)).count
 }
 
 private func artifactKind(for kinds: [ContextKind]) -> String {
