@@ -31,6 +31,7 @@ CORE_EVENTS = (
     "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
+    "onboarding_exited",
     "dictation_start_failed",
     "dictation_no_speech",
     "dictation_cancelled",
@@ -62,6 +63,7 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "onboarding_exited",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {

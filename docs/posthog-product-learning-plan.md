@@ -81,6 +81,7 @@ Operational scripts query aggregate counts only:
 | `onboarding_reporting_toggle_changed` | `available`, `enabled`, `reporting_kind`, `step_id` |
 | `onboarding_completed` | `anonymous_usage_enabled`, `calendar_status`, `completion_flow`, `crash_reporting_enabled`, `first_dictation_saved`, `flow_elapsed_bucket`, `meeting_dry_run_completed`, `meeting_recording_ready`, `model_state`, `step_id` |
 | `onboarding_dismissed` | `first_dictation_saved`, `flow_elapsed_bucket`, `meeting_dry_run_completed`, `model_state`, `step_id`, `step_index` |
+| `onboarding_exited` | `elapsed_bucket`, `last_step_id`, `permission_readiness`, `reason_kind`, `stage` |
 
 ### Activation And Agent Value
 

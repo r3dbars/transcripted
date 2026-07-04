@@ -33,6 +33,7 @@ RELEVANT_EVENTS = (
     "activation_first_artifact_saved",
     "activation_second_artifact_saved",
     "agent_capture_query_observed",
+    "onboarding_exited",
     "workflow_abandoned",
 )
 
@@ -49,6 +50,7 @@ WORKFLOW_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
     "activation_second_artifact_saved",
+    "onboarding_exited",
     "workflow_abandoned",
 )
 
@@ -162,7 +164,7 @@ REACH_STEPS = (
     StepDefinition(
         "workflow_abandonment_devices",
         "Workflow abandonment",
-        "event = 'workflow_abandoned'",
+        "event IN ('workflow_abandoned', 'onboarding_exited')",
         "observed",
         "Devices with a confident privacy-safe abandonment event, bucketed by workflow, stage, and reason.",
     ),
@@ -366,16 +368,16 @@ LIMIT 60
 def workflow_abandonment_query(days: int, app_version: str | None) -> str:
     return f"""
 SELECT
-  properties['workflow_kind'] AS workflow_kind,
+  if(event = 'onboarding_exited', 'onboarding', properties['workflow_kind']) AS workflow_kind,
   properties['stage'] AS stage,
   properties['reason_kind'] AS reason_kind,
-  properties['surface'] AS surface,
-  properties['prior_ready_state'] AS prior_ready_state,
+  if(event = 'onboarding_exited', 'onboarding', properties['surface']) AS surface,
+  if(event = 'onboarding_exited', properties['permission_readiness'], properties['prior_ready_state']) AS prior_ready_state,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event = 'workflow_abandoned'
+  AND event IN ('workflow_abandoned', 'onboarding_exited')
   {app_version_filter(app_version)}
 GROUP BY workflow_kind, stage, reason_kind, surface, prior_ready_state
 ORDER BY events DESC

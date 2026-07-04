@@ -906,7 +906,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func makeOnboardingView() -> PermissionsOnboardingView {
-        PermissionsOnboardingView { [weak self] in
+        PermissionsOnboardingView(sttRouter: appState.sttRouter) { [weak self] in
             self?.finishOnboarding()
         }
     }

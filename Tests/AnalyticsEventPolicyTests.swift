@@ -93,6 +93,7 @@ func testAnalyticsEventPolicy() {
         let agentClicked = AnalyticsEventPolicy.policy(forEvent: "onboarding_agent_cta_clicked")
         let completed = AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")
         let dismissed = AnalyticsEventPolicy.policy(forEvent: "onboarding_dismissed")
+        let exited = AnalyticsEventPolicy.policy(forEvent: "onboarding_exited")
 
         assertEqual(shown?.allowedProperties.contains("meeting_recording_ready"), true, "onboarding shown should preserve meeting-readiness attribution")
         assertEqual(stepViewed?.allowedProperties.contains("flow_elapsed_bucket"), true, "step views should preserve coarse elapsed time")
@@ -104,26 +105,49 @@ func testAnalyticsEventPolicy() {
         assertEqual(agentClicked?.allowedProperties.contains("agent_cta"), true, "agent CTAs should preserve the action id")
         assertEqual(completed?.allowedProperties.contains("first_dictation_saved"), true, "completion should preserve whether first value happened")
         assertEqual(completed?.allowedProperties.contains("flow_elapsed_bucket"), true, "completion should preserve coarse time to finish")
+        assertEqual(completed?.allowedProperties.contains("model_state"), true, "completion should preserve coarse model readiness")
         assertEqual(dismissed?.allowedProperties.contains("step_index"), true, "dismissal should preserve where users dropped")
+        assertEqual(exited?.allowedProperties ?? Set<String>(), ["elapsed_bucket", "last_step_id", "permission_readiness", "reason_kind", "stage"], "onboarding exit telemetry should stay narrow")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "meeting_recording_ready": "true",
+                "model_state": "ready",
                 "permission_kind": "system_recording",
+                "permission_readiness": "meeting_missing",
                 "flow_elapsed_bucket": "30_119s",
+                "last_step_id": "permissions",
+                "reason_kind": "window_closed",
+                "stage": "permissions",
                 "step_id": "meeting_setup",
+                "meeting_title": "Private meeting",
+                "file_path": "/Users/redbars/private.md",
+                "source_app": "Zoom",
             ],
             allowedKeys: [
                 "flow_elapsed_bucket",
+                "last_step_id",
                 "meeting_recording_ready",
+                "model_state",
+                "permission_readiness",
                 "permission_kind",
+                "reason_kind",
+                "stage",
                 "step_id",
             ]
         )
         assertEqual(sanitized["meeting_recording_ready"], "true", "meeting_recording_ready should avoid the audio-key sanitizer drop")
+        assertEqual(sanitized["model_state"], "ready", "model state should survive as a coarse enum")
         assertEqual(sanitized["permission_kind"], "system_recording", "permission kind should survive as a coarse enum")
+        assertEqual(sanitized["permission_readiness"], "meeting_missing", "permission readiness should survive as a coarse enum")
         assertEqual(sanitized["flow_elapsed_bucket"], "30_119s", "coarse elapsed buckets should survive sanitization")
+        assertEqual(sanitized["last_step_id"], "permissions", "last step id should survive sanitization")
+        assertEqual(sanitized["reason_kind"], "window_closed", "exit reason should survive as a coarse enum")
+        assertEqual(sanitized["stage"], "permissions", "exit stage should survive as a coarse enum")
         assertEqual(sanitized["step_id"], "meeting_setup", "step id should survive sanitization")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["source_app"], "source apps must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy pins active onboarding activation events") {

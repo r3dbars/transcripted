@@ -35,6 +35,7 @@ SAFE_EVENTS = (
     "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
+    "onboarding_exited",
     "update_check_finished",
     "update_download_finished",
 )
@@ -51,6 +52,7 @@ WORKFLOW_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "activation_return_proxy_observed",
+    "onboarding_exited",
 )
 
 FAILURE_EVENTS = (

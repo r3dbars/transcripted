@@ -27,6 +27,7 @@ extension FirstRunLocalModelState {
 
 @MainActor
 struct PermissionsOnboardingView: View {
+    @ObservedObject private var sttRouter: STTRouter
     var onComplete: () -> Void
 
     static let preferredSize = NSSize(width: 960, height: 680)
@@ -54,9 +55,11 @@ struct PermissionsOnboardingView: View {
     @State private var didTrackCompletion = false
     @State private var didTrackAbandonment = false
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
+    @State private var lastModelStatus: String?
     @FocusState private var demoEditorFocused: Bool
 
-    init(onComplete: @escaping () -> Void) {
+    init(sttRouter: STTRouter, onComplete: @escaping () -> Void) {
+        self.sttRouter = sttRouter
         self.onComplete = onComplete
     }
 
@@ -112,12 +115,16 @@ struct PermissionsOnboardingView: View {
             if flowStartedAt == nil {
                 flowStartedAt = CFAbsoluteTimeGetCurrent()
             }
+            lastModelStatus = currentModelStatus
             checkAllPermissions(trackChanges: false)
             trackCurrentStepViewed()
             startPolling()
         }
         .onChange(of: currentStepIndex) { _, _ in
             trackCurrentStepViewed()
+        }
+        .onChange(of: currentModelStatus) { _, newStatus in
+            trackModelStateChangedIfNeeded(newStatus: newStatus)
         }
         .onDisappear {
             stopPolling()
@@ -366,6 +373,8 @@ struct PermissionsOnboardingView: View {
                 .onChange(of: diagnosticsEnabled) { _, newValue in
                     CrashReportingPreferences.setEnabled(newValue)
                     AnalyticsPreferences.setEnabled(newValue)
+                    trackReportingToggleChanged(kind: "crash_reporting", enabled: newValue, available: CrashReporter.isAvailable)
+                    trackReportingToggleChanged(kind: "anonymous_analytics", enabled: newValue, available: AnalyticsReporter.isAvailable)
                 }
             }
         case .done:
@@ -626,6 +635,7 @@ struct PermissionsOnboardingView: View {
                 firstDictationSaved: PermissionsOnboardingPreferences.hasTrackedFirstDictationSaved(),
                 anonymousUsageEnabled: AnalyticsPreferences.isEnabled(),
                 crashReportingEnabled: CrashReportingPreferences.isEnabled(),
+                modelState: currentModelStatus,
                 elapsedSeconds: flowStartedAt.map { CFAbsoluteTimeGetCurrent() - $0 }
             )
         )
@@ -635,13 +645,27 @@ struct PermissionsOnboardingView: View {
         guard !didTrackCompletion, !didTrackAbandonment, flowStartedAt != nil else { return }
         didTrackAbandonment = true
         let now = CFAbsoluteTimeGetCurrent()
-        ActivationTelemetry.trackWorkflowAbandoned(
-            workflowKind: .onboarding,
-            stage: currentStep.kind.analyticsID,
-            reasonKind: reason,
-            surface: .onboarding,
-            elapsedBucket: flowElapsedBucket(now: now),
-            priorReadyState: hasRequiredPermissions ? "ready" : "not_ready"
+        let permissionReadiness = permissionReadinessState()
+        AnalyticsReporter.track(
+            "onboarding_exited",
+            properties: [
+                "elapsed_bucket": flowElapsedBucket(now: now),
+                "last_step_id": currentStep.kind.analyticsID,
+                "permission_readiness": permissionReadiness,
+                "reason_kind": reason.rawValue,
+                "stage": currentStep.kind.analyticsID,
+            ]
+        )
+        AnalyticsReporter.track(
+            "onboarding_dismissed",
+            properties: [
+                "first_dictation_saved": PermissionsOnboardingPreferences.hasTrackedFirstDictationSaved() ? "true" : "false",
+                "flow_elapsed_bucket": flowElapsedBucket(now: now),
+                "meeting_dry_run_completed": "false",
+                "model_state": currentModelStatus,
+                "step_id": currentStep.kind.analyticsID,
+                "step_index": String(currentStepIndex),
+            ]
         )
     }
 
@@ -668,6 +692,7 @@ struct PermissionsOnboardingView: View {
             "onboarding_step_viewed",
             properties: [
                 "flow_elapsed_bucket": flowElapsedBucket(now: now),
+                "model_state": currentModelStatus,
                 "step_id": currentStep.kind.analyticsID,
                 "step_index": String(currentStepIndex),
             ]
@@ -682,6 +707,7 @@ struct PermissionsOnboardingView: View {
                 "cta": primaryCTAAnalyticsID,
                 "cta_type": "primary",
                 "flow_elapsed_bucket": flowElapsedBucket(now: now),
+                "model_state": currentModelStatus,
                 "step_elapsed_bucket": stepElapsedBucket(now: now),
                 "step_id": currentStep.kind.analyticsID,
             ]
@@ -708,6 +734,50 @@ struct PermissionsOnboardingView: View {
                     "to_status": updated,
                 ]
             )
+        }
+    }
+
+    private func trackReportingToggleChanged(kind: String, enabled: Bool, available: Bool) {
+        AnalyticsReporter.track(
+            "onboarding_reporting_toggle_changed",
+            properties: [
+                "available": available ? "true" : "false",
+                "enabled": enabled ? "true" : "false",
+                "reporting_kind": kind,
+                "step_id": currentStep.kind.analyticsID,
+            ]
+        )
+    }
+
+    private var currentModelStatus: String {
+        sttRouter.modelDownloadState.diagnosticName
+    }
+
+    private func trackModelStateChangedIfNeeded(newStatus: String) {
+        let previous = lastModelStatus
+        lastModelStatus = newStatus
+
+        guard let previous, previous != newStatus else { return }
+        AnalyticsReporter.track(
+            "onboarding_model_state_changed",
+            properties: [
+                "from_status": previous,
+                "step_id": currentStep.kind.analyticsID,
+                "to_status": newStatus,
+            ]
+        )
+    }
+
+    private func permissionReadinessState() -> String {
+        if micGranted && accessibilityGranted && screenRecordingGranted {
+            return "all_ready"
+        }
+
+        switch selectedUseCase {
+        case .meetings:
+            return hasRequiredPermissions ? "meeting_ready" : "meeting_missing"
+        case .dictation:
+            return hasRequiredPermissions ? "dictation_ready" : "dictation_missing"
         }
     }
 

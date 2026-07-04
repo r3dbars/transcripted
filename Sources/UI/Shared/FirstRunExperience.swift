@@ -256,6 +256,7 @@ enum FirstRunExperience {
         firstDictationSaved: Bool,
         anonymousUsageEnabled: Bool,
         crashReportingEnabled: Bool,
+        modelState: String,
         elapsedSeconds: Double?
     ) -> [String: String] {
         var properties: [String: String] = [
@@ -268,6 +269,7 @@ enum FirstRunExperience {
             "crash_reporting_enabled": booleanString(crashReportingEnabled),
             "first_dictation_saved": booleanString(firstDictationSaved),
             "meeting_recording_ready": booleanString(systemAudioGranted),
+            "model_state": modelState,
             "step_id": "done",
         ]
 

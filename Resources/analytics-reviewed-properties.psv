@@ -86,6 +86,7 @@ input_device_class
 input_rate_hz
 input_volume_scalar_available
 last_event
+last_step_id
 location_type
 meeting_dry_run_completed
 meeting_recording_ready
@@ -110,6 +111,7 @@ page_id
 paste_available
 pasteback_status
 permission_kind
+permission_readiness
 previous_clean_shutdown
 previous_version
 prior_artifact_kind

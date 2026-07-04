@@ -53,6 +53,7 @@ ACTIVATION_EVENTS = (
     "onboarding_agent_cta_clicked",
     "agent_capture_query_observed",
     "activation_return_proxy_observed",
+    "onboarding_exited",
 )
 
 RELIABILITY_EVENTS = (

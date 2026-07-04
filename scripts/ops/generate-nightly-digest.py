@@ -73,6 +73,7 @@ POSTHOG_ACTIVE_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "agent_capture_query_observed",
     "activation_return_proxy_observed",
+    "onboarding_exited",
     "workflow_abandoned",
 )
 POSTHOG_FIRST_VALUE_EVENTS = (
