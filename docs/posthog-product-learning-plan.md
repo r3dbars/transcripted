@@ -152,7 +152,9 @@ aggregate reliability sizing and should not be expanded to raw device names.
 | `meeting_recording_started` | `trigger` |
 | `meeting_recording_start_failed` | `failure_kind`, `trigger` |
 | `meeting_prompt_shown` | `app_signal`, `calendar_confidence`, `call_state`, `missing_permission`, `prompt_reason`, `provider`, `route_ready`, `source` |
+| `meeting_prompt_choice_made` | `calendar_confidence`, `call_state`, `choice_kind`, `elapsed_bucket`, `prompt_reason`, `provider`, `route_ready`, `source` |
 | `meeting_prompt_dismissed` | prompt fields plus `backoff_kind`, `cooldown_reason` |
+| `meeting_prompt_outcome_recorded` | prompt fields plus `elapsed_bucket`, `outcome_kind`, optional `suppression_reason` |
 | `meeting_prompt_record_selected` | prompt fields |
 | `meeting_prompt_suppressed` | prompt fields plus `capture_activity`, `cooldown_reason`, `suppression_reason` |
 | `meeting_mic_boost_prompt_shown` | `duration_bucket`, `trigger` |
@@ -283,8 +285,9 @@ Break down by trigger, delivery, route shape, input/output class,
 
 ### Meeting Reliability Funnel
 
-`meeting_prompt_shown` -> `meeting_prompt_record_selected` ->
-`meeting_recording_started` -> `meeting_recording_stopped` ->
+`meeting_prompt_shown` -> `meeting_prompt_choice_made` ->
+`meeting_prompt_record_selected` -> `meeting_recording_started` ->
+`meeting_prompt_outcome_recorded` -> `meeting_recording_stopped` ->
 `meeting_transcript_saved` / failed / skipped -> speaker review ->
 summary requested -> summary finished.
 

@@ -84,7 +84,8 @@
     {
       "id": "feature_adoption.meeting_prompts",
       "rows": [
-        {"event": "meeting_prompt_record_selected", "provider": "zoom", "source": "active_call", "route_ready": true, "suppression_reason": null, "cooldown_reason": null, "events": 8, "devices": 5}
+        {"event": "meeting_prompt_choice_made", "provider": "zoom", "source": "runtime_app", "route_ready": "true", "choice_kind": "record", "outcome_kind": null, "elapsed_bucket": "10_29s", "suppression_reason": null, "cooldown_reason": null, "events": 8, "devices": 5},
+        {"event": "meeting_prompt_outcome_recorded", "provider": "zoom", "source": "runtime_app", "route_ready": "true", "choice_kind": null, "outcome_kind": "transcript_saved", "elapsed_bucket": "10_29m", "suppression_reason": null, "cooldown_reason": null, "events": 6, "devices": 4}
       ]
     },
     {

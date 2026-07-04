@@ -136,7 +136,7 @@ still does not measure answer quality.
 raw error strings, device names, app names, or audio details.
 
 `feature_adoption` tracks feature discovery through stable surfaces, action IDs,
-agent targets, and prompt buckets.
+agent targets, prompt buckets, prompt choice/outcome enums, and elapsed buckets.
 
 `release_health` accepts `--app-version`. Workflow events use `app_version`;
 update events use `version`, so the helper filters both.

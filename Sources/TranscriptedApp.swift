@@ -92,6 +92,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     lazy var micActivityMonitor = MicActivityMonitor()
     @available(macOS 14.0, *)
     lazy var cameraActivityMonitor = CameraActivityMonitor()
+    private var meetingPromptShownAtByCandidateID: [String: Date] = [:]
     private var workspaceObservers: [NSObjectProtocol] = []
     private var micPreferenceObserver: NSObjectProtocol?
     private var terminationCleanupStarted = false
@@ -147,11 +148,26 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.setup(meetingSession: meetingSession)
             let recordPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
+                let readiness = self.meetingPromptTelemetryReadiness()
+                let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
+                let promptFunnelProperties = MeetingPromptTelemetry.funnelProperties(
+                    for: candidate,
+                    readiness: readiness
+                )
+                AnalyticsReporter.track(
+                    "meeting_prompt_choice_made",
+                    properties: MeetingPromptTelemetry.choiceProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        choiceKind: .record,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                )
                 AnalyticsReporter.track(
                     "meeting_prompt_record_selected",
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness(),
+                        readiness: readiness,
                         signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
@@ -159,7 +175,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     guard let self else { return }
                     let started = await self.appState.meetingSession.startRecording(
                         trigger: .detectedPrompt,
-                        suggestedTitle: candidate.suggestedTranscriptTitle
+                        suggestedTitle: candidate.suggestedTranscriptTitle,
+                        promptTelemetryProperties: promptFunnelProperties
                     )
                     if started {
                         self.meetingPromptDetector.markAccepted(candidate: candidate)
@@ -168,12 +185,22 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
             let dismissPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
+                let readiness = self.meetingPromptTelemetryReadiness()
+                AnalyticsReporter.track(
+                    "meeting_prompt_choice_made",
+                    properties: MeetingPromptTelemetry.choiceProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        choiceKind: .dismiss,
+                        elapsedSeconds: self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
+                    )
+                )
                 let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
                 AnalyticsReporter.track(
                     "meeting_prompt_dismissed",
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness(),
+                        readiness: readiness,
                         backoffKind: backoffDecision.kind,
                         signals: self.meetingPromptDetector.currentSignalSnapshot(),
                         dismissStreak: self.meetingPromptDetector.dismissStreak(for: candidate.provider)
@@ -185,18 +212,38 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     reasonKind: .dismissed,
                     surface: .meetingOverlay,
                     priorReadyState: MeetingPromptTelemetry.readyState(
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: readiness
                     )
                 )
             }
             meetingOverlayController.onPromptExpired = { [weak self] candidate in
                 guard let self else { return }
+                let readiness = self.meetingPromptTelemetryReadiness()
+                let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
+                AnalyticsReporter.track(
+                    "meeting_prompt_choice_made",
+                    properties: MeetingPromptTelemetry.choiceProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        choiceKind: .expired,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                )
+                AnalyticsReporter.track(
+                    "meeting_prompt_outcome_recorded",
+                    properties: MeetingPromptTelemetry.outcomeProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        outcomeKind: .ignored,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                )
                 let backoffDecision = self.meetingPromptDetector.expire(candidate: candidate)
                 AnalyticsReporter.track(
                     "meeting_prompt_dismissed",
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness(),
+                        readiness: readiness,
                         backoffKind: backoffDecision.kind,
                         signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
@@ -207,7 +254,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     reasonKind: .expired,
                     surface: .meetingOverlay,
                     priorReadyState: MeetingPromptTelemetry.readyState(
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: readiness
                     )
                 )
             }
@@ -215,12 +262,22 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingOverlayController.onPromptDismiss = dismissPrompt
             meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
                 guard let self else { return }
+                let readiness = self.meetingPromptTelemetryReadiness()
+                AnalyticsReporter.track(
+                    "meeting_prompt_choice_made",
+                    properties: MeetingPromptTelemetry.choiceProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        choiceKind: .remindLater,
+                        elapsedSeconds: self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
+                    )
+                )
                 let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
                 AnalyticsReporter.track(
                     "meeting_prompt_dismissed",
                     properties: MeetingPromptTelemetry.properties(
                         for: candidate,
-                        readiness: self.meetingPromptTelemetryReadiness(),
+                        readiness: readiness,
                         backoffKind: backoffDecision.kind,
                         signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
@@ -231,7 +288,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     reasonKind: .remindedLater,
                     surface: .meetingOverlay,
                     priorReadyState: MeetingPromptTelemetry.readyState(
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: readiness
                     )
                 )
             }
@@ -239,11 +296,21 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             capturePillController.onDismiss = dismissPrompt
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
+                let readiness = self.meetingPromptTelemetryReadiness()
+                AnalyticsReporter.track(
+                    "meeting_prompt_outcome_recorded",
+                    properties: MeetingPromptTelemetry.outcomeProperties(
+                        for: suppression.candidate,
+                        readiness: readiness,
+                        outcomeKind: .suppressed,
+                        suppressionReason: suppression.reason
+                    )
+                )
                 AnalyticsReporter.track(
                     "meeting_prompt_suppressed",
                     properties: MeetingPromptTelemetry.properties(
                         for: suppression,
-                        readiness: self.meetingPromptTelemetryReadiness(),
+                        readiness: readiness,
                         signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
@@ -253,7 +320,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     reasonKind: .suppressed,
                     surface: .meetingOverlay,
                     priorReadyState: MeetingPromptTelemetry.readyState(
-                        readiness: self.meetingPromptTelemetryReadiness()
+                        readiness: readiness
                     )
                 )
             }
@@ -262,6 +329,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 guard let self else { return false }
                 let presented = self.capturePillController.present(candidate: candidate)
                 if presented {
+                    self.meetingPromptShownAtByCandidateID[candidate.id] = Date()
                     AnalyticsReporter.track(
                         "meeting_prompt_shown",
                         properties: MeetingPromptTelemetry.properties(
@@ -1010,6 +1078,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingRecordingActive: appState.meetingSession.isRecording,
             dictationRecordingActive: appState.sttRouter.isRecording
         )
+    }
+
+    private func consumeMeetingPromptShownElapsedSeconds(candidateID: String) -> TimeInterval? {
+        guard let shownAt = meetingPromptShownAtByCandidateID.removeValue(forKey: candidateID) else {
+            return nil
+        }
+        return Date().timeIntervalSince(shownAt)
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {

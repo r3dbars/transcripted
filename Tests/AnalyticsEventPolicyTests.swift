@@ -1236,7 +1236,9 @@ func testAnalyticsEventPolicy() {
 
     runSuite("AnalyticsEventPolicy allows coarse meeting prompt telemetry") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_shown")
+        let choice = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_choice_made")
         let dismissed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_dismissed")
+        let outcome = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_outcome_recorded")
         let recorded = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_record_selected")
         let suppressed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_suppressed")
 
@@ -1250,6 +1252,27 @@ func testAnalyticsEventPolicy() {
         assertEqual(dismissed?.allowedProperties.contains("source"), true, "prompt dismiss should allow source attribution")
         assertEqual(dismissed?.allowedProperties.contains("backoff_kind"), true, "prompt dismiss should preserve which backoff rule fired")
         assertEqual(dismissed?.allowedProperties.contains("cooldown_reason"), true, "prompt dismiss should preserve cooldown reason")
+        assertEqual(choice?.allowedProperties ?? Set<String>(), [
+            "calendar_confidence",
+            "call_state",
+            "choice_kind",
+            "elapsed_bucket",
+            "prompt_reason",
+            "provider",
+            "route_ready",
+            "source",
+        ], "prompt choices should keep only prompt buckets, the selected choice, and elapsed bucket")
+        assertEqual(outcome?.allowedProperties ?? Set<String>(), [
+            "calendar_confidence",
+            "call_state",
+            "elapsed_bucket",
+            "outcome_kind",
+            "prompt_reason",
+            "provider",
+            "route_ready",
+            "source",
+            "suppression_reason",
+        ], "prompt outcomes should keep only prompt buckets, outcome, elapsed bucket, and optional suppression reason")
         assertEqual(recorded?.allowedProperties.contains("provider"), true, "prompt accept should allow provider attribution")
         assertEqual(suppressed?.allowedProperties.contains("suppression_reason"), true, "prompt suppression should preserve why nothing appeared")
         assertEqual(suppressed?.allowedProperties.contains("capture_activity"), true, "prompt suppression should preserve already-recording state")
@@ -1284,6 +1307,34 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["source"], "runtime_app", "prompt source should survive sanitization")
         assertEqual(sanitized["suppression_reason"], "pending_candidate", "suppression reason should survive sanitization")
         assertEqual(sanitized["backoff_kind"], "calendar_teams_extended", "dismiss backoff kind should survive sanitization")
+
+        let decisionOutcome = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "calendar_confidence": "linked_event_runtime_match",
+                "call_state": "mic_active",
+                "choice_kind": "record",
+                "elapsed_bucket": "10_29s",
+                "outcome_kind": "transcript_saved",
+                "prompt_reason": "calendar_plus_runtime_match",
+                "provider": "googleMeet",
+                "route_ready": "true",
+                "source": "runtime_app",
+                "suppression_reason": "own_capture_active",
+                "source_app_name": "Private Browser",
+                "meeting_title": "Customer Roadmap",
+                "meeting_url": "https://meet.example.com/private",
+                "transcript_text": "private words",
+            ],
+            allowedKeys: (choice?.allowedProperties ?? []).union(outcome?.allowedProperties ?? [])
+        )
+        assertEqual(decisionOutcome["choice_kind"], "record", "choice kind should survive as an enum")
+        assertEqual(decisionOutcome["elapsed_bucket"], "10_29s", "elapsed time should survive only as a bucket")
+        assertEqual(decisionOutcome["outcome_kind"], "transcript_saved", "outcome kind should survive as an enum")
+        assertEqual(decisionOutcome["suppression_reason"], "own_capture_active", "suppression reason should survive when outcome is suppressed")
+        assertNil(decisionOutcome["source_app_name"], "source app names must not be sent")
+        assertNil(decisionOutcome["meeting_title"], "meeting titles must not be sent")
+        assertNil(decisionOutcome["meeting_url"], "meeting URLs must not be sent")
+        assertNil(decisionOutcome["transcript_text"], "transcript text must not be sent")
 
         let privatePromptFields = AnalyticsPayloadSanitizer.sanitizeProperties(
             [

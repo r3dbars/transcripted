@@ -80,8 +80,10 @@ FEATURE_EVENTS = (
     "activation_agent_setup_cta_clicked",
     "onboarding_agent_cta_clicked",
     "meeting_prompt_shown",
+    "meeting_prompt_choice_made",
     "meeting_prompt_record_selected",
     "meeting_prompt_dismissed",
+    "meeting_prompt_outcome_recorded",
     "meeting_prompt_suppressed",
     "meeting_mic_boost_prompt_shown",
     "meeting_mic_boost_prompt_actioned",
@@ -415,23 +417,26 @@ LIMIT 60
             id="feature_adoption.meeting_prompts",
             family="feature_adoption",
             title="Meeting prompt adoption and suppression",
-            description="Measures prompt shown/accepted/dismissed/suppressed without app names or meeting titles.",
-            columns=("event", "provider", "source", "route_ready", "suppression_reason", "cooldown_reason", "events", "devices"),
+            description="Measures prompt shown, choice, accepted, outcome, dismissed, and suppressed without app names or meeting titles.",
+            columns=("event", "provider", "source", "route_ready", "choice_kind", "outcome_kind", "elapsed_bucket", "suppression_reason", "cooldown_reason", "events", "devices"),
             sql=f"""
 SELECT
   event,
   properties['provider'] AS provider,
   properties['source'] AS source,
   properties['route_ready'] AS route_ready,
+  properties['choice_kind'] AS choice_kind,
+  properties['outcome_kind'] AS outcome_kind,
+  properties['elapsed_bucket'] AS elapsed_bucket,
   properties['suppression_reason'] AS suppression_reason,
   properties['cooldown_reason'] AS cooldown_reason,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('meeting_prompt_shown', 'meeting_prompt_record_selected', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed')
+  AND event IN ('meeting_prompt_shown', 'meeting_prompt_choice_made', 'meeting_prompt_record_selected', 'meeting_prompt_outcome_recorded', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed')
   {app_version_filter(app_version)}
-GROUP BY event, provider, source, route_ready, suppression_reason, cooldown_reason
+GROUP BY event, provider, source, route_ready, choice_kind, outcome_kind, elapsed_bucket, suppression_reason, cooldown_reason
 ORDER BY events DESC
 LIMIT 80
 """,

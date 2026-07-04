@@ -96,6 +96,8 @@ final class MeetingSessionController: ObservableObject {
         let kind: Kind
         let startTrigger: StartTrigger
         let sttModel: TranscriptionModelChoice
+        let promptTelemetryProperties: [String: String]?
+        let promptRecordingStartedAt: Date?
 
         var captureDiagnostics: [String: String]? {
             switch kind {
@@ -218,6 +220,10 @@ final class MeetingSessionController: ObservableObject {
     private var queuedRuntimeDiagnosticsJobIDs: Set<UUID> = []
     private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
     private var activeTranscriptionCaptureDiagnostics: [String: String]?
+    private var activeDetectedPromptRecordingTelemetryProperties: [String: String]?
+    private var activeDetectedPromptRecordingStartedAt: Date?
+    private var activeDetectedPromptTranscriptionTelemetryProperties: [String: String]?
+    private var activeDetectedPromptTranscriptionRecordingStartedAt: Date?
     private var activeRecordingTrigger: StartTrigger = .unknown
     private var activeRecordingIdentity: UUID?
     private var micBoostPromptRecordingIdentity: UUID?
@@ -414,8 +420,14 @@ final class MeetingSessionController: ObservableObject {
     /// meeting is still transcribing, the new capture starts immediately and
     /// the older transcript continues in the background.
     @discardableResult
-    func startRecording(trigger: StartTrigger = .unknown, suggestedTitle: String? = nil) async -> Bool {
+    func startRecording(
+        trigger: StartTrigger = .unknown,
+        suggestedTitle: String? = nil,
+        promptTelemetryProperties: [String: String]? = nil
+    ) async -> Bool {
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "start_requested")
+        activeDetectedPromptRecordingTelemetryProperties = trigger == .detectedPrompt ? promptTelemetryProperties : nil
+        activeDetectedPromptRecordingStartedAt = nil
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_start_requested",
@@ -431,6 +443,7 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting start ignored because another meeting flow is active",
                 context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
             )
+            clearDetectedPromptRecordingTelemetry()
             return true
         case .idle, .loadingModels, .ready, .transcribing, .error:
             break
@@ -463,11 +476,21 @@ final class MeetingSessionController: ObservableObject {
                     ?? "Turn on the required permissions in System Settings before recording a meeting."
             )
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_blocked_permission")
+            trackDetectedPromptOutcome(
+                .recordingStartFailed,
+                promptProperties: activeDetectedPromptRecordingTelemetryProperties
+            )
+            clearDetectedPromptRecordingTelemetry()
             return false
         }
 
         guard await ensureModelsReadyForRecording(trigger: trigger) else {
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "models_unavailable")
+            trackDetectedPromptOutcome(
+                .recordingStartFailed,
+                promptProperties: activeDetectedPromptRecordingTelemetryProperties
+            )
+            clearDetectedPromptRecordingTelemetry()
             return false
         }
 
@@ -519,10 +542,23 @@ final class MeetingSessionController: ObservableObject {
             )
             state = .error(failureMessage)
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_failed")
+            trackDetectedPromptOutcome(
+                .recordingStartFailed,
+                promptProperties: activeDetectedPromptRecordingTelemetryProperties
+            )
+            clearDetectedPromptRecordingTelemetry()
             return false
         }
 
         activeRecordingStartedAt = Date()
+        if trigger == .detectedPrompt {
+            activeDetectedPromptRecordingStartedAt = activeRecordingStartedAt
+            trackDetectedPromptOutcome(
+                .recordingStarted,
+                elapsedSeconds: 0,
+                promptProperties: activeDetectedPromptRecordingTelemetryProperties
+            )
+        }
         state = .recording
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
@@ -850,6 +886,12 @@ final class MeetingSessionController: ObservableObject {
             )
             state = .error("Recording didn't close cleanly. Open Transcripted Home to retry.")
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "stop_timeout")
+            trackDetectedPromptOutcome(
+                .transcriptFailed,
+                elapsedSeconds: activeDetectedPromptRecordingStartedAt.map { Date().timeIntervalSince($0) },
+                promptProperties: activeDetectedPromptRecordingTelemetryProperties
+            )
+            clearDetectedPromptRecordingTelemetry()
             return
         }
 
@@ -878,8 +920,15 @@ final class MeetingSessionController: ObservableObject {
             captureDiagnostics: stopCaptureDiagnostics,
             meetingTitle: recordingSnapshot.suggestedTitle,
             recordingDate: recordingSnapshot.recordingStartedAt ?? Date(),
-            startTrigger: recordingSnapshot.trigger
+            startTrigger: recordingSnapshot.trigger,
+            promptTelemetryProperties: recordingSnapshot.trigger == .detectedPrompt
+                ? activeDetectedPromptRecordingTelemetryProperties
+                : nil,
+            promptRecordingStartedAt: recordingSnapshot.trigger == .detectedPrompt
+                ? activeDetectedPromptRecordingStartedAt
+                : nil
         )
+        clearDetectedPromptRecordingTelemetry()
 
         let queueDepth = queuedTranscriptionJobs.count
         DiagnosticsTrail.record(
@@ -2414,7 +2463,9 @@ final class MeetingSessionController: ObservableObject {
         captureDiagnostics: [String: String],
         meetingTitle: String?,
         recordingDate: Date,
-        startTrigger: StartTrigger
+        startTrigger: StartTrigger,
+        promptTelemetryProperties: [String: String]? = nil,
+        promptRecordingStartedAt: Date? = nil
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
             kind: .recorded(
@@ -2426,7 +2477,9 @@ final class MeetingSessionController: ObservableObject {
                 recordingDate: recordingDate
             ),
             startTrigger: startTrigger,
-            sttModel: sttRouter.selectedModel
+            sttModel: sttRouter.selectedModel,
+            promptTelemetryProperties: promptTelemetryProperties,
+            promptRecordingStartedAt: promptRecordingStartedAt
         )
 
         if liveCodexFinalTranscriptNeedsQueuedJobID && liveCodexSessionAwaitingFinalTranscript {
@@ -2449,7 +2502,9 @@ final class MeetingSessionController: ObservableObject {
                 recordingDate: recordingDate
             ),
             startTrigger: startTrigger,
-            sttModel: sttRouter.selectedModel
+            sttModel: sttRouter.selectedModel,
+            promptTelemetryProperties: nil,
+            promptRecordingStartedAt: nil
         )
 
         return enqueue(job)
@@ -2469,6 +2524,8 @@ final class MeetingSessionController: ObservableObject {
         lastTerminalTranscriptionOutcome = nil
         activeTranscriptionTrigger = job.startTrigger
         activeTranscriptionCaptureDiagnostics = job.captureDiagnostics
+        activeDetectedPromptTranscriptionTelemetryProperties = job.promptTelemetryProperties
+        activeDetectedPromptTranscriptionRecordingStartedAt = job.promptRecordingStartedAt
         sttAdapter.selectPreparedModel(job.sttModel)
         preparingQueuedTranscriptionJob = job
 
@@ -2773,6 +2830,8 @@ final class MeetingSessionController: ObservableObject {
         case .transcriptSaved:
             lastTerminalTranscriptionOutcome = .transcriptSaved
             let transcriptionTrigger = activeTranscriptionTrigger
+            let promptTelemetryProperties = activeDetectedPromptTranscriptionTelemetryProperties
+            let promptRecordingStartedAt = activeDetectedPromptTranscriptionRecordingStartedAt
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "meeting_transcript_saved",
@@ -2788,8 +2847,11 @@ final class MeetingSessionController: ObservableObject {
                 baseProperties: [
                     "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
                     "trigger": transcriptionTrigger.rawValue,
-                ]
+                ],
+                promptTelemetryProperties: promptTelemetryProperties,
+                promptRecordingStartedAt: promptRecordingStartedAt
             )
+            clearDetectedPromptTelemetry()
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_saved")
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
             activeQueuedTranscriptionJobID = nil
@@ -2824,6 +2886,11 @@ final class MeetingSessionController: ObservableObject {
                     "meeting_transcript_skipped",
                     properties: failureTelemetryContext
                 )
+                trackDetectedPromptOutcome(
+                    .transcriptSkipped,
+                    elapsedSeconds: detectedPromptRecordingElapsedSeconds()
+                )
+                clearDetectedPromptTelemetry()
                 ProductFrictionTelemetry.track(
                     surface: .meeting,
                     stage: "meeting_transcription",
@@ -2868,6 +2935,11 @@ final class MeetingSessionController: ObservableObject {
                         "trigger": transcriptionTrigger.rawValue,
                     ]
                 )
+                trackDetectedPromptOutcome(
+                    .speakerFinalizationFailed,
+                    elapsedSeconds: detectedPromptRecordingElapsedSeconds()
+                )
+                clearDetectedPromptTelemetry()
                 ProductFrictionTelemetry.track(
                     surface: .meeting,
                     stage: "speaker_finalization",
@@ -2908,6 +2980,11 @@ final class MeetingSessionController: ObservableObject {
                 "meeting_transcript_failed",
                 properties: failureTelemetryContext
             )
+            trackDetectedPromptOutcome(
+                .transcriptFailed,
+                elapsedSeconds: detectedPromptRecordingElapsedSeconds()
+            )
+            clearDetectedPromptTelemetry()
             ProductFrictionTelemetry.track(
                 surface: .meeting,
                 stage: "meeting_transcription",
@@ -3011,6 +3088,40 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
+    private func trackDetectedPromptOutcome(
+        _ outcomeKind: MeetingPromptTelemetry.OutcomeKind,
+        elapsedSeconds: TimeInterval? = nil,
+        promptProperties: [String: String]? = nil
+    ) {
+        let properties = promptProperties ?? activeDetectedPromptTranscriptionTelemetryProperties
+        guard let properties else { return }
+        AnalyticsReporter.track(
+            "meeting_prompt_outcome_recorded",
+            properties: MeetingPromptTelemetry.outcomeProperties(
+                promptProperties: properties,
+                outcomeKind: outcomeKind,
+                elapsedSeconds: elapsedSeconds
+            )
+        )
+    }
+
+    private func detectedPromptRecordingElapsedSeconds() -> TimeInterval? {
+        guard let activeDetectedPromptTranscriptionRecordingStartedAt else {
+            return nil
+        }
+        return Date().timeIntervalSince(activeDetectedPromptTranscriptionRecordingStartedAt)
+    }
+
+    private func clearDetectedPromptTelemetry() {
+        activeDetectedPromptTranscriptionTelemetryProperties = nil
+        activeDetectedPromptTranscriptionRecordingStartedAt = nil
+    }
+
+    private func clearDetectedPromptRecordingTelemetry() {
+        activeDetectedPromptRecordingTelemetryProperties = nil
+        activeDetectedPromptRecordingStartedAt = nil
+    }
+
     private func reportCaptureHealthIfNeeded(
         snapshot: AudioPipelineDiagnosticsSnapshot,
         captureDiagnostics: [String: String],
@@ -3056,7 +3167,11 @@ final class MeetingSessionController: ObservableObject {
     /// The bucketed properties come from transcript frontmatter on disk, so the
     /// read happens off the main actor and waits for any in-flight restyle to
     /// finish renaming the saved artifact before reading it.
-    private func trackSavedTranscriptAnalyticsInBackground(baseProperties: [String: String]) {
+    private func trackSavedTranscriptAnalyticsInBackground(
+        baseProperties: [String: String],
+        promptTelemetryProperties: [String: String]?,
+        promptRecordingStartedAt: Date?
+    ) {
         let restyle = savedTranscriptRestyleTask
         let fallbackTranscriptURL = taskManager.lastSavedTranscriptURL ?? lastSavedTranscriptURL
         let speakerDatabase = self.speakerDatabase
@@ -3091,6 +3206,16 @@ final class MeetingSessionController: ObservableObject {
                     "meeting_transcript_saved",
                     properties: properties
                 )
+                if let promptTelemetryProperties {
+                    AnalyticsReporter.track(
+                        "meeting_prompt_outcome_recorded",
+                        properties: MeetingPromptTelemetry.outcomeProperties(
+                            promptProperties: promptTelemetryProperties,
+                            outcomeKind: .transcriptSaved,
+                            elapsedSeconds: promptRecordingStartedAt.map { Date().timeIntervalSince($0) }
+                        )
+                    )
+                }
                 for eventProperties in autoRecognitionEvents {
                     AnalyticsReporter.track(
                         "meeting_speaker_auto_recognized",
