@@ -2959,7 +2959,8 @@ final class MeetingSessionController: ObservableObject {
                 )
                 trackDetectedPromptOutcome(
                     .transcriptSkipped,
-                    elapsedSeconds: detectedPromptRecordingElapsedSeconds()
+                    elapsedSeconds: detectedPromptRecordingElapsedSeconds(),
+                    promptProperties: activeDetectedPromptTranscriptionTelemetryProperties
                 )
                 clearDetectedPromptTelemetry()
                 ProductFrictionTelemetry.track(
@@ -3008,7 +3009,8 @@ final class MeetingSessionController: ObservableObject {
                 )
                 trackDetectedPromptOutcome(
                     .speakerFinalizationFailed,
-                    elapsedSeconds: detectedPromptRecordingElapsedSeconds()
+                    elapsedSeconds: detectedPromptRecordingElapsedSeconds(),
+                    promptProperties: activeDetectedPromptTranscriptionTelemetryProperties
                 )
                 clearDetectedPromptTelemetry()
                 ProductFrictionTelemetry.track(
@@ -3053,7 +3055,8 @@ final class MeetingSessionController: ObservableObject {
             )
             trackDetectedPromptOutcome(
                 .transcriptFailed,
-                elapsedSeconds: detectedPromptRecordingElapsedSeconds()
+                elapsedSeconds: detectedPromptRecordingElapsedSeconds(),
+                promptProperties: activeDetectedPromptTranscriptionTelemetryProperties
             )
             clearDetectedPromptTelemetry()
             ProductFrictionTelemetry.track(
@@ -3162,10 +3165,17 @@ final class MeetingSessionController: ObservableObject {
     private func trackDetectedPromptOutcome(
         _ outcomeKind: MeetingPromptTelemetry.OutcomeKind,
         elapsedSeconds: TimeInterval? = nil,
-        promptProperties: [String: String]? = nil
+        promptProperties: [String: String]?
     ) {
-        let properties = promptProperties ?? activeDetectedPromptTranscriptionTelemetryProperties
-        guard let properties else { return }
+        // No implicit fallback here: a nil `promptProperties` means this call
+        // site has no detected-prompt properties to attribute (e.g. a
+        // manual/hotkey-triggered recording), so tracking is skipped rather
+        // than mislabeling the outcome with an unrelated detected-prompt
+        // meeting that happens to be transcribing in the background. Callers
+        // that legitimately want the currently-transcribing job's properties
+        // must pass `activeDetectedPromptTranscriptionTelemetryProperties`
+        // explicitly.
+        guard let properties = promptProperties else { return }
         AnalyticsReporter.track(
             "meeting_prompt_outcome_recorded",
             properties: MeetingPromptTelemetry.outcomeProperties(
