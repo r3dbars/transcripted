@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 
-struct TimelineScreenshotRecord: Equatable {
+struct TimelineScreenshotRow: Equatable {
     let id: Int64
     let capturedAt: Int64
     let filePath: String
@@ -163,7 +163,7 @@ final class TimelineDatabase {
         }
     }
 
-    func screenshots(includeDeleted: Bool = false) throws -> [TimelineScreenshotRecord] {
+    func screenshots(includeDeleted: Bool = false) throws -> [TimelineScreenshotRow] {
         try queue.sync {
             let whereClause = includeDeleted ? "" : " WHERE is_deleted = 0"
             return try screenshotRows("SELECT * FROM screenshots\(whereClause) ORDER BY captured_at ASC, id ASC;")
@@ -174,7 +174,7 @@ final class TimelineDatabase {
         try Set(screenshots(includeDeleted: includeDeleted).map(\.filePath))
     }
 
-    func oldestPurgeCandidates(limit: Int) throws -> [TimelineScreenshotRecord] {
+    func oldestPurgeCandidates(limit: Int) throws -> [TimelineScreenshotRow] {
         guard limit > 0 else { return [] }
         return try queue.sync {
             let sql = """
@@ -383,16 +383,16 @@ final class TimelineDatabase {
         }
     }
 
-    private func screenshotRows(_ sql: String) throws -> [TimelineScreenshotRecord] {
+    private func screenshotRows(_ sql: String) throws -> [TimelineScreenshotRow] {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         return try screenshotRows(from: statement)
     }
 
-    private func screenshotRows(from statement: OpaquePointer?) throws -> [TimelineScreenshotRecord] {
-        var rows: [TimelineScreenshotRecord] = []
+    private func screenshotRows(from statement: OpaquePointer?) throws -> [TimelineScreenshotRow] {
+        var rows: [TimelineScreenshotRow] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            rows.append(TimelineScreenshotRecord(
+            rows.append(TimelineScreenshotRow(
                 id: sqlite3_column_int64(statement, 0),
                 capturedAt: sqlite3_column_int64(statement, 1),
                 filePath: textColumn(statement, 2) ?? "",
