@@ -6,6 +6,14 @@ import AppKit
 import AVFoundation
 import ApplicationServices
 
+extension Notification.Name {
+    /// Posted by app-termination cleanup so onboarding can attribute an
+    /// in-progress permission handoff before the process exits, since
+    /// `onDisappear` never fires when the app quits without closing the
+    /// onboarding window first.
+    static let transcriptedOnboardingWillTerminate = Notification.Name("transcriptedOnboardingWillTerminate")
+}
+
 extension FirstRunLocalModelState {
     init(_ state: ParakeetModelState) {
         switch state {
@@ -53,6 +61,7 @@ struct PermissionsOnboardingView: View {
     @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
     @State private var didTrackAbandonment = false
+    @State private var pendingSystemSettingsHandoff = false
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
     @FocusState private var demoEditorFocused: Bool
 
@@ -120,9 +129,15 @@ struct PermissionsOnboardingView: View {
         .onChange(of: currentStepIndex) { _, _ in
             trackCurrentStepViewed()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            pendingSystemSettingsHandoff = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .transcriptedOnboardingWillTerminate)) { _ in
+            trackAbandonmentIfNeeded()
+        }
         .onDisappear {
             stopPolling()
-            trackAbandonmentIfNeeded(reason: .windowClosed)
+            trackAbandonmentIfNeeded()
             copiedResetTask?.cancel()
         }
     }
@@ -649,14 +664,16 @@ struct PermissionsOnboardingView: View {
         )
     }
 
-    private func trackAbandonmentIfNeeded(reason: ActivationTelemetry.WorkflowAbandonmentReasonKind) {
+    private func trackAbandonmentIfNeeded() {
         guard !didTrackCompletion, !didTrackAbandonment, flowStartedAt != nil else { return }
         didTrackAbandonment = true
         let now = CFAbsoluteTimeGetCurrent()
         ActivationTelemetry.trackWorkflowAbandoned(
             workflowKind: .onboarding,
             stage: currentStep.kind.analyticsID,
-            reasonKind: reason,
+            reasonKind: OnboardingAbandonmentReasonPolicy.reason(
+                pendingSystemSettingsHandoff: pendingSystemSettingsHandoff
+            ),
             surface: .onboarding,
             elapsedBucket: flowElapsedBucket(now: now),
             priorReadyState: hasRequiredPermissions ? "ready" : "not_ready"
@@ -674,6 +691,7 @@ struct PermissionsOnboardingView: View {
             ]
         )
 
+        pendingSystemSettingsHandoff = true
         TranscriptedPermissionAccess.openSettings(for: kind)
         checkAllPermissions(trackChanges: false)
     }
