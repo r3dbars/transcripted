@@ -29,6 +29,7 @@ Important entry points:
 - `Support/ActivationPolicyController.swift` — main-actor policy for combining the Dock toggle with recording-state safety so active capture stays force-quit-visible
 - `Support/TranscriptedConstants.swift` — shared timing and behavior constants used across the app target
 - `Capture/ContextCaptureEngine.swift` — configurable physical-key dictation handling, meeting trigger routing, and trigger error surfacing
+- `Timeline/TimelineCaptureJoiner.swift` — projects saved meeting and dictation artifacts into timeline card records without changing capture behavior
 - `UI/Overlay/DictationSessionController.swift` — dictation session orchestration
 - `Meeting/MeetingPromptDetector.swift` — Calendar and runtime-app meeting detection used to offer one-tap meeting capture prompts
 - `Meeting/MeetingSessionController.swift` — app-side bridge into `TranscriptedCore`, including live capture, imported-audio handoff, queued meeting transcription, and local-speaker-split settings
@@ -44,7 +45,7 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
-- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the app-owned timeline database, and screenshot storage retention
+- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the app-owned timeline database, screenshot storage retention, and capture-library projection logic; capture-library artifacts remain the source of truth
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, and `Timeline/`

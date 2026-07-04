@@ -301,6 +301,8 @@ APP_SOURCES=(
     "Sources/Timeline/InputIdleSnapshot.swift"
     "Sources/Timeline/ForegroundAppSampler.swift"
     "Sources/Timeline/ScreenCaptureEngine.swift"
+    "Sources/Timeline/TimelineDayBoundary.swift"
+    "Sources/Timeline/TimelineCaptureJoiner.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
     "Sources/Speech/DictationReadinessWaitPolicy.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
