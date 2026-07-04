@@ -79,4 +79,22 @@ func testParakeetShortAudioGate() {
 
         assertNil(decision, "non-short-audio failures should still surface as real transcription errors")
     }
+
+    runSuite("DictationEmptyTranscriptionReason keeps too-short telemetry out of no-speech") {
+        assertEqual(
+            DictationEmptyTranscriptionReason.recordingTooShort.analyticsEventName,
+            "dictation_recording_too_short",
+            "short dictation should not inflate dictation_no_speech analytics"
+        )
+        assertEqual(
+            DictationEmptyTranscriptionReason.recordingTooShort.localEventName,
+            "dictation_recording_too_short",
+            "local diagnostics should use the same explicit short-recording event"
+        )
+        assertEqual(
+            DictationEmptyTranscriptionReason.noSpeech.analyticsEventName,
+            "dictation_no_speech",
+            "real no-speech dictation should keep the existing analytics event"
+        )
+    }
 }

@@ -9,6 +9,19 @@ func testMeetingFailureKind() {
         assertEqual(kind, .recordingTooShort, "short captures should stay out of the generic bucket")
     }
 
+    runSuite("MeetingFailureKind classifies import and retry short-audio copy") {
+        assertEqual(
+            MeetingFailureKind.classify(message: "That audio file is too short to transcribe. Choose audio that is at least two seconds long."),
+            .recordingTooShort,
+            "imported recordings that are too short should share the stable short-recording bucket"
+        )
+        assertEqual(
+            MeetingFailureKind.classify(message: "That saved audio is too short to transcribe again."),
+            .recordingTooShort,
+            "saved-audio retry should preserve the same user-actionable short-recording bucket"
+        )
+    }
+
     runSuite("MeetingFailureKind does not overmatch generic minimum language") {
         let kind = MeetingFailureKind.classify(
             message: "Upload failed after at least one retry because the destination was unavailable."
