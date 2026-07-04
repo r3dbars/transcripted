@@ -45,7 +45,7 @@ struct PermissionsOnboardingView: View {
     @State private var navigationDirection: OnboardingNavigationDirection = .forward
     @State private var micGranted = false
     @State private var accessibilityGranted = false
-    @State private var screenRecordingGranted = false
+    @State private var systemAudioGranted = false
     @State private var calendarGranted = false
     @State private var meetingPromptsEnabled = true
     @State private var selectedUseCase: OnboardingUseCase = .meetings
@@ -80,9 +80,14 @@ struct PermissionsOnboardingView: View {
     private var hasRequiredPermissions: Bool {
         switch selectedUseCase {
         case .meetings:
-            return micGranted && screenRecordingGranted
+            return FirstRunExperience.hasRequiredMeetingSetup(
+                microphoneGranted: micGranted
+            )
         case .dictation:
-            return micGranted && accessibilityGranted
+            return FirstRunExperience.hasRequiredDictationSetup(
+                microphoneGranted: micGranted,
+                accessibilityGranted: accessibilityGranted
+            )
         }
     }
 
@@ -281,10 +286,10 @@ struct PermissionsOnboardingView: View {
                 Headline(primary: "Record meetings.\nGet the transcript.", size: 42, alignment: .leading)
                 BodyCopy("Transcripted needs two audio streams to write the whole conversation: your microphone for you, and system audio for everyone else.")
                 BulletList(["macOS calls this Screen Recording", "Used only to hear meeting audio", "Everything stays on your Mac"])
-                Button(screenRecordingGranted ? "System audio enabled" : "Enable system audio") {
+                Button(systemAudioGranted ? "System audio enabled" : "Enable system audio") {
                     requestPermission(.systemAudioRecording, required: false)
                 }
-                .buttonStyle(InkButtonStyle(isSubtle: screenRecordingGranted))
+                .buttonStyle(InkButtonStyle(isSubtle: systemAudioGranted))
                 .padding(.top, 12)
                 .accessibilityIdentifier("transcripted.onboarding.system-audio.enable")
                 Text("You can skip this now, but meeting transcripts need it to include the other side of the call.")
@@ -292,14 +297,18 @@ struct PermissionsOnboardingView: View {
                     .foregroundStyle(OnboardingTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             } right: {
-                DualStreamVisual(systemReady: screenRecordingGranted)
+                DualStreamVisual(systemReady: systemAudioGranted)
             }
         case .meeting:
             SplitStage {
                 Kicker("After the call")
                 Headline(primary: "A transcript you can actually use.", size: 42, alignment: .leading)
-                BodyCopy("Every recorded meeting becomes a local Markdown file with timestamps and speaker labels.")
-                BulletList(["Find decisions later", "Copy exact quotes", "Give your agent the right context"])
+                BodyCopy(systemAudioGranted
+                    ? "Every recorded meeting becomes a local Markdown file with timestamps and speaker labels."
+                    : "Once System Audio is on, recorded meetings become local Markdown with both sides of the conversation.")
+                BulletList(systemAudioGranted
+                    ? ["Find decisions later", "Copy exact quotes", "Give your agent the right context"]
+                    : ["Meeting prompts are ready now", "System Audio adds everyone else's voice", "Turn it on from the app when you are ready"])
             } right: {
                 MeetingDemoCard()
             }
@@ -392,9 +401,7 @@ struct PermissionsOnboardingView: View {
                     size: 52
                 )
                 Lede(
-                    selectedUseCase == .meetings
-                        ? "Start meetings from Transcripted. Dictation can stay off until you want it."
-                        : "Three actions to remember: use your voice anywhere, capture meetings, then ask your agent what happened.",
+                    doneStepLede,
                     maxWidth: 560
                 )
                 ThreeActionsRecap(useCase: selectedUseCase)
@@ -423,11 +430,11 @@ struct PermissionsOnboardingView: View {
                     title: "System Audio",
                     reason: "For everyone else on the call.",
                     icon: "speaker.wave.2.fill",
-                    granted: screenRecordingGranted,
+                    granted: systemAudioGranted,
                     actionTitle: "Allow",
                     automationIdentifier: "transcripted.onboarding.permissions.system-audio"
                 ) {
-                    requestPermission(.systemAudioRecording, required: true)
+                    requestPermission(.systemAudioRecording, required: false)
                 }
             case .dictation:
                 PermissionGrantRow(
@@ -447,13 +454,24 @@ struct PermissionsOnboardingView: View {
     private var requiredPermissionsStatusText: String {
         if hasRequiredPermissions {
             return selectedUseCase == .meetings
-                ? "Meeting recording is ready."
+                ? (systemAudioGranted ? "Meeting recording is ready." : "Meeting prompts are ready. System Audio can be set up next.")
                 : "Dictation is ready."
         }
 
         return selectedUseCase == .meetings
-            ? "Allow Microphone and System Audio to continue."
+            ? "Allow Microphone to continue. System Audio is next for full meeting transcripts."
             : "Allow Microphone and Accessibility to continue."
+    }
+
+    private var doneStepLede: String {
+        switch selectedUseCase {
+        case .meetings:
+            return systemAudioGranted
+                ? "Start meetings from Transcripted. Dictation can stay off until you want it."
+                : "Transcripted can spot calls now. Turn on System Audio from the app before recording a full meeting transcript."
+        case .dictation:
+            return "Three actions to remember: use your voice anywhere, capture meetings, then ask your agent what happened."
+        }
     }
 
     private func goBack() {
@@ -579,7 +597,7 @@ struct PermissionsOnboardingView: View {
 
         micGranted = TranscriptedPermissionAccess.isGranted(.microphone)
         accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
-        screenRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+        systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
         revalidateSystemAudioPermissionForStatusSurfaces()
 
@@ -595,7 +613,7 @@ struct PermissionsOnboardingView: View {
         guard TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown else { return }
         permissionRevalidationTask = Task { @MainActor in
             _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
-            screenRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+            systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
             permissionRevalidationTask = nil
         }
     }
@@ -653,7 +671,7 @@ struct PermissionsOnboardingView: View {
             "onboarding_completed",
             properties: FirstRunExperience.onboardingCompletionAnalyticsProperties(
                 completionPath: selectedUseCase.completionPath,
-                systemAudioGranted: screenRecordingGranted,
+                systemAudioGranted: systemAudioGranted,
                 calendarGranted: calendarGranted,
                 meetingPromptsEnabled: meetingPromptsEnabled,
                 firstDictationSaved: PermissionsOnboardingPreferences.hasTrackedFirstDictationSaved(),
@@ -768,7 +786,7 @@ struct PermissionsOnboardingView: View {
         [
             .microphone: micGranted ? "granted" : "not_granted",
             .accessibility: accessibilityGranted ? "granted" : "not_granted",
-            .systemAudioRecording: screenRecordingGranted ? "granted" : "not_granted",
+            .systemAudioRecording: systemAudioGranted ? "granted" : "not_granted",
             .screenRecording: TranscriptedPermissionAccess.isGranted(.screenRecording) ? "granted" : "not_granted",
             .calendar: calendarGranted ? "granted" : "not_granted",
         ]
@@ -787,6 +805,7 @@ struct PermissionsOnboardingView: View {
                 .init(kind: .useCase),
                 .init(kind: .permissions),
                 .init(kind: .meetingStart),
+                .init(kind: .systemAudio, canSkip: true),
                 .init(kind: .meeting),
                 .init(kind: .calendar, canSkip: true),
                 .init(kind: .memory),

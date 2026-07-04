@@ -462,6 +462,13 @@ func testUIAutomationSurfaceContract() {
             assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(requiredOnboardingHook), "\(requiredOnboardingHook) should stay in onboarding automation scope")
         }
 
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".init(kind: .meetingStart),\n                .init(kind: .systemAudio, canSkip: true),\n                .init(kind: .meeting)")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requestPermission(.systemAudioRecording, required: false)")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Meeting prompts are ready. System Audio can be set up next."),
+            "meetings-first onboarding should not hard-block permission progress on System Audio; it should continue after Microphone, then explain optional System Audio before meeting value"
+        )
+
         // Auto-detect calls is default-on (AutoCallDetectionPreferences) but onboarding
         // used to teach only the manual menu-bar path and frame detection as
         // calendar-only. These guard the copy fix: the meetingStart step should prime

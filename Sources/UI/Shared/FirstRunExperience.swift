@@ -160,6 +160,12 @@ enum FirstRunExperience {
         microphoneGranted && accessibilityGranted
     }
 
+    static func hasRequiredMeetingSetup(
+        microphoneGranted: Bool
+    ) -> Bool {
+        microphoneGranted
+    }
+
     static func onboardingAction(
         for step: FirstRunOnboardingStep,
         microphoneGranted: Bool,
@@ -242,6 +248,17 @@ enum FirstRunExperience {
 
     static func onboardingRequiredPermissions() -> [TranscriptedPermissionKind] {
         [.microphone, .accessibility]
+    }
+
+    static func onboardingRequiredPermissions(
+        completionPath: FirstRunCompletionPath
+    ) -> [TranscriptedPermissionKind] {
+        switch completionPath {
+        case .meetings:
+            return [.microphone]
+        case .dictation:
+            return [.microphone, .accessibility]
+        }
     }
 
     static func onboardingOptionalPermissions() -> [TranscriptedPermissionKind] {
