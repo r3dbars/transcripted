@@ -1151,7 +1151,7 @@ class ParakeetEngine: ObservableObject {
                                     "reason": "recording_restart_budget_exhausted"
                                 ]
                             ))
-                        finishWorkflowRecovery(result: "gave_up", artifactRetained: false)
+                        finishWorkflowRecovery(result: "failed", artifactRetained: false)
                     }
                 } else {
                     finishWorkflowRecovery(result: "success", artifactRetained: false)
@@ -1261,7 +1261,7 @@ class ParakeetEngine: ObservableObject {
                 workflowKind: "dictation",
                 failureKind: "route_changed",
                 retrySource: "audio_route_recovery",
-                result: "gave_up",
+                result: "failed",
                 elapsedSeconds: Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000,
                 surface: "runtime",
                 artifactRetained: wasRecording
