@@ -198,19 +198,19 @@ aggregate reliability sizing and should not be expanded to raw device names.
   keep `dictation_completed` as completion-volume context, not strict saved-artifact proof.
 - `agent_capture_query_observed` proves successful saved-capture reads/searches
   through MCP, but it still cannot judge answer quality.
-- General dictation saved-Markdown writes still rely on `dictation_completed`
-  as a proxy, while onboarding dictation and meeting saves have stricter events.
 - Settings/action tracking is broad enough to show discovery, but it does not
   always connect settings changes to later workflow success.
-- Local summary beta behavior now has abandonment shape, but not a full success
-  funnel. Summary attempts, generated results, failure kind, model readiness,
-  and latency buckets should be captured when the summary flow is product-ready
-  enough to learn from.
+- Local summary beta has a started/completed/failed funnel, but not opened or
+  quality/usefulness proof. Treat generated-summary counts as artifact volume,
+  not user value.
 - Speaker review now has a narrow prompt/submission funnel, but final transcript
   rewrite quality is still visible mainly through meeting outcome and
   finalization failure events.
 - Retention is a return proxy, not a real habit model. It needs day/week active
   cohorts and first-artifact-to-second-artifact conversion in PostHog dashboards.
+- Dayflow/timeline has no PostHog events in this release. That is intentional:
+  screen-derived app names, window titles, OCR text, screenshot paths, URLs,
+  and screen content stay local until a separate enum-only privacy review exists.
 
 ## A+ Event Taxonomy To Add
 
@@ -226,8 +226,9 @@ Prefer a small number of lifecycle events over broad click tracking.
 | `meeting_speaker_match_reviewed` | One review verdict joining match confidence to the user's answer (confirmed = right, corrected = wrong) | `review_action`, `similarity_bucket`, `margin_bucket`, `call_count_bucket`, `channel`, `had_suggestion`, `surface` |
 | `meeting_speaker_review_shown` | A saved meeting has review work surfaced | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `surface` |
 | `meeting_speaker_review_submitted` | User saves or defers speaker review | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `completion_kind`, `result`, `updates_submitted_bucket`, `surface` |
-| `meeting_summary_requested` | User asks for a local summary | `artifact_age_bucket`, `model_state`, `surface` |
-| `meeting_summary_finished` | Summary succeeds or fails | `duration_bucket`, `failure_kind`, `latency_bucket`, `model_state`, `result`, `surface` |
+| `local_meeting_summary_started` | User asks for a local meeting summary and the run is queued/started | `provider`, `runtime`, `setup_ready`, `summary_action`, `queue_depth_bucket` |
+| `local_meeting_summary_completed` | Local summary generation succeeds | `provider`, `runtime`, `summary_action`, `chunk_count_bucket`, `duration_bucket` |
+| `local_meeting_summary_failed` | Local summary generation fails without exposing content | `provider`, `runtime`, `summary_action`, `stage`, `failure_kind`, `duration_bucket` |
 | `settings_feature_discovered` | A high-leverage feature panel is first viewed | `feature_area`, `page_id`, `source` |
 | `workflow_abandoned` | App can confidently infer abandonment without content | `workflow_kind`, `stage`, `reason_kind`, `elapsed_bucket`, `surface`, optional `prior_ready_state` |
 
@@ -293,9 +294,13 @@ system stream present, capture quality, queue depth, and failure kind.
 
 ### Local Summary Beta Funnel
 
-`meeting_transcript_saved` -> summary CTA shown -> `meeting_summary_requested`
--> `meeting_summary_finished` -> opened/copied/applied summary. Track model
-state, latency bucket, result, and failure kind only.
+`meeting_transcript_saved` -> summary CTA shown ->
+`local_meeting_summary_started` -> `local_meeting_summary_completed` /
+`local_meeting_summary_failed`.
+
+Track provider, runtime, setup readiness, queue depth, chunk count, duration,
+summary action, stage, and normalized failure kind only. Opened/copied/applied
+summary usefulness is still a gap.
 
 ### Agent And Markdown Value Loop
 

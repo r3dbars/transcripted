@@ -245,6 +245,49 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["word_count"], "raw counts should stay out of activation analytics")
     }
 
+    runSuite("AnalyticsEventPolicy pins release instrumentation surfaces") {
+        let expectedEvents = [
+            "meeting_prompt_shown",
+            "meeting_prompt_dismissed",
+            "meeting_prompt_record_selected",
+            "meeting_prompt_suppressed",
+            "meeting_detected_call_ended",
+            "dictation_completed",
+            "dictation_artifact_saved",
+            "activation_artifact_action_clicked",
+            "activation_agent_prompt_action_clicked",
+            "activation_agent_setup_cta_clicked",
+            "agent_capture_query_observed",
+            "meeting_speaker_auto_recognized",
+            "meeting_speaker_match_reviewed",
+            "meeting_speaker_review_shown",
+            "meeting_speaker_review_submitted",
+            "workflow_abandoned",
+            "workflow_recovery_attempted",
+            "workflow_recovery_finished",
+            "onboarding_dismissed",
+            "local_meeting_summary_started",
+            "local_meeting_summary_completed",
+            "local_meeting_summary_failed",
+        ]
+
+        for event in expectedEvents {
+            assertNotNil(
+                AnalyticsEventPolicy.policy(forEvent: event),
+                "\(event) should stay allowlisted for the release PostHog audit"
+            )
+        }
+
+        let timelineEvents = AnalyticsEventPolicy.allEventNames.filter { event in
+            event.contains("timeline") || event.contains("dayflow") || event.contains("screen")
+        }
+        assertEqual(
+            timelineEvents,
+            [],
+            "Dayflow/timeline data should stay local until a separate privacy-reviewed enum-only taxonomy exists"
+        )
+    }
+
     runSuite("ActivationTelemetry buckets artifact age, first-artifact saves, dictation artifacts, and next-day return proxy") {
         let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
         let suiteName = "ActivationTelemetryTests.first-artifact.\(UUID().uuidString)"
