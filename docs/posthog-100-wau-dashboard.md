@@ -42,7 +42,7 @@ Do not collapse launch, proxy activation, and strict activation into one number.
 | Meeting reliability funnel | Do meeting captures start, retain audio, transcribe, and save? | `meeting_prompt_shown`, `meeting_prompt_record_selected`, `meeting_prompt_dismissed`, `meeting_prompt_suppressed`, `meeting_recording_started`, `meeting_recording_start_failed`, `meeting_recording_stopped`, `meeting_capture_health_snapshot`, `meeting_transcript_saved`, `meeting_transcript_failed`, `meeting_transcript_skipped`, `meeting_saved_audio_retranscription_requested`, `meeting_mic_boost_prompt_shown`, `meeting_mic_boost_prompt_actioned`, `meeting_file_imported`, `meeting_file_import_failed`, `meeting_speaker_finalization_failed` | `meeting_opened_after_save` if Home/open behavior needs stricter proof than artifact-action clicks |
 | Local summary beta funnel | Are beta summaries discoverable, prepared, run, and useful? | `settings_page_viewed`, `settings_action_clicked`, `settings_toggle_changed`, `activation_artifact_action_clicked` with `action_kind = 'local_summary'`, plus `local_meeting_summary_started`, `local_meeting_summary_completed`, and `local_meeting_summary_failed` | None for the current beta loop; keep model/provider/status/failure as enums only |
 | Agent/Markdown value loop | Does saved Markdown become sourced agent use and later return? | `activation_first_artifact_saved`, `activation_second_artifact_saved`, `activation_artifact_action_clicked`, `activation_agent_prompt_action_clicked`, `activation_agent_setup_cta_clicked`, `onboarding_agent_cta_clicked`, `activation_habit_loop_actioned`, `activation_return_proxy_observed`, `agent_capture_query_observed` grouped by `query_kind`, `artifact_kind`, `source_count_bucket`, `capture_age_bucket`, and `return_window_bucket`, `meeting_transcript_saved`, `dictation_completed` | maybe `agent_answer_returned_observed` only if implemented through local MCP/tool invocation metadata, never content |
-| Release health by app version | Did a release improve activation without hurting reliability? | All dashboard events grouped by default `app_version` and `build_version`; update events: `update_check_finished`, `update_download_started`, `update_download_finished`, `update_ready_to_install`, `update_relaunching`, `update_installed`; runtime events: `app_unclean_shutdown_detected`, `app_session_stall_detected` | None for the first dashboard. Add only coarse release-readiness enums if Sentry/PostHog release reviews need a stable join key later |
+| Release health by installed build | Did a shipped release improve activation without hurting reliability, and are local/current-main builds staying out of shipped proof? | Workflow events grouped by default `app_version`, `build_version`, `build_channel`, and `build_revision`; update events: `update_check_finished`, `update_download_started`, `update_download_finished`, `update_ready_to_install`, `update_relaunching`, `update_installed`; runtime events: `app_unclean_shutdown_detected`, `app_session_stall_detected` | None for the first dashboard. Add only coarse release-readiness enums if Sentry/PostHog release reviews need a stable join key later |
 
 ## PostHog Objects
 
@@ -97,10 +97,14 @@ Create these as saved PostHog insights, then collect them into one dashboard.
    - Label setup/prompt clicks as proxy evidence; even agent-query rows prove a
      saved-capture read/search, not answer quality.
 
-7. **Release health by app version**
+7. **Release health by installed build**
    - Compare launch WAU, value WAU, activation conversion, dictation completion,
      meeting save rate, update success, unclean shutdowns, and stalls by
-     `app_version`.
+     `app_version`, `build_version`, `build_channel`, and `build_revision`.
+   - Treat `build_channel = local`, `dev`, `main`, `nightly`, or `unknown` as
+     current-main/local telemetry, not shipped-release proof.
+   - Keep update events separate: they describe the update target `version`,
+     not necessarily the installed `app_version`.
    - Keep Sentry crash triage separate, but use this dashboard to decide if a
      release changed usage or reliability.
 

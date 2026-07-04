@@ -334,7 +334,12 @@ def release_breakdown_query(days: int) -> str:
     return f"""
 SELECT
   properties['app_version'] AS app_version,
+  properties['build_version'] AS build_version,
+  properties['build_channel'] AS build_channel,
+  properties['build_revision'] AS build_revision,
+  countIf(event = 'app_launched') AS launch_events,
   uniqIf(distinct_id, event = 'app_launched') AS launch_devices,
+  countIf(event IN ('dictation_completed', 'meeting_transcript_saved', 'activation_first_artifact_saved')) AS success_events,
   uniqIf(distinct_id, event IN ('dictation_completed', 'meeting_transcript_saved', 'activation_first_artifact_saved')) AS success_devices,
   countIf(event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped')) AS failure_events,
   uniqIf(distinct_id, event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped')) AS failure_devices,
@@ -342,8 +347,9 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(CORE_EVENTS)})
-GROUP BY app_version
-ORDER BY last_seen DESC
+  AND properties['app_version'] IS NOT NULL
+GROUP BY app_version, build_version, build_channel, build_revision
+ORDER BY launch_devices DESC, launch_events DESC, last_seen DESC
 LIMIT 20
 """
 
@@ -729,15 +735,20 @@ def build_release_watch(data: dict[str, Any]) -> Finding:
     successes = as_int(watched.get("success_devices"))
     failures = as_int(watched.get("failure_events"))
     version = watched.get("app_version")
+    build_version = watched.get("build_version") or "unknown"
+    build_channel = watched.get("build_channel") or "unknown"
+    build_revision = watched.get("build_revision") or "unknown"
     if launches and successes == 0:
         recommendation = "Watch this version for install/update friction: launch exists but no first success signal yet."
     elif failures:
         recommendation = "Compare this version against Sentry and recent PRs before calling the release clean."
     else:
         recommendation = "No release regression from aggregate PostHog counts; keep watching Sentry for sparse fatals."
+    if str(build_channel).lower() in {"local", "dev", "debug", "main", "nightly"}:
+        recommendation = "Treat this as current-main/local telemetry, not shipped-release proof. Keep it separate from shipped app_version rows."
     return Finding(
         "Release regression watch",
-        f"{version}: launches={launches}, success_devices={successes}, failure_events={failures}.",
+        f"{version} ({build_version}, {build_channel}, {build_revision}): launches={launches}, success_devices={successes}, failure_events={failures}.",
         recommendation,
         "medium" if launches < 10 or failures else "high",
         (failures / max(launches, 1)) * 1000 + max(0, launches - successes),
@@ -945,6 +956,18 @@ def run_self_test() -> int:
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)
             return 1
+    release_query = release_breakdown_query(30)
+    if "GROUP BY app_version, build_version, build_channel, build_revision" not in release_query:
+        print("self-test failed: release breakdown must group by full build identity", file=sys.stderr)
+        return 1
+    release_rows = data["results"].get("release_breakdown", [])
+    if not any(row.get("build_channel") == "release" for row in release_rows) or not any(row.get("build_channel") == "local" for row in release_rows):
+        print("self-test failed: release fixture must include shipped and local/current-main build rows", file=sys.stderr)
+        return 1
+    release_metric = findings["release"].metric
+    if "localmain" not in release_metric:
+        print("self-test failed: release watch must print selected build revision/channel", file=sys.stderr)
+        return 1
     print("self-test passed")
     return 0
 
