@@ -256,6 +256,8 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
+    "Sources/Timeline/TimelineDatabase.swift"
+    "Sources/Timeline/TimelineRetentionManager.swift"
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/AgentMCPConnector.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
@@ -473,6 +475,7 @@ SWIFTC_ARGS+=(
     -framework FoundationModels
     -framework Network
     -framework ScreenCaptureKit
+    -lsqlite3
     -parse-as-library
     -o "$TEST_BINARY"
 )

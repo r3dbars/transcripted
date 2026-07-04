@@ -15,6 +15,8 @@ Important entry points:
 - `TranscriptedAppState.swift` — owns `ContextCaptureEngine`, `STTRouter`, wake-recovery coordination, and lazy `MeetingSessionController`
 - `TranscriptedMenuCommands.swift` — app-active macOS command menus for capture, import, navigation, and speaker search; these are additive window-scoped shortcuts and do not replace global physical triggers
 - `Support/TranscriptedStoragePaths.swift` — app-support path helpers for the Transcripted capture-library, state, cache, logs, and tmp layout
+- `Timeline/TimelineDatabase.swift` — raw SQLite3 storage for the Dayflow-style activity timeline
+- `Timeline/TimelineRetentionManager.swift` — storage-cap cleanup for app-owned timeline screenshots
 - `Support/HotkeyPreferences.swift` — persisted dictation shortcut mode, meeting shortcut compatibility, and legacy hotkey migration helpers
 - `Support/PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
 - `Support/PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier bindings used by capture routing for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts
@@ -42,9 +44,8 @@ Important entry points:
 - `Observability/` — events, debug log, anonymous analytics, Sparkle updater, and crash reporting
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — local STT engines, router, recorded-audio buffering, and dictation audio recovery helpers
-- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, and pause/resume state exposure
+- `Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the app-owned timeline database, and screenshot storage retention
 - `Support/` — app-wide path, storage, permission metadata, onboarding-state, physical trigger bindings, shortcut-mode preferences, clipboard paste, custom-dictionary, auto-send, local-speaker, and transcription-model preference helpers
-- `Timeline/` — Dayflow-style timeline engine scaffolding; future screen-activity capture, analysis, storage, and Markdown projection
 - `TranscriptedCore/` — shared library boundary
 - `UI/` — grouped app surfaces: `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, and `Timeline/`
 
@@ -62,9 +63,8 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching meeting flow, imported-audio transcription, or meeting UI: `Sources/Meeting/CLAUDE.md`
 - touching core library or meeting pipeline internals: `Sources/TranscriptedCore/CLAUDE.md`
 - touching STT, recording lifecycle, audio recovery, or device handling: `Sources/Speech/CLAUDE.md`
-- touching timeline capture, local screenshot metadata, or timeline pause/resume state: `Sources/Timeline/CLAUDE.md`
+- touching timeline capture, local screenshot metadata, timeline pause/resume state, the timeline database, or screenshot retention: `Sources/Timeline/CLAUDE.md`
 - touching app-wide support utilities: `Sources/Support/CLAUDE.md`
-- touching timeline engine scaffolding: `Sources/Timeline/CLAUDE.md`
 - touching timeline UI scaffolding: `Sources/UI/Timeline/CLAUDE.md`
 - touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/CLAUDE.md`
 - touching hotkeys or physical dictation trigger routing: `Sources/Capture/CLAUDE.md`

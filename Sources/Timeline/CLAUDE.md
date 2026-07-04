@@ -2,10 +2,10 @@
 
 ## What This Directory Owns
 
-`Sources/Timeline/` owns the Dayflow-style timeline engine. Phase 1 is capture
-plumbing only: screenshot cadence, display selection, foreground-app metadata,
-idle snapshots, local screenshot writes, and the pause/resume state exposed for
-future UI.
+`Sources/Timeline/` owns the Dayflow-style timeline engine: capture plumbing
+(screenshot cadence, display selection, foreground-app metadata, idle
+snapshots, local screenshot writes, and pause/resume state exposed for future
+UI), plus the app-owned timeline database and storage-cap retention cleanup.
 
 ## Files
 
@@ -13,6 +13,8 @@ future UI.
 - `ActiveDisplayTracker.swift` - display selection and even-dimension scaling helpers
 - `InputIdleSnapshot.swift` - local input-idle sampling
 - `ForegroundAppSampler.swift` - frontmost app plus best-effort window title
+- `TimelineDatabase.swift` - raw SQLite3 storage for screenshots, batches, observations, timeline cards, LLM call logs, and future timeline chat rows
+- `TimelineRetentionManager.swift` - storage-cap cleanup for timeline screenshots
 
 ## Guardrails
 
@@ -20,7 +22,11 @@ future UI.
 - Do not send app names, window titles, screenshot paths, OCR text, or screen content to Sentry/PostHog.
 - Keep ScreenCaptureKit work off the main thread.
 - Fast tests must stay deterministic and must not require Screen Recording permission.
-- UI, analysis, cards, OCR, LLM providers, and SQLite belong to later phases.
+- Keep timeline state under `~/Library/Application Support/Transcripted/`.
+- Keep screenshots in app-owned storage, not the relocatable capture library.
+- Keep human/agent-readable timeline Markdown in the capture library when that future phase exists.
+- Do not put timeline code in `Sources/TranscriptedCore/`; Core remains the meeting transcription library boundary.
+- UI, analysis, cards, OCR, and LLM providers belong to later phases.
 
 ## Verify
 

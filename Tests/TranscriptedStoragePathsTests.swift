@@ -183,6 +183,7 @@ func testTranscriptedStoragePaths() {
         defer {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
+        UserDefaults.standard.removeObject(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
 
         let disallowedRoot = URL(fileURLWithPath: "/System/Library/Transcripted", isDirectory: true)
 
@@ -273,6 +274,7 @@ func testTranscriptedStoragePaths() {
         defer {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
+        UserDefaults.standard.removeObject(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
 
         let fileURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("TranscriptedStoragePathsTests-file-root-\(UUID().uuidString)", isDirectory: false)
