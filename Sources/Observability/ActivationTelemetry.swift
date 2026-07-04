@@ -13,9 +13,18 @@ enum ActivationTelemetry {
     }
 
     enum ArtifactActionKind: String {
+        case localSummary = "local_summary"
         case openMarkdown = "open_markdown"
         case revealFolder = "reveal_folder"
         case preview
+    }
+
+    enum ArtifactActionResult: String {
+        case blocked
+        case clicked
+        case failed
+        case started
+        case success
     }
 
     enum Surface: String {
@@ -119,16 +128,32 @@ enum ActivationTelemetry {
         actionKind: ArtifactActionKind,
         surface: Surface,
         artifactDate: Date? = nil,
+        result: ArtifactActionResult = .clicked,
+        trigger: String? = nil,
+        wordCountBucket: String? = nil,
+        durationBucket: String? = nil,
         now: Date = Date()
     ) {
+        var properties = [
+            "action_kind": actionKind.rawValue,
+            "artifact_age_bucket": artifactAgeBucket(since: artifactDate, now: now),
+            "artifact_kind": artifactKind.rawValue,
+            "result": result.rawValue,
+            "surface": surface.rawValue,
+        ]
+        if let trigger {
+            properties["trigger"] = trigger
+        }
+        if let wordCountBucket {
+            properties["word_count_bucket"] = wordCountBucket
+        }
+        if let durationBucket {
+            properties["duration_bucket"] = durationBucket
+        }
+
         AnalyticsReporter.track(
             "activation_artifact_action_clicked",
-            properties: [
-                "action_kind": actionKind.rawValue,
-                "artifact_age_bucket": artifactAgeBucket(since: artifactDate, now: now),
-                "artifact_kind": artifactKind.rawValue,
-                "surface": surface.rawValue,
-            ]
+            properties: properties
         )
     }
 
