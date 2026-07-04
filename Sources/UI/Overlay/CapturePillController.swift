@@ -249,7 +249,6 @@ private final class CapturePillView: NSView {
         let recordSize = NSSize(width: 72, height: 32)
         let remindSize = NSSize(width: 118, height: 32)
         let dismissSize = NSSize(width: 82, height: 32)
-        let remindSize = NSSize(width: 74, height: 32)
         recordButton.frame = NSRect(
             x: bounds.width - pad - recordSize.width,
             y: (bounds.height - recordSize.height) / 2,
