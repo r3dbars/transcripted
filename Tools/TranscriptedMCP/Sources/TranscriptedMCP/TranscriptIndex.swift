@@ -62,9 +62,8 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     /// Bump when the derived index shape changes so existing on-disk indexes are
-    /// rebuilt from disk on next open. v2 added `meeting_summary_items`; v3 adds
-    /// the meeting-summary FTS document used by general search.
-    private static let schemaVersion: Int32 = 3
+    /// rebuilt from disk on next open. v4 adds indexed timeline day Markdown.
+    private static let schemaVersion: Int32 = 4
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
@@ -162,6 +161,33 @@ final class TranscriptIndex: @unchecked Sendable {
                 word_count INTEGER NOT NULL,
                 character_count INTEGER NOT NULL,
                 text TEXT NOT NULL
+            )
+        """)
+
+        exec("""
+            CREATE TABLE IF NOT EXISTS timeline_days (
+                filename TEXT PRIMARY KEY,
+                date TEXT NOT NULL,
+                markdown_filename TEXT NOT NULL,
+                card_count INTEGER NOT NULL,
+                active_minutes INTEGER NOT NULL,
+                categories TEXT NOT NULL,
+                json_modified_at REAL NOT NULL
+            )
+        """)
+
+        exec("""
+            CREATE TABLE IF NOT EXISTS timeline_cards (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                time_range TEXT NOT NULL,
+                title TEXT NOT NULL,
+                category TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                details TEXT,
+                transcript_path TEXT
             )
         """)
 
@@ -289,6 +315,8 @@ final class TranscriptIndex: @unchecked Sendable {
         exec("CREATE INDEX IF NOT EXISTS idx_dictation_days_date ON dictation_days(date)")
         exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_filename ON dictation_entries(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_created_at ON dictation_entries(created_at)")
+        exec("CREATE INDEX IF NOT EXISTS idx_timeline_days_date ON timeline_days(date)")
+        exec("CREATE INDEX IF NOT EXISTS idx_timeline_cards_filename ON timeline_cards(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_filename ON meeting_summary_items(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON meeting_summary_items(kind)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_items_owner ON meeting_summary_items(owner COLLATE NOCASE)")
@@ -298,15 +326,15 @@ final class TranscriptIndex: @unchecked Sendable {
     // MARK: - Reconciliation
 
     func reconcile(meetingsDir: URL, dictationsDir: URL) throws {
-        try reconcile(meetingDirs: [meetingsDir], dictationDirs: [dictationsDir])
+        try reconcile(meetingDirs: [meetingsDir], dictationDirs: [dictationsDir], timelineDirs: [])
     }
 
-    func reconcile(meetingDirs: [URL], dictationDirs: [URL]) throws {
+    func reconcile(meetingDirs: [URL], dictationDirs: [URL], timelineDirs: [URL] = []) throws {
         try queue.sync {
             var seenPaths: Set<String> = []
             var diskMap: [String: ContextArtifactFile] = [:]
 
-            for directory in meetingDirs + dictationDirs {
+            for directory in meetingDirs + dictationDirs + timelineDirs {
                 let directoryPath = directory.standardizedFileURL.path
                 guard !seenPaths.contains(directoryPath) else { continue }
                 seenPaths.insert(directoryPath)
@@ -386,6 +414,8 @@ final class TranscriptIndex: @unchecked Sendable {
             SELECT filename, json_modified_at FROM meetings
             UNION ALL
             SELECT filename, json_modified_at FROM dictation_days
+            UNION ALL
+            SELECT filename, json_modified_at FROM timeline_days
         """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw MCPIndexError.queryFailed(dbError())
@@ -405,6 +435,8 @@ final class TranscriptIndex: @unchecked Sendable {
             try indexMeeting(file: url, filename: filename, modDate: modDate)
         case .dictationDay:
             try indexDictationDay(file: url, filename: filename, modDate: modDate)
+        case .timelineDay:
+            try indexTimelineDay(file: url, filename: filename, modDate: modDate)
         }
     }
 
@@ -551,6 +583,52 @@ final class TranscriptIndex: @unchecked Sendable {
         log("Indexed dictation day: \(filename) (\(day.entries.count) entries)")
     }
 
+    private func indexTimelineDay(file url: URL, filename: String, modDate: TimeInterval) throws {
+        guard let day = TranscriptLoader.loadTimelineDay(url) else { return }
+
+        try execOrThrow("BEGIN EXCLUSIVE")
+        var committed = false
+        defer { if !committed { exec("ROLLBACK") } }
+
+        try bindExec(
+            "INSERT OR REPLACE INTO timeline_days (filename, date, markdown_filename, card_count, active_minutes, categories, json_modified_at) VALUES (?,?,?,?,?,?,?)",
+            bindings: [
+                .text(filename),
+                .text(day.date),
+                .text(day.markdownFilename),
+                .int(day.cardCount),
+                .int(day.activeMinutes),
+                .text(day.categories.joined(separator: "\n")),
+                .double(modDate)
+            ]
+        )
+
+        for card in day.cards {
+            try bindExec(
+                """
+                INSERT INTO timeline_cards
+                    (filename, position, time_range, title, category, kind, summary, details, transcript_path)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                """,
+                bindings: [
+                    .text(filename),
+                    .int(card.position),
+                    .text(card.timeRange),
+                    .text(card.title),
+                    .text(card.category),
+                    .text(card.kind),
+                    .text(card.summary),
+                    card.details.map { .text($0) } ?? .null,
+                    card.transcriptPath.map { .text($0) } ?? .null
+                ]
+            )
+        }
+
+        try execOrThrow("COMMIT")
+        committed = true
+        log("Indexed timeline day: \(filename) (\(day.cards.count) cards)")
+    }
+
     private func reindex(file url: URL, filename: String, kind: ContextArtifactKind) throws {
         try removeFromIndex(filename: filename)
         let modDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
@@ -569,6 +647,8 @@ final class TranscriptIndex: @unchecked Sendable {
         try bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM dictation_entries WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM dictation_days WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM timeline_cards WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM timeline_days WHERE filename = ?", bindings: [.text(filename)])
         try execOrThrow("COMMIT")
         committed = true
     }
@@ -677,6 +757,8 @@ final class TranscriptIndex: @unchecked Sendable {
         let dictationEntries: Int
         let summaryItems: Int
         let summarizedMeetings: Int
+        let timelineDays: Int
+        let timelineCards: Int
     }
 
     func counts() throws -> IndexCounts {
@@ -686,9 +768,94 @@ final class TranscriptIndex: @unchecked Sendable {
                 dictationDays: try scalarCount("SELECT COUNT(*) FROM dictation_days"),
                 dictationEntries: try scalarCount("SELECT COUNT(*) FROM dictation_entries"),
                 summaryItems: try scalarCount("SELECT COUNT(*) FROM meeting_summary_items"),
-                summarizedMeetings: try scalarCount("SELECT COUNT(DISTINCT filename) FROM meeting_summary_items")
+                summarizedMeetings: try scalarCount("SELECT COUNT(DISTINCT filename) FROM meeting_summary_items"),
+                timelineDays: try scalarCount("SELECT COUNT(*) FROM timeline_days"),
+                timelineCards: try scalarCount("SELECT COUNT(*) FROM timeline_cards")
             )
         }
+    }
+
+    func listTimelineDays(dateFrom: String?, dateTo: String?, limit: Int = 31) throws -> [AgentTimelineDay] {
+        try queue.sync {
+            let cappedLimit = max(1, min(limit, 366))
+            var sql = "SELECT filename, date, markdown_filename, card_count, active_minutes, categories FROM timeline_days"
+            var bindings: [SQLBinding] = []
+            var conditions: [String] = []
+            if let dateFrom { conditions.append("date >= ?"); bindings.append(.text(dateFrom)) }
+            if let dateTo { conditions.append("date <= ?"); bindings.append(.text(dateTo)) }
+            if !conditions.isEmpty { sql += " WHERE " + conditions.joined(separator: " AND ") }
+            sql += " ORDER BY date DESC LIMIT ?"
+            bindings.append(.int(cappedLimit))
+
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw MCPIndexError.queryFailed(dbError())
+            }
+            defer { sqlite3_finalize(stmt) }
+            for (i, binding) in bindings.enumerated() { bind(stmt: stmt, index: Int32(i + 1), value: binding) }
+
+            struct Row {
+                let filename: String
+                let date: String
+                let markdownFilename: String
+                let cardCount: Int
+                let activeMinutes: Int
+                let categories: [String]
+            }
+            var rows: [Row] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rows.append(Row(
+                    filename: colText(stmt, 0),
+                    date: colText(stmt, 1),
+                    markdownFilename: colText(stmt, 2),
+                    cardCount: Int(sqlite3_column_int64(stmt, 3)),
+                    activeMinutes: Int(sqlite3_column_int64(stmt, 4)),
+                    categories: colText(stmt, 5).split(separator: "\n").map(String.init)
+                ))
+            }
+
+            return try rows.map { row in
+                AgentTimelineDay(
+                    version: "1",
+                    captureType: TimelineMarkdownFormat.captureType,
+                    date: row.date,
+                    markdownFilename: row.markdownFilename,
+                    cardCount: row.cardCount,
+                    activeMinutes: row.activeMinutes,
+                    categories: row.categories,
+                    cards: try timelineCards(filename: row.filename)
+                )
+            }
+        }
+    }
+
+    private func timelineCards(filename: String) throws -> [AgentTimelineCard] {
+        var stmt: OpaquePointer?
+        let sql = """
+            SELECT position, time_range, title, category, kind, summary, details, transcript_path
+            FROM timeline_cards
+            WHERE filename = ?
+            ORDER BY position ASC
+        """
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw MCPIndexError.queryFailed(dbError())
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (filename as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        var cards: [AgentTimelineCard] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            cards.append(AgentTimelineCard(
+                position: Int(sqlite3_column_int64(stmt, 0)),
+                timeRange: colText(stmt, 1),
+                title: colText(stmt, 2),
+                category: colText(stmt, 3),
+                kind: colText(stmt, 4),
+                summary: colText(stmt, 5),
+                details: colTextOptional(stmt, 6),
+                transcriptPath: colTextOptional(stmt, 7)
+            ))
+        }
+        return cards
     }
 
     /// Single-value COUNT query. Must run inside `queue.sync`.

@@ -7,6 +7,7 @@ private var logSuppressionDepth = 0
 enum ContextArtifactKind {
     case meeting
     case dictationDay
+    case timelineDay
 }
 
 struct ContextArtifactFile {
@@ -124,12 +125,26 @@ enum TranscriptLoader {
         )
     }
 
+    static func loadTimelineDay(_ url: URL) -> AgentTimelineDay? {
+        guard let content = CaptureMarkdown.readBoundedContents(of: url),
+              let parsed = TimelineMarkdownParser.parseTimelineDay(from: content, markdownURL: url) else {
+            log("Cannot read markdown timeline day: \(url.lastPathComponent)")
+            return nil
+        }
+
+        return AgentTimelineDay(parsed)
+    }
+
     static func artifactKind(for url: URL) -> ContextArtifactKind? {
         guard url.pathExtension == "md", CaptureMarkdown.looksLikeCaptureMarkdown(url) else { return nil }
 
         let filename = url.deletingPathExtension().lastPathComponent
         if filename.hasPrefix("Dictations_") {
             return .dictationDay
+        }
+        if let content = CaptureMarkdown.readBoundedContents(of: url),
+           TimelineMarkdownParser.parseTimelineDay(from: content, markdownURL: url) != nil {
+            return .timelineDay
         }
         // Generated `<stem>.summary.md` sidecars carry frontmatter too, but they
         // are not meetings — they are read as a fallback summary source for their

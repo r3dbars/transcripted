@@ -51,6 +51,7 @@ bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the
 Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multiple rules, run the union):
 
 - Touched `Sources/**/*.swift`, root `Tests/*.swift`, or `Tests/FastTests.manifest` → `bash build.sh --no-open` + `bash run-tests.sh`
+- Touched `Sources/Timeline/**` or `Sources/UI/Timeline/**` → `python3 scripts/dev/check-build-source-lists.py` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
 - Touched `Sources/Meeting/**`, `Sources/TranscriptedCore/**`, or `Tests/Integration/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
 - Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `python3 scripts/dev/check-build-source-lists.py` + `bash run-e2e-smoke.sh`
 - Touched the slow-pasteback smoke path (`Tests/E2E/SlowPastebackSmoke.swift`, `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/Support/TranscriptedConstants.swift`, `run-slow-pasteback-smoke.sh`) → `python3 scripts/dev/check-build-source-lists.py` + `bash run-slow-pasteback-smoke.sh`
@@ -106,9 +107,10 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | `Sources/Observability/` | events, debug log, Sentry, anonymous PostHog analytics, Sparkle updater, crash reporting |
 | `Sources/Reliability/` | wake/sleep recovery for hotkeys and active capture |
 | `Sources/Speech/` | local STT engines (`ParakeetEngine`), `STTRouter`, recorded-audio buffering, dictation audio recovery |
+| `Sources/Timeline/` | Dayflow-style timeline capture engine, local screenshot metadata, pause/resume state exposure, the timeline database, screenshot storage retention, analysis pipeline pure rules, capture-library projections, and local-first read-only chat tools; meeting/dictation Markdown stays the source of truth |
 | `Sources/Support/` | app paths, permissions metadata, hotkey/trigger preferences, paste, dictionary, launch-at-login |
 | `Sources/TranscriptedCore/` | reusable meeting transcription library — strict library boundary, consumed only through `Sources/Meeting/` |
-| `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `Shared/` |
+| `Sources/UI/` | `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, `Timeline/` |
 | `Tools/TranscriptedCaptureKit` | shared capture-library resolution + capture-Markdown parsing library for the CLI and MCP tools |
 | `Tools/TranscriptedCLI` | standalone local-context, offline transcription, and offline diarization CLI |
 | `Tools/TranscriptedMCP` | read-only MCP server for saved meetings/dictations, including cross-meeting rollup tools (`list_action_items`/`list_decisions`/`digest`) |

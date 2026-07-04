@@ -149,6 +149,60 @@ struct ListDictations: ParsableCommand {
     }
 }
 
+struct ListTimelines: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "list-timelines",
+        abstract: "List saved timeline day files."
+    )
+
+    @OptionGroup var paths: CLIContextPathOptions
+
+    @Option(name: .long, help: "Start date filter (YYYY-MM-DD).")
+    var dateFrom: String?
+
+    @Option(name: .long, help: "End date filter (YYYY-MM-DD).")
+    var dateTo: String?
+
+    @Option(name: .shortAndLong, help: "Number of days to return (valid range 1-50; values outside are clamped).")
+    var count: Int = 10
+
+    @Flag(name: .long, help: "Output JSON instead of text.")
+    var json: Bool = false
+
+    func run() throws {
+        let directories = paths.resolved
+        let days = CLIContextStore.listTimelineDays(
+            in: directories,
+            count: max(1, min(count, 50)),
+            dateFrom: dateFrom,
+            dateTo: dateTo
+        )
+        let searchedDirectories = searchedDirectoryPaths(in: directories, kind: .timeline)
+
+        if json {
+            if days.isEmpty {
+                try printEmptyResultsJSON(searchedDirectories: searchedDirectories, notes: [])
+                return
+            }
+            let data = try JSONEncoder.contextPretty.encode(days)
+            print(String(data: data, encoding: .utf8) ?? "[]")
+            return
+        }
+
+        if days.isEmpty {
+            printEmptyResultsToStandardError(searchedDirectories: searchedDirectories)
+            return
+        }
+
+        for day in days {
+            print("[\(day.date)] \(day.filename)  \(day.cardCount) cards  \(day.activeMinutes) active min")
+            if !day.categories.isEmpty {
+                print("  categories: \(day.categories.joined(separator: ", "))")
+            }
+        }
+    }
+}
+
 struct ReadMeeting: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "read-meeting",
@@ -205,6 +259,34 @@ struct ReadDictation: ParsableCommand {
             markdown: read.markdown,
             date: read.date,
             entries: read.entries
+        )
+        try printReadDocument(document, asJSON: json)
+    }
+}
+
+struct ReadTimeline: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "read-timeline",
+        abstract: "Read a saved timeline day file."
+    )
+
+    @Argument(help: "Timeline day filename or YYYY-MM-DD, with or without .md.")
+    var filename: String
+
+    @OptionGroup var paths: CLIContextPathOptions
+
+    @Flag(name: .long, help: "Output JSON instead of raw Markdown.")
+    var json: Bool = false
+
+    func run() throws {
+        let read = try CLIContextStore.readTimeline(filename: filename, in: paths.resolved)
+        let document = CLIReadMarkdownDocument(
+            kind: .timeline,
+            filename: normalizedMarkdownFilename(filename),
+            entryId: nil,
+            markdown: read.markdown,
+            date: read.day.date,
+            timeline: read.day
         )
         try printReadDocument(document, asJSON: json)
     }
@@ -292,11 +374,14 @@ private func printToStandardError(_ message: String) {
 
 private func searchedDirectoryPaths(in directories: CLIContextDirectories, kind: CLIContextKind) -> [String] {
     var urls: [URL] = []
-    if kind != .dictation {
+    if kind == .meeting || kind == .all {
         urls.append(contentsOf: directories.meetingDirs)
     }
-    if kind != .meeting {
+    if kind == .dictation || kind == .all {
         urls.append(contentsOf: directories.dictationDirs)
+    }
+    if kind == .timeline || kind == .all {
+        urls.append(contentsOf: directories.timelineDirs)
     }
 
     var seen: Set<String> = []

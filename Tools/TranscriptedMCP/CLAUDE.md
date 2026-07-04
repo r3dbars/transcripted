@@ -1,6 +1,6 @@
 # TranscriptedMCP
 
-Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting and dictation data from Claude Desktop or any MCP-compatible client.
+Standalone MCP server (`transcripted-mcp`) for querying Transcripted meeting, dictation, and timeline data from Claude Desktop or any MCP-compatible client.
 
 It is read-only, independent from the app target, and builds its own SQLite index from saved artifacts on disk.
 
@@ -16,6 +16,7 @@ Default locations when no custom capture library is configured:
 
 - meetings: `~/Library/Application Support/Transcripted/captures/meetings`
 - dictations: `~/Library/Application Support/Transcripted/captures/dictations`
+- timeline: `~/Library/Application Support/Transcripted/captures/timeline`
 - index: `~/Library/Application Support/Transcripted/cache`
 
 Legacy fallback:
@@ -28,10 +29,11 @@ Path overrides:
 - `TRANSCRIPTED_DATA_DIR` — shared meetings + dictations directory
 - `TRANSCRIPTED_MEETINGS_DIR` — meetings directory override
 - `TRANSCRIPTED_DICTATIONS_DIR` — dictations directory override
+- `TRANSCRIPTED_TIMELINE_DIR` — timeline directory override
 - `TRANSCRIPTED_INDEX_DIR` — SQLite index directory override
 
 When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
-`dictations/` subfolders, the server uses those subfolders automatically. In
+`dictations/` and `timeline/` subfolders, the server uses those subfolders automatically. In
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
@@ -52,7 +54,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `EmbeddingProvider.swift` | `EmbeddingProvider` protocol, the default `NLEmbeddingProvider` (Apple NaturalLanguage, zero-bundle on-device), `SearchMode`, and `VectorMath` helpers |
 | `EmbeddingStore.swift` | Vector store on its own SQLite connection; embeds rows, stores Float32 vectors, and runs cosine semantic search over utterances and dictation entries |
 | `SemanticSearchFusion.swift` | Reciprocal-rank fusion that merges lexical (FTS) and semantic result lists for hybrid search |
-| `TranscriptLoader.swift` | Loads markdown meeting transcripts and dictation day files from disk; parsing delegates to `TranscriptedCaptureKit` |
+| `TranscriptLoader.swift` | Loads markdown meeting transcripts, dictation day files, and timeline day files from disk; parsing delegates to `TranscriptedCaptureKit` |
 | `Models.swift` | Codable input/output models and `MCPIndexError` |
 | `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
 | `PathSecurity.swift` | Guards direct file reads against traversal, symlinks, and out-of-root paths |
@@ -85,6 +87,7 @@ All tools are read-only.
 | `read_meeting` | Read one meeting transcript by filename; `section` (`full`/`transcript`/`speakers`) plus optional `offset`/`limit` utterance paging |
 | `list_dictations` | List saved dictation day files with counts, source apps, and titles |
 | `read_dictation` | Read one dictation day, one specific entry by `entry_id`, or a paged window of entries via `offset`/`limit` |
+| `get_timeline` | Read saved timeline day files by date or date range |
 | `search` | Search meeting transcript content (lexical / semantic / hybrid via `mode`, default hybrid) |
 | `search_context` | Search across meetings, dictations, or both (same `mode` options) |
 | `recent_context` | Get a mixed recent feed of meetings and dictations |
@@ -92,7 +95,7 @@ All tools are read-only.
 | `recap` | Build a structured digest for a date range |
 | `list_action_items` | Roll up action items across meetings; filter by owner / status (`open`/`all`; `done` is rejected with an explicit error) / query / date |
 | `list_decisions` | Roll up decisions across meetings; filter by query / date |
-| `digest` | Cross-meeting summary (decisions + action items + open questions) for a window |
+| `digest` | Merged day summary for a window: timeline activity cards plus meeting decisions, action items, and open questions |
 | `decisions` | WS2.3 receipt API for local decision lookup by topic/range |
 | `commitments` | WS2.3 receipt API for local action-item lookup by person/range |
 | `open_questions` | WS2.3 receipt API for local open-question lookup by project/range |
@@ -112,12 +115,13 @@ Use these tool patterns for the most common questions:
 - meetings by speaker: `search` with `{"query":"topic","speaker":"Name"}` or `who_is` with `{"speaker":"Name"}`
 - recent mixed context: `recent_context` with `{"count":10}`
 - dictations by day: `list_dictations` with `{"date":"2026-04-29"}`, then `read_dictation` with the returned filename
+- timeline by day: `get_timeline` with `{"date":"2026-04-29"}`
 
 ## Data Flow
 
 ```text
-meetings/*.md + dictations/*.md
-  -> TranscriptLoader direct reads for read_meeting and read_dictation
+meetings/*.md + dictations/*.md + timeline/*.md
+  -> TranscriptLoader direct reads for read_meeting, read_dictation, and get_timeline
   -> TranscriptIndex.reconcile() on startup
   -> FileWatcher incremental updates on change
   -> SQLite index
@@ -132,6 +136,8 @@ The SQLite index keeps separate records for:
 - structured meeting-summary items (Decisions / Action Items with owner / Open Questions), one row per bullet in `meeting_summary_items` with a `kind` discriminator + FTS5, so cross-meeting tools can roll up across all meetings
 - dictation day files
 - dictation entry search rows
+- timeline day files
+- timeline cards
 
 Structured summary items are parsed via `TranscriptedCaptureKit.CaptureSummaryParser` from each meeting's inline local summary (or a `<stem>.summary.md` sidecar fallback) during `indexMeeting`. `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)` is the cross-meeting query foundation behind `list_action_items`, `list_decisions`, and `digest`.
 
@@ -196,6 +202,7 @@ The in-app Claude Desktop installer copies that helper into:
 
 - reads meeting markdown transcripts written by `Sources/TranscriptedCore/Storage/TranscriptSaver.swift`
 - reads dictation markdown day files written by `Sources/Dictation/DictationTranscriptWriter.swift`
+- reads timeline markdown day files written by `Sources/Timeline/TimelineMarkdownWriter.swift`
 - shares capture-library resolution and capture-Markdown parsing with `Tools/TranscriptedCLI` through `Tools/TranscriptedCaptureKit`; change that logic in the kit, not here
 - mirrors speaker-name matching logic from the app with `NameVariants.swift`
 - has no compile-time dependency on the main Transcripted app target

@@ -2,6 +2,7 @@ import Foundation
 
 /// Handles automatic saving of transcripts to the filesystem
 public class TranscriptSaver {
+    private static let fileUpdateQueueSpecific = DispatchSpecificKey<Void>()
 
     /// Default save location for the standalone Transcripted app.
     /// Falls back to `CoreStoragePaths.default.transcripts` unless the user has set a
@@ -43,7 +44,19 @@ public class TranscriptSaver {
     }
 
     /// Serial queue for file updates — prevents concurrent reads/writes from corrupting transcripts
-    static let fileUpdateQueue = DispatchQueue(label: "com.transcripted.fileupdate", qos: .utility)
+    static let fileUpdateQueue: DispatchQueue = {
+        let queue = DispatchQueue(label: "com.transcripted.fileupdate", qos: .utility)
+        queue.setSpecific(key: fileUpdateQueueSpecific, value: ())
+        return queue
+    }()
+
+    /// Run a whole-file transcript update under the same serializer as speaker-name rewrites.
+    public static func serializeTranscriptFileUpdate<T>(_ update: () throws -> T) rethrows -> T {
+        if DispatchQueue.getSpecific(key: fileUpdateQueueSpecific) != nil {
+            return try update()
+        }
+        return try fileUpdateQueue.sync(execute: update)
+    }
 
     /// Save transcript to file with automatic timestamped naming
     /// - Parameters:

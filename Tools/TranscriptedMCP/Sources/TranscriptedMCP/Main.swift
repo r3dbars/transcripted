@@ -26,6 +26,7 @@ struct TranscriptedMCP {
         log("Starting transcripted-mcp v\(serverVersion)")
         log("Meetings directories: \(directories.meetingDirs.map(\.path).joined(separator: ", "))")
         log("Dictations directories: \(directories.dictationDirs.map(\.path).joined(separator: ", "))")
+        log("Timeline directories: \(directories.timelineDirs.map(\.path).joined(separator: ", "))")
         log("Index directory: \(directories.indexDir.path)")
 
         for directory in directories.watchedDirectories + [directories.indexDir] {
@@ -48,7 +49,7 @@ struct TranscriptedMCP {
                 log("Semantic search unavailable on this host; using lexical search only")
             }
             index = try TranscriptIndex(indexDir: directories.indexDir, embeddingProvider: embeddingProvider)
-            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs, timelineDirs: directories.timelineDirs)
         } catch {
             log("Failed to initialize index: \(error.localizedDescription)")
             throw error
@@ -57,7 +58,7 @@ struct TranscriptedMCP {
         let watchers = directories.watchedDirectories.map { directory in
             FileWatcher(directory: directory) {
                 do {
-                    try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+                    try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs, timelineDirs: directories.timelineDirs)
                 } catch {
                     log("Failed to reconcile watched directories: \(error.localizedDescription)")
                 }
@@ -99,6 +100,7 @@ struct TranscriptedMCP {
       TRANSCRIPTED_DATA_DIR         Shared root with meetings/ and dictations/.
       TRANSCRIPTED_MEETINGS_DIR     Meeting directory override.
       TRANSCRIPTED_DICTATIONS_DIR   Dictation directory override.
+      TRANSCRIPTED_TIMELINE_DIR     Timeline Markdown directory override.
       TRANSCRIPTED_INDEX_DIR        SQLite index directory override.
     """
 
@@ -113,7 +115,7 @@ struct TranscriptedMCP {
 
         try withLogsSuppressed {
             let index = try TranscriptIndex(indexDir: directories.indexDir)
-            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs, timelineDirs: directories.timelineDirs)
         }
 
         let result = TranscriptedMCPSelfTestResult(
@@ -122,9 +124,11 @@ struct TranscriptedMCP {
             dictationsDirectory: directories.dictationsDir.path,
             meetingDirectories: directories.meetingDirs.map(\.path),
             dictationDirectories: directories.dictationDirs.map(\.path),
+            timelineDirectories: directories.timelineDirs.map(\.path),
             indexDirectory: directories.indexDir.path,
             meetingFileCount: markdownFileCount(in: directories.meetingDirs),
-            dictationFileCount: markdownFileCount(in: directories.dictationDirs)
+            dictationFileCount: markdownFileCount(in: directories.dictationDirs),
+            timelineFileCount: markdownFileCount(in: directories.timelineDirs)
         )
 
         let encoder = JSONEncoder()
@@ -164,9 +168,11 @@ private struct TranscriptedMCPSelfTestResult: Codable {
     let dictationsDirectory: String
     let meetingDirectories: [String]
     let dictationDirectories: [String]
+    let timelineDirectories: [String]
     let indexDirectory: String
     let meetingFileCount: Int
     let dictationFileCount: Int
+    let timelineFileCount: Int
 
     enum CodingKeys: String, CodingKey {
         case ok
@@ -174,8 +180,10 @@ private struct TranscriptedMCPSelfTestResult: Codable {
         case dictationsDirectory = "dictations_directory"
         case meetingDirectories = "meeting_directories"
         case dictationDirectories = "dictation_directories"
+        case timelineDirectories = "timeline_directories"
         case indexDirectory = "index_directory"
         case meetingFileCount = "meeting_file_count"
         case dictationFileCount = "dictation_file_count"
+        case timelineFileCount = "timeline_file_count"
     }
 }

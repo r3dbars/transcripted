@@ -48,6 +48,7 @@ struct PermissionsOnboardingView: View {
     @State private var claudeDesktopConnectPhase: OnboardingAgentConnectPhase = .idle
     @State private var copiedResetTask: Task<Void, Never>?
     @State private var pollTask: Task<Void, Never>?
+    @State private var permissionRevalidationTask: Task<Void, Never>?
     @State private var flowStartedAt: CFAbsoluteTime?
     @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
@@ -564,12 +565,23 @@ struct PermissionsOnboardingView: View {
         accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
         screenRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
+        revalidateSystemAudioPermissionForStatusSurfaces()
 
         let updatedStatuses = currentPermissionStatuses()
         if trackChanges && !previousStatuses.isEmpty {
             trackPermissionStatusChanges(from: previousStatuses, to: updatedStatuses)
         }
         lastPermissionStatuses = updatedStatuses
+    }
+
+    private func revalidateSystemAudioPermissionForStatusSurfaces() {
+        guard permissionRevalidationTask == nil else { return }
+        guard TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown else { return }
+        permissionRevalidationTask = Task { @MainActor in
+            _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
+            screenRecordingGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
+            permissionRevalidationTask = nil
+        }
     }
 
     private func startPolling() {
@@ -589,6 +601,8 @@ struct PermissionsOnboardingView: View {
     private func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+        permissionRevalidationTask?.cancel()
+        permissionRevalidationTask = nil
     }
 
     private func completeOnboarding() {
@@ -719,6 +733,7 @@ struct PermissionsOnboardingView: View {
             .microphone: micGranted ? "granted" : "not_granted",
             .accessibility: accessibilityGranted ? "granted" : "not_granted",
             .systemAudioRecording: screenRecordingGranted ? "granted" : "not_granted",
+            .screenRecording: TranscriptedPermissionAccess.isGranted(.screenRecording) ? "granted" : "not_granted",
             .calendar: calendarGranted ? "granted" : "not_granted",
         ]
     }

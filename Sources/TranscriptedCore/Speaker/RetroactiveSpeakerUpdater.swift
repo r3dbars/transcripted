@@ -95,6 +95,12 @@ extension TranscriptSaver {
 
             // Write back atomically
             do {
+                guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                    AppLogger.pipeline.warning("Skipped retroactive speaker update because transcript moved before write", [
+                        "file": fileURL.lastPathComponent
+                    ])
+                    continue
+                }
                 try content.write(to: fileURL, atomically: true, encoding: .utf8)
                 restrictTranscriptToOwnerOnly(fileURL)
                 updatedCount += 1

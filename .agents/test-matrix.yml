@@ -24,6 +24,7 @@ rules:
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
       - "python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json"
+      - "bash run-integration-smoke.sh"
 
   - paths:
       - "Sources/Meeting/**"

@@ -1,6 +1,6 @@
 # Transcripted MCP
 
-Read-only local tools for Transcripted meetings and dictations.
+Read-only local tools for Transcripted meetings, dictations, and daily timelines.
 
 For Claude Desktop users, the best setup is inside the app:
 
@@ -41,12 +41,14 @@ Without a custom library, it reads:
 ```text
 ~/Library/Application Support/Transcripted/captures/meetings
 ~/Library/Application Support/Transcripted/captures/dictations
+~/Library/Application Support/Transcripted/captures/timeline
 ```
 
 Override paths with `TRANSCRIPTED_DATA_DIR`, `TRANSCRIPTED_MEETINGS_DIR`,
-`TRANSCRIPTED_DICTATIONS_DIR`, or `TRANSCRIPTED_INDEX_DIR`.
+`TRANSCRIPTED_DICTATIONS_DIR`, `TRANSCRIPTED_TIMELINE_DIR`, or
+`TRANSCRIPTED_INDEX_DIR`.
 If `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
-`dictations/` subfolders, `transcripted-mcp` uses those subfolders
+`dictations/` and `timeline/` subfolders, `transcripted-mcp` uses those subfolders
 automatically and stores its SQLite index in that shared root unless
 `TRANSCRIPTED_INDEX_DIR` is also set.
 

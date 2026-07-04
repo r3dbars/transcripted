@@ -77,9 +77,11 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Sources/Observability/` — analytics, crash reporting, debug logging, and Sparkle updater
 - `Sources/Reliability/` — wake/sleep recovery
 - `Sources/Speech/` — local STT engines, router, and audio recovery
+- `Sources/Timeline/` — Dayflow-style timeline capture engine, local screenshot metadata, timeline state exposure, the timeline database, storage retention, analysis rules, provider seams, weekly aggregation helpers, capture-library projection logic, and local-first read-only chat tools
 - `Sources/Support/` — shared app utilities such as paths, permissions, hotkeys, and constants
 - `Sources/TranscriptedCore/` — reusable meeting transcription library
-- `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
+- `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`, and `Timeline/`
+- `Sources/UI/Timeline/` — preview-gated SwiftUI timeline home components
 - `Tests/` — fast tests, package tests, and integration smoke sources
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
 - `docs/` — live project docs

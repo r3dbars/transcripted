@@ -15,6 +15,11 @@ folder before switching. The copy never deletes originals and skips destination
 name collisions instead of overwriting. App-owned state, cache, logs, and temp
 files always stay under `~/Library/Application Support/Transcripted/`.
 
+Timeline screen capture state is app-owned and local-only:
+
+- screenshots: `~/Library/Application Support/Transcripted/recordings/screenshots/`
+- future timeline database: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
+
 ## Dictation
 
 Dictation artifacts live under:
@@ -25,6 +30,17 @@ Dictation artifacts live under:
 `DictationStoragePaths.transcriptsFolder` points directly at the dictations
 folder. There is no extra `transcripts/` subdirectory in the current app
 layout.
+
+## Timeline
+
+Agent-readable day timeline files live under:
+
+- root: `<capture-library>/timeline/`
+- current runtime output: daily markdown files like `2026-04-11.md`
+
+Timeline files summarize activity cards for a local day. They may link to saved
+meeting Markdown by relative path, but they must not include screenshots or raw
+OCR text.
 
 ## Meetings
 
@@ -54,8 +70,21 @@ App-owned meeting state is stored separately under:
 
 - speaker DB: `~/Library/Application Support/Transcripted/state/speakers.sqlite`
 - stats DB: `~/Library/Application Support/Transcripted/state/stats.sqlite`
+- timeline DB: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
 - failed queue: `~/Library/Application Support/Transcripted/state/failed_transcriptions.json`
 - runtime diagnostics marker: `~/Library/Application Support/Transcripted/state/runtime-diagnostics.json`
+
+The Dayflow-style timeline stores app-owned screen activity data separately from
+the relocatable capture library:
+
+- screenshots: `~/Library/Application Support/Transcripted/recordings/screenshots/YYYY-MM-DD/*.jpg`
+- future timeline Markdown summaries: `<capture-library>/timeline/`
+
+Timeline database rows and screenshot files are owner-only local state. The
+retention manager soft-deletes old screenshot rows first, removes files oldest
+first when the configured cap is exceeded, then hard-deletes the purged rows.
+Screenshots that belong to an `analysis_batches.status = processing` batch are
+not deleted by retention.
 
 Claude Desktop integration installs the bundled read-only MCP helper under:
 
@@ -108,6 +137,22 @@ directory:
 
 - core pipeline log: `~/Library/Application Support/Transcripted/logs/app.jsonl`
 
+## Timeline
+
+Timeline state is app-owned and stays under the Transcripted Application
+Support root:
+
+- timeline DB: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
+- timeline screenshots: `~/Library/Application Support/Transcripted/recordings/screenshots/`
+
+The future agent-readable daily timeline Markdown will live in the relocatable
+capture library:
+
+- timeline Markdown: `<capture-library>/timeline/`
+
+Screen pixels and screen-derived text stay out of the capture library unless a
+future phase writes user/agent-readable Markdown summaries there.
+
 ## `TranscriptedCore` Defaults
 
 `CoreStoragePaths.default` now uses the same Transcripted-named Application
@@ -125,6 +170,6 @@ can follow the user-selected capture library.
 
 The standalone tools do not all resolve paths the same way:
 
-- `TranscriptedCLI` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current Transcripted capture folders, then legacy Draft `.../transcripts/`, then `~/Documents/Transcripted/`; explicit `--data-dir`, `--meetings-dir`, `--dictations-dir`, or matching env vars still override this
-- `TranscriptedMCP` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current-plus-legacy read order. It keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default; if `TRANSCRIPTED_DATA_DIR` is set, it instead keeps the index in that shared root unless `TRANSCRIPTED_INDEX_DIR` is also set
-- `TranscriptedQA` now defaults to the current Transcripted meetings/dictations/state/log layout, uses `~/Library/Application Support/Transcripted/logs/app.jsonl` for log validation, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--dictations-path`, `--state-dir`, and `--log-path` overrides for nonstandard setups
+- `TranscriptedCLI` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current Transcripted capture folders, then legacy Draft `.../transcripts/`, then `~/Documents/Transcripted/`; explicit `--data-dir`, `--meetings-dir`, `--dictations-dir`, `--timeline-dir`, or matching env vars still override this
+- `TranscriptedMCP` first follows the app-selected capture library from `mcp-directories.json` or the app's `transcriptSaveLocation` preference, then falls back to the current-plus-legacy read order. It keeps its SQLite index under `~/Library/Application Support/Transcripted/cache/` by default; if `TRANSCRIPTED_DATA_DIR` is set, it instead keeps the index in that shared root unless `TRANSCRIPTED_INDEX_DIR` is also set. `TRANSCRIPTED_TIMELINE_DIR` can override just the timeline directory.
+- `TranscriptedQA` now defaults to the current Transcripted meetings/dictations/timeline/state/log layout, uses `~/Library/Application Support/Transcripted/logs/app.jsonl` for log validation, falls back to legacy Draft and then `~/Documents/Transcripted/`, and accepts explicit `--path`, `--dictations-path`, `--timeline-path`, `--state-dir`, and `--log-path` overrides for nonstandard setups

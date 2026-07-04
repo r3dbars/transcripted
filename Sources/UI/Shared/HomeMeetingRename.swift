@@ -33,6 +33,16 @@ enum HomeMeetingRename {
         to rawTitle: String,
         fileManager: FileManager = .default
     ) throws -> HomeMeetingRenameResult {
+        try MeetingTranscriptFileUpdateSerializer.sync {
+            try renameSerialized(transcriptAt: url, to: rawTitle, fileManager: fileManager)
+        }
+    }
+
+    private static func renameSerialized(
+        transcriptAt url: URL,
+        to rawTitle: String,
+        fileManager: FileManager
+    ) throws -> HomeMeetingRenameResult {
         guard let normalizedTitle = MeetingRecordingTitlePolicy.normalized(rawTitle) else {
             throw HomeMeetingRenameError.emptyTitle
         }

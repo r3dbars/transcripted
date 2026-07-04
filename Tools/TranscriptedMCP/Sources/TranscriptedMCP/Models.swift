@@ -1,4 +1,5 @@
 import Foundation
+import TranscriptedCaptureKit
 
 // MARK: - Transcript Context Types
 
@@ -100,6 +101,104 @@ struct AgentDictationEntry: Codable {
         case delivery
         case wordCount = "word_count"
         case characterCount = "character_count"
+    }
+}
+
+struct AgentTimelineDay: Codable {
+    let version: String
+    let captureType: String
+    let date: String
+    let markdownFilename: String
+    let cardCount: Int
+    let activeMinutes: Int
+    let categories: [String]
+    let cards: [AgentTimelineCard]
+
+    init(
+        version: String,
+        captureType: String,
+        date: String,
+        markdownFilename: String,
+        cardCount: Int,
+        activeMinutes: Int,
+        categories: [String],
+        cards: [AgentTimelineCard]
+    ) {
+        self.version = version
+        self.captureType = captureType
+        self.date = date
+        self.markdownFilename = markdownFilename
+        self.cardCount = cardCount
+        self.activeMinutes = activeMinutes
+        self.categories = categories
+        self.cards = cards
+    }
+
+    init(_ parsed: ParsedTimelineDayCapture) {
+        self.version = "\(parsed.formatVersion)"
+        self.captureType = parsed.captureType
+        self.date = parsed.date
+        self.markdownFilename = parsed.markdownFilename
+        self.cardCount = parsed.cardCount
+        self.activeMinutes = parsed.activeMinutes
+        self.categories = parsed.categories
+        self.cards = parsed.cards.map(AgentTimelineCard.init)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case version, date, categories, cards
+        case captureType = "capture_type"
+        case markdownFilename = "markdown_filename"
+        case cardCount = "card_count"
+        case activeMinutes = "active_minutes"
+    }
+}
+
+struct AgentTimelineCard: Codable {
+    let position: Int
+    let timeRange: String
+    let title: String
+    let category: String
+    let kind: String
+    let summary: String
+    let details: String?
+    let transcriptPath: String?
+
+    init(
+        position: Int,
+        timeRange: String,
+        title: String,
+        category: String,
+        kind: String,
+        summary: String,
+        details: String?,
+        transcriptPath: String?
+    ) {
+        self.position = position
+        self.timeRange = timeRange
+        self.title = title
+        self.category = category
+        self.kind = kind
+        self.summary = summary
+        self.details = details
+        self.transcriptPath = transcriptPath
+    }
+
+    init(_ parsed: ParsedTimelineCard) {
+        self.position = parsed.position
+        self.timeRange = parsed.timeRange
+        self.title = parsed.title
+        self.category = parsed.category
+        self.kind = parsed.kind
+        self.summary = parsed.summary
+        self.details = parsed.details
+        self.transcriptPath = parsed.transcriptPath
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case position, title, category, kind, summary, details
+        case timeRange = "time_range"
+        case transcriptPath = "transcript_path"
     }
 }
 
@@ -227,6 +326,7 @@ struct MeetingSpeaker: Codable {
 enum ContextKind: String, Codable {
     case meeting
     case dictation
+    case timeline
     case all
 }
 
@@ -343,6 +443,7 @@ struct StatusResult: Codable {
     let serverVersion: String
     let meetingDirectories: [String]
     let dictationDirectories: [String]
+    let timelineDirectories: [String]
     let resolutionSource: String
     let legacyFallbackAppended: Bool
     let indexDirectory: String
@@ -351,12 +452,15 @@ struct StatusResult: Codable {
     let indexedDictationEntries: Int
     let indexedSummaryItems: Int
     let summarizedMeetings: Int
+    let indexedTimelineDays: Int
+    let indexedTimelineCards: Int
     let summariesIndexed: Bool
 
     enum CodingKeys: String, CodingKey {
         case serverVersion = "server_version"
         case meetingDirectories = "meeting_directories"
         case dictationDirectories = "dictation_directories"
+        case timelineDirectories = "timeline_directories"
         case resolutionSource = "resolution_source"
         case legacyFallbackAppended = "legacy_fallback_appended"
         case indexDirectory = "index_directory"
@@ -365,6 +469,8 @@ struct StatusResult: Codable {
         case indexedDictationEntries = "indexed_dictation_entries"
         case indexedSummaryItems = "indexed_summary_items"
         case summarizedMeetings = "summarized_meetings"
+        case indexedTimelineDays = "indexed_timeline_days"
+        case indexedTimelineCards = "indexed_timeline_cards"
         case summariesIndexed = "summaries_indexed"
     }
 }
@@ -378,6 +484,7 @@ struct EmptyQueryResult: Codable {
     let indexedDictationDays: Int?
     let indexedDictationEntries: Int?
     let indexedSummaryItems: Int?
+    let indexedTimelineDays: Int?
     let hint: String
 
     enum CodingKeys: String, CodingKey {
@@ -386,6 +493,7 @@ struct EmptyQueryResult: Codable {
         case indexedDictationDays = "indexed_dictation_days"
         case indexedDictationEntries = "indexed_dictation_entries"
         case indexedSummaryItems = "indexed_summary_items"
+        case indexedTimelineDays = "indexed_timeline_days"
         case hint
     }
 }
@@ -541,6 +649,7 @@ struct DigestResult: Codable {
     let decisionCount: Int
     let openQuestionCount: Int
     var meetings: [DigestMeeting]
+    var timelineDays: [AgentTimelineDay] = []
 
     enum CodingKeys: String, CodingKey {
         case dateRange = "date_range"
@@ -550,6 +659,7 @@ struct DigestResult: Codable {
         case decisionCount = "decision_count"
         case openQuestionCount = "open_question_count"
         case meetings
+        case timelineDays = "timeline_days"
     }
 }
 

@@ -256,6 +256,8 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
+    "Sources/Timeline/TimelineDatabase.swift"
+    "Sources/Timeline/TimelineRetentionManager.swift"
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/AgentMCPConnector.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
@@ -267,6 +269,7 @@ APP_SOURCES=(
     "Sources/Support/CustomDictionaryPreferences.swift"
     "Sources/Support/SpeakerEmbedderPreferences.swift"
     "Sources/Support/DockVisibilityPreferences.swift"
+    "Sources/Support/TimelinePreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/QuitConfirmationPreferences.swift"
     "Sources/Support/AutoCallDetectionPreferences.swift"
@@ -292,8 +295,16 @@ APP_SOURCES=(
     "Sources/Dictation/DictationStopFinalizationPolicy.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
     "Sources/Dictation/DictationTranscriptStore.swift"
+    "Sources/Timeline/TimelineMarkdownWriter.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
     "Sources/Support/TranscriptedConstants.swift"
+    "Sources/Timeline/ActiveDisplayTracker.swift"
+    "Sources/Timeline/InputIdleSnapshot.swift"
+    "Sources/Timeline/ForegroundAppSampler.swift"
+    "Sources/Timeline/ScreenCaptureEngine.swift"
+    "Sources/Timeline/TimelineDayBoundary.swift"
+    "Sources/Timeline/TimelineCaptureJoiner.swift"
+    "Sources/Timeline/WeeklyStatsBuilder.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
     "Sources/Speech/DictationReadinessWaitPolicy.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
@@ -416,8 +427,20 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingStartFailureClassifier.swift"
     "Sources/Meeting/MeetingSystemAudioStatusCopy.swift"
     "Sources/UI/Settings/HomePresentation.swift"
+    "Sources/UI/Timeline/TimelineHomePresentation.swift"
     "Sources/UI/Settings/HomeSearchMatching.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
+    "Sources/Timeline/TimelineModels.swift"
+    "Sources/Timeline/TimelineCategoryStore.swift"
+    "Sources/Timeline/BatchPlanner.swift"
+    "Sources/Timeline/TimelineLLMProvider.swift"
+    "Sources/Timeline/ObservationBuilder.swift"
+    "Sources/Timeline/CardGenerator.swift"
+    "Sources/Timeline/AnalysisScheduler.swift"
+    "Sources/Timeline/TimelineChatModels.swift"
+    "Sources/Timeline/ChatToolExecutor.swift"
+    "Sources/Timeline/ChatPromptBuilder.swift"
+    "Sources/Timeline/ChatService.swift"
 )
 
 # Fail early on a stale APP_SOURCES entry (renamed or deleted source) so the
@@ -468,6 +491,7 @@ SWIFTC_ARGS+=(
     -framework FoundationModels
     -framework Network
     -framework ScreenCaptureKit
+    -lsqlite3
     -parse-as-library
     -o "$TEST_BINARY"
 )

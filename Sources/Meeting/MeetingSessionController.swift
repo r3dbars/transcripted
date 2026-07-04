@@ -111,7 +111,7 @@ final class MeetingSessionController: ObservableObject {
             case .recorded:
                 return true
             case .imported:
-                return false
+                return true
             }
         }
     }
@@ -1506,8 +1506,16 @@ final class MeetingSessionController: ObservableObject {
                 ) {
                     preservedCount += 1
                 }
-            case .imported(let audioURL, _, _):
-                try? FileManager.default.removeItem(at: audioURL)
+            case .imported(let audioURL, let suggestedTitle, let recordingDate):
+                if preserveFailedMeetingForRetry(
+                    micAudioURL: audioURL,
+                    systemAudioURL: nil,
+                    errorMessage: errorMessage,
+                    meetingTitle: suggestedTitle,
+                    recordingDate: recordingDate
+                ) {
+                    preservedCount += 1
+                }
             }
         }
         return preservedCount
@@ -2825,7 +2833,7 @@ final class MeetingSessionController: ObservableObject {
                 )
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind.rawValue)
-                finalizeBackgroundTranscriptionStateIfNeeded()
+                handleBackgroundTranscriptionWorkChanged()
                 return
             }
 
@@ -2869,7 +2877,7 @@ final class MeetingSessionController: ObservableObject {
                 )
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "speaker_finalization_failed")
-                finalizeBackgroundTranscriptionStateIfNeeded()
+                handleBackgroundTranscriptionWorkChanged()
                 return
             }
 
@@ -2909,7 +2917,7 @@ final class MeetingSessionController: ObservableObject {
             )
             activeTranscriptionCaptureDiagnostics = nil
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_failed")
-            finalizeBackgroundTranscriptionStateIfNeeded()
+            handleBackgroundTranscriptionWorkChanged()
         case .gettingReady:
             if previousStatus.diagnosticName != status.diagnosticName {
                 DiagnosticsTrail.record(

@@ -8,9 +8,15 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 - `Overlay/`
 - `MenuBar/`
 - `Settings/`
+- `Timeline/`
 - `Shared/`
+- `Timeline/`
 
 Draft-mode UI is not an active product path in this worktree.
+
+`Timeline/` is Phase 0 scaffolding for the future Dayflow-style timeline home
+surface. Touching it means also reading `Sources/UI/Timeline/CLAUDE.md` and the
+engine boundary in `Sources/Timeline/CLAUDE.md`.
 
 ## Files (82 Swift files)
 
@@ -68,6 +74,11 @@ onboarding connect stage. Both keep one mental model:
 - the universal copy-prompt row covers agents we cannot configure directly
 - folders, the Codex inbox automation, and config details stay behind Advanced
 
+### Timeline/
+
+- `TimelineWeekGridView.swift` — protocol/sample-backed 7-day, 4 AM to 4 AM week grid for timeline cards
+- `TimelineDashboardView.swift` — weekly overview stats, category donut, focus heatmap, top apps/sites, and meeting/dictation chips backed by `WeeklyStatsBuilder`
+
 ### Settings/
 
 - `Settings/AgentConnectionSettingsPage.swift` — Settings' agent page: detected-agent connect rows (Claude Desktop, Claude Code, Codex, Cursor), the universal copy-prompt row, the live-meetings toggle, and the Advanced disclosure (folders, Codex inbox, config details)
@@ -100,6 +111,10 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/TypingTimeSavedFormatter.swift` — Foundation-pure formatter for Home's typing-time-saved stat
+
+### Timeline/
+
+- `Timeline/TimelineChatView.swift` — Phase 8 chat panel shell for asking questions over the current timeline day, with local/cloud privacy state surfaced inline
 
 ### Shared/
 

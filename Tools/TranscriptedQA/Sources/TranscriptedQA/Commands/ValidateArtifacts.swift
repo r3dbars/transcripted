@@ -11,7 +11,8 @@ struct ValidateArtifacts: ParsableCommand {
     @OptionGroup var formatOpts: FormatOptions
 
     func run() throws {
-        let results = JSONSidecarValidator(directory: pathOpts.resolved.meetingsDir).validate()
+        var results = JSONSidecarValidator(directory: pathOpts.resolved.meetingsDir).validate()
+        results += TimelineValidator(directory: pathOpts.resolved.timelineDir).validate()
         try runValidation(results: results, format: formatOpts.format)
     }
 }

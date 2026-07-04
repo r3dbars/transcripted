@@ -183,6 +183,7 @@ func testTranscriptedStoragePaths() {
         defer {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
+        UserDefaults.standard.removeObject(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
 
         let disallowedRoot = URL(fileURLWithPath: "/System/Library/Transcripted", isDirectory: true)
 
@@ -228,11 +229,52 @@ func testTranscriptedStoragePaths() {
         )
     }
 
+    runSuite("Transcripted capture library helpers — missing custom folders fall back without recreating") {
+        let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        defer {
+            restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        }
+
+        let missingRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-missing-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: missingRoot) }
+
+        UserDefaults.standard.set(
+            missingRoot.path,
+            forKey: TranscriptedStoragePreferences.captureLibraryLocationKey
+        )
+
+        assertFalse(
+            FileManager.default.fileExists(atPath: missingRoot.path),
+            "test setup should start with a missing custom capture library"
+        )
+        assertEqual(
+            TranscriptedStoragePreferences.customCaptureLibraryURL(),
+            nil,
+            "missing custom capture-library preferences should not resolve as usable"
+        )
+        assertEqual(
+            TranscriptedStoragePreferences.unavailableCustomCaptureLibraryPath(),
+            missingRoot.path,
+            "settings should be able to explain which saved custom library is unavailable"
+        )
+        assertEqual(
+            FileManager.default.transcriptedCaptureLibraryDir,
+            FileManager.default.transcriptedDefaultCaptureLibraryDir,
+            "runtime storage should fall back to the default capture root when a custom library is gone"
+        )
+        assertFalse(
+            FileManager.default.fileExists(atPath: missingRoot.path),
+            "resolving storage should not recreate a missing custom capture library or phantom mount point"
+        )
+    }
+
     runSuite("Transcripted capture library helpers — reject file-shaped capture folders") {
         let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         defer {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
+        UserDefaults.standard.removeObject(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
 
         let fileURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("TranscriptedStoragePathsTests-file-root-\(UUID().uuidString)", isDirectory: false)

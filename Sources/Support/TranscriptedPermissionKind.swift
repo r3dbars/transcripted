@@ -6,6 +6,7 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
     case microphone
     case accessibility
     case systemAudioRecording
+    case screenRecording
     case calendar
 
     var id: String { rawValue }
@@ -18,6 +19,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "hand.raised.fill"
         case .systemAudioRecording:
             return "speaker.wave.2.fill"
+        case .screenRecording:
+            return "rectangle.on.rectangle"
         case .calendar:
             return "calendar"
         }
@@ -27,9 +30,16 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         switch self {
         case .microphone, .accessibility:
             return true
-        case .systemAudioRecording, .calendar:
+        case .systemAudioRecording, .screenRecording, .calendar:
             return false
         }
+    }
+
+    static func requiredForCurrentUse(dictationShortcutsEnabled: Bool) -> [TranscriptedPermissionKind] {
+        if dictationShortcutsEnabled {
+            return [.microphone, .accessibility]
+        }
+        return [.microphone, .systemAudioRecording]
     }
 
     var title: String {
@@ -40,6 +50,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "Accessibility"
         case .systemAudioRecording:
             return "System Audio Recording"
+        case .screenRecording:
+            return "Screen Recording"
         case .calendar:
             return "Calendar"
         }
@@ -53,6 +65,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "pasteback"
         case .systemAudioRecording:
             return "system_recording"
+        case .screenRecording:
+            return "screen_recording"
         case .calendar:
             return "calendar"
         }
@@ -66,6 +80,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return "For shortcuts and paste-back."
         case .systemAudioRecording:
             return Self.systemAudioRecordingSummary
+        case .screenRecording:
+            return "Optional. Lets Timeline save screen snapshots for local activity cards."
         case .calendar:
             return "Optional. Shows meeting prompts from synced calendars."
         }
@@ -83,6 +99,8 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
             return Self.accessibilityActionTitle(isTrusted: AXIsProcessTrusted())
         case .systemAudioRecording:
             return Self.systemAudioRecordingActionTitle(for: TranscriptedPermissionAccess.systemAudioRecordingStatus())
+        case .screenRecording:
+            return Self.screenRecordingActionTitle(isGranted: TranscriptedPermissionAccess.screenRecordingGranted())
         case .calendar:
             return Self.calendarActionTitle(for: EKEventStore.authorizationStatus(for: .event))
         }
@@ -114,6 +132,10 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .denied:
             return "Open Audio Recording Settings"
         }
+    }
+
+    static func screenRecordingActionTitle(isGranted: Bool) -> String {
+        isGranted ? "Review" : "Open Screen Recording Settings"
     }
 
     static func calendarActionTitle(for status: EKAuthorizationStatus) -> String {

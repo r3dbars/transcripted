@@ -5,6 +5,7 @@ import TranscriptedCaptureKit
 struct CLIContextDirectories {
     let meetingDirs: [URL]
     let dictationDirs: [URL]
+    let timelineDirs: [URL]
 
     var meetingsDir: URL {
         meetingDirs[0]
@@ -14,20 +15,23 @@ struct CLIContextDirectories {
         dictationDirs[0]
     }
 
-    init(meetingsDir: URL, dictationsDir: URL) {
+    init(meetingsDir: URL, dictationsDir: URL, timelineDir: URL? = nil) {
         self.meetingDirs = [meetingsDir]
         self.dictationDirs = [dictationsDir]
+        self.timelineDirs = [timelineDir ?? meetingsDir.deletingLastPathComponent().appendingPathComponent("timeline", isDirectory: true)]
     }
 
-    init(meetingDirs: [URL], dictationDirs: [URL]) {
+    init(meetingDirs: [URL], dictationDirs: [URL], timelineDirs: [URL] = []) {
         self.meetingDirs = meetingDirs
         self.dictationDirs = dictationDirs
+        self.timelineDirs = timelineDirs
     }
 
     static func resolve(
         dataDir: String?,
         meetingsDir: String?,
         dictationsDir: String?,
+        timelineDir: String? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default,
         homeDirectory: URL? = nil
@@ -36,13 +40,15 @@ struct CLIContextDirectories {
             dataDir: dataDir,
             meetingsDir: meetingsDir,
             dictationsDir: dictationsDir,
+            timelineDir: timelineDir,
             environment: environment,
             fileManager: fileManager,
             homeDirectory: homeDirectory
         )
         return CLIContextDirectories(
             meetingDirs: resolved.meetingDirs,
-            dictationDirs: resolved.dictationDirs
+            dictationDirs: resolved.dictationDirs,
+            timelineDirs: resolved.timelineDirs
         )
     }
 }
@@ -57,8 +63,11 @@ struct CLIContextPathOptions: ParsableArguments {
     @Option(name: .long, help: "Dictations transcript directory.")
     var dictationsDir: String?
 
+    @Option(name: .long, help: "Timeline Markdown directory.")
+    var timelineDir: String?
+
     var resolved: CLIContextDirectories {
-        CLIContextDirectories.resolve(dataDir: dataDir, meetingsDir: meetingsDir, dictationsDir: dictationsDir)
+        CLIContextDirectories.resolve(dataDir: dataDir, meetingsDir: meetingsDir, dictationsDir: dictationsDir, timelineDir: timelineDir)
     }
 }
 
@@ -86,7 +95,7 @@ enum CLIContextStore {
     static func recent(in directories: CLIContextDirectories, kind: CLIContextKind, count: Int, dateFrom: String?, dateTo: String?) -> [CLIContextItem] {
         var items: [CLIContextItem] = []
 
-        if kind != .dictation {
+        if kind == .meeting || kind == .all {
             items.append(contentsOf: loadMeetings(from: directories.meetingDirs).compactMap { meeting in
                 guard matches(date: meeting.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
                 return CLIContextItem(
@@ -105,7 +114,7 @@ enum CLIContextStore {
             })
         }
 
-        if kind != .meeting {
+        if kind == .dictation || kind == .all {
             items.append(contentsOf: loadDictationDays(from: directories.dictationDirs).flatMap { day in
                 day.entries.compactMap { entry in
                     guard matches(date: day.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
@@ -133,7 +142,7 @@ enum CLIContextStore {
         let normalizedQuery = query.lowercased()
         var items: [CLIContextItem] = []
 
-        if kind != .dictation {
+        if kind == .meeting || kind == .all {
             items.append(contentsOf: loadMeetings(from: directories.meetingDirs).compactMap { meeting in
                 guard matches(date: meeting.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
                 if let speaker, !meeting.speakers.contains(where: { $0.localizedCaseInsensitiveContains(speaker) }) {
@@ -163,7 +172,7 @@ enum CLIContextStore {
             })
         }
 
-        if kind != .meeting, speaker == nil {
+        if (kind == .dictation || kind == .all), speaker == nil {
             items.append(contentsOf: loadDictationDays(from: directories.dictationDirs).flatMap { day in
                 day.entries.compactMap { entry in
                     guard matches(date: day.date, dateFrom: dateFrom, dateTo: dateTo) else { return nil }
@@ -229,6 +238,54 @@ enum CLIContextStore {
 
     static func readDictation(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> String {
         try readDictationDocument(filename: filename, entryId: entryId, in: directories).markdown
+    }
+
+    static func listTimelineDays(in directories: CLIContextDirectories, count: Int, dateFrom: String?, dateTo: String?) -> [CLITimelineDaySummary] {
+        let days = loadTimelineDays(from: directories.timelineDirs).filter { day in
+            matches(date: day.date, dateFrom: dateFrom, dateTo: dateTo)
+        }
+        return Array(days.sorted { $0.date > $1.date }.prefix(count).map {
+            CLITimelineDaySummary(
+                filename: $0.filename,
+                date: $0.date,
+                cardCount: $0.payload.cardCount,
+                activeMinutes: $0.payload.activeMinutes,
+                categories: $0.payload.categories
+            )
+        })
+    }
+
+    struct TimelineRead {
+        let markdown: String
+        let day: CLIAgentTimelineDay
+    }
+
+    static func readTimeline(filename: String, in directories: CLIContextDirectories) throws -> TimelineRead {
+        let requestedName = filename.hasSuffix(".md") ? filename : filename + ".md"
+        var invalidPathRequested = false
+        var markdownURL: URL?
+        for directory in directories.timelineDirs {
+            switch CLIPathSecurity.resolveReadableFile(named: requestedName, in: directory) {
+            case .valid(let safeURL):
+                markdownURL = safeURL
+            case .missing:
+                continue
+            case .invalid:
+                invalidPathRequested = true
+            }
+            if markdownURL != nil { break }
+        }
+
+        if invalidPathRequested && markdownURL == nil {
+            throw ValidationError("Invalid timeline filename: \(filename)")
+        }
+        guard let markdownURL,
+              let content = CaptureMarkdown.readBoundedContents(of: markdownURL),
+              let parsed = TimelineMarkdownParser.parseTimelineDay(from: content, markdownURL: markdownURL) else {
+            throw ValidationError("Timeline not found: \(filename)")
+        }
+
+        return TimelineRead(markdown: content, day: CLIAgentTimelineDay(parsed))
     }
 
     static func readDictationDocument(filename: String, entryId: String?, in directories: CLIContextDirectories) throws -> DictationRead {
@@ -310,6 +367,12 @@ enum CLIContextStore {
         let payload: CLIAgentDictationDay
     }
 
+    private struct TimelineDayRecord {
+        let filename: String
+        let date: String
+        let payload: CLIAgentTimelineDay
+    }
+
     private static func loadMeetings(from directories: [URL]) -> [MeetingRecord] {
         deduplicating(directories.flatMap { loadMeetings(from: $0) }, by: \.filename)
     }
@@ -345,6 +408,32 @@ enum CLIContextStore {
 
     private static func loadDictationDays(from directories: [URL]) -> [DictationDayRecord] {
         deduplicating(directories.flatMap { loadDictationDays(from: $0) }, by: \.filename)
+    }
+
+    private static func loadTimelineDays(from directories: [URL]) -> [TimelineDayRecord] {
+        deduplicating(directories.flatMap { loadTimelineDays(from: $0) }, by: \.filename)
+    }
+
+    private static func loadTimelineDays(from directory: URL) -> [TimelineDayRecord] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        return files.compactMap { url in
+            guard url.pathExtension == "md" else { return nil }
+            guard case .valid(let safeURL) = CLIPathSecurity.validateExistingFile(url, under: directory),
+                  let content = CaptureMarkdown.readBoundedContents(of: safeURL),
+                  let parsed = TimelineMarkdownParser.parseTimelineDay(from: content, markdownURL: safeURL) else {
+                return nil
+            }
+            return TimelineDayRecord(
+                filename: safeURL.deletingPathExtension().lastPathComponent,
+                date: parsed.date,
+                payload: CLIAgentTimelineDay(parsed)
+            )
+        }
     }
 
     private static func loadDictationDays(from directory: URL) -> [DictationDayRecord] {

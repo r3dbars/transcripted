@@ -18,22 +18,51 @@ enum TranscriptedStoragePreferences {
         userDefaults: UserDefaults = .standard,
         fileManager: FileManager = .default
     ) -> URL {
-        if let customPath = userDefaults.string(forKey: captureLibraryLocationKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !customPath.isEmpty {
+        customCaptureLibraryURL(userDefaults: userDefaults, fileManager: fileManager)
+            ?? fileManager.transcriptedDefaultCaptureLibraryDir
+    }
+
+    static func customCaptureLibraryURL(
+        userDefaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        if let customPath = storedCustomCaptureLibraryPath(userDefaults: userDefaults) {
             guard customPath.hasPrefix("/") else {
-                return fileManager.transcriptedDefaultCaptureLibraryDir
+                return nil
             }
 
             let candidate = URL(fileURLWithPath: customPath, isDirectory: true)
             // Security: reject tampered preferences that target traversal or system
             // roots while preserving the user's ability to choose their own library.
-            if isSafeCaptureLibraryURL(candidate) {
+            if isSafeCaptureLibraryURL(candidate),
+               isExistingCaptureLibraryURL(candidate, fileManager: fileManager) {
                 return candidate.standardizedFileURL
             }
         }
 
-        return fileManager.transcriptedDefaultCaptureLibraryDir
+        return nil
+    }
+
+    static func storedCustomCaptureLibraryPath(
+        userDefaults: UserDefaults = .standard
+    ) -> String? {
+        guard let customPath = userDefaults.string(forKey: captureLibraryLocationKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !customPath.isEmpty else {
+            return nil
+        }
+        return customPath
+    }
+
+    static func unavailableCustomCaptureLibraryPath(
+        userDefaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> String? {
+        guard let customPath = storedCustomCaptureLibraryPath(userDefaults: userDefaults),
+              customCaptureLibraryURL(userDefaults: userDefaults, fileManager: fileManager) == nil else {
+            return nil
+        }
+        return customPath
     }
 
     @discardableResult
@@ -79,6 +108,16 @@ enum TranscriptedStoragePreferences {
         return !forbiddenPrefixes.contains { prefix in
             candidate.path == prefix || candidate.path.hasPrefix(prefix + "/")
         }
+    }
+
+    static func isExistingCaptureLibraryURL(
+        _ url: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        let candidate = url.standardizedFileURL
+        var isDirectory: ObjCBool = false
+        return fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 
     static func prepareCaptureLibraryURL(
@@ -178,6 +217,10 @@ extension FileManager {
         return ensuredPrivateDirectory(at: url, context: "Transcripted state")
     }
 
+    var transcriptedTimelineDatabaseURL: URL {
+        transcriptedStateDir.appendingPathComponent("timeline.sqlite", isDirectory: false)
+    }
+
     var transcriptedCacheDir: URL {
         let url = transcriptedAppSupportDir.appendingPathComponent("cache", isDirectory: true)
         return ensuredPrivateDirectory(at: url, context: "Transcripted cache")
@@ -200,6 +243,52 @@ extension FileManager {
     var transcriptedRecordingsDir: URL {
         let url = transcriptedTemporaryDir.appendingPathComponent("recordings", isDirectory: true)
         return ensuredPrivateDirectory(at: url, context: "Transcripted temporary recordings")
+    }
+
+    var transcriptedTimelineRecordingsDir: URL {
+        let url = transcriptedAppSupportDir.appendingPathComponent("recordings", isDirectory: true)
+        return ensuredPrivateDirectory(at: url, context: "Transcripted timeline recordings")
+    }
+
+    var transcriptedTimelineScreenshotsRootURL: URL {
+        let url = transcriptedTimelineRecordingsDir.appendingPathComponent("screenshots", isDirectory: true)
+        return ensuredPrivateDirectory(at: url, context: "Transcripted timeline screenshots")
+    }
+
+    func transcriptedTimelineScreenshotDirectory(for date: Date, calendar: Calendar = .current) -> URL {
+        let day = TimelineStorageDayFormatter.string(from: date, calendar: calendar)
+        let url = transcriptedTimelineScreenshotsRootURL.appendingPathComponent(day, isDirectory: true)
+        return ensuredPrivateDirectory(at: url, context: "Transcripted timeline screenshot day")
+    }
+
+    func transcriptedTimelineScreenshotRelativePath(
+        capturedAt date: Date,
+        fileName: String,
+        calendar: Calendar = .current
+    ) -> String {
+        "\(TimelineStorageDayFormatter.string(from: date, calendar: calendar))/\(fileName)"
+    }
+
+    func transcriptedTimelineScreenshotURL(relativePath: String) -> URL? {
+        guard !relativePath.hasPrefix("/"),
+              !relativePath.split(separator: "/").contains("..") else {
+            return nil
+        }
+        return transcriptedTimelineScreenshotsRootURL.appendingPathComponent(relativePath, isDirectory: false)
+    }
+
+    func prepareTimelineScreenshotURL(
+        capturedAt date: Date,
+        fileName: String,
+        calendar: Calendar = .current
+    ) throws -> (url: URL, relativePath: String) {
+        let directory = transcriptedTimelineScreenshotDirectory(for: date, calendar: calendar)
+        let relativePath = transcriptedTimelineScreenshotRelativePath(
+            capturedAt: date,
+            fileName: fileName,
+            calendar: calendar
+        )
+        return (directory.appendingPathComponent(fileName, isDirectory: false), relativePath)
     }
 
     /// <capture-library>/meetings/
@@ -226,6 +315,12 @@ extension FileManager {
     /// Tighten a file to owner-only access (0600).
     func restrictFileToOwnerOnly(at url: URL) {
         setPOSIXPermissionsIfNeeded(NSNumber(value: 0o600), ofItemAtPath: url.path)
+    }
+
+    func restrictSQLiteArtifactsToOwnerOnly(at url: URL) {
+        for artifact in [url, URL(fileURLWithPath: url.path + "-wal"), URL(fileURLWithPath: url.path + "-shm")] {
+            restrictFileToOwnerOnly(at: artifact)
+        }
     }
 
     func writeTranscriptedMCPDirectoriesManifestIfNeeded(
@@ -260,5 +355,15 @@ extension FileManager {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         try encoder.encode(manifest).write(to: manifestURL, options: [.atomic])
         restrictFileToOwnerOnly(at: manifestURL)
+    }
+}
+
+private enum TimelineStorageDayFormatter {
+    static func string(from date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        let year = components.year ?? 1970
+        let month = components.month ?? 1
+        let day = components.day ?? 1
+        return String(format: "%04d-%02d-%02d", year, month, day)
     }
 }

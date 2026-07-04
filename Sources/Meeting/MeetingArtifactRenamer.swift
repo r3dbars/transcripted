@@ -3,6 +3,26 @@ import Foundation
 import TranscriptedCore
 #endif
 
+enum MeetingTranscriptFileUpdateSerializer {
+    private static let fallbackQueueSpecific = DispatchSpecificKey<Void>()
+    private static let fallbackQueue: DispatchQueue = {
+        let queue = DispatchQueue(label: "Transcripted.MeetingTranscriptFileUpdateSerializer", qos: .utility)
+        queue.setSpecific(key: fallbackQueueSpecific, value: ())
+        return queue
+    }()
+
+    static func sync<T>(_ update: () throws -> T) rethrows -> T {
+        #if canImport(TranscriptedCore)
+        return try TranscriptSaver.serializeTranscriptFileUpdate(update)
+        #else
+        if DispatchQueue.getSpecific(key: fallbackQueueSpecific) != nil {
+            return try update()
+        }
+        return try fallbackQueue.sync(execute: update)
+        #endif
+    }
+}
+
 /// Shared rename mechanics for the on-disk artifacts that make up a saved meeting:
 /// the Markdown transcript, its retained `audio/<stem>_audio/` directory, and the
 /// optional `<stem>.summary.md` sidecar.

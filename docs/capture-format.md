@@ -1,14 +1,15 @@
 # Capture Markdown format
 
 This is the authoritative spec for the Markdown files Transcripted saves under
-the capture library (`<capture-library>/meetings/` and
-`<capture-library>/dictations/`). Agents and standalone tools parse these
+the capture library (`<capture-library>/meetings/`,
+`<capture-library>/dictations/`, and `<capture-library>/timeline/`). Agents and standalone tools parse these
 files, so treat this document as the contract. Writers live in
 `Sources/TranscriptedCore/Storage/TranscriptFormatter.swift`,
 `Sources/Meeting/MeetingTranscriptStyler.swift`,
 `Sources/Meeting/MeetingQuickSummaryWriter.swift`,
 `Sources/Meeting/LocalMeetingSummarizer.swift`, and
-`Sources/Dictation/DictationTranscriptWriter.swift`. Readers include the app's
+`Sources/Dictation/DictationTranscriptWriter.swift`; timeline day output is
+written by `Sources/Timeline/TimelineMarkdownWriter.swift`. Readers include the app's
 Home scanner (`TranscriptFrontmatter`), `Tools/TranscriptedCaptureKit` (used by
 the CLI and MCP tools), and `Tools/TranscriptedQA`. If you change the written
 format, update this doc, the CaptureKit parsers, and their tests in the same
@@ -29,6 +30,9 @@ Two flat frontmatter keys carry the contract:
   → raw, `## Transcript` → styled).
 
 Dictation day files carry `format_version` but no `transcript_style` (they have
+a single body grammar).
+
+Timeline day files carry `format_version` but no `transcript_style` (they have
 a single body grammar).
 
 ## Stability rules
@@ -300,11 +304,56 @@ Details:
 - The dictated text follows after a blank line and runs to the next `## `
   heading or end of file.
 
+## Timeline day files
+
+`Sources/Timeline/TimelineMarkdownWriter.swift` writes one file per local day:
+`<capture-library>/timeline/<YYYY-MM-dd>.md`.
+
+```markdown
+---
+capture_type: timeline
+format_version: 1
+date: 2026-04-07
+card_count: 2
+active_minutes: 75
+categories:
+  - "Meetings"
+  - "Work"
+---
+
+# Timeline - 2026-04-07
+
+1. **9:15 AM - 9:45 AM - Launch review**
+   _Meetings_
+   - Kind: meeting
+   - Summary: Reviewed launch milestones.
+   - Details: Waiting on packaging proof.
+   - Transcript: [transcript](../meetings/Call_2026-04-07_09-15-00.md)
+
+2. **10:00 AM - 10:45 AM - Plan cleanup**
+   _Work_
+   - Kind: activity
+   - Summary: Consolidated next actions.
+```
+
+Details:
+
+- Filename is the stable local day key: `<YYYY-MM-dd>.md`.
+- Frontmatter keys are flat except `categories`, which is a simple YAML list.
+- `card_count` must match the number of numbered cards in the body.
+- `active_minutes` is the sum of nonnegative card durations rounded down to
+  whole minutes.
+- Timeline Markdown is an agent-readable digest only. It must not include
+  screenshots or raw OCR text.
+- Meeting links are relative to the timeline folder and point at
+  `../meetings/<filename>.md`.
+
 ## Parser guidance
 
 - Detect meetings via `capture_type: meeting`; fall back to the transcript
   headings for pre-`capture_type` files. Detect dictation day files via
-  `capture_type: dictation_day` or the `Dictations_` filename prefix.
+  `capture_type: dictation_day` or the `Dictations_` filename prefix. Detect
+  timeline day files via `capture_type: timeline`.
 - Choose the meeting body grammar by `transcript_style` when present, else by
   heading: `## Full Transcript` (raw) vs `## Transcript` (styled). Robust
   parsers accept both grammars in either file (see
@@ -313,3 +362,4 @@ Details:
 - `Tools/TranscriptedCaptureKit` exposes `format_version` / `transcript_style`
   as optional `formatVersion` / `transcriptStyle` fields on
   `ParsedMeetingCapture` and `formatVersion` on `ParsedDictationDayCapture`.
+  It also exposes `TimelineMarkdownParser` for timeline day files.
