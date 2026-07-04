@@ -613,9 +613,8 @@ func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, mee
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "list",
-        artifactKind: "meeting",
-        captureDate: latestMeetingDate(in: results),
+        toolKind: "list",
+        captureKind: "meeting",
         sourceCount: results.count
     )
 
@@ -636,9 +635,8 @@ func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex, d
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "list",
-        artifactKind: "dictation",
-        captureDate: latestDictationDayDate(in: results),
+        toolKind: "list",
+        captureKind: "dictation",
         sourceCount: results.count
     )
 
@@ -689,9 +687,8 @@ func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -
     let parsed = CaptureMarkdownParser.parseMeeting(from: content)
 
     trackAgentCaptureQueryObserved(
-        queryKind: "read",
-        artifactKind: "meeting",
-        captureDate: parsed.flatMap { parseCaptureDate($0.datetime) },
+        toolKind: "read",
+        captureKind: "meeting",
         sourceCount: 1
     )
 
@@ -837,9 +834,8 @@ func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) thro
         }
 
         trackAgentCaptureQueryObserved(
-            queryKind: "read",
-            artifactKind: "dictation",
-            captureDate: parseCaptureDate(entry.createdAt),
+            toolKind: "read",
+            captureKind: "dictation",
             sourceCount: 1
         )
 
@@ -857,9 +853,8 @@ func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) thro
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "read",
-        artifactKind: "dictation",
-        captureDate: parseCaptureDate(day.entries.last?.createdAt ?? day.date),
+        toolKind: "read",
+        captureKind: "dictation",
         sourceCount: day.entries.count
     )
 
@@ -945,9 +940,8 @@ private func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, m
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "search",
-        artifactKind: "meeting",
-        captureDate: latestMeetingSearchDate(in: results),
+        toolKind: "search",
+        captureKind: "meeting",
         sourceCount: results.results.count
     )
 
@@ -984,9 +978,8 @@ private func handleSearchContext(params: CallTool.Parameters, index: TranscriptI
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "search",
-        artifactKind: artifactKind(for: results.results.map(\.kind)),
-        captureDate: latestContextSearchDate(in: results.results),
+        toolKind: "search",
+        captureKind: artifactKind(for: results.results.map(\.kind)),
         sourceCount: results.results.count
     )
 
@@ -1008,9 +1001,8 @@ func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, me
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "recent",
-        artifactKind: artifactKind(for: result.items.map(\.kind)),
-        captureDate: latestRecentContextDate(in: result.items),
+        toolKind: "recent",
+        captureKind: artifactKind(for: result.items.map(\.kind)),
         sourceCount: result.items.count
     )
 
@@ -1032,9 +1024,8 @@ private func handleWhoIs(params: CallTool.Parameters, index: TranscriptIndex) th
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "speaker_lookup",
-        artifactKind: "meeting",
-        captureDate: parseCaptureDate(profile.lastSeen),
+        toolKind: "speaker_lookup",
+        captureKind: "meeting",
         sourceCount: profile.meetingCount
     )
 
@@ -1115,9 +1106,8 @@ func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDir
     )
 
     trackAgentCaptureQueryObserved(
-        queryKind: "recap",
-        artifactKind: "meeting",
-        captureDate: latestRecapDate(in: recapParts),
+        toolKind: "recap",
+        captureKind: "meeting",
         sourceCount: recapParts.count
     )
 
@@ -1150,9 +1140,8 @@ func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, 
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "action_items",
-        artifactKind: "meeting",
-        captureDate: latestActionItemDate(in: result.items),
+        toolKind: "action_items",
+        captureKind: "meeting",
         sourceCount: distinctActionItemSourceCount(in: result.items)
     )
 
@@ -1177,9 +1166,8 @@ func handleListDecisions(params: CallTool.Parameters, index: TranscriptIndex, me
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "decisions",
-        artifactKind: "meeting",
-        captureDate: latestDecisionDate(in: result.decisions),
+        toolKind: "decisions",
+        captureKind: "meeting",
         sourceCount: distinctDecisionSourceCount(in: result.decisions)
     )
 
@@ -1204,9 +1192,8 @@ func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, meetingDi
     }
 
     trackAgentCaptureQueryObserved(
-        queryKind: "digest",
-        artifactKind: "meeting",
-        captureDate: latestDigestMeetingDate(in: result.meetings),
+        toolKind: "digest",
+        captureKind: "meeting",
         sourceCount: result.meetings.count
     )
 
@@ -1271,9 +1258,8 @@ func handleDecisions(params: CallTool.Parameters, index: TranscriptIndex, meetin
     )
     if !receipts.isEmpty {
         trackAgentCaptureQueryObserved(
-            queryKind: "decisions",
-            artifactKind: "meeting",
-            captureDate: latestReceiptDate(in: receipts),
+            toolKind: "decisions",
+            captureKind: "meeting",
             sourceCount: distinctReceiptSourceCount(in: receipts)
         )
     }
@@ -1314,9 +1300,8 @@ func handleCommitments(params: CallTool.Parameters, index: TranscriptIndex, meet
     )
     if !receipts.isEmpty {
         trackAgentCaptureQueryObserved(
-            queryKind: "commitments",
-            artifactKind: "meeting",
-            captureDate: latestReceiptDate(in: receipts),
+            toolKind: "commitments",
+            captureKind: "meeting",
             sourceCount: distinctReceiptSourceCount(in: receipts)
         )
     }
@@ -1357,9 +1342,8 @@ func handleOpenQuestions(params: CallTool.Parameters, index: TranscriptIndex, me
     )
     if !receipts.isEmpty {
         trackAgentCaptureQueryObserved(
-            queryKind: "open_questions",
-            artifactKind: "meeting",
-            captureDate: latestReceiptDate(in: receipts),
+            toolKind: "open_questions",
+            captureKind: "meeting",
             sourceCount: distinctReceiptSourceCount(in: receipts)
         )
     }
@@ -1406,9 +1390,8 @@ func handleSearchMeetings(params: CallTool.Parameters, index: TranscriptIndex, m
     )
     if !result.results.isEmpty {
         trackAgentCaptureQueryObserved(
-            queryKind: "search",
-            artifactKind: "meeting",
-            captureDate: latestReceiptDate(in: result.results),
+            toolKind: "search",
+            captureKind: "meeting",
             sourceCount: distinctReceiptSourceCount(in: result.results)
         )
     }
@@ -1623,46 +1606,6 @@ private func appendSummarySection(_ title: String, _ items: [String], to section
     guard !items.isEmpty else { return }
     let body = items.map { "- \($0)" }.joined(separator: "\n")
     sections.append("## \(title)\n\(body)")
-}
-
-private func latestMeetingDate(in results: [MeetingSummary]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestDictationDayDate(in results: [DictationDaySummary]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestMeetingSearchDate(in results: GroupedSearchResult) -> Date? {
-    results.results.compactMap { parseCaptureDate($0.meetingDateTime) }.max()
-}
-
-private func latestContextSearchDate(in results: [ContextSearchGroup]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestRecentContextDate(in results: [RecentContextItem]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestRecapDate(in results: [RecapEntry]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestActionItemDate(in results: [ActionItemRecord]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestDecisionDate(in results: [DecisionRecord]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestDigestMeetingDate(in results: [DigestMeeting]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
-}
-
-private func latestReceiptDate(in results: [CrossMeetingReceipt]) -> Date? {
-    results.compactMap { parseCaptureDate($0.datetime) }.max()
 }
 
 private func distinctActionItemSourceCount(in results: [ActionItemRecord]) -> Int {

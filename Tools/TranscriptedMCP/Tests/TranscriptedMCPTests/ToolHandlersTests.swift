@@ -92,10 +92,9 @@ final class ToolHandlersTests: XCTestCase {
         )
 
         let observation = try XCTUnwrap(telemetry.observations.last)
-        XCTAssertEqual(observation.queryKind, "list")
-        XCTAssertEqual(observation.artifactKind, "meeting")
+        XCTAssertEqual(observation.toolKind, "list")
+        XCTAssertEqual(observation.captureKind, "meeting")
         XCTAssertEqual(observation.sourceCountBucket, "1")
-        XCTAssertNotEqual(observation.captureAgeBucket, "unknown")
     }
 
     func testListDictationsTracksBucketedAgentQueryTelemetry() throws {
@@ -109,10 +108,9 @@ final class ToolHandlersTests: XCTestCase {
         )
 
         let observation = try XCTUnwrap(telemetry.observations.last)
-        XCTAssertEqual(observation.queryKind, "list")
-        XCTAssertEqual(observation.artifactKind, "dictation")
+        XCTAssertEqual(observation.toolKind, "list")
+        XCTAssertEqual(observation.captureKind, "dictation")
         XCTAssertEqual(observation.sourceCountBucket, "1")
-        XCTAssertNotEqual(observation.captureAgeBucket, "unknown")
     }
 
     func testRecentContextTracksMixedAgentQueryTelemetry() throws {
@@ -132,10 +130,9 @@ final class ToolHandlersTests: XCTestCase {
         )
 
         let observation = try XCTUnwrap(telemetry.observations.last)
-        XCTAssertEqual(observation.queryKind, "recent")
-        XCTAssertEqual(observation.artifactKind, "mixed")
+        XCTAssertEqual(observation.toolKind, "recent")
+        XCTAssertEqual(observation.captureKind, "mixed")
         XCTAssertEqual(observation.sourceCountBucket, "2_3")
-        XCTAssertNotEqual(observation.captureAgeBucket, "unknown")
     }
 
     func testSummaryRollupsTrackSourcedAgentQueryTelemetry() throws {
@@ -157,8 +154,8 @@ final class ToolHandlersTests: XCTestCase {
             index: index,
             meetingDirs: [tempDir]
         )
-        XCTAssertEqual(telemetry.observations.last?.queryKind, "action_items")
-        XCTAssertEqual(telemetry.observations.last?.artifactKind, "meeting")
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "action_items")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
         XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
 
         _ = try handleListDecisions(
@@ -166,7 +163,7 @@ final class ToolHandlersTests: XCTestCase {
             index: index,
             meetingDirs: [tempDir]
         )
-        XCTAssertEqual(telemetry.observations.last?.queryKind, "decisions")
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "decisions")
         XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
 
         _ = try handleDigest(
@@ -174,7 +171,7 @@ final class ToolHandlersTests: XCTestCase {
             index: index,
             meetingDirs: [tempDir]
         )
-        XCTAssertEqual(telemetry.observations.last?.queryKind, "digest")
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "digest")
         XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
     }
 
@@ -197,7 +194,7 @@ final class ToolHandlersTests: XCTestCase {
             index: index,
             meetingDirs: [tempDir]
         )
-        XCTAssertEqual(telemetry.observations.last?.queryKind, "decisions")
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "decisions")
         XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
 
         _ = try handleCommitments(
@@ -205,7 +202,7 @@ final class ToolHandlersTests: XCTestCase {
             index: index,
             meetingDirs: [tempDir]
         )
-        XCTAssertEqual(telemetry.observations.last?.queryKind, "commitments")
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "commitments")
         XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
 
         _ = try handleOpenQuestions(
@@ -213,7 +210,7 @@ final class ToolHandlersTests: XCTestCase {
             index: index,
             meetingDirs: [tempDir]
         )
-        XCTAssertEqual(telemetry.observations.last?.queryKind, "open_questions")
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "open_questions")
         XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
 
         try writeFixture(
@@ -234,7 +231,7 @@ final class ToolHandlersTests: XCTestCase {
             index: index,
             meetingDirs: [tempDir]
         )
-        XCTAssertEqual(telemetry.observations.last?.queryKind, "search")
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "search")
         XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
     }
 
@@ -453,6 +450,43 @@ final class ToolHandlersTests: XCTestCase {
 
         XCTAssertNotEqual(result.isError, true)
         XCTAssertEqual(try resultText(result), content)
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "read")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
+    }
+
+    func testReadMeetingBuildsPostHogPayloadFromRealSavedArtifactLookup() throws {
+        let payloadTelemetry = RequestCapturingAgentCaptureQueryTelemetry()
+        AgentCaptureQueryTelemetryRuntime.recorder = payloadTelemetry
+
+        try writeFixture(
+            makeFixtureJSON(title: "Roadmap Sync", date: "2026-03-26T16:04:11-0500"),
+            filename: "Call_2026-03-26_16-04-11",
+            to: tempDir
+        )
+
+        _ = try handleReadMeeting(
+            params: CallTool.Parameters(name: "read_meeting", arguments: ["filename": .string("Call_2026-03-26_16-04-11")]),
+            meetingDirs: [tempDir]
+        )
+
+        let properties = try XCTUnwrap(payloadTelemetry.properties)
+        XCTAssertEqual(properties["client_family"], "mcp")
+        XCTAssertEqual(properties["tool_kind"], "read")
+        XCTAssertEqual(properties["capture_kind"], "meeting")
+        XCTAssertEqual(properties["result"], "success")
+        XCTAssertEqual(properties["source_count_bucket"], "1")
+        XCTAssertEqual(Set(properties.keys), AgentCaptureQueryTelemetryPolicy.allowedProperties.union(["distinct_id"]))
+        XCTAssertNil(properties["agent_target"])
+        XCTAssertNil(properties["query_kind"])
+        XCTAssertNil(properties["artifact_kind"])
+        XCTAssertNil(properties["capture_age_bucket"])
+        XCTAssertNil(properties["return_window_bucket"])
+        XCTAssertNil(properties["surface"])
+        XCTAssertNil(properties["query_text"])
+        XCTAssertNil(properties["transcript_text"])
+        XCTAssertNil(properties["meeting_title"])
+        XCTAssertNil(properties["file_path"])
     }
 
     func testReadMeetingWindowedReadReturnsRequestedUtterances() throws {
@@ -485,6 +519,9 @@ final class ToolHandlersTests: XCTestCase {
         let frontmatter = try XCTUnwrap(page.frontmatter)
         XCTAssertTrue(frontmatter.contains("title: \"Roadmap Sync\""))
         XCTAssertTrue(page.hint.contains("offset=4"))
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "read")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
     }
 
     func testReadMeetingTranscriptSectionWindowOmitsFrontmatter() throws {
@@ -510,6 +547,8 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(page.offset, 0)
         XCTAssertEqual(page.returned, 3)
         XCTAssertEqual(page.nextOffset, 3)
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "read")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
     }
 
     func testReadMeetingOffsetBeyondEndReturnsEmptyWindowWithTotals() throws {
@@ -538,6 +577,8 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertFalse(page.truncated)
         XCTAssertNil(page.nextOffset)
         XCTAssertTrue(page.hint.contains("past the end"))
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "read")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
     }
 
     func testReadMeetingOversizedTranscriptAutoTruncatesWithNextOffset() throws {
@@ -565,6 +606,8 @@ final class ToolHandlersTests: XCTestCase {
         let nextOffset = try XCTUnwrap(page.nextOffset)
         XCTAssertEqual(nextOffset, page.returned)
         XCTAssertTrue(page.hint.contains("offset=\(nextOffset)"))
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "read")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
     }
 
     func testReadDictationSmallDayFullReadStaysByteIdenticalRawMarkdown() throws {
@@ -578,6 +621,9 @@ final class ToolHandlersTests: XCTestCase {
 
         XCTAssertNotEqual(result.isError, true)
         XCTAssertEqual(try resultText(result), content)
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "read")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "dictation")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "2_3")
     }
 
     func testReadDictationEntryWindowing() throws {
@@ -606,6 +652,9 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(page.nextOffset, 2)
         XCTAssertEqual(page.entries.map(\.title), ["Second note"])
         XCTAssertTrue(page.hint.contains("offset=2"))
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "read")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "dictation")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "2_3")
     }
 
     func testReadDictationEntryIdBehaviorUnchangedByPaginationParams() throws {
@@ -626,6 +675,9 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertTrue(text.hasPrefix("# Morning note"))
         XCTAssertTrue(text.contains("Ship the follow-up note to product today"))
         XCTAssertFalse(text.contains("total_entries"))
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "read")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "dictation")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
     }
 
     func testListActionItemsDoneStatusReturnsStructuredEmptyResult() throws {
@@ -753,6 +805,9 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(decoded.results.first?.meetingId, "Call_2026-04-18_09-15-00")
         XCTAssertEqual(decoded.results.first?.timestamp, "2:05")
         XCTAssertEqual(decoded.results.first?.quote, "The pricing decision needs a receipt")
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "search")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
+        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
     }
 
     func testCrossMeetingToolsReturnStructuredEmptyCorpusResults() throws {
@@ -845,6 +900,30 @@ private final class RecordingAgentCaptureQueryTelemetry: AgentCaptureQueryTeleme
 
     func track(_ observation: AgentCaptureQueryObservation) {
         observations.append(observation)
+    }
+}
+
+private final class RequestCapturingAgentCaptureQueryTelemetry: AgentCaptureQueryTelemetryRecording {
+    private(set) var properties: [String: String]?
+
+    private let reporter = AgentCaptureQueryTelemetry(
+        configuration: AgentCaptureQueryTelemetryConfiguration(
+            apiKey: "phc_test",
+            host: URL(string: "https://us.i.posthog.com")!,
+            distinctID: "anonymous-device"
+        )
+    )
+
+    func track(_ observation: AgentCaptureQueryObservation) {
+        guard let request = reporter.makeRequest(for: observation),
+              let body = request.httpBody,
+              let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let event = object["event"] as? String,
+              event == AgentCaptureQueryTelemetryPolicy.eventName,
+              let properties = object["properties"] as? [String: String] else {
+            return
+        }
+        self.properties = properties
     }
 }
 
