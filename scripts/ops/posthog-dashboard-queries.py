@@ -751,6 +751,33 @@ LIMIT 100
 """,
         ),
         QuerySpec(
+            id="artifact_usefulness.artifact_and_agent_actions",
+            family="artifact_usefulness",
+            title="Artifact and agent action adoption",
+            description="Shows open/reveal/summary/copy/setup actions by surface and coarse artifact/agent fields.",
+            columns=("event", "surface", "artifact_kind", "action_kind", "result", "trigger", "duration_bucket", "agent_target", "events", "devices"),
+            sql=f"""
+SELECT
+  event,
+  properties['surface'] AS surface,
+  properties['artifact_kind'] AS artifact_kind,
+  properties['action_kind'] AS action_kind,
+  properties['result'] AS result,
+  properties['trigger'] AS trigger,
+  properties['duration_bucket'] AS duration_bucket,
+  properties['agent_target'] AS agent_target,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')
+  {app_version_filter(app_version)}
+GROUP BY event, surface, artifact_kind, action_kind, result, trigger, duration_bucket, agent_target
+ORDER BY events DESC
+LIMIT 60
+""",
+        ),
+        QuerySpec(
             id="onboarding_friction.permission_readiness",
             family="onboarding_friction",
             title="Onboarding permission readiness",

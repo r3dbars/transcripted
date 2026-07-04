@@ -230,14 +230,15 @@ SELECT
   properties['agent_target'] AS agent_target,
   properties['query_kind'] AS query_kind,
   properties['source_count_bucket'] AS source_count_bucket,
+  properties['result'] AS result,
   properties['page_id'] AS page_id,
   count() AS events,
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened')
+  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened', 'local_meeting_summary_started', 'local_meeting_summary_completed', 'local_meeting_summary_failed')
   {app_version_filter(app_version)}
-GROUP BY event, artifact_kind, action_kind, agent_target, query_kind, source_count_bucket, page_id
+GROUP BY event, artifact_kind, action_kind, agent_target, query_kind, source_count_bucket, result, page_id
 ORDER BY devices DESC, events DESC
 LIMIT 50
 """
@@ -581,6 +582,7 @@ def build_under_discovered_feature(data: dict[str, Any]) -> Finding:
     candidates = [
         ("Agent setup", max(devices.get("activation_agent_setup_cta_clicked", 0), devices.get("onboarding_agent_cta_clicked", 0)), 5, "Surface Claude/MCP setup immediately after the first saved artifact."),
         ("Agent prompt copy", devices.get("activation_agent_prompt_action_clicked", 0), 4, "Put the first sourced question beside Open Markdown."),
+        ("Local summary", max(devices.get("local_meeting_summary_started", 0), devices.get("local_meeting_summary_completed", 0)), 3, "Make the saved-meeting summary action clearer on Home."),
         ("Meeting import", devices.get("meeting_file_imported", 0), 3, "Expose imported-audio transcription from Home for users who missed live capture."),
         ("Saved-audio retranscription", devices.get("meeting_saved_audio_retranscription_requested", 0), 2, "Make retry from retained meeting audio clearer after transcript failure."),
         ("Meeting prompt acceptance", devices.get("meeting_prompt_record_selected", 0), 2, "Clarify detected-meeting prompts and route readiness."),

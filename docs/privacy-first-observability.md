@@ -188,6 +188,10 @@ allowlist.
   `result`, and `elapsed_bucket`
 - product friction fields limited to `surface`, `stage`, `result`,
   `failure_kind`, `elapsed_bucket`, `route_shape`, and `model_state`
+- artifact-action analytics limited to `artifact_kind`, `action_kind`,
+  `surface`, `artifact_age_bucket`, `result`, `trigger`,
+  `word_count_bucket`, and `duration_bucket`; local-summary runs reuse this
+  shape for the saved-meeting -> summary -> return loop
 - local meeting summary analytics limited to `provider`, `summary_action`,
   `setup_ready`, `runtime`, `queue_depth_bucket`, `chunk_count_bucket`,
   `duration_bucket`, `failure_kind`, and `stage`
