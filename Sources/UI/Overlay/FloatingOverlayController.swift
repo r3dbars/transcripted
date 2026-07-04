@@ -269,19 +269,24 @@ class FloatingOverlayController {
 
         // Validate the accessibility rect — terminal emulators report oversized text areas
         let mousePos = NSEvent.mouseLocation
-        let referencePoint = anchorTargetRect.map { NSPoint(x: $0.midX, y: $0.midY) } ?? mousePos
-        let currentScreen = NSScreen.screens.first { NSMouseInRect(referencePoint, $0.frame, false) }
-            ?? NSScreen.screens.first { NSMouseInRect(mousePos, $0.frame, false) }
-            ?? NSScreen.main
-        let screenSize = currentScreen?.frame.size ?? NSSize(width: 1920, height: 1080)
-        let targetRect: CGRect?
-        if let raw = rawTargetRect,
-           raw.height > 0, raw.height <= screenSize.height,
-           raw.width > 0, raw.width <= screenSize.width {
-            targetRect = raw
-        } else {
-            targetRect = nil
+        let screenFrames = NSScreen.screens.map(\.frame)
+        let primaryScreenFrame = NSScreen.screens.first?.frame ?? NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+        let convertedTargetRect = rawTargetRect.flatMap {
+            DictationOverlayPlacementPolicy.cocoaRect(fromAccessibilityRect: $0, primaryScreenFrame: primaryScreenFrame)
         }
+        let resolvedScreenFrame = DictationOverlayPlacementPolicy.screenFrame(
+            containing: anchorTargetRect ?? convertedTargetRect,
+            mouseLocation: mousePos,
+            screenFrames: screenFrames,
+            fallbackScreenFrame: NSScreen.main?.frame
+        )
+        let currentScreen = resolvedScreenFrame.flatMap { frame in
+            NSScreen.screens.first { $0.frame == frame }
+        } ?? NSScreen.main
+        let targetRect = DictationOverlayPlacementPolicy.validatedTargetRect(
+            convertedTargetRect,
+            on: resolvedScreenFrame
+        )
 
         var origin: NSPoint
         if shouldOpenAtCursor {
@@ -291,12 +296,8 @@ class FloatingOverlayController {
                 x: rect.midX - panelSize.width / 2,
                 y: rect.midY - panelSize.height / 2
             )
-        } else if let rect = targetRect, let screen = currentScreen {
-            let flippedY = screen.frame.maxY - rect.origin.y
-            origin = NSPoint(
-                x: rect.midX - panelSize.width / 2,
-                y: flippedY + 12
-            )
+        } else if let rect = targetRect {
+            origin = DictationOverlayPlacementPolicy.originAboveTarget(targetRect: rect, panelSize: panelSize)
         } else {
             origin = NSPoint(
                 x: mousePos.x - panelSize.width / 2,

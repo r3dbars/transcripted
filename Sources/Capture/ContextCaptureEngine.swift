@@ -80,6 +80,12 @@ private enum PhysicalShortcutPhase {
 }
 
 private final class PhysicalShortcutDetector {
+    /// Shared with `ContextCaptureEngine.updateAccessibilityRetryMonitor()`,
+    /// which matches on this exact message to decide whether to poll for
+    /// Accessibility permission. Keep both call sites on this constant so a
+    /// wording change here can't silently break that retry.
+    static let accessibilityPermissionErrorMessage = "Shortcut trigger needs Accessibility permission"
+
     /// Cached binding snapshot, rebuilt by ContextCaptureEngine on
     /// .hotkeysDidChange. The event tap runs on a dedicated run loop so
     /// Transcripted main-thread work cannot delay global keyboard delivery.
@@ -137,7 +143,7 @@ private final class PhysicalShortcutDetector {
             resetState()
             return TranscriptedPermissionAccess.isGranted(.accessibility)
                 ? "Shortcut trigger failed to start"
-                : "Shortcut trigger needs Accessibility permission"
+                : Self.accessibilityPermissionErrorMessage
         }
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
@@ -631,7 +637,7 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func updateAccessibilityRetryMonitor() {
-        guard physicalTriggerError == "Shortcut trigger needs Accessibility permission" else {
+        guard physicalTriggerError == PhysicalShortcutDetector.accessibilityPermissionErrorMessage else {
             accessibilityRetryTask?.cancel()
             accessibilityRetryTask = nil
             return

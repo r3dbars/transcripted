@@ -29,10 +29,12 @@ SAFE_EVENTS = (
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
     "onboarding_agent_cta_clicked",
+    "activation_habit_loop_actioned",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
     "update_check_finished",
@@ -47,9 +49,11 @@ WORKFLOW_EVENTS = (
     "meeting_recording_started",
     "meeting_transcript_saved",
     "activation_first_artifact_saved",
+    "activation_second_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
+    "activation_habit_loop_actioned",
     "activation_return_proxy_observed",
 )
 
@@ -121,9 +125,11 @@ def overview_query(days: int, app_version: str | None) -> str:
 SELECT
   uniqIf(distinct_id, event = 'app_launched') AS launch_devices,
   uniqIf(distinct_id, event = 'activation_first_artifact_saved') AS first_artifact_devices,
+  uniqIf(distinct_id, event = 'activation_second_artifact_saved') AS second_artifact_devices,
   uniqIf(distinct_id, event = 'activation_agent_prompt_action_clicked') AS agent_prompt_devices,
   uniqIf(distinct_id, event IN ('activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')) AS agent_setup_devices,
   uniqIf(distinct_id, event = 'agent_capture_query_observed') AS true_agent_query_devices,
+  uniqIf(distinct_id, event = 'activation_habit_loop_actioned') AS habit_loop_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed') AS return_proxy_devices,
   uniqIf(distinct_id, event = 'dictation_completed') AS dictation_completed_devices,
   uniqIf(distinct_id, event = 'meeting_transcript_saved') AS meeting_saved_devices,
@@ -223,8 +229,9 @@ SELECT
   multiIf(
     event IN ('dictation_started', 'dictation_completed'), 'dictation',
     event IN ('meeting_recording_started', 'meeting_transcript_saved'), 'meetings',
-    event IN ('activation_artifact_action_clicked', 'activation_first_artifact_saved'), 'artifact_actions',
+    event IN ('activation_artifact_action_clicked', 'activation_first_artifact_saved', 'activation_second_artifact_saved'), 'artifact_actions',
     event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked'), 'agent_bridge',
+    event = 'activation_habit_loop_actioned', 'habit_loop',
     event IN ('update_check_finished', 'update_download_finished'), 'updates',
     'other'
   ) AS feature,
@@ -248,6 +255,12 @@ FROM (
   FROM events
   WHERE timestamp >= now() - INTERVAL {int(days)} DAY
     AND event = 'activation_return_proxy_observed'
+    {app_version_filter(app_version)}
+  UNION ALL
+  SELECT 'habit_loop_action' AS signal, count() AS events, uniq(distinct_id) AS devices
+  FROM events
+  WHERE timestamp >= now() - INTERVAL {int(days)} DAY
+    AND event = 'activation_habit_loop_actioned'
     {app_version_filter(app_version)}
   UNION ALL
   SELECT 'multi_artifact_proxy' AS signal, sum(saved_output_events) AS events, count() AS devices
@@ -372,9 +385,11 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
     overview = (results.get("overview") or [{}])[0]
     launch = as_int(overview.get("launch_devices"))
     first_artifact = as_int(overview.get("first_artifact_devices"))
+    second_artifact = as_int(overview.get("second_artifact_devices"))
     agent_prompt = as_int(overview.get("agent_prompt_devices"))
     agent_setup = as_int(overview.get("agent_setup_devices"))
     true_agent_query = as_int(overview.get("true_agent_query_devices"))
+    habit_loop = as_int(overview.get("habit_loop_devices"))
     return_proxy = as_int(overview.get("return_proxy_devices"))
     dictation_completed = as_int(overview.get("dictation_completed_devices"))
     meeting_saved = as_int(overview.get("meeting_saved_devices"))
@@ -384,9 +399,11 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
         for value in (
             launch,
             first_artifact,
+            second_artifact,
             agent_prompt,
             agent_setup,
             true_agent_query,
+            habit_loop,
             return_proxy,
             dictation_completed,
             meeting_saved,
@@ -508,10 +525,12 @@ def build_context_pack(data: dict[str, Any]) -> dict[str, Any]:
             "launch_devices": launch,
             "first_artifact_devices": first_artifact,
             "first_artifact_rate_pct": artifact_rate,
+            "second_artifact_devices": second_artifact,
             "agent_prompt_devices": agent_prompt,
             "agent_setup_devices": agent_setup,
             "agent_prompt_per_first_artifact_pct": prompt_rate,
             "true_agent_query_devices": true_agent_query,
+            "habit_loop_devices": habit_loop,
             "return_proxy_devices": return_proxy,
             "return_proxy_per_first_artifact_pct": return_rate,
             "strongest_repeat_use_signal": {
@@ -679,8 +698,10 @@ def render_markdown(pack: dict[str, Any]) -> str:
         "",
         f"- Launch devices: {pack['activation'].get('launch_devices')}",
         f"- First artifact devices: {pack['activation'].get('first_artifact_devices')} ({md_value(pack['activation'].get('first_artifact_rate_pct'))} of launch)",
+        f"- Second artifact devices: {pack['activation'].get('second_artifact_devices')}",
         f"- Agent prompt devices: {pack['activation'].get('agent_prompt_devices')} ({md_value(pack['activation'].get('agent_prompt_per_first_artifact_pct'))} of first artifact)",
         f"- True agent-query devices: {pack['activation'].get('true_agent_query_devices')} (UNKNOWN if zero in this window)",
+        f"- Habit-loop action devices: {pack['activation'].get('habit_loop_devices')}",
         f"- Return proxy devices: {pack['activation'].get('return_proxy_devices')} ({md_value(pack['activation'].get('return_proxy_per_first_artifact_pct'))} of first artifact)",
         "",
         "## Recommended Next PRs",

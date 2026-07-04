@@ -16,6 +16,7 @@
 - `MeetingFailureExplanation.swift` — maps meeting outcomes into retryability, artifact-retention, user-visible state, and privacy-safe telemetry fields
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
 - `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths, derives titles, and prepares single-file meeting transcription jobs
+- `MeetingImportPreparationFailureCopy.swift` — maps an imported-audio preparation failure into the shared `MeetingFailureKind` taxonomy and user-facing retry copy, extracted out of `MeetingSessionController` so it stays unit-testable
 - `LiveMeetingCodexSession.swift` — app-owned sidecar writer for the opt-in live-meeting workspace used by Codex and Claude Cowork; it must not replace or mutate the normal saved meeting transcript pipeline
 - `LiveMeetingPreviewServer.swift` — loopback HTTP server that serves the live sidecar preview on a tokenized URL so the page updates in place without full-page refreshes while Transcripted is running
 - `LiveMeetingStreamingUpdatePolicy.swift` — tiny throttling/deduplication policy for provisional live ASR updates before they are appended to the sidecar
@@ -135,6 +136,7 @@ Relevant direct coverage:
 - `Tests/FailedMeetingPresentationTests.swift`
 - `Tests/MeetingFailureExplanationTests.swift`
 - `Tests/MeetingFailureKindTests.swift`
+- `Tests/MeetingImportPreparationFailureCopyTests.swift`
 - `Tests/MeetingPromptHeuristicsTests.swift`
 - `Tests/MicActivityMonitorTests.swift`
 - `Tests/CameraActivityMonitorTests.swift`

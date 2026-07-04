@@ -45,7 +45,7 @@ struct FailedMeetingRecoveryPresentation: Equatable {
         )
     }
 
-    private static func retryDisabled(
+    static func retryDisabled(
         canRetry: Bool,
         isRetryable: Bool,
         isRetrying: Bool,
@@ -54,7 +54,7 @@ struct FailedMeetingRecoveryPresentation: Equatable {
         !canRetry || !isRetryable || !hasAudioFiles || isRetrying
     }
 
-    private static func retryHelp(
+    static func retryHelp(
         canRetry: Bool,
         retryUnavailableReason: String?,
         isRetryable: Bool,

@@ -242,6 +242,59 @@ func testMeetingPromptDetector() async {
         assertEqual(output.analyticsAppSignal, "native_output", "output attribution is native-only and stays family-level")
     }
 
+    await runSuite("MeetingPromptDetector calendar refresh — prompt evaluations reuse the warm snapshot") {
+        let now = Date()
+        let box = CandidateBox()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            fetchCalendarEventSnapshots: { _, _ in
+                box.calendarFetchCount += 1
+                return [
+                    makeMeetingPromptCalendarSnapshot(
+                        id: "warm-calendar",
+                        startsIn: 30,
+                        now: now
+                    )
+                ]
+            }
+        )
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.start()
+        defer { detector.stop() }
+        await waitForPromptEvaluation()
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation()
+        detector.updateAudioOutputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation()
+
+        assertEqual(box.calendarFetchCount, 1, "signal-driven evaluations should reuse the cached calendar window while it is fresh")
+        assertNotNil(box.candidate, "the warm calendar snapshot should still be usable for prompting")
+    }
+
+    await runSuite("MeetingPromptDetector calendar refresh — EventKit changes invalidate the warm snapshot") {
+        let box = CandidateBox()
+        let detector = MeetingPromptDetector(
+            calendarAccessGranted: { true },
+            fetchCalendarEventSnapshots: { _, _ in
+                box.calendarFetchCount += 1
+                return []
+            }
+        )
+
+        detector.start()
+        defer { detector.stop() }
+        await waitForPromptEvaluation()
+        NotificationCenter.default.post(name: .EKEventStoreChanged, object: nil)
+        await waitForPromptEvaluation()
+
+        assertEqual(box.calendarFetchCount, 2, "calendar changes should force exactly one fresh EventKit read")
+    }
+
     await runSuite("MeetingPromptDetector.updateMicInputUsers — a browser holding the mic prompts an ad-hoc call") {
         let detector = MeetingPromptDetector()
         detector.isOwnCaptureActive = { false }
@@ -691,6 +744,7 @@ private final class CandidateBox {
     var promptCount = 0
     var suppressionCount = 0
     var unrecordedCallCount = 0
+    var calendarFetchCount = 0
 }
 
 // updateMicInputUsers re-evaluates on a detached @MainActor Task; yield/sleep a

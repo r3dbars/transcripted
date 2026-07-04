@@ -3500,7 +3500,8 @@ func testRepoCommandContract() {
         assertTrue(
             pillContents.contains("event.window === panel || panel.isKeyWindow")
                 && !pillContents.contains("panel.makeKey()")
-                && pillContents.contains("NSMouseInRect(mouseLocation"),
+                && pillContents.contains("CapturePillPlacementPolicy.selectedScreenFrame(")
+                && pillContents.contains("mouseLocation: mouseLocation"),
             "capture pill should not hijack app-wide keys or force primary-display placement"
         )
         assertTrue(

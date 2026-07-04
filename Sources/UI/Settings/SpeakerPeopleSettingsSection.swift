@@ -1515,21 +1515,7 @@ private struct SpeakerAvatarView: View {
 
     private var color: Color {
         guard let name, !name.isEmpty else { return .secondary }
-        let palette: [NSColor] = [
-            .systemBlue,
-            .systemGreen,
-            .systemPurple,
-            .systemOrange,
-            .systemPink,
-            .systemTeal,
-            .systemRed,
-            .systemIndigo,
-        ]
-        let normalized = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = normalized.unicodeScalars.reduce(UInt32(0)) { partial, scalar in
-            partial &+ scalar.value
-        }
-        return Color(nsColor: palette[Int(value % UInt32(palette.count))])
+        return HomeMeetingSpeakerColor.color(for: name)
     }
 }
 

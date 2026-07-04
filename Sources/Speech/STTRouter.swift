@@ -202,70 +202,63 @@ class STTRouter: ObservableObject {
         case .parakeetTDTv3:
             return await parakeetEngine.transcribe()
         case .whisperLargeV3Turbo, .whisperLargeV3:
-            await initialize(model: model)
-            guard isModelLoaded(for: model) else {
-                EventReporter.shared.capture(
-                    level: .error,
-                    engine: model.engineName,
-                    event: "dictation_model_unavailable",
-                    message: "\(model.title) was selected but is not loaded",
-                    context: ["model": model.rawValue]
-                )
-                return nil
-            }
-
-            guard let recording = await parakeetEngine.drainRecordedSamplesForExternalTranscription(
-                engineName: model.engineName
-            ) else {
-                return nil
-            }
-
-            do {
-                defer {
-                    parakeetEngine.finishExternalTranscription()
-                }
-                let text = try await whisperEngine.transcribeSamples(
+            return await transcribeUsingExternalEngine(model: model) { [self] recording in
+                try await whisperEngine.transcribeSamples(
                     recording.samples16k,
                     source: .microphone,
                     model: model
                 )
-                return text.isEmpty ? nil : text
-            } catch {
-                print("❌ WHISPER | dictation failed: \(error.localizedDescription)")
-                return nil
             }
         case .nemotronStreaming:
-            await initialize(model: model)
-            guard isModelLoaded(for: model) else {
-                EventReporter.shared.capture(
-                    level: .error,
-                    engine: model.engineName,
-                    event: "dictation_model_unavailable",
-                    message: "\(model.title) was selected but is not loaded",
-                    context: ["model": model.rawValue]
-                )
-                return nil
-            }
-
-            guard let recording = await parakeetEngine.drainRecordedSamplesForExternalTranscription(
-                engineName: model.engineName
-            ) else {
-                return nil
-            }
-
-            do {
-                defer {
-                    parakeetEngine.finishExternalTranscription()
-                }
-                let text = try await nemotronEngine.transcribeSamples(
+            return await transcribeUsingExternalEngine(model: model) { [self] recording in
+                try await nemotronEngine.transcribeSamples(
                     recording.samples16k,
                     source: .microphone
                 )
-                return text.isEmpty ? nil : text
-            } catch {
-                print("❌ NEMOTRON | dictation failed: \(error.localizedDescription)")
-                return nil
             }
+        }
+    }
+
+    /// Shared drain/transcribe/report flow for the non-Parakeet dictation
+    /// engines (Whisper, Nemotron), which both transcribe already-recorded
+    /// Parakeet samples rather than owning the audio graph themselves.
+    private func transcribeUsingExternalEngine(
+        model: TranscriptionModelChoice,
+        transcribe: (RecordedSpeechSamples) async throws -> String
+    ) async -> String? {
+        await initialize(model: model)
+        guard isModelLoaded(for: model) else {
+            EventReporter.shared.capture(
+                level: .error,
+                engine: model.engineName,
+                event: "dictation_model_unavailable",
+                message: "\(model.title) was selected but is not loaded",
+                context: ["model": model.rawValue]
+            )
+            return nil
+        }
+
+        guard let recording = await parakeetEngine.drainRecordedSamplesForExternalTranscription(
+            engineName: model.engineName
+        ) else {
+            return nil
+        }
+
+        do {
+            defer {
+                parakeetEngine.finishExternalTranscription()
+            }
+            let text = try await transcribe(recording)
+            return text.isEmpty ? nil : text
+        } catch {
+            EventReporter.shared.capture(
+                level: .error,
+                engine: model.engineName,
+                event: "dictation_transcription_failed",
+                message: error.localizedDescription,
+                context: ["model": model.rawValue]
+            )
+            return nil
         }
     }
 

@@ -194,8 +194,18 @@ func testFailedMeetingPresentation() {
             "failed rows should keep Show Audio visible when any retained audio URL exists"
         )
         assertTrue(
-            homeSource.contains("private var retryDisabled: Bool {\n        !canRetry || !item.isRetryable || !item.hasAudioFiles || item.isRetrying"),
+            homeSource.contains("private var retryDisabled: Bool {\n        FailedMeetingRecoveryPresentation.retryDisabled(\n            canRetry: canRetry,\n            isRetryable: item.isRetryable,\n            isRetrying: item.isRetrying,\n            hasAudioFiles: item.hasAudioFiles\n        )"),
             "failed rows should keep retry readiness tied to complete retryable audio, not mere visibility"
+        )
+
+        let recoveryPresentationSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift"),
+            encoding: .utf8
+        )) ?? ""
+
+        assertTrue(
+            recoveryPresentationSource.contains("!canRetry || !isRetryable || !hasAudioFiles || isRetrying"),
+            "the shared retry-readiness helper Home delegates to should still require complete retryable audio"
         )
         assertTrue(
             homeSource.contains("private var hasRetainedAudioFiles: Bool {\n        !item.audioURLs.isEmpty"),

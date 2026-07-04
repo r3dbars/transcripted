@@ -222,7 +222,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
-            meetingOverlayController.onPromptExpired = { [weak self] candidate in
+            let expirePrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
                 let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
@@ -264,9 +264,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
-            meetingOverlayController.onPromptRecord = recordPrompt
-            meetingOverlayController.onPromptDismiss = dismissPrompt
-            meetingOverlayController.onPromptRemindSoon = { [weak self] candidate in
+            let remindPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
                 AnalyticsReporter.track(
@@ -298,10 +296,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
+            meetingOverlayController.onPromptRecord = recordPrompt
+            meetingOverlayController.onPromptDismiss = dismissPrompt
+            meetingOverlayController.onPromptExpired = expirePrompt
+            meetingOverlayController.onPromptRemindSoon = remindPrompt
             capturePillController.onRecord = recordPrompt
             capturePillController.onDismiss = dismissPrompt
-            capturePillController.onRemind = meetingOverlayController.onPromptRemindSoon
-            capturePillController.onExpired = meetingOverlayController.onPromptExpired
+            capturePillController.onExpired = expirePrompt
+            capturePillController.onRemind = remindPrompt
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
@@ -335,11 +337,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.onPromptRequest = { [weak self] candidate in
                 guard PermissionsOnboardingPreferences.hasCompleted() else { return false }
                 guard let self else { return false }
-                let timeout = MeetingPromptHeuristics.promptTimeoutSeconds(
+                let promptTimeout = MeetingPromptHeuristics.promptTimeoutSeconds(
                     for: candidate.reason,
                     calendarDefault: 30
                 )
-                let presented = self.capturePillController.present(candidate: candidate, timeout: TimeInterval(timeout))
+                let presented = self.capturePillController.present(
+                    candidate: candidate,
+                    timeout: TimeInterval(promptTimeout)
+                )
                 if presented {
                     self.meetingPromptShownAtByCandidateID[candidate.id] = Date()
                     AnalyticsReporter.track(
