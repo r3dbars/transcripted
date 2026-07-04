@@ -44,8 +44,9 @@ For delegated or coordinator work, use `docs/agent-closeout.md`.
 - `Sources/Speech/` - dictation STT, audio recovery, device handling
 - `Sources/Meeting/` - app-side meeting flow and bridge into core
 - `Sources/TranscriptedCore/` - reusable meeting transcription library
-- `Sources/UI/` - overlay, menu bar, settings, onboarding, agent connect
 - `Sources/Support/` - preferences, permissions, paths, paste, launch behavior
+- `Sources/Timeline/` - Dayflow-style timeline engine scaffolding
+- `Sources/UI/` - overlay, menu bar, settings, onboarding, agent connect, timeline UI
 - `Sources/Observability/` - logs, diagnostics, Sentry, PostHog, Sparkle
 - `Sources/Reliability/` - wake / sleep recovery
 - `Sources/Beta/` - beta-build configuration

@@ -14,6 +14,14 @@ rules:
       - "bash run-tests.sh"
 
   - paths:
+      - "Sources/Timeline/**"
+      - "Sources/UI/Timeline/**"
+    checks:
+      - "python3 scripts/dev/check-build-source-lists.py"
+      - "bash build.sh --no-open"
+      - "bash run-tests.sh"
+
+  - paths:
       - "Sources/Meeting/**"
       - "Sources/TranscriptedCore/**"
       - "Tests/Integration/**"

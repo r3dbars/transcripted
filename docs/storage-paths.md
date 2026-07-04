@@ -15,6 +15,11 @@ folder before switching. The copy never deletes originals and skips destination
 name collisions instead of overwriting. App-owned state, cache, logs, and temp
 files always stay under `~/Library/Application Support/Transcripted/`.
 
+Timeline screen capture state is app-owned and local-only:
+
+- screenshots: `~/Library/Application Support/Transcripted/recordings/screenshots/`
+- future timeline database: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
+
 ## Dictation
 
 Dictation artifacts live under:
@@ -54,8 +59,21 @@ App-owned meeting state is stored separately under:
 
 - speaker DB: `~/Library/Application Support/Transcripted/state/speakers.sqlite`
 - stats DB: `~/Library/Application Support/Transcripted/state/stats.sqlite`
+- timeline DB: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
 - failed queue: `~/Library/Application Support/Transcripted/state/failed_transcriptions.json`
 - runtime diagnostics marker: `~/Library/Application Support/Transcripted/state/runtime-diagnostics.json`
+
+The Dayflow-style timeline stores app-owned screen activity data separately from
+the relocatable capture library:
+
+- screenshots: `~/Library/Application Support/Transcripted/recordings/screenshots/YYYY-MM-DD/*.jpg`
+- future timeline Markdown summaries: `<capture-library>/timeline/`
+
+Timeline database rows and screenshot files are owner-only local state. The
+retention manager soft-deletes old screenshot rows first, removes files oldest
+first when the configured cap is exceeded, then hard-deletes the purged rows.
+Screenshots that belong to an `analysis_batches.status = processing` batch are
+not deleted by retention.
 
 Claude Desktop integration installs the bundled read-only MCP helper under:
 
@@ -107,6 +125,22 @@ The embedded `TranscriptedCore` logger also writes JSONL under the same logs
 directory:
 
 - core pipeline log: `~/Library/Application Support/Transcripted/logs/app.jsonl`
+
+## Timeline
+
+Timeline state is app-owned and stays under the Transcripted Application
+Support root:
+
+- timeline DB: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
+- timeline screenshots: `~/Library/Application Support/Transcripted/recordings/screenshots/`
+
+The future agent-readable daily timeline Markdown will live in the relocatable
+capture library:
+
+- timeline Markdown: `<capture-library>/timeline/`
+
+Screen pixels and screen-derived text stay out of the capture library unless a
+future phase writes user/agent-readable Markdown summaries there.
 
 ## `TranscriptedCore` Defaults
 

@@ -256,6 +256,8 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
+    "Sources/Timeline/TimelineDatabase.swift"
+    "Sources/Timeline/TimelineRetentionManager.swift"
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/AgentMCPConnector.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
@@ -276,6 +278,7 @@ APP_SOURCES=(
     "Sources/Support/CaptureLibraryMigrationPlanner.swift"
     "Sources/Support/LiveMeetingCodexPreferences.swift"
     "Sources/Support/LocalMeetingSummaryPreferences.swift"
+    "Sources/Support/TimelinePreferences.swift"
     "Sources/Support/SpeechModelBetaPreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"
@@ -294,6 +297,10 @@ APP_SOURCES=(
     "Sources/Dictation/DictationTranscriptStore.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
     "Sources/Support/TranscriptedConstants.swift"
+    "Sources/Timeline/ActiveDisplayTracker.swift"
+    "Sources/Timeline/InputIdleSnapshot.swift"
+    "Sources/Timeline/ForegroundAppSampler.swift"
+    "Sources/Timeline/ScreenCaptureEngine.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
     "Sources/Speech/DictationReadinessWaitPolicy.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
@@ -468,6 +475,7 @@ SWIFTC_ARGS+=(
     -framework FoundationModels
     -framework Network
     -framework ScreenCaptureKit
+    -lsqlite3
     -parse-as-library
     -o "$TEST_BINARY"
 )
