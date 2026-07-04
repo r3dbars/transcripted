@@ -1530,6 +1530,46 @@ func testAnalyticsEventPolicy() {
         assertNil(privatePromptFields["transcript_text"], "transcript text must not be sent")
     }
 
+    runSuite("AnalyticsEventPolicy pins meeting prompt telemetry firing paths") {
+        let appSource = readAnalyticsPolicyRepoTextFile("Sources/TranscriptedApp.swift")
+        let meetingSessionSource = readAnalyticsPolicyRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_shown\"", in: appSource),
+            1,
+            "shown telemetry should fire once, only after the detected prompt is actually presented"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_record_selected\"", in: appSource),
+            1,
+            "selected telemetry should fire once on the explicit record choice"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_suppressed\"", in: appSource),
+            1,
+            "suppression telemetry should fire once from the detector suppression hook"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_choice_made\"", in: appSource),
+            4,
+            "choice telemetry should cover record, dismiss, remind-later, and expiry actions without counting shown inventory"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: appSource),
+            2,
+            "app-level outcomes should cover ignored expiry and pre-prompt suppression only"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: meetingSessionSource),
+            2,
+            "session-level outcomes should stay centralized for start/save/fail terminal recording results"
+        )
+        assertTrue(
+            meetingSessionSource.contains("guard let properties = promptProperties else { return }"),
+            "manual and hotkey meetings must not inherit stale detected-prompt properties"
+        )
+    }
+
     runSuite("AnalyticsEventPolicy keeps mic boost prompt events narrow") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_mic_boost_prompt_shown")
         let actioned = AnalyticsEventPolicy.policy(forEvent: "meeting_mic_boost_prompt_actioned")
@@ -1564,6 +1604,17 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["trigger"], "hotkey", "trigger enum should survive sanitization")
         assertNil(sanitized["app_name"], "unallowlisted properties must be dropped")
     }
+}
+
+private func analyticsPolicyOccurrenceCount(of needle: String, in haystack: String) -> Int {
+    guard !needle.isEmpty else { return 0 }
+    var count = 0
+    var searchRange = haystack.startIndex..<haystack.endIndex
+    while let range = haystack.range(of: needle, range: searchRange) {
+        count += 1
+        searchRange = range.upperBound..<haystack.endIndex
+    }
+    return count
 }
 
 private func readAnalyticsPolicyRepoTextFile(_ relativePath: String) -> String {
