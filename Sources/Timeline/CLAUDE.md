@@ -9,9 +9,12 @@ UI), the app-owned timeline database and storage-cap retention cleanup,
 deterministic analysis seams (batching, observation building, card
 generation, category normalization, provider stubs, and scheduling),
 projection logic that joins saved meeting/dictation artifacts into timeline
-card records, and pure weekly aggregation helpers. It is app-side code, not
-part of `Sources/TranscriptedCore/`, and should stay off-main for capture,
-analysis, and database work, and UI-free.
+card records, pure weekly aggregation helpers, and local-first read-only
+chat tools over timeline cards, observations, meeting Markdown, and vetted
+SQL. It is app-side code, not part of `Sources/TranscriptedCore/`, and
+should stay off-main for capture, analysis, and database work, and UI-free.
+Chat should ask the timeline store for already-derived cards and summaries
+instead of reading raw screenshots.
 
 ## Files
 
@@ -30,8 +33,11 @@ analysis, and database work, and UI-free.
 - `TimelineLLMProvider.swift` - provider protocol and safe inert stubs
 - `AnalysisScheduler.swift` - single-flight in-memory scheduler harness for the pure pipeline
 - `TimelineCaptureJoiner.swift` - projects saved meeting and dictation artifacts into timeline card records without changing the capture source of truth
-- `WeeklyStatsBuilder.swift` - pure weekly aggregation helpers used by the week
-  grid and dashboard sample/protocol views.
+- `WeeklyStatsBuilder.swift` - pure weekly aggregation helpers used by the week grid and dashboard sample/protocol views
+- `TimelineChatModels.swift` - shared value types for chat context, messages, tools, and privacy mode
+- `ChatToolExecutor.swift` - read-only tool dispatch plus SQL guardrails
+- `ChatPromptBuilder.swift` - local prompt assembly and cloud privacy gate
+- `ChatService.swift` - small orchestration seam for provider-backed chat answers
 
 ## Guardrails
 
@@ -49,6 +55,8 @@ analysis, and database work, and UI-free.
 - Provider stubs must not make network calls by default.
 - Pure rules need fast tests before being wired into capture, storage, or UI.
 - Keep analytics-facing values bucketed or enum-like. Raw titles, transcript text, app names, URLs, file paths, and screenshot-derived text stay local UI data only.
+- Do not send screenshot text, app/window titles, transcript text, or timeline summaries to a cloud provider unless the user has explicitly accepted the cloud notice for the configured provider.
+- SQL tooling is read-only. Keep the statement vetting strict.
 - UI, cards-facing OCR, and full LLM provider wiring belong to later phases.
 
 ## Verify

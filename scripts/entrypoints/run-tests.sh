@@ -437,6 +437,10 @@ APP_SOURCES=(
     "Sources/Timeline/ObservationBuilder.swift"
     "Sources/Timeline/CardGenerator.swift"
     "Sources/Timeline/AnalysisScheduler.swift"
+    "Sources/Timeline/TimelineChatModels.swift"
+    "Sources/Timeline/ChatToolExecutor.swift"
+    "Sources/Timeline/ChatPromptBuilder.swift"
+    "Sources/Timeline/ChatService.swift"
 )
 
 # Fail early on a stale APP_SOURCES entry (renamed or deleted source) so the
