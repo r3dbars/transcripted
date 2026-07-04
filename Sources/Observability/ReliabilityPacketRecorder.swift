@@ -260,6 +260,8 @@ enum ReliabilityPacketRecorder {
             return .init(feature: "dictation", stage: "recording", defaultOutcome: "failed_retryable")
         case ("dictation", "dictation_delivery_completed"):
             return .init(feature: "dictation", stage: "paste_back", defaultOutcome: "success")
+        case ("overlay", "dictation_recording_too_short"):
+            return .init(feature: "dictation", stage: "transcribe", defaultOutcome: "skipped_expected")
         case ("overlay", "no_voice_input"):
             return .init(feature: "dictation", stage: "transcribe", defaultOutcome: "failed_retryable")
         case ("overlay", "dictation_timeout"),
@@ -273,6 +275,7 @@ enum ReliabilityPacketRecorder {
              ("parakeet", "device_change_recovery_timeout"):
             return .init(feature: "dictation", stage: "device_change", defaultOutcome: "failed_retryable")
         case ("parakeet", "audio_engine_start_failed"),
+             ("parakeet", "audio_engine_start_timeout"),
              ("parakeet", "mic_not_authorized"),
              ("dictation", "microphone_start_timeout"):
             return .init(feature: "dictation", stage: "start", defaultOutcome: "failed_retryable")

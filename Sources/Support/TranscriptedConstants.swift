@@ -279,4 +279,87 @@ enum TranscriptedConstants {
             return result
         }
     }
+
+    /// Run an async operation with a deadline and return as soon as the deadline
+    /// wins, even if the underlying operation does not cooperatively unwind.
+    static func withDetachedTimeout<T: Sendable>(
+        seconds: Double,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        let operationTask = Task { try await operation() }
+        let timeoutTask = Task<T, Error> {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw CancellationError()
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let race = TimeoutRaceState<T>()
+
+            Task {
+                do {
+                    race.resume(
+                        with: .success(try await operationTask.value),
+                        continuation: continuation,
+                        operationTask: operationTask,
+                        timeoutTask: timeoutTask
+                    )
+                } catch {
+                    race.resume(
+                        with: .failure(error),
+                        continuation: continuation,
+                        operationTask: operationTask,
+                        timeoutTask: timeoutTask
+                    )
+                }
+            }
+
+            Task {
+                do {
+                    race.resume(
+                        with: .success(try await timeoutTask.value),
+                        continuation: continuation,
+                        operationTask: operationTask,
+                        timeoutTask: timeoutTask
+                    )
+                } catch {
+                    race.resume(
+                        with: .failure(error),
+                        continuation: continuation,
+                        operationTask: operationTask,
+                        timeoutTask: timeoutTask
+                    )
+                }
+            }
+        }
+    }
+}
+
+private final class TimeoutRaceState<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    func resume(
+        with result: Result<T, Error>,
+        continuation: CheckedContinuation<T, Error>,
+        operationTask: Task<T, Error>,
+        timeoutTask: Task<T, Error>
+    ) {
+        lock.lock()
+        guard !didResume else {
+            lock.unlock()
+            return
+        }
+        didResume = true
+        lock.unlock()
+
+        operationTask.cancel()
+        timeoutTask.cancel()
+
+        switch result {
+        case .success(let value):
+            continuation.resume(returning: value)
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
+    }
 }

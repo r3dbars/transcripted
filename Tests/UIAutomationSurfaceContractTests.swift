@@ -224,6 +224,8 @@ func testUIAutomationSurfaceContract() {
         for requiredSourceHook in [
             "title: \"Transcribe audio file\"",
             "actions.importAudioFile()",
+            "secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\"",
+            "trackSettingsAction(\"empty_import_audio\", page: .home)",
             "title: \"AI meeting summaries\"",
             "title: \"Live meeting sidecar\"",
             "trackSettingsToggle(\"local_ai_meeting_summaries\"",
@@ -366,6 +368,61 @@ func testUIAutomationSurfaceContract() {
             "Home reveal/open should route through OwnFileResolver helpers, surfacing presentHomeActionFailure on .unavailable instead of a dead click"
         )
 
+        let settingsSource = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let copyMeetingBlock = sourceBlock(
+            named: "private func handleCopyMeeting(_ item: RecentMeetingItem)",
+            endingBefore: "    private func handleCopyMeetingPreview(",
+            in: settingsSource
+        )
+        assertFalse(
+            copyMeetingBlock.contains(
+                "trackSettingsAction(\"copy_meeting\", page: .home)\n        ActivationTelemetry.trackHabitLoopAction"
+            ),
+            "copy-for-agent telemetry must not emit habit-loop success before the transcript resolves"
+        )
+        assertEqual(
+            countOccurrences(of: "ActivationTelemetry.trackHabitLoopAction(", in: copyMeetingBlock),
+            3,
+            "copy-for-agent should track habit-loop exactly on missing-file failure, read failure, or success"
+        )
+
+        let copyPreviewBlock = sourceBlock(
+            named: "private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview)",
+            endingBefore: "    private func handleRetranscribeMeeting(",
+            in: settingsSource
+        )
+        assertFalse(
+            copyPreviewBlock.contains(
+                "trackSettingsAction(\"copy_meeting_preview\", page: .home)\n        ActivationTelemetry.trackHabitLoopAction"
+            ),
+            "preview copy telemetry must not emit habit-loop success before bundle/markdown text exists"
+        )
+        assertEqual(
+            countOccurrences(of: "ActivationTelemetry.trackHabitLoopAction(", in: copyPreviewBlock),
+            2,
+            "preview copy should track habit-loop exactly on no-text failure or success"
+        )
+
+        let previewBlock = sourceBlock(
+            named: "private func presentHomeMeetingPreview(_ item: RecentMeetingItem)",
+            endingBefore: "    private static func readMeetingMarkdown(",
+            in: settingsSource
+        )
+        assertFalse(
+            previewBlock.contains(
+                "trackSettingsAction(\"preview_recent_meeting\", page: .home)\n        ActivationTelemetry.trackArtifactAction"
+            )
+                || previewBlock.contains(
+                    "trackSettingsAction(\"preview_recent_meeting\", page: .home)\n        ActivationTelemetry.trackHabitLoopAction"
+                ),
+            "meeting preview telemetry must wait for the async Markdown read to succeed or fail"
+        )
+        assertEqual(
+            countOccurrences(of: "ActivationTelemetry.trackHabitLoopAction(", in: previewBlock),
+            2,
+            "meeting preview should track habit-loop once in the success branch and once in the failure branch"
+        )
+
         // No control may pass a possibly-stale row/preview/notice URL straight to
         // NSWorkspace — those silently no-op when the file moved after scanning.
         for staleRawCall in [
@@ -459,6 +516,13 @@ func testUIAutomationSurfaceContract() {
         ] {
             assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(requiredOnboardingHook), "\(requiredOnboardingHook) should stay in onboarding automation scope")
         }
+
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".init(kind: .meetingStart),\n                .init(kind: .systemAudio, canSkip: true),\n                .init(kind: .meeting)")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requestPermission(.systemAudioRecording, required: false)")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Meeting prompts are ready. System Audio can be set up next."),
+            "meetings-first onboarding should not hard-block permission progress on System Audio; it should continue after Microphone, then explain optional System Audio before meeting value"
+        )
 
         // Auto-detect calls is default-on (AutoCallDetectionPreferences) but onboarding
         // used to teach only the manual menu-bar path and frame detection as
@@ -776,6 +840,19 @@ func testUIAutomationSurfaceContract() {
             "QA bench should keep a callable ui mode with local JSON evidence"
         )
     }
+}
+
+private func sourceBlock(named startMarker: String, endingBefore endMarker: String, in source: String) -> String {
+    guard let start = source.range(of: startMarker)?.lowerBound,
+          let end = source[start...].range(of: endMarker)?.lowerBound else {
+        return ""
+    }
+    return String(source[start..<end])
+}
+
+private func countOccurrences(of needle: String, in haystack: String) -> Int {
+    guard !needle.isEmpty else { return 0 }
+    return haystack.components(separatedBy: needle).count - 1
 }
 
 private func readUIAutomationContractFile(_ relativePath: String) -> String {

@@ -13,7 +13,7 @@ It covers ten dashboard families:
 - `speaker_trust` - speaker review, auto-recognition, corrections, deferrals, and finalization failures
 - `retry_recovery` - workflow retry/recovery, failure kinds, and dictation latency buckets
 - `onboarding_friction` - first-run steps, permission readiness, dismissals, abandonment, and product friction
-- `timeline_dayflow` - planned timeline/dayflow adoption and data-quality rows when those events ship
+- `timeline_dayflow` - shipped timeline/dayflow adoption and data-quality rows from the allowlisted timeline taxonomy
 - `release_health` - release-scoped workflow and Sparkle update health
 
 All query outputs are aggregate, bucketed, and privacy-safe. The helpers do not
@@ -56,6 +56,19 @@ Run the offline CI/self-test path:
 
 ```bash
 python3 scripts/ops/posthog-dashboard-queries.py --self-test
+```
+
+Compare observed/live event names against the checked-in allowlist without
+exporting user rows:
+
+```bash
+python3 scripts/ops/posthog-dashboard-queries.py --taxonomy-check --days 30
+```
+
+Run the same event-name check against a synthetic aggregate fixture:
+
+```bash
+python3 scripts/ops/posthog-dashboard-queries.py --taxonomy-check --observed-fixture Tests/Fixtures/posthog-observed-event-taxonomy.json --json-only
 ```
 
 Render synthetic fixture rows without credentials:
@@ -127,6 +140,11 @@ The JSON shape is stable:
 Health checks should treat missing live credentials as an environment gap, not
 as a product analytics failure. Use `--dry-run` or `--fixture` in CI.
 
+For taxonomy checks, the JSON shape includes `unknown_events`,
+`required_taxonomy_events`, `observed_required_taxonomy_events`, and
+`observed_events`. `observed_events` is aggregate-only: event name, count,
+anonymous device count, and first/last seen timestamps.
+
 ## Dashboard Family Notes
 
 `100_wau` uses active workflow and first-value events, not launch alone. That
@@ -166,9 +184,9 @@ raw error strings, device names, app names, or audio details.
 `onboarding_friction` tracks step, permission, abandonment, and product-friction
 buckets only.
 
-`timeline_dayflow` is intentionally separate because timeline analytics may be
-empty until that surface ships. It must not export screen text, screenshots, app
-names, file paths, or raw timeline rows.
+`timeline_dayflow` is intentionally separate because timeline analytics can be
+sparse. It must not export screen text, screenshots, app names, file paths, or
+raw timeline rows.
 
 `release_health` accepts `--app-version`. Workflow events use `app_version`;
 update events use `version`, so the helper filters both.

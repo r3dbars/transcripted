@@ -29,13 +29,21 @@ func testHomeImportAudioAction() {
             "general settings should keep imported-audio help simple"
         )
         assertTrue(
-            !homeSource.contains("HomeMeetingImportActionRow")
-                && !homeSource.contains("onImportAudio"),
-            "meetings tab should not carry the imported-audio action"
+            settingsSource.contains("secondaryActionTitle: \"Transcribe audio file\"")
+                && settingsSource.contains("secondaryAutomationIdentifier: \"transcripted.home.meetings.empty.import-audio\"")
+                && settingsSource.contains("trackSettingsAction(\"empty_import_audio\", page: .home)")
+                && settingsSource.contains("actions.importAudioFile()"),
+            "Home meetings empty state should expose a visible imported-audio route"
         )
         assertTrue(
-            HomeCaptureListCopy.emptyMeetings.contains("transcribe an audio file from General"),
-            "home meeting empty state should point users back to the import location"
+            homeSource.contains("secondaryActionTitle")
+                && homeSource.contains("secondaryAutomationIdentifier")
+                && homeSource.contains("secondaryAction"),
+            "Home empty states should render the optional secondary action route"
+        )
+        assertTrue(
+            HomeCaptureListCopy.emptyMeetings.contains("transcribe an existing audio file"),
+            "Home meeting empty copy should name imported-audio transcription directly"
         )
     }
 }

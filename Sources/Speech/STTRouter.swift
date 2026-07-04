@@ -20,6 +20,7 @@ class STTRouter: ObservableObject {
     @Published var recordingInterrupted = false
     @Published var isRecovering = false
     @Published var inputFormatReady = true
+    private(set) var lastEmptyTranscriptionReason: DictationEmptyTranscriptionReason?
 
     private var cancellables: Set<AnyCancellable> = []
     private var activeRecordingModel: TranscriptionModelChoice?
@@ -194,13 +195,16 @@ class STTRouter: ObservableObject {
 
     func transcribe() async -> String? {
         let model = activeRecordingModel ?? selectedModel
+        lastEmptyTranscriptionReason = nil
         defer {
             activeRecordingModel = nil
         }
 
         switch model {
         case .parakeetTDTv3:
-            return await parakeetEngine.transcribe()
+            let text = await parakeetEngine.transcribe()
+            lastEmptyTranscriptionReason = text == nil ? parakeetEngine.lastEmptyTranscriptionReason : nil
+            return text
         case .whisperLargeV3Turbo, .whisperLargeV3:
             return await transcribeUsingExternalEngine(model: model) { [self] recording in
                 try await whisperEngine.transcribeSamples(
@@ -241,6 +245,7 @@ class STTRouter: ObservableObject {
         guard let recording = await parakeetEngine.drainRecordedSamplesForExternalTranscription(
             engineName: model.engineName
         ) else {
+            lastEmptyTranscriptionReason = parakeetEngine.lastEmptyTranscriptionReason
             return nil
         }
 
@@ -249,7 +254,12 @@ class STTRouter: ObservableObject {
                 parakeetEngine.finishExternalTranscription()
             }
             let text = try await transcribe(recording)
-            return text.isEmpty ? nil : text
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                lastEmptyTranscriptionReason = .noSpeech
+                return nil
+            }
+            return text
         } catch {
             EventReporter.shared.capture(
                 level: .error,

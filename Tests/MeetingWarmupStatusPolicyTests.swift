@@ -111,6 +111,18 @@ func testMeetingWarmupStatusPolicy() {
         )
     }
 
+    runSuite("MeetingWarmupStatusPolicy.status — clamps over-complete download copy") {
+        let status = MeetingWarmupStatusPolicy.status(
+            dictationState: .downloading(progress: 1.35),
+            meetingState: .notLoaded,
+            isMeetingWarmupInFlight: false,
+            shouldSurfaceMeetingWarmupFailure: false
+        )
+
+        assertEqual(status.dictationStatus, "Downloading 100%", "first-run download copy should never show impossible percentages")
+        assertTrue(status.progress <= 0.62, "download progress bar should stay in the bounded warmup range")
+    }
+
     runSuite("MeetingWarmupStatusPolicy.status — shows cached dictation files without fake readiness") {
         let status = MeetingWarmupStatusPolicy.status(
             dictationState: .cached,
@@ -125,6 +137,25 @@ func testMeetingWarmupStatusPolicy() {
             status.detail.contains("load them into memory on first use"),
             "cached copy should not claim the speech model is already loaded"
         )
+    }
+
+    runSuite("MeetingWarmupStatusPolicy.status — transitions from cached files to active loading copy") {
+        let cached = MeetingWarmupStatusPolicy.status(
+            dictationState: .cached,
+            meetingState: .notLoaded,
+            isMeetingWarmupInFlight: false,
+            shouldSurfaceMeetingWarmupFailure: false
+        )
+        let loading = MeetingWarmupStatusPolicy.status(
+            dictationState: .loading,
+            meetingState: .notLoaded,
+            isMeetingWarmupInFlight: false,
+            shouldSurfaceMeetingWarmupFailure: false
+        )
+
+        assertEqual(cached.dictationStatus, "Cached", "cached model files should stay distinct from a resident model")
+        assertEqual(loading.dictationStatus, "Loading", "active first-use loading should surface as loading")
+        assertFalse(loading.isReadyForMenuHeader, "active model loading should not be treated as ready")
     }
 
     runSuite("MeetingWarmupStatusPolicy.status — dictation failures still take priority") {

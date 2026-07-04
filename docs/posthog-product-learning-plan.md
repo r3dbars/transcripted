@@ -99,6 +99,7 @@ Operational scripts query aggregate counts only:
 | `activation_habit_loop_actioned` | `action_kind`, `artifact_kind`, `artifact_count_bucket`, `return_window_bucket`, `surface`, `result` |
 | `workflow_abandoned` | `elapsed_bucket`, `prior_ready_state`, `reason_kind`, `stage`, `surface`, `workflow_kind` |
 | `workflow_recovery_attempted` | `artifact_retained`, `failure_kind`, `recovery_attempt_bucket`, `retry_source`, `surface`, `workflow_kind` |
+| `workflow_recovery_failed` | `artifact_retained`, `elapsed_bucket`, `failure_kind`, `recovery_attempt_bucket`, `result`, `retry_source`, `surface`, `workflow_kind` |
 | `workflow_recovery_finished` | `artifact_retained`, `elapsed_bucket`, `failure_kind`, `recovery_attempt_bucket`, `result`, `retry_source`, `surface`, `workflow_kind` |
 | `agent_capture_query_observed` | `agent_target`, `query_kind`, `artifact_kind`, `result`, `surface`, `return_window_bucket`, `capture_age_bucket`, `source_count_bucket` |
 
@@ -306,12 +307,15 @@ summary requested -> summary finished.
 
 Break down by provider, source, route readiness, missing permission, trigger,
 system stream present, capture quality, queue depth, and failure kind.
-Use `workflow_recovery_finished` to split retry/recovery terminal results by
-`workflow_kind`, `failure_kind`, `retry_source`, `recovery_attempt_bucket`, and
-`result`.
+Use `workflow_recovery_finished` for terminal retry/recovery totals, then
+`workflow_recovery_failed` for failure-only drill-downs by `workflow_kind`,
+`failure_kind`, `retry_source`, `recovery_attempt_bucket`, and `result`.
 
 ### Local Summary Beta Funnel
 
+`meeting_transcript_saved` -> `local_meeting_summary_started` ->
+`local_meeting_summary_completed` / `local_meeting_summary_failed` ->
+`workflow_recovery_finished` / `workflow_recovery_failed` for retry from the failure notice ->
 `meeting_transcript_saved` -> `local_summary_requested` ->
 `local_summary_finished` / `local_summary_failed` / `local_summary_cancelled` ->
 `workflow_recovery_finished` for retry from the failure notice ->
@@ -350,7 +354,11 @@ diagnosis.
 
 ### Release Health By App Version
 
-- active devices by `app_version`
+- launch, success, and failure rows by `app_version`, `build_version`,
+  `build_channel`, and `build_revision`
+- shipped-release reads must not merge `build_channel = release` rows with
+  local/current-main rows such as `local`, `dev`, `main`, `nightly`, or
+  `unknown`
 - first successful `dictation_artifact_saved`
 - useful dictation completion volume via `dictation_completed`
 - first successful `meeting_transcript_saved`

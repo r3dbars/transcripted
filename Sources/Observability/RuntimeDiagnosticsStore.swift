@@ -201,6 +201,7 @@ enum RuntimeDiagnosticsStore {
         "dictation_model_load_timeout",
         "dictation_model_unavailable",
         "dictation_no_speech",
+        "dictation_recording_too_short",
         "dictation_start_failed",
         "meeting_cancelled",
         "meeting_empty_audio",
