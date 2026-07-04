@@ -2559,8 +2559,8 @@ func testRepoCommandContract() {
         )
         assertTrue(
             importBlock.contains("activeTaskAudio[taskId]")
-                && importBlock.contains("micURL: nil")
-                && importBlock.contains("systemURL: audioURL")
+                && importBlock.contains("micURL: audioURL")
+                && importBlock.contains("systemURL: nil")
                 && importBlock.contains("meetingTitle: meetingTitle")
                 && importBlock.contains("recordingDate: recordingDate"),
             "active imported transcription should register its audio so shutdown quit can preserve a Home retry item"
