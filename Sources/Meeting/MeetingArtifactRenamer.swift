@@ -70,7 +70,9 @@ enum MeetingArtifactRenamer {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         let limited = String(collapsedWhitespace.prefix(80)).trimmingCharacters(in: .whitespacesAndNewlines)
-        return limited.isEmpty ? fallback : limited
+        let visibleStem = String(limited.drop(while: { $0 == "." }))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return visibleStem.isEmpty ? fallback : visibleStem
     }
 
     // MARK: - Artifact paths

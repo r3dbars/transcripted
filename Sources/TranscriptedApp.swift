@@ -14,6 +14,12 @@ import UniformTypeIdentifiers
 struct TranscriptedApp: App {
     @NSApplicationDelegateAdaptor(TranscriptedAppDelegate.self) var appDelegate
 
+    init() {
+        // Set this before app startup creates logs, scratch files, or atomic-write
+        // temp files so new app-owned files default to owner-only permissions.
+        umask(0o077)
+    }
+
     var body: some Scene {
         Settings { EmptyView() }
             .commands {
