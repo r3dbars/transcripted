@@ -35,6 +35,7 @@ CORE_EVENTS = (
     "agent_capture_query_observed",
     "workflow_abandoned",
     "workflow_recovery_attempted",
+    "workflow_recovery_failed",
     "workflow_recovery_finished",
     "product_friction_observed",
     "dictation_start_failed",
@@ -176,7 +177,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('dictation_start_failed', 'dictation_no_speech', 'dictation_audio_route_recovery_timeout', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'meeting_speaker_finalization_failed', 'local_meeting_summary_failed', 'workflow_recovery_finished')
+  AND event IN ('dictation_start_failed', 'dictation_no_speech', 'dictation_audio_route_recovery_timeout', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'meeting_speaker_finalization_failed', 'local_meeting_summary_failed', 'workflow_recovery_failed', 'workflow_recovery_finished')
   {app_version_filter(app_version)}
 GROUP BY event, failure_kind, trigger
 ORDER BY events DESC

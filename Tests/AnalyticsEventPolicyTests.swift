@@ -535,6 +535,13 @@ func testAnalyticsEventPolicy() {
             "workflow recovery terminal events should preserve only buckets and terminal result"
         )
 
+        let failed = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_failed")
+        assertEqual(
+            failed?.allowedProperties ?? Set<String>(),
+            ["artifact_retained", "elapsed_bucket", "failure_kind", "recovery_attempt_bucket", "result", "retry_source", "surface", "workflow_kind"],
+            "workflow recovery failed events should match the terminal payload without adding raw failure details"
+        )
+
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
                 "workflow_kind": "local_summary",
@@ -578,6 +585,10 @@ func testAnalyticsEventPolicy() {
         assertFalse(
             source.contains("\"attempt_bucket\""),
             "workflow recovery helper should not emit the legacy attempt bucket key"
+        )
+        assertTrue(
+            source.contains("\"workflow_recovery_failed\""),
+            "workflow recovery helper should emit a dedicated failed terminal event for failure drill-down"
         )
     }
 

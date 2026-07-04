@@ -36,6 +36,7 @@ RELEVANT_EVENTS = (
     "workflow_abandoned",
     "product_friction_observed",
     "workflow_recovery_attempted",
+    "workflow_recovery_failed",
     "workflow_recovery_finished",
     "meeting_prompt_shown",
     "meeting_prompt_record_selected",
@@ -487,7 +488,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished')
+  AND event IN ('workflow_recovery_attempted', 'workflow_recovery_finished', 'workflow_recovery_failed')
   {app_version_filter(app_version)}
 GROUP BY event, workflow_kind, failure_kind, retry_source, artifact_retained, result
 ORDER BY events DESC
