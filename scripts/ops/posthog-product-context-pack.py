@@ -28,6 +28,9 @@ SAFE_EVENTS = (
     "meeting_transcript_saved",
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
+    "meeting_speaker_finalization_failed",
+    "meeting_speaker_finalization_succeeded",
+    "meeting_speaker_review_outcome",
     "activation_first_artifact_saved",
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
@@ -60,6 +63,7 @@ FAILURE_EVENTS = (
     "meeting_recording_start_failed",
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
+    "meeting_speaker_finalization_failed",
     "update_check_finished",
     "update_download_finished",
 )
@@ -71,6 +75,7 @@ NON_UPDATE_FAILURE_EVENTS = (
     "meeting_recording_start_failed",
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
+    "meeting_speaker_finalization_failed",
 )
 
 DISALLOWED_OUTPUT_COLUMNS = {

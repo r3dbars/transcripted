@@ -43,6 +43,7 @@ completion_flow
 completion_kind
 cooldown_reason
 copy_reason
+correction_kind
 crash_reporting_available
 crash_reporting_enabled
 cta

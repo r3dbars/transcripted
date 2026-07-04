@@ -454,15 +454,30 @@ final class SpeakerNamingContentView: NSView {
             "meeting_speaker_review_submitted",
             properties: properties
         )
+        if completionKind == "review_later" {
+            trackReviewOutcome(
+                result: "deferred",
+                correctionKind: "deferred",
+                identityConfidenceBucket: "none"
+            )
+        } else if updateCount == 0 {
+            trackReviewOutcome(
+                result: "no_updates",
+                correctionKind: "no_updates",
+                identityConfidenceBucket: "none"
+            )
+        }
     }
 
     private func speakerReviewAnalyticsProperties() -> [String: String] {
+        let reviewItemBucket = AnalyticsReporter.countBucket(micRows.count + systemRows.count)
         [
             "known_people_bucket": AnalyticsReporter.countBucket(request.knownPeople.count),
             "local_voice_bucket": AnalyticsReporter.countBucket(micRows.count),
             "match_suggestion_bucket": AnalyticsReporter.countBucket(suggestedMatchCount),
             "remote_voice_bucket": AnalyticsReporter.countBucket(systemRows.count),
-            "review_item_bucket": AnalyticsReporter.countBucket(micRows.count + systemRows.count),
+            "review_item_bucket": reviewItemBucket,
+            "review_item_count_bucket": reviewItemBucket,
             "review_reason": reviewReason,
             "surface": "speaker_review_sheet",
         ]
@@ -483,10 +498,12 @@ final class SpeakerNamingContentView: NSView {
             // classify one verdict differently.
             guard let kind = SpeakerMatchOutcomeKind(reviewAction: update.action) else { continue }
             let entry = entriesByKey[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
+            let identityConfidenceBucket = Self.identityConfidenceBucket(for: entry)
             AnalyticsReporter.track(
                 "meeting_speaker_match_reviewed",
                 properties: [
                     "review_action": kind.rawValue,
+                    "identity_confidence_bucket": identityConfidenceBucket,
                     "similarity_bucket": SpeakerRecognitionTelemetry.similarityBucket(entry?.matchSimilarity),
                     "margin_bucket": SpeakerRecognitionTelemetry.marginBucket(
                         similarity: entry?.matchSimilarity,
@@ -498,7 +515,81 @@ final class SpeakerNamingContentView: NSView {
                     "surface": "speaker_review_sheet",
                 ]
             )
+            trackReviewOutcome(
+                result: "updated",
+                correctionKind: Self.correctionKind(for: update.action),
+                identityConfidenceBucket: identityConfidenceBucket
+            )
         }
+        for update in updates where SpeakerMatchOutcomeKind(reviewAction: update.action) == nil {
+            trackReviewOutcome(
+                result: Self.reviewResult(for: update.action),
+                correctionKind: Self.correctionKind(for: update.action),
+                identityConfidenceBucket: "none"
+            )
+        }
+    }
+
+    private func trackReviewOutcome(
+        result: String,
+        correctionKind: String,
+        identityConfidenceBucket: String
+    ) {
+        AnalyticsReporter.track(
+            "meeting_speaker_review_outcome",
+            properties: [
+                "correction_kind": correctionKind,
+                "identity_confidence_bucket": identityConfidenceBucket,
+                "result": result,
+                "review_item_count_bucket": AnalyticsReporter.countBucket(micRows.count + systemRows.count),
+                "review_reason": reviewReason,
+                "surface": "speaker_review_sheet",
+            ]
+        )
+    }
+
+    private static func reviewResult(for action: SpeakerNameUpdate.NamingAction) -> String {
+        switch action {
+        case .discardedFromDatabase:
+            return "rejected"
+        case .collapsedToMe, .confirmed, .corrected, .merged, .named:
+            return "updated"
+        }
+    }
+
+    private static func correctionKind(for action: SpeakerNameUpdate.NamingAction) -> String {
+        switch action {
+        case .confirmed:
+            return "accepted"
+        case .corrected:
+            return "corrected"
+        case .named:
+            return "named"
+        case .merged:
+            return "merged"
+        case .collapsedToMe:
+            return "collapsed_to_me"
+        case .discardedFromDatabase:
+            return "discarded"
+        }
+    }
+
+    private static func identityConfidenceBucket(for entry: SpeakerNamingEntry?) -> String {
+        guard let similarity = entry?.matchSimilarity else { return "none" }
+        let margin = entry.map {
+            SpeakerRecognitionTelemetry.marginBucket(
+                similarity: $0.matchSimilarity,
+                secondSimilarity: $0.matchSecondSimilarity
+            )
+        }
+
+        if similarity >= 0.92, margin == "no_runner_up" || margin == "0_12_24" || margin == "0_25_plus" {
+            return "high"
+        }
+        if similarity >= 0.8, margin != "lt_0_05" {
+            return "medium"
+        }
+        return "low"
     }
 
     private var payoffText: String {

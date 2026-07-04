@@ -61,6 +61,9 @@ func testAnalyticsEventPolicy() {
         let properties = allAllowedAnalyticsPropertyNames()
 
         for property in properties {
+            if property == "identity_confidence_bucket" {
+                continue
+            }
             let normalized = property.lowercased()
             for fragment in forbiddenFragments {
                 assertFalse(
@@ -1039,6 +1042,7 @@ func testAnalyticsEventPolicy() {
         let saved = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_saved")
         let failed = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_failed")
         let speakerFinalizationFailed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_failed")
+        let speakerFinalizationSucceeded = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_finalization_succeeded")
         let skipped = AnalyticsEventPolicy.policy(forEvent: "meeting_transcript_skipped")
 
         assertEqual(saved?.allowedProperties.contains("trigger"), true, "meeting saves should preserve trigger attribution")
@@ -1049,12 +1053,22 @@ func testAnalyticsEventPolicy() {
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("trigger"), true, "speaker finalization failures should preserve trigger attribution")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("queue_depth_bucket"), true, "speaker finalization failures should preserve bucketed queue depth")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("session_stage"), true, "speaker finalization failures should keep save-stage attribution")
+        assertEqual(speakerFinalizationFailed?.allowedProperties.contains("result"), true, "speaker finalization failures should keep terminal result")
+        assertEqual(speakerFinalizationFailed?.allowedProperties.contains("review_item_count_bucket"), true, "speaker finalization failures should keep only review count buckets")
+        assertEqual(speakerFinalizationFailed?.allowedProperties.contains("surface"), true, "speaker finalization failures should preserve a coarse surface")
+        assertEqual(
+            speakerFinalizationSucceeded?.allowedProperties ?? Set<String>(),
+            ["result", "review_item_count_bucket", "review_reason", "surface"],
+            "speaker finalization success should keep only terminal enum and review inventory buckets"
+        )
         assertEqual(skipped?.allowedProperties.contains("trigger"), true, "skipped meeting transcripts should preserve trigger attribution")
     }
 
     runSuite("AnalyticsEventPolicy allows speaker review funnel events without names") {
         let shown = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_shown")
         let submitted = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_submitted")
+        let outcome = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_review_outcome")
+        let matchReviewed = AnalyticsEventPolicy.policy(forEvent: "meeting_speaker_match_reviewed")
 
         assertEqual(
             shown?.allowedProperties ?? Set<String>(),
@@ -1064,6 +1078,7 @@ func testAnalyticsEventPolicy() {
                 "match_suggestion_bucket",
                 "remote_voice_bucket",
                 "review_item_bucket",
+                "review_item_count_bucket",
                 "review_reason",
                 "surface",
             ],
@@ -1079,12 +1094,26 @@ func testAnalyticsEventPolicy() {
                 "remote_voice_bucket",
                 "result",
                 "review_item_bucket",
+                "review_item_count_bucket",
                 "review_reason",
                 "surface",
                 "updates_submitted_bucket",
             ],
             "speaker review submitted should keep only outcome enums and buckets"
         )
+        assertEqual(
+            outcome?.allowedProperties ?? Set<String>(),
+            [
+                "correction_kind",
+                "identity_confidence_bucket",
+                "result",
+                "review_item_count_bucket",
+                "review_reason",
+                "surface",
+            ],
+            "speaker review outcomes should keep only trust-loop enums and buckets"
+        )
+        assertEqual(matchReviewed?.allowedProperties.contains("identity_confidence_bucket"), true, "match reviews should keep a coarse identity confidence bucket")
 
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
             [
@@ -1095,6 +1124,7 @@ func testAnalyticsEventPolicy() {
                 "remote_voice_bucket": "2_3",
                 "result": "updates_submitted",
                 "review_item_bucket": "4_9",
+                "review_item_count_bucket": "4_9",
                 "review_reason": "mixed",
                 "surface": "speaker_review_sheet",
                 "updates_submitted_bucket": "2_3",
@@ -1114,6 +1144,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["remote_voice_bucket"], "2_3", "remote voice bucket should survive")
         assertEqual(sanitized["result"], "updates_submitted", "coarse result should survive")
         assertEqual(sanitized["review_item_bucket"], "4_9", "review item bucket should survive")
+        assertEqual(sanitized["review_item_count_bucket"], "4_9", "review item count bucket should survive")
         assertEqual(sanitized["review_reason"], "mixed", "review reason should survive")
         assertEqual(sanitized["surface"], "speaker_review_sheet", "surface should survive")
         assertEqual(sanitized["updates_submitted_bucket"], "2_3", "submitted update bucket should survive")
@@ -1122,6 +1153,30 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["speaker_id"], "speaker ids must not be sent")
         assertNil(sanitized["speaker_name"], "speaker names must not be sent")
         assertNil(sanitized["transcript_text"], "transcript text must not be sent")
+
+        let outcomeSanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "correction_kind": "corrected",
+                "identity_confidence_bucket": "medium",
+                "result": "updated",
+                "review_item_count_bucket": "2_3",
+                "review_reason": "needs_confirmation",
+                "surface": "speaker_review_sheet",
+                "speaker_identity_id": "private-id",
+                "speaker_name": "Alice Customer",
+                "transcript_text": "private transcript words",
+            ],
+            allowedKeys: outcome?.allowedProperties ?? []
+        )
+        assertEqual(outcomeSanitized["correction_kind"], "corrected", "correction kind should survive")
+        assertEqual(outcomeSanitized["identity_confidence_bucket"], "medium", "identity confidence bucket should survive")
+        assertEqual(outcomeSanitized["result"], "updated", "outcome result should survive")
+        assertEqual(outcomeSanitized["review_item_count_bucket"], "2_3", "outcome review count bucket should survive")
+        assertEqual(outcomeSanitized["review_reason"], "needs_confirmation", "outcome review reason should survive")
+        assertEqual(outcomeSanitized["surface"], "speaker_review_sheet", "outcome surface should survive")
+        assertNil(outcomeSanitized["speaker_identity_id"], "speaker identity ids must not be sent")
+        assertNil(outcomeSanitized["speaker_name"], "speaker names must not be sent")
+        assertNil(outcomeSanitized["transcript_text"], "transcript text must not be sent")
     }
 
     runSuite("AnalyticsEventPolicy meeting outcomes drop adversarial private fields") {

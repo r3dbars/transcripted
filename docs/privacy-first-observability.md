@@ -159,7 +159,9 @@ allowlist.
 - `meeting_transcript_failed`
 - `meeting_speaker_auto_recognized`
 - `meeting_speaker_finalization_failed`
+- `meeting_speaker_finalization_succeeded`
 - `meeting_speaker_match_reviewed`
+- `meeting_speaker_review_outcome`
 - `meeting_speaker_review_shown`
 - `meeting_speaker_review_submitted`
 - `meeting_transcript_skipped`
@@ -183,6 +185,9 @@ allowlist.
 - local meeting summary analytics limited to `provider`, `summary_action`,
   `setup_ready`, `runtime`, `queue_depth_bucket`, `chunk_count_bucket`,
   `duration_bucket`, `failure_kind`, and `stage`
+- speaker review trust analytics limited to enum / bucket outcomes such as
+  `result`, `review_reason`, `review_item_count_bucket`, `surface`,
+  `failure_kind`, `identity_confidence_bucket`, and `correction_kind`
 
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes

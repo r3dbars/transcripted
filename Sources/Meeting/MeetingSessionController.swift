@@ -2790,6 +2790,7 @@ final class MeetingSessionController: ObservableObject {
                     "trigger": transcriptionTrigger.rawValue,
                 ]
             )
+            trackSpeakerFinalizationSucceeded()
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_saved")
             AppSoundPlayer.shared.play(.meetingTranscriptComplete)
             activeQueuedTranscriptionJobID = nil
@@ -2862,9 +2863,12 @@ final class MeetingSessionController: ObservableObject {
                 AnalyticsReporter.track(
                     "meeting_speaker_finalization_failed",
                     properties: [
+                        "result": "failed",
                         "session_stage": CaptureFailureStage.save.rawValue,
                         "failure_kind": failureKind.rawValue,
                         "queue_depth_bucket": queueDepthBucket,
+                        "review_item_count_bucket": "0",
+                        "surface": "meeting_save",
                         "trigger": transcriptionTrigger.rawValue,
                     ]
                 )
@@ -3098,6 +3102,35 @@ final class MeetingSessionController: ObservableObject {
                     )
                 }
             }
+        }
+    }
+
+    private func trackSpeakerFinalizationSucceeded() {
+        let request = taskManager.speakerNamingRequest
+        AnalyticsReporter.track(
+            "meeting_speaker_finalization_succeeded",
+            properties: [
+                "result": "succeeded",
+                "review_item_count_bucket": AnalyticsReporter.countBucket(request?.speakers.count ?? 0),
+                "review_reason": Self.speakerReviewReason(for: request),
+                "surface": "meeting_save",
+            ]
+        )
+    }
+
+    nonisolated private static func speakerReviewReason(for request: SpeakerNamingRequest?) -> String {
+        guard let request else { return "none" }
+        let needsNaming = request.speakers.contains { $0.needsNaming }
+        let needsConfirmation = request.speakers.contains { $0.needsConfirmation }
+        switch (needsNaming, needsConfirmation) {
+        case (true, true):
+            return "mixed"
+        case (true, false):
+            return "needs_naming"
+        case (false, true):
+            return "needs_confirmation"
+        case (false, false):
+            return "unknown"
         }
     }
 

@@ -38,6 +38,8 @@ CORE_EVENTS = (
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
     "meeting_speaker_finalization_failed",
+    "meeting_speaker_finalization_succeeded",
+    "meeting_speaker_review_outcome",
     "update_check_finished",
     "update_download_finished",
     "update_installed",
@@ -163,7 +165,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested')
+  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'meeting_speaker_review_outcome')
   {app_version_filter(app_version)}
 GROUP BY event, artifact_kind, action_kind, agent_target, page_id
 ORDER BY devices DESC, events DESC

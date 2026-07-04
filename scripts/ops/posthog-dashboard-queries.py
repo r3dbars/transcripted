@@ -72,6 +72,7 @@ RELIABILITY_EVENTS = (
     "meeting_transcript_failed",
     "meeting_transcript_skipped",
     "meeting_file_import_failed",
+    "meeting_speaker_finalization_failed",
 )
 
 FEATURE_EVENTS = (
@@ -85,6 +86,8 @@ FEATURE_EVENTS = (
     "meeting_prompt_suppressed",
     "meeting_mic_boost_prompt_shown",
     "meeting_mic_boost_prompt_actioned",
+    "meeting_speaker_finalization_succeeded",
+    "meeting_speaker_review_outcome",
     "meeting_saved_audio_retranscription_requested",
     "meeting_file_imported",
     "settings_opened",
@@ -334,7 +337,7 @@ SELECT
   countIf(event = 'meeting_recording_started') AS meeting_starts,
   countIf(event = 'meeting_recording_start_failed') AS meeting_start_failures,
   countIf(event = 'meeting_transcript_saved') AS meeting_saved,
-  countIf(event IN ('meeting_transcript_failed', 'meeting_transcript_skipped')) AS meeting_failed_or_skipped
+  countIf(event IN ('meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_speaker_finalization_failed')) AS meeting_failed_or_skipped
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
   AND {event_filter(RELIABILITY_EVENTS)}
@@ -355,7 +358,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed')
+  AND event IN ('dictation_start_failed', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'meeting_speaker_finalization_failed')
   {app_version_filter(app_version)}
 GROUP BY event, failure_kind
 ORDER BY events DESC
