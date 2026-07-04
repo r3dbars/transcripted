@@ -517,11 +517,18 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func activeMeetingTerminationDecision() -> ActiveMeetingQuitDecision {
         guard #available(macOS 14.0, *) else { return .saveAudioAndQuit }
+        let activeCapture = appState.meetingSession.shouldConfirmQuitForActiveCapture
+        let backgroundWork = appState.meetingSession.shouldConfirmQuitForBackgroundTranscription
         guard ActiveMeetingQuitConfirmationPolicy.shouldConfirmQuit(
             preferenceEnabled: QuitConfirmationPreferences.confirmQuitDuringActiveMeetingRecording(),
-            activeMeetingCapture: appState.meetingSession.shouldConfirmQuitForActiveCapture
+            activeMeetingCapture: activeCapture,
+            backgroundTranscriptionWork: backgroundWork
         ) else {
             return .saveAudioAndQuit
+        }
+
+        guard activeCapture else {
+            return confirmQuitDuringBackgroundMeetingWork()
         }
 
         return confirmQuitDuringActiveMeeting()
@@ -546,6 +553,28 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         case .alertSecondButtonReturn:
             return .stopAndTranscribe
         case .alertThirdButtonReturn:
+            return .saveAudioAndQuit
+        default:
+            return .keepRecording
+        }
+    }
+
+    private func confirmQuitDuringBackgroundMeetingWork() -> ActiveMeetingQuitDecision {
+        closePopover()
+        NSApp.activate(ignoringOtherApps: true)
+
+        let presentation = ActiveMeetingQuitConfirmationPolicy.backgroundPresentation
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = presentation.title
+        alert.informativeText = presentation.message
+        alert.addButton(withTitle: presentation.keepOpenTitle)
+        alert.addButton(withTitle: presentation.saveAudioAndQuitTitle)
+        alert.buttons.first?.keyEquivalent = "\r"
+        alert.buttons.last?.keyEquivalent = ""
+
+        switch alert.runModal() {
+        case .alertSecondButtonReturn:
             return .saveAudioAndQuit
         default:
             return .keepRecording

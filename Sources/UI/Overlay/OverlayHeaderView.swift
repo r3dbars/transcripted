@@ -277,6 +277,7 @@ final class OverlayHeaderView: NSView {
     func update(
         state: FloatingOverlayController.OverlayState,
         dictationShortcutHint: String,
+        listeningNotice: String,
         loadingTitle: String?,
         successTitle: String = "Pasted",
         isError: Bool = false,
@@ -331,8 +332,8 @@ final class OverlayHeaderView: NSView {
         // Shortcut hint
         switch state {
         case .listening:
-            shortcutHint.stringValue = ""
-            shortcutHint.textColor = OverlayTokens.textMuted
+            shortcutHint.stringValue = listeningNotice
+            shortcutHint.textColor = listeningNotice.isEmpty ? OverlayTokens.textMuted : OverlayTokens.warningColor
         case .success:
             shortcutHint.stringValue = ""
             shortcutHint.textColor = OverlayTokens.textMuted

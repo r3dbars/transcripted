@@ -24,7 +24,7 @@ public class TranscriptionTaskManager: ObservableObject {
     private var savedTranscriptTaskIdsByTranscriptId: [UUID: UUID] = [:]
     private var savedTranscriptTaskIdsByURL: [URL: UUID] = [:]
     var activeTasks: [UUID: Task<Void, Never>] = [:]
-    private var activeTaskAudio: [UUID: (micURL: URL, systemURL: URL?, meetingTitle: String?, recordingDate: Date?)] = [:]
+    private var activeTaskAudio: [UUID: (micURL: URL?, systemURL: URL?, meetingTitle: String?, recordingDate: Date?)] = [:]
     private var preservedTaskIdsForShutdown: Set<UUID> = []
     private var intentionallyCancelledTaskIds: Set<UUID> = []
     private var committedTranscriptTaskIds: Set<UUID> = []
@@ -306,6 +306,10 @@ public class TranscriptionTaskManager: ObservableObject {
                 ])
 
                 await MainActor.run {
+                    if self.preservedTaskIdsForShutdown.remove(taskId) != nil {
+                        self.handleTaskCompletion(taskId: taskId)
+                        return
+                    }
                     if self.finishCancelledTaskIfNeeded(taskId: taskId, error: error) {
                         self.removeRecordingFile(audioURL, label: "cancelled imported recording")
                         return

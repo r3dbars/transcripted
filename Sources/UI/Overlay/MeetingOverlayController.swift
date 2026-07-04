@@ -665,16 +665,15 @@ final class MeetingOverlayRootView: NSView {
 
         statusDot.frame = NSRect(x: pad, y: topY - dotSize / 2, width: dotSize, height: dotSize)
 
-        let titleX = statusDot.frame.maxX + 8
-        let closeWidth: CGFloat = 70
-        let closeHeight: CGFloat = 24
+        let closeSize: CGFloat = 24
         closeButton.frame = NSRect(
-            x: bounds.width - pad - closeWidth,
-            y: topY - closeHeight / 2,
-            width: closeWidth,
-            height: closeHeight
+            x: bounds.width - pad - closeSize,
+            y: topY - closeSize / 2,
+            width: closeSize,
+            height: closeSize
         )
 
+        let titleX = statusDot.frame.maxX + 8
         let titleWidth = max(0, closeButton.frame.minX - titleX - 8)
         let titleSize = titleLabel.fittingSize
         titleLabel.frame = NSRect(
@@ -687,9 +686,9 @@ final class MeetingOverlayRootView: NSView {
         detailLabel.maximumNumberOfLines = 2
         detailLabel.frame = NSRect(
             x: pad,
-            y: 12,
+            y: 10,
             width: bounds.width - pad * 2,
-            height: 32
+            height: 36
         )
         refreshTooltipTrackingAreas()
     }
@@ -794,9 +793,13 @@ final class MeetingOverlayRootView: NSView {
         case .prompt:
             titleLabel.stringValue = prompt?.title ?? "Meeting detected"
             detailLabel.stringValue = prompt?.detail ?? "Record this meeting?"
+            detailLabel.lineBreakMode = .byTruncatingTail
+            detailLabel.maximumNumberOfLines = 1
             timerLabel.stringValue = prompt?.countdownText ?? ""
             updateStatusDot(color: MeetingOverlayTokens.dotPrompt)
             closeButton.attributedTitle = buttonTitle(prompt?.secondaryTitle ?? "Not now", size: 11, weight: .semibold)
+            closeButton.image = nil
+            closeButton.imagePosition = .noImage
             closeButton.toolTip = nil
             closeButton.setAccessibilityLabel(prompt?.secondaryAccessibilityLabel ?? dismissPromptTooltip)
             closeButton.setAccessibilityHelp("Dismisses this meeting recording prompt.")
@@ -858,6 +861,17 @@ final class MeetingOverlayRootView: NSView {
                     : MeetingOverlayTokens.dotError
             )
             detailLabel.stringValue = copy.detail
+            detailLabel.lineBreakMode = .byWordWrapping
+            detailLabel.maximumNumberOfLines = 2
+            closeButton.attributedTitle = buttonTitle("", size: 12, weight: .semibold)
+            closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss")
+            closeButton.imagePosition = .imageOnly
+            closeButton.contentTintColor = MeetingOverlayTokens.textSecondary
+            closeButton.setAccessibilityLabel("Dismiss meeting error")
+            closeButton.setAccessibilityHelp("Keeps the failed meeting available on Home.")
+            closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
+            closeButton.layer?.cornerRadius = 12
+            closeButton.layer?.borderWidth = 0
         }
 
         // Transcription has no progress channel to drive a bar, so pulse the
@@ -1967,6 +1981,12 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func handleCloseTapped() {
+        if case .error = state {
+            state = .idle
+            hidePanel()
+            pushToView()
+            return
+        }
         guard let session = meetingSession else { hidePanel(); return }
         Task { [weak session] in
             guard let session else { return }

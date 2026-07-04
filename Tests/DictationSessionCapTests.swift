@@ -1,7 +1,7 @@
 // DictationSessionCapTests.swift
 // Guards the 5-minute dictation session cap: a session that hits the cap is
-// finalized and saved (not discarded), and is never auto-pasted / auto-sent
-// into whatever app happens to hold focus when the user walked away.
+// finalized and saved (not discarded), pastes only when the original target is
+// still active, and offers a recovery paste action otherwise.
 //
 // DictationSessionController pulls in the whole app and can't be instantiated in
 // the fast runner, so this pairs behavioral checks on the pure policy / delivery
@@ -103,8 +103,10 @@ func testDictationSessionCap() {
             "the cap finalize path should persist the transcript to the daily Markdown file"
         )
         assertTrue(
-            finalizeBody.contains("overlayController.showSuccessAndDismiss(title: DictationDelivery.savedWithoutPaste.summaryText)"),
-            "the cap confirmation should say Saved only instead of reusing the pasted success label"
+            finalizeBody.contains("\"Saved to Markdown. Paste it now, or use Paste Last Dictation later.\"")
+                && finalizeBody.contains("actionTitle: \"Paste It\"")
+                && finalizeBody.contains("pasteWithClipboardRestore(text)"),
+            "the cap save-only path should keep a visible Paste It recovery action"
         )
         let headerBody = try? String(
             contentsOf: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
@@ -119,10 +121,6 @@ func testDictationSessionCap() {
         assertTrue(
             finalizeBody.contains("ActivationTelemetry.trackDictationArtifactSaved("),
             "the cap finalize path should count successful session-cap saves as dictation artifacts"
-        )
-        assertFalse(
-            finalizeBody.contains("pasteWithClipboardRestore"),
-            "the cap finalize path must not paste into the focused app"
         )
     }
 

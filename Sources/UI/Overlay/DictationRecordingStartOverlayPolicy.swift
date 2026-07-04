@@ -41,19 +41,17 @@ struct DictationRecordingStartLifecyclePolicy {
 }
 
 struct DictationStartAvailabilityPolicy {
-    static let meetingWorkMessage = "Finish the current meeting before starting dictation."
-    static let speakerReviewMessage = "Finish the speaker review window before starting dictation."
+    static let activeMeetingCaptureMessage = "Finish or save the meeting recording before starting dictation."
+    static let speakerReviewMessage = "Speaker review can wait. Dictation is available."
 
     static func unavailableReason(
-        hasMeetingWork: Bool,
+        hasActiveMeetingCapture: Bool,
         isSpeakerReviewPending: Bool
     ) -> String? {
-        if hasMeetingWork {
-            return meetingWorkMessage
+        if hasActiveMeetingCapture {
+            return activeMeetingCaptureMessage
         }
-        if isSpeakerReviewPending {
-            return speakerReviewMessage
-        }
+        _ = isSpeakerReviewPending
         return nil
     }
 }
