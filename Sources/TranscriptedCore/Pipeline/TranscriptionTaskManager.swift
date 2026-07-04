@@ -480,6 +480,11 @@ public class TranscriptionTaskManager: ObservableObject {
 
         if normalized.contains(anyOf: [
             "recording too short",
+            "audio file is too short",
+            "saved audio is too short",
+            "audio is too short",
+            "recording is too short",
+            "too short to transcribe",
             "at least 1 second",
             "at least 2 seconds",
             "at least one second",

@@ -510,6 +510,34 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Mic only recovery worked."))
     }
 
+    func testStartTranscriptionRejectsTooShortLiveAudioWithoutQueueingRetry() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let micURL = scratchDirectory.appendingPathComponent("mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: micURL, duration: 1.0)
+        try writeMonoWAV(to: systemURL, duration: 1.0)
+
+        manager.startTranscription(
+            micURL: micURL,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts")
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "too-short live mic scratch audio should be cleaned up")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "too-short live system scratch audio should be cleaned up")
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Recording too short")
+        guard case .failed(let message) = manager.displayStatus else {
+            return XCTFail("Expected too-short live audio to publish a failed status")
+        }
+        XCTAssertEqual(message, "Recording too short")
+    }
+
     func testMicOnlyTranscriptionRetainsMicAudioAndRemovesScratch() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
@@ -1615,6 +1643,34 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertEqual(manager.lastFailureDiagnosticMessage, "No speech detected")
         XCTAssertTrue(FileManager.default.fileExists(atPath: externalURL.path))
         XCTAssertNil(manager.lastSavedTranscriptURL)
+    }
+
+    func testStartImportedTranscriptionRejectsTooShortAudioWithClearCopy() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        try FileManager.default.createDirectory(at: scratchDirectory, withIntermediateDirectories: true)
+        let scratchURL = scratchDirectory.appendingPathComponent("imported-too-short.wav")
+        try writeMonoWAV(to: scratchURL, duration: 1.0)
+
+        manager.startImportedTranscription(
+            audioURL: scratchURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Short import"
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scratchURL.path), "app-managed short import scratch audio should be removed after rejection")
+        XCTAssertEqual(manager.activeCount, 0)
+        XCTAssertEqual(manager.backgroundTaskCount, 0)
+        XCTAssertTrue(manager.activeTasks.isEmpty)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(manager.lastFailureDiagnosticMessage, "Recording too short")
+        guard case .failed(let message) = manager.displayStatus else {
+            return XCTFail("Expected too-short imported audio to publish a failed status")
+        }
+        XCTAssertEqual(
+            message,
+            "That audio file is too short to transcribe. Choose audio that is at least two seconds long."
+        )
     }
 
     func testSavedAudioRetranscriptionRunsSpeakerIdentificationAndKeepsSourceAudio() async throws {

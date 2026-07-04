@@ -14,6 +14,51 @@ struct ParakeetTranscriptionDecision: Equatable {
     )
 }
 
+enum DictationEmptyTranscriptionReason: String {
+    case noSpeech = "no_speech"
+    case recordingTooShort = "recording_too_short"
+
+    var analyticsEventName: String {
+        switch self {
+        case .noSpeech:
+            return "dictation_no_speech"
+        case .recordingTooShort:
+            return "dictation_recording_too_short"
+        }
+    }
+
+    var localEventName: String {
+        switch self {
+        case .noSpeech:
+            return "no_voice_input"
+        case .recordingTooShort:
+            return "dictation_recording_too_short"
+        }
+    }
+
+    var localEventMessage: String {
+        switch self {
+        case .noSpeech:
+            return "Dictation transcription empty"
+        case .recordingTooShort:
+            return "Dictation ended before enough audio was captured"
+        }
+    }
+
+    var frictionFailureKind: String {
+        rawValue
+    }
+
+    var runtimeOutcome: String {
+        switch self {
+        case .noSpeech:
+            return "no_speech"
+        case .recordingTooShort:
+            return "recording_too_short"
+        }
+    }
+}
+
 enum ParakeetShortAudioGate {
     static func dictation(nativeSampleCount: Int, resampledSampleCount: Int) -> ParakeetTranscriptionDecision {
         guard !TranscriptedConstants.hasMinimumParakeetAudioSamples(resampledSampleCount) else {
