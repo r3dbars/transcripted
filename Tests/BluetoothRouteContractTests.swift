@@ -125,6 +125,39 @@ func testBluetoothRouteContract() {
         assertEqual(routeShape, "bluetooth_input_to_bluetooth_output", "suppressed fallback should expose the matched Bluetooth route shape")
     }
 
+    runSuite("Bluetooth route contract - suppressed recovery route waits on Bluetooth speech output") {
+        for outputRate in [8_000.0, 16_000.0, 24_000.0] {
+            let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+                outputSampleRate: outputRate,
+                outputChannelCount: 3,
+                inputSampleRate: 48_000,
+                inputChannelCount: 1,
+                selectedInputClass: "bluetooth",
+                outputDeviceClass: "bluetooth",
+                selectionOverrodeDefault: false,
+                selectionReason: .builtInFallbackSuppressedForRecoveryAttempt
+            )
+
+            assertEqual(readiness, .routeNotSettled, "recovery should not start recording on the low-rate Bluetooth speech bus \(outputRate)")
+            assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "suppressed recovery routes should stay recoverable")
+        }
+    }
+
+    runSuite("Bluetooth route contract - settled suppressed recovery route can record") {
+        let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 48_000,
+            outputChannelCount: 1,
+            inputSampleRate: 24_000,
+            inputChannelCount: 1,
+            selectedInputClass: "bluetooth",
+            outputDeviceClass: "bluetooth",
+            selectionOverrodeDefault: false,
+            selectionReason: .builtInFallbackSuppressedForRecoveryAttempt
+        )
+
+        assertEqual(readiness, .ready, "settled Bluetooth recovery capture should not be blocked")
+    }
+
     runSuite("Bluetooth route contract - native AirPods HFP capture stays allowed") {
         let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
             outputSampleRate: 48_000,

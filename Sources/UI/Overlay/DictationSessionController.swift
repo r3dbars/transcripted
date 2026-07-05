@@ -2087,6 +2087,8 @@ private final class DictationReadinessRefreshRunner {
         operation = operationName
         startedAt = ProcessInfo.processInfo.systemUptime
         task = Task { @MainActor [weak self] in
+            guard !Task.isCancelled else { return }
+            guard self?.generation == taskGeneration else { return }
             await body()
             guard !Task.isCancelled else { return }
             guard self?.generation == taskGeneration else { return }

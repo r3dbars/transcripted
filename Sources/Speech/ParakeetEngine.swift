@@ -92,6 +92,8 @@ class ParakeetEngine: ObservableObject {
     private var pureSampleTranscriptionActivityCount = 0
     private var asrManagerReady = false
     private nonisolated(unsafe) var didReceiveAudioSamples = false
+    private nonisolated(unsafe) var didReceiveNonZeroAudioSamples = false
+    private var recordingStartedOnLikelyBluetoothHandsFreeRoute = false
     private var cachedInputDeviceName = "Unknown"
     /// Last known dictation input selection, refreshed on start, prewarm,
     /// route/device-change notifications, and background refreshes. Serves
@@ -698,6 +700,7 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Input readiness
 
     func prewarm() async {
+        guard !Task.isCancelled else { return }
         guard !isShuttingDown else { return }
         guard !isRecording else { return }
         guard !audioStartInProgress else { return }
@@ -705,6 +708,7 @@ class ParakeetEngine: ObservableObject {
         scheduleInputDeviceNameRefresh()
 
         await releaseIdleAudioHardware(removeTap: false)
+        guard !Task.isCancelled else { return }
         let prewarmGeneration = audioGraphGeneration
         guard canContinuePrewarm(generation: prewarmGeneration) else { return }
 
@@ -821,6 +825,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     func forceInputReadinessRecovery(reason: String) async {
+        guard !Task.isCancelled else { return }
         guard !isShuttingDown else { return }
         guard !isRecording, !audioStartInProgress else { return }
 
@@ -843,7 +848,12 @@ class ParakeetEngine: ObservableObject {
 
         abandonBlockedAudioEngine(reason: reason)
         markFormatUnreadyAndPublish()
-        try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+        do {
+            try await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
+        } catch {
+            return
+        }
+        guard !Task.isCancelled else { return }
         await prewarm()
     }
 
@@ -1481,6 +1491,7 @@ class ParakeetEngine: ObservableObject {
                 outputDeviceClass: defaultOutputClass
             ),
             "sample_flow_started": "\(didReceiveAudioSamples)",
+            "sample_signal_started": "\(didReceiveNonZeroAudioSamples)",
             "selection_overrode_default": "\(selection?.didOverrideDefault ?? false)",
             "selection_reason": selection?.reason.rawValue ?? "unknown",
             "selected_input_class": selectedClass,
@@ -1656,6 +1667,10 @@ class ParakeetEngine: ObservableObject {
                     bufferSampleRate: bufferFormat.sampleRate
                 )
                 self.nativeSampleRate = effectiveSampleRate
+                let hasNonZeroSignal = ParakeetSampleSignalPolicy.hasNonZeroSignal(monoSamples)
+                if hasNonZeroSignal {
+                    self.didReceiveNonZeroAudioSamples = true
+                }
 
                 if !self.didReceiveAudioSamples && frameLength > 0 {
                     self.didReceiveAudioSamples = true
@@ -1666,7 +1681,8 @@ class ParakeetEngine: ObservableObject {
                         var context = [
                             "sample_rate": "\(effectiveSampleRate)",
                             "channels": "\(bufferFormat.channelCount)",
-                            "frames": "\(frameLength)"
+                            "frames": "\(frameLength)",
+                            "sample_signal_started": "\(hasNonZeroSignal)"
                         ]
                         if let startToFirstSampleMs {
                             context["start_to_first_sample_ms"] = "\(startToFirstSampleMs)"
@@ -1815,6 +1831,8 @@ class ParakeetEngine: ObservableObject {
         isRecording = false
         audioLevel = 0
         didReceiveAudioSamples = false
+        didReceiveNonZeroAudioSamples = false
+        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
 
         if rebuildEngine {
             await rebuildAudioEngine(reason: reason)
@@ -1872,6 +1890,8 @@ class ParakeetEngine: ObservableObject {
         inputTapInstalled = false
         isEnginePrewarmed = false
         didReceiveAudioSamples = false
+        didReceiveNonZeroAudioSamples = false
+        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         if !isShuttingDown {
             installAudioEngineConfigObserverIfNeeded()
         }
@@ -1900,6 +1920,8 @@ class ParakeetEngine: ObservableObject {
         inputTapInstalled = false
         isEnginePrewarmed = false
         didReceiveAudioSamples = false
+        didReceiveNonZeroAudioSamples = false
+        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         if !isShuttingDown {
             installAudioEngineConfigObserverIfNeeded()
         }
@@ -2188,6 +2210,8 @@ class ParakeetEngine: ObservableObject {
 
         recordingInterrupted = false
         didReceiveAudioSamples = false
+        didReceiveNonZeroAudioSamples = false
+        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         cancelAudioWatchdog()
         if !isRecoveryAttempt && !preservingRecordingAcrossRecovery {
             recoveredRecordingTimeline.removeAll(keepingCapacity: true)
@@ -2300,6 +2324,12 @@ class ParakeetEngine: ObservableObject {
             }
 
             updateNativeSampleRate(snapshot.outputFormat.sampleRate)
+            recordingStartedOnLikelyBluetoothHandsFreeRoute = ParakeetRouteDiagnosticsPolicy.isLikelyBluetoothHandsFreeProfile(
+                inputClass: selectedInputClass(for: snapshot.selection),
+                outputDeviceClass: defaultOutputClass(for: snapshot.selection),
+                inputRate: snapshot.hwFormat.sampleRate,
+                outputRate: snapshot.outputFormat.sampleRate
+            )
             reserveNativeSampleBufferCapacity()
 
             do {
@@ -2361,8 +2391,13 @@ class ParakeetEngine: ObservableObject {
                 let failureReason = operationTimedOut
                     ? ParakeetStartRecordingFailureReason.audioEngineStartTimedOut
                     : ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error as NSError)
+                let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
+                    for: failureReason,
+                    isRecoveryAttempt: isRecoveryAttempt
+                )
                 context["failure_kind"] = operationTimedOut ? "audio_engine_start_timeout" : "audio_engine_start_failed"
                 context["sample_flow_started"] = "\(didReceiveAudioSamples)"
+                context["sample_signal_started"] = "\(didReceiveNonZeroAudioSamples)"
                 let shouldRetry = !operationTimedOut
                     && failureReason == .audioEngineStartFailed
                     && ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(
@@ -2374,7 +2409,7 @@ class ParakeetEngine: ObservableObject {
                 } else {
                     await resetAudioGraphAfterStartFailure(
                         reason: failureReason == .audioRouteNotSettled ? "audio_route_not_settled" : "audio_engine_start_failed",
-                        rebuildEngine: true
+                        rebuildEngine: startFailureAction.rebuildAudioEngine
                     )
                 }
 
@@ -2400,10 +2435,6 @@ class ParakeetEngine: ObservableObject {
                         message: "Audio route format was not ready while starting dictation",
                         context: context
                     )
-                    let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
-                        for: failureReason,
-                        isRecoveryAttempt: isRecoveryAttempt
-                    )
                     if startFailureAction.markFormatUnready {
                         markStartFailedAndPublish()
                     }
@@ -2422,10 +2453,6 @@ class ParakeetEngine: ObservableObject {
                         message: "Audio engine start timed out; abandoned blocked microphone graph",
                         context: context
                     )
-                    let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
-                        for: .audioEngineStartTimedOut,
-                        isRecoveryAttempt: isRecoveryAttempt
-                    )
                     if startFailureAction.markFormatUnready {
                         markStartFailedAndPublish()
                     }
@@ -2437,10 +2464,6 @@ class ParakeetEngine: ObservableObject {
 
                 print("❌ PARAKEET | audio engine failed after \(attempt) attempt(s): \(error.localizedDescription)")
                 reportAudioStartFailureIfNeeded(message: error.localizedDescription, context: context)
-                let startFailureAction = ParakeetStartRecordingFailurePolicy.action(
-                    for: .audioEngineStartFailed,
-                    isRecoveryAttempt: isRecoveryAttempt
-                )
                 if startFailureAction.markFormatUnready {
                     markStartFailedAndPublish()
                 }
@@ -2482,7 +2505,7 @@ class ParakeetEngine: ObservableObject {
         }
         print("🎤 PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
 
-        // Watchdog: detect zombie audio engine (running but no samples flowing after sleep/wake).
+        // Watchdog: detect zombie audio engine (running but no usable signal after sleep/wake).
         // Only on first attempt — recovery attempt doesn't re-watchdog to prevent infinite loops.
         if !isRecoveryAttempt {
             startAudioWatchdog()
@@ -2528,7 +2551,7 @@ class ParakeetEngine: ObservableObject {
         return monoSamples
     }
 
-    /// Watchdog that detects zombie audio engines — running but producing no samples.
+    /// Watchdog that detects zombie audio engines — running but producing no usable signal.
     /// After sleep/wake, CoreAudio may report the engine as running but the hardware graph
     /// is disconnected. If no samples arrive within 2 seconds, tear down and retry once.
     /// If the user stops dictation during the recovery delay, the pending retry is cleared
@@ -2545,11 +2568,23 @@ class ParakeetEngine: ObservableObject {
             }
             guard sampleCount >= 0 else { return }
 
-            guard sampleCount == 0 else { return }  // Audio is flowing — all good
+            let shouldReset = ParakeetSampleSignalPolicy.shouldResetStartupAudio(
+                sampleCount: sampleCount,
+                hasNonZeroSignal: self.didReceiveNonZeroAudioSamples,
+                isLikelyBluetoothHandsFreeRoute: self.recordingStartedOnLikelyBluetoothHandsFreeRoute
+            )
+            guard shouldReset else { return }
 
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "zombie_engine_detected",
-                message: "No audio samples received after recording start — resetting engine",
-                context: ["audio_device": self.inputDeviceName])
+                message: sampleCount == 0
+                    ? "No audio samples received after recording start — resetting engine"
+                    : "Only silent audio samples received after recording start — resetting engine",
+                context: [
+                    "audio_device": self.inputDeviceName,
+                    "hfp_suspected": "\(self.recordingStartedOnLikelyBluetoothHandsFreeRoute)",
+                    "sample_count": "\(sampleCount)",
+                    "sample_signal_started": "\(self.didReceiveNonZeroAudioSamples)",
+                ])
 
             self.streamingSamplesLock.withLock {
                 self.streamingSampleBuffer.removeAll(keepingCapacity: true)
@@ -3211,6 +3246,8 @@ class ParakeetEngine: ObservableObject {
         isTranscribing = false
         audioLevel = 0
         didReceiveAudioSamples = false
+        didReceiveNonZeroAudioSamples = false
+        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         liveTranscript = ""
@@ -3245,6 +3282,8 @@ class ParakeetEngine: ObservableObject {
         audioStartInProgress = false
         audioLevel = 0
         didReceiveAudioSamples = false
+        didReceiveNonZeroAudioSamples = false
+        recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         liveTranscript = ""
