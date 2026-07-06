@@ -3129,6 +3129,7 @@ class ParakeetEngine: ObservableObject {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "transcription_failed",
                 message: error.localizedDescription,
                 context: ["samples": "\(nativeCount)", "elapsed": String(format: "%.2f", elapsed)])
+            lastEmptyTranscriptionReason = .modelFailure
             finishTranscription()
             return nil
         }

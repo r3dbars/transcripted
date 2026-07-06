@@ -8,6 +8,9 @@ enum DictationNoSpeechPresentationPolicy {
         if reason == .recordingTooShort {
             return "Recording ended too soon. Try again and speak for at least a second."
         }
+        if reason == .modelFailure {
+            return "The local speech model failed. Try again, or switch transcription models in Settings."
+        }
 
         if trigger == "physical_key" {
             return "No speech heard. Hold the dictation key while you talk."
