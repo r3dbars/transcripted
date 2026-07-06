@@ -102,6 +102,7 @@ class ParakeetEngine: ObservableObject {
     private var lastAudioStartFailureReportAt: TimeInterval?
     private var lastInputSelectionReportKey: String?
     private var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
+    private var pendingSystemInputRestore: (temporaryInput: AudioDeviceID, previousInput: AudioDeviceID)?
 
     var isModelLoaded: Bool { asrManagerReady }
     var inputDeviceName: String { cachedInputDeviceName }
@@ -155,6 +156,39 @@ class ParakeetEngine: ObservableObject {
             )
         } catch {
             return nil
+        }
+    }
+
+    nonisolated private static func applyPreferredSystemInputDevice(
+        for selection: DictationInputDeviceSelection?
+    ) -> String? {
+        guard let selection,
+              selection.didOverrideDefault,
+              selection.reason == .preferredBuiltInForBluetoothHeadset else {
+            return nil
+        }
+
+        do {
+            try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(selection.selectedInput.id)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    nonisolated private static func restoreSystemInputDeviceIfStillTemporary(
+        temporaryInput: AudioDeviceID,
+        previousInput: AudioDeviceID
+    ) -> String? {
+        do {
+            let currentInput = try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
+            guard currentInput == temporaryInput else {
+                return nil
+            }
+            try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(previousInput)
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 
@@ -1514,6 +1548,70 @@ class ParakeetEngine: ObservableObject {
         return context
     }
 
+    private func restoreSystemInputIfStillTemporary(
+        temporaryInput: AudioDeviceID,
+        previousInput: AudioDeviceID,
+        operation: String
+    ) async {
+        ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
+            + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
+        let restoreError = await Task.detached(priority: .utility) {
+            Self.restoreSystemInputDeviceIfStillTemporary(
+                temporaryInput: temporaryInput,
+                previousInput: previousInput
+            )
+        }.value
+        if let restoreError {
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "dictation_system_input_restore_failed",
+                message: "Failed to restore system input after dictation route override",
+                context: [
+                    "operation": operation,
+                    "error": restoreError,
+                ]
+            )
+        }
+    }
+
+    private func restorePendingSystemInputAfterRecording(operation: String) async {
+        guard let restoreTarget = pendingSystemInputRestore else { return }
+        pendingSystemInputRestore = nil
+        await restoreSystemInputIfStillTemporary(
+            temporaryInput: restoreTarget.temporaryInput,
+            previousInput: restoreTarget.previousInput,
+            operation: operation
+        )
+    }
+
+    private func schedulePendingSystemInputRestore(operation: String) {
+        guard let restoreTarget = pendingSystemInputRestore else { return }
+        pendingSystemInputRestore = nil
+        ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
+            + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
+        Task.detached(priority: .utility) {
+            let restoreError = Self.restoreSystemInputDeviceIfStillTemporary(
+                temporaryInput: restoreTarget.temporaryInput,
+                previousInput: restoreTarget.previousInput
+            )
+            if let restoreError {
+                await MainActor.run {
+                    EventReporter.shared.capture(
+                        level: .warning,
+                        engine: "parakeet",
+                        event: "dictation_system_input_restore_failed",
+                        message: "Failed to restore system input after dictation route override",
+                        context: [
+                            "operation": operation,
+                            "error": restoreError,
+                        ]
+                    )
+                }
+            }
+        }
+    }
+
     private func audioInputSnapshot(
         operation: String,
         recoveryGeneration: UInt64? = nil,
@@ -1536,20 +1634,88 @@ class ParakeetEngine: ObservableObject {
             ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
                 + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
         }
+        let shouldRestoreSystemInputOnStop = operation == "start_recording"
+        let systemInputOverrideStartedAt = CFAbsoluteTimeGetCurrent()
+        let systemInputOverrideError = await Task.detached(priority: .utility) {
+            Self.applyPreferredSystemInputDevice(for: selection)
+        }.value
+        var systemInputRestoreTarget: (temporaryInput: AudioDeviceID, previousInput: AudioDeviceID)?
+        stageTimings["audio_input_system_override_ms"] = Self.elapsedMilliseconds(since: systemInputOverrideStartedAt)
+        if let selection, selection.didOverrideDefault {
+            var context = inputSelectionContext(selection, operation: "\(operation)_system_input")
+            if let systemInputOverrideError {
+                pendingSystemInputRestore = nil
+                context["error"] = systemInputOverrideError
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "parakeet",
+                    event: "dictation_system_input_override_failed",
+                    message: "Failed to move system input away from Bluetooth headset microphone",
+                    context: context
+                )
+            } else if selection.reason == .preferredBuiltInForBluetoothHeadset {
+                let restoreTarget = (
+                    temporaryInput: selection.selectedInput.id,
+                    previousInput: selection.defaultInput.id
+                )
+                if shouldRestoreSystemInputOnStop {
+                    pendingSystemInputRestore = restoreTarget
+                }
+                systemInputRestoreTarget = restoreTarget
+                EventReporter.shared.capture(
+                    level: .info,
+                    engine: "parakeet",
+                    event: "dictation_system_input_auto_selected",
+                    message: "System input moved away from Bluetooth headset microphone",
+                    context: context
+                )
+            }
+        }
 
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
+            if !shouldRestoreSystemInputOnStop, let systemInputRestoreTarget {
+                await restoreSystemInputIfStillTemporary(
+                    temporaryInput: systemInputRestoreTarget.temporaryInput,
+                    previousInput: systemInputRestoreTarget.previousInput,
+                    operation: "\(operation)_system_input_stale_recovery"
+                )
+            }
             throw CancellationError()
         }
         let snapshotGraphGeneration = audioGraphGeneration
         let snapshotReadStartedAt = CFAbsoluteTimeGetCurrent()
-        let snapshotResult = try await runTimedAudioEngineWork(operation: "\(operation)_snapshot") { audioEngine in
-            let inputNode = audioEngine.inputNode
-            let selectionApplication = Self.applyPreferredDictationInputDevice(selection, to: inputNode)
-            return (
-                outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
-                hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
-                selectionApplication: selectionApplication,
-                engineWasRunning: audioEngine.isRunning
+        let snapshotResult: (
+            outputFormat: ParakeetAudioFormatSummary,
+            hwFormat: ParakeetAudioFormatSummary,
+            selectionApplication: ParakeetInputDeviceApplication?,
+            engineWasRunning: Bool
+        )
+        do {
+            snapshotResult = try await runTimedAudioEngineWork(operation: "\(operation)_snapshot") { audioEngine in
+                let inputNode = audioEngine.inputNode
+                let selectionApplication = Self.applyPreferredDictationInputDevice(selection, to: inputNode)
+                return (
+                    outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
+                    hwFormat: Self.audioFormatSummary(inputNode.inputFormat(forBus: 0)),
+                    selectionApplication: selectionApplication,
+                    engineWasRunning: audioEngine.isRunning
+                )
+            }
+        } catch {
+            if !shouldRestoreSystemInputOnStop, let systemInputRestoreTarget {
+                await restoreSystemInputIfStillTemporary(
+                    temporaryInput: systemInputRestoreTarget.temporaryInput,
+                    previousInput: systemInputRestoreTarget.previousInput,
+                    operation: "\(operation)_system_input_failed"
+                )
+            }
+            throw error
+        }
+        if !shouldRestoreSystemInputOnStop, let systemInputRestoreTarget {
+            await restoreSystemInputIfStillTemporary(
+                temporaryInput: systemInputRestoreTarget.temporaryInput,
+                previousInput: systemInputRestoreTarget.previousInput,
+                operation: "\(operation)_system_input"
             )
         }
         stageTimings["audio_input_snapshot_read_ms"] = Self.elapsedMilliseconds(since: snapshotReadStartedAt)
@@ -2180,13 +2346,17 @@ class ParakeetEngine: ObservableObject {
         defer {
             audioStartInProgress = false
         }
+        func failAudioStart(_ operation: String) async -> Bool {
+            await restorePendingSystemInputAfterRecording(operation: operation)
+            return false
+        }
 
         scheduleInputDeviceNameRefresh()
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "mic_not_authorized",
                 message: "Microphone permission status: \(micStatus.rawValue)")
-            return false
+            return await failAudioStart("start_recording_mic_not_authorized")
         }
 
         installAudioObserversIfNeeded()
@@ -2205,7 +2375,7 @@ class ParakeetEngine: ObservableObject {
             if !recoveryState.isRecovering {
                 schedulePrewarmRetry()
             }
-            return false
+            return await failAudioStart("start_recording_recovering")
         }
 
         recordingInterrupted = false
@@ -2233,7 +2403,7 @@ class ParakeetEngine: ObservableObject {
                     message: "Audio start aborted because the audio graph changed before startup finished",
                     context: ["audio_graph_generation": "\(audioGraphGeneration)"]
                 )
-                return false
+                return await failAudioStart("start_recording_generation_changed_before_snapshot")
             }
 
             let snapshot: ParakeetAudioInputSnapshot
@@ -2264,7 +2434,7 @@ class ParakeetEngine: ObservableObject {
                 }
                 markFormatUnreadyAndPublish()
                 schedulePrewarmRetry()
-                return false
+                return await failAudioStart("start_recording_format_read_failed")
             }
             guard startGeneration == audioGraphGeneration else {
                 EventReporter.shared.capture(
@@ -2274,7 +2444,7 @@ class ParakeetEngine: ObservableObject {
                     message: "Audio start aborted because the audio graph changed while reading input format",
                     context: ["audio_graph_generation": "\(audioGraphGeneration)"]
                 )
-                return false
+                return await failAudioStart("start_recording_generation_changed_after_snapshot")
             }
 
             let readiness = audioFormatReadiness(
@@ -2320,7 +2490,7 @@ class ParakeetEngine: ObservableObject {
                 if startFailureAction.schedulePrewarmRetry {
                     schedulePrewarmRetry()
                 }
-                return false
+                return await failAudioStart("start_recording_format_unavailable")
             }
 
             updateNativeSampleRate(snapshot.outputFormat.sampleRate)
@@ -2344,7 +2514,7 @@ class ParakeetEngine: ObservableObject {
                         message: "Audio start aborted because the audio graph changed while starting",
                         context: ["audio_graph_generation": "\(audioGraphGeneration)"]
                     )
-                    return false
+                    return await failAudioStart("start_recording_generation_changed_after_start")
                 }
                 inputTapInstalled = true
                 isEnginePrewarmed = true
@@ -2441,7 +2611,7 @@ class ParakeetEngine: ObservableObject {
                     if startFailureAction.schedulePrewarmRetry {
                         schedulePrewarmRetry()
                     }
-                    return false
+                    return await failAudioStart("start_recording_route_not_settled")
                 }
 
                 if operationTimedOut {
@@ -2459,7 +2629,7 @@ class ParakeetEngine: ObservableObject {
                     if startFailureAction.schedulePrewarmRetry {
                         schedulePrewarmRetry()
                     }
-                    return false
+                    return await failAudioStart("start_recording_engine_start_timeout")
                 }
 
                 print("❌ PARAKEET | audio engine failed after \(attempt) attempt(s): \(error.localizedDescription)")
@@ -2470,7 +2640,7 @@ class ParakeetEngine: ObservableObject {
                 if startFailureAction.schedulePrewarmRetry {
                     schedulePrewarmRetry()
                 }
-                return false
+                return await failAudioStart("start_recording_engine_start_failed")
             }
 
             if attempt > 1 {
@@ -2634,6 +2804,7 @@ class ParakeetEngine: ObservableObject {
             // zombie retry drains real audio instead of discarding it.
             if preservingRecordingAcrossRecovery || !recoveredRecordingTimeline.isEmpty {
                 cancelPendingRecordingRecovery()
+                await restorePendingSystemInputAfterRecording(operation: "stop_recording_preserved_recovery")
                 return
             }
             // A zombie reset marks recording idle while it waits to retry, with
@@ -2643,6 +2814,7 @@ class ParakeetEngine: ObservableObject {
                 audioGraphGeneration += 1
                 cancelAudioWatchdog()
                 clearRecoveredRecordingTimeline(keepingCapacity: true)
+                await restorePendingSystemInputAfterRecording(operation: "stop_recording_zombie_restart")
                 return
             }
             if audioStartInProgress {
@@ -2650,6 +2822,7 @@ class ParakeetEngine: ObservableObject {
             } else {
                 clearRecoveredRecordingTimeline(keepingCapacity: true)
             }
+            await restorePendingSystemInputAfterRecording(operation: "stop_recording_idle")
             return
         }
         audioGraphGeneration += 1
@@ -2670,6 +2843,7 @@ class ParakeetEngine: ObservableObject {
         }
         await removeRecordingTap()
         await stopAudioEngine()
+        await restorePendingSystemInputAfterRecording(operation: "stop_recording")
         isEnginePrewarmed = false
         drainPendingSamplesIntoSampleBuffer()
         isRecording = false
@@ -3256,6 +3430,7 @@ class ParakeetEngine: ObservableObject {
         audioGraphGeneration += 1
         let cleanupGeneration = audioGraphGeneration
         await releaseIdleAudioHardware(removeTap: true, expectedGeneration: cleanupGeneration)
+        await restorePendingSystemInputAfterRecording(operation: "reset_after_failed_recording_start")
     }
 
     func abandonBlockedRecordingStart(reason: String) {
@@ -3289,6 +3464,7 @@ class ParakeetEngine: ObservableObject {
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         liveTranscript = ""
         committedStreamText = ""
+        schedulePendingSystemInputRestore(operation: "abandon_blocked_recording_start")
         abandonBlockedAudioEngine(reason: reason)
     }
 
@@ -3319,6 +3495,7 @@ class ParakeetEngine: ObservableObject {
         }
         audioGraphGeneration += 1
         let cleanupGeneration = audioGraphGeneration
+        schedulePendingSystemInputRestore(operation: "cancel")
         Task { @MainActor [weak self] in
             await self?.releaseIdleAudioHardware(removeTap: true, expectedGeneration: cleanupGeneration)
         }
@@ -3370,6 +3547,7 @@ class ParakeetEngine: ObservableObject {
         cancelConfigRecoveryTimeout()
         audioGraphGeneration += 1
         let cleanupGeneration = audioGraphGeneration
+        schedulePendingSystemInputRestore(operation: "cleanup")
         Task { @MainActor [weak self] in
             await self?.releaseIdleAudioHardware(removeTap: true, expectedGeneration: cleanupGeneration)
         }

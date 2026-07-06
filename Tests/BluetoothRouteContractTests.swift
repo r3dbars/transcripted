@@ -24,7 +24,9 @@
 // off the headset mic before the format is sampled. They are intentionally kept as
 // source-text contracts rather than a runtime seam: extracting one would restructure
 // real-time CoreAudio tap/format-read control flow, which is too risky to refactor for
-// testability. The "QA report names mocked proof boundary" suite is a docs/report
+// testability. The system default input override must also happen before format reads
+// so macOS moves AirPods off the headset microphone route before recording starts.
+// The "QA report names mocked proof boundary" suite is a docs/report
 // consistency check, not a runtime check. If you move/rename these functions or reorder
 // their statements, update both the source and these greps together.
 
@@ -361,6 +363,7 @@ func testBluetoothRouteContract() {
         guard let loadSelection = snapshotBody.range(of: "let selection = await Task.detached"),
               let detachedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
               let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
+              let systemInputOverride = snapshotBody.range(of: "Self.applyPreferredSystemInputDevice(for: selection)"),
               let applyOverride = snapshotBody.range(of: "Self.applyPreferredDictationInputDevice(selection, to: inputNode)"),
               let outputFormatRead = snapshotBody.range(of: "inputNode.outputFormat(forBus: 0)"),
               let inputFormatRead = snapshotBody.range(of: "inputNode.inputFormat(forBus: 0)") else {
@@ -370,9 +373,66 @@ func testBluetoothRouteContract() {
 
         assertTrue(loadSelection.lowerBound < detachedSelectionLookup.lowerBound, "selection should be loaded through detached CoreAudio lookup")
         assertTrue(detachedSelectionLookup.lowerBound < avoidDefaultRead.lowerBound, "selection should be loaded before the no-default-read guard")
-        assertTrue(avoidDefaultRead.lowerBound < applyOverride.lowerBound, "override guard should be set before touching the input node")
+        assertTrue(avoidDefaultRead.lowerBound < systemInputOverride.lowerBound, "override guard should be set before changing system input")
+        assertTrue(systemInputOverride.lowerBound < applyOverride.lowerBound, "system input should move off AirPods before touching the input node")
         assertTrue(applyOverride.lowerBound < outputFormatRead.lowerBound, "forced input override should happen before output format reads")
         assertTrue(applyOverride.lowerBound < inputFormatRead.lowerBound, "forced input override should happen before hardware input format reads")
+    }
+
+    runSuite("Bluetooth route contract - system input override restores after recording") {
+        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
+        guard let snapshotStart = source.range(of: "private func audioInputSnapshot"),
+              let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex),
+              let startStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
+              let startEnd = source.range(of: "private func extractMonoSamples", range: startStart.upperBound..<source.endIndex),
+              let cleanupStart = source.range(of: "// MARK: - Cleanup"),
+              let cleanupEnd = source.range(of: "deinit", range: cleanupStart.upperBound..<source.endIndex),
+              let stopStart = source.range(of: "func stopRecording() async"),
+              let stopEnd = source.range(of: "// MARK: - EOU Streaming", range: stopStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find dictation audioInputSnapshot and stopRecording")
+            return
+        }
+        let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
+        let startBody = String(source[startStart.lowerBound..<startEnd.lowerBound])
+        let cleanupBody = String(source[cleanupStart.lowerBound..<cleanupEnd.lowerBound])
+        let stopBody = String(source[stopStart.lowerBound..<stopEnd.lowerBound])
+
+        assertTrue(
+            snapshotBody.contains("pendingSystemInputRestore = restoreTarget"),
+            "start_recording should remember the prior system input when it temporarily moves AirPods input to built-in"
+        )
+        assertTrue(
+            snapshotBody.contains("operation: \"\\(operation)_system_input_stale_recovery\""),
+            "superseded recovery snapshots should restore the temporary system input before throwing cancellation"
+        )
+        assertTrue(
+            startBody.contains("func failAudioStart(_ operation: String) async -> Bool"),
+            "failed starts should share one cleanup path for temporary system input restores"
+        )
+        assertTrue(
+            startBody.contains("return await failAudioStart(\"start_recording_engine_start_failed\")"),
+            "engine-start failures after the temporary system input override should restore before returning false"
+        )
+        assertTrue(
+            stopBody.contains("await restorePendingSystemInputAfterRecording(operation: \"stop_recording\")"),
+            "normal stop should restore the prior system input if Transcripted still owns the temporary input"
+        )
+        assertTrue(
+            stopBody.contains("await restorePendingSystemInputAfterRecording(operation: \"stop_recording_idle\")"),
+            "canceled or interrupted start paths should not leave the temporary system input behind"
+        )
+        assertTrue(
+            cleanupBody.contains("schedulePendingSystemInputRestore(operation: \"cancel\")"),
+            "explicit cancellation should restore the temporary system input even though cancel() is synchronous"
+        )
+        assertTrue(
+            cleanupBody.contains("schedulePendingSystemInputRestore(operation: \"cleanup\")"),
+            "quit cleanup should restore the temporary system input even though cleanup() is synchronous"
+        )
+        assertTrue(
+            cleanupBody.contains("schedulePendingSystemInputRestore(operation: \"abandon_blocked_recording_start\")"),
+            "blocked-start abandonment should restore the temporary system input"
+        )
     }
 
     runSuite("Bluetooth route contract - QA report names mocked proof boundary") {

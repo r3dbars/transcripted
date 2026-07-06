@@ -1119,6 +1119,14 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
+            case .copied(let message, reason: let reason) where reason.isPasteConfirmationOnly:
+                AppSoundPlayer.shared.play(.dictationDelivered)
+                if let saveFailureMessage {
+                    overlayController.showError(saveFailureMessage)
+                } else {
+                    overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
+                }
+                appState.logger.log("DICTATION | paste confirmation missing after Cmd+V; suppressing user warning: \(message)")
             case .copied(let message, reason: _):
                 if let saveFailureMessage {
                     overlayController.showError("\(message) \(saveFailureMessage)")
@@ -2159,6 +2167,15 @@ private extension TextPasteOutcome {
 }
 
 private extension TextPasteCopyReason {
+    var isPasteConfirmationOnly: Bool {
+        switch self {
+        case .pasteConfirmationUnavailable:
+            return true
+        case .accessibilityMissing, .pasteEventCreationFailed, .focusChanged, .pasteNotConfirmed:
+            return false
+        }
+    }
+
     var diagnosticName: String {
         switch self {
         case .accessibilityMissing:

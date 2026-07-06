@@ -32,6 +32,15 @@ class FloatingOverlayController {
         case listening    // Recording dictation
         case drafting     // Processing dictation
         case success      // Finished successfully — brief confirmation before dismiss
+
+        var isActiveDictationState: Bool {
+            switch self {
+            case .starting, .loading, .listening:
+                return true
+            case .idle, .drafting, .success:
+                return false
+            }
+        }
     }
 
     /// How a drafting-state message should read: a real problem, or a calm
@@ -62,6 +71,9 @@ class FloatingOverlayController {
     var state: OverlayState = .idle {
         didSet {
             guard state != oldValue else { return }
+            if state.isActiveDictationState {
+                cancelPendingHideForActiveDictation()
+            }
             if state != .loading {
                 cancelMiniLoadingReveal()
             }
@@ -260,6 +272,8 @@ class FloatingOverlayController {
         errorDismissTask = nil
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
+        successDismissTask?.cancel()
+        successDismissTask = nil
         errorMessage = ""
         messageTone = .error
         successTitle = "Pasted"
@@ -380,6 +394,8 @@ class FloatingOverlayController {
         errorDismissTask = nil
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
+        successDismissTask?.cancel()
+        successDismissTask = nil
         cancelMiniLoadingReveal()
         errorMessage = ""
         messageTone = .error
@@ -391,6 +407,29 @@ class FloatingOverlayController {
         if !isVisible {
             showPanel(near: sourceApp, anchorRect: anchorRect)
         }
+    }
+
+    private func cancelPendingHideForActiveDictation() {
+        hideGeneration &+= 1
+        successDismissTask?.cancel()
+        successDismissTask = nil
+
+        guard let panel, isVisible else { return }
+        cancelPanelHideAnimations(panel)
+        panel.ignoresMouseEvents = isCursorMiniPanelMode
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+            isVisible = true
+        }
+    }
+
+    private func cancelPanelHideAnimations(_ panel: NSPanel) {
+        panel.animations = [:]
+        panel.contentView?.layer?.removeAllAnimations()
+        panel.contentView?.subviews.forEach { subview in
+            subview.layer?.removeAllAnimations()
+        }
+        panel.alphaValue = 1
     }
 
     @discardableResult
