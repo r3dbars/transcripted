@@ -10,6 +10,11 @@ struct MenuBarLaunchUISmokeReport: Codable, Equatable {
     let popoverConfigured: Bool
     let onboardingCompleted: Bool
     let content: MenuBarContentSmokeSnapshot
+    /// Wall-clock from kernel process-start to the moment the menu-bar UI is
+    /// interactive (status item + popover configured). Powers the CI
+    /// launch-to-interactive perf budget (PRD WS4.2). Optional so older report
+    /// consumers and hand-built fixtures stay decodable.
+    var launchToInteractiveMs: Double?
 }
 
 @MainActor
@@ -158,6 +163,7 @@ final class MenuBarPanelController: NSViewController {
         statusItemExists: Bool,
         popoverConfigured: Bool,
         onboardingCompleted: Bool,
+        launchToInteractiveMs: Double? = nil,
         menuVisibilityOverride: [MenuBarOptionalItem: Bool]
     ) -> MenuBarLaunchUISmokeReport {
         loadViewIfNeeded()
@@ -184,7 +190,8 @@ final class MenuBarPanelController: NSViewController {
                 ),
                 primaryActions: [:],
                 utilityActions: [:]
-            )
+            ),
+            launchToInteractiveMs: launchToInteractiveMs
         )
     }
 
