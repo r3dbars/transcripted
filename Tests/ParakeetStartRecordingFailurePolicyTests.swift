@@ -101,18 +101,18 @@ func testParakeetStartRecordingFailurePolicy() {
 
         assertTrue(action.markFormatUnready, "stale route formats should hold recording starts")
         assertTrue(action.schedulePrewarmRetry, "stale route formats should wait for the next prewarm")
-        assertTrue(action.rebuildAudioEngine, "stale route formats should rebuild the audio engine")
+        assertFalse(action.rebuildAudioEngine, "stale route formats should wait without rebuilding the audio engine")
     }
 
-    runSuite("ParakeetStartRecordingFailurePolicy route-not-settled during recovery does not chain retries") {
+    runSuite("ParakeetStartRecordingFailurePolicy route-not-settled during recovery keeps readiness retry") {
         let action = ParakeetStartRecordingFailurePolicy.action(
             for: .audioRouteNotSettled,
             isRecoveryAttempt: true
         )
 
         assertTrue(action.markFormatUnready, "recovery route failures should still hold recording starts")
-        assertFalse(action.schedulePrewarmRetry, "recovery route failures should not recursively schedule retries")
-        assertTrue(action.rebuildAudioEngine, "recovery route failures should rebuild the audio engine")
+        assertTrue(action.schedulePrewarmRetry, "recovery route failures should leave a bounded readiness retry path")
+        assertFalse(action.rebuildAudioEngine, "recovery route failures should not churn the audio graph")
     }
 
     runSuite("ParakeetDeviceRecoveryFailurePolicy keeps idle device settling out of Sentry") {
@@ -325,6 +325,39 @@ func testParakeetStartRecordingFailurePolicy() {
         }
     }
 
+    runSuite("ParakeetAudioFormatReadinessPolicy defers suppressed Bluetooth recovery speech bus") {
+        for outputRate in [8_000.0, 16_000.0, 24_000.0] {
+            let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+                outputSampleRate: outputRate,
+                outputChannelCount: 3,
+                inputSampleRate: 48_000,
+                inputChannelCount: 1,
+                selectedInputClass: "bluetooth",
+                outputDeviceClass: "bluetooth",
+                selectionOverrodeDefault: false,
+                selectionReason: .builtInFallbackSuppressedForRecoveryAttempt
+            )
+
+            assertEqual(readiness, .routeNotSettled, "suppressed recovery should wait instead of recording on a low-rate Bluetooth output bus \(outputRate)")
+            assertEqual(readiness.startFailureReason, .audioRouteNotSettled, "suppressed Bluetooth recovery should remain a recoverable route-settling failure")
+        }
+    }
+
+    runSuite("ParakeetAudioFormatReadinessPolicy allows settled suppressed Bluetooth recovery bus") {
+        let readiness = ParakeetAudioFormatReadinessPolicy.readiness(
+            outputSampleRate: 48_000,
+            outputChannelCount: 1,
+            inputSampleRate: 24_000,
+            inputChannelCount: 1,
+            selectedInputClass: "bluetooth",
+            outputDeviceClass: "bluetooth",
+            selectionOverrodeDefault: false,
+            selectionReason: .builtInFallbackSuppressedForRecoveryAttempt
+        )
+
+        assertEqual(readiness, .ready, "suppressed recovery should still allow a settled Bluetooth capture bus")
+    }
+
     runSuite("ParakeetAudioFormatReadinessPolicy defers non-preferred override reasons on Bluetooth output") {
         let nonPreferredReasons: [DictationInputDeviceSelectionReason] = [
             .defaultIsSafe,
@@ -493,6 +526,60 @@ func testParakeetStartRecordingFailurePolicy() {
             effectiveSampleRate,
             ParakeetAudioFormatReadinessPolicy.fallbackCaptureSampleRate,
             "invalid tap rates should still use the central safe fallback"
+        )
+    }
+
+    runSuite("ParakeetSampleSignalPolicy distinguishes zero callbacks from real signal") {
+        assertFalse(
+            ParakeetSampleSignalPolicy.hasNonZeroSignal([]),
+            "empty buffers should not count as signal"
+        )
+        assertFalse(
+            ParakeetSampleSignalPolicy.hasNonZeroSignal([0, 0, 0]),
+            "all-zero buffers should not mark the microphone route healthy"
+        )
+        assertFalse(
+            ParakeetSampleSignalPolicy.hasNonZeroSignal([0, 0.000_000_1, -0.000_000_5]),
+            "sub-threshold noise should not defeat the zero-route watchdog"
+        )
+        assertTrue(
+            ParakeetSampleSignalPolicy.hasNonZeroSignal([0, 0.000_01, 0]),
+            "normal mic noise or speech should count as real sample signal"
+        )
+    }
+
+    runSuite("ParakeetSampleSignalPolicy scopes zero-signal restart to risky routes") {
+        assertTrue(
+            ParakeetSampleSignalPolicy.shouldResetStartupAudio(
+                sampleCount: 0,
+                hasNonZeroSignal: false,
+                isLikelyBluetoothHandsFreeRoute: false
+            ),
+            "no callbacks should still trigger startup recovery on any route"
+        )
+        assertFalse(
+            ParakeetSampleSignalPolicy.shouldResetStartupAudio(
+                sampleCount: 512,
+                hasNonZeroSignal: false,
+                isLikelyBluetoothHandsFreeRoute: false
+            ),
+            "normal initial silence should not look like a dead engine"
+        )
+        assertTrue(
+            ParakeetSampleSignalPolicy.shouldResetStartupAudio(
+                sampleCount: 512,
+                hasNonZeroSignal: false,
+                isLikelyBluetoothHandsFreeRoute: true
+            ),
+            "zero-only buffers on Bluetooth HFP should recover from the garbled route"
+        )
+        assertFalse(
+            ParakeetSampleSignalPolicy.shouldResetStartupAudio(
+                sampleCount: 512,
+                hasNonZeroSignal: true,
+                isLikelyBluetoothHandsFreeRoute: true
+            ),
+            "real signal on Bluetooth HFP should not be restarted"
         )
     }
 

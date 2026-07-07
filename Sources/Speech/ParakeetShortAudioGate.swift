@@ -17,6 +17,7 @@ struct ParakeetTranscriptionDecision: Equatable {
 enum DictationEmptyTranscriptionReason: String {
     case noSpeech = "no_speech"
     case recordingTooShort = "recording_too_short"
+    case modelFailure = "model_failure"
 
     var analyticsEventName: String {
         switch self {
@@ -24,6 +25,8 @@ enum DictationEmptyTranscriptionReason: String {
             return "dictation_no_speech"
         case .recordingTooShort:
             return "dictation_recording_too_short"
+        case .modelFailure:
+            return "dictation_transcription_failed"
         }
     }
 
@@ -33,6 +36,8 @@ enum DictationEmptyTranscriptionReason: String {
             return "no_voice_input"
         case .recordingTooShort:
             return "dictation_recording_too_short"
+        case .modelFailure:
+            return "dictation_transcription_failed"
         }
     }
 
@@ -42,6 +47,8 @@ enum DictationEmptyTranscriptionReason: String {
             return "Dictation transcription empty"
         case .recordingTooShort:
             return "Dictation ended before enough audio was captured"
+        case .modelFailure:
+            return "Dictation transcription model failed"
         }
     }
 
@@ -55,6 +62,8 @@ enum DictationEmptyTranscriptionReason: String {
             return "no_speech"
         case .recordingTooShort:
             return "recording_too_short"
+        case .modelFailure:
+            return "model_failure"
         }
     }
 }

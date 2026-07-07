@@ -9,9 +9,21 @@ extension NSLock {
     }
 }
 
-private enum InputDeviceLookupError: Error {
+private enum InputDeviceLookupError: LocalizedError {
     case propertyReadFailed(OSStatus)
+    case propertyWriteFailed(OSStatus)
     case unknownDevice
+
+    var errorDescription: String? {
+        switch self {
+        case .propertyReadFailed(let status):
+            return "CoreAudio property read failed with status \(status)"
+        case .propertyWriteFailed(let status):
+            return "CoreAudio property write failed with status \(status)"
+        case .unknownDevice:
+            return "CoreAudio returned an unknown device"
+        }
+    }
 }
 
 enum ParakeetAudioEngineWorkError: LocalizedError {
@@ -48,6 +60,31 @@ enum CoreAudioInputDeviceLookup {
             availableInputs: availableInputs,
             allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
         )
+    }
+
+    static func setDefaultInputDeviceID(_ deviceID: AudioDeviceID) throws {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var mutableDeviceID = deviceID
+        let dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            dataSize,
+            &mutableDeviceID
+        )
+        guard status == noErr else {
+            throw InputDeviceLookupError.propertyWriteFailed(status)
+        }
+    }
+
+    static func currentDefaultInputDeviceID() throws -> AudioDeviceID {
+        try defaultInputDeviceID()
     }
 
     private static func allInputDevices() throws -> [DictationAudioDevice] {

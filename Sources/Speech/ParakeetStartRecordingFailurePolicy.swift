@@ -40,15 +40,20 @@ enum ParakeetStartRecordingFailurePolicy {
         isRecoveryAttempt: Bool
     ) -> ParakeetStartRecordingFailureAction {
         let shouldScheduleRetry: Bool
+        let shouldRebuildAudioEngine: Bool
         switch reason {
-        case .invalidAudioFormat, .audioRouteNotSettled, .audioEngineStartFailed, .audioEngineStartTimedOut:
+        case .invalidAudioFormat, .audioEngineStartFailed, .audioEngineStartTimedOut:
             shouldScheduleRetry = !isRecoveryAttempt
+            shouldRebuildAudioEngine = true
+        case .audioRouteNotSettled:
+            shouldScheduleRetry = true
+            shouldRebuildAudioEngine = false
         }
 
         return ParakeetStartRecordingFailureAction(
             markFormatUnready: true,
             schedulePrewarmRetry: shouldScheduleRetry,
-            rebuildAudioEngine: true
+            rebuildAudioEngine: shouldRebuildAudioEngine
         )
     }
 }
@@ -172,7 +177,7 @@ enum ParakeetAudioFormatReadinessPolicy {
         selectedInputClass: String,
         outputDeviceClass: String,
         selectionOverrodeDefault: Bool,
-        selectionReason _: DictationInputDeviceSelectionReason? = nil
+        selectionReason: DictationInputDeviceSelectionReason? = nil
     ) -> ParakeetAudioFormatReadiness {
         guard isUsableCaptureSampleRate(outputSampleRate), outputChannelCount > 0,
               isUsableCaptureSampleRate(inputSampleRate), inputChannelCount > 0 else {
@@ -182,11 +187,18 @@ enum ParakeetAudioFormatReadinessPolicy {
         let lowRateOutputBus = likelyBluetoothSpeechRates.contains(Int(outputSampleRate.rounded()))
         let overriddenBluetoothOutputRoute = selectionOverrodeDefault
             && outputDeviceClass == "bluetooth"
+        let suppressedRecoveryBluetoothRoute = selectedInputClass == "bluetooth"
+            && outputDeviceClass == "bluetooth"
+            && selectionReason == .builtInFallbackSuppressedForRecoveryAttempt
 
         if selectedInputClass != "bluetooth",
            inputSampleRate >= 44_100,
            lowRateOutputBus,
            (outputDeviceClass != "bluetooth" || overriddenBluetoothOutputRoute) {
+            return .routeNotSettled
+        }
+
+        if suppressedRecoveryBluetoothRoute, lowRateOutputBus {
             return .routeNotSettled
         }
 
@@ -235,6 +247,22 @@ enum ParakeetTapSampleRatePolicy {
         hardwareSampleRate _: Double? = nil
     ) -> Double {
         ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(bufferSampleRate)
+    }
+}
+
+enum ParakeetSampleSignalPolicy {
+    private static let nonZeroSignalThreshold: Float = 0.000_001
+
+    static func hasNonZeroSignal(_ samples: [Float]) -> Bool {
+        samples.contains { abs($0) > nonZeroSignalThreshold }
+    }
+
+    static func shouldResetStartupAudio(
+        sampleCount: Int,
+        hasNonZeroSignal: Bool,
+        isLikelyBluetoothHandsFreeRoute: Bool
+    ) -> Bool {
+        sampleCount == 0 || (sampleCount > 0 && !hasNonZeroSignal && isLikelyBluetoothHandsFreeRoute)
     }
 }
 

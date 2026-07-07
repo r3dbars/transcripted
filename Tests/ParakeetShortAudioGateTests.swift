@@ -96,5 +96,15 @@ func testParakeetShortAudioGate() {
             "dictation_no_speech",
             "real no-speech dictation should keep the existing analytics event"
         )
+        assertEqual(
+            DictationEmptyTranscriptionReason.modelFailure.analyticsEventName,
+            "dictation_transcription_failed",
+            "model runtime errors should not inflate no-speech analytics"
+        )
+        assertEqual(
+            DictationEmptyTranscriptionReason.modelFailure.localEventName,
+            "dictation_transcription_failed",
+            "local diagnostics should name model failures explicitly"
+        )
     }
 }
