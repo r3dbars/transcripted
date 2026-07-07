@@ -727,6 +727,9 @@ struct SpeakerPeopleSettingsSection: View {
     }
 
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    /// Optional hook so the first-run empty state can offer a real next step.
+    /// Defaults to nil to keep the initializer additive for existing call sites.
+    var onStartMeeting: (() -> Void)? = nil
     @State private var playbackStateVersion = 0
 
     var body: some View {
@@ -780,9 +783,13 @@ struct SpeakerPeopleSettingsSection: View {
                 }
 
                 if model.filteredProfiles.isEmpty {
-                    Text(emptyPeopleMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if model.profiles.isEmpty {
+                        SpeakersEmptyStateView(onStartMeeting: onStartMeeting)
+                    } else {
+                        Text(emptyPeopleMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     let profiles = model.filteredProfiles
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -823,11 +830,65 @@ struct SpeakerPeopleSettingsSection: View {
         return count == 1 ? "1 saved speaker." : "\(count) saved speakers."
     }
 
+    // The truly-empty case now renders `SpeakersEmptyStateView`; this only covers
+    // the "search filtered everyone out" case, where a plain caption is right.
     private var emptyPeopleMessage: String {
-        if model.profiles.isEmpty {
-            return "No speakers yet. After your next meeting, the people in it will appear here."
+        SpeakerPeopleEmptyState.noSearchMatches
+    }
+}
+
+// MARK: - Empty state copy + teaching view
+
+/// Foundation-pure copy for the Speakers surface's empty states. Kept as
+/// constants so the teaching first-run copy can be pinned by fast tests and can
+/// never regress to bare gray placeholder text. Plain words, no exclamation
+/// marks, per the repo voice convention.
+enum SpeakerPeopleEmptyState {
+    static let symbolName = "person.2"
+    static let title = "No speakers yet"
+    static let message = "Transcripted learns each voice as you record. After your first meeting, the people in it show up here, so you can name someone once and have them recognized in every meeting after."
+    static let actionTitle = "Start a meeting"
+    static let actionAutomationIdentifier = "transcripted.speakers.empty.start-meeting"
+    static let noSearchMatches = "No speakers match your search."
+}
+
+/// First-run teaching empty state for the all-speakers list: it explains what
+/// the screen will fill with and offers the one action that fills it.
+private struct SpeakersEmptyStateView: View {
+    var onStartMeeting: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: SpeakerPeopleEmptyState.symbolName)
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.tertiary)
+
+            VStack(spacing: 5) {
+                Text(SpeakerPeopleEmptyState.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+
+                Text(SpeakerPeopleEmptyState.message)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 360)
+            }
+
+            if let onStartMeeting {
+                Button(action: onStartMeeting) {
+                    Text(SpeakerPeopleEmptyState.actionTitle)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .accessibilityIdentifier(SpeakerPeopleEmptyState.actionAutomationIdentifier)
+                .padding(.top, 2)
+            }
         }
-        return "No speakers match your search."
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .padding(.horizontal, 16)
     }
 }
 

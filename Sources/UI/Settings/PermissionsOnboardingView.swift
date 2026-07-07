@@ -535,7 +535,10 @@ struct PermissionsOnboardingView: View {
                     result: .success
                 )
             } catch {
-                claudeDesktopConnectPhase = .failed(error.localizedDescription)
+                // Plain words on the first-run card instead of a raw NSError dump.
+                // The button flips to "Try again" (the retry); the raw error still
+                // goes to telemetry above, not onto the user's onboarding screen.
+                claudeDesktopConnectPhase = .failed(AgentSetupFailureCopy.connect(agentName: "Claude Desktop"))
                 ActivationTelemetry.trackAgentSetupCTA(
                     setupKind: .claudeDesktop,
                     agentTarget: .claudeDesktop,

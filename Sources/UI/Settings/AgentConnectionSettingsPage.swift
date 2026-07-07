@@ -21,6 +21,9 @@ struct AgentConnectionSettingsPage: View {
     @State private var detectedAgents: Set<AgentMCPAgent> = []
     @State private var connectedAgents: Set<AgentMCPAgent> = []
     @State private var rowPhases: [AgentMCPAgent: RowPhase] = [:]
+    // Raw error text for the connect-row failure, kept out of the user-visible
+    // message and offered behind "Copy Details".
+    @State private var rowFailureDetails: [AgentMCPAgent: String] = [:]
     @State private var configRepairNotices: [AgentMCPAgent: String] = [:]
     @State private var claudeDesktopSelfTest: TranscriptedMCPSelfTest?
     @State private var copiedLocalAgentPrompt = false
@@ -28,10 +31,12 @@ struct AgentConnectionSettingsPage: View {
     @State private var copiedFolderPaths = false
     @State private var openedCodexInboxSetup = false
     @State private var codexInboxSetupError: String?
+    @State private var codexInboxSetupErrorDetails: String?
     @State private var openedLiveMeetingCodexSetup = false
     @State private var openedLiveMeetingPreview = false
     @State private var copiedLiveMeetingCoworkSetup = false
     @State private var liveMeetingCodexSetupError: String?
+    @State private var liveMeetingCodexSetupErrorDetails: String?
     @State private var showAdvancedAgentSetup = false
     @AppStorage(LiveMeetingCodexPreferences.enabledKey) private var liveMeetingCodexEnabled = LiveMeetingCodexPreferences.defaultEnabled
 
@@ -121,10 +126,11 @@ struct AgentConnectionSettingsPage: View {
             }
 
             if case .failed(let message) = phase {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                failureNotice(
+                    message: message,
+                    details: rowFailureDetails[agent],
+                    detailsAutomationIdentifier: "transcripted.settings.agent.connect-error-details.\(agent.rawValue)"
+                )
             }
 
             if let configRepairNotice = configRepairNotices[agent] {
@@ -247,10 +253,11 @@ struct AgentConnectionSettingsPage: View {
             }
 
             if let liveMeetingCodexSetupError {
-                Label(liveMeetingCodexSetupError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                failureNotice(
+                    message: liveMeetingCodexSetupError,
+                    details: liveMeetingCodexSetupErrorDetails,
+                    detailsAutomationIdentifier: "transcripted.settings.agent.live-meetings.error-details"
+                )
             }
         }
     }
@@ -335,10 +342,11 @@ struct AgentConnectionSettingsPage: View {
             }
 
             if let codexInboxSetupError {
-                Label(codexInboxSetupError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                failureNotice(
+                    message: codexInboxSetupError,
+                    details: codexInboxSetupErrorDetails,
+                    detailsAutomationIdentifier: "transcripted.settings.agent.codex-inbox.error-details"
+                )
             }
         }
     }
@@ -433,11 +441,39 @@ struct AgentConnectionSettingsPage: View {
         }
     }
 
+    // MARK: - Failure notice
+
+    /// Plain-words failure line plus a subtle "Copy Details" reveal for the raw
+    /// error. The triggering control (Connect / Set up / Open) is the retry.
+    @ViewBuilder
+    private func failureNotice(
+        message: String,
+        details: String?,
+        detailsAutomationIdentifier: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let details {
+                Button(AgentSetupFailureCopy.detailsTitle) {
+                    copyText(details)
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+                .accessibilityIdentifier(detailsAutomationIdentifier)
+            }
+        }
+    }
+
     // MARK: - Connect
 
     private func connect(_ agent: AgentMCPAgent) {
         guard rowPhases[agent] != .connecting else { return }
         rowPhases[agent] = .connecting
+        rowFailureDetails[agent] = nil
         configRepairNotices[agent] = nil
         if agent == .claudeDesktop {
             claudeDesktopSelfTest = nil
@@ -470,7 +506,8 @@ struct AgentConnectionSettingsPage: View {
                 }
                 trackConnect(agent, priorStatus: priorStatus, result: .success)
             } catch {
-                rowPhases[agent] = .failed(error.localizedDescription)
+                rowPhases[agent] = .failed(AgentSetupFailureCopy.connect(agentName: agent.displayName))
+                rowFailureDetails[agent] = error.localizedDescription
                 trackConnect(agent, priorStatus: priorStatus, result: .failed)
             }
         }
@@ -511,6 +548,7 @@ struct AgentConnectionSettingsPage: View {
 
     private func setupCodexInbox() {
         codexInboxSetupError = nil
+        codexInboxSetupErrorDetails = nil
 
         do {
             let inboxURL = try AgentConnectionGuide.ensureCodexInboxFolder()
@@ -558,7 +596,8 @@ struct AgentConnectionSettingsPage: View {
                 )
             }
         } catch {
-            codexInboxSetupError = "Could not set up Codex Inbox: \(error.localizedDescription)"
+            codexInboxSetupError = AgentSetupFailureCopy.codexInbox
+            codexInboxSetupErrorDetails = error.localizedDescription
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .codexInbox,
                 agentTarget: .codex,
@@ -572,6 +611,7 @@ struct AgentConnectionSettingsPage: View {
 
     private func setupLiveMeetingCodex() {
         liveMeetingCodexSetupError = nil
+        liveMeetingCodexSetupErrorDetails = nil
 
         do {
             liveMeetingCodexEnabled = true
@@ -622,7 +662,8 @@ struct AgentConnectionSettingsPage: View {
             }
         } catch {
             disableLiveMeetingSidecarAfterFailure()
-            liveMeetingCodexSetupError = "Could not set up Live Meetings: \(error.localizedDescription)"
+            liveMeetingCodexSetupError = AgentSetupFailureCopy.liveMeetings
+            liveMeetingCodexSetupErrorDetails = error.localizedDescription
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .liveSidecar,
                 agentTarget: .codex,
@@ -634,17 +675,20 @@ struct AgentConnectionSettingsPage: View {
 
     private func prepareLiveMeetingSidecarWorkspace() {
         liveMeetingCodexSetupError = nil
+        liveMeetingCodexSetupErrorDetails = nil
 
         do {
             _ = try prepareLiveMeetingSidecarWorkspaceForUse()
         } catch {
             disableLiveMeetingSidecarAfterFailure()
-            liveMeetingCodexSetupError = "Could not prepare Live Meetings: \(error.localizedDescription)"
+            liveMeetingCodexSetupError = AgentSetupFailureCopy.liveMeetingsPrepare
+            liveMeetingCodexSetupErrorDetails = error.localizedDescription
         }
     }
 
     private func copyLiveMeetingCoworkSetup() {
         liveMeetingCodexSetupError = nil
+        liveMeetingCodexSetupErrorDetails = nil
 
         do {
             liveMeetingCodexEnabled = true
@@ -666,7 +710,8 @@ struct AgentConnectionSettingsPage: View {
             showCopiedFeedback($copiedLiveMeetingCoworkSetup)
         } catch {
             disableLiveMeetingSidecarAfterFailure()
-            liveMeetingCodexSetupError = "Could not set up Live Meetings: \(error.localizedDescription)"
+            liveMeetingCodexSetupError = AgentSetupFailureCopy.liveMeetings
+            liveMeetingCodexSetupErrorDetails = error.localizedDescription
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .liveSidecar,
                 agentTarget: .cowork,
@@ -678,6 +723,7 @@ struct AgentConnectionSettingsPage: View {
 
     private func openLiveMeetingPreview() {
         liveMeetingCodexSetupError = nil
+        liveMeetingCodexSetupErrorDetails = nil
 
         do {
             liveMeetingCodexEnabled = true
@@ -718,7 +764,8 @@ struct AgentConnectionSettingsPage: View {
             }
         } catch {
             disableLiveMeetingSidecarAfterFailure()
-            liveMeetingCodexSetupError = "Could not open Live View: \(error.localizedDescription)"
+            liveMeetingCodexSetupError = AgentSetupFailureCopy.liveView
+            liveMeetingCodexSetupErrorDetails = error.localizedDescription
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .livePreview,
                 agentTarget: .localAgent,
