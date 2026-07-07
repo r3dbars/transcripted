@@ -36,7 +36,9 @@ extension SpeakerDatabase {
                SpeakerNegativeExemplarPolicy.shouldVeto(
                    candidate: embedding,
                    positiveSimilarity: similarity,
-                   negativeExemplars: negatives
+                   negativeExemplars: negatives,
+                   profileAverage: speaker.embedding,
+                   positiveExemplars: speaker.exemplars
                ) {
                 AppLogger.speakers.info("Match vetoed: negative exemplar", [
                     "name": speaker.displayName ?? speaker.id.uuidString,

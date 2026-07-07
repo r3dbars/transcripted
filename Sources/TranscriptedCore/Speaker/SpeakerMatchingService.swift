@@ -94,7 +94,9 @@ extension Transcription {
                SpeakerNegativeExemplarPolicy.shouldVeto(
                    candidate: embedding,
                    positiveSimilarity: similarity,
-                   negativeExemplars: negatives
+                   negativeExemplars: negatives,
+                   profileAverage: profile.embedding,
+                   positiveExemplars: profile.exemplars
                ) {
                 AppLogger.transcription.info("Match vetoed: negative exemplar", [
                     "profile": profile.displayName ?? profile.id.uuidString.prefix(8).description,
