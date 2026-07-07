@@ -59,6 +59,9 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
 - `scripts/ops/release-health-card.py` — print a compact release-health card for one app version by combining local release metadata, GitHub downloads, live public release surfaces, and PostHog update/workflow counts when credentials are present; installed workflow rows are grouped by `app_version`, `build_version`, `build_channel`, and `build_revision` so local/current-main builds cannot be counted as shipped-release proof
   - Usage: `python3 scripts/ops/release-health-card.py --version 1.1.47`
+- `scripts/ops/check-crash-free-rate.py` — crash-free-rate release gate: query Sentry Release Health (Sessions) for a release's crash-free session/user rate and exit non-zero if it is below threshold (red) or unverifiable (yellow, e.g. credentials absent or no session data), so it can be a go/no-go gate; read-only, never publishes
+  - Usage: `python3 scripts/ops/check-crash-free-rate.py --version 1.1.48`
+  - Verdicts: exit 0 green (>= threshold), exit 1 red (below threshold), exit 3 yellow (cannot verify; never auto-green)
 - `scripts/ops/retention-cohort-report.py` — print a privacy-safe PostHog retention cohort report for first/second artifact, next-day and 7-day return, repeat dictation/meeting/agent/summary use, 3-days-this-week, version adoption, and first-run drop-off
   - Usage: `python3 scripts/ops/retention-cohort-report.py`
   - Health output: `python3 scripts/ops/retention-cohort-report.py --write-dir /tmp/transcripted-retention-health`
