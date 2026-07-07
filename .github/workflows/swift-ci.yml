@@ -5,14 +5,39 @@ name: Swift CI
 # PR and on merges to main. This is the machine enforcement behind the local
 # verification contract in .agents/test-matrix.yml.
 #
-# This is a required gate: the build-and-test job must pass for a PR to merge.
-# It does not use continue-on-error, so a failure here blocks merge instead of
-# leaving merge safety to local discipline alone.
+# The suite used to run as ONE sequential macOS job, so every check waited
+# behind the ~15-25 min app build and one failing step blocked signal on all
+# steps after it. It is now split by its real dependency graph so the
+# build-independent checks run in parallel with the single expensive app build:
 #
-# The app targets arm64-apple-macos26.0, so the runner image must carry a
-# toolchain/SDK that can target macOS 26. If `macos-26` is not available as a
-# hosted image (or the job fails on SDK selection), switch `runs-on` to a
-# self-hosted runner on a Mac that already builds this repo.
+#   checks      — build-independent (no prebuilt deps, no app bundle): source-list
+#                 contracts, fast tests, E2E smoke, Tools package tests.
+#   spm-tests   — needs the prebuilt native deps but NOT the app bundle: Core
+#                 package tests (`swift test`) + integration smoke. Restores the
+#                 shared deps cache and runs in parallel with the app build.
+#   app-build   — the only job that runs the full app build: build the native
+#                 deps (populating the shared cache), build the app bundle, then
+#                 the app-dependent Premium performance budget.
+#   build-and-test — required-status umbrella (see below). Aggregates the three
+#                 parallel jobs; fails if any of them failed.
+#
+# Why the umbrella: branch protection requires the status context
+# "build-and-test". Keeping a job with that exact id means splitting the work
+# across new jobs does not orphan the required check. The umbrella uses
+# `if: always()` so a failed upstream job fails it (rather than skipping it),
+# and it explicitly asserts every upstream job succeeded. If you rename the
+# jobs, keep the umbrella's id as `build-and-test` or update branch protection's
+# required contexts to match.
+#
+# All jobs run on macos-26 because the compiled sources pull in macOS-only SDKs
+# (AppKit, ScreenCaptureKit, FoundationModels, etc.) and the app targets
+# arm64-apple-macos26.0, so the runner image must carry a toolchain/SDK that can
+# target macOS 26. If `macos-26` is not available as a hosted image (or a job
+# fails on SDK selection), switch `runs-on` to a self-hosted runner on a Mac
+# that already builds this repo.
+#
+# None of these jobs use continue-on-error, so a failure blocks merge instead of
+# leaving merge safety to local discipline alone.
 
 on:
   pull_request:
@@ -27,10 +52,33 @@ concurrency:
   group: swift-ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Every build/test entrypoint disables the on-disk file logger so it does not
+  # write into the runner's home. This mirrors the per-step env that the old
+  # single-job workflow set on every step.
+  TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+
 jobs:
-  build-and-test:
+  # ---------------------------------------------------------------------------
+  # Fast feedback: everything that compiles against the system SDK only and
+  # needs NEITHER the prebuilt native deps NOR the full app build. Runs fully in
+  # parallel with the expensive app build, so a broken fast test or Tools
+  # package test surfaces in minutes instead of behind the 20-minute app build.
+  #
+  # Build-independence is load-bearing here:
+  #   - run-tests.sh compiles a curated Sources/Tests list against system
+  #     frameworks (no deps-*/app link).
+  #   - run-e2e-smoke.sh compiles a curated source list + TranscriptedCaptureKit
+  #     from source against system frameworks (no deps-*/app link).
+  #   - The four Tools package tests run without TRANSCRIPTEDCLI_ENABLE_* set, so
+  #     TranscriptedCLI's Package.swift leaves `hasAudioPipelineDeps` false and
+  #     none of the packages link the prebuilt deps.
+  # If any of those grows a dependency on the prebuilt deps, move it to
+  # spm-tests (and add the deps cache/build steps there).
+  # ---------------------------------------------------------------------------
+  checks:
     runs-on: macos-26
-    timeout-minutes: 120
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -39,6 +87,97 @@ jobs:
       - name: Build source-list contracts
         shell: bash
         run: python3 scripts/dev/check-build-source-lists.py
+
+      - name: Fast tests
+        shell: bash
+        env:
+          # Several dictation-writer tests construct fixed -0500 instants and
+          # assert locally-formatted headings/filenames; match the supported
+          # interactive environment instead of the runner's UTC default.
+          TZ: America/Chicago
+          # Wall-clock timing proofs (clipboard restore windows) are not
+          # provable under shared-runner scheduler jitter; they still run on
+          # every local bash run-tests.sh.
+          TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS: "1"
+        run: bash run-tests.sh
+
+      - name: E2E smoke
+        shell: bash
+        run: bash run-e2e-smoke.sh
+
+      - name: Tools package tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift test --package-path Tools/TranscriptedCaptureKit
+          swift test --package-path Tools/TranscriptedCLI
+          swift test --package-path Tools/TranscriptedMCP
+          swift test --package-path Tools/TranscriptedQA
+
+  # ---------------------------------------------------------------------------
+  # SPM package tests that need the prebuilt native deps (libExternalDeps.a for
+  # `swift test`, libDraftDeps.a for the integration smoke, plus deps-modules)
+  # but NOT the built app bundle. Restores the shared deps cache and, on a miss,
+  # self-heals by building deps here — so it never has to wait behind the app
+  # build. app-build is the canonical cache saver; this job restores only.
+  # ---------------------------------------------------------------------------
+  spm-tests:
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Restore prebuilt dependencies
+        id: deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps-libs
+            deps-modules
+            deps-frameworks
+            deps-tools
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
+          # Fall back to the newest dep cache for this OS/arch when the exact key
+          # misses, so build-deps.sh warm-starts from a partial cache and only
+          # rebuilds the stale artifacts.
+          restore-keys: |
+            deps-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.deps-cache.outputs.cache-hit }}" = "true" ]; then
+            # The cache key already hashes every staleness input, so a hit means
+            # the artifacts match this tree. Refresh the mtime stamp so
+            # build-deps.sh's mtime check agrees with the fresh checkout.
+            touch deps-libs/.build-deps-stamp
+          fi
+          bash build-deps.sh
+
+      - name: Core package tests
+        shell: bash
+        run: swift test
+
+      - name: Integration smoke
+        shell: bash
+        run: bash run-integration-smoke.sh
+
+  # ---------------------------------------------------------------------------
+  # The expensive path: build the native deps (populating the shared deps cache
+  # for spm-tests to reuse on later runs), build the app bundle, then run the
+  # app-dependent Premium performance budget. This is the ONLY job that runs the
+  # full ~15-25 min app build.
+  # ---------------------------------------------------------------------------
+  app-build:
+    runs-on: macos-26
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
 
       - name: Cache prebuilt dependencies
         id: deps-cache
@@ -50,9 +189,9 @@ jobs:
             deps-frameworks
             deps-tools
           key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/entrypoints/build-deps.sh', 'Package.swift', 'Sources/TranscriptedCore/**') }}
-          # Fall back to the newest dep cache for this OS/arch when the exact
-          # key misses, so build-deps.sh warm-starts from a partial cache and
-          # only rebuilds the stale artifacts.
+          # Fall back to the newest dep cache for this OS/arch when the exact key
+          # misses, so build-deps.sh warm-starts from a partial cache and only
+          # rebuilds the stale artifacts.
           restore-keys: |
             deps-${{ runner.os }}-${{ runner.arch }}-
 
@@ -61,8 +200,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ steps.deps-cache.outputs.cache-hit }}" = "true" ]; then
-            # The cache key already hashes every staleness input, so a hit
-            # means the artifacts match this tree. Refresh the mtime stamp so
+            # The cache key already hashes every staleness input, so a hit means
+            # the artifacts match this tree. Refresh the mtime stamp so
             # build-deps.sh's mtime check agrees with the fresh checkout.
             touch deps-libs/.build-deps-stamp
           fi
@@ -70,8 +209,6 @@ jobs:
 
       - name: Build app
         shell: bash
-        env:
-          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
         # GitHub-hosted macOS runners boot a real GUI/WindowServer session (the
         # same reason XCUITest works there), so build.sh runs its launch smoke
         # here instead of skipping it.
@@ -79,52 +216,37 @@ jobs:
 
       - name: Premium performance budget
         shell: bash
-        env:
-          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
         run: scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80
 
-      - name: Fast tests
-        shell: bash
-        env:
-          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
-          # Several dictation-writer tests construct fixed -0500 instants and
-          # assert locally-formatted headings/filenames; match the supported
-          # interactive environment instead of the runner's UTC default.
-          TZ: America/Chicago
-          # Wall-clock timing proofs (clipboard restore windows) are not
-          # provable under shared-runner scheduler jitter; they still run on
-          # every local bash run-tests.sh.
-          TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS: "1"
-        run: bash run-tests.sh
+  # ---------------------------------------------------------------------------
+  # Required-status umbrella. Branch protection requires the "build-and-test"
+  # context; keeping a job with that exact id means the split above does not
+  # orphan the required check. `if: always()` makes this job run even when an
+  # upstream job fails (a skipped required check would leave the PR unmergeable),
+  # and the step asserts every upstream job actually succeeded.
+  # ---------------------------------------------------------------------------
+  build-and-test:
+    needs: [checks, spm-tests, app-build]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
 
-      - name: Core package tests
+    steps:
+      - name: Require all Swift CI jobs to succeed
         shell: bash
-        env:
-          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
-        run: swift test
-
-      - name: Integration smoke
-        shell: bash
-        env:
-          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
-        run: bash run-integration-smoke.sh
-
-      - name: E2E smoke
-        shell: bash
-        env:
-          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
-        run: bash run-e2e-smoke.sh
-
-      - name: Tools package tests
-        shell: bash
-        env:
-          TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
         run: |
           set -euo pipefail
-          swift test --package-path Tools/TranscriptedCaptureKit
-          swift test --package-path Tools/TranscriptedCLI
-          swift test --package-path Tools/TranscriptedMCP
-          swift test --package-path Tools/TranscriptedQA
+          checks_result='${{ needs.checks.result }}'
+          spm_result='${{ needs.spm-tests.result }}'
+          app_result='${{ needs.app-build.result }}'
+          echo "checks=$checks_result spm-tests=$spm_result app-build=$app_result"
+          for result in "$checks_result" "$spm_result" "$app_result"; do
+            if [ "$result" != "success" ]; then
+              echo "::error::A required Swift CI job did not succeed (checks=$checks_result, spm-tests=$spm_result, app-build=$app_result)."
+              exit 1
+            fi
+          done
+          echo "All Swift CI jobs succeeded."
 
   # Hardware-dependent smokes. These need a physical microphone, a System Audio
   # Recording TCC grant, and real paste-back focus, which GitHub-hosted runners
