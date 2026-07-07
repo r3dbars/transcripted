@@ -34,6 +34,20 @@ echo "HEAD: $head_sha"
 echo "Base: $base_ref"
 echo ""
 
+# Catch wasted "repair PR" work: if this looks like a repair/redo branch, the
+# fix may already be merged under another PR number. Nudge before any editing.
+case "$branch" in
+    *repair*|*redo*|*reland*|*reapply*|*re-apply*|*conflict*|*rebase-*|*supersed*)
+        echo "Repair-branch guard:"
+        echo "- This branch name looks like a repair/redo of an existing PR."
+        echo "- Before editing, confirm the change did not ALREADY merge elsewhere:"
+        echo "    python3 scripts/dev/check-superseded.py --branch \"$branch\""
+        echo "    python3 scripts/dev/check-superseded.py --pr <dirty-pr-number>"
+        echo "  A 'STOP: #NNNN already merged this' means do not open the repair branch."
+        echo ""
+        ;;
+esac
+
 echo "Worktree:"
 git status --short
 echo ""
@@ -170,6 +184,12 @@ if [ -n "$changed_paths" ]; then
             add_command "scripts/dev/agent-preflight.sh"
             add_command "python3 -m py_compile scripts/dev/check-build-source-lists.py"
             add_command "python3 scripts/dev/check-build-source-lists.py"
+        fi
+
+        if matches_any "$path" "scripts/dev/check-superseded.py"; then
+            add_command "scripts/dev/agent-preflight.sh"
+            add_command "python3 -m py_compile scripts/dev/check-superseded.py"
+            add_command "python3 scripts/dev/check-superseded.py --self-test"
         fi
 
         if matches_any "$path" "scripts/dev/benchmark-home-recent-captures.sh" "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"; then

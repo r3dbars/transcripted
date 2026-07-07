@@ -128,6 +128,13 @@ rules:
       - "python3 scripts/dev/check-build-source-lists.py"
 
   - paths:
+      - "scripts/dev/check-superseded.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/dev/check-superseded.py"
+      - "python3 scripts/dev/check-superseded.py --self-test"
+
+  - paths:
       - "scripts/dev/benchmark-home-recent-captures.sh"
       - "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift"
     checks:
