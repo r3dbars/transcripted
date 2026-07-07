@@ -70,6 +70,22 @@ enum MenuTokens {
     static let compactActionRowHeight: CGFloat = 42
     static let utilityActionRowHeight: CGFloat = 40
     static let statusDotSize: CGFloat = 6
+
+    // Type — the popover's SF Pro roles. See docs/DESIGN_TOKENS.md. The menubar
+    // is the app's compact density tier, so its sizes sit a half-point below the
+    // main-window scale; they live here as named roles so views never reach for
+    // a raw `NSFont.systemFont(ofSize:)` literal. Changing a menubar font means
+    // changing it once, here.
+    enum Font {
+        static let rowTitlePrimary = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+        static let rowTitleUtility = NSFont.systemFont(ofSize: 12.5, weight: .regular)
+        static let rowDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
+        static let rowTrailingPrimary = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+        static let rowTrailingUtility = NSFont.systemFont(ofSize: 10, weight: .medium)
+        static let headerTitle = NSFont.systemFont(ofSize: 15.5, weight: .semibold)
+        static let headerStatus = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        static let headerDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
+    }
 }
 
 extension NSView {

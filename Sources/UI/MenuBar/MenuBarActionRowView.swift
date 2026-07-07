@@ -223,13 +223,13 @@ final class MenuBarActionRowView: NSControl {
     private func updateTypography() {
         switch rowSize {
         case .primary:
-            titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
-            detailLabel.font = NSFont.systemFont(ofSize: 10)
-            trailingLabel.font = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+            titleLabel.font = MenuTokens.Font.rowTitlePrimary
+            detailLabel.font = MenuTokens.Font.rowDetail
+            trailingLabel.font = MenuTokens.Font.rowTrailingPrimary
         case .utility:
-            titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .regular)
-            detailLabel.font = NSFont.systemFont(ofSize: 10)
-            trailingLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+            titleLabel.font = MenuTokens.Font.rowTitleUtility
+            detailLabel.font = MenuTokens.Font.rowDetail
+            trailingLabel.font = MenuTokens.Font.rowTrailingUtility
         }
     }
 

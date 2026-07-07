@@ -840,6 +840,136 @@ func testUIAutomationSurfaceContract() {
             "QA bench should keep a callable ui mode with local JSON evidence"
         )
     }
+
+    // WS4 "Premium minimalism" polish guards. These pin the visual/UX polish so
+    // it can't silently regress: teaching empty states (not gray filler),
+    // plain-words error states routed through shared copy (no raw
+    // `error.localizedDescription` on a user-facing surface), and design tokens.
+    runSuite("UI automation surface contract - WS4 empty states teach") {
+        let speakers = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
+        let settings = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
+
+        assertTrue(
+            speakers.contains("enum SpeakerPeopleEmptyState")
+                && speakers.contains("static let title = \"No speakers yet\"")
+                && speakers.contains("static let actionTitle = \"Start a meeting\"")
+                && speakers.contains("transcripted.speakers.empty.start-meeting")
+                && speakers.contains("struct SpeakersEmptyStateView")
+                && speakers.contains("Transcripted learns each voice as you record."),
+            "the Speakers surface should teach an empty first-run state, not render bare gray placeholder text"
+        )
+        assertFalse(
+            speakers.contains("No speakers yet. After your next meeting, the people in it will appear here."),
+            "the old bare-caption Speakers empty message should be gone, replaced by the teaching empty state"
+        )
+        assertTrue(
+            settings.contains("onStartMeeting: { actions.startMeeting() }"),
+            "the Speakers empty state should be wired to a real next action from the Settings host"
+        )
+    }
+
+    runSuite("UI automation surface contract - WS4 error states act, not dump") {
+        let agent = contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
+        let onboarding = contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift")
+        let settings = contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let agentCopy = contractSource("Sources/UI/Settings/AgentSetupFailureCopy.swift")
+        let settingsCopy = contractSource("Sources/UI/Settings/SettingsActionFailureCopy.swift")
+
+        // Shared plain-words primitives exist and are the single source of copy.
+        assertTrue(
+            agentCopy.contains("enum AgentSetupFailureCopy")
+                && agentCopy.contains("static let detailsTitle = \"Copy Details\"")
+                && agentCopy.contains("Transcripted couldn't connect \\(agentName)"),
+            "AgentSetupFailureCopy should hold plain-words connect/setup failure copy behind a Copy Details reveal"
+        )
+        assertTrue(
+            settingsCopy.contains("enum SettingsActionFailureCopy")
+                && settingsCopy.contains("static let modelCacheRemoval")
+                && settingsCopy.contains("static func captureLibraryMigration("),
+            "SettingsActionFailureCopy should hold plain-words settings-action failure copy"
+        )
+
+        // Agent page: routes through the shared copy + a Copy Details reveal, and
+        // no longer dumps a raw NSError into a user-visible label.
+        assertTrue(
+            agent.contains("AgentSetupFailureCopy.connect(agentName:")
+                && agent.contains("AgentSetupFailureCopy.codexInbox")
+                && agent.contains("AgentSetupFailureCopy.liveMeetings")
+                && agent.contains("AgentSetupFailureCopy.liveView")
+                && agent.contains("private func failureNotice(")
+                && agent.contains("transcripted.settings.agent.connect-error-details."),
+            "the Agent page should surface plain-words failures with a Copy Details reveal, not raw error text"
+        )
+        assertFalse(
+            agent.contains(".failed(error.localizedDescription)")
+                || agent.contains("Could not set up Codex Inbox: \\(error")
+                || agent.contains("Could not set up Live Meetings: \\(error")
+                || agent.contains("Could not prepare Live Meetings: \\(error")
+                || agent.contains("Could not open Live View: \\(error"),
+            "the Agent page must not interpolate a raw error into a user-facing setup message"
+        )
+
+        // Onboarding: first-run connect failure is plain words, not a raw NSError.
+        assertTrue(
+            onboarding.contains("AgentSetupFailureCopy.connect(agentName: \"Claude Desktop\")"),
+            "onboarding's Claude Desktop connect failure should read as plain words"
+        )
+        assertFalse(
+            onboarding.contains("claudeDesktopConnectPhase = .failed(error.localizedDescription)"),
+            "onboarding must not put a raw NSError on the first-run connect card"
+        )
+
+        // Settings statuses: plain words + Copy Details reveal, no raw dumps.
+        assertTrue(
+            settings.contains("SettingsActionFailureCopy.betaLiveSidecar")
+                && settings.contains("SettingsActionFailureCopy.localSummary(")
+                && settings.contains("SettingsActionFailureCopy.modelCacheRemoval")
+                && settings.contains("SettingsActionFailureCopy.launchAtLogin")
+                && settings.contains("SettingsActionFailureCopy.captureLibraryMigration(")
+                && settings.contains("private func settingsFailureDetailsButton("),
+            "Settings action failures should route through SettingsActionFailureCopy with a Copy Details reveal"
+        )
+        assertFalse(
+            settings.contains("Could not prepare live meeting sidecar: \\(error")
+                || settings.contains("setup failed: \\(error.localizedDescription)")
+                || settings.contains("Could not remove stale models: \\(error")
+                || settings.contains("Could not update launch at login: \\(error")
+                || settings.contains("Copy stopped: \\(error"),
+            "Settings status lines must not interpolate a raw error into user-facing text"
+        )
+    }
+
+    runSuite("UI automation surface contract - WS4 design tokens are the single source") {
+        let tokens = contractSource("Sources/UI/MenuBar/MenuTokens.swift")
+        let actionRow = contractSource("Sources/UI/MenuBar/MenuBarActionRowView.swift")
+        let header = contractSource("Sources/UI/MenuBar/MenuBarHeaderView.swift")
+        let doc = contractSource("docs/DESIGN_TOKENS.md")
+
+        assertTrue(
+            tokens.contains("enum Font")
+                && tokens.contains("static let rowTitlePrimary")
+                && tokens.contains("static let headerTitle"),
+            "MenuTokens should own the menubar's type roles so views never reach for a raw NSFont literal"
+        )
+        assertTrue(
+            actionRow.contains("MenuTokens.Font.rowTitlePrimary")
+                && actionRow.contains("MenuTokens.Font.rowTitleUtility")
+                && header.contains("MenuTokens.Font.headerTitle"),
+            "menubar rows and header should read their fonts from MenuTokens.Font"
+        )
+        assertFalse(
+            actionRow.contains("NSFont.systemFont(ofSize: 12.5")
+                || header.contains("NSFont.systemFont(ofSize: 15.5"),
+            "menubar labels should not re-inline raw NSFont sizes now that MenuTokens.Font owns them"
+        )
+        assertTrue(
+            doc.contains("Type scale")
+                && doc.contains("Spacing grid")
+                && doc.contains("Corner radii")
+                && doc.contains("MenuTokens.Font"),
+            "docs/DESIGN_TOKENS.md should exist as the single source documenting the type, spacing, and radius scales"
+        )
+    }
 }
 
 private func sourceBlock(named startMarker: String, endingBefore endMarker: String, in source: String) -> String {

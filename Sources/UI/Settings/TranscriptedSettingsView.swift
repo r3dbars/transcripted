@@ -97,6 +97,12 @@ struct TranscriptedSettingsView: View {
     @State private var appleSummarySetupStatus = AppleFoundationSummarySetupStatus.current()
     @State private var showLocalSummarySetupDetails = false
     @State private var localSummaryModelPreparationStatus: String?
+    // Raw error text for settings-action failures, kept out of the user-visible
+    // status line and offered behind "Copy Details".
+    @State private var betaFeatureStatusDetails: String?
+    @State private var localSummaryModelPreparationStatusDetails: String?
+    @State private var modelCacheCleanupStatusDetails: String?
+    @State private var captureLibraryMigrationStatusDetails: String?
     @State private var localSummaryModelPreparationTask: Task<String, Error>?
     @State private var localSummaryModelPreparationToken: UUID?
     @State private var isLocalSummaryModelPreparing = false
@@ -2094,6 +2100,20 @@ struct TranscriptedSettingsView: View {
         pasteboard.setString(details, forType: .string)
     }
 
+    /// Subtle "Copy Details" reveal shown under a failed settings-action status
+    /// line. The raw error lives here, never inline in the status message; the
+    /// action's own button (Set up / Remove / toggle) is the retry.
+    @ViewBuilder
+    private func settingsFailureDetailsButton(_ details: String?) -> some View {
+        if let details {
+            Button(SettingsActionFailureCopy.detailsTitle) {
+                copyHomeFailureDetails(details)
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+        }
+    }
+
     private func retryFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
         let didStart = meetingSession.retryFailedMeeting(id: item.id)
         if !didStart {
@@ -3353,7 +3373,10 @@ struct TranscriptedSettingsView: View {
                 summary: "Name new voices and manage the people in your meetings."
             )
 
-            SpeakerPeopleSettingsSection(model: speakerPeopleModel)
+            SpeakerPeopleSettingsSection(
+                model: speakerPeopleModel,
+                onStartMeeting: { actions.startMeeting() }
+            )
         }
         .accessibilityIdentifier("transcripted.settings.page.people")
     }
@@ -3415,6 +3438,7 @@ struct TranscriptedSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    settingsFailureDetailsButton(captureLibraryMigrationStatusDetails)
                 }
 
                 Text("Pick an Obsidian vault or any folder you want agents to read.")
@@ -3567,6 +3591,7 @@ struct TranscriptedSettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        settingsFailureDetailsButton(modelCacheCleanupStatusDetails)
                     }
                 } else if !modelCacheLoading {
                     Text("Model storage has not been scanned yet.")
@@ -3823,6 +3848,7 @@ struct TranscriptedSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(isLocalSummaryModelPreparing ? Color.accentColor : .secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                settingsFailureDetailsButton(localSummaryModelPreparationStatusDetails)
             }
 
             DisclosureGroup("Setup details", isExpanded: $showLocalSummarySetupDetails) {
@@ -3875,13 +3901,15 @@ struct TranscriptedSettingsView: View {
                 }
 
                 if let betaFeatureStatus {
+                    let isFailure = betaFeatureStatusDetails != nil
                     Label(
                         betaFeatureStatus,
-                        systemImage: betaFeatureStatus.hasPrefix("Could not") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+                        systemImage: isFailure ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
                     )
                     .font(.caption)
-                    .foregroundStyle(betaFeatureStatus.hasPrefix("Could not") ? Color.orange : Color.secondary)
+                    .foregroundStyle(isFailure ? Color.orange : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    settingsFailureDetailsButton(betaFeatureStatusDetails)
                 }
             }
         }
@@ -3903,6 +3931,7 @@ struct TranscriptedSettingsView: View {
 
     private func handleBetaLiveMeetingSidecarToggle(_ enabled: Bool) {
         betaFeatureStatus = nil
+        betaFeatureStatusDetails = nil
 
         if enabled {
             do {
@@ -3913,7 +3942,8 @@ struct TranscriptedSettingsView: View {
                 LiveMeetingCodexPreferences.setEnabled(false)
                 meetingSession.stopLiveCodexSessionFromSettings()
                 stopBetaLiveMeetingSidecarPreview()
-                betaFeatureStatus = "Could not prepare live meeting sidecar: \(error.localizedDescription)"
+                betaFeatureStatus = SettingsActionFailureCopy.betaLiveSidecar
+                betaFeatureStatusDetails = error.localizedDescription
             }
         } else {
             meetingSession.stopLiveCodexSessionFromSettings()
@@ -3930,6 +3960,7 @@ struct TranscriptedSettingsView: View {
             clearHomeLocalSummaryNotice()
             cancelLocalSummaryModelPreparation()
             localSummaryModelPreparationStatus = nil
+            localSummaryModelPreparationStatusDetails = nil
         }
     }
 
@@ -3962,6 +3993,7 @@ struct TranscriptedSettingsView: View {
 
         isLocalSummaryModelPreparing = true
         localSummaryModelPreparationStatus = localSummaryPreparationStartedStatus
+        localSummaryModelPreparationStatusDetails = nil
         recordLocalSummaryEvent(
             event: "local_meeting_summary_model_prepare_started",
             message: "\(provider.title) summary model preparation started",
@@ -4020,7 +4052,8 @@ struct TranscriptedSettingsView: View {
                 localSummaryModelPreparationTask = nil
                 localSummaryModelPreparationToken = nil
                 refreshLocalSummarySetupStatus()
-                localSummaryModelPreparationStatus = "\(provider.title) setup failed: \(error.localizedDescription)"
+                localSummaryModelPreparationStatus = SettingsActionFailureCopy.localSummary(providerTitle: provider.title)
+                localSummaryModelPreparationStatusDetails = error.localizedDescription
                 trackBetaModelPrepAbandoned(reason: .failed, stage: "prepare_model")
                 recordLocalSummaryEvent(
                     level: .error,
@@ -5003,6 +5036,7 @@ struct TranscriptedSettingsView: View {
         guard !modelCacheCleanupInProgress else { return }
         modelCacheCleanupInProgress = true
         modelCacheCleanupStatus = nil
+        modelCacheCleanupStatusDetails = nil
 
         Task.detached(priority: .utility) {
             do {
@@ -5021,7 +5055,8 @@ struct TranscriptedSettingsView: View {
             } catch {
                 await MainActor.run {
                     modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = "Could not remove stale models: \(error.localizedDescription)"
+                    modelCacheCleanupStatus = SettingsActionFailureCopy.modelCacheRemoval
+                    modelCacheCleanupStatusDetails = error.localizedDescription
                 }
             }
         }
@@ -5032,6 +5067,7 @@ struct TranscriptedSettingsView: View {
         let includeWhisper = !effectiveTranscriptionModel.isWhisper
         modelCacheCleanupInProgress = true
         modelCacheCleanupStatus = nil
+        modelCacheCleanupStatusDetails = nil
 
         Task.detached(priority: .utility) {
             do {
@@ -5050,7 +5086,8 @@ struct TranscriptedSettingsView: View {
             } catch {
                 await MainActor.run {
                     modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = "Could not remove reclaimable cache: \(error.localizedDescription)"
+                    modelCacheCleanupStatus = SettingsActionFailureCopy.modelCacheRemoval
+                    modelCacheCleanupStatusDetails = error.localizedDescription
                 }
             }
         }
@@ -5060,6 +5097,7 @@ struct TranscriptedSettingsView: View {
         guard !modelCacheCleanupInProgress, !effectiveTranscriptionModel.isWhisper else { return }
         modelCacheCleanupInProgress = true
         modelCacheCleanupStatus = nil
+        modelCacheCleanupStatusDetails = nil
 
         Task.detached(priority: .utility) {
             do {
@@ -5078,7 +5116,8 @@ struct TranscriptedSettingsView: View {
             } catch {
                 await MainActor.run {
                     modelCacheCleanupInProgress = false
-                    modelCacheCleanupStatus = "Could not remove Whisper cache: \(error.localizedDescription)"
+                    modelCacheCleanupStatus = SettingsActionFailureCopy.modelCacheRemoval
+                    modelCacheCleanupStatusDetails = error.localizedDescription
                 }
             }
         }
@@ -5175,7 +5214,8 @@ struct TranscriptedSettingsView: View {
             refreshLaunchAtLoginState()
         } catch {
             launchAtLoginEnabled = previousValue
-            launchAtLoginStatus = "Could not update launch at login: \(error.localizedDescription)"
+            // Tooltip copy only; the raw error is captured to telemetry below.
+            launchAtLoginStatus = SettingsActionFailureCopy.launchAtLogin
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "app",
@@ -5392,6 +5432,7 @@ struct TranscriptedSettingsView: View {
         guard !captureLibraryMigrationInProgress else { return }
         captureLibraryMigrationInProgress = true
         captureLibraryMigrationStatus = "Copying captures..."
+        captureLibraryMigrationStatusDetails = nil
 
         Task.detached(priority: .utility) {
             let planner = CaptureLibraryMigrationPlanner()
@@ -5410,8 +5451,10 @@ struct TranscriptedSettingsView: View {
             } catch {
                 await MainActor.run {
                     captureLibraryMigrationInProgress = false
-                    captureLibraryMigrationStatus = "Copy stopped: \(error.localizedDescription) "
-                        + "Your captures are still in \(choice.currentLibrary.path) and the library was not switched."
+                    captureLibraryMigrationStatus = SettingsActionFailureCopy.captureLibraryMigration(
+                        currentLibraryPath: choice.currentLibrary.path
+                    )
+                    captureLibraryMigrationStatusDetails = error.localizedDescription
                 }
             }
         }

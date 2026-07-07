@@ -35,7 +35,7 @@ final class MenuBarHeaderView: NSView {
     override var isFlipped: Bool { true }
 
     private func setupViews() {
-        titleLabel.font = NSFont.systemFont(ofSize: 15.5, weight: .semibold)
+        titleLabel.font = MenuTokens.Font.headerTitle
         titleLabel.textColor = MenuTokens.textPrimaryNS
         addSubview(titleLabel)
 
@@ -43,7 +43,7 @@ final class MenuBarHeaderView: NSView {
         statusDot.layer?.cornerRadius = MenuTokens.statusDotSize / 2
         addSubview(statusDot)
 
-        statusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        statusLabel.font = MenuTokens.Font.headerStatus
         statusLabel.textColor = MenuTokens.textSecondaryNS
         addSubview(statusLabel)
 
@@ -53,7 +53,7 @@ final class MenuBarHeaderView: NSView {
         progressBar.maxValue = 1
         addSubview(progressBar)
 
-        detailLabel.font = NSFont.systemFont(ofSize: 10)
+        detailLabel.font = MenuTokens.Font.headerDetail
         detailLabel.textColor = MenuTokens.textSecondaryNS
         detailLabel.maximumNumberOfLines = 2
         addSubview(detailLabel)
@@ -64,7 +64,7 @@ final class MenuBarHeaderView: NSView {
         }
         addSubview(warningIconView)
 
-        warningLabel.font = NSFont.systemFont(ofSize: 10)
+        warningLabel.font = MenuTokens.Font.headerDetail
         warningLabel.textColor = MenuTokens.textSecondaryNS
         warningLabel.maximumNumberOfLines = 2
         addSubview(warningLabel)
