@@ -13,6 +13,18 @@ For Claude Desktop users, the best setup is inside the app:
 That path installs the bundled helper, updates Claude Desktop's config, and
 runs a local self-test.
 
+## Interactive UI (MCP Apps)
+
+The server exposes one interactive widget via the MCP Apps extension
+(`io.modelcontextprotocol/ui`, SEP-1865): call `show_recent_meetings` to render a
+card list of recent meetings — each with inline audio playback and a raw-transcript
+view — that draws inside a rendering-capable client. It is fully self-contained
+(no network; local audio/transcripts travel over the local transport), and falls
+back to a plain-text list in clients that do not render inline UI (e.g. the Claude
+Code CLI). Renders inline today in ChatGPT, VS Code, Cursor, and Goose; see
+[`docs/mcp-ui-recent-meetings.md`](../../docs/mcp-ui-recent-meetings.md) for the
+per-client support matrix and how to try it.
+
 ## Source Build
 
 Use this only when developing the MCP server directly:
