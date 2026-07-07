@@ -225,6 +225,14 @@ extension SpeakerDatabase {
             }
             sqlite3_finalize(statement)
 
+            // Exemplars are a rebuildable cache of gated centroids tied to a specific identity/average.
+            // The merge blends a second voice into the target and deletes the source, so drop both
+            // sets: the source's would orphan, and the target's no longer match its changed average.
+            // They re-accumulate from future confident matches. Un-merge restores neither (both start
+            // empty), which degrades to single-average matching — never wrong, just less enriched.
+            deleteExemplarsImpl(profileId: sourceId)
+            deleteExemplarsImpl(profileId: targetId)
+
             // Delete source profile
             let deleteSql = "DELETE FROM speakers WHERE id = ?;"
             var deleteStmt: OpaquePointer?

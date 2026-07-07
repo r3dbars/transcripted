@@ -11,6 +11,13 @@ public struct SpeakerProfile: Identifiable, Sendable {
     public var displayName: String?        // "Nate", "Travis", or nil if unnamed
     public var nameSource: String?         // NameSource.userManual or nil
     public var embedding: [Float]          // 256-dim average voice vector
+    /// Additional representative voiceprints ("exemplars") for this person, beyond the blended
+    /// `embedding` average — e.g. one for clean in-person mic and one for compressed remote audio.
+    /// Empty for legacy single-average profiles, which then match exactly as before. Matching scores
+    /// a candidate against the best-fitting exemplar (see `SpeakerVectorMath.bestSimilarity`).
+    /// Populated as a read-side cache when profiles are loaded from `SpeakerDatabase`; the
+    /// authoritative rows live in the `speaker_exemplars` table.
+    public var exemplars: [[Float]]
     public var firstSeen: Date
     public var lastSeen: Date
     public var callCount: Int
@@ -26,12 +33,14 @@ public struct SpeakerProfile: Identifiable, Sendable {
         lastSeen: Date,
         callCount: Int,
         confidence: Double,
-        disputeCount: Int
+        disputeCount: Int,
+        exemplars: [[Float]] = []
     ) {
         self.id = id
         self.displayName = displayName
         self.nameSource = nameSource
         self.embedding = embedding
+        self.exemplars = exemplars
         self.firstSeen = firstSeen
         self.lastSeen = lastSeen
         self.callCount = callCount
