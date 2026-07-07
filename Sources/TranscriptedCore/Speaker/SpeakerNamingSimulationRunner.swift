@@ -587,6 +587,9 @@ public final class SpeakerNamingSimulationRunner {
         speakerDB: SpeakerDatabase
     ) -> Classification {
         var contexts: [String: ChannelSpeakerContext] = [:]
+        // Mirror the production pipeline: rejected-sample vetoes feed the matcher so the simulation
+        // exercises the negative-exemplar path end-to-end (empty until a correction records one).
+        let negativeExemplarsByProfile = speakerDB.negativeExemplarsByProfile()
         let grouped = Dictionary(grouping: segments) { segment in
             segment.fixture.channel.speakerKey(diarizerSpeakerId: String(segment.effectiveSpeakerId))
         }
@@ -619,7 +622,8 @@ public final class SpeakerNamingSimulationRunner {
             if let match = Transcription.matchAgainstProfiles(
                 meanEmbedding,
                 profiles: existingProfiles,
-                threshold: threshold
+                threshold: threshold,
+                negativeExemplarsByProfile: negativeExemplarsByProfile
             ) {
                 _ = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: match.profileId)
                 let snapshot = existingProfiles.first { $0.id == match.profileId }
@@ -1129,6 +1133,11 @@ public final class SpeakerNamingSimulationRunner {
                 if let snapshot = context?.matchedProfileSnapshot {
                     speakerDB.restoreProfile(snapshot)
                     speakerDB.incrementDisputeCount(id: snapshot.id)
+                    // Mirror production: the rejected embedding becomes a negative exemplar against
+                    // the wrongly-suggested profile.
+                    if let embedding = context?.sessionEmbedding {
+                        speakerDB.recordNegativeExemplar(profileId: snapshot.id, embedding: embedding)
+                    }
                 }
                 if let embedding = context?.sessionEmbedding {
                     _ = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: resolvedId)

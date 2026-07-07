@@ -22,6 +22,7 @@ extension TranscriptionTaskManager {
         case addOrUpdateEmbedding(embedding: [Float], existingId: UUID?)
         case incrementDisputeCount(UUID)
         case resetDisputeCount(UUID)
+        case recordNegativeExemplar(profileId: UUID, embedding: [Float])
     }
 
     /// Handle completion of the speaker naming flow.
@@ -494,7 +495,7 @@ extension TranscriptionTaskManager {
         case .corrected:
             var mutations = plannedMutations.compactMap { mutation -> PlannedSpeakerMutation? in
                 switch mutation {
-                case .restoreProfile, .incrementDisputeCount:
+                case .restoreProfile, .incrementDisputeCount, .recordNegativeExemplar:
                     return mutation
                 case .merge, .setDisplayName, .addOrUpdateEmbedding, .resetDisputeCount:
                     return nil
@@ -564,6 +565,15 @@ extension TranscriptionTaskManager {
             if let matchedProfile = entry?.matchedProfileSnapshot {
                 mutations.append(.restoreProfile(matchedProfile))
                 mutations.append(.incrementDisputeCount(matchedProfile.id))
+                // The rejected embedding becomes a negative exemplar against the wrongly-suggested
+                // profile: "this voice is explicitly not this person", used to veto future matches.
+                // The corrected-to target (below) is resolved via `exactNamedTarget(excluding:
+                // update.persistentSpeakerId)`, and on a match `persistentSpeakerId == matchedProfile.id`,
+                // so the target can never be the matched profile — the same id is never written a
+                // positive embedding and a negative exemplar for one correction.
+                if let embedding = entry?.sessionEmbedding {
+                    mutations.append(.recordNegativeExemplar(profileId: matchedProfile.id, embedding: embedding))
+                }
             }
 
             if let targetProfile = exactNamedTarget(
@@ -623,6 +633,8 @@ extension TranscriptionTaskManager {
                 speakerDB.incrementDisputeCount(id: id)
             case .resetDisputeCount(let id):
                 speakerDB.resetDisputeCount(id: id)
+            case .recordNegativeExemplar(let profileId, let embedding):
+                speakerDB.recordNegativeExemplar(profileId: profileId, embedding: embedding)
             }
         }
     }
@@ -698,6 +710,10 @@ extension TranscriptionTaskManager {
             }
 
             if let snapshot = entry.matchedProfileSnapshot {
+                // Discard freezes the matched profile (dispute count) but intentionally does NOT
+                // record a negative exemplar: unlike an explicit correction, a discard says "don't
+                // save this sample", not "this voice is a different known person". Negative
+                // exemplars are scoped to the `.corrected` path.
                 speakerDB.restoreProfile(snapshot)
                 speakerDB.incrementDisputeCount(id: snapshot.id)
                 AppLogger.speakers.info("Discarded speaker sample and restored matched profile", [

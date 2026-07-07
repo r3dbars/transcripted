@@ -153,6 +153,8 @@ extension Transcription {
             // consolidation (collapses one over-segmented voice so the user names
             // each person once), and DB-informed split still run.
             let existingProfiles = speakerDB.allSpeakers()
+            // Rejected-sample vetoes for matching (empty until a correction records one).
+            let negativeExemplarsByProfile = speakerDB.negativeExemplarsByProfile()
             let speakerThresholds = diarization.activeSpeakerThresholds
             let speakerSegments = EmbeddingClusterer.postProcess(
                 segments: rawSegments,
@@ -317,7 +319,7 @@ extension Transcription {
                 // so a cluster that turns out to be a distinct voice (spun off) never blends into
                 // the shared profile. Matching reads only the `existingProfiles` snapshot, so
                 // deferring the blend cannot change any match decision.
-                if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold) {
+                if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile) {
                     speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity)
                     let matchedProfile = existingProfiles.first(where: { $0.id == matchResult.profileId })
                     AppLogger.transcription.info("Speaker matched DB profile", [
@@ -899,6 +901,9 @@ extension Transcription {
             .filter { !ghostSpeakerIdSet.contains($0.key) }
             .reduce(into: [:]) { $0[$1.key] = Self.computeMeanEmbedding($1.value) }
 
+        // Rejected-sample vetoes for matching (empty until a correction records one).
+        let negativeExemplarsByProfile = speakerDB.negativeExemplarsByProfile()
+
         for (speakerId, embeddings) in embeddingsPerSpeaker {
             let meanEmbedding = Self.computeMeanEmbedding(embeddings)
             let isGhost = ghostSpeakerIdSet.contains(speakerId)
@@ -924,7 +929,7 @@ extension Transcription {
             // rationale as the system path: matching reads only the existingProfiles snapshot, so
             // deferring the blend changes no match decision, and a spun-off distinct voice never
             // contaminates the shared profile).
-            if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold) {
+            if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile) {
                 speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity)
             } else {
                 let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)

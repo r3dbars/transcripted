@@ -65,6 +65,14 @@ public protocol SpeakerStore: Sendable {
 
     /// Most-recent-first lifeline outcomes for a profile, for health/demotion decisions
     func recentMatchOutcomes(profileId: UUID, limit: Int) -> [SpeakerMatchOutcome]
+
+    /// Record a rejected embedding as a negative exemplar ("explicitly not this person") against the
+    /// profile it was wrongly matched to. Written when a user corrects a mis-identified speaker.
+    func recordNegativeExemplar(profileId: UUID, embedding: [Float])
+
+    /// All negative exemplars grouped by profile id, fetched once per recording so the matcher can
+    /// veto profiles whose rejected samples a candidate embedding too closely resembles.
+    func negativeExemplarsByProfile() -> [UUID: [[Float]]]
 }
 
 public extension SpeakerStore {
@@ -90,4 +98,11 @@ public extension SpeakerStore {
     }
 
     func recentMatchOutcomes(profileId: UUID, limit: Int) -> [SpeakerMatchOutcome] { [] }
+
+    /// Back-compat defaults: stores that don't persist negative exemplars (test doubles, simple
+    /// stores) drop the signal and report none, which leaves matching at its positive-only behavior.
+    /// `SpeakerDatabase` provides the real SQLite-backed implementations.
+    func recordNegativeExemplar(profileId: UUID, embedding: [Float]) {}
+
+    func negativeExemplarsByProfile() -> [UUID: [[Float]]] { [:] }
 }
