@@ -263,9 +263,20 @@ final class SpeakerExemplarDeltaEvalTests: XCTestCase {
     ///   - ownerCollateralRate — A's own voice wrongly vetoed by B's negative (must stay ~0).
     private func vetoExperiment(profiles: [Profile], testBySpeaker: [String: [(quality: String, emb: [Float])]], db: SpeakerDatabase) -> [String: Any] {
         var confusablePairs = 0
-        var replays = 0, reMatch = 0, vetoed = 0, vetoedAndReMatch = 0, vetoable = 0
-        var sameCondReplays = 0, sameCondReMatch = 0, sameCondVetoed = 0
-        var ownerCollateral = 0, ownerChecks = 0
+        var replays = 0, reMatch = 0, vetoable = 0
+
+        // Two veto arms, each split by whether the returning wrong voice arrives in the SAME audio
+        // condition as the rejected sample or a DIFFERENT (cross) condition:
+        //   - RAW: the single stored rejected embedding only (pre-fix behavior, the eval's original
+        //          `vetoedAmongReMatch`). Raw cosine collapses cross-condition, so it under-fires there.
+        //   - TX:  condition-transported negatives (#1493 follow-up) — the rejected sample plus its
+        //          transport along the profile's own observed condition shifts. Same 0.80/≥pos owner
+        //          gate; only the negative representation is richer.
+        // reMatch (pos ≥ floor) is arm-independent; the vetoed-among-re-match counters are per arm.
+        var reMatchCross = 0, reMatchSame = 0
+        var rawVetoedCross = 0, rawVetoedSame = 0
+        var txVetoedCross = 0, txVetoedSame = 0
+        var rawOwnerCollateral = 0, txOwnerCollateral = 0, ownerChecks = 0
 
         // DB round-trip sanity: the store persists + reads a negative exemplar (real write path).
         if let a = profiles.first, let bEmb = testBySpeaker[profiles.dropFirst().first?.gt ?? ""]?.first?.emb {
@@ -287,44 +298,67 @@ final class SpeakerExemplarDeltaEvalTests: XCTestCase {
                     replays += 1
                     let pos2 = SpeakerVectorMath.bestSimilarity(candidate: u2.emb, average: a.average, exemplars: a.exemplars)
                     let didReMatch = pos2 >= matchFloor
-                    let didVeto = SpeakerNegativeExemplarPolicy.shouldVeto(
+                    let sameCond = u2.quality == u1.quality
+                    // RAW arm: single stored negative, no transport.
+                    let rawVeto = SpeakerNegativeExemplarPolicy.shouldVeto(
                         candidate: u2.emb, positiveSimilarity: pos2, negativeExemplars: negatives)
+                    // TX arm: condition-transported negatives (the fix).
+                    let txVeto = SpeakerNegativeExemplarPolicy.shouldVeto(
+                        candidate: u2.emb, positiveSimilarity: pos2, negativeExemplars: negatives,
+                        profileAverage: a.average, positiveExemplars: a.exemplars)
                     let negSim = SpeakerVectorMath.cosineSimilarity(u2.emb, negatives[0])
-                    if didReMatch { reMatch += 1 }
-                    if didVeto { vetoed += 1 }
-                    if didReMatch && didVeto { vetoedAndReMatch += 1 }
                     if negSim >= SpeakerNegativeExemplarPolicy.vetoFloor { vetoable += 1 }
-                    if u2.quality == u1.quality {
-                        sameCondReplays += 1
-                        if didReMatch { sameCondReMatch += 1 }
-                        if didVeto { sameCondVetoed += 1 }
+                    if didReMatch {
+                        reMatch += 1
+                        if sameCond { reMatchSame += 1 } else { reMatchCross += 1 }
+                        if rawVeto { if sameCond { rawVetoedSame += 1 } else { rawVetoedCross += 1 } }
+                        if txVeto { if sameCond { txVetoedSame += 1 } else { txVetoedCross += 1 } }
                     }
                 }
-                // Collateral: A's own held-out utterances must not be vetoed by B's negative.
+                // Collateral: A's own held-out utterances must not be vetoed by B's negative — under
+                // EITHER arm. The transport must not start vetoing the genuine owner.
                 for own in ownUtterances {
                     ownerChecks += 1
                     let posOwn = SpeakerVectorMath.bestSimilarity(candidate: own.emb, average: a.average, exemplars: a.exemplars)
-                    if SpeakerNegativeExemplarPolicy.shouldVeto(candidate: own.emb, positiveSimilarity: posOwn, negativeExemplars: negatives) {
-                        ownerCollateral += 1
+                    if SpeakerNegativeExemplarPolicy.shouldVeto(
+                        candidate: own.emb, positiveSimilarity: posOwn, negativeExemplars: negatives) {
+                        rawOwnerCollateral += 1
+                    }
+                    if SpeakerNegativeExemplarPolicy.shouldVeto(
+                        candidate: own.emb, positiveSimilarity: posOwn, negativeExemplars: negatives,
+                        profileAverage: a.average, positiveExemplars: a.exemplars) {
+                        txOwnerCollateral += 1
                     }
                 }
             }
         }
         func rate(_ x: Int, _ y: Int) -> Double { y > 0 ? Double(x) / Double(y) : 0 }
+        let rawVetoed = rawVetoedCross + rawVetoedSame
+        let txVetoed = txVetoedCross + txVetoedSame
         return [
             "confusablePairs": confusablePairs,
             "replays": replays,
             "reMatchRateLegacy": rate(reMatch, replays),
-            "vetoedRate": rate(vetoed, replays),
-            "vetoedAmongReMatch": rate(vetoedAndReMatch, reMatch),   // fraction of wrong re-matches the veto removes
-            "vetoableShare": rate(vetoable, replays),               // u2 resembles rejected sample >= 0.80
-            "reMatchCount": reMatch, "vetoedCount": vetoed, "vetoedAndReMatchCount": vetoedAndReMatch,
-            "sameCondition": [
-                "replays": sameCondReplays,
-                "reMatchRateLegacy": rate(sameCondReMatch, sameCondReplays),
-                "vetoedRate": rate(sameCondVetoed, sameCondReplays),
+            "vetoableShare": rate(vetoable, replays),               // u2 resembles rejected sample >= 0.80 (raw)
+            "reMatchCount": reMatch,
+            "reMatchCrossCount": reMatchCross, "reMatchSameCount": reMatchSame,
+            // RAW arm (pre-fix): fraction of wrong re-matches the single stored negative removes.
+            "raw": [
+                "vetoedAmongReMatch": rate(rawVetoed, reMatch),
+                "vetoedAmongReMatchCross": rate(rawVetoedCross, reMatchCross),
+                "vetoedAmongReMatchSame": rate(rawVetoedSame, reMatchSame),
+                "ownerCollateralRate": rate(rawOwnerCollateral, ownerChecks),
+                "ownerCollateralCount": rawOwnerCollateral,
             ],
-            "ownerCollateralRate": rate(ownerCollateral, ownerChecks),
+            // TX arm (the fix): same metrics with condition-transported negatives.
+            "transported": [
+                "vetoedAmongReMatch": rate(txVetoed, reMatch),
+                "vetoedAmongReMatchCross": rate(txVetoedCross, reMatchCross),
+                "vetoedAmongReMatchSame": rate(txVetoedSame, reMatchSame),
+                "ownerCollateralRate": rate(txOwnerCollateral, ownerChecks),
+                "ownerCollateralCount": txOwnerCollateral,
+                "transportScale": SpeakerNegativeExemplarPolicy.crossConditionTransportScale,
+            ],
             "ownerChecks": ownerChecks,
         ]
     }
