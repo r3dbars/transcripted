@@ -12,6 +12,18 @@ extension TranscriptionTaskManager {
         /// Runner-up similarity for the auto-accept margin guard; nil when unknown (the
         /// utterance fallback path), which `shouldAutoAccept` treats as "confirm, don't auto".
         let secondSimilarity: Double?
+        /// Winner's average-only cosine and the runner-up's average-only cosine, when carried by
+        /// the match context. Feed `SpeakerNamingPolicy.shouldAutoAccept`'s `marginSimilarities`
+        /// so the auto-accept margin is judged on the blended average, not the best exemplar.
+        let averageSimilarity: Double?
+        let secondAverageSimilarity: Double?
+
+        /// Average-based margin pair for `shouldAutoAccept`, or nil to fall back to the legacy
+        /// (exemplar) margin when the average sims weren't carried (e.g. utterance fallback).
+        var marginSimilarities: (best: Double, secondBest: Double)? {
+            guard let best = averageSimilarity, let second = secondAverageSimilarity else { return nil }
+            return (best: best, secondBest: second)
+        }
     }
 
     nonisolated static func speakerClassificationKnowledge(
@@ -31,7 +43,9 @@ extension TranscriptionTaskManager {
                     speakerId: sid,
                     profile: snapshot,
                     similarity: similarity,
-                    secondSimilarity: context.matchSecondSimilarity
+                    secondSimilarity: context.matchSecondSimilarity,
+                    averageSimilarity: context.matchAverageSimilarity,
+                    secondAverageSimilarity: context.matchSecondBestAverageSimilarity
                 ))
                 continue
             }
@@ -44,7 +58,9 @@ extension TranscriptionTaskManager {
                     speakerId: sid,
                     profile: profile,
                     similarity: similarity,
-                    secondSimilarity: nil   // runner-up not carried on the utterance fallback
+                    secondSimilarity: nil,   // runner-up not carried on the utterance fallback
+                    averageSimilarity: nil,
+                    secondAverageSimilarity: nil
                 ))
             }
         }
@@ -330,7 +346,8 @@ extension TranscriptionTaskManager {
                     profile: entry.profile,
                     similarity: entry.similarity,
                     secondBestSimilarity: entry.secondSimilarity,
-                    recentOutcomes: cachedRecentOutcomes(entry.profile)
+                    recentOutcomes: cachedRecentOutcomes(entry.profile),
+                    marginSimilarities: entry.marginSimilarities
                 )
                 if canAutoAccept {
                     autoAcceptedIds.insert(sid)
@@ -358,7 +375,8 @@ extension TranscriptionTaskManager {
                 profile: entry.profile,
                 similarity: entry.similarity,
                 secondBestSimilarity: entry.secondSimilarity,
-                recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? []
+                recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? [],
+                marginSimilarities: entry.marginSimilarities
             )
             speakerMappings[key] = mapping
             speakerSources[key] = autoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
@@ -403,7 +421,8 @@ extension TranscriptionTaskManager {
                         profile: entry.profile,
                         similarity: entry.similarity,
                         secondBestSimilarity: entry.secondSimilarity,
-                        recentOutcomes: cachedRecentOutcomes(entry.profile)
+                        recentOutcomes: cachedRecentOutcomes(entry.profile),
+                        marginSimilarities: entry.marginSimilarities
                     )
                     if canAutoAccept {
                         micAutoAcceptedIds.insert(sid)
@@ -435,7 +454,8 @@ extension TranscriptionTaskManager {
                     profile: entry.profile,
                     similarity: entry.similarity,
                     secondBestSimilarity: entry.secondSimilarity,
-                    recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? []
+                    recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? [],
+                    marginSimilarities: entry.marginSimilarities
                 )
                 speakerMappings[key] = mapping
                 speakerSources["mic_\(entry.speakerId)"] = micAutoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"

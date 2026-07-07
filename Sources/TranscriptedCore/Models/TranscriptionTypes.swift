@@ -351,19 +351,30 @@ public struct ChannelSpeakerContext: Sendable {
     /// Similarity of the next-closest profile that cleared the match floor (the runner-up),
     /// or nil if unknown / no runner-up. Feeds `SpeakerNamingPolicy`'s auto-accept margin guard.
     public let matchSecondSimilarity: Double?
+    /// Winner's cosine to its blended *average* representative (exemplars excluded), and the
+    /// highest average cosine among the other candidate profiles. Feed
+    /// `SpeakerNamingPolicy.shouldAutoAccept`'s `marginSimilarities` so the auto-accept margin is
+    /// computed on the average, not the best exemplar (see
+    /// docs/speaker-eval-exemplar-delta-2026-07.md). nil on paths that don't carry a match result.
+    public let matchAverageSimilarity: Double?
+    public let matchSecondBestAverageSimilarity: Double?
 
     public init(
         persistentSpeakerId: UUID,
         sessionEmbedding: [Float]?,
         matchedProfileSnapshot: SpeakerProfile?,
         matchSimilarity: Double?,
-        matchSecondSimilarity: Double? = nil
+        matchSecondSimilarity: Double? = nil,
+        matchAverageSimilarity: Double? = nil,
+        matchSecondBestAverageSimilarity: Double? = nil
     ) {
         self.persistentSpeakerId = persistentSpeakerId
         self.sessionEmbedding = sessionEmbedding
         self.matchedProfileSnapshot = matchedProfileSnapshot
         self.matchSimilarity = matchSimilarity
         self.matchSecondSimilarity = matchSecondSimilarity
+        self.matchAverageSimilarity = matchAverageSimilarity
+        self.matchSecondBestAverageSimilarity = matchSecondBestAverageSimilarity
     }
 }
 

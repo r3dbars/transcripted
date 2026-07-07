@@ -253,7 +253,7 @@ extension Transcription {
 
             // Match each speaker's mean embedding against the DB once
             // (existingProfiles was already snapshotted above for post-processing)
-            var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double, secondSimilarity: Double)] = [:]
+            var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double, secondSimilarity: Double, averageSimilarity: Double, secondAverageSimilarity: Double)] = [:]
             var speakerNewProfiles: [Int: UUID] = [:]
             var speakerIdRemap: [Int: Int] = [:]
             // Session mean embedding actually matched for each non-ghost speaker, kept so the
@@ -320,7 +320,7 @@ extension Transcription {
                 // the shared profile. Matching reads only the `existingProfiles` snapshot, so
                 // deferring the blend cannot change any match decision.
                 if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile) {
-                    speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity)
+                    speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity, matchResult.averageSimilarity, matchResult.secondBestAverageSimilarity)
                     let matchedProfile = existingProfiles.first(where: { $0.id == matchResult.profileId })
                     AppLogger.transcription.info("Speaker matched DB profile", [
                         "speakerId": "\(speakerId)",
@@ -440,7 +440,9 @@ extension Transcription {
                     sessionEmbedding: sessionEmbedding,
                     matchedProfileSnapshot: matchedProfileSnapshot,
                     matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity,
-                    matchSecondSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondSimilarity
+                    matchSecondSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondSimilarity,
+                    matchAverageSimilarity: speakerMatchResults[effectiveSpeakerId]?.averageSimilarity,
+                    matchSecondBestAverageSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondAverageSimilarity
                 )
             }
 
@@ -890,7 +892,7 @@ extension Transcription {
             }
         }
 
-        var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double, secondSimilarity: Double)] = [:]
+        var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double, secondSimilarity: Double, averageSimilarity: Double, secondAverageSimilarity: Double)] = [:]
         var speakerNewProfiles: [Int: UUID] = [:]
         var speakerIdRemap: [Int: Int] = [:]
         var newlyCreatedProfileIds: Set<UUID> = []
@@ -930,7 +932,7 @@ extension Transcription {
             // deferring the blend changes no match decision, and a spun-off distinct voice never
             // contaminates the shared profile).
             if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile) {
-                speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity)
+                speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity, matchResult.averageSimilarity, matchResult.secondBestAverageSimilarity)
             } else {
                 let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
                 speakerNewProfiles[speakerId] = newProfile.id
@@ -997,7 +999,9 @@ extension Transcription {
                 sessionEmbedding: sessionEmbedding,
                 matchedProfileSnapshot: matchedProfileSnapshot,
                 matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity,
-                matchSecondSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondSimilarity
+                matchSecondSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondSimilarity,
+                matchAverageSimilarity: speakerMatchResults[effectiveSpeakerId]?.averageSimilarity,
+                matchSecondBestAverageSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondAverageSimilarity
             )
         }
 

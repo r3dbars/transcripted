@@ -10,9 +10,18 @@ extension Transcription {
         let profileId: UUID
         let similarity: Double
         /// Similarity of the next-closest non-disputed profile that cleared the floor, or -1
-        /// if there was no runner-up. Used by `SpeakerNamingPolicy.shouldAutoAccept` as the
-        /// "clear winner" margin guard.
+        /// if there was no runner-up. Best-of-representatives (exemplar) score; still used for
+        /// write-back blend gating and logging.
         let secondBestSimilarity: Double
+        /// Winner's cosine to its *blended average only* (exemplars excluded). Top of the
+        /// average-based auto-accept margin (`SpeakerNamingPolicy.shouldAutoAccept`
+        /// `marginSimilarities`). Equal to `similarity` for legacy single-average profiles.
+        let averageSimilarity: Double
+        /// Highest average-only cosine among the OTHER candidate profiles (the runner-up on the
+        /// average representation), or -1 if there was none. Bottom of the average-based margin.
+        /// Decoupling the margin from the best exemplar keeps a lucky-exemplar impostor from
+        /// clearing the auto-accept gate — see docs/speaker-eval-exemplar-delta-2026-07.md.
+        let secondBestAverageSimilarity: Double
     }
 
     // MARK: - Embedding Utilities
@@ -61,6 +70,11 @@ extension Transcription {
         var bestProfile: SpeakerProfile?
         var bestSimilarity: Double = -1
         var secondBestSimilarity: Double = -1
+        // Average-only cosine for every candidate profile (survives dispute/dim/veto gating),
+        // used to build the average-based auto-accept margin after the winner is chosen. Kept
+        // separate from `bestSimilarity` (best-of-exemplars) so the recall win from exemplar
+        // scoring is untouched while the margin is computed against the blended average.
+        var averageSimilarityByProfile: [UUID: Double] = [:]
 
         for profile in profiles {
             // A disputed profile was explicitly rejected by the user; don't
@@ -88,6 +102,10 @@ extension Transcription {
                 ])
                 continue
             }
+            // Record the average-only cosine for the margin computation (all non-vetoed candidates,
+            // not just floor-clearers, so the runner-up on the average representation is captured
+            // even when it didn't clear the exemplar floor).
+            averageSimilarityByProfile[profile.id] = SpeakerVectorMath.cosineSimilarity(embedding, profile.embedding)
             if similarity >= threshold {
                 if similarity > bestSimilarity {
                     secondBestSimilarity = bestSimilarity
@@ -129,8 +147,20 @@ extension Transcription {
             return nil
         }
 
+        // Average-based margin: the winner's cosine to its blended average vs the highest average
+        // cosine among the other candidates. A genuine owner is close on both average and best
+        // exemplar (margin holds); a lucky-exemplar impostor is far from the average (margin
+        // collapses), so `SpeakerNamingPolicy.shouldAutoAccept` withholds the silent auto-name.
+        let averageSimilarity = averageSimilarityByProfile[matched.id] ?? bestSimilarity
+        var secondBestAverageSimilarity = -1.0
+        for (id, avg) in averageSimilarityByProfile where id != matched.id {
+            secondBestAverageSimilarity = max(secondBestAverageSimilarity, avg)
+        }
+
         return SnapshotMatchResult(profileId: matched.id, similarity: bestSimilarity,
-                                   secondBestSimilarity: secondBestSimilarity)
+                                   secondBestSimilarity: secondBestSimilarity,
+                                   averageSimilarity: averageSimilarity,
+                                   secondBestAverageSimilarity: secondBestAverageSimilarity)
     }
 
     // MARK: - Cross-Cluster Link/Merge (#8)

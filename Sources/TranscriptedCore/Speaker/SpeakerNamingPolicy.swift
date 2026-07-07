@@ -39,13 +39,33 @@ public enum SpeakerNamingPolicy {
             ) == .trusted
     }
 
+    /// - Parameters:
+    ///   - similarity: best-of-representatives similarity (blended average OR any stored
+    ///     multi-exemplar voiceprint, `SpeakerVectorMath.bestSimilarity`). Checked against the
+    ///     0.92 bar so the multi-exemplar recall win is preserved on degraded audio.
+    ///   - secondBestSimilarity: legacy runner-up similarity used for the margin when
+    ///     `marginSimilarities` is not supplied (and the sentinel: `< 0` ⇒ no runner-up, `nil` ⇒
+    ///     unknown ⇒ conservative).
+    ///   - marginSimilarities: when supplied, the best-vs-second **margin** is computed against
+    ///     each profile's *average* representative (`best` = winner's cosine to its blended
+    ///     average, `secondBest` = highest average cosine among the other candidates, `< 0` ⇒
+    ///     none). Decoupling the margin from the best-exemplar score restores the "0 false-auto"
+    ///     guarantee: a genuine owner is close on BOTH its average and its best exemplar so the
+    ///     margin still holds, while an impostor that only cleared the 0.92 bar via one lucky
+    ///     exemplar is far from the average, so its average-based margin collapses and auto-accept
+    ///     is withheld (routed to suggest/ask). Legacy callers and single-average profiles (where
+    ///     average == best exemplar) pass `nil` and behave exactly as before. See
+    ///     `docs/speaker-eval-exemplar-delta-2026-07.md`.
     public static func shouldAutoAccept(
         profile: SpeakerProfile,
         similarity: Double,
-        secondBestSimilarity: Double?
+        secondBestSimilarity: Double?,
+        marginSimilarities: (best: Double, secondBest: Double)? = nil
     ) -> Bool {
+        let marginTop = marginSimilarities?.best ?? similarity
+        let marginRunnerUp: Double? = marginSimilarities.map { $0.secondBest } ?? secondBestSimilarity
         let marginOK: Bool
-        switch secondBestSimilarity {
+        switch marginRunnerUp {
         case .none:
             // Runner-up unknown (e.g. a fallback path that didn't carry it) — be conservative
             // and route to confirm rather than silently auto-name.
@@ -53,7 +73,7 @@ public enum SpeakerNamingPolicy {
         case .some(let second) where second < 0:
             marginOK = true   // no confusable runner-up cleared the match floor
         case .some(let second):
-            marginOK = (similarity - second) >= autoAcceptMarginMin
+            marginOK = (marginTop - second) >= autoAcceptMarginMin
         }
         return isAutoRecognizable(profile: profile, recentOutcomes: [])
             && similarity > autoAcceptSimilarityThreshold
@@ -69,7 +89,8 @@ public enum SpeakerNamingPolicy {
         profile: SpeakerProfile,
         similarity: Double,
         secondBestSimilarity: Double?,
-        recentOutcomes: [SpeakerMatchOutcomeKind]
+        recentOutcomes: [SpeakerMatchOutcomeKind],
+        marginSimilarities: (best: Double, secondBest: Double)? = nil
     ) -> Bool {
         guard isAutoRecognizable(profile: profile, recentOutcomes: recentOutcomes) else {
             return false
@@ -77,7 +98,8 @@ public enum SpeakerNamingPolicy {
         return shouldAutoAccept(
             profile: profile,
             similarity: similarity,
-            secondBestSimilarity: secondBestSimilarity
+            secondBestSimilarity: secondBestSimilarity,
+            marginSimilarities: marginSimilarities
         )
     }
 
@@ -90,13 +112,15 @@ public enum SpeakerNamingPolicy {
         profile: SpeakerProfile,
         similarity: Double,
         secondBestSimilarity: Double?,
-        recentOutcomes: [SpeakerMatchOutcomeKind] = []
+        recentOutcomes: [SpeakerMatchOutcomeKind] = [],
+        marginSimilarities: (best: Double, secondBest: Double)? = nil
     ) -> SpeakerMapping {
         guard shouldAutoAccept(
             profile: profile,
             similarity: similarity,
             secondBestSimilarity: secondBestSimilarity,
-            recentOutcomes: recentOutcomes
+            recentOutcomes: recentOutcomes,
+            marginSimilarities: marginSimilarities
         ),
               let name = profile.displayName,
               !name.isEmpty else {
