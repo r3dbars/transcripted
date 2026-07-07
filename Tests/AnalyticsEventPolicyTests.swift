@@ -618,6 +618,117 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["raw_error"], "raw errors must not be sent")
     }
 
+    runSuite("AnalyticsEventPolicy allows local summary proof events") {
+        let requested = AnalyticsEventPolicy.policy(forEvent: LocalSummaryTelemetry.requestedEvent)
+        let finished = AnalyticsEventPolicy.policy(forEvent: LocalSummaryTelemetry.finishedEvent)
+        let failed = AnalyticsEventPolicy.policy(forEvent: LocalSummaryTelemetry.failedEvent)
+        let cancelled = AnalyticsEventPolicy.policy(forEvent: LocalSummaryTelemetry.cancelledEvent)
+
+        assertEqual(
+            requested?.allowedProperties ?? Set<String>(),
+            ["provider", "queue_depth_bucket", "runtime", "setup_ready", "summary_action"],
+            "local summary requests should stay enum and bucket only"
+        )
+        assertEqual(
+            finished?.allowedProperties ?? Set<String>(),
+            ["chunk_count_bucket", "duration_bucket", "provider", "runtime", "summary_action"],
+            "local summary finishes should stay enum and bucket only"
+        )
+        assertEqual(
+            failed?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "failure_kind", "provider", "runtime", "stage", "summary_action"],
+            "local summary failures should stay enum and bucket only"
+        )
+        assertEqual(
+            cancelled?.allowedProperties ?? Set<String>(),
+            ["duration_bucket", "provider", "runtime", "stage", "summary_action"],
+            "local summary cancels should stay enum and bucket only"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "provider": "gemmaMLX",
+                "summary_action": "generate",
+                "setup_ready": "false",
+                "runtime": "m1-low-memory",
+                "queue_depth_bucket": "0",
+                "chunk_count_bucket": "2_3",
+                "duration_bucket": "30_119s",
+                "failure_kind": "runtime_unavailable",
+                "stage": "start",
+                "meeting_title": "Customer call",
+                "transcript_text": "private transcript",
+                "file_path": "/Users/redbars/private.md",
+                "raw_error": "private stack",
+            ],
+            allowedKeys: (requested?.allowedProperties ?? [])
+                .union(finished?.allowedProperties ?? [])
+                .union(failed?.allowedProperties ?? [])
+                .union(cancelled?.allowedProperties ?? [])
+        )
+
+        assertEqual(sanitized["provider"], "gemmaMLX", "provider enum should survive")
+        assertEqual(sanitized["summary_action"], "generate", "summary action should survive")
+        assertEqual(sanitized["setup_ready"], "false", "setup readiness should survive as a boolean string")
+        assertEqual(sanitized["runtime"], "m1-low-memory", "runtime profile enum should survive")
+        assertEqual(sanitized["queue_depth_bucket"], "0", "queue depth should stay bucketed")
+        assertEqual(sanitized["chunk_count_bucket"], "2_3", "chunk count should stay bucketed")
+        assertEqual(sanitized["duration_bucket"], "30_119s", "duration should stay bucketed")
+        assertEqual(sanitized["failure_kind"], "runtime_unavailable", "failure kind should survive")
+        assertEqual(sanitized["stage"], "start", "stage should survive")
+        assertNil(sanitized["meeting_title"], "meeting titles must not be sent")
+        assertNil(sanitized["transcript_text"], "transcript text must not be sent")
+        assertNil(sanitized["file_path"], "file paths must not be sent")
+        assertNil(sanitized["raw_error"], "raw errors must not be sent")
+    }
+
+    runSuite("LocalSummaryTelemetry builds deterministic success failure cancel and no-model payloads") {
+        let requested = LocalSummaryTelemetry.requestedProperties(
+            provider: "gemmaMLX",
+            summaryAction: "generate",
+            setupReady: false,
+            runtime: "m1-low-memory",
+            queueDepth: 0
+        )
+        let finished = LocalSummaryTelemetry.finishedProperties(
+            provider: "appleFoundation",
+            summaryAction: "regenerate",
+            chunkCount: 3,
+            runtime: "apple-foundation",
+            durationBucket: "2_9m"
+        )
+        let failed = LocalSummaryTelemetry.failedProperties(
+            provider: "gemmaMLX",
+            summaryAction: "generate",
+            failureKind: "process_failed",
+            stage: "generate",
+            runtime: "m1-low-memory",
+            durationBucket: "30_119s"
+        )
+        let cancelled = LocalSummaryTelemetry.cancelledProperties(
+            provider: "gemmaMLX",
+            summaryAction: "generate",
+            stage: "generate",
+            runtime: "m1-low-memory",
+            durationBucket: "10_29s"
+        )
+        let noModel = LocalSummaryTelemetry.failedProperties(
+            provider: "gemmaMLX",
+            summaryAction: "generate",
+            failureKind: "runtime_unavailable",
+            stage: "start",
+            runtime: "m1-low-memory",
+            durationBucket: "lt_10s"
+        )
+
+        assertEqual(requested["setup_ready"], "false", "no-model requests should keep setup readiness as a coarse boolean")
+        assertEqual(requested["queue_depth_bucket"], "0", "queue depth should be bucketed")
+        assertEqual(finished["chunk_count_bucket"], "2_3", "successful multi-chunk summaries should bucket chunk count")
+        assertEqual(failed["failure_kind"], "process_failed", "failure path should carry only the normalized failure kind")
+        assertEqual(cancelled["stage"], "generate", "cancel path should identify only the coarse stage")
+        assertEqual(noModel["failure_kind"], "runtime_unavailable", "no-model path should be a terminal start failure")
+    }
+
     runSuite("WorkflowRecoveryTelemetry emits the allowlisted recovery attempt bucket") {
         let source = readAnalyticsPolicyRepoTextFile("Sources/Observability/WorkflowRecoveryTelemetry.swift")
         assertTrue(
