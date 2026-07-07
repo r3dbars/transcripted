@@ -113,6 +113,29 @@ equivalent independent agent reviewer. Record the verdict (and any findings you
 rejected, with reasons) in the PR description. It is not defined as a repo
 script; any tool that reviews the true diff qualifies.
 
+## Before opening a repair branch
+
+When a PR goes dirty (conflicting) the reflex is to spin up a fresh
+`repair-pr-NNNN` branch. Do not. First confirm the change did not ALREADY merge
+under a different PR number — this has burned multiple threads that each
+re-opened a repair branch for a fix that was already on `main`.
+
+Required step before opening any repair/redo/reland branch:
+
+```bash
+python3 scripts/dev/check-superseded.py --pr <dirty-pr-number>
+# or, once you are on the repair branch:
+python3 scripts/dev/check-superseded.py --branch "$(git branch --show-current)"
+```
+
+- Exit `3` with `STOP: #NNNN already merged this` means the scope is already on
+  `main`. Close the dirty PR as superseded and do the work only if something is
+  genuinely still missing. Do not open the repair branch.
+- Exit `0` (`no merged PR already covers ...`) means the change is novel. Proceed.
+
+`scripts/dev/agent-preflight.sh` also prints this reminder automatically when it
+detects a repair-shaped branch name.
+
 ## Releases, Sparkle, and Homebrew
 
 When the task is a user-facing release, package handoff, or update-path change,

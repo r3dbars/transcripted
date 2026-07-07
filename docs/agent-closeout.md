@@ -41,6 +41,11 @@ Agents may recommend cleanup, but should not delete branches, close issues,
 close PRs, edit labels, edit milestones, or change repo settings unless Justin
 explicitly asked for that action.
 
+Before recommending a fresh repair branch for a dirty PR, run
+`python3 scripts/dev/check-superseded.py --pr <dirty-pr-number>`. If it prints
+`STOP: #NNNN already merged this`, the fix is already on `main` — recommend
+closing the dirty PR as superseded instead of opening a repair branch.
+
 Good cleanup recommendations name the exact object and reason:
 
 - stale merged branch candidate
