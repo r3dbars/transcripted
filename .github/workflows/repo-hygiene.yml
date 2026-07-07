@@ -2,6 +2,11 @@ name: Repo Hygiene
 
 on:
   pull_request:
+  # Run for GitHub merge-queue merge groups so this required gate executes
+  # against the queue's temporary merged ref before landing. Without this
+  # trigger the queue would wait forever for a "repo-hygiene" check that
+  # never starts. See .github/merge-queue.md.
+  merge_group:
   workflow_dispatch:
 
 permissions:
