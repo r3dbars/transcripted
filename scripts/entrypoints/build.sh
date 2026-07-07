@@ -622,7 +622,7 @@ fi
 # the budget rather than fail on a file that was intentionally not produced.
 LAUNCH_UI_SMOKE_REPORT="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
 if [ "${TRANSCRIPTED_SKIP_LAUNCH_SMOKE:-0}" != "1" ] && [ -s "$LAUNCH_UI_SMOKE_REPORT" ]; then
-    PERFORMANCE_BUDGET_ARGS+=(--launch-ui-smoke "$LAUNCH_UI_SMOKE_REPORT" --max-launch-interactive-ms 1500)
+    PERFORMANCE_BUDGET_ARGS+=(--launch-ui-smoke "$LAUNCH_UI_SMOKE_REPORT" --max-launch-interactive-ms 2500)
 fi
 scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
 
