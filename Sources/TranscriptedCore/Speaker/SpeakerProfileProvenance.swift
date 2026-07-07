@@ -537,6 +537,12 @@ extension SpeakerDatabase {
             }
         }
         sqlite3_finalize(statement)
+        // The average was just rebuilt from a changed contribution set (un-merge / reassign), so any
+        // cached multi-exemplar voiceprints no longer represent this identity — drop them and let
+        // them re-accumulate from future confident matches.
+        if ok {
+            deleteExemplarsImpl(profileId: profileId)
+        }
         return ok
     }
 

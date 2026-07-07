@@ -27,7 +27,10 @@ extension SpeakerDatabase {
 
         for speaker in allSpeakers {
             guard speaker.embedding.count == embedding.count else { continue }
-            let similarity = SpeakerVectorMath.cosineSimilarity(embedding, speaker.embedding)
+            // Best-fitting representative (blended average or any stored exemplar); identical to the
+            // single cosine for legacy profiles whose exemplar set is empty.
+            let similarity = SpeakerVectorMath.bestSimilarity(
+                candidate: embedding, average: speaker.embedding, exemplars: speaker.exemplars)
             // Negative-exemplar veto — see matchAgainstProfiles for the shared rationale.
             if let negatives = negativeExemplarsByProfile[speaker.id],
                SpeakerNegativeExemplarPolicy.shouldVeto(
