@@ -69,10 +69,16 @@ struct TranscriptedMCP {
         let server = Server(
             name: "transcripted",
             version: serverVersion,
-            capabilities: .init(tools: .init(listChanged: false))
+            capabilities: .init(
+                resources: .init(subscribe: false, listChanged: false),
+                tools: .init(listChanged: false)
+            )
         )
 
         await registerToolHandlers(server: server, index: index, directories: directories)
+        await TranscriptedUIResources.register(
+            server: server, index: index, directories: directories, serverVersion: serverVersion
+        )
 
         log("MCP server ready, waiting for connections")
 

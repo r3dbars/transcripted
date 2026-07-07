@@ -537,6 +537,21 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 ]),
                 annotations: .init(readOnlyHint: true)
             ),
+            Tool(
+                name: "show_recent_meetings",
+                description: "Render an interactive card list of the most recent meetings — each with audio playback and a raw-transcript view — as an MCP Apps (SEP-1865) UI widget that draws inline in rendering-capable clients. Clients that don't paint inline UI get a plain-text meeting list as a fallback. All audio and transcripts are local; nothing leaves this Mac.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "count": .object([
+                            "type": .string("integer"),
+                            "description": .string("Number of recent meetings to show (default: 5, max: 15)")
+                        ]),
+                    ]),
+                ]),
+                annotations: .init(readOnlyHint: true),
+                _meta: TranscriptedUIResources.toolMeta
+            ),
         ])
     }
 
@@ -577,6 +592,11 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 return try handleSearchMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
             case "status":
                 return try handleStatus(index: index, directories: directories)
+            case "show_recent_meetings":
+                let count = min(max(params.arguments?["count"]?.intValue ?? TranscriptedUIResources.defaultRecentCount, 1), 15)
+                return try TranscriptedUIResources.showRecentMeetingsResult(
+                    count: count, index: index, directories: directories, serverVersion: TranscriptedMCP.serverVersion
+                )
             default:
                 return textResult("Unknown tool: \(params.name)", isError: true)
             }
