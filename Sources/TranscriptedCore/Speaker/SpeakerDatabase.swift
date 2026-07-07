@@ -147,6 +147,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         migrateSchema()
         createProvenanceTablesImpl()
         createMatchOutcomeTablesImpl()
+        createNegativeExemplarTablesImpl()
     }
 
     /// Add columns that may be missing from older databases.

@@ -43,13 +43,18 @@ extension Transcription {
     /// Same logic as SpeakerDatabase.matchSpeaker but operates on an in-memory array,
     /// preventing the matching loop from seeing profiles created during the same recording.
     ///
-    /// Includes two safeguards against false positives:
+    /// Includes three safeguards against false positives:
     /// - **Maturity bonus**: Immature profiles (callCount ≤ 2) require +0.08 higher similarity
     /// - **Separation check**: Rejects match if two profiles are within 0.05 (ambiguous)
+    /// - **Negative-exemplar veto**: a profile is dropped from candidacy when the embedding too
+    ///   closely resembles a sample the user already rejected for it (`negativeExemplarsByProfile`).
+    ///   The map defaults empty, so callers that don't supply it — and profiles with no rejected
+    ///   samples — match exactly as before.
     nonisolated static func matchAgainstProfiles(
         _ embedding: [Float],
         profiles: [SpeakerProfile],
-        threshold: Double
+        threshold: Double,
+        negativeExemplarsByProfile: [UUID: [[Float]]] = [:]
     ) -> SnapshotMatchResult? {
         guard !profiles.isEmpty, !embedding.isEmpty else { return nil }
 
@@ -63,6 +68,21 @@ extension Transcription {
             guard profile.disputeCount == 0 else { continue }
             guard profile.embedding.count == embedding.count else { continue }
             let similarity = cosineSimilarityStatic(embedding, profile.embedding)
+            // Negative-exemplar veto: if this embedding looks at least as much like a previously
+            // rejected sample for this profile as it does like the profile itself, exclude the
+            // profile entirely (best AND runner-up) — the user already said "not this person".
+            if let negatives = negativeExemplarsByProfile[profile.id],
+               SpeakerNegativeExemplarPolicy.shouldVeto(
+                   candidate: embedding,
+                   positiveSimilarity: similarity,
+                   negativeExemplars: negatives
+               ) {
+                AppLogger.transcription.info("Match vetoed: negative exemplar", [
+                    "profile": profile.displayName ?? profile.id.uuidString.prefix(8).description,
+                    "similarity": String(format: "%.3f", similarity)
+                ])
+                continue
+            }
             if similarity >= threshold {
                 if similarity > bestSimilarity {
                     secondBestSimilarity = bestSimilarity

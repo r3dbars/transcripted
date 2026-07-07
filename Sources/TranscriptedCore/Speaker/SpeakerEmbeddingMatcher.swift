@@ -17,12 +17,30 @@ extension SpeakerDatabase {
         let allSpeakers = allSpeakersImpl()
         guard !allSpeakers.isEmpty else { return nil }
 
+        // Fetched once (in-queue, no re-entrant queue.sync) so the loop can veto profiles whose
+        // rejected samples this embedding resembles. Empty until a correction records one, keeping
+        // matching identical to the positive-only behavior for stores without negative exemplars.
+        let negativeExemplarsByProfile = allNegativeExemplarsImpl()
+
         var bestMatch: SpeakerProfile?
         var bestSimilarity: Double = -1
 
         for speaker in allSpeakers {
             guard speaker.embedding.count == embedding.count else { continue }
             let similarity = SpeakerVectorMath.cosineSimilarity(embedding, speaker.embedding)
+            // Negative-exemplar veto — see matchAgainstProfiles for the shared rationale.
+            if let negatives = negativeExemplarsByProfile[speaker.id],
+               SpeakerNegativeExemplarPolicy.shouldVeto(
+                   candidate: embedding,
+                   positiveSimilarity: similarity,
+                   negativeExemplars: negatives
+               ) {
+                AppLogger.speakers.info("Match vetoed: negative exemplar", [
+                    "name": speaker.displayName ?? speaker.id.uuidString,
+                    "similarity": String(format: "%.3f", similarity)
+                ])
+                continue
+            }
             if similarity > bestSimilarity && similarity >= threshold {
                 bestSimilarity = similarity
                 bestMatch = speaker
