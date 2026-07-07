@@ -11,10 +11,12 @@ name: Swift CI
 # build-independent checks run in parallel with the single expensive app build:
 #
 #   checks      — build-independent (no prebuilt deps, no app bundle): source-list
-#                 contracts, fast tests, E2E smoke, Tools package tests.
-#   spm-tests   — needs the prebuilt native deps but NOT the app bundle: Core
-#                 package tests (`swift test`) + integration smoke. Restores the
-#                 shared deps cache and runs in parallel with the app build.
+#                 contracts, fast tests, E2E smoke.
+#   spm-tests   — Core package tests (`swift test`) + integration smoke, which
+#                 need the prebuilt native deps but NOT the app bundle, plus the
+#                 Tools package tests (build-independent, parked here to balance
+#                 wall-clock against `checks`). Restores the shared deps cache and
+#                 runs in parallel with the app build.
 #   app-build   — the only job that runs the full app build: build the native
 #                 deps (populating the shared cache), build the app bundle, then
 #                 the app-dependent Premium performance budget.
@@ -60,21 +62,21 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Fast feedback: everything that compiles against the system SDK only and
-  # needs NEITHER the prebuilt native deps NOR the full app build. Runs fully in
-  # parallel with the expensive app build, so a broken fast test or Tools
-  # package test surfaces in minutes instead of behind the 20-minute app build.
+  # Fast feedback: build-independent checks that compile against the system SDK
+  # only and need NEITHER the prebuilt native deps NOR the full app build. Runs
+  # fully in parallel with the expensive app build, so a broken fast test
+  # surfaces in minutes instead of behind the app build.
   #
   # Build-independence is load-bearing here:
   #   - run-tests.sh compiles a curated Sources/Tests list against system
   #     frameworks (no deps-*/app link).
   #   - run-e2e-smoke.sh compiles a curated source list + TranscriptedCaptureKit
   #     from source against system frameworks (no deps-*/app link).
-  #   - The four Tools package tests run without TRANSCRIPTEDCLI_ENABLE_* set, so
-  #     TranscriptedCLI's Package.swift leaves `hasAudioPipelineDeps` false and
-  #     none of the packages link the prebuilt deps.
-  # If any of those grows a dependency on the prebuilt deps, move it to
-  # spm-tests (and add the deps cache/build steps there).
+  # The Tools package tests are also build-independent but live in spm-tests to
+  # balance wall-clock (fast tests + Tools tests were the two heaviest chunks and
+  # stacking them here made this job the critical path). If either of the above
+  # grows a dependency on the prebuilt deps, move it to spm-tests (which already
+  # has the deps cache/build steps).
   # ---------------------------------------------------------------------------
   checks:
     runs-on: macos-26
@@ -104,15 +106,6 @@ jobs:
       - name: E2E smoke
         shell: bash
         run: bash run-e2e-smoke.sh
-
-      - name: Tools package tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          swift test --package-path Tools/TranscriptedCaptureKit
-          swift test --package-path Tools/TranscriptedCLI
-          swift test --package-path Tools/TranscriptedMCP
-          swift test --package-path Tools/TranscriptedQA
 
   # ---------------------------------------------------------------------------
   # SPM package tests that need the prebuilt native deps (libExternalDeps.a for
@@ -164,6 +157,19 @@ jobs:
       - name: Integration smoke
         shell: bash
         run: bash run-integration-smoke.sh
+
+      # Build-independent (no prebuilt deps): the four Tools packages compile
+      # with no TRANSCRIPTEDCLI_ENABLE_* set, so they never link the deps. They
+      # live here (not in `checks`) purely to balance wall-clock — see the
+      # comment on the `checks` job.
+      - name: Tools package tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift test --package-path Tools/TranscriptedCaptureKit
+          swift test --package-path Tools/TranscriptedCLI
+          swift test --package-path Tools/TranscriptedMCP
+          swift test --package-path Tools/TranscriptedQA
 
   # ---------------------------------------------------------------------------
   # The expensive path: build the native deps (populating the shared deps cache
