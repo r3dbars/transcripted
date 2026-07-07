@@ -632,7 +632,9 @@ public final class SpeakerNamingSimulationRunner {
                     sessionEmbedding: meanEmbedding,
                     matchedProfileSnapshot: snapshot,
                     matchSimilarity: match.similarity,
-                    matchSecondSimilarity: match.secondBestSimilarity
+                    matchSecondSimilarity: match.secondBestSimilarity,
+                    matchAverageSimilarity: match.averageSimilarity,
+                    matchSecondBestAverageSimilarity: match.secondBestAverageSimilarity
                 )
             } else {
                 let profile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
@@ -771,18 +773,24 @@ public final class SpeakerNamingSimulationRunner {
                     profileId: snapshot.id,
                     limit: SpeakerProfileHealth.recentOutcomeWindow
                 ).map(\.kind)
+                let marginSimilarities: (best: Double, secondBest: Double)? =
+                    context.matchAverageSimilarity.flatMap { best in
+                        context.matchSecondBestAverageSimilarity.map { (best: best, secondBest: $0) }
+                    }
                 let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
                     profile: snapshot,
                     similarity: similarity,
                     secondBestSimilarity: context.matchSecondSimilarity,
-                    recentOutcomes: recentOutcomes
+                    recentOutcomes: recentOutcomes,
+                    marginSimilarities: marginSimilarities
                 )
                 speakerMappings[key] = SpeakerNamingPolicy.initialMapping(
                     speakerId: speakerId,
                     profile: snapshot,
                     similarity: similarity,
                     secondBestSimilarity: context.matchSecondSimilarity,
-                    recentOutcomes: recentOutcomes
+                    recentOutcomes: recentOutcomes,
+                    marginSimilarities: marginSimilarities
                 )
                 speakerSources[key] = canAutoAccept ? "db" : "db_pending"
             } else {

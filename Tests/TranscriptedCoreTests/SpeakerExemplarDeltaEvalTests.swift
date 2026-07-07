@@ -199,15 +199,17 @@ final class SpeakerExemplarDeltaEvalTests: XCTestCase {
     /// Identification metrics for one arm at the certified operating point.
     private func scoreArm(profiles: [Profile], trials: [(gt: String, emb: [Float])], useExemplars: Bool) -> [String: Any] {
         var recallAtFloor = 0
-        var autoCorrect = 0          // genuine, silently + correctly recognized
+        var autoCorrect = 0          // genuine, silently + correctly recognized (avg-margin gate)
         var falseAuto = 0            // WRONG identity silently auto-named (the dangerous case)
+        var autoCorrectLegacyMargin = 0  // same, under the pre-fix best-exemplar margin
+        var falseAutoLegacyMargin = 0    // WRONG auto-names under the pre-fix best-exemplar margin
         var impostorFAatFloor = 0    // any non-self profile clears the match floor
         var genuineSimSum = 0.0
         var genuineSimN = 0
 
         for trial in trials {
             // Score against every gallery profile (best rep for WITH, average for WITHOUT).
-            var best = (sim: -2.0, gt: "", cc: 0, ex: [[Float]]())
+            var best = (sim: -2.0, gt: "", cc: 0, ex: [[Float]](), avg: [Float]())
             var second = -2.0
             var bestImpostor = -2.0
             for p in profiles {
@@ -217,25 +219,50 @@ final class SpeakerExemplarDeltaEvalTests: XCTestCase {
                 if p.gt != trial.gt { bestImpostor = max(bestImpostor, sim) }
                 if sim > best.sim {
                     second = best.sim
-                    best = (sim, p.gt, p.callCount, p.exemplars)
+                    best = (sim, p.gt, p.callCount, p.exemplars, p.average)
                 } else if sim > second {
                     second = sim
                 }
             }
             if bestImpostor >= matchFloor { impostorFAatFloor += 1 }
 
+            // Auto-accept margin decoupled from best-of-exemplars (the fix under test): the 0.92
+            // bar is still checked against the best-exemplar `best.sim` (so the recall win holds),
+            // but the best-vs-second MARGIN is checked against the profile AVERAGE — winner's
+            // cosine-to-average vs the highest average cosine among the other profiles. A genuine
+            // owner is close on both, so it still clears; a lucky-exemplar impostor is far from the
+            // average, so its margin collapses and auto-accept is withheld. WITHOUT arm scores on
+            // the average already, so passing nil keeps it exactly the legacy single-average gate.
+            let marginSims: (best: Double, secondBest: Double)?
+            if useExemplars {
+                let winnerAvg = SpeakerVectorMath.cosineSimilarity(trial.emb, best.avg)
+                var secondAvg = -1.0
+                for p in profiles where p.gt != best.gt {
+                    secondAvg = max(secondAvg, SpeakerVectorMath.cosineSimilarity(trial.emb, p.average))
+                }
+                marginSims = (best: winnerAvg, secondBest: secondAvg)
+            } else {
+                marginSims = nil
+            }
+
             // Real auto-accept decision on the argmax profile (named + mature so eligibility holds
             // exactly when callCount > 4; margin/similarity gates come from production).
             let named = namedMatureProfile(gt: best.gt, callCount: best.cc, average: [], exemplars: best.ex)
             let autoAccept = SpeakerNamingPolicy.shouldAutoAccept(
+                profile: named, similarity: best.sim, secondBestSimilarity: second,
+                marginSimilarities: marginSims)
+            // Pre-fix behavior for the A/B: the same gate with the best-exemplar margin (nil).
+            let autoAcceptLegacyMargin = SpeakerNamingPolicy.shouldAutoAccept(
                 profile: named, similarity: best.sim, secondBestSimilarity: second)
 
             if best.gt == trial.gt {
                 genuineSimSum += best.sim; genuineSimN += 1
                 if best.sim >= matchFloor { recallAtFloor += 1 }
                 if autoAccept { autoCorrect += 1 }
-            } else if autoAccept {
-                falseAuto += 1
+                if autoAcceptLegacyMargin { autoCorrectLegacyMargin += 1 }
+            } else {
+                if autoAccept { falseAuto += 1 }
+                if autoAcceptLegacyMargin { falseAutoLegacyMargin += 1 }
             }
         }
         let n = max(1, trials.count)
@@ -244,6 +271,11 @@ final class SpeakerExemplarDeltaEvalTests: XCTestCase {
             "autoCorrect": Double(autoCorrect) / Double(n),
             "falseAuto": Double(falseAuto) / Double(n),
             "falseAutoCount": falseAuto,
+            // Pre-fix best-exemplar margin, for the before/after within one artifact. Equal to the
+            // new counters in the WITHOUT arm (which never supplies an average margin).
+            "autoCorrectLegacyMargin": Double(autoCorrectLegacyMargin) / Double(n),
+            "falseAutoLegacyMargin": Double(falseAutoLegacyMargin) / Double(n),
+            "falseAutoLegacyMarginCount": falseAutoLegacyMargin,
             "impostorFAatFloor": Double(impostorFAatFloor) / Double(n),
             "meanGenuineSim": genuineSimN > 0 ? genuineSimSum / Double(genuineSimN) : 0,
         ]

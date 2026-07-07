@@ -1,5 +1,11 @@
 # Speaker eval: multi-exemplar + negative-exemplar accuracy delta (2026-07)
 
+> **Update (2026-07, retune shipped):** Recommendation #2 below is now implemented — the auto-accept
+> **margin** is computed against each profile's blended *average* representative instead of its best
+> exemplar, while match selection keeps best-of-exemplars. On the same degraded AMI slice this cuts
+> the multi-exemplar false-auto count from **12 → 2** with the recall gain **fully retained**
+> (0.659, unchanged). See [Retune shipped](#retune-shipped-2026-07--average-based-auto-accept-margin).
+
 ## Verdict
 
 The two speaker-identity features that merged into `main` in 2026-07 were measured against the
@@ -170,6 +176,57 @@ rep, not the best exemplar (see below).
    false-auto stays ~0 (consistent with the ladder's clean findings); the 1.6% is the degraded-slice
    upper bound, not the expected production rate.
 
+## Retune shipped (2026-07) — average-based auto-accept margin
+
+Recommendation #2 shipped as the "lowest-risk option": the auto-accept **margin** is now judged
+against each profile's blended *average* representative, decoupled from the best-of-exemplars score
+that still drives match **selection** (and thus the recall win). `SpeakerMatchingService`
+(`matchAgainstProfiles`) now carries, alongside the exemplar `similarity`/`secondBestSimilarity`, the
+winner's average-only cosine and the highest average cosine among the other candidates.
+`SpeakerNamingPolicy.shouldAutoAccept` gained a `marginSimilarities:` parameter: the 0.92 bar is still
+checked against the best exemplar (preserving auto-recognition of returning voices), but the
+best-vs-second **margin** is checked on the average. A genuine owner is close on *both* its average and
+its best exemplar, so its margin still clears; a lucky-exemplar impostor is far from the average, so
+its average-based margin collapses and the auto-accept is withheld (routed to suggest/ask). Legacy
+single-average profiles pass `nil` and behave exactly as before.
+
+Re-run of this harness on the same corpus, WITH arm (multi-exemplar), AMI degraded slice — raw output
+in [`speaker-eval-exemplar-delta-2026-07.after-fix.result.json`](speaker-eval-exemplar-delta-2026-07.after-fix.result.json):
+
+| metric | pre-fix (best-exemplar margin) | post-fix (average margin) | Δ |
+|---|---:|---:|---:|
+| **false-auto (silent mislabels)** @ (0.92, 0.12) | **12** (1.6%) | **2** (0.27%) | **−10** |
+| genuine recall @ floor 0.70 | 0.659 | **0.659** | 0.000 |
+| correct silent auto-recognition @ (0.92, 0.12) | 0.097 | 0.070 | −0.027 |
+| mean genuine similarity | 0.858 | 0.858 | 0.000 |
+
+Recall is untouched by construction — the fix does not change match selection, the match floor, or
+`bestSimilarity`, so `recallAtFloor` and `meanGenuineSim` are identical to the pre-fix WITH arm. The
+harness reports both counters per run (`falseAutoLegacyMarginCount` = pre-fix, `falseAutoCount` =
+post-fix) so the A/B is reproducible in one artifact. The WITHOUT (legacy single-average) arm and the
+VoxCeleb slice are unchanged (0 false-auto in both arms; VoxCeleb never reaches the 0.92 bar on
+degraded audio, so it has no auto-recognition to regress).
+
+**Residual 2 (characterized).** The two remaining false-autos are *not* lucky-exemplar artifacts:
+their average-similarity to the wrong profile is genuinely high (`avgBest` 0.82 and 0.70) with a real
+average margin (0.172 and 0.137) — distinct speakers who are genuinely confusable on the *blended
+average*, the error class the average-only WITHOUT arm would also risk if its bar-clearing weren't
+gated by the (lower) average score. They are irreducible at this operating point without harming the
+genuine experience: probed tighteners on the same slice removed at most one of the two while costing
+2.5×–15× as many *genuine* auto-recognitions as false-autos they eliminated —
+
+| lever | false-auto | genuine autos kept |
+|---|---:|---:|
+| average margin (shipped) | 2 | 52 |
+| + raise margin 0.12→0.15 | 1 | 47 (−5) |
+| + exemplar-vs-average gap ≤ 0.15 | 1 | 25 (−27) |
+| + require avgBest ≥ 0.80 | 1 | 23 (−29) |
+
+So the shipped lever is the knee of the curve: it removes the entire lucky-exemplar class (10/10) at
+zero recall and near-zero genuine-auto cost, and stops before trading the genuine experience away to
+chase two irreducibly-confusable cases. The residual 0.27% remains a worst-case degraded-slice upper
+bound (§ caveats), not an expected production rate.
+
 ## Risks / caveats
 
 - **Fingerprint-level, not full-pipeline.** The eval operates on per-(speaker, meeting) mean
@@ -192,4 +249,8 @@ rep, not the best exemplar (see below).
 - `swift test --filter SpeakerNamingSimulationRunnerTests` — 7/7 pass (existing functional
   regression; confirms the Core test target builds + runs with the exemplar features on `main`).
 - `swift test --filter SpeakerExemplarDeltaEvalTests` — passes (this eval; ~3.4 s), writes
-  `docs/speaker-eval-exemplar-delta-2026-07.result.json`.
+  `docs/speaker-eval-exemplar-delta-2026-07.result.json` (pre-fix) and, re-run after the retune,
+  `docs/speaker-eval-exemplar-delta-2026-07.after-fix.result.json` (12 → 2 false-auto, recall held).
+- `swift test --filter SpeakerAutoAcceptMarginTests` — corpus-free, in-tree proof of the retune:
+  constructs the lucky-exemplar impostor fixture and asserts the average-based margin withholds it
+  while a genuine owner still auto-accepts (both at the policy gate and through `matchAgainstProfiles`).
