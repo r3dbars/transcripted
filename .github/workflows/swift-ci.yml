@@ -229,11 +229,15 @@ jobs:
         shell: bash
         # The app-build step above runs build.sh, whose launch smoke writes
         # build/launch-ui-smoke.json with launchToInteractiveMs. Score it here so
-        # a launch-to-interactive regression fails CI (PRD WS4.2). Product target
-        # is <400ms warm on Apple Silicon (measured ~285ms); a cold GitHub runner
-        # measured ~1420ms, so the ceiling is 2500ms — a regression guard with
-        # room for runner variance that still fails on a ~1.8x+ blow-up.
-        run: scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80 --launch-ui-smoke build/launch-ui-smoke.json --max-launch-interactive-ms 2500
+        # a launch-to-interactive regression fails CI (PRD WS4.2). The real UX
+        # number is the warm Apple-Silicon product target (<400ms, measured
+        # ~285ms). This CI gate is a COARSE catastrophic-regression guard only:
+        # the GitHub runner's single cold-launch sample is very noisy (observed
+        # 1420ms and 2095ms on identical commits, ~48% swing), so 3000ms is set
+        # to never flake while still failing on a gross blow-up (e.g. a
+        # synchronous model/network load added to the launch path). A future
+        # tightening is min-of-N sampling in the smoke to sharpen the signal.
+        run: scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80 --launch-ui-smoke build/launch-ui-smoke.json --max-launch-interactive-ms 3000
 
   # ---------------------------------------------------------------------------
   # Required-status umbrella. Branch protection requires the "build-and-test"
