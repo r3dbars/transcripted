@@ -67,7 +67,12 @@ extension Transcription {
             // auto-match future recordings back into it until the user repairs it.
             guard profile.disputeCount == 0 else { continue }
             guard profile.embedding.count == embedding.count else { continue }
-            let similarity = cosineSimilarityStatic(embedding, profile.embedding)
+            // Score against the best-fitting representative: the blended average OR any stored
+            // multi-exemplar voiceprint (empty for legacy profiles ⇒ identical to the old single
+            // cosine). All downstream semantics — maturity bonus, separation, second-best margin —
+            // operate on this per-profile best.
+            let similarity = SpeakerVectorMath.bestSimilarity(
+                candidate: embedding, average: profile.embedding, exemplars: profile.exemplars)
             // Negative-exemplar veto: if this embedding looks at least as much like a previously
             // rejected sample for this profile as it does like the profile itself, exclude the
             // profile entirely (best AND runner-up) — the user already said "not this person".

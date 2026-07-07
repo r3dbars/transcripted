@@ -148,6 +148,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         createProvenanceTablesImpl()
         createMatchOutcomeTablesImpl()
         createNegativeExemplarTablesImpl()
+        createExemplarTablesImpl()
     }
 
     /// Add columns that may be missing from older databases.
@@ -309,10 +310,23 @@ public final class SpeakerDatabase: @unchecked Sendable {
             }
             sqlite3_finalize(statement)
 
+            var updatedExemplars = existing.exemplars
             if !sqlSucceeded {
                 AppLogger.speakers.error("CRITICAL: speaker update was NOT persisted to database — returning stale profile", ["id": existingId.uuidString])
             } else {
                 recordContributionImpl(profileId: existingId, embedding: embedding, kind: SpeakerProvenanceKind.contribution)
+                // Multi-exemplar voiceprints: fold this confirmed session mean into the profile's
+                // exemplar set so distinct capture conditions (clean in-person vs compressed remote)
+                // are stored separately rather than blended into one mediocre average. Gated on
+                // alpha > 0 — the same write-back quality gate that protects the average — so an
+                // ambiguous/frozen match never seeds or drifts an exemplar either.
+                if alpha > 0 {
+                    updatedExemplars = updateExemplarsImpl(
+                        profileId: existingId,
+                        newMean: embedding,
+                        average: normalized
+                    )
+                }
             }
 
             return SpeakerProfile(
@@ -324,7 +338,8 @@ public final class SpeakerDatabase: @unchecked Sendable {
                 lastSeen: Date(),
                 callCount: existing.callCount + 1,
                 confidence: newConfidence,
-                disputeCount: existing.disputeCount
+                disputeCount: existing.disputeCount,
+                exemplars: updatedExemplars
             )
         } else {
             return insertSpeakerImpl(embedding: embedding, preferredId: existingId, now: now)
@@ -457,6 +472,17 @@ public final class SpeakerDatabase: @unchecked Sendable {
             AppLogger.speakers.error("Failed to prepare allSpeakers query", ["sqlite_error": dbErrorMessage()])
         }
         sqlite3_finalize(statement)
+
+        // Attach multi-exemplar voiceprints as a read-side cache. One batched query, so the hot
+        // pipeline snapshot stays a single pass. Legacy profiles with no exemplar rows keep [].
+        let exemplarsByProfile = exemplarsByProfileImpl()
+        if !exemplarsByProfile.isEmpty {
+            for i in speakers.indices {
+                if let exemplars = exemplarsByProfile[speakers[i].id] {
+                    speakers[i].exemplars = exemplars
+                }
+            }
+        }
         return speakers
     }
 
@@ -481,6 +507,9 @@ public final class SpeakerDatabase: @unchecked Sendable {
             AppLogger.speakers.error("Failed to prepare getSpeaker query", ["sqlite_error": dbErrorMessage(), "id": id.uuidString])
         }
         sqlite3_finalize(statement)
+        if profile != nil {
+            profile?.exemplars = exemplarEmbeddingsImpl(forProfileId: id)
+        }
         return profile
     }
 
@@ -488,6 +517,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
     public func deleteSpeaker(id: UUID) {
         queue.sync { [self] in
             guard isDatabaseOpen else { return }
+            deleteExemplarsImpl(profileId: id)
             let sql = "DELETE FROM speakers WHERE id = ?;"
             var statement: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
