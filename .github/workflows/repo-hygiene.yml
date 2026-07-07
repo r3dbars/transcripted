@@ -56,3 +56,14 @@ jobs:
         run: |
           set -euo pipefail
           find scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
+
+      # Catches same-scope duplicate declarations (e.g. a symbol declared twice
+      # by a bad git auto-merge) in seconds, so they fail here instead of 20
+      # minutes into the macOS Swift build. --self-test guards the checker's own
+      # precision (overloads, protocol reqs, switch arms, if/guard-let chains).
+      - name: Duplicate declarations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/dev/check-duplicate-declarations.py --self-test
+          python3 scripts/dev/check-duplicate-declarations.py
