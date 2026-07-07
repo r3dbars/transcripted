@@ -30,6 +30,14 @@ public enum SpeakerNegativeExemplarPolicy {
     /// resemblance to an *explicitly rejected* sample can veto. Coincidental similarity never fires.
     public static let vetoFloor: Double = 0.80
 
+    /// How far to transport a rejected sample along one of a profile's observed condition shifts when
+    /// deriving a cross-condition negative representation (see the transported `maxNegativeSimilarity`
+    /// overload). `1.0` moves the rejected sample by one full observed shift (e.g. clean → the telephone
+    /// offset the owner's own exemplars exhibit); `0.75` is a mild transport that lifts cross-condition
+    /// veto coverage on real degraded audio while keeping owner-collateral flat (tuned on
+    /// `SpeakerExemplarDeltaEvalTests`).
+    public static let crossConditionTransportScale: Double = 0.75
+
     /// Highest cosine similarity between `embedding` and any of a profile's negative exemplars.
     /// Dimension-mismatched exemplars are skipped (same guard the positive matchers use), and an
     /// empty list yields `-1` (no signal), so a profile without negative exemplars never vetoes.
@@ -43,6 +51,83 @@ public enum SpeakerNegativeExemplarPolicy {
             best = max(best, SpeakerVectorMath.cosineSimilarity(embedding, exemplar))
         }
         return best
+    }
+
+    /// Cross-condition negative similarity: the max cosine of `embedding` against each stored negative
+    /// exemplar **and** against each negative *transported* along the profile's own observed condition
+    /// shifts.
+    ///
+    /// The positive side already fixed the condition gap with multi-exemplar voiceprints — a returning
+    /// owner is scored against its best-fitting capture condition, not one blended centroid. The
+    /// negative side had no analog: a single rejected in-room sample and a later telephone/VoIP sample
+    /// of the *same* rejected impostor sit too far apart in embedding space for the raw cosine to clear
+    /// the veto floor, so a correction made in one condition failed to protect the owner in another
+    /// (see `docs/speaker-eval-exemplar-delta-2026-07.md`, "regime-limited"). This gives the negative
+    /// side the same multi-condition treatment.
+    ///
+    /// Channel/condition shifts (clean → compressed remote → telephone) are largely speaker-independent,
+    /// and the profile has already *observed* several of them as the offset between each of its positive
+    /// exemplars and its blended average (`positiveExemplar − average`). Transporting a rejected sample
+    /// by `crossConditionTransportScale ×` one of those offsets synthesizes "the same rejected voice, in
+    /// a condition this profile has actually seen", so a cross-condition return of that impostor still
+    /// resembles one derived negative ≥ the floor.
+    ///
+    /// It is deliberately conservative and owner-safe:
+    ///   - **Only real, forward shifts.** Transport is along `+(exemplar − average)` — conditions the
+    ///     profile genuinely exhibits — never arbitrary directions. A profile with **no** positive
+    ///     exemplars (single-condition, e.g. a one-utterance profile) derives nothing and this reduces
+    ///     *exactly* to `maxNegativeSimilarity`, so those profiles are byte-for-byte unchanged.
+    ///   - **The owner gate is untouched.** Callers still require the resulting similarity to clear the
+    ///     0.80 floor *and* beat the candidate's own positive similarity (`shouldVeto`), so a genuine
+    ///     owner — closer to its own fingerprint than to a transported *impostor* sample — is never
+    ///     vetoed. Transport widens which *impostor* returns are caught; it does not relax the floor.
+    public static func maxNegativeSimilarity(
+        _ embedding: [Float],
+        negativeExemplars: [[Float]],
+        profileAverage: [Float],
+        positiveExemplars: [[Float]]
+    ) -> Double {
+        guard !embedding.isEmpty else { return -1 }
+
+        // Baseline: raw resemblance to any stored negative (identical to the two-arg overload).
+        var best = maxNegativeSimilarity(embedding, negativeExemplars: negativeExemplars)
+
+        // Observed condition shifts: unit(exemplar) − average, for each same-dimension positive
+        // exemplar. Empty ⇒ no transport ⇒ `best` is exactly the raw negative similarity above.
+        let shifts = conditionShifts(average: profileAverage, positiveExemplars: positiveExemplars)
+        guard !shifts.isEmpty else { return best }
+
+        for exemplar in negativeExemplars where exemplar.count == embedding.count {
+            let base = SpeakerVectorMath.l2Normalize(exemplar)
+            for shift in shifts where shift.count == base.count {
+                var transported = base
+                for i in 0..<transported.count {
+                    transported[i] += Float(crossConditionTransportScale) * shift[i]
+                }
+                best = max(best, SpeakerVectorMath.cosineSimilarity(embedding, transported))
+            }
+        }
+        return best
+    }
+
+    /// The profile's observed condition-shift directions: `unit(exemplar) − average` for each
+    /// same-dimension positive exemplar. `average` is already the L2-normalized blended fingerprint;
+    /// exemplars are normalized here so a shift is a pure direction between two unit representatives.
+    private static func conditionShifts(
+        average: [Float],
+        positiveExemplars: [[Float]]
+    ) -> [[Float]] {
+        guard !average.isEmpty else { return [] }
+        var shifts: [[Float]] = []
+        for exemplar in positiveExemplars where exemplar.count == average.count {
+            let unit = SpeakerVectorMath.l2Normalize(exemplar)
+            var shift = unit
+            for i in 0..<shift.count {
+                shift[i] -= average[i]
+            }
+            shifts.append(shift)
+        }
+        return shifts
     }
 
     /// Whether a candidate embedding should be excluded from matching a profile because it too
@@ -80,6 +165,30 @@ public enum SpeakerNegativeExemplarPolicy {
     ) -> Bool {
         guard !negativeExemplars.isEmpty else { return false }
         let negativeSimilarity = maxNegativeSimilarity(embedding, negativeExemplars: negativeExemplars)
+        return shouldVeto(positiveSimilarity: positiveSimilarity, negativeSimilarity: negativeSimilarity)
+    }
+
+    /// Cross-condition-aware veto: same rule as above, but the negative similarity is computed with
+    /// condition transport (see `maxNegativeSimilarity(_:negativeExemplars:profileAverage:positiveExemplars:)`),
+    /// so a rejected impostor returning in a different audio condition the profile has seen is still
+    /// caught. The owner gate is unchanged — the floor and the `≥ positiveSimilarity` comparison still
+    /// protect the genuine returning owner — so a profile with no positive exemplars, or a candidate
+    /// that resembles its own fingerprint more than any (transported) rejected sample, behaves exactly
+    /// as the raw overload. Used by the matchers, which have the profile's average and exemplars in hand.
+    public static func shouldVeto(
+        candidate embedding: [Float],
+        positiveSimilarity: Double,
+        negativeExemplars: [[Float]],
+        profileAverage: [Float],
+        positiveExemplars: [[Float]]
+    ) -> Bool {
+        guard !negativeExemplars.isEmpty else { return false }
+        let negativeSimilarity = maxNegativeSimilarity(
+            embedding,
+            negativeExemplars: negativeExemplars,
+            profileAverage: profileAverage,
+            positiveExemplars: positiveExemplars
+        )
         return shouldVeto(positiveSimilarity: positiveSimilarity, negativeSimilarity: negativeSimilarity)
     }
 }

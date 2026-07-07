@@ -1,0 +1,118 @@
+{
+  "corpora" : [
+    {
+      "corpus" : "ami",
+      "profiles" : 147,
+      "profilesWithExemplars" : 138,
+      "testQualities" : [
+        "opus_8k",
+        "tel_g711",
+        "noisy_snr5",
+        "reverb",
+        "mp3_16"
+      ],
+      "trials" : 741,
+      "veto" : {
+        "confusablePairs" : 1176,
+        "ownerChecks" : 5773,
+        "raw" : {
+          "ownerCollateralCount" : 125,
+          "ownerCollateralRate" : 0.021652520353369131,
+          "vetoedAmongReMatch" : 0.45988538681948427,
+          "vetoedAmongReMatchCross" : 0.34953271028037386,
+          "vetoedAmongReMatchSame" : 0.82208588957055218
+        },
+        "reMatchCount" : 698,
+        "reMatchCrossCount" : 535,
+        "reMatchRateLegacy" : 0.14794404408647732,
+        "reMatchSameCount" : 163,
+        "replays" : 4718,
+        "transported" : {
+          "ownerCollateralCount" : 134,
+          "ownerCollateralRate" : 0.023211501818811708,
+          "transportScale" : 0.75,
+          "vetoedAmongReMatch" : 0.48280802292263608,
+          "vetoedAmongReMatchCross" : 0.37383177570093457,
+          "vetoedAmongReMatchSame" : 0.8404907975460123
+        },
+        "vetoableShare" : 0.14709622721492158
+      },
+      "with" : {
+        "autoCorrect" : 0.097165991902834009,
+        "falseAuto" : 0.016194331983805668,
+        "falseAutoCount" : 12,
+        "impostorFAatFloor" : 0.55330634278002699,
+        "meanGenuineSim" : 0.85824506285209812,
+        "recallAtFloor" : 0.65856950067476383
+      },
+      "without" : {
+        "autoCorrect" : 0.016194331983805668,
+        "falseAuto" : 0,
+        "falseAutoCount" : 0,
+        "impostorFAatFloor" : 0.2874493927125506,
+        "meanGenuineSim" : 0.78487367151233289,
+        "recallAtFloor" : 0.54925775978407554
+      }
+    },
+    {
+      "corpus" : "voxceleb",
+      "profiles" : 30,
+      "profilesWithExemplars" : 30,
+      "testQualities" : [
+        "opus_8k",
+        "tel_g711",
+        "noisy_snr5",
+        "reverb",
+        "mp3_16"
+      ],
+      "trials" : 1798,
+      "veto" : {
+        "confusablePairs" : 103,
+        "ownerChecks" : 6162,
+        "raw" : {
+          "ownerCollateralCount" : 96,
+          "ownerCollateralRate" : 0.015579357351509251,
+          "vetoedAmongReMatch" : 0.12297734627831715,
+          "vetoedAmongReMatchCross" : 0.06699346405228758,
+          "vetoedAmongReMatchSame" : 0.3364485981308411
+        },
+        "reMatchCount" : 1545,
+        "reMatchCrossCount" : 1224,
+        "reMatchRateLegacy" : 0.25423728813559321,
+        "reMatchSameCount" : 321,
+        "replays" : 6077,
+        "transported" : {
+          "ownerCollateralCount" : 96,
+          "ownerCollateralRate" : 0.015579357351509251,
+          "transportScale" : 0.75,
+          "vetoedAmongReMatch" : 0.12297734627831715,
+          "vetoedAmongReMatchCross" : 0.06699346405228758,
+          "vetoedAmongReMatchSame" : 0.3364485981308411
+        },
+        "vetoableShare" : 0.045746256376501565
+      },
+      "with" : {
+        "autoCorrect" : 0.00055617352614015572,
+        "falseAuto" : 0,
+        "falseAutoCount" : 0,
+        "impostorFAatFloor" : 0.4727474972191324,
+        "meanGenuineSim" : 0.65601019484345202,
+        "recallAtFloor" : 0.17408231368186874
+      },
+      "without" : {
+        "autoCorrect" : 0,
+        "falseAuto" : 0,
+        "falseAutoCount" : 0,
+        "impostorFAatFloor" : 0.39432703003337038,
+        "meanGenuineSim" : 0.61114929809089846,
+        "recallAtFloor" : 0.14071190211345941
+      }
+    }
+  ],
+  "note" : "WITH = multi-exemplar bestSimilarity + negative veto (main). WITHOUT = single-average cosine, no veto (legacy).",
+  "operatingPoint" : {
+    "autoBar" : 0.92000000000000004,
+    "marginMin" : 0.12,
+    "matchFloor" : 0.69999999999999996
+  }
+}
