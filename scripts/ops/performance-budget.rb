@@ -24,6 +24,12 @@ MAX_DICTATION_STOP_TO_DONE_P95_MS = 1_000.0
 MAX_MEETING_P95_RTF = 0.05
 MAX_HOME_RECENT_CAPTURE_AVERAGE_LOAD_MS = 750.0
 MAX_HOME_RECENT_CAPTURE_CANCEL_MS = 100.0
+# Launch-to-interactive ceiling (kernel process-start -> menu-bar UI ready),
+# read from the launch UI smoke report. PRD WS4.2 product target is <400ms warm
+# on Apple Silicon; this regression ceiling carries headroom for slower/cold CI
+# runners while still catching a multi-x blow-up. Callers pass an explicit
+# --max-launch-interactive-ms tuned to the surface (dev build vs CI runner).
+MAX_LAUNCH_TO_INTERACTIVE_MS = 1_500.0
 MIN_MEETING_DURATION_SECONDS = 30.0
 MIN_TRANSCRIPTION_SAMPLES = 10
 MIN_STARTUP_SAMPLES = 3
@@ -60,6 +66,8 @@ options = {
   check_home_recent_captures: false,
   max_home_recent_capture_average_load_ms: MAX_HOME_RECENT_CAPTURE_AVERAGE_LOAD_MS,
   max_home_recent_capture_cancel_ms: MAX_HOME_RECENT_CAPTURE_CANCEL_MS,
+  launch_ui_smoke_path: nil,
+  max_launch_to_interactive_ms: MAX_LAUNCH_TO_INTERACTIVE_MS,
   require_launch_model_ready_samples: 0,
   require_dictation_fast_start_samples: 0,
   require_dictation_stop_latency_samples: 0,
@@ -90,6 +98,8 @@ OptionParser.new do |parser|
   parser.on("--check-home-recent-captures", "Run deterministic Home recent-captures loader budget") { options[:check_home_recent_captures] = true }
   parser.on("--max-home-recent-capture-average-load-ms MS", Float, "Home recent-captures average load budget") { |ms| options[:max_home_recent_capture_average_load_ms] = ms }
   parser.on("--max-home-recent-capture-cancel-ms MS", Float, "Home recent-captures cancellation acknowledgement budget") { |ms| options[:max_home_recent_capture_cancel_ms] = ms }
+  parser.on("--launch-ui-smoke PATH", "Launch UI smoke report JSON for the launch-to-interactive budget") { |path| options[:launch_ui_smoke_path] = path }
+  parser.on("--max-launch-interactive-ms MS", Float, "Launch-to-interactive budget in ms (kernel process-start to menu-bar UI ready)") { |ms| options[:max_launch_to_interactive_ms] = ms }
   parser.on("--require-launch-model-ready-samples N", Integer, "Require at least N launch-to-model-ready samples in --events logs") { |count| options[:require_launch_model_ready_samples] = count }
   parser.on("--require-dictation-fast-start-samples N", Integer, "Require at least N fast-start samples in --events logs") { |count| options[:require_dictation_fast_start_samples] = count }
   parser.on("--require-dictation-stop-latency-samples N", Integer, "Require at least N stop-latency samples in --events logs") { |count| options[:require_dictation_stop_latency_samples] = count }
@@ -477,6 +487,30 @@ if options[:check_home_recent_captures]
   end
 end
 
+launch_interactive_summary = nil
+if options[:launch_ui_smoke_path]
+  smoke_path = Pathname.new(options[:launch_ui_smoke_path]).expand_path
+  if !smoke_path.file?
+    errors << "Missing launch UI smoke report: #{smoke_path}"
+  else
+    begin
+      report = JSON.parse(File.read(smoke_path))
+      value = float_or_nil(report["launchToInteractiveMs"])
+      budget = options[:max_launch_to_interactive_ms]
+      if value.nil?
+        errors << "Launch UI smoke report #{smoke_path} is missing launchToInteractiveMs"
+      else
+        launch_interactive_summary = { value_ms: value, budget_ms: budget }
+        if value > budget
+          errors << "Launch to interactive is #{format("%.1fms", value)}, above #{format("%.1fms", budget)}"
+        end
+      end
+    rescue JSON::ParserError => error
+      errors << "Launch UI smoke report #{smoke_path} is not valid JSON: #{error.message}"
+    end
+  end
+end
+
 fail_budget!(errors)
 
 puts "Performance budget OK"
@@ -554,4 +588,8 @@ end
 if home_recent_capture_summary
   puts "Home recent-captures benchmark:"
   puts home_recent_capture_summary[:stdout].strip
+end
+if launch_interactive_summary
+  puts "Launch to interactive: #{format("%.1fms", launch_interactive_summary[:value_ms])} " \
+       "(budget #{format("%.1fms", launch_interactive_summary[:budget_ms])})"
 end

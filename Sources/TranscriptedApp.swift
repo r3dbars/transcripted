@@ -891,6 +891,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             statusItemExists: statusItem != nil,
             popoverConfigured: popover != nil,
             onboardingCompleted: true,
+            launchToInteractiveMs: Self.processStartToNowMilliseconds(),
             menuVisibilityOverride: smokeMenuVisibility
         )
         let reportURL = URL(fileURLWithPath: reportPath, isDirectory: false)
@@ -906,6 +907,30 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         } catch {
             NSLog("Failed to write launch UI smoke report: \(error.localizedDescription)")
         }
+    }
+
+    /// Wall-clock milliseconds from the kernel's process-start time to now.
+    /// Measured from `kinfo_proc.p_starttime` so it captures the true
+    /// launch-to-interactive latency including pre-`main` dyld/runtime setup,
+    /// not just the time since the app delegate began running. Returns nil if
+    /// the syscall fails or the clock reads backwards. CI-smoke only.
+    private static func processStartToNowMilliseconds() -> Double? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        let status = mib.withUnsafeMutableBufferPointer { buffer in
+            sysctl(buffer.baseAddress, UInt32(buffer.count), &info, &size, nil, 0)
+        }
+        guard status == 0 else { return nil }
+
+        var now = timeval()
+        guard gettimeofday(&now, nil) == 0 else { return nil }
+
+        let start = info.kp_proc.p_starttime
+        let startMs = Double(start.tv_sec) * 1000.0 + Double(start.tv_usec) / 1000.0
+        let nowMs = Double(now.tv_sec) * 1000.0 + Double(now.tv_usec) / 1000.0
+        let elapsed = nowMs - startMs
+        return elapsed >= 0 ? elapsed : nil
     }
 
     private func scheduleLaunchUISmokeTerminationIfRequested(environment: [String: String]) {

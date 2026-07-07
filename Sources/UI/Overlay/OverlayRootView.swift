@@ -115,10 +115,16 @@ final class OverlayRootView: NSView {
     // MARK: - State Updates
 
     // @_optimize(none): the -O SimplifyCFG pass crashes on this function's
-    // parameter/closure shape under swiftlang-6.3.2.1.108 (SIL/BorrowUtils.swift:542,
-    // "cannot get borrow introducers for unknown guaranteed value"). This is a
-    // compiler bug, not a correctness issue — disable optimization here until upstream
-    // fixes it. Reproduced in CI at github.com/r3dbars/transcripted actions run 28685559441.
+    // parameter/closure shape (SIL/BorrowUtils.swift:542, "cannot get borrow
+    // introducers for unknown guaranteed value"). This is a compiler bug, not a
+    // correctness issue — disable optimization here until upstream fixes it.
+    // First seen under swiftlang-6.3.2.1.108 (CI actions run 28685559441).
+    // Re-verified STILL CRASHING under swiftlang-6.3.3.1.3 (Swift 6.3.3) on
+    // 2026-07-07: removing this attribute reproduces the identical SimplifyCFG
+    // fault. Keep it. Perf cost is nil: `updateForState` runs only on discrete
+    // overlay state transitions (see FloatingOverlayController.pushStateToViews),
+    // never per audio frame — the hot meter path calls headerView.updateWaveformLevel
+    // directly, so this function is not on any hot path.
     @_optimize(none)
     func updateForState(
         _ state: FloatingOverlayController.OverlayState,

@@ -617,6 +617,13 @@ PERFORMANCE_BUDGET_ARGS=(--app "$APP_BUNDLE")
 if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
     PERFORMANCE_BUDGET_ARGS+=(--allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80)
 fi
+# The launch smoke (above) writes the interactive-readiness report; score its
+# launch-to-interactive latency when it ran. Skipped smoke → no report → skip
+# the budget rather than fail on a file that was intentionally not produced.
+LAUNCH_UI_SMOKE_REPORT="$REPO_ROOT/$BUILD_DIR/launch-ui-smoke.json"
+if [ "${TRANSCRIPTED_SKIP_LAUNCH_SMOKE:-0}" != "1" ] && [ -s "$LAUNCH_UI_SMOKE_REPORT" ]; then
+    PERFORMANCE_BUDGET_ARGS+=(--launch-ui-smoke "$LAUNCH_UI_SMOKE_REPORT" --max-launch-interactive-ms 1500)
+fi
 scripts/ops/performance-budget.rb "${PERFORMANCE_BUDGET_ARGS[@]}"
 
 echo "Build complete!"
