@@ -228,4 +228,49 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         sqlite3_bind_text(stmt, 6, jsonString, -1, SQLITE_TRANSIENT)
         sqlite3_step(stmt)
     }
+
+    /// Drop cached rows whose transcript file no longer exists on disk, and report
+    /// how many were removed. Stale rows accumulate whenever a meeting is deleted
+    /// or moved (and, historically, when tests wrote fixture rows into the shared
+    /// cache). A missing file is already a lookup miss, so these rows are harmless
+    /// for correctness, but left unbounded they bloat the table — and if the whole
+    /// cached set points at now-gone paths the Home view can strand at "No meetings
+    /// yet". Pruning makes the cache self-healing.
+    ///
+    /// Kept cheap: one table scan to read the paths, a `stat` per row done outside
+    /// the SQL step loop, then the missing rows deleted in a single transaction.
+    /// Call it from the background refresh path only — never the main thread.
+    @discardableResult
+    func pruneMissingPaths(fileManager: FileManager = .default) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return 0 }
+
+        var paths: [String] = []
+        var selectStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT path FROM meeting_metadata;", -1, &selectStmt, nil) == SQLITE_OK {
+            while sqlite3_step(selectStmt) == SQLITE_ROW {
+                if let cString = sqlite3_column_text(selectStmt, 0) {
+                    paths.append(String(cString: cString))
+                }
+            }
+        }
+        sqlite3_finalize(selectStmt)
+
+        let missing = paths.filter { !fileManager.fileExists(atPath: $0) }
+        guard !missing.isEmpty else { return 0 }
+
+        sqlite3_exec(db, "BEGIN;", nil, nil, nil)
+        var deleteStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM meeting_metadata WHERE path = ?;", -1, &deleteStmt, nil) == SQLITE_OK {
+            for path in missing {
+                sqlite3_bind_text(deleteStmt, 1, path, -1, SQLITE_TRANSIENT)
+                sqlite3_step(deleteStmt)
+                sqlite3_reset(deleteStmt)
+            }
+        }
+        sqlite3_finalize(deleteStmt)
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+        return missing.count
+    }
 }

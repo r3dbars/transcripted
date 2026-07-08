@@ -154,8 +154,31 @@ extension FileManager {
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
     }
 
+    /// Test/CI override for the entire app-owned Transcripted container. When
+    /// `TRANSCRIPTED_CONTAINER_DIR` holds an absolute path, every app-owned store
+    /// (cache, state/speakers.sqlite/stats.sqlite, logs, tmp, and the default
+    /// capture library) roots there instead of `~/Library/Application
+    /// Support/Transcripted`. This is the single seam that keeps a test run from
+    /// writing fixture data into the real user container — most notably the
+    /// `RecentMeetingMetadataCache.shared` Home cache, whose `static let` captures
+    /// its path at first access, so redirection has to happen at the container
+    /// root, before any store is touched. Read fresh (never cached) so a harness
+    /// that exports the variable before launch is always honored.
+    private var transcriptedContainerOverrideURL: URL? {
+        guard let raw = ProcessInfo.processInfo.environment["TRANSCRIPTED_CONTAINER_DIR"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty,
+              raw.hasPrefix("/") else {
+            return nil
+        }
+        return URL(fileURLWithPath: raw, isDirectory: true).standardizedFileURL
+    }
+
     var transcriptedAppSupportRootURL: URL {
-        userApplicationSupportDir.appendingPathComponent("Transcripted", isDirectory: true)
+        if let override = transcriptedContainerOverrideURL {
+            return override
+        }
+        return userApplicationSupportDir.appendingPathComponent("Transcripted", isDirectory: true)
     }
 
     var transcriptedMCPDirectoriesManifestURL: URL {

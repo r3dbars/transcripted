@@ -408,6 +408,13 @@ enum RecentMeetingsScanner {
 
         let dir = directory ?? MeetingStoragePaths.transcriptsFolder
         let fm = FileManager.default
+
+        // Self-heal before scanning: drop cached rows whose transcript no longer
+        // exists so deleted/moved meetings (and any fixture rows a mis-scoped
+        // caller wrote) can't strand the Home list. This runs on the background
+        // refresh task, so the `stat`-per-row cost stays off the main thread.
+        cache?.pruneMissingPaths(fileManager: fm)
+
         guard fm.fileExists(atPath: dir.path) else { return [] }
 
         let keys: [URLResourceKey] = [
