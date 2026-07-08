@@ -192,6 +192,63 @@ func testObservabilityLogWriter() {
         )
     }
 
+    runSuite("LockedFileAppender swallows write failures instead of crashing the app") {
+        // The 1.1.48 crash was EventFileWriter.write → LockedFileAppender.append →
+        // NSFileHandle writeData: → objc_exception_throw → terminate. The legacy
+        // seekToEndOfFile()/write(_:) raise uncatchable ObjC NSExceptions on I/O
+        // failure; the error-returning variants must swallow them. If this suite
+        // regressed, appending to a closed handle would abort the whole runner.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("LockedFileAppenderCrashSafety-\(UUID().uuidString)", isDirectory: true)
+        let logURL = root.appendingPathComponent("events.jsonl", isDirectory: false)
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        fm.createFile(atPath: logURL.path, contents: nil)
+        defer { try? fm.removeItem(at: root) }
+
+        // Open the log read-only, then hand it to the appender as if it were a
+        // write handle. The fd is live (so flock + fileDescriptor behave), but the
+        // write fails with EBADF — the same failure shape as the 1.1.48 disk write
+        // that raised NSFileHandleOperationException from writeData: and crashed.
+        guard let readOnlyHandle = try? FileHandle(forReadingFrom: logURL) else {
+            assertTrue(false, "expected to open a read handle")
+            return
+        }
+        defer { try? readOnlyHandle.close() }
+
+        // Must return normally — reaching the next line proves no NSException propagated.
+        LockedFileAppender.append(Data("{\"crash\":\"safe\"}\n".utf8), to: readOnlyHandle)
+
+        assertTrue(true, "LockedFileAppender.append returned without terminating the process")
+
+        let contents = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
+        assertTrue(contents.isEmpty, "a failed append should be a no-op on disk, not a crash")
+    }
+
+    runSuite("Diagnostic file writers avoid the NSException-throwing legacy FileHandle APIs") {
+        // Guards every shipped logging site the 1.1.49 stability pass converted. The
+        // legacy seekToEndOfFile()/write(_:)/readData(ofLength:) raise uncatchable
+        // ObjC NSExceptions on I/O failure; a revert to any of them re-arms the crash.
+        let crashProneAPIs = ["seekToEndOfFile()", "readData(ofLength:", ".write(data)"]
+        let sites = [
+            "Sources/Observability/LockedFileAppender.swift",
+            "Sources/Observability/EventReporter.swift",
+            "Sources/Observability/ReliabilityPacketRecorder.swift",
+            "Sources/Observability/AppLogger.swift",
+            "Sources/TranscriptedCore/Logging/FileLogger.swift",
+            "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift",
+        ]
+        for site in sites {
+            let source = strippedOfComments(readObservabilityTestRepoTextFile(site))
+            assertFalse(source.isEmpty, "expected to read \(site)")
+            for api in crashProneAPIs {
+                assertFalse(
+                    source.contains(api),
+                    "\(site) must not call the NSException-throwing \(api) outside comments"
+                )
+            }
+        }
+    }
+
     runSuite("LockedFileAppender keeps concurrent log records line-delimited") {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("ObservabilityLogWriterTests-\(UUID().uuidString)", isDirectory: true)
@@ -239,4 +296,19 @@ private func readObservabilityTestRepoTextFile(_ relativePath: String) -> String
     let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         .appendingPathComponent(relativePath)
     return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+}
+
+// Drop `//` line comments so a contract check for a crash-prone API name does not
+// trip on the explanatory comments that intentionally reference it. Coarse (it does
+// not model strings), which is fine for the diagnostic-logging sources it scans.
+private func strippedOfComments(_ source: String) -> String {
+    source
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .map { line -> Substring in
+            if let range = line.range(of: "//") {
+                return line[line.startIndex..<range.lowerBound]
+            }
+            return line
+        }
+        .joined(separator: "\n")
 }

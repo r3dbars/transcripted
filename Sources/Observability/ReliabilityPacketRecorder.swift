@@ -61,7 +61,15 @@ private actor ReliabilityPacketFileWriter {
         }
 
         handle = opened
-        approximateSize = opened.seekToEndOfFile()
+        // seekToEnd() (error-returning) instead of the legacy seekToEndOfFile(),
+        // which raises an uncatchable ObjC NSException on failure and hard-crashes.
+        // On failure, fall back to a zero size estimate; appends stay crash-safe.
+        do {
+            approximateSize = try opened.seekToEnd()
+        } catch {
+            fputs("⚠️ RELIABILITY | failed to seek reliability log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
+            approximateSize = 0
+        }
         isPrepared = true
         return true
     }
