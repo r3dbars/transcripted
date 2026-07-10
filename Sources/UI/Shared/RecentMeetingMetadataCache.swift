@@ -113,6 +113,8 @@ extension CachedRecentMeetingMetadata {
 /// is safe to share the singleton across the background scan task and any future
 /// concurrent caller.
 final class RecentMeetingMetadataCache: @unchecked Sendable {
+    private static let pruneInterval: TimeInterval = 60
+
     /// App-wide cache, persisted under the app cache directory. Safe to delete;
     /// it is rebuilt lazily from disk on the next refresh.
     static let shared = RecentMeetingMetadataCache(
@@ -122,6 +124,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
 
     private let lock = NSLock()
     private var db: OpaquePointer?
+    private var lastPruneAt: Date?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -227,5 +230,72 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         sqlite3_bind_int64(stmt, 5, stamp.summarySize)
         sqlite3_bind_text(stmt, 6, jsonString, -1, SQLITE_TRANSIENT)
         sqlite3_step(stmt)
+    }
+
+    /// Drop cached rows whose transcript file no longer exists on disk, and report
+    /// how many were removed. Stale rows accumulate whenever a meeting is deleted
+    /// or moved (and, historically, when tests wrote fixture rows into the shared
+    /// cache). A missing file is already a lookup miss, so these rows are harmless
+    /// for correctness, but left unbounded they bloat the table — and if the whole
+    /// cached set points at now-gone paths the Home view can strand at "No meetings
+    /// yet". Pruning makes the cache self-healing.
+    ///
+    /// Kept cheap: one table scan to read the paths, a `stat` per row done outside
+    /// the SQL step loop, then the missing rows deleted in a single transaction.
+    /// Call it from the background refresh path only — never the main thread.
+    @discardableResult
+    func pruneMissingPaths(fileManager: FileManager = .default) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let db else { return 0 }
+
+        var paths: [String] = []
+        var selectStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT path FROM meeting_metadata;", -1, &selectStmt, nil) == SQLITE_OK {
+            while sqlite3_step(selectStmt) == SQLITE_ROW {
+                if let cString = sqlite3_column_text(selectStmt, 0) {
+                    paths.append(String(cString: cString))
+                }
+            }
+        }
+        sqlite3_finalize(selectStmt)
+
+        let missing = paths.filter { !fileManager.fileExists(atPath: $0) }
+        guard !missing.isEmpty else { return 0 }
+
+        sqlite3_exec(db, "BEGIN;", nil, nil, nil)
+        var deleteStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "DELETE FROM meeting_metadata WHERE path = ?;", -1, &deleteStmt, nil) == SQLITE_OK {
+            for path in missing {
+                sqlite3_bind_text(deleteStmt, 1, path, -1, SQLITE_TRANSIENT)
+                sqlite3_step(deleteStmt)
+                sqlite3_reset(deleteStmt)
+            }
+        }
+        sqlite3_finalize(deleteStmt)
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+        return missing.count
+    }
+
+    /// Run cache maintenance on the first refresh, then at most once per minute.
+    /// The cache is never the source of truth for which meetings exist — the
+    /// scanner enumerates the meetings folder — so pruning does not need to block
+    /// every Home refresh to keep the derived index tidy.
+    @discardableResult
+    func pruneMissingPathsIfNeeded(
+        now: Date = Date(),
+        fileManager: FileManager = .default
+    ) -> Int {
+        lock.lock()
+        if let lastPruneAt,
+           now >= lastPruneAt,
+           now.timeIntervalSince(lastPruneAt) < Self.pruneInterval {
+            lock.unlock()
+            return 0
+        }
+        lastPruneAt = now
+        lock.unlock()
+
+        return pruneMissingPaths(fileManager: fileManager)
     }
 }

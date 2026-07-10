@@ -74,8 +74,18 @@ if [ "$expect_filter_value" = true ]; then
     exit 2
 fi
 
+# Redirect the entire app-owned Transcripted container (Home meeting cache,
+# speakers/stats/timeline SQLite, logs, tmp) into a throwaway dir for the run so
+# tests can never write fixture rows into ~/Library/Application Support/
+# Transcripted. Exported before the test binary launches because
+# RecentMeetingMetadataCache.shared is a `static let` that captures its DB path at
+# first access — the redirect has to be in the environment from the start.
+TRANSCRIPTED_CONTAINER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/transcripted-test-container.XXXXXX")"
+export TRANSCRIPTED_CONTAINER_DIR
+
 cleanup_generated_runner() {
     rm -f "$GENERATED_RUNNER"
+    rm -rf "$TRANSCRIPTED_CONTAINER_DIR"
 }
 trap cleanup_generated_runner EXIT
 
