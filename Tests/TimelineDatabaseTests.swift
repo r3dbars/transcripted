@@ -164,6 +164,51 @@ func testTimelineDatabase() {
         }
     }
 
+    runSuite("TimelineRetentionManager repairs rows stranded after a soft-delete") {
+        let fixture = TimelineDatabaseFixture()
+        defer { fixture.cleanup() }
+
+        do {
+            let db = try TimelineDatabase(databaseURL: fixture.databaseURL)
+            try fixture.writeScreenshot(relativePath: "2026-07-03/stranded.jpg", bytes: 4)
+            try fixture.writeScreenshot(relativePath: "2026-07-03/live.jpg", bytes: 4)
+            let id = try db.insertScreenshot(NewTimelineScreenshot(
+                capturedAt: 10,
+                filePath: "2026-07-03/stranded.jpg",
+                fileSize: 4,
+                idleSecondsAtCapture: 0
+            ))
+            _ = try db.insertScreenshot(NewTimelineScreenshot(
+                capturedAt: 20,
+                filePath: "2026-07-03/live.jpg",
+                fileSize: 4,
+                idleSecondsAtCapture: 0
+            ))
+            try db.markScreenshotsDeleted(ids: [id])
+
+            let manager = TimelineRetentionManager(database: db, screenshotsRoot: fixture.screenshotsRoot)
+            let summary = try manager.runRetentionPass(storageCapBytes: 4)
+
+            assertEqual(summary.deletedFiles, 1, "a stranded soft-delete should remove its retained screenshot file")
+            assertEqual(summary.deletedDatabaseRows, 1, "a repaired soft-delete should count as one deleted database row")
+            assertFalse(
+                FileManager.default.fileExists(atPath: fixture.url("2026-07-03/stranded.jpg").path),
+                "a stranded soft-delete should not leave the screenshot on disk"
+            )
+            assertTrue(
+                FileManager.default.fileExists(atPath: fixture.url("2026-07-03/live.jpg").path),
+                "repairing a stranded file should update the byte budget before purging live screenshots"
+            )
+            assertEqual(
+                try db.screenshots(includeDeleted: true).map(\.filePath),
+                ["2026-07-03/live.jpg"],
+                "a repaired soft-delete should remove only its database row"
+            )
+        } catch {
+            assertTrue(false, "soft-delete repair should not throw: \(error)")
+        }
+    }
+
     runSuite("TimelineRetentionManager does no work when maxFilesPerPass is zero") {
         let fixture = TimelineDatabaseFixture()
         defer { fixture.cleanup() }

@@ -197,6 +197,24 @@ final class TimelineDatabase {
         }
     }
 
+    func deletedScreenshotCandidates() throws -> [TimelineScreenshotRow] {
+        try queue.sync {
+            let sql = """
+            SELECT s.* FROM screenshots s
+            WHERE s.is_deleted = 1
+              AND NOT EXISTS (
+                SELECT 1
+                FROM batch_screenshots bs
+                JOIN analysis_batches ab ON ab.id = bs.batch_id
+                WHERE bs.screenshot_id = s.id
+                  AND ab.status = 'processing'
+              )
+            ORDER BY s.captured_at ASC, s.id ASC;
+            """
+            return try screenshotRows(sql)
+        }
+    }
+
     func markScreenshotsDeleted(ids: [Int64]) throws {
         guard !ids.isEmpty else { return }
         try queue.sync {

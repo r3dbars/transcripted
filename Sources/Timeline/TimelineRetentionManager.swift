@@ -62,22 +62,35 @@ final class TimelineRetentionManager {
         let startingBytes = directorySize(screenshotsRoot)
         var endingBytes = startingBytes
         var deletedRows: [Int64] = []
-        var deletedFiles = 0
-        var deletedOrphanFiles = 0
+        var repairedDatabaseRows = 0
         var remainingFileBudget = max(0, maxFilesPerPass)
+        var deletedFiles = 0
+        if remainingFileBudget > 0 {
+            let repair = try repairPreviouslyDeletedScreenshots(limit: remainingFileBudget)
+            repairedDatabaseRows = repair.deletedRows
+            deletedFiles = repair.deletedFiles
+            endingBytes = max(0, endingBytes - repair.deletedBytes)
+            remainingFileBudget -= repair.deletedFiles
+        }
+        var deletedOrphanFiles = 0
 
         if storageCapBytes >= 0, endingBytes > storageCapBytes, remainingFileBudget > 0 {
             let candidates = try database.oldestPurgeCandidates(limit: remainingFileBudget)
 
             for candidate in candidates where endingBytes > storageCapBytes && remainingFileBudget > 0 {
                 guard let url = fileURL(for: candidate.filePath) else { continue }
-                let bytes = fileSize(url) ?? candidate.fileSize
-                try database.markScreenshotsDeleted(ids: [candidate.id])
+                let fileWasPresent = fileManager.fileExists(atPath: url.path)
+                let bytes = fileWasPresent ? (fileSize(url) ?? candidate.fileSize) : 0
                 if fileManager.fileExists(atPath: url.path) {
                     try fileManager.removeItem(at: url)
                     deletedFiles += 1
                     remainingFileBudget -= 1
                 }
+                // Delete the file before marking the row. If the process dies
+                // after the unlink, the next pass can still remove the now
+                // missing row; reversing this order would strand the file
+                // behind is_deleted=1 forever.
+                try database.markScreenshotsDeleted(ids: [candidate.id])
                 endingBytes = max(0, endingBytes - max(0, bytes))
                 deletedRows.append(candidate.id)
             }
@@ -99,10 +112,31 @@ final class TimelineRetentionManager {
         return TimelineRetentionSummary(
             startingBytes: startingBytes,
             endingBytes: directorySize(screenshotsRoot),
-            deletedDatabaseRows: deletedRows.count,
+            deletedDatabaseRows: repairedDatabaseRows + deletedRows.count,
             deletedFiles: deletedFiles,
             deletedOrphanFiles: deletedOrphanFiles
         )
+    }
+
+    private func repairPreviouslyDeletedScreenshots(limit: Int) throws -> (deletedRows: Int, deletedFiles: Int, deletedBytes: Int64) {
+        let candidates = try database.deletedScreenshotCandidates().prefix(limit)
+        guard !candidates.isEmpty else { return (0, 0, 0) }
+
+        var deletedFiles = 0
+        var deletedBytes: Int64 = 0
+        var repairedIDs: [Int64] = []
+        for candidate in candidates {
+            if let url = fileURL(for: candidate.filePath), fileManager.fileExists(atPath: url.path) {
+                let bytes = fileSize(url) ?? candidate.fileSize
+                try fileManager.removeItem(at: url)
+                deletedFiles += 1
+                deletedBytes += max(0, bytes)
+            }
+            repairedIDs.append(candidate.id)
+        }
+
+        try database.hardDeleteScreenshots(ids: repairedIDs)
+        return (repairedIDs.count, deletedFiles, deletedBytes)
     }
 
     private func fileURL(for relativePath: String) -> URL? {

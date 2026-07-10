@@ -119,6 +119,7 @@ final class ScreenCaptureEngine: @unchecked Sendable {
     private var observerTokens: [NSObjectProtocol] = []
     private var distributedObserverTokens: [NSObjectProtocol] = []
     private var captureInFlight = false
+    private var captureGeneration = 0
 
     init(
         displayTracker: ActiveDisplayTracker = ActiveDisplayTracker(),
@@ -155,6 +156,7 @@ final class ScreenCaptureEngine: @unchecked Sendable {
     func stop() {
         queue.async { [weak self] in
             guard let self else { return }
+            self.captureGeneration &+= 1
             self.stopTimerLocked()
             self.removeSystemObserversLocked()
             self.transitionLocked { $0.stop() }
@@ -183,6 +185,7 @@ final class ScreenCaptureEngine: @unchecked Sendable {
     }
 
     private func pauseLocked(_ reason: ScreenCapturePauseReason) {
+        captureGeneration &+= 1
         stopTimerLocked()
         transitionLocked { $0.pause(reason) }
     }
@@ -235,13 +238,15 @@ final class ScreenCaptureEngine: @unchecked Sendable {
         )
         let idleSnapshot = idleSnapshotProvider()
         let foregroundSnapshot = foregroundAppSampler.currentSnapshot()
+        let generation = captureGeneration
 
         Task.detached(priority: .utility) { [weak self] in
             do {
                 let record = try await self?.captureAndStore(
                     request: request,
                     idleSnapshot: idleSnapshot,
-                    foregroundSnapshot: foregroundSnapshot
+                    foregroundSnapshot: foregroundSnapshot,
+                    generation: generation
                 )
                 self?.queue.async {
                     self?.captureInFlight = false
@@ -250,6 +255,13 @@ final class ScreenCaptureEngine: @unchecked Sendable {
                     }
                 }
             } catch {
+                if let captureError = error as? TimelineCaptureError,
+                   captureError == .captureInvalidated {
+                    self?.queue.async {
+                        self?.captureInFlight = false
+                    }
+                    return
+                }
                 self?.queue.async {
                     guard let self else { return }
                     self.captureInFlight = false
@@ -267,7 +279,8 @@ final class ScreenCaptureEngine: @unchecked Sendable {
     private func captureAndStore(
         request: TimelineScreenshotCaptureRequest,
         idleSnapshot: InputIdleSnapshot,
-        foregroundSnapshot: ForegroundAppSnapshot
+        foregroundSnapshot: ForegroundAppSnapshot,
+        generation: Int
     ) async throws -> TimelineScreenshotRecord {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let scDisplay = content.displays.first(where: { $0.displayID == request.display.id }) ?? content.displays.first else {
@@ -286,18 +299,44 @@ final class ScreenCaptureEngine: @unchecked Sendable {
         configuration.scalesToFit = true
 
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
-        let fileURL = try screenshotStore.writeJPEG(image, capturedAt: idleSnapshot.capturedAt)
-        let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value ?? 0
-        return TimelineScreenshotRecord(
-            capturedAt: idleSnapshot.capturedAt,
-            fileURL: fileURL,
-            fileSize: fileSize,
-            idleSecondsAtCapture: idleSnapshot.idleSeconds,
-            appBundleIdentifier: foregroundSnapshot.bundleIdentifier,
-            appName: foregroundSnapshot.appName,
-            windowTitle: foregroundSnapshot.windowTitle,
-            displayID: request.display.id
+        return try storeScreenshotIfCurrent(
+            image,
+            request: request,
+            idleSnapshot: idleSnapshot,
+            foregroundSnapshot: foregroundSnapshot,
+            generation: generation
         )
+    }
+
+    /// Commit the screenshot on the engine queue so pause/stop and persistence
+    /// are ordered. A capture that finishes after invalidation is discarded
+    /// before it can touch the local screenshot store.
+    private func storeScreenshotIfCurrent(
+        _ image: CGImage,
+        request: TimelineScreenshotCaptureRequest,
+        idleSnapshot: InputIdleSnapshot,
+        foregroundSnapshot: ForegroundAppSnapshot,
+        generation: Int
+    ) throws -> TimelineScreenshotRecord {
+        try queue.sync {
+            guard stateMachine.state == .capturing,
+                  captureGeneration == generation else {
+                throw TimelineCaptureError.captureInvalidated
+            }
+
+            let fileURL = try screenshotStore.writeJPEG(image, capturedAt: idleSnapshot.capturedAt)
+            let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+            return TimelineScreenshotRecord(
+                capturedAt: idleSnapshot.capturedAt,
+                fileURL: fileURL,
+                fileSize: fileSize,
+                idleSecondsAtCapture: idleSnapshot.idleSeconds,
+                appBundleIdentifier: foregroundSnapshot.bundleIdentifier,
+                appName: foregroundSnapshot.appName,
+                windowTitle: foregroundSnapshot.windowTitle,
+                displayID: request.display.id
+            )
+        }
     }
 
     private func installSystemObserversLocked() {
@@ -396,6 +435,7 @@ enum TimelineCaptureError: Error, Equatable {
     case noDisplayAvailable
     case imageDestinationUnavailable
     case imageEncodingFailed
+    case captureInvalidated
 }
 
 final class LocalTimelineScreenshotStore {
