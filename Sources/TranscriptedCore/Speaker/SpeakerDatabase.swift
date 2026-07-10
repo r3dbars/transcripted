@@ -518,6 +518,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
         queue.sync { [self] in
             guard isDatabaseOpen else { return }
             deleteExemplarsImpl(profileId: id)
+            deleteNegativeExemplarsImpl(profileId: id)
             let sql = "DELETE FROM speakers WHERE id = ?;"
             var statement: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {

@@ -132,10 +132,15 @@ final class SpeakerProfileMergerTests: XCTestCase {
 
         let targetBefore = try XCTUnwrap(database.getSpeaker(id: target.id))
         let sourceBefore = try XCTUnwrap(database.getSpeaker(id: source.id))
+        database.recordNegativeExemplar(profileId: source.id, embedding: [Float](repeating: 0.12, count: 256))
 
         database.mergeProfiles(sourceId: source.id, into: target.id)
 
         XCTAssertNil(database.getSpeaker(id: source.id), "source profile is deleted after merge")
+        XCTAssertTrue(
+            database.negativeExemplars(profileId: source.id).isEmpty,
+            "absorbed profile must not leave identity-bound negative embeddings behind"
+        )
 
         let merged = try XCTUnwrap(database.getSpeaker(id: target.id))
         XCTAssertEqual(merged.callCount, targetBefore.callCount + sourceBefore.callCount, "call counts sum")
@@ -168,6 +173,31 @@ final class SpeakerProfileMergerTests: XCTestCase {
 
         let survivors = [a.id, b.id].compactMap { database.getSpeaker(id: $0) }
         XCTAssertEqual(survivors.count, 1, "identical unnamed embeddings above threshold merge into one")
+    }
+
+    func testPruneWeakProfilesRemovesNegativeExemplarsWithProfile() {
+        let profileId = UUID()
+        _ = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: profileId
+        )
+        database.restoreProfile(SpeakerProfile(
+            id: profileId,
+            displayName: nil,
+            nameSource: nil,
+            embedding: [Float](repeating: 0.25, count: 256),
+            firstSeen: Date().addingTimeInterval(-7200),
+            lastSeen: Date().addingTimeInterval(-7200),
+            callCount: 1,
+            confidence: 0.5,
+            disputeCount: 0
+        ))
+        database.recordNegativeExemplar(profileId: profileId, embedding: [Float](repeating: 0.12, count: 256))
+
+        database.pruneWeakProfiles()
+
+        XCTAssertNil(database.getSpeaker(id: profileId))
+        XCTAssertTrue(database.negativeExemplars(profileId: profileId).isEmpty)
     }
 }
 
