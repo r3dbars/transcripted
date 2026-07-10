@@ -60,18 +60,19 @@ enum MeetingQuickSummaryWriter {
         fileManager: FileManager = .default,
         generatedAt: Date = Date()
     ) -> Bool {
-        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return false }
-        guard let updated = markdown(byApplyingQuickSummaryTo: raw, generatedAt: generatedAt) else {
-            return false
-        }
-        guard updated != raw else { return false }
-        do {
+        // This is a whole-file read/modify/write. Keep the read and write in the
+        // same critical section as transcript saves, restyles, renames, and
+        // speaker rewrites so a concurrent artifact update cannot be lost.
+        (try? MeetingTranscriptFileUpdateSerializer.sync {
+            guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return false }
+            guard let updated = markdown(byApplyingQuickSummaryTo: raw, generatedAt: generatedAt) else {
+                return false
+            }
+            guard updated != raw else { return false }
             try updated.write(to: url, atomically: true, encoding: .utf8)
             fileManager.restrictFileToOwnerOnly(at: url)
             return true
-        } catch {
-            return false
-        }
+        }) ?? false
     }
 
     /// Pure transform used by `ensureQuickSummary` and tests. Returns the rewritten

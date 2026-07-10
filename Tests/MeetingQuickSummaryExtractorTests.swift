@@ -178,4 +178,51 @@ func testMeetingQuickSummaryExtractor() {
             "writer should skip non-meeting captures"
         )
     }
+
+    runSuite("writer joins the shared transcript update serializer") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MeetingQuickSummarySerializerTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = root.appendingPathComponent("Call.md")
+        let markdown = """
+        ---
+        capture_type: meeting
+        title: "Call"
+        ---
+
+        ## Transcript
+
+        **00:01** [Mic/Justin]
+        I will send the launch checklist before Friday.
+        """
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let entered = DispatchSemaphore(value: 0)
+            let release = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                MeetingTranscriptFileUpdateSerializer.sync {
+                    entered.signal()
+                    _ = release.wait(timeout: .now() + 2)
+                }
+            }
+            assertEqual(entered.wait(timeout: .now() + 2), .success, "serializer fixture should acquire the shared lock")
+
+            let writerFinished = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                _ = MeetingQuickSummaryWriter.ensureQuickSummary(at: transcriptURL)
+                writerFinished.signal()
+            }
+            assertEqual(
+                writerFinished.wait(timeout: .now() + 0.1),
+                .timedOut,
+                "whole-file quick-summary writes must wait for concurrent transcript updates"
+            )
+            release.signal()
+            assertEqual(writerFinished.wait(timeout: .now() + 2), .success, "writer should continue after the shared lock is released")
+        } catch {
+            assertTrue(false, "serializer fixture should run: \(error)")
+        }
+        try? FileManager.default.removeItem(at: root)
+    }
 }
