@@ -164,6 +164,34 @@ extension SpeakerDatabase {
         return byProfile
     }
 
+    /// Drop all negative-exemplar rows for a profile that is being deleted or absorbed.
+    /// Must be called on `queue`.
+    func deleteNegativeExemplarsImpl(profileId: UUID) {
+        guard isDatabaseOpen else { return }
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(
+            db,
+            "DELETE FROM speaker_negative_exemplars WHERE profile_id = ?;",
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK {
+            sqlite3_bind_text(statement, 1, (profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            if sqlite3_step(statement) != SQLITE_DONE {
+                AppLogger.speakers.error("Failed to delete negative exemplars", [
+                    "sqlite_error": dbErrorMessage(),
+                    "profileId": profileId.uuidString
+                ])
+            }
+        } else {
+            AppLogger.speakers.error("Failed to prepare delete negative exemplars", [
+                "sqlite_error": dbErrorMessage(),
+                "profileId": profileId.uuidString
+            ])
+        }
+        sqlite3_finalize(statement)
+    }
+
     private static func readEmbeddingBlob(_ statement: OpaquePointer?, column: Int32) -> [Float]? {
         guard let statement, let blobPtr = sqlite3_column_blob(statement, column) else { return nil }
         let blobSize = sqlite3_column_bytes(statement, column)

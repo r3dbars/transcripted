@@ -44,6 +44,24 @@ final class SpeakerNegativeExemplarTests: XCTestCase {
         XCTAssertEqual(db.negativeExemplars(profileId: profileId).count, cap)
     }
 
+    func testDeletingSpeakerRemovesNegativeExemplars() {
+        let (db, _) = makeDatabase()
+        let profile = db.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        db.recordNegativeExemplar(profileId: profile.id, embedding: vector(degrees: 19))
+
+        db.deleteSpeaker(id: profile.id)
+
+        XCTAssertNil(db.getSpeaker(id: profile.id))
+        XCTAssertTrue(
+            db.negativeExemplars(profileId: profile.id).isEmpty,
+            "deleting a profile must delete its identity-bound negative embeddings"
+        )
+        XCTAssertNil(db.negativeExemplarsByProfile()[profile.id])
+    }
+
     // MARK: - In-memory matcher veto (matchAgainstProfiles)
 
     func testNegativeExemplarExcludesWrongProfileButKeepsCorrectMatch() {

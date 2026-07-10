@@ -232,6 +232,9 @@ extension SpeakerDatabase {
             // empty), which degrades to single-average matching — never wrong, just less enriched.
             deleteExemplarsImpl(profileId: sourceId)
             deleteExemplarsImpl(profileId: targetId)
+            // Negative exemplars are also identity-bound. The source profile is deleted, so its
+            // rejected samples must not remain as orphaned voice embeddings in the database.
+            deleteNegativeExemplarsImpl(profileId: sourceId)
 
             // Delete source profile
             let deleteSql = "DELETE FROM speakers WHERE id = ?;"
@@ -414,12 +417,48 @@ extension SpeakerDatabase {
         // Only prune profiles created more than 1 hour ago — don't prune profiles from
         // the current recording that are about to be named in the speaker naming flow.
         let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
-        let protectedIds = persistedReviewClipSpeakerIds()
+        let protectedIds = persistedReviewClipSpeakerIds().sorted { $0.uuidString < $1.uuidString }
         let protectedClause: String
         if protectedIds.isEmpty {
             protectedClause = ""
         } else {
             protectedClause = "AND id NOT IN (\(Array(repeating: "?", count: protectedIds.count).joined(separator: ",")))"
+        }
+
+        // Clean both exemplar caches before deleting the matching profiles. These tables are
+        // intentionally not foreign-key cascades because older databases may predate them, so a
+        // direct bulk profile delete must remove their identity-bound embeddings explicitly.
+        for table in ["speaker_exemplars", "speaker_negative_exemplars"] {
+            let cleanupSQL = """
+            DELETE FROM \(table)
+            WHERE profile_id IN (
+                SELECT id FROM speakers
+                WHERE display_name IS NULL
+                  AND call_count <= 1
+                  AND confidence <= 0.5
+                  AND first_seen < ?
+                  \(protectedClause)
+            );
+            """
+            var cleanupStatement: OpaquePointer?
+            if sqlite3_prepare_v2(db, cleanupSQL, -1, &cleanupStatement, nil) == SQLITE_OK {
+                sqlite3_bind_text(cleanupStatement, 1, (cutoff as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                for (offset, id) in protectedIds.enumerated() {
+                    sqlite3_bind_text(cleanupStatement, Int32(offset + 2), (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                }
+                if sqlite3_step(cleanupStatement) != SQLITE_DONE {
+                    AppLogger.speakers.error("Failed to clean pruned speaker exemplars", [
+                        "sqlite_error": dbErrorMessage(),
+                        "table": table
+                    ])
+                }
+            } else {
+                AppLogger.speakers.error("Failed to prepare pruned speaker exemplar cleanup", [
+                    "sqlite_error": dbErrorMessage(),
+                    "table": table
+                ])
+            }
+            sqlite3_finalize(cleanupStatement)
         }
 
         let sql = """
