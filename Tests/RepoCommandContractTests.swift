@@ -1348,7 +1348,7 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - performance budget checks release bloat") {
         let contents = readRepoTextFile("scripts/ops/performance-budget.rb")
         assertTrue(
-            contents.contains("EXPECTED_PARAKEET_MODEL_DIR = \"parakeet-tdt-0.6b-v3-coreml\""),
+            contents.contains("EXPECTED_PARAKEET_MODEL_DIR = \"parakeet-tdt-0.6b-v3\""),
             "performance budget should assert the runtime Parakeet model directory"
         )
         assertTrue(

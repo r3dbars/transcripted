@@ -9,7 +9,7 @@ require "pathname"
 require "time"
 
 REPO_ROOT = Pathname.new(__dir__).join("../..").expand_path
-EXPECTED_PARAKEET_MODEL_DIR = "parakeet-tdt-0.6b-v3-coreml"
+EXPECTED_PARAKEET_MODEL_DIR = "parakeet-tdt-0.6b-v3"
 EXPECTED_RESOURCE_ICONS = ["Transcripted.icns"].freeze
 MAX_APP_BYTES = 650 * 1024 * 1024
 MAX_RESOURCES_BYTES = 520 * 1024 * 1024
