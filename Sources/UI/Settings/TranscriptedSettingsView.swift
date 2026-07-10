@@ -3108,6 +3108,7 @@ struct TranscriptedSettingsView: View {
                             crashReportingEnabled = newValue
                             trackSettingsToggle("crash_reporting", enabled: newValue, page: .general)
                             CrashReportingPreferences.setEnabled(newValue)
+                            CrashReporter.applySessionTrackingPreference()
                             sentryTestStatus = nil
                             diagnosticsActionStatus = nil
                         }
@@ -4513,6 +4514,7 @@ struct TranscriptedSettingsView: View {
                             crashReportingEnabled = newValue
                             trackSettingsToggle("crash_reporting", enabled: newValue, page: .privacy)
                             CrashReportingPreferences.setEnabled(newValue)
+                            CrashReporter.applySessionTrackingPreference()
                             sentryTestStatus = nil
                             diagnosticsActionStatus = nil
                         }

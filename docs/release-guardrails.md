@@ -62,13 +62,12 @@ Defaults (all overridable by flag or env, see `--help`):
   on a handful of sessions.
 - `--stats-period 24h` (`SENTRY_STATS_PERIOD`) — lookback window.
 
-Note: as of this writing the Transcripted Sentry project reports no session
-data, so a live run returns `yellow`/`unknown` for real releases (session
-tracking is not populating Release Health). That is the correct safe posture —
-the gate blocks rather than false-greening — and it also surfaces that Release
-Health is not yet wired up in the app's Sentry SDK. Wiring session tracking is
-what turns this gate green-capable; until then crash-free is an `UNKNOWN` row,
-handled by manual QA.
+Release Health session tracking starts after onboarding when crash reporting is
+enabled, and follows later Settings changes. Existing releases may still
+report no session data if they shipped before that wiring or if users opted
+out, so a live run can remain `yellow`/`unknown` until a later release has
+enough opted-in production sessions. That is the correct safe posture: the
+gate blocks rather than false-greening.
 
 ## Safe While Justin Is Away
 

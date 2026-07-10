@@ -121,6 +121,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         // Crash reporting
         CrashReporter.setup()
+        if PermissionsOnboardingPreferences.hasCompleted() {
+            CrashReporter.applySessionTrackingPreference()
+        }
 
         let activationController = ActivationPolicyController(
             actualPolicy: { NSApp.activationPolicy() }
@@ -525,6 +528,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             cameraActivityMonitor.stop()
         }
         appState.shutdown()
+        CrashReporter.endSession()
         singleInstanceGuard.release()
     }
 
@@ -1066,6 +1070,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     private func finishOnboarding() {
         PermissionsOnboardingPreferences.markCompleted()
+        CrashReporter.applySessionTrackingPreference()
         // Meeting detection only works while the app runs; register the login
         // item by default now that onboarding gives the macOS notice context.
         // One-time, and an explicit Settings choice always wins.

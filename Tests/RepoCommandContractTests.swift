@@ -104,6 +104,18 @@ func testRepoCommandContract() {
         )
     }
 
+    runSuite("Repo command contract - Sentry release health follows crash reporting preference") {
+        let contents = readRepoTextFile("Sources/Observability/CrashReporter.swift")
+
+        assertTrue(
+            contents.contains("options.enableAutoSessionTracking = false")
+                && contents.contains("static func applySessionTrackingPreference()")
+                && contents.contains("SentrySDK.startSession()")
+                && contents.contains("SentrySDK.endSession()"),
+            "Sentry Release Health sessions should be explicitly gated by the user's crash-reporting preference"
+        )
+    }
+
     runSuite("Repo command contract - PostHog health probe uses the query API") {
         let contents = readRepoTextFile("scripts/ops/health-probe.sh")
 

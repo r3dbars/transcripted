@@ -19,6 +19,7 @@ final class CrashReporter {
     private init() {}
 
     private var hasStarted = false
+    private var sessionTrackingEnabled = false
 
     static func setup(dsn: String? = SentryRuntimeConfiguration.dsn()) {
         guard let dsn, !shared.hasStarted else { return }
@@ -32,6 +33,9 @@ final class CrashReporter {
         options.enableCrashHandler = true
         options.enableUncaughtNSExceptionReporting = true
         options.enableAppHangTracking = SentryRuntimeConfiguration.appHangTrackingEnabled()
+        // Session tracking is started explicitly after onboarding and when the
+        // user changes the crash-reporting preference. That keeps the first-run
+        // choice and later opt-outs aligned with Release Health envelopes.
         options.enableAutoSessionTracking = false
         options.enableNetworkBreadcrumbs = false
         options.maxBreadcrumbs = 0
@@ -49,6 +53,31 @@ final class CrashReporter {
         shared.hasStarted = true
 
         installUnrecognizedSelectorCapture()
+    }
+
+    /// Starts or ends the current Release Health session after the preference
+    /// is settled. Fresh installs stay session-free until onboarding completes.
+    static func applySessionTrackingPreference() {
+        guard shared.hasStarted else { return }
+
+        let shouldTrack = CrashReportingPreferences.isEnabled()
+        guard shouldTrack != shared.sessionTrackingEnabled else { return }
+
+        shared.sessionTrackingEnabled = shouldTrack
+        if shouldTrack {
+            SentrySDK.startSession()
+        } else {
+            SentrySDK.endSession()
+        }
+    }
+
+    /// Ends an opted-in session before normal app termination so Release
+    /// Health receives a completed session rather than only a later abnormal
+    /// session marker.
+    static func endSession() {
+        guard shared.sessionTrackingEnabled else { return }
+        shared.sessionTrackingEnabled = false
+        SentrySDK.endSession()
     }
 
     // MARK: - Unrecognized-selector enrichment
