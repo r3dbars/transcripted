@@ -198,7 +198,7 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
     }
     required_utility = {
         "connectAgent": ("Connect Agent", "transcripted.menubar.utility.connect-agent"),
-        "submitFeedback": ("Submit feedback", "transcripted.menubar.utility.submit-feedback"),
+        "submitFeedback": ("Submit Feedback", "transcripted.menubar.utility.submit-feedback"),
         "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
         "settings": ("Settings", "transcripted.menubar.utility.settings"),
         "quit": ("Quit", "transcripted.menubar.utility.quit"),
