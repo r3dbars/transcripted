@@ -40,7 +40,7 @@ private actor ReliabilityPacketFileWriter {
             approximateSize += UInt64(lineData.count)
             if approximateSize > TranscriptedConstants.jsonlLogRotationThreshold {
                 // Close so the next append re-prepares, which rotates the file.
-                handle.synchronizeFile()
+                try? handle.synchronize()
                 try? handle.close()
                 self.handle = nil
                 isPrepared = false
@@ -50,7 +50,7 @@ private actor ReliabilityPacketFileWriter {
 
     func flushForShutdown() {
         guard isPrepared, let handle else { return }
-        handle.synchronizeFile()
+        try? handle.synchronize()
     }
 
     private func prepareIfNeeded() -> Bool {

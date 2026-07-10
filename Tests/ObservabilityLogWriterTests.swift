@@ -228,7 +228,13 @@ func testObservabilityLogWriter() {
         // Guards every shipped logging site the 1.1.49 stability pass converted. The
         // legacy seekToEndOfFile()/write(_:)/readData(ofLength:) raise uncatchable
         // ObjC NSExceptions on I/O failure; a revert to any of them re-arms the crash.
-        let crashProneAPIs = ["seekToEndOfFile()", "readData(ofLength:", ".write(data)"]
+        let crashProneAPIs = [
+            "seekToEndOfFile()",
+            "readData(ofLength:",
+            ".write(data)",
+            "synchronizeFile()",
+            "closeFile()",
+        ]
         let sites = [
             "Sources/Observability/LockedFileAppender.swift",
             "Sources/Observability/EventReporter.swift",

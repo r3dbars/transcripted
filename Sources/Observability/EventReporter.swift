@@ -55,7 +55,7 @@ private actor EventFileWriter {
     func flushForShutdown() {
         guard prepareIfNeeded() else { return }
         flushBufferedInfoEvents()
-        handle?.synchronizeFile()
+        try? handle?.synchronize()
     }
 
     private func lineData(for event: ObservabilityEvent) -> Data? {

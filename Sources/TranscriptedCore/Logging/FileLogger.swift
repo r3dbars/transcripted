@@ -76,7 +76,7 @@ final class FileLogger: @unchecked Sendable {
     func flush() {
         guard !isDisabled else { return }
         queue.sync { [weak self] in
-            self?.fileHandle?.synchronizeFile()
+            try? self?.fileHandle?.synchronize()
         }
     }
 
@@ -121,7 +121,7 @@ final class FileLogger: @unchecked Sendable {
 
     private func trimIfNeeded() {
         // Flush buffered writes before reading — otherwise Data(contentsOf:) may miss recent entries
-        fileHandle?.synchronizeFile()
+        try? fileHandle?.synchronize()
 
         // Open a separate fd for an advisory lock that spans the close/reopen cycle.
         // The main fileHandle's lock is released when it's closed during trim,
@@ -142,7 +142,7 @@ final class FileLogger: @unchecked Sendable {
         let newContent = trimmed.joined(separator: "\n") + "\n"
 
         // Close handle, rewrite file, reopen
-        fileHandle?.closeFile()
+        try? fileHandle?.close()
 
         try? newContent.write(to: logFileURL, atomically: true, encoding: .utf8)
         // Security: atomic rewrite creates a replacement inode that may inherit default
@@ -171,8 +171,8 @@ final class FileLogger: @unchecked Sendable {
     }
 
     deinit {
-        fileHandle?.synchronizeFile()
-        fileHandle?.closeFile()
+        try? fileHandle?.synchronize()
+        try? fileHandle?.close()
     }
 
     private static func isEnabledFlag(_ value: String?) -> Bool {
