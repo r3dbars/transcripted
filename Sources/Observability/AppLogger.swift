@@ -53,7 +53,13 @@ private actor AppLogFileWriter {
     private func openHandleIfNeeded() {
         guard handle == nil, let path = logPath else { return }
         handle = FileHandle(forWritingAtPath: path)
-        handle?.seekToEndOfFile()
+        // seekToEnd() (error-returning) instead of the legacy seekToEndOfFile(),
+        // which raises an uncatchable ObjC NSException on failure and hard-crashes.
+        do {
+            try handle?.seekToEnd()
+        } catch {
+            fputs("⚠️ LOGGER | failed to seek debug log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
+        }
     }
 
     private func closeHandle() {

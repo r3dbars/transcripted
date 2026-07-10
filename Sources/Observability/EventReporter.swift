@@ -55,7 +55,7 @@ private actor EventFileWriter {
     func flushForShutdown() {
         guard prepareIfNeeded() else { return }
         flushBufferedInfoEvents()
-        handle?.synchronizeFile()
+        try? handle?.synchronize()
     }
 
     private func lineData(for event: ObservabilityEvent) -> Data? {
@@ -144,11 +144,16 @@ private actor EventFileWriter {
 
         do {
             handle = try FileHandle(forWritingTo: fileURL)
-            approximateSize = handle?.seekToEndOfFile() ?? 0
+            // seekToEnd() (error-returning) instead of the legacy seekToEndOfFile(),
+            // which raises an uncatchable ObjC NSException on failure. Any error here
+            // is caught below and treated as a failed prepare rather than a crash.
+            approximateSize = try handle?.seekToEnd() ?? 0
             isPrepared = true
             return true
         } catch {
             fputs("⚠️ EVENT | failed to open local event log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
+            try? handle?.close()
+            handle = nil
             return false
         }
     }

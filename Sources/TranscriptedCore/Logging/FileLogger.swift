@@ -52,7 +52,9 @@ final class FileLogger: @unchecked Sendable {
 
         // Open file handle for appending
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
-        fileHandle?.seekToEndOfFile()
+        // seekToEnd() (error-returning) instead of the legacy seekToEndOfFile(),
+        // which raises an uncatchable ObjC NSException on failure and hard-crashes.
+        try? fileHandle?.seekToEnd()
 
         // Heal oversized inherited logs on startup even if this process never reaches 100 writes.
         trimIfNeeded()
@@ -74,7 +76,7 @@ final class FileLogger: @unchecked Sendable {
     func flush() {
         guard !isDisabled else { return }
         queue.sync { [weak self] in
-            self?.fileHandle?.synchronizeFile()
+            try? self?.fileHandle?.synchronize()
         }
     }
 
@@ -99,8 +101,15 @@ final class FileLogger: @unchecked Sendable {
             // when multiple app instances write to the same log file simultaneously
             let fd = handle.fileDescriptor
             flock(fd, LOCK_EX)
-            handle.seekToEndOfFile()
-            handle.write(data)
+            do {
+                // Error-returning variants: the legacy seekToEndOfFile()/write(_:)
+                // raise uncatchable ObjC NSExceptions on I/O failure, which would
+                // hard-crash the app from this background logging path.
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+            } catch {
+                fputs("⚠️ LOGGER | log append failed: \(LogPrivacySanitizer.sanitizeText(error.localizedDescription))\n", stderr)
+            }
             flock(fd, LOCK_UN)
         }
 
@@ -112,7 +121,7 @@ final class FileLogger: @unchecked Sendable {
 
     private func trimIfNeeded() {
         // Flush buffered writes before reading — otherwise Data(contentsOf:) may miss recent entries
-        fileHandle?.synchronizeFile()
+        try? fileHandle?.synchronize()
 
         // Open a separate fd for an advisory lock that spans the close/reopen cycle.
         // The main fileHandle's lock is released when it's closed during trim,
@@ -133,7 +142,7 @@ final class FileLogger: @unchecked Sendable {
         let newContent = trimmed.joined(separator: "\n") + "\n"
 
         // Close handle, rewrite file, reopen
-        fileHandle?.closeFile()
+        try? fileHandle?.close()
 
         try? newContent.write(to: logFileURL, atomically: true, encoding: .utf8)
         // Security: atomic rewrite creates a replacement inode that may inherit default
@@ -148,7 +157,8 @@ final class FileLogger: @unchecked Sendable {
             FileManager.default.restrictToOwnerOnly(atPath: logFileURL.path)
             fileHandle = try? FileHandle(forWritingTo: logFileURL)
         }
-        fileHandle?.seekToEndOfFile()
+        // seekToEnd() (error-returning) instead of the crash-prone seekToEndOfFile().
+        try? fileHandle?.seekToEnd()
     }
 
     private func escapeJSON(_ string: String) -> String {
@@ -161,8 +171,8 @@ final class FileLogger: @unchecked Sendable {
     }
 
     deinit {
-        fileHandle?.synchronizeFile()
-        fileHandle?.closeFile()
+        try? fileHandle?.synchronize()
+        try? fileHandle?.close()
     }
 
     private static func isEnabledFlag(_ value: String?) -> Bool {

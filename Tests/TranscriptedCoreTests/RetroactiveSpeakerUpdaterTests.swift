@@ -26,6 +26,22 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         super.tearDown()
     }
 
+    // Regression: extractTranscriptId(from:) used the legacy readData(ofLength:),
+    // which raises an uncatchable ObjC NSException on I/O failure and hard-crashes
+    // the app (same crash family as the 1.1.48 telemetry-flush crash). Reading a
+    // directory fd fails with EISDIR — with read(upToCount:) that surfaces as a
+    // Swift error we swallow and return nil, instead of terminating the process.
+    func testExtractTranscriptIdDoesNotCrashOnUnreadableHandle() throws {
+        let directoryURL = temporaryDirectory.appendingPathComponent("a-directory", isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        // Opening a directory read-only succeeds; the first read fails with EISDIR.
+        // If this line NSException-crashes, the whole test process aborts.
+        let result = TranscriptSaver.extractTranscriptId(from: directoryURL)
+
+        XCTAssertNil(result, "an unreadable handle should yield nil, not a crash")
+    }
+
     func testRetroactivelyUpdateSpeakerRenamesEscapedQuotes() throws {
         let speakerId = UUID()
         let transcriptURL = temporaryDirectory.appendingPathComponent("quoted.md")

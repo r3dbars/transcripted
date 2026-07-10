@@ -40,7 +40,7 @@ private actor ReliabilityPacketFileWriter {
             approximateSize += UInt64(lineData.count)
             if approximateSize > TranscriptedConstants.jsonlLogRotationThreshold {
                 // Close so the next append re-prepares, which rotates the file.
-                handle.synchronizeFile()
+                try? handle.synchronize()
                 try? handle.close()
                 self.handle = nil
                 isPrepared = false
@@ -50,7 +50,7 @@ private actor ReliabilityPacketFileWriter {
 
     func flushForShutdown() {
         guard isPrepared, let handle else { return }
-        handle.synchronizeFile()
+        try? handle.synchronize()
     }
 
     private func prepareIfNeeded() -> Bool {
@@ -61,7 +61,15 @@ private actor ReliabilityPacketFileWriter {
         }
 
         handle = opened
-        approximateSize = opened.seekToEndOfFile()
+        // seekToEnd() (error-returning) instead of the legacy seekToEndOfFile(),
+        // which raises an uncatchable ObjC NSException on failure and hard-crashes.
+        // On failure, fall back to a zero size estimate; appends stay crash-safe.
+        do {
+            approximateSize = try opened.seekToEnd()
+        } catch {
+            fputs("⚠️ RELIABILITY | failed to seek reliability log: \(ObservabilityTextRedactor.redact(error.localizedDescription))\n", stderr)
+            approximateSize = 0
+        }
         isPrepared = true
         return true
     }
