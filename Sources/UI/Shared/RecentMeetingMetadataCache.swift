@@ -113,6 +113,8 @@ extension CachedRecentMeetingMetadata {
 /// is safe to share the singleton across the background scan task and any future
 /// concurrent caller.
 final class RecentMeetingMetadataCache: @unchecked Sendable {
+    private static let pruneInterval: TimeInterval = 60
+
     /// App-wide cache, persisted under the app cache directory. Safe to delete;
     /// it is rebuilt lazily from disk on the next refresh.
     static let shared = RecentMeetingMetadataCache(
@@ -122,6 +124,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
 
     private let lock = NSLock()
     private var db: OpaquePointer?
+    private var lastPruneAt: Date?
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -272,5 +275,27 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         sqlite3_finalize(deleteStmt)
         sqlite3_exec(db, "COMMIT;", nil, nil, nil)
         return missing.count
+    }
+
+    /// Run cache maintenance on the first refresh, then at most once per minute.
+    /// The cache is never the source of truth for which meetings exist — the
+    /// scanner enumerates the meetings folder — so pruning does not need to block
+    /// every Home refresh to keep the derived index tidy.
+    @discardableResult
+    func pruneMissingPathsIfNeeded(
+        now: Date = Date(),
+        fileManager: FileManager = .default
+    ) -> Int {
+        lock.lock()
+        if let lastPruneAt,
+           now >= lastPruneAt,
+           now.timeIntervalSince(lastPruneAt) < Self.pruneInterval {
+            lock.unlock()
+            return 0
+        }
+        lastPruneAt = now
+        lock.unlock()
+
+        return pruneMissingPaths(fileManager: fileManager)
     }
 }

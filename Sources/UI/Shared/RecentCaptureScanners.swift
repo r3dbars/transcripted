@@ -413,7 +413,7 @@ enum RecentMeetingsScanner {
         // exists so deleted/moved meetings (and any fixture rows a mis-scoped
         // caller wrote) can't strand the Home list. This runs on the background
         // refresh task, so the `stat`-per-row cost stays off the main thread.
-        cache?.pruneMissingPaths(fileManager: fm)
+        cache?.pruneMissingPathsIfNeeded(fileManager: fm)
 
         guard fm.fileExists(atPath: dir.path) else { return [] }
 

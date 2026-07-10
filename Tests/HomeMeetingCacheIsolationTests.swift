@@ -133,6 +133,24 @@ func testHomeMeetingCacheIsolation() {
             cache.lookup(path: missingPath, stamp: stamp),
             "a row whose file is missing should be pruned"
         )
+
+        cache.store(path: missingPath, stamp: stamp, metadata: payload)
+        assertEqual(
+            cache.pruneMissingPathsIfNeeded(now: Date(timeIntervalSince1970: 100)),
+            1,
+            "first scheduled prune should heal a stale row"
+        )
+        cache.store(path: missingPath, stamp: stamp, metadata: payload)
+        assertEqual(
+            cache.pruneMissingPathsIfNeeded(now: Date(timeIntervalSince1970: 130)),
+            0,
+            "scheduled pruning should not repeat on every refresh"
+        )
+        assertEqual(
+            cache.pruneMissingPathsIfNeeded(now: Date(timeIntervalSince1970: 160)),
+            1,
+            "scheduled pruning should run again after its maintenance interval"
+        )
     }
 }
 
