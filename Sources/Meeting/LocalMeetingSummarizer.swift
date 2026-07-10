@@ -304,28 +304,30 @@ enum LocalMeetingSummaryStore {
         for transcriptURL: URL,
         fileManager: FileManager = .default
     ) throws -> Bool {
-        var didRemove = false
-        let url = summaryURL(for: transcriptURL)
-        if fileManager.fileExists(atPath: url.path),
-           let values = try TranscriptFrontmatter.readValues(from: url),
-           values["capture_type"] == "meeting_summary",
-           values["source_transcript"] == transcriptURL.lastPathComponent {
-            try fileManager.removeItem(at: url)
-            didRemove = true
-        }
+        try MeetingTranscriptFileUpdateSerializer.sync {
+            var didRemove = false
+            let url = summaryURL(for: transcriptURL)
+            if fileManager.fileExists(atPath: url.path),
+               let values = try TranscriptFrontmatter.readValues(from: url),
+               values["capture_type"] == "meeting_summary",
+               values["source_transcript"] == transcriptURL.lastPathComponent {
+                try fileManager.removeItem(at: url)
+                didRemove = true
+            }
 
-        guard fileManager.fileExists(atPath: transcriptURL.path),
-              let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
-              values["capture_type"]?.lowercased() == "meeting" else {
-            return didRemove
-        }
+            guard fileManager.fileExists(atPath: transcriptURL.path),
+                  let values = try? TranscriptFrontmatter.readValues(from: transcriptURL),
+                  values["capture_type"]?.lowercased() == "meeting" else {
+                return didRemove
+            }
 
-        let raw = try String(contentsOf: transcriptURL, encoding: .utf8)
-        let updated = LocalMeetingSummaryMarkdownUpdater.removingGeneratedSummary(from: raw)
-        guard updated != raw else { return didRemove }
-        try updated.write(to: transcriptURL, atomically: true, encoding: .utf8)
-        fileManager.restrictFileToOwnerOnly(at: transcriptURL)
-        return true
+            let raw = try String(contentsOf: transcriptURL, encoding: .utf8)
+            let updated = LocalMeetingSummaryMarkdownUpdater.removingGeneratedSummary(from: raw)
+            guard updated != raw else { return didRemove }
+            try updated.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            fileManager.restrictFileToOwnerOnly(at: transcriptURL)
+            return true
+        }
     }
 }
 
@@ -1155,23 +1157,25 @@ struct LocalMeetingSummarizer: @unchecked Sendable {
         let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
         let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
             .withTranscriptParticipants(from: transcript)
-        let latestMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        let latestTranscript = LocalMeetingTranscriptExtractor.transcriptText(from: latestMarkdown)
-        guard latestTranscript == transcript else {
-            throw LocalMeetingSummaryError.transcriptChanged
-        }
-        let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
-            byApplying: sections,
-            to: latestMarkdown,
-            metadata: .gemma(configuration: configuration),
-            generatedAt: date,
-            chunkCount: chunks.count,
-            sourceTranscriptFilename: transcriptURL.lastPathComponent
-        )
+        try MeetingTranscriptFileUpdateSerializer.sync {
+            let latestMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+            let latestTranscript = LocalMeetingTranscriptExtractor.transcriptText(from: latestMarkdown)
+            guard latestTranscript == transcript else {
+                throw LocalMeetingSummaryError.transcriptChanged
+            }
+            let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+                byApplying: sections,
+                to: latestMarkdown,
+                metadata: .gemma(configuration: configuration),
+                generatedAt: date,
+                chunkCount: chunks.count,
+                sourceTranscriptFilename: transcriptURL.lastPathComponent
+            )
 
-        try Task.checkCancellation()
-        try updatedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
-        fileManager.restrictFileToOwnerOnly(at: transcriptURL)
+            try Task.checkCancellation()
+            try updatedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            fileManager.restrictFileToOwnerOnly(at: transcriptURL)
+        }
 
         return LocalMeetingSummaryResult(
             transcriptURL: transcriptURL,
@@ -1295,21 +1299,23 @@ struct AppleFoundationMeetingSummarizer: @unchecked Sendable {
         let normalizedBody = LocalMeetingSummaryNormalizer.normalized(summaryBody)
         let sections = LocalMeetingSummaryNormalizer.sections(in: normalizedBody)
             .withTranscriptParticipants(from: transcript)
-        let latestMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        let latestTranscript = LocalMeetingTranscriptExtractor.transcriptText(from: latestMarkdown)
-        guard latestTranscript == transcript else {
-            throw LocalMeetingSummaryError.transcriptChanged
+        try MeetingTranscriptFileUpdateSerializer.sync {
+            let latestMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+            let latestTranscript = LocalMeetingTranscriptExtractor.transcriptText(from: latestMarkdown)
+            guard latestTranscript == transcript else {
+                throw LocalMeetingSummaryError.transcriptChanged
+            }
+            let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
+                byApplying: sections,
+                to: latestMarkdown,
+                metadata: runtime.metadata,
+                generatedAt: date,
+                chunkCount: chunks.count,
+                sourceTranscriptFilename: transcriptURL.lastPathComponent
+            )
+            try updatedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            fileManager.restrictFileToOwnerOnly(at: transcriptURL)
         }
-        let updatedMarkdown = LocalMeetingSummaryMarkdownUpdater.markdown(
-            byApplying: sections,
-            to: latestMarkdown,
-            metadata: runtime.metadata,
-            generatedAt: date,
-            chunkCount: chunks.count,
-            sourceTranscriptFilename: transcriptURL.lastPathComponent
-        )
-        try updatedMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
-        fileManager.restrictFileToOwnerOnly(at: transcriptURL)
 
         return LocalMeetingSummaryResult(
             transcriptURL: transcriptURL,

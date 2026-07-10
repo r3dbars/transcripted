@@ -353,6 +353,52 @@ func testLocalMeetingSummarizer() async {
         }
     }
 
+    runSuite("LocalMeetingSummaryStore joins the shared transcript update serializer") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalMeetingSummarySerializerTests-\(UUID().uuidString)", isDirectory: true)
+        let transcriptURL = root.appendingPathComponent("Call.md")
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try """
+            ---
+            capture_type: meeting
+            title: "Call"
+            ---
+
+            ## Transcript
+
+            **00:01** [Mic/You]
+            Keep the real transcript.
+            """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+            let entered = DispatchSemaphore(value: 0)
+            let release = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                MeetingTranscriptFileUpdateSerializer.sync {
+                    entered.signal()
+                    _ = release.wait(timeout: .now() + 2)
+                }
+            }
+            assertEqual(entered.wait(timeout: .now() + 2), .success, "serializer fixture should acquire the shared lock")
+
+            let cleanupFinished = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                _ = try? LocalMeetingSummaryStore.removeGeneratedSummary(for: transcriptURL)
+                cleanupFinished.signal()
+            }
+            assertEqual(
+                cleanupFinished.wait(timeout: .now() + 0.1),
+                .timedOut,
+                "summary invalidation must wait for concurrent transcript updates"
+            )
+            release.signal()
+            assertEqual(cleanupFinished.wait(timeout: .now() + 2), .success, "summary invalidation should continue after the shared lock is released")
+        } catch {
+            assertTrue(false, "serializer fixture should run: \(error)")
+        }
+        try? FileManager.default.removeItem(at: root)
+    }
+
     runSuite("LocalMeetingSummaryNormalizer restores missing sections") {
         let normalized = LocalMeetingSummaryNormalizer.normalized("# Summary\nUseful brief.")
         for heading in [
