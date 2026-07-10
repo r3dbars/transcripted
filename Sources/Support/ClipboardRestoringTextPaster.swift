@@ -443,10 +443,15 @@ final class ClipboardRestoringTextPaster {
 
         let pasteboard = pendingClipboardRestore.pasteboard
         let temporaryString = pendingClipboardRestore.temporaryString
-        let stillBorrowedClipboard = pasteboard.changeCount == pendingClipboardRestore.temporaryChangeCount
-            || pasteboard.string(forType: .string) == temporaryString
+        let temporaryChangeCount = pendingClipboardRestore.temporaryChangeCount
         clearPendingClipboardRestore(restore: false)
-        guard stillBorrowedClipboard else { return true }
+        // A user copy with the same plain text can still carry rich data. Keep it
+        // intact when the pasteboard changed after paste started. An unchanged
+        // pasteboard may still hold our lazy provider, so materialize it before
+        // returning the text for manual recovery.
+        if pasteboard.changeCount != temporaryChangeCount {
+            return true
+        }
         return copyTextToClipboard(temporaryString, to: pasteboard)
     }
 

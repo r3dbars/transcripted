@@ -174,6 +174,77 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster.paste — unconfirmed lazy clipboard stays manually pasteable") {
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedUnconfirmedLazyClipboardTest-\(UUID().uuidString)"))
+            let paster = ClipboardRestoringTextPaster()
+            let dictationText = "synthetic lazy provider dictation"
+
+            pasteboard.clearContents()
+            pasteboard.setString("synthetic original clipboard", forType: .string)
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmationWait: 0.01
+            )
+
+            assertEqual(
+                outcome,
+                .copied(
+                    "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                    reason: .pasteConfirmationUnavailable
+                ),
+                "unconfirmed paste should leave the dictation available for manual recovery"
+            )
+            assertEqual(
+                pasteboard.string(forType: .string),
+                dictationText,
+                "unconfirmed lazy clipboard content should be materialized before provider cleanup"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — same-text user rich clipboard survives unconfirmed paste") {
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedSameTextRichClipboardTest-\(UUID().uuidString)"))
+            let paster = ClipboardRestoringTextPaster()
+            let dictationText = "synthetic shared text"
+            let customType = NSPasteboard.PasteboardType("com.transcripted.same-text-rich-clipboard")
+            let customData = Data([0xca, 0xfe, 0xba, 0xbe])
+
+            pasteboard.clearContents()
+            pasteboard.setString("synthetic original clipboard", forType: .string)
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    let userItem = NSPasteboardItem()
+                    userItem.setString(dictationText, forType: .string)
+                    userItem.setData(customData, forType: customType)
+                    pasteboard.clearContents()
+                    pasteboard.writeObjects([userItem])
+                    return true
+                },
+                pasteConfirmationWait: 0.01
+            )
+
+            assertEqual(
+                outcome,
+                .copied(
+                    "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                    reason: .pasteConfirmationUnavailable
+                ),
+                "unconfirmed paste should keep same-text user clipboard content available"
+            )
+            assertEqual(
+                pasteboard.pasteboardItems?.first?.data(forType: customType),
+                customData,
+                "same-text user rich clipboard data should not be flattened to plain text"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster.paste — blocks Cmd+V when the dictation clipboard write fails") {
             let existingClipboard = "synthetic existing clipboard"
             let pasteboard = FakeClipboardPasteboard(
