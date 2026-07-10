@@ -425,16 +425,13 @@ final class MenuBarPanelController: NSViewController {
                 )
             }
 
-            // Available-but-not-downloaded stays in the quiet utility row;
-            // the loud callout is reserved for the one state that actually
-            // needs the user (restart to finish installing).
             return (
-                "arrow.down.circle",
+                "arrow.down.circle.fill",
                 "Update available: \(version)",
                 "A new version is ready to install",
                 "Install",
-                .standard,
-                false
+                .warning,
+                true
             )
         case .downloading(let version):
             return (
