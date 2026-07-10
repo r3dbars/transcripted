@@ -111,6 +111,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     /// AppKit is ready.
     private var activationPolicyController: ActivationPolicyController?
     private var activationPolicySubscriptions: Set<AnyCancellable> = []
+    private let persistentDictationInputController = PersistentDictationInputController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if DictationStopBenchmarkRunner.runFromEnvironmentIfRequested() {
@@ -124,6 +125,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if PermissionsOnboardingPreferences.hasCompleted() {
             CrashReporter.applySessionTrackingPreference()
         }
+        persistentDictationInputController.start()
 
         let activationController = ActivationPolicyController(
             actualPolicy: { NSApp.activationPolicy() }
@@ -506,6 +508,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         if duplicateInstanceShouldTerminateImmediately {
             return
         }
+
+        persistentDictationInputController.stopAndRestore()
 
         if onboardingWindowController.isVisible {
             NotificationCenter.default.post(name: .transcriptedOnboardingWillTerminate, object: nil)

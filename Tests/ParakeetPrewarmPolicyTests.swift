@@ -2,6 +2,67 @@ import AVFoundation
 import Foundation
 
 func testParakeetPrewarmPolicy() {
+    runSuite("ParakeetPrewarmPolicy — defers invasive Bluetooth fallback prewarm") {
+        let bluetoothInput = DictationAudioDevice(
+            id: 10,
+            name: "Bluetooth Headset",
+            transport: .bluetooth,
+            inputChannelCount: 1
+        )
+        let builtInInput = DictationAudioDevice(
+            id: 20,
+            name: "MacBook Pro Microphone",
+            transport: .builtIn,
+            inputChannelCount: 1
+        )
+        let bluetoothOutput = DictationAudioDevice(
+            id: 30,
+            name: "Bluetooth Headset",
+            transport: .bluetooth,
+            inputChannelCount: 0
+        )
+        let fallbackSelection = DictationInputDeviceSelection(
+            defaultInput: bluetoothInput,
+            selectedInput: builtInInput,
+            defaultOutput: bluetoothOutput,
+            reason: .preferredBuiltInForBluetoothHeadset
+        )
+
+        assertTrue(
+            ParakeetPrewarmPolicy.shouldDeferHardwarePrewarm(for: fallbackSelection),
+            "idle prewarm should not repeatedly change the Mac-wide input for Bluetooth fallback"
+        )
+        assertTrue(
+            ParakeetPrewarmPolicy.shouldDeferHardwareRecovery(
+                for: fallbackSelection,
+                wasRecording: false
+            ),
+            "idle route recovery after stop should not reapply the Bluetooth fallback override"
+        )
+        assertFalse(
+            ParakeetPrewarmPolicy.shouldDeferHardwareRecovery(
+                for: fallbackSelection,
+                wasRecording: true
+            ),
+            "an interrupted recording should still recover its real microphone graph"
+        )
+        assertFalse(
+            ParakeetPrewarmPolicy.shouldDeferHardwarePrewarm(
+                for: DictationInputDeviceSelection(
+                    defaultInput: builtInInput,
+                    selectedInput: builtInInput,
+                    defaultOutput: bluetoothOutput,
+                    reason: .defaultIsSafe
+                )
+            ),
+            "safe native routes should keep normal hardware prewarm"
+        )
+        assertFalse(
+            ParakeetPrewarmPolicy.shouldDeferHardwarePrewarm(for: nil),
+            "missing route metadata should keep normal prewarm behavior"
+        )
+    }
+
     runSuite("ParakeetPrewarmPolicy.decision — authorized microphone can prewarm") {
         let decision = ParakeetPrewarmPolicy.decision(for: .authorized)
 

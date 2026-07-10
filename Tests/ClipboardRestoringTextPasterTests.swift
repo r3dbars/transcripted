@@ -6,6 +6,21 @@ import Foundation
 
 func testClipboardRestoringTextPaster() async {
     await MainActor.run {
+        runSuite("ClipboardRestoringTextPaster confirmation bounds synchronous AX reads") {
+            let source = try! String(
+                contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
+                encoding: .utf8
+            )
+            assertTrue(
+                source.contains("AXUIElementSetMessagingTimeout(element, messagingTimeout)"),
+                "paste confirmation must bound synchronous AX reads so busy editors cannot stall delivery"
+            )
+            assertTrue(
+                source.contains("private static let messagingTimeout: Float = 0.05"),
+                "paste confirmation should fail fast when a target editor is temporarily unresponsive"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — preserves user clipboard changes") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
@@ -340,6 +355,178 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("DictationPasteTarget — follows the app focused at paste time") {
+            let originalTarget = DictationPasteTarget(
+                processIdentifier: 42,
+                bundleIdentifier: "com.example.Original"
+            )
+
+            assertEqual(
+                DictationPasteTarget.preferredDestination(
+                    frontmostProcessIdentifier: 84,
+                    frontmostBundleIdentifier: "com.example.Current",
+                    transcriptedBundleIdentifier: "com.justinbetker.draft",
+                    fallback: originalTarget
+                ),
+                DictationPasteTarget(
+                    processIdentifier: 84,
+                    bundleIdentifier: "com.example.Current"
+                ),
+                "manual dictation should paste into the app focused when pasteback runs"
+            )
+            assertEqual(
+                DictationPasteTarget.preferredDestination(
+                    frontmostProcessIdentifier: 7,
+                    frontmostBundleIdentifier: "com.justinbetker.draft",
+                    transcriptedBundleIdentifier: "com.justinbetker.draft",
+                    fallback: originalTarget
+                ),
+                originalTarget,
+                "Transcripted's own overlay should not replace the user's last external target"
+            )
+            assertEqual(
+                DictationPasteTarget.preferredDestination(
+                    frontmostProcessIdentifier: nil,
+                    frontmostBundleIdentifier: nil,
+                    transcriptedBundleIdentifier: "com.justinbetker.draft",
+                    fallback: originalTarget
+                ),
+                originalTarget,
+                "missing frontmost-app metadata should preserve the safe fallback target"
+            )
+        }
+
+        runSuite("FocusedTextPasteConfirmationPolicy — accepts editor-normalized paste changes") {
+            assertEqual(
+                FocusedTextPasteConfirmationPolicy.observableString(
+                    from: NSAttributedString(string: "Notes editor value")
+                ),
+                "Notes editor value",
+                "rich editors should expose attributed AX values as confirmable text"
+            )
+            assertTrue(
+                FocusedTextPasteConfirmationPolicy.didObservePaste(
+                    initialValue: "Before ",
+                    currentValue: "Before Transcripted changed \u{201C}straight quotes\u{201D} to smart quotes",
+                    pastedText: "Transcripted changed \"straight quotes\" to smart quotes"
+                ),
+                "a changed focused-editor value should confirm paste even when the target normalizes text"
+            )
+            assertFalse(
+                FocusedTextPasteConfirmationPolicy.didObservePaste(
+                    initialValue: "Unchanged",
+                    currentValue: "Unchanged",
+                    pastedText: "Expected paste"
+                ),
+                "an unchanged editor value should not confirm paste"
+            )
+            assertFalse(
+                FocusedTextPasteConfirmationPolicy.didObservePaste(
+                    initialValue: nil,
+                    currentValue: "Changed",
+                    pastedText: "Changed"
+                ),
+                "confirmation remains unavailable when the initial editor value cannot be observed"
+            )
+            assertFalse(
+                FocusedTextPasteConfirmationPolicy.didObservePaste(
+                    initialValue: "Before",
+                    currentValue: "Before unrelated edit",
+                    pastedText: "A much longer expected dictation that was not inserted"
+                ),
+                "an unrelated editor change should not confirm the requested paste"
+            )
+            assertTrue(
+                FocusedTextPasteConfirmationPolicy.didObservePaste(
+                    initialValue: "Replace this",
+                    currentValue: "Replacement",
+                    pastedText: "Replacement",
+                    replacedSelectionLength: "Replace this".utf16.count
+                ),
+                "replacement pastes should confirm from the observed length change"
+            )
+            assertTrue(
+                FocusedTextPasteConfirmationPolicy.didObserveSelectionPaste(
+                    initialRange: .init(location: 7, length: 0),
+                    currentRange: .init(location: 7 + "Inserted text".utf16.count, length: 0),
+                    pastedText: "Inserted text",
+                    clipboardWasRead: true
+                ),
+                "rich editors should confirm a clipboard read plus the expected cursor movement"
+            )
+            assertFalse(
+                FocusedTextPasteConfirmationPolicy.didObserveSelectionPaste(
+                    initialRange: .init(location: 7, length: 0),
+                    currentRange: .init(location: 7 + "Inserted text".utf16.count, length: 0),
+                    pastedText: "Inserted text",
+                    clipboardWasRead: false
+                ),
+                "cursor movement alone should not treat an unrelated edit as paste proof"
+            )
+            assertFalse(
+                FocusedTextPasteConfirmationPolicy.didObserveSelectionPaste(
+                    initialRange: .init(location: 7, length: 0),
+                    currentRange: .init(location: 8, length: 0),
+                    pastedText: "Inserted text",
+                    clipboardWasRead: true
+                ),
+                "an observer read plus unrelated cursor movement should not confirm paste"
+            )
+            let dispatchTime: CFAbsoluteTime = 100
+            assertTrue(
+                FocusedTextPasteConfirmationPolicy.didObserveTargetChange(
+                    pasteDispatchedAt: dispatchTime,
+                    clipboardReadAt: dispatchTime + 0.02,
+                    targetChangedAt: dispatchTime + 0.04
+                ),
+                "the exact target changing immediately after its post-dispatch clipboard read should confirm paste"
+            )
+            assertFalse(
+                FocusedTextPasteConfirmationPolicy.didObserveTargetChange(
+                    pasteDispatchedAt: dispatchTime,
+                    clipboardReadAt: dispatchTime - 0.01,
+                    targetChangedAt: dispatchTime + 0.04
+                ),
+                "a clipboard observer read before Cmd+V should not confirm a later target edit"
+            )
+            assertFalse(
+                FocusedTextPasteConfirmationPolicy.didObserveTargetChange(
+                    pasteDispatchedAt: dispatchTime,
+                    clipboardReadAt: dispatchTime + 0.02,
+                    targetChangedAt: dispatchTime + 1.5
+                ),
+                "an unrelated delayed target edit should not confirm paste"
+            )
+        }
+
+        runSuite("FocusedTextPasteConfirmationPolicy — selected Auto Enter reads stay immediate and frontmost") {
+            let dispatchedAt: CFAbsoluteTime = 100
+            assertTrue(
+                FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
+                    pasteDispatchedAt: dispatchedAt,
+                    clipboardReadAt: dispatchedAt + 0.05,
+                    targetStillFrontmost: true
+                ),
+                "an immediate selected-target clipboard read should confirm the opted-in Auto Enter path"
+            )
+            assertFalse(
+                FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
+                    pasteDispatchedAt: dispatchedAt,
+                    clipboardReadAt: dispatchedAt + 0.25,
+                    targetStillFrontmost: true
+                ),
+                "a delayed clipboard observer read must not confirm Auto Enter"
+            )
+            assertFalse(
+                FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
+                    pasteDispatchedAt: dispatchedAt,
+                    clipboardReadAt: dispatchedAt + 0.05,
+                    targetStillFrontmost: false
+                ),
+                "a clipboard read after focus changes must not confirm Auto Enter"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster — waits briefly for menu-triggered target activation") {
             assertTrue(
                 TranscriptedConstants.clipboardTargetActivationWait > 0
@@ -434,6 +621,56 @@ func testClipboardRestoringTextPaster() async {
             restoredClipboard,
             existingClipboard,
             "waiting for pending restore should include the fallback restore before auto-enter"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — selected Auto Enter target may confirm its post-dispatch clipboard read") {
+        let existingClipboard = "selected app original clipboard"
+        let dictationText = "selected app dictation"
+        let pasteboardName = NSPasteboard.Name("TranscriptedSelectedAutoEnterPasteTest-\(UUID().uuidString)")
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        let outcome = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(existingClipboard, forType: .string)
+            return paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                allowClipboardReadConfirmation: true,
+                selectedTargetStillFrontmost: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 120_000_000,
+                pasteConfirmationWait: 0.2
+            )
+        }
+
+        assertEqual(outcome, .pasted, "an explicitly selected Auto Enter app may confirm its own post-dispatch clipboard read")
+        await paster.waitForPendingClipboardRestore()
+        let restoredClipboard = await MainActor.run {
+            NSPasteboard(name: pasteboardName).string(forType: .string)
+        }
+        assertEqual(restoredClipboard, existingClipboard, "selected-app confirmation should restore the original clipboard")
+    }
+
+    runSuite("ClipboardRestoringTextPaster.paste — selected Auto Enter clipboard read fails closed without a target") {
+        let source = try! String(
+            contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
+            encoding: .utf8
+        )
+        assertTrue(
+            source.contains("let selectedTargetIsFrontmost = selectedTargetStillFrontmost ?? {\n            target?.matchesCurrentFrontmostApp() == true"),
+            "a missing target must not be treated as frontmost for Auto Enter confirmation"
+        )
+        assertFalse(
+            source.contains("let selectedTargetIsFrontmost = selectedTargetStillFrontmost ?? {\n            target?.matchesCurrentFrontmostApp() != false"),
+            "the nil-target permissive check must not return"
         )
     }
 

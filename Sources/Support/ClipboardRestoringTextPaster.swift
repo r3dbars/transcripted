@@ -50,6 +50,11 @@ enum TextPasteOutcome: Equatable {
     }
 }
 
+struct ClipboardPasteConfirmationDiagnostic: Equatable {
+    let event: String
+    let context: [String: String]
+}
+
 @MainActor
 protocol ClipboardPasteboard: AnyObject {
     var changeCount: Int { get }
@@ -152,6 +157,23 @@ struct DictationPasteTarget: Equatable {
         )
     }
 
+    static func preferredDestination(
+        frontmostProcessIdentifier: pid_t?,
+        frontmostBundleIdentifier: String?,
+        transcriptedBundleIdentifier: String?,
+        fallback: DictationPasteTarget?
+    ) -> DictationPasteTarget? {
+        guard let frontmostProcessIdentifier,
+              let frontmostBundleIdentifier,
+              frontmostBundleIdentifier != transcriptedBundleIdentifier else {
+            return fallback
+        }
+        return DictationPasteTarget(
+            processIdentifier: frontmostProcessIdentifier,
+            bundleIdentifier: frontmostBundleIdentifier
+        )
+    }
+
     func matchesCurrentFrontmostApp() -> Bool {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             return false
@@ -173,12 +195,215 @@ struct DictationPasteTarget: Equatable {
     }
 }
 
+enum FocusedTextPasteConfirmationPolicy {
+    static let selectedAutoEnterClipboardReadWindow: CFTimeInterval = 0.2
+    struct SelectionRange: Equatable {
+        let location: Int
+        let length: Int
+    }
+
+    static func observableString(from value: Any?) -> String? {
+        if let string = value as? String {
+            return string
+        }
+        if let attributedString = value as? NSAttributedString {
+            return attributedString.string
+        }
+        return nil
+    }
+
+    static func didObservePaste(
+        initialValue: String?,
+        currentValue: String?,
+        pastedText: String,
+        replacedSelectionLength: Int = 0
+    ) -> Bool {
+        guard let initialValue,
+              let currentValue,
+              currentValue != initialValue,
+              !pastedText.isEmpty else {
+            return false
+        }
+
+        let normalizedInitial = normalizedForConfirmation(initialValue)
+        let normalizedCurrent = normalizedForConfirmation(currentValue)
+        let normalizedPaste = normalizedForConfirmation(pastedText)
+        if !normalizedPaste.isEmpty,
+           !normalizedInitial.contains(normalizedPaste),
+           normalizedCurrent.contains(normalizedPaste) {
+            return true
+        }
+
+        let expectedLengthChange = pastedText.utf16.count - max(0, replacedSelectionLength)
+        let observedLengthChange = currentValue.utf16.count - initialValue.utf16.count
+        let tolerance = max(2, pastedText.utf16.count / 20)
+        return abs(observedLengthChange - expectedLengthChange) <= tolerance
+    }
+
+    static func didObserveSelectionPaste(
+        initialRange: SelectionRange?,
+        currentRange: SelectionRange?,
+        pastedText: String,
+        clipboardWasRead: Bool
+    ) -> Bool {
+        guard clipboardWasRead,
+              let initialRange,
+              let currentRange,
+              !pastedText.isEmpty,
+              currentRange.length == 0 else {
+            return false
+        }
+
+        let expectedCursorLocation = initialRange.location + pastedText.utf16.count
+        let tolerance = max(2, pastedText.utf16.count / 20)
+        return abs(currentRange.location - expectedCursorLocation) <= tolerance
+    }
+
+    static func didObserveTargetChange(
+        pasteDispatchedAt: CFAbsoluteTime,
+        clipboardReadAt: CFAbsoluteTime?,
+        targetChangedAt: CFAbsoluteTime?
+    ) -> Bool {
+        guard let clipboardReadAt,
+              let targetChangedAt,
+              clipboardReadAt >= pasteDispatchedAt,
+              targetChangedAt >= clipboardReadAt else {
+            return false
+        }
+        return targetChangedAt - clipboardReadAt <= 1.0
+    }
+
+    static func didObserveSelectedAutoEnterTargetRead(
+        pasteDispatchedAt: CFAbsoluteTime,
+        clipboardReadAt: CFAbsoluteTime?,
+        targetStillFrontmost: Bool
+    ) -> Bool {
+        guard targetStillFrontmost,
+              let clipboardReadAt,
+              clipboardReadAt >= pasteDispatchedAt else {
+            return false
+        }
+        return clipboardReadAt - pasteDispatchedAt <= selectedAutoEnterClipboardReadWindow
+    }
+
+    private static func normalizedForConfirmation(_ text: String) -> String {
+        text.precomposedStringWithCompatibilityMapping
+            .replacingOccurrences(of: "\u{2018}", with: "'")
+            .replacingOccurrences(of: "\u{2019}", with: "'")
+            .replacingOccurrences(of: "\u{201C}", with: "\"")
+            .replacingOccurrences(of: "\u{201D}", with: "\"")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+
+private func focusedTextChangeObserverCallback(
+    observer: AXObserver,
+    element: AXUIElement,
+    notification: CFString,
+    refcon: UnsafeMutableRawPointer?
+) {
+    guard let refcon else { return }
+    let tracker = Unmanaged<FocusedTextChangeObserver>.fromOpaque(refcon).takeUnretainedValue()
+    tracker.recordChange()
+}
+
+private final class FocusedTextChangeObserver {
+    private let focusedElement: AXUIElement
+    private let lock = NSLock()
+    private var observer: AXObserver?
+    private var monitoredNotifications: [CFString] = []
+    private var latestChangeTimestamp: CFAbsoluteTime?
+
+    var changedAt: CFAbsoluteTime? {
+        lock.lock()
+        let value = latestChangeTimestamp
+        lock.unlock()
+        return value
+    }
+
+    private init(focusedElement: AXUIElement) {
+        self.focusedElement = focusedElement
+    }
+
+    static func start(for focusedElement: AXUIElement) -> FocusedTextChangeObserver? {
+        let tracker = FocusedTextChangeObserver(focusedElement: focusedElement)
+        return tracker.install() ? tracker : nil
+    }
+
+    fileprivate func recordChange() {
+        lock.lock()
+        latestChangeTimestamp = CFAbsoluteTimeGetCurrent()
+        lock.unlock()
+    }
+
+    private func install() -> Bool {
+        var processIdentifier: pid_t = 0
+        guard AXUIElementGetPid(focusedElement, &processIdentifier) == .success else {
+            return false
+        }
+
+        var createdObserver: AXObserver?
+        guard AXObserverCreate(
+            processIdentifier,
+            focusedTextChangeObserverCallback,
+            &createdObserver
+        ) == .success,
+              let createdObserver else {
+            return false
+        }
+
+        let refcon = Unmanaged.passUnretained(self).toOpaque()
+        for notification in [kAXValueChangedNotification, kAXSelectedTextChangedNotification] {
+            if AXObserverAddNotification(
+                createdObserver,
+                focusedElement,
+                notification as CFString,
+                refcon
+            ) == .success {
+                monitoredNotifications.append(notification as CFString)
+            }
+        }
+        guard !monitoredNotifications.isEmpty else { return false }
+
+        observer = createdObserver
+        CFRunLoopAddSource(
+            CFRunLoopGetMain(),
+            AXObserverGetRunLoopSource(createdObserver),
+            .commonModes
+        )
+        return true
+    }
+
+    deinit {
+        guard let observer else { return }
+        for notification in monitoredNotifications {
+            AXObserverRemoveNotification(observer, focusedElement, notification)
+        }
+        CFRunLoopRemoveSource(
+            CFRunLoopGetMain(),
+            AXObserverGetRunLoopSource(observer),
+            .commonModes
+        )
+    }
+}
+
 private struct FocusedTextPasteConfirmation {
+    /// Accessibility clients can otherwise block for several seconds when an editor is
+    /// briefly busy applying a paste (Notes is a common example). Confirmation is a
+    /// best-effort signal and must never stall delivery or the target application.
+    private static let messagingTimeout: Float = 0.05
+
     private let focusedElement: AXUIElement
     private let initialValue: String?
+    private let replacedSelectionLength: Int
+    private let initialSelectionRange: FocusedTextPasteConfirmationPolicy.SelectionRange?
+    private let changeObserver: FocusedTextChangeObserver?
 
-    var canObserveTextValue: Bool {
-        initialValue != nil
+    var canObservePaste: Bool {
+        initialValue != nil || initialSelectionRange != nil || changeObserver != nil
     }
 
     static func capture() -> FocusedTextPasteConfirmation? {
@@ -194,19 +419,59 @@ private struct FocusedTextPasteConfirmation {
         }
 
         let element = focusedElement as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, messagingTimeout)
         return FocusedTextPasteConfirmation(
             focusedElement: element,
-            initialValue: stringAttribute(kAXValueAttribute as CFString, from: element)
+            initialValue: stringAttribute(kAXValueAttribute as CFString, from: element),
+            replacedSelectionLength: stringAttribute(kAXSelectedTextAttribute as CFString, from: element)?.utf16.count ?? 0,
+            initialSelectionRange: selectionRangeAttribute(from: element),
+            changeObserver: FocusedTextChangeObserver.start(for: element)
         )
     }
 
-    func containsPastedText(_ text: String) -> Bool {
-        guard !text.isEmpty,
-              let currentValue = Self.stringAttribute(kAXValueAttribute as CFString, from: focusedElement),
-              currentValue != initialValue else {
-            return false
+    func confirmationMode(
+        _ text: String,
+        clipboardWasRead: Bool,
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> String? {
+        if FocusedTextPasteConfirmationPolicy.didObservePaste(
+            initialValue: initialValue,
+            currentValue: Self.stringAttribute(kAXValueAttribute as CFString, from: focusedElement),
+            pastedText: text,
+            replacedSelectionLength: replacedSelectionLength
+        ) {
+            return "text_value"
         }
-        return currentValue.contains(text)
+        if FocusedTextPasteConfirmationPolicy.didObserveSelectionPaste(
+            initialRange: initialSelectionRange,
+            currentRange: Self.selectionRangeAttribute(from: focusedElement),
+            pastedText: text,
+            clipboardWasRead: clipboardWasRead
+        ) {
+            return "selection_range"
+        }
+        if FocusedTextPasteConfirmationPolicy.didObserveTargetChange(
+            pasteDispatchedAt: pasteDispatchedAt,
+            clipboardReadAt: clipboardReadAt,
+            targetChangedAt: changeObserver?.changedAt
+        ) {
+            return "target_change_notification"
+        }
+        return nil
+    }
+
+    func diagnosticsContext(
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> [String: String] {
+        [
+            "clipboard_read_after_dispatch": "\((clipboardReadAt ?? 0) >= pasteDispatchedAt)",
+            "target_change_after_dispatch": "\((changeObserver?.changedAt ?? 0) >= pasteDispatchedAt)",
+            "target_change_observer_available": "\(changeObserver != nil)",
+            "target_selection_observable": "\(initialSelectionRange != nil)",
+            "target_text_observable": "\(initialValue != nil)",
+        ]
     }
 
     private static func stringAttribute(_ attribute: CFString, from element: AXUIElement) -> String? {
@@ -214,7 +479,34 @@ private struct FocusedTextPasteConfirmation {
         guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
             return nil
         }
-        return value as? String
+        return FocusedTextPasteConfirmationPolicy.observableString(from: value)
+    }
+
+    private static func selectionRangeAttribute(
+        from element: AXUIElement
+    ) -> FocusedTextPasteConfirmationPolicy.SelectionRange? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXSelectedTextRangeAttribute as CFString,
+            &value
+        ) == .success,
+              let value,
+              CFGetTypeID(value) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        let axValue = value as! AXValue
+        var range = CFRange()
+        guard AXValueGetValue(axValue, .cfRange, &range),
+              range.location >= 0,
+              range.length >= 0 else {
+            return nil
+        }
+        return FocusedTextPasteConfirmationPolicy.SelectionRange(
+            location: range.location,
+            length: range.length
+        )
     }
 }
 
@@ -239,6 +531,7 @@ final class ClipboardRestoringTextPaster {
     private var pendingClipboardRestore: PendingClipboardRestore?
     private var temporaryPasteboardDataProvider: TemporaryPasteboardStringProvider?
     private var pasteGeneration = 0
+    private(set) var lastConfirmationDiagnostic: ClipboardPasteConfirmationDiagnostic?
 
     deinit {
         clipboardRestoreTask?.cancel()
@@ -292,10 +585,13 @@ final class ClipboardRestoringTextPaster {
         },
         pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
         pasteConfirmed: (@MainActor () -> Bool)? = nil,
+        allowClipboardReadConfirmation: Bool = false,
+        selectedTargetStillFrontmost: (@MainActor () -> Bool)? = nil,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
     ) -> TextPasteOutcome {
+        lastConfirmationDiagnostic = nil
         restorePendingClipboardBeforeNewPaste()
 
         if let target,
@@ -336,6 +632,7 @@ final class ClipboardRestoringTextPaster {
             }
         }
         temporaryChangeCount = pasteboard.changeCount
+        let temporaryProvider = temporaryPasteboardDataProvider
 
         scheduleClipboardRestore(
             savedItems,
@@ -346,6 +643,7 @@ final class ClipboardRestoringTextPaster {
             delay: fallbackRestoreDelay
         )
 
+        let pasteDispatchedAt = CFAbsoluteTimeGetCurrent()
         guard pasteDispatcher() else {
             restorePendingClipboardNow()
             guard copyTextToClipboard(text, to: pasteboard) else {
@@ -357,22 +655,51 @@ final class ClipboardRestoringTextPaster {
             )
         }
 
-        let confirmationUnavailable = pasteConfirmed == nil && accessibilityConfirmation?.canObserveTextValue != true
+        let confirmationUnavailable = pasteConfirmed == nil && accessibilityConfirmation?.canObservePaste != true
+        let selectedTargetIsFrontmost = selectedTargetStillFrontmost ?? {
+            target?.matchesCurrentFrontmostApp() == true
+        }
         let confirmPasteReceived = pasteConfirmed ?? {
-            if accessibilityConfirmation?.containsPastedText(text) == true {
+            if allowClipboardReadConfirmation,
+               FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
+                   pasteDispatchedAt: pasteDispatchedAt,
+                   clipboardReadAt: temporaryProvider?.firstReadAt,
+                   targetStillFrontmost: selectedTargetIsFrontmost()
+               ) {
                 return true
             }
-            if accessibilityConfirmation?.canObserveTextValue == true {
-                return false
+            if accessibilityConfirmation?.confirmationMode(
+                text,
+                clipboardWasRead: temporaryProvider?.didProvideData == true,
+                clipboardReadAt: temporaryProvider?.firstReadAt,
+                pasteDispatchedAt: pasteDispatchedAt
+            ) != nil {
+                return true
             }
             return false
         }
 
-        guard waitForPasteConfirmation(
+        let pasteWasConfirmed = waitForPasteConfirmation(
             target: target,
             pasteConfirmed: confirmPasteReceived,
             timeout: pasteConfirmationWait
-        ) else {
+        )
+        guard pasteWasConfirmed else {
+            var diagnostics = accessibilityConfirmation?.diagnosticsContext(
+                clipboardReadAt: temporaryProvider?.firstReadAt,
+                pasteDispatchedAt: pasteDispatchedAt
+            ) ?? [
+                "clipboard_read_after_dispatch": "\((temporaryProvider?.firstReadAt ?? 0) >= pasteDispatchedAt)",
+                "target_change_after_dispatch": "false",
+                "target_change_observer_available": "false",
+                "target_selection_observable": "false",
+                "target_text_observable": "false",
+            ]
+            diagnostics["target_still_frontmost"] = "\(target?.matchesCurrentFrontmostApp() != false)"
+            lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
+                event: "dictation_paste_confirmation_diagnostics",
+                context: diagnostics
+            )
             guard leaveTemporaryClipboardAvailable() else {
                 return .failed("Couldn't keep the dictation copied after paste-back was unconfirmed. The dictation was saved, but paste-back did not run.")
             }
@@ -387,6 +714,29 @@ final class ClipboardRestoringTextPaster {
                 reason: .pasteNotConfirmed
             )
         }
+
+        let confirmationMode: String
+        if pasteConfirmed != nil {
+            confirmationMode = "injected_confirmation"
+        } else if allowClipboardReadConfirmation,
+                  FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
+                      pasteDispatchedAt: pasteDispatchedAt,
+                      clipboardReadAt: temporaryProvider?.firstReadAt,
+                      targetStillFrontmost: selectedTargetIsFrontmost()
+                  ) {
+            confirmationMode = "clipboard_read_selected_auto_enter_target"
+        } else {
+            confirmationMode = accessibilityConfirmation?.confirmationMode(
+                text,
+                clipboardWasRead: temporaryProvider?.didProvideData == true,
+                clipboardReadAt: temporaryProvider?.firstReadAt,
+                pasteDispatchedAt: pasteDispatchedAt
+            ) ?? "unknown"
+        }
+        lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
+            event: "dictation_paste_confirmed",
+            context: ["confirmation_mode": confirmationMode]
+        )
 
         scheduleClipboardRestore(
             savedItems,
@@ -633,10 +983,18 @@ private final class TemporaryPasteboardStringProvider: NSObject, NSPasteboardIte
     private let onTemporaryStringRead: () -> Void
     private let lock = NSLock()
     private var didNotifyRead = false
+    private var firstReadTimestamp: CFAbsoluteTime?
 
     var didProvideData: Bool {
         lock.lock()
         let value = didNotifyRead
+        lock.unlock()
+        return value
+    }
+
+    var firstReadAt: CFAbsoluteTime? {
+        lock.lock()
+        let value = firstReadTimestamp
         lock.unlock()
         return value
     }
@@ -660,6 +1018,9 @@ private final class TemporaryPasteboardStringProvider: NSObject, NSPasteboardIte
         lock.lock()
         let shouldNotify = !didNotifyRead
         didNotifyRead = true
+        if firstReadTimestamp == nil {
+            firstReadTimestamp = CFAbsoluteTimeGetCurrent()
+        }
         lock.unlock()
 
         if shouldNotify {

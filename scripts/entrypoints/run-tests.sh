@@ -295,6 +295,7 @@ APP_SOURCES=(
     "Sources/Support/ModelCacheInventory.swift"
     "Sources/Support/SingleInstanceGuard.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
+    "Sources/Support/DictationPersistentInputPreferences.swift"
     "Sources/Support/DictationCleanupPreferences.swift"
     "Sources/Support/DictationOverlayPresentationPreferences.swift"
     "Sources/Support/DictationFillerCleanupPolicy.swift"

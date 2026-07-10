@@ -17,6 +17,7 @@
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
 - `DockVisibilityPreferences.swift` — persisted General setting for whether Transcripted should stay visible in the Dock while idle
 - `DictationAutoSendPreferences.swift` — persisted auto-send rules, allowed bundle list, and keypress-sending helpers for pasted dictation
+- `DictationPersistentInputPreferences.swift` — persisted faster-Bluetooth-dictation opt-in, preferred CoreAudio device UID, and crash-recovery ownership marker
 - `DictationCleanupPreferences.swift` — persisted General toggle for filler-word cleanup after dictation
 - `DictationFillerCleanupPolicy.swift` — text cleanup policy for light dictation filler removal
 - `DictationOverlayPresentationPreferences.swift` — persisted overlay presentation mode for normal vs cursor-mini dictation UI

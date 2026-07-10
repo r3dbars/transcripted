@@ -40,6 +40,9 @@ struct TranscriptedSettingsView: View {
     @State private var showSpeakerEmbedderSwitchConfirm = false
     @State private var uiSoundsEnabled = UISoundPreferences.isEnabled()
     @State private var autoEnterEnabled = DictationAutoSendPreferences.isEnabled()
+    @State private var keepRecommendedMicrophoneActive = DictationPersistentInputPreferences.isEnabled()
+    @State private var preferredDictationInputUID = DictationPersistentInputPreferences.preferredDeviceUID()
+    @State private var availableDictationInputs = (try? CoreAudioInputDeviceLookup.availableInputDevices()) ?? []
     @State private var autoEnterKey = DictationAutoSendPreferences.sendKey()
     @State private var autoEnterAllowedBundleIDs = DictationAutoSendPreferences.allowedBundleIDs()
     @State private var autoEnterAppCandidates: [AutoEnterAppCandidate] = []
@@ -2526,6 +2529,51 @@ struct TranscriptedSettingsView: View {
                     .disabled(!autoEnterEnabled)
                 }
             }
+
+            SettingsSection(
+                title: "Bluetooth Start Speed",
+                detail: "Avoid switching microphone routes every time dictation starts."
+            ) {
+                SettingsToggleRow(
+                    title: "Faster Bluetooth dictation",
+                    detail: keepRecommendedMicrophoneActive
+                        ? "Keeps your preferred non-Bluetooth microphone selected while Transcripted is open. This changes the microphone used by other apps, but does not record while idle."
+                        : "Off. Bluetooth dictation may take longer while macOS switches microphone routes.",
+                    isOn: Binding(
+                        get: { keepRecommendedMicrophoneActive },
+                        set: { newValue in
+                            keepRecommendedMicrophoneActive = newValue
+                            trackSettingsToggle("keep_recommended_microphone_active", enabled: newValue, page: .shortcuts)
+                            DictationPersistentInputPreferences.setEnabled(newValue)
+                        }
+                    )
+                )
+
+                Picker("Preferred microphone", selection: Binding(
+                    get: { preferredDictationInputUID },
+                    set: { newValue in
+                        preferredDictationInputUID = newValue
+                        trackSettingsAction("change_preferred_dictation_microphone", page: .shortcuts)
+                        DictationPersistentInputPreferences.setPreferredDeviceUID(newValue)
+                    }
+                )) {
+                    Text("Automatic (recommended)").tag(String?.none)
+                    ForEach(preferredDictationInputCandidates, id: \.id) { device in
+                        Text(device.name).tag(device.uid)
+                    }
+                }
+                .disabled(!keepRecommendedMicrophoneActive)
+
+                SettingsInlineActionButton(title: "Refresh microphones", symbolName: "arrow.clockwise") {
+                    trackSettingsAction("refresh_dictation_microphones", page: .shortcuts)
+                    refreshDictationInputCandidates()
+                }
+
+                Text("Fallback order: preferred microphone, then the recommended Mac or display microphone, then the current system input.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -2935,6 +2983,43 @@ struct TranscriptedSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.caption)
+            }
+
+            Divider()
+
+            SettingsToggleRow(
+                title: "Faster Bluetooth dictation",
+                detail: keepRecommendedMicrophoneActive
+                    ? "Keeps the preferred microphone selected Mac-wide while Transcripted is open; it does not record while idle."
+                    : "Allow macOS to switch microphone routes for each dictation.",
+                isOn: Binding(
+                    get: { keepRecommendedMicrophoneActive },
+                    set: { newValue in
+                        keepRecommendedMicrophoneActive = newValue
+                        trackSettingsToggle("keep_recommended_microphone_active", enabled: newValue, page: .general)
+                        DictationPersistentInputPreferences.setEnabled(newValue)
+                    }
+                )
+            )
+
+            Picker("Preferred microphone", selection: Binding(
+                get: { preferredDictationInputUID },
+                set: { newValue in
+                    preferredDictationInputUID = newValue
+                    trackSettingsAction("change_preferred_dictation_microphone", page: .general)
+                    DictationPersistentInputPreferences.setPreferredDeviceUID(newValue)
+                }
+            )) {
+                Text("Automatic (recommended)").tag(String?.none)
+                ForEach(preferredDictationInputCandidates, id: \.id) { device in
+                    Text(device.name).tag(device.uid)
+                }
+            }
+            .disabled(!keepRecommendedMicrophoneActive)
+
+            SettingsInlineActionButton(title: "Refresh microphones", symbolName: "arrow.clockwise") {
+                trackSettingsAction("refresh_dictation_microphones", page: .general)
+                refreshDictationInputCandidates()
             }
 
             Divider()
@@ -5500,6 +5585,17 @@ struct TranscriptedSettingsView: View {
         autoEnterAllowedBundleIDs.sorted { lhs, rhs in
             autoEnterDisplayName(for: lhs).localizedCaseInsensitiveCompare(autoEnterDisplayName(for: rhs)) == .orderedAscending
         }
+    }
+
+    private var preferredDictationInputCandidates: [DictationAudioDevice] {
+        availableDictationInputs
+            .filter { $0.uid != nil }
+            .filter { DictationInputDeviceSelectionPolicy.deviceClass(for: $0) != "bluetooth" }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private func refreshDictationInputCandidates() {
+        availableDictationInputs = (try? CoreAudioInputDeviceLookup.availableInputDevices()) ?? []
     }
 
     private func setAutoEnterApp(

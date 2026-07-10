@@ -69,6 +69,7 @@ struct SlowPastebackSmoke {
         for scenario in scenarios {
             results.append(await runScenario(scenario))
         }
+        results.append(await runTargetChangeConfirmationScenario())
         results.append(await runRetryWhileRestorePendingScenario())
         results.append(await runCancelPendingRestoreScenario())
 
@@ -180,6 +181,74 @@ struct SlowPastebackSmoke {
             freshDictation: freshDictation,
             userCopy: userCopy,
             autoEnterReadyAt: autoEnterReadyAt
+        )
+    }
+
+    @MainActor
+    private static func runTargetChangeConfirmationScenario() async -> SmokeResult {
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("TranscriptedSlowPasteback-target-change-\(UUID().uuidString)")
+        )
+        let paster = ClipboardRestoringTextPaster()
+        let originalClipboard = "synthetic original clipboard \(UUID().uuidString)"
+        let freshDictation = "synthetic target-change dictation \(UUID().uuidString)"
+        pasteboard.clearContents()
+        pasteboard.setString(originalClipboard, forType: .string)
+
+        var pasteDispatchedAt: CFAbsoluteTime = 0
+        var clipboardReadAt: CFAbsoluteTime?
+        var targetChangedAt: CFAbsoluteTime?
+        let outcome = paster.paste(
+            freshDictation,
+            pasteboard: pasteboard,
+            accessibilityTrusted: { true },
+            requestAccessibilityTrust: {},
+            pasteDispatcher: {
+                pasteDispatchedAt = CFAbsoluteTimeGetCurrent()
+                _ = pasteboard.string(forType: .string)
+                clipboardReadAt = CFAbsoluteTimeGetCurrent()
+                targetChangedAt = clipboardReadAt.map { $0 + 0.02 }
+                return true
+            },
+            pasteConfirmed: {
+                FocusedTextPasteConfirmationPolicy.didObserveTargetChange(
+                    pasteDispatchedAt: pasteDispatchedAt,
+                    clipboardReadAt: clipboardReadAt,
+                    targetChangedAt: targetChangedAt
+                )
+            },
+            restoreDelay: SmokeDelay.milliseconds(20).nanoseconds,
+            fallbackRestoreDelay: SmokeDelay.milliseconds(500).nanoseconds,
+            pasteConfirmationWait: 0.2
+        )
+
+        await paster.waitForPendingClipboardRestore()
+        let finalClipboard = pasteboard.string(forType: .string)
+        var failures: [String] = []
+        if outcome != .pasted {
+            failures.append("paste outcome was \(outcome.diagnosticName)")
+        }
+        if finalClipboard != originalClipboard {
+            failures.append("final clipboard was \(category(for: finalClipboard, original: originalClipboard, fresh: freshDictation, userCopy: nil))")
+        }
+
+        let status: SmokeStatus = failures.isEmpty ? .pass : .fail
+        return SmokeResult(
+            scenarioID: "target-change-confirmation-restores-original",
+            status: status,
+            readDelayMS: 0,
+            fallbackDelayMS: 500,
+            insertedCategory: "fresh_dictation",
+            finalClipboardCategory: category(
+                for: finalClipboard,
+                original: originalClipboard,
+                fresh: freshDictation,
+                userCopy: nil
+            ),
+            autoEnterReadyMS: nil,
+            detail: failures.isEmpty
+                ? "A post-dispatch clipboard read plus target change confirms delivery and restores the original clipboard"
+                : failures.joined(separator: "; ")
         )
     }
 
