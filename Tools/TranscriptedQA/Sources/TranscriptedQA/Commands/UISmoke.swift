@@ -158,6 +158,18 @@ final class UIAutomationSmokeRunner {
         builder.isolatedHomePath = isolatedHome.path
         builder.add(.pass("isolated-home", "Isolated app home is writable", target: isolatedHome.path))
 
+        do {
+            try seedSavedDictationFixture(in: isolatedHome)
+        } catch {
+            builder.add(.fail(
+                "dictation-fixture",
+                "Saved dictation fixture is writable",
+                target: isolatedHome.path,
+                detail: error.localizedDescription
+            ))
+            return builder.build()
+        }
+
         var launchedProcess: Process?
         do {
             let launched = try launchApp(
@@ -248,22 +260,25 @@ final class UIAutomationSmokeRunner {
             "transcripted.menubar.utility.settings",
             "transcripted.menubar.utility.quit",
         ]
+        let menuMaxDepth = 12
 
         guard waitUntil(timeout: timeout, description: "menu rows", condition: {
-            let ids = Set(appInspector.snapshot(maxDepth: 9).compactMap(\.identifier))
+            let ids = Set(appInspector.snapshot(maxDepth: menuMaxDepth).compactMap(\.identifier))
             return menuRequiredIDs.allSatisfy(ids.contains)
         }) else {
+            let observedIDs = Set(appInspector.snapshot(maxDepth: menuMaxDepth).compactMap(\.identifier))
+            let missingIDs = menuRequiredIDs.filter { !observedIDs.contains($0) }
             builder.add(.fail(
                 "menu-identifiers",
                 "Menu bar popover exposes core controls",
                 target: "menubar",
-                detail: "Missing one or more menu bar automation identifiers.",
-                observed: observedElements(for: menuRequiredIDs, inspector: appInspector)
+                detail: "Missing menu bar automation identifiers: \(missingIDs.joined(separator: ", ")).",
+                observed: observedElements(for: menuRequiredIDs, inspector: appInspector, maxDepth: menuMaxDepth)
             ))
             return builder.build()
         }
 
-        let menuObserved = observedElements(for: menuRequiredIDs, inspector: appInspector)
+        let menuObserved = observedElements(for: menuRequiredIDs, inspector: appInspector, maxDepth: menuMaxDepth)
         let disabledMenuIDs = menuObserved
             .filter { ["transcripted.menubar.primary.home", "transcripted.menubar.primary.start-dictation", "transcripted.menubar.primary.start-meeting", "transcripted.menubar.utility.settings", "transcripted.menubar.utility.quit"].contains($0.identifier ?? "") }
             .filter { $0.isEnabled != true }
@@ -846,6 +861,36 @@ final class UIAutomationSmokeRunner {
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: preferencesURL, options: .atomic)
         return home
+    }
+
+    private func seedSavedDictationFixture(in isolatedHome: URL) throws {
+        let dictationsDirectory = isolatedHome
+            .appendingPathComponent("Library/Application Support/Transcripted/captures/dictations", isDirectory: true)
+        try fileManager.createDirectory(at: dictationsDirectory, withIntermediateDirectories: true)
+
+        let fixtureURL = dictationsDirectory.appendingPathComponent("Dictations_2099-12-31.md", isDirectory: false)
+        let fixture = """
+        ---
+        title: "Dictations for December 31, 2099"
+        date: 2099-12-31
+        capture_type: dictation_day
+        format_version: 1
+        ---
+
+        # Dictations for December 31, 2099
+
+        ## 11:59 PM - UI smoke saved dictation
+
+        Entry ID: `dictation-ui-smoke`
+        Captured: 2099-12-31T23:59:00.000Z
+        Source app: Transcripted QA
+        Delivery: copied
+        Words: 4
+        Characters: 25
+
+        UI smoke saved dictation.
+        """
+        try fixture.write(to: fixtureURL, atomically: true, encoding: .utf8)
     }
 
     private func launchApp(
