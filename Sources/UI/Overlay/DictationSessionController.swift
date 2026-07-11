@@ -1710,14 +1710,9 @@ class DictationSessionController: ObservableObject {
 
     private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
         retargetPasteToCurrentFocus()
-        let selectedAutoEnterTarget = DictationAutoSendPreferences.isEnabled()
-            && sessionSourceApp?.bundleIdentifier.map {
-                DictationAutoSendPreferences.allowedBundleIDs().contains($0)
-            } == true
         let outcome = textPaster.paste(
             text,
-            target: sessionPasteTarget,
-            allowClipboardReadConfirmation: selectedAutoEnterTarget
+            target: sessionPasteTarget
         )
         if let diagnostic = textPaster.lastConfirmationDiagnostic {
             EventReporter.shared.capture(

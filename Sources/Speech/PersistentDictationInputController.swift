@@ -17,6 +17,7 @@ final class PersistentDictationInputController {
     private var defaultInputListener: AudioObjectPropertyListenerBlock?
     private var deviceListListener: AudioObjectPropertyListenerBlock?
     private var topologyRefreshTask: Task<Void, Never>?
+    private var shouldRecoverInheritedTemporaryOverride = false
 
     func start() {
         guard preferenceObserver == nil else { return }
@@ -26,13 +27,14 @@ final class PersistentDictationInputController {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.applyCurrentPreference()
+                self?.reconcileCurrentPreference()
             }
         }
         installDefaultInputListener()
         installDeviceListListener()
-        recoverPersistedOwnership()
-        applyCurrentPreference()
+        shouldRecoverInheritedTemporaryOverride =
+            DictationPersistentInputPreferences.temporaryRecoveryMarker() != nil
+        reconcileCurrentPreference()
     }
 
     func stopAndRestore() {
@@ -140,13 +142,23 @@ final class PersistentDictationInputController {
     }
 
     private func scheduleTopologyRefresh() {
-        guard DictationPersistentInputPreferences.isEnabled() else { return }
+        guard DictationPersistentInputPreferences.isEnabled()
+                || DictationPersistentInputPreferences.recoveryMarker() != nil
+                || shouldRecoverInheritedTemporaryOverride else { return }
         topologyRefreshTask?.cancel()
         topologyRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
             guard !Task.isCancelled else { return }
-            self?.applyCurrentPreference()
+            self?.reconcileCurrentPreference()
         }
+    }
+
+    private func reconcileCurrentPreference() {
+        if shouldRecoverInheritedTemporaryOverride {
+            recoverTemporaryOwnership()
+        }
+        recoverPersistedOwnership()
+        applyCurrentPreference()
     }
 
     private func applyCurrentPreference() {
@@ -158,6 +170,11 @@ final class PersistentDictationInputController {
         do {
             let selection = try CoreAudioInputDeviceLookup.preferredDictationInputSelection()
             let availableInputs = try CoreAudioInputDeviceLookup.availableInputDevices()
+            if activeOverride == nil,
+               let marker = DictationPersistentInputPreferences.recoveryMarker(),
+               selection.defaultInput.uid == marker.selectedUID {
+                return
+            }
             let selectedInput = DictationPreferredInputPolicy.input(
                 preferredUID: DictationPersistentInputPreferences.preferredDeviceUID(),
                 availableInputs: availableInputs,
@@ -316,6 +333,8 @@ final class PersistentDictationInputController {
                 }
                 try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(previous.id)
                 DictationPersistentInputPreferences.setRecoveryMarker(nil)
+            case .preserve:
+                return
             case .clear:
                 DictationPersistentInputPreferences.setRecoveryMarker(nil)
             }
@@ -325,6 +344,48 @@ final class PersistentDictationInputController {
                 engine: "parakeet",
                 event: "dictation_persistent_input_ownership_recovery_failed",
                 message: "Could not reconcile microphone ownership after an unclean app exit"
+            )
+        }
+    }
+
+    private func recoverTemporaryOwnership() {
+        guard let marker = DictationPersistentInputPreferences.temporaryRecoveryMarker() else {
+            shouldRecoverInheritedTemporaryOverride = false
+            return
+        }
+        do {
+            let availableInputs = try CoreAudioInputDeviceLookup.availableInputDevices()
+            let currentInputID = try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID()
+            let currentUID = availableInputs.first(where: { $0.id == currentInputID })?.uid
+            let availableByUID = Dictionary(
+                uniqueKeysWithValues: availableInputs.compactMap { device in
+                    device.uid.map { ($0, device) }
+                }
+            )
+            let action = DictationPersistentInputRecoveryPolicy.action(
+                preferenceEnabled: false,
+                currentUID: currentUID,
+                marker: marker,
+                availableUIDs: Set(availableByUID.keys)
+            )
+            switch action {
+            case .restore:
+                guard let previous = availableByUID[marker.previousUID] else { return }
+                try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(previous.id)
+                DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
+                shouldRecoverInheritedTemporaryOverride = false
+            case .clear:
+                DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
+                shouldRecoverInheritedTemporaryOverride = false
+            case .none, .adopt, .preserve:
+                return
+            }
+        } catch {
+            EventReporter.shared.capture(
+                level: .warning,
+                engine: "parakeet",
+                event: "dictation_temporary_input_ownership_recovery_failed",
+                message: "Could not restore the microphone after an interrupted dictation"
             )
         }
     }

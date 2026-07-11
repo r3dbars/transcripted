@@ -437,6 +437,14 @@ func testBluetoothRouteContract() {
             cleanupBody.contains("await restorePendingSystemInputAfterRecording(operation: \"reset_after_failed_recording_start\")"),
             "final failed-start cleanup should restore the temporary system input after retries are exhausted"
         )
+        assertTrue(
+            source.contains("DictationPersistentInputPreferences.setTemporaryRecoveryMarker(recoveryMarker)"),
+            "temporary system-input ownership must survive a crash during dictation"
+        )
+        assertTrue(
+            source.contains("DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)"),
+            "successful restoration must clear the temporary crash marker"
+        )
     }
 
     runSuite("Bluetooth route contract - active startup owns its config changes") {
@@ -476,8 +484,10 @@ func testBluetoothRouteContract() {
         assertTrue(installDeviceList.lowerBound < removeDeviceList.lowerBound, "USB device-list monitoring should have paired teardown")
         assertTrue(stop.lowerBound < restore.lowerBound, "shutdown should route through ownership-safe restoration")
         assertTrue(
-            source.contains("guard DictationPersistentInputPreferences.isEnabled() else { return }"),
-            "device-change reapplication must stay gated by explicit user opt-in"
+            source.contains("guard DictationPersistentInputPreferences.isEnabled()")
+                && source.contains("|| DictationPersistentInputPreferences.recoveryMarker() != nil")
+                && source.contains("|| shouldRecoverInheritedTemporaryOverride"),
+            "device changes must retry inherited crash restoration without treating current-session overrides as inherited"
         )
         assertTrue(
             source.contains("guard currentInput == activeOverride.selectedInput else"),

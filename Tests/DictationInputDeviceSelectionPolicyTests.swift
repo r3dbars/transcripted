@@ -32,6 +32,12 @@ func testDictationInputDeviceSelectionPolicy() {
             marker,
             "unclean exits should leave a durable restoration obligation"
         )
+        DictationPersistentInputPreferences.setTemporaryRecoveryMarker(marker, userDefaults: defaults)
+        assertEqual(
+            DictationPersistentInputPreferences.temporaryRecoveryMarker(userDefaults: defaults),
+            marker,
+            "temporary per-dictation overrides should have an independent crash marker"
+        )
     }
 
     runSuite("DictationPersistentInputRecoveryPolicy adopts, restores, or clears crash markers") {
@@ -68,6 +74,16 @@ func testDictationInputDeviceSelectionPolicy() {
             ),
             .clear,
             "an external microphone change should cancel stale restoration ownership"
+        )
+        assertEqual(
+            DictationPersistentInputRecoveryPolicy.action(
+                preferenceEnabled: false,
+                currentUID: "selected",
+                marker: marker,
+                availableUIDs: ["selected"]
+            ),
+            .preserve,
+            "a disconnected previous microphone must keep its restoration obligation"
         )
     }
 

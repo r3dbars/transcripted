@@ -499,34 +499,6 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
-        runSuite("FocusedTextPasteConfirmationPolicy — selected Auto Enter reads stay immediate and frontmost") {
-            let dispatchedAt: CFAbsoluteTime = 100
-            assertTrue(
-                FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
-                    pasteDispatchedAt: dispatchedAt,
-                    clipboardReadAt: dispatchedAt + 0.05,
-                    targetStillFrontmost: true
-                ),
-                "an immediate selected-target clipboard read should confirm the opted-in Auto Enter path"
-            )
-            assertFalse(
-                FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
-                    pasteDispatchedAt: dispatchedAt,
-                    clipboardReadAt: dispatchedAt + 0.25,
-                    targetStillFrontmost: true
-                ),
-                "a delayed clipboard observer read must not confirm Auto Enter"
-            )
-            assertFalse(
-                FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
-                    pasteDispatchedAt: dispatchedAt,
-                    clipboardReadAt: dispatchedAt + 0.05,
-                    targetStillFrontmost: false
-                ),
-                "a clipboard read after focus changes must not confirm Auto Enter"
-            )
-        }
-
         runSuite("ClipboardRestoringTextPaster — waits briefly for menu-triggered target activation") {
             assertTrue(
                 TranscriptedConstants.clipboardTargetActivationWait > 0
@@ -624,7 +596,7 @@ func testClipboardRestoringTextPaster() async {
         )
     }
 
-    await runSuite("ClipboardRestoringTextPaster.paste — selected Auto Enter target may confirm its post-dispatch clipboard read") {
+    await runSuite("ClipboardRestoringTextPaster.paste — unattributed clipboard reads never confirm paste") {
         let existingClipboard = "selected app original clipboard"
         let dictationText = "selected app dictation"
         let pasteboardName = NSPasteboard.Name("TranscriptedSelectedAutoEnterPasteTest-\(UUID().uuidString)")
@@ -643,34 +615,36 @@ func testClipboardRestoringTextPaster() async {
                     _ = pasteboard.string(forType: .string)
                     return true
                 },
-                allowClipboardReadConfirmation: true,
-                selectedTargetStillFrontmost: { true },
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 120_000_000,
                 pasteConfirmationWait: 0.2
             )
         }
 
-        assertEqual(outcome, .pasted, "an explicitly selected Auto Enter app may confirm its own post-dispatch clipboard read")
+        assertEqual(
+            outcome,
+            .copied(
+                "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                reason: .pasteConfirmationUnavailable
+            ),
+            "a clipboard manager read must not masquerade as target-specific paste confirmation"
+        )
         await paster.waitForPendingClipboardRestore()
-        let restoredClipboard = await MainActor.run {
+        let retainedClipboard = await MainActor.run {
             NSPasteboard(name: pasteboardName).string(forType: .string)
         }
-        assertEqual(restoredClipboard, existingClipboard, "selected-app confirmation should restore the original clipboard")
+        assertEqual(retainedClipboard, dictationText, "unconfirmed paste must keep recovery text available")
     }
 
-    runSuite("ClipboardRestoringTextPaster.paste — selected Auto Enter clipboard read fails closed without a target") {
+    runSuite("ClipboardRestoringTextPaster.paste — provider reads are not an Auto Enter confirmation API") {
         let source = try! String(
             contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
             encoding: .utf8
         )
-        assertTrue(
-            source.contains("let selectedTargetIsFrontmost = selectedTargetStillFrontmost ?? {\n            target?.matchesCurrentFrontmostApp() == true"),
-            "a missing target must not be treated as frontmost for Auto Enter confirmation"
-        )
         assertFalse(
-            source.contains("let selectedTargetIsFrontmost = selectedTargetStillFrontmost ?? {\n            target?.matchesCurrentFrontmostApp() != false"),
-            "the nil-target permissive check must not return"
+            source.contains("allowClipboardReadConfirmation")
+                || source.contains("selectedTargetStillFrontmost"),
+            "an unattributed pasteboard provider read must never restore the clipboard or enable Auto Enter"
         )
     }
 

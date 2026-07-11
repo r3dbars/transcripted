@@ -196,7 +196,6 @@ struct DictationPasteTarget: Equatable {
 }
 
 enum FocusedTextPasteConfirmationPolicy {
-    static let selectedAutoEnterClipboardReadWindow: CFTimeInterval = 0.2
     struct SelectionRange: Equatable {
         let location: Int
         let length: Int
@@ -271,19 +270,6 @@ enum FocusedTextPasteConfirmationPolicy {
             return false
         }
         return targetChangedAt - clipboardReadAt <= 1.0
-    }
-
-    static func didObserveSelectedAutoEnterTargetRead(
-        pasteDispatchedAt: CFAbsoluteTime,
-        clipboardReadAt: CFAbsoluteTime?,
-        targetStillFrontmost: Bool
-    ) -> Bool {
-        guard targetStillFrontmost,
-              let clipboardReadAt,
-              clipboardReadAt >= pasteDispatchedAt else {
-            return false
-        }
-        return clipboardReadAt - pasteDispatchedAt <= selectedAutoEnterClipboardReadWindow
     }
 
     private static func normalizedForConfirmation(_ text: String) -> String {
@@ -585,8 +571,6 @@ final class ClipboardRestoringTextPaster {
         },
         pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
         pasteConfirmed: (@MainActor () -> Bool)? = nil,
-        allowClipboardReadConfirmation: Bool = false,
-        selectedTargetStillFrontmost: (@MainActor () -> Bool)? = nil,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
@@ -656,18 +640,7 @@ final class ClipboardRestoringTextPaster {
         }
 
         let confirmationUnavailable = pasteConfirmed == nil && accessibilityConfirmation?.canObservePaste != true
-        let selectedTargetIsFrontmost = selectedTargetStillFrontmost ?? {
-            target?.matchesCurrentFrontmostApp() == true
-        }
         let confirmPasteReceived = pasteConfirmed ?? {
-            if allowClipboardReadConfirmation,
-               FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
-                   pasteDispatchedAt: pasteDispatchedAt,
-                   clipboardReadAt: temporaryProvider?.firstReadAt,
-                   targetStillFrontmost: selectedTargetIsFrontmost()
-               ) {
-                return true
-            }
             if accessibilityConfirmation?.confirmationMode(
                 text,
                 clipboardWasRead: temporaryProvider?.didProvideData == true,
@@ -718,13 +691,6 @@ final class ClipboardRestoringTextPaster {
         let confirmationMode: String
         if pasteConfirmed != nil {
             confirmationMode = "injected_confirmation"
-        } else if allowClipboardReadConfirmation,
-                  FocusedTextPasteConfirmationPolicy.didObserveSelectedAutoEnterTargetRead(
-                      pasteDispatchedAt: pasteDispatchedAt,
-                      clipboardReadAt: temporaryProvider?.firstReadAt,
-                      targetStillFrontmost: selectedTargetIsFrontmost()
-                  ) {
-            confirmationMode = "clipboard_read_selected_auto_enter_target"
         } else {
             confirmationMode = accessibilityConfirmation?.confirmationMode(
                 text,

@@ -1627,6 +1627,8 @@ class ParakeetEngine: ObservableObject {
                     "error": restoreError,
                 ]
             )
+        } else {
+            DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
         }
     }
 
@@ -1663,6 +1665,10 @@ class ParakeetEngine: ObservableObject {
                         ]
                     )
                 }
+            } else {
+                await MainActor.run {
+                    DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
+                }
             }
         }
     }
@@ -1690,6 +1696,21 @@ class ParakeetEngine: ObservableObject {
                 + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
         }
         let shouldRestoreSystemInputOnStop = operation == "start_recording"
+        let recoveryMarker = selection.flatMap { selection -> DictationPersistentInputPreferences.RecoveryMarker? in
+            guard selection.didOverrideDefault,
+                  selection.reason == .preferredBuiltInForBluetoothHeadset,
+                  let selectedUID = selection.selectedInput.uid,
+                  let previousUID = selection.defaultInput.uid else {
+                return nil
+            }
+            return DictationPersistentInputPreferences.RecoveryMarker(
+                selectedUID: selectedUID,
+                previousUID: previousUID
+            )
+        }
+        if let recoveryMarker {
+            DictationPersistentInputPreferences.setTemporaryRecoveryMarker(recoveryMarker)
+        }
         let systemInputOverrideStartedAt = CFAbsoluteTimeGetCurrent()
         let systemInputOverrideError = await Task.detached(priority: .utility) {
             Self.applyPreferredSystemInputDevice(for: selection)
@@ -1700,6 +1721,9 @@ class ParakeetEngine: ObservableObject {
             var context = inputSelectionContext(selection, operation: "\(operation)_system_input")
             if let systemInputOverrideError {
                 pendingSystemInputRestore = nil
+                if recoveryMarker != nil {
+                    DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
+                }
                 context["error"] = systemInputOverrideError
                 EventReporter.shared.capture(
                     level: .warning,
