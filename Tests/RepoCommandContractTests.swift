@@ -3678,6 +3678,18 @@ func testRepoCommandContract() {
             "capture pill prompts should use heuristic timeouts and route remind/expiry distinctly"
         )
         assertTrue(
+            pillContents.contains("static let preferredSize = NSSize(width: 720, height: 90)")
+                && pillContents.contains("Closes in ")
+                && pillContents.contains("scheduleCountdown(seconds: timeoutSeconds)")
+                && pillContents.contains("setAccessibilityValue("),
+            "detected-call prompts should reserve room for full copy and show their expiry countdown"
+        )
+        assertTrue(
+            pillContents.contains("button.attributedTitle = buttonTitle(title, isPrimary: isPrimary)")
+                && pillContents.contains("NSColor.labelColor.withAlphaComponent(0.12)"),
+            "secondary prompt actions should use explicit high-contrast text and surfaces"
+        )
+        assertTrue(
             pillContents.contains("event.window === panel || panel.isKeyWindow")
                 && !pillContents.contains("panel.makeKey()")
                 && pillContents.contains("CapturePillPlacementPolicy.selectedScreenFrame(")
