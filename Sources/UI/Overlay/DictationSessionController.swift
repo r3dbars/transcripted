@@ -1709,7 +1709,22 @@ class DictationSessionController: ObservableObject {
     }
 
     private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
-        let outcome = textPaster.paste(text, target: sessionPasteTarget)
+        retargetPasteToCurrentFocus()
+        let outcome = textPaster.paste(
+            text,
+            target: sessionPasteTarget
+        )
+        if let diagnostic = textPaster.lastConfirmationDiagnostic {
+            EventReporter.shared.capture(
+                level: diagnostic.event == "dictation_paste_confirmed" ? .info : .warning,
+                engine: "overlay",
+                event: diagnostic.event,
+                message: diagnostic.event == "dictation_paste_confirmed"
+                    ? "Paste delivery confirmed from privacy-safe target signals"
+                    : "Paste delivery could not be confirmed from privacy-safe target signals",
+                context: diagnostic.context
+            )
+        }
 
         switch outcome.copyReason {
         case .accessibilityMissing:
@@ -1735,6 +1750,35 @@ class DictationSessionController: ObservableObject {
         }
 
         return outcome
+    }
+
+    private func retargetPasteToCurrentFocus() {
+        let previousTarget = sessionPasteTarget
+        let frontmostApp = NSWorkspace.shared.frontmostApplication
+        let frontmostTarget = DictationPasteTarget.capture(sourceApp: frontmostApp)
+        let resolvedTarget = DictationPasteTarget.preferredDestination(
+            frontmostProcessIdentifier: frontmostApp?.processIdentifier,
+            frontmostBundleIdentifier: frontmostApp?.bundleIdentifier,
+            transcriptedBundleIdentifier: Bundle.main.bundleIdentifier,
+            fallback: previousTarget
+        )
+
+        sessionPasteTarget = resolvedTarget
+        if resolvedTarget == frontmostTarget,
+           frontmostApp?.bundleIdentifier != Bundle.main.bundleIdentifier {
+            sessionSourceApp = frontmostApp
+        }
+
+        if resolvedTarget != previousTarget {
+            appState?.logger.log("DICTATION | paste target updated to current focus")
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "overlay",
+                event: "dictation_paste_target_updated",
+                message: "Paste target followed current focus",
+                context: ["target_changed": "true"]
+            )
+        }
     }
 
     private func performAutoEnterIfNeeded(

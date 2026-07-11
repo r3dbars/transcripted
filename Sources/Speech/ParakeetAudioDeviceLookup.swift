@@ -42,7 +42,7 @@ enum CoreAudioInputDeviceLookup {
         allowsBuiltInBluetoothFallback: Bool = true
     ) throws -> DictationInputDeviceSelection {
         let defaultInputID = try defaultInputDeviceID()
-        var availableInputs = try allInputDevices()
+        var availableInputs = try availableInputDevices()
 
         let defaultInput: DictationAudioDevice
         if let existingDefault = availableInputs.first(where: { $0.id == defaultInputID }) {
@@ -87,7 +87,7 @@ enum CoreAudioInputDeviceLookup {
         try defaultInputDeviceID()
     }
 
-    private static func allInputDevices() throws -> [DictationAudioDevice] {
+    static func availableInputDevices() throws -> [DictationAudioDevice] {
         try allDeviceIDs().compactMap { deviceID in
             let inputChannels = (try? channelCount(for: deviceID, scope: kAudioDevicePropertyScopeInput)) ?? 0
             guard inputChannels > 0 else { return nil }
@@ -152,7 +152,11 @@ enum CoreAudioInputDeviceLookup {
             id: deviceID,
             name: name.isEmpty ? "Unknown" : name,
             transport: transport,
-            inputChannelCount: inputChannelCount
+            inputChannelCount: inputChannelCount,
+            uid: try? readStringProperty(
+                selector: kAudioDevicePropertyDeviceUID,
+                objectID: AudioObjectID(deviceID)
+            )
         )
     }
 

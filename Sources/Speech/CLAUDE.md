@@ -14,6 +14,7 @@
 - `DictationAudioLevelMeter.swift` — normalizes live PCM buffers into a 0...1 level used by the dictation waveform UI
 - `DictationAudioRecovery.swift` — analyzes recorded dictation audio for usable speech signal and extracts focused, gain-normalized retry segments when an initial transcription attempt returns empty
 - `DictationInputDeviceSelectionPolicy.swift` — prefers a built-in mic over Bluetooth headset input for dictation when that avoids HFP-style playback downgrades
+- `PersistentDictationInputController.swift` — owns the explicit faster-Bluetooth-dictation preference at runtime: keeps the preferred non-Bluetooth system input selected, follows device reconnects, and restores prior input ownership across clean or unclean exits
 - `DictationReadinessWaitPolicy.swift` — tiny policy that decides whether dictation should keep waiting for recovery, refresh input readiness, or start recording immediately
 - `ParakeetModelInitDiagnostics.swift` — builds safe diagnostic context for model-initialization failures without leaking transcript or user-content data
 - `ParakeetPrewarmPolicy.swift` — central policy for deciding whether speech-engine input-readiness checks should proceed or be skipped based on microphone authorization state

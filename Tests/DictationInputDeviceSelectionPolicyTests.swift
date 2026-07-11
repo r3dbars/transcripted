@@ -1,6 +1,114 @@
 import Foundation
 
 func testDictationInputDeviceSelectionPolicy() {
+    runSuite("DictationPersistentInputPreferences defaults off and persists explicit opt-in") {
+        let suiteName = "DictationPersistentInputPreferencesTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        assertFalse(
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
+            "keeping a Mac-wide microphone active must remain explicit opt-in"
+        )
+        DictationPersistentInputPreferences.setEnabled(true, userDefaults: defaults)
+        assertTrue(
+            DictationPersistentInputPreferences.isEnabled(userDefaults: defaults),
+            "the faster Bluetooth start preference should persist"
+        )
+        DictationPersistentInputPreferences.setPreferredDeviceUID("usb-mic-uid", userDefaults: defaults)
+        assertEqual(
+            DictationPersistentInputPreferences.preferredDeviceUID(userDefaults: defaults),
+            "usb-mic-uid",
+            "the preferred microphone should persist by stable CoreAudio UID"
+        )
+        let marker = DictationPersistentInputPreferences.RecoveryMarker(
+            selectedUID: "usb-mic-uid",
+            previousUID: "system-mic-uid"
+        )
+        DictationPersistentInputPreferences.setRecoveryMarker(marker, userDefaults: defaults)
+        assertEqual(
+            DictationPersistentInputPreferences.recoveryMarker(userDefaults: defaults),
+            marker,
+            "unclean exits should leave a durable restoration obligation"
+        )
+        DictationPersistentInputPreferences.setTemporaryRecoveryMarker(marker, userDefaults: defaults)
+        assertEqual(
+            DictationPersistentInputPreferences.temporaryRecoveryMarker(userDefaults: defaults),
+            marker,
+            "temporary per-dictation overrides should have an independent crash marker"
+        )
+    }
+
+    runSuite("DictationPersistentInputRecoveryPolicy adopts, restores, or clears crash markers") {
+        let marker = DictationPersistentInputPreferences.RecoveryMarker(
+            selectedUID: "selected",
+            previousUID: "previous"
+        )
+        assertEqual(
+            DictationPersistentInputRecoveryPolicy.action(
+                preferenceEnabled: true,
+                currentUID: "selected",
+                marker: marker,
+                availableUIDs: ["selected", "previous"]
+            ),
+            .adopt,
+            "a relaunched opted-in app should reclaim the restoration obligation"
+        )
+        assertEqual(
+            DictationPersistentInputRecoveryPolicy.action(
+                preferenceEnabled: false,
+                currentUID: "selected",
+                marker: marker,
+                availableUIDs: ["selected", "previous"]
+            ),
+            .restore,
+            "a disabled preference should restore the prior microphone on relaunch"
+        )
+        assertEqual(
+            DictationPersistentInputRecoveryPolicy.action(
+                preferenceEnabled: true,
+                currentUID: "user-changed",
+                marker: marker,
+                availableUIDs: ["selected", "previous", "user-changed"]
+            ),
+            .clear,
+            "an external microphone change should cancel stale restoration ownership"
+        )
+        assertEqual(
+            DictationPersistentInputRecoveryPolicy.action(
+                preferenceEnabled: false,
+                currentUID: "selected",
+                marker: marker,
+                availableUIDs: ["selected"]
+            ),
+            .preserve,
+            "a disconnected previous microphone must keep its restoration obligation"
+        )
+    }
+
+    runSuite("DictationPreferredInputPolicy uses preferred USB then automatic fallback") {
+        let bluetooth = DictationAudioDevice(id: 1, name: "AirPods", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
+        let macMic = DictationAudioDevice(id: 2, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
+        let usbMic = DictationAudioDevice(id: 3, name: "Studio USB Mic", transport: .usb, inputChannelCount: 1, uid: "usb")
+
+        assertEqual(
+            DictationPreferredInputPolicy.input(preferredUID: "usb", availableInputs: [bluetooth, macMic, usbMic], automaticFallback: macMic),
+            usbMic,
+            "an available preferred USB microphone should win"
+        )
+        assertEqual(
+            DictationPreferredInputPolicy.input(preferredUID: "missing", availableInputs: [bluetooth, macMic], automaticFallback: macMic),
+            macMic,
+            "an unavailable preferred microphone should fall back automatically"
+        )
+        assertEqual(
+            DictationPreferredInputPolicy.input(preferredUID: "airpods", availableInputs: [bluetooth, macMic], automaticFallback: macMic),
+            macMic,
+            "the faster-start preference should not silently choose a Bluetooth headset microphone"
+        )
+    }
+
     runSuite("DictationInputDeviceSelectionPolicy chooses MacBook mic for AirPods input/output") {
         let airPodsInput = device(1, "Justin's AirPods Pro", .bluetooth)
         let airPodsOutput = device(2, "Justin's AirPods Pro", .bluetooth, inputChannels: 0)

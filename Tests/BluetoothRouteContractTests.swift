@@ -406,12 +406,12 @@ func testBluetoothRouteContract() {
             "superseded recovery snapshots should restore the temporary system input before throwing cancellation"
         )
         assertTrue(
-            startBody.contains("func failAudioStart(_ operation: String) async -> Bool"),
-            "failed starts should share one cleanup path for temporary system input restores"
+            startBody.contains("func failAudioStart() async -> Bool"),
+            "failed starts should share one bounded-retry path"
         )
-        assertTrue(
-            startBody.contains("return await failAudioStart(\"start_recording_engine_start_failed\")"),
-            "engine-start failures after the temporary system input override should restore before returning false"
+        assertFalse(
+            startBody.contains("restorePendingSystemInputAfterRecording"),
+            "retryable start failures should keep the temporary built-in input stable instead of restoring and reapplying it"
         )
         assertTrue(
             stopBody.contains("await restorePendingSystemInputAfterRecording(operation: \"stop_recording\")"),
@@ -432,6 +432,70 @@ func testBluetoothRouteContract() {
         assertTrue(
             cleanupBody.contains("schedulePendingSystemInputRestore(operation: \"abandon_blocked_recording_start\")"),
             "blocked-start abandonment should restore the temporary system input"
+        )
+        assertTrue(
+            cleanupBody.contains("await restorePendingSystemInputAfterRecording(operation: \"reset_after_failed_recording_start\")"),
+            "final failed-start cleanup should restore the temporary system input after retries are exhausted"
+        )
+        assertTrue(
+            source.contains("DictationPersistentInputPreferences.setTemporaryRecoveryMarker(recoveryMarker)"),
+            "temporary system-input ownership must survive a crash during dictation"
+        )
+        assertTrue(
+            source.contains("DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)"),
+            "successful restoration must clear the temporary crash marker"
+        )
+    }
+
+    runSuite("Bluetooth route contract - active startup owns its config changes") {
+        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
+        guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
+              let handlerEnd = source.range(of: "private func recordRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the audio config-change handler")
+            return
+        }
+        let handlerBody = String(source[handlerStart.lowerBound..<handlerEnd.lowerBound])
+        guard let startupGuard = handlerBody.range(of: "if audioStartInProgress"),
+              let generationBump = handlerBody.range(of: "audioGraphGeneration += 1") else {
+            assertTrue(false, "startup config changes should be ignored before recovery mutates the graph")
+            return
+        }
+        assertTrue(
+            startupGuard.lowerBound < generationBump.lowerBound,
+            "recording startup should own route validation before config recovery can rebuild the graph"
+        )
+    }
+
+    runSuite("Bluetooth route contract - persistent input follows reconnects and restores on shutdown") {
+        let source = readBluetoothRouteContractFile("Sources/Speech/PersistentDictationInputController.swift")
+        guard let start = source.range(of: "func start()"),
+              let stop = source.range(of: "func stopAndRestore()"),
+              let install = source.range(of: "private func installDefaultInputListener()"),
+              let installDeviceList = source.range(of: "private func installDeviceListListener()"),
+              let remove = source.range(of: "private func removeDefaultInputListener()"),
+              let removeDeviceList = source.range(of: "private func removeDeviceListListener()"),
+              let restore = source.range(of: "private func restoreIfStillOwned") else {
+            assertTrue(false, "persistent input controller should expose bounded lifecycle seams")
+            return
+        }
+
+        assertTrue(start.lowerBound < install.lowerBound, "controller startup should install its reconnect listener")
+        assertTrue(install.lowerBound < remove.lowerBound, "listener teardown should remain paired with installation")
+        assertTrue(installDeviceList.lowerBound < removeDeviceList.lowerBound, "USB device-list monitoring should have paired teardown")
+        assertTrue(stop.lowerBound < restore.lowerBound, "shutdown should route through ownership-safe restoration")
+        assertTrue(
+            source.contains("guard DictationPersistentInputPreferences.isEnabled()")
+                && source.contains("|| DictationPersistentInputPreferences.recoveryMarker() != nil")
+                && source.contains("|| shouldRecoverInheritedTemporaryOverride"),
+            "device changes must retry inherited crash restoration without treating current-session overrides as inherited"
+        )
+        assertTrue(
+            source.contains("guard currentInput == activeOverride.selectedInput else"),
+            "restoration must not overwrite a microphone the user changed outside Transcripted"
+        )
+        assertTrue(
+            source.contains("mSelector: kAudioHardwarePropertyDevices"),
+            "the saved preferred microphone should be reconsidered when USB devices reconnect"
         )
     }
 

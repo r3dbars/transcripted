@@ -7,6 +7,7 @@ final class CapturePillController {
     private var pillView: CapturePillView?
     private var representedCandidate: MeetingPromptDetector.Candidate?
     private var dismissTask: Task<Void, Never>?
+    private var countdownTask: Task<Void, Never>?
     private var eventMonitor: Any?
 
     var onRecord: ((MeetingPromptDetector.Candidate) -> Void)?
@@ -16,6 +17,7 @@ final class CapturePillController {
 
     deinit {
         dismissTask?.cancel()
+        countdownTask?.cancel()
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
         }
@@ -30,7 +32,8 @@ final class CapturePillController {
         guard let panel, let pillView else { return false }
 
         representedCandidate = candidate
-        pillView.update(candidate: candidate)
+        let timeoutSeconds = max(1, Int(ceil(timeout)))
+        pillView.update(candidate: candidate, timeoutSeconds: timeoutSeconds)
         panel.onCancel = { [weak self] in self?.dismiss(notify: true) }
         panel.onDefault = { [weak self] in self?.record() }
 
@@ -39,12 +42,15 @@ final class CapturePillController {
 
         installEventMonitor()
         scheduleDismiss(timeout: timeout)
+        scheduleCountdown(seconds: timeoutSeconds)
         return true
     }
 
     func dismiss(notify: Bool) {
         dismissTask?.cancel()
         dismissTask = nil
+        countdownTask?.cancel()
+        countdownTask = nil
 
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
@@ -102,6 +108,21 @@ final class CapturePillController {
             guard let self, let candidate = self.representedCandidate else { return }
             self.dismiss(notify: false)
             self.onExpired?(candidate)
+        }
+    }
+
+    private func scheduleCountdown(seconds: Int) {
+        countdownTask?.cancel()
+        countdownTask = Task { @MainActor [weak self] in
+            var secondsRemaining = max(1, seconds)
+            self?.pillView?.updateCountdown(secondsRemaining: secondsRemaining)
+
+            while secondsRemaining > 1 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                secondsRemaining -= 1
+                self?.pillView?.updateCountdown(secondsRemaining: secondsRemaining)
+            }
         }
     }
 
@@ -193,7 +214,7 @@ final class CapturePillPanel: NSPanel {
 
 @available(macOS 14.0, *)
 private final class CapturePillView: NSView {
-    static let preferredSize = NSSize(width: 540, height: 74)
+    static let preferredSize = NSSize(width: 720, height: 90)
 
     var onRecord: (() -> Void)?
     var onDismiss: (() -> Void)?
@@ -202,6 +223,9 @@ private final class CapturePillView: NSView {
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
+    private let countdownLabel = NSTextField(labelWithString: "")
+    private var accessibilityMeetingName = "Meeting detected"
+    private var accessibilityDetail = "Record this meeting?"
     private let dismissButton = NSButton(title: "Not now", target: nil, action: nil)
     private let remindButton = NSButton(title: "Remind me soon", target: nil, action: nil)
     private let recordButton = NSButton(title: "Record", target: nil, action: nil)
@@ -229,6 +253,11 @@ private final class CapturePillView: NSView {
         detailLabel.lineBreakMode = .byTruncatingTail
         addSubview(detailLabel)
 
+        countdownLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        countdownLabel.textColor = .secondaryLabelColor
+        countdownLabel.lineBreakMode = .byTruncatingTail
+        addSubview(countdownLabel)
+
         configureButton(dismissButton, title: "Not now", isPrimary: false, action: #selector(dismissTapped))
         configureButton(remindButton, title: "Remind me soon", isPrimary: false, action: #selector(remindTapped))
         configureButton(recordButton, title: "Record", isPrimary: true, action: #selector(recordTapped))
@@ -241,6 +270,11 @@ private final class CapturePillView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
 
     override func layout() {
         super.layout()
@@ -273,16 +307,27 @@ private final class CapturePillView: NSView {
 
         let textX = iconView.frame.maxX + 12
         let textWidth = dismissButton.frame.minX - 12 - textX
-        titleLabel.frame = NSRect(x: textX, y: 38, width: max(40, textWidth), height: 18)
-        detailLabel.frame = NSRect(x: textX, y: 18, width: max(40, textWidth), height: 16)
+        titleLabel.frame = NSRect(x: textX, y: 53, width: max(40, textWidth), height: 18)
+        detailLabel.frame = NSRect(x: textX, y: 33, width: max(40, textWidth), height: 16)
+        countdownLabel.frame = NSRect(x: textX, y: 15, width: max(40, textWidth), height: 14)
     }
 
-    func update(candidate: MeetingPromptDetector.Candidate) {
+    func update(candidate: MeetingPromptDetector.Candidate, timeoutSeconds: Int) {
         let meetingName = candidate.suggestedTranscriptTitle ?? candidate.title
+        accessibilityMeetingName = meetingName
+        accessibilityDetail = candidate.detail
         titleLabel.stringValue = meetingName
         detailLabel.stringValue = candidate.detail
-        setAccessibilityValue("\(meetingName). \(candidate.detail)")
+        updateCountdown(secondsRemaining: timeoutSeconds)
         needsLayout = true
+    }
+
+    func updateCountdown(secondsRemaining: Int) {
+        let clampedSeconds = max(1, secondsRemaining)
+        countdownLabel.stringValue = "Closes in \(clampedSeconds)s"
+        setAccessibilityValue(
+            "\(accessibilityMeetingName). \(accessibilityDetail). Closes in \(clampedSeconds) seconds."
+        )
     }
 
     private func configureButton(
@@ -291,17 +336,14 @@ private final class CapturePillView: NSView {
         isPrimary: Bool,
         action: Selector
     ) {
-        button.title = title
         button.target = self
         button.action = action
         button.isBordered = false
         button.font = .systemFont(ofSize: 12, weight: .semibold)
         button.wantsLayer = true
         button.layer?.cornerRadius = 8
-        button.layer?.backgroundColor = isPrimary
-            ? NSColor.controlAccentColor.cgColor
-            : NSColor.controlColor.withAlphaComponent(0.85).cgColor
-        button.contentTintColor = isPrimary ? .white : .labelColor
+        button.layer?.borderWidth = isPrimary ? 0 : 1
+        button.identifier = NSUserInterfaceItemIdentifier(isPrimary ? "primary" : "secondary")
         button.setAccessibilityLabel(title)
         let help: String
         switch title {
@@ -313,7 +355,38 @@ private final class CapturePillView: NSView {
             help = "Dismiss this meeting prompt."
         }
         button.setAccessibilityHelp(help)
+        button.attributedTitle = buttonTitle(title, isPrimary: isPrimary)
         addSubview(button)
+        applyColors(to: button, isPrimary: isPrimary)
+    }
+
+    private func applyColors() {
+        layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.98).cgColor
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
+        for button in [dismissButton, remindButton, recordButton] {
+            let isPrimary = button.identifier?.rawValue == "primary"
+            applyColors(to: button, isPrimary: isPrimary)
+            button.attributedTitle = buttonTitle(button.title, isPrimary: isPrimary)
+        }
+    }
+
+    private func applyColors(to button: NSButton, isPrimary: Bool) {
+        button.layer?.backgroundColor = isPrimary
+            ? NSColor.controlAccentColor.cgColor
+            : NSColor.labelColor.withAlphaComponent(0.12).cgColor
+        button.layer?.borderColor = isPrimary
+            ? NSColor.clear.cgColor
+            : NSColor.labelColor.withAlphaComponent(0.28).cgColor
+    }
+
+    private func buttonTitle(_ title: String, isPrimary: Bool) -> NSAttributedString {
+        NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                .foregroundColor: isPrimary ? NSColor.white : NSColor.labelColor,
+            ]
+        )
     }
 
     @objc private func recordTapped() {

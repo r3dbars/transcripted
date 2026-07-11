@@ -18,6 +18,38 @@ struct DictationAudioDevice: Equatable {
     let name: String
     let transport: DictationAudioTransport
     let inputChannelCount: UInt32
+    let uid: String?
+
+    init(
+        id: UInt32,
+        name: String,
+        transport: DictationAudioTransport,
+        inputChannelCount: UInt32,
+        uid: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.transport = transport
+        self.inputChannelCount = inputChannelCount
+        self.uid = uid
+    }
+}
+
+enum DictationPreferredInputPolicy {
+    static func input(
+        preferredUID: String?,
+        availableInputs: [DictationAudioDevice],
+        automaticFallback: DictationAudioDevice
+    ) -> DictationAudioDevice {
+        guard let preferredUID,
+              let preferred = availableInputs.first(where: {
+                  $0.uid == preferredUID
+                      && DictationInputDeviceSelectionPolicy.deviceClass(for: $0) != "bluetooth"
+              }) else {
+            return automaticFallback
+        }
+        return preferred
+    }
 }
 
 enum DictationInputDeviceSelectionReason: String {
