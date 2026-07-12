@@ -111,7 +111,18 @@ final class MeetingPromptDetector {
     private let defaultSnoozeInterval: TimeInterval = 30 * 60
     private let pendingCooldown: TimeInterval = 90
     private let suppressionTelemetryCooldown: TimeInterval = 90
-    private let pollIntervalNanoseconds: UInt64 = 20_000_000_000
+    // Every state change that can *newly* justify a prompt already re-evaluates
+    // immediately via an observer: workspace app activate/launch, EKEventStoreChanged,
+    // and the mic/camera/audio-output push methods below. What none of those can
+    // catch is a pure wall-clock threshold crossing — the calendar lead-time window
+    // opening (`calendarReminderLeadTime`), a snooze/pending cooldown expiring, or a
+    // runtime-dismiss resume date arriving — because nothing "happens" at that
+    // instant except time passing. The poll exists solely to catch those, so it's
+    // demoted to a slow safety net rather than removed: the widest of those windows
+    // (calendarReminderPostStartGrace, 5 min) comfortably absorbs a 120s cadence
+    // without missing a prompt window, at the cost of the poll-caught transitions
+    // landing up to ~100s later than the old 20s cadence.
+    private let pollIntervalNanoseconds: UInt64 = 120_000_000_000
     // Single fetch window covering both the near-term prompt window and the
     // farthest lookahead used for runtime-dismiss resume dates.
     private let calendarLookaheadInterval: TimeInterval = 12 * 60 * 60
