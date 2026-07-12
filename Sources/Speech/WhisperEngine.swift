@@ -3,6 +3,7 @@
 
 import FluidAudio
 import Foundation
+import TranscriptedCore
 @preconcurrency import WhisperKit
 
 @MainActor
@@ -122,7 +123,7 @@ final class WhisperEngine: ObservableObject {
             let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
 
-            print("✅ WHISPER | \(model.title) transcribed \(sourceDescription) in \(String(format: "%.2f", elapsed))s, chars=\(trimmed.count)")
+            TranscriptedCore.AppLogger.transcription.info("WHISPER | \(model.title) transcribed \(sourceDescription) in \(String(format: "%.2f", elapsed))s, chars=\(trimmed.count)")
             EventReporter.shared.capture(
                 level: .info,
                 engine: model.engineName,
@@ -184,7 +185,7 @@ final class WhisperEngine: ObservableObject {
         }
 
         modelDownloadState = .downloading(progress: 0)
-        print("🌐 WHISPER | preparing \(model.title) (\(variant))...")
+        TranscriptedCore.AppLogger.transcription.info("WHISPER | preparing \(model.title) (\(variant))...")
 
         do {
             let downloadBase = FileManager.default.transcriptedWhisperModelsDir
@@ -202,7 +203,7 @@ final class WhisperEngine: ObservableObject {
 
             guard !Task.isCancelled else { return }
             modelDownloadState = .loading
-            print("🔄 WHISPER | loading \(model.title) from \(modelFolder.path)")
+            TranscriptedCore.AppLogger.transcription.info("WHISPER | loading \(model.title) from \(modelFolder.path)")
 
             let config = WhisperKitConfig(
                 model: variant,
@@ -240,7 +241,7 @@ final class WhisperEngine: ObservableObject {
             )
         } catch {
             let friendlyMessage = "Couldn't load \(model.title): \(error.localizedDescription)"
-            print("❌ WHISPER | \(friendlyMessage)")
+            TranscriptedCore.AppLogger.transcription.error("WHISPER | \(friendlyMessage)")
             modelDownloadState = .failed(friendlyMessage)
             EventReporter.shared.capture(
                 level: .error,

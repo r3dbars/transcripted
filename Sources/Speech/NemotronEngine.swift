@@ -6,6 +6,7 @@
 import AVFoundation
 import FluidAudio
 import Foundation
+import TranscriptedCore
 
 @MainActor
 final class NemotronEngine: ObservableObject {
@@ -143,7 +144,7 @@ final class NemotronEngine: ObservableObject {
             let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
 
-            print("✅ NEMOTRON | \(Self.model.title) transcribed \(sourceDescription) in \(String(format: "%.2f", elapsed))s, chars=\(trimmed.count)")
+            TranscriptedCore.AppLogger.transcription.info("NEMOTRON | \(Self.model.title) transcribed \(sourceDescription) in \(String(format: "%.2f", elapsed))s, chars=\(trimmed.count)")
             EventReporter.shared.capture(
                 level: .info,
                 engine: Self.model.engineName,
@@ -193,7 +194,7 @@ final class NemotronEngine: ObservableObject {
         // cache on first use, then loads from disk. There is no per-file
         // progress callback, so publish a coarse downloading → ready state.
         modelDownloadState = .downloading(progress: 0)
-        print("🌐 NEMOTRON | preparing \(Self.model.title)...")
+        TranscriptedCore.AppLogger.transcription.info("NEMOTRON | preparing \(Self.model.title)...")
 
         do {
             try await manager.loadModels()
@@ -209,7 +210,7 @@ final class NemotronEngine: ObservableObject {
             )
         } catch {
             let friendlyMessage = "Couldn't load \(Self.model.title): \(error.localizedDescription)"
-            print("❌ NEMOTRON | \(friendlyMessage)")
+            TranscriptedCore.AppLogger.transcription.error("NEMOTRON | \(friendlyMessage)")
             modelDownloadState = .failed(friendlyMessage)
             EventReporter.shared.capture(
                 level: .error,
