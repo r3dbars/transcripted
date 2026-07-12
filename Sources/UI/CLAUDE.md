@@ -17,7 +17,7 @@ Draft-mode UI is not an active product path in this worktree.
 surface. Touching it means also reading `Sources/UI/Timeline/CLAUDE.md` and the
 engine boundary in `Sources/Timeline/CLAUDE.md`.
 
-## Files (82 Swift files)
+## Files (97 Swift files across Overlay/MenuBar/Settings/Shared; Timeline/ is still empty scaffolding)
 
 ### Overlay/
 
@@ -106,6 +106,14 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/TypingTimeSavedFormatter.swift` — Foundation-pure formatter for Home's typing-time-saved stat
+- `Settings/Pages/` — one file per settings tab-strip page split out of `TranscriptedSettingsView` (About, Dictations, People, Privacy, Support)
+
+This list is not exhaustive for `Settings/` — it has grown past 40 files, several
+of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,
+`HomeMeetingPreviewSheet.swift`, `HomeScanWarningPolicy.swift`, `HomeSearchMatching.swift`,
+`AgentSetupFailureCopy.swift`, `OnboardingAbandonmentReasonPolicy.swift`,
+`SettingsActionFailureCopy.swift`, `TranscriptedSettingsSupportViews.swift`).
+See `Sources/UI/Settings/CLAUDE.md` for the file list that directory keeps current.
 
 ### Shared/
 

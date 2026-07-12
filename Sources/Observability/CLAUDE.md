@@ -23,10 +23,13 @@ anonymous analytics, and Sparkle update plumbing.
 - `AnalyticsPreferences.swift` — Settings-backed anonymous analytics preference
 - `AnalyticsEventPolicy.swift` — compiles the explicit PostHog event/property allowlist from `Resources/analytics-events.psv`
 - `ActivationTelemetry.swift` — centralized activation analytics helpers for artifact actions, agent prompt/setup CTAs, and saved-recent artifact return-proxy buckets
+- `FeatureDiscoveryTelemetry.swift` — tracks which Settings features (agent setup, beta summaries, capture library, permissions, speaker review, support, update settings) a user has already discovered, keyed off a shared `settingsFeatureDiscovered.` preference prefix
 - `SpeakerRecognitionTelemetry.swift` — similarity/margin bucketing for speaker-recognition accuracy analytics, aligned with the matcher's decision thresholds
 - `AnalyticsPayloadSanitizer.swift` — strips sensitive analytics properties before send
 - `TimelineAnalyticsTelemetry.swift` — centralized timeline analytics helper with coarse enum/bucket payloads only
+- `WorkflowRecoveryTelemetry.swift` — bucketed analytics for recovery flows (attempted/succeeded/failed) across workflow kind, failure kind, retry source, and artifact-retained outcome
 - `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
+- `ObservabilityLogRotation.swift` — rename-based, O(1) rotation for append-only JSONL observability logs once they exceed a size threshold; keeps one rotated generation
 - `ObservabilityTextRedactor.swift` — shared text redactor for support-facing and diagnostic strings before they leave local-only surfaces
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
@@ -34,6 +37,7 @@ anonymous analytics, and Sparkle update plumbing.
 - `SentryRuntimeConfiguration.swift` — resolves Sentry DSN, environment, release, and dist from `Info.plist` or process environment
 - `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app, including update-state telemetry and ready-to-install restart flows
 - `UpdateFailureKind.swift` — canonical Sparkle/update failure taxonomy used to normalize network, appcast, download, signature, install, and busy-session errors for analytics
+- `UpdateActionSafetyPolicy.swift` — gates the Settings "check for updates" action against in-flight capture/processing work, with the user-facing help copy for why the action is blocked
 
 ## Current Notes
 
