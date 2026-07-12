@@ -85,7 +85,7 @@ extension ParakeetEngine {
     private func handleDefaultInputDeviceChange(selection: DictationInputDeviceSelection) {
         cachedInputDeviceName = selection.selectedInput.name
         cachedInputDeviceSelection = selection
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | default input changed → \(selection.defaultInput.name); dictation input → \(selection.selectedInput.name)")
+        AppLogger.transcription.info("PARAKEET | default input changed → \(selection.defaultInput.name); dictation input → \(selection.selectedInput.name)")
         EventReporter.shared.capture(
             level: .info,
             engine: "parakeet",
@@ -310,7 +310,7 @@ extension ParakeetEngine {
                 guard let snapshot = readySnapshot else { return }
                 self.updateNativeSampleRate(snapshot.outputFormat.sampleRate)
                 self.prewarmRetryCount = 0
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET | audio device changed → \(self.inputDeviceName) (\(self.safeNativeSampleRate())Hz), input ready")
+                AppLogger.transcription.info("PARAKEET | audio device changed → \(self.inputDeviceName) (\(self.safeNativeSampleRate())Hz), input ready")
 
                 guard !Task.isCancelled else { return }
                 guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
@@ -341,7 +341,7 @@ extension ParakeetEngine {
                         guard !self.recoveryState.isStale(generation: myGeneration) else { return }
                         if await self.startRecording() {
                             restarted = true
-                            TranscriptedCore.AppLogger.transcription.info("PARAKEET | recording recovered on new device (\(self.inputDeviceName)) after \(attempt) attempt(s)")
+                            AppLogger.transcription.info("PARAKEET | recording recovered on new device (\(self.inputDeviceName)) after \(attempt) attempt(s)")
                             EventReporter.shared.capture(level: .info, engine: "parakeet",
                                 event: "recording_recovered_device_change",
                                 message: "Recording recovered after device change",

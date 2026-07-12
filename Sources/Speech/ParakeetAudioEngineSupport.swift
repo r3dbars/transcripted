@@ -20,7 +20,7 @@ func unregisterDefaultInputDeviceListener(_ listener: AudioObjectPropertyListene
     )
 
     if status != noErr {
-        TranscriptedCore.AppLogger.audioMic.warning("PARAKEET | failed to remove default input listener (\(status))")
+        AppLogger.audioMic.warning("PARAKEET | failed to remove default input listener (\(status))")
     }
 }
 

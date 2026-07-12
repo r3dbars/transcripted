@@ -51,6 +51,7 @@ SWIFT_SOURCES=(
     "Sources/TranscriptedCore/Audio/WAVHeaderRepair.swift"
     "Sources/TranscriptedCore/Logging/AppLogger.swift"
     "Sources/TranscriptedCore/Logging/FileLogger.swift"
+    "Sources/TranscriptedCore/Logging/LogTailTrimmer.swift"
     "Sources/TranscriptedCore/Logging/LogPrivacySanitizer.swift"
     "Sources/TranscriptedCore/Utilities/FilePermissions.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"

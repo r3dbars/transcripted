@@ -1,7 +1,7 @@
 // EventReporter.swift
 // Centralized event tracking — structured JSONL for local diagnostics + optional Sentry forwarding.
 //
-// Design: @MainActor singleton + actor-based file writer (same pattern as AppLogger).
+// Design: @MainActor singleton + actor-based file writer (same pattern as AppLogSink).
 // Fire-and-forget via Task.detached — capture() never blocks the caller.
 
 import Foundation
