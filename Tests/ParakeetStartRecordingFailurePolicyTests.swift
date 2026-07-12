@@ -856,7 +856,7 @@ func testParakeetStartRecordingFailurePolicy() {
         let source = readParakeetEngineSource()
         guard let stopStart = source.range(of: "func stopRecording()"),
               let stopEnd = source.range(of: "// MARK: - EOU Streaming", range: stopStart.upperBound..<source.endIndex),
-              let cancelStart = source.range(of: "private func cancelAudioWatchdog()") else {
+              let cancelStart = source.range(of: "func cancelAudioWatchdog()") else {
             assertTrue(false, "test should find stopRecording and watchdog cancellation bodies")
             return
         }
