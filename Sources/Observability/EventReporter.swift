@@ -129,7 +129,7 @@ private actor EventFileWriter {
             at: fileURL,
             threshold: TranscriptedConstants.jsonlLogRotationThreshold
         ) {
-            print("📊 EVENT | rotated events.jsonl")
+            fputs("📊 EVENT | rotated events.jsonl\n", stderr)
         }
 
         if !FileManager.default.fileExists(atPath: fileURL.path) {
@@ -138,7 +138,7 @@ private actor EventFileWriter {
                 contents: nil,
                 attributes: [.posixPermissions: 0o600]
             )
-            print("📊 EVENT | created events.jsonl")
+            fputs("📊 EVENT | created events.jsonl\n", stderr)
         }
         FileManager.default.restrictFileToOwnerOnly(at: fileURL)
 

@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import CoreAudio
 import Foundation
+import TranscriptedCore
 
 func unregisterDefaultInputDeviceListener(_ listener: AudioObjectPropertyListenerBlock?) {
     guard let listener else { return }
@@ -19,7 +20,7 @@ func unregisterDefaultInputDeviceListener(_ listener: AudioObjectPropertyListene
     )
 
     if status != noErr {
-        print("⚠️ PARAKEET | failed to remove default input listener (\(status))")
+        TranscriptedCore.AppLogger.audioMic.warning("PARAKEET | failed to remove default input listener (\(status))")
     }
 }
 
