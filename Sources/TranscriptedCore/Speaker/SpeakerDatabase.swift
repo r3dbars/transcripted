@@ -12,7 +12,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
     var db: OpaquePointer?
     // Thread-safety invariant:
     // - Writes happen only during `init` (single-threaded construction) inside
-    //   `openDatabase`/`configureOpenDatabase`.
+    //   `openDatabase` (which delegates open/configure to `SQLiteHandle`).
     // - Reads happen only inside `queue.sync { ... }` via the `*Impl` helpers
     //   below. This serializes reader visibility through the queue's memory
     //   barrier, which is why the class can safely be `@unchecked Sendable`
@@ -42,57 +42,49 @@ public final class SpeakerDatabase: @unchecked Sendable {
     // MARK: - Database Setup
 
     private func openDatabase() {
-        if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
-            let sqliteError = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
-            AppLogger.speakers.error("Failed to open speaker database — all speaker operations will be skipped", ["path": dbPath.path, "sqlite_error": sqliteError])
-            isDatabaseOpen = false
-        } else {
-            configureOpenDatabase()
-
-            // Corruption detection: run quick_check to verify database integrity
-            if !verifyDatabaseIntegrity() {
-                AppLogger.speakers.error("CRITICAL: Speaker database corrupt — backing up and recreating", ["path": dbPath.path])
-                sqlite3_close(db)
-                db = nil
-                // Backup corrupt file with timestamp
-                let backupName = "speakers_corrupt_\(DateFormattingHelper.formatFilename(Date())).sqlite"
-                let backupPath = dbPath.deletingLastPathComponent().appendingPathComponent(backupName)
-                try? FileManager.default.moveItem(at: dbPath, to: backupPath)
-                // Recreate fresh database
-                if sqlite3_open(dbPath.path, &db) == SQLITE_OK {
-                    configureOpenDatabase()
-                    AppLogger.speakers.info("Recreated fresh database after corruption recovery")
-                } else {
-                    isDatabaseOpen = false
-                    AppLogger.speakers.error("Failed to recreate database after corruption recovery")
-                }
-            } else {
-                AppLogger.speakers.info("Opened database", ["path": dbPath.path])
-            }
-        }
-    }
-
-    /// Apply permissions and WAL pragmas to an already-opened database handle.
-    /// Called on both initial open and corruption-recovery re-open.
-    private func configureOpenDatabase() {
-        FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
-        // WAL mode for crash safety, busy timeout to avoid SQLITE_BUSY, NORMAL sync for performance
-        let pragmas = [
-            ("journal_mode=WAL", "WAL"),
-            ("busy_timeout=5000", "busy_timeout"),
-            ("synchronous=NORMAL", "synchronous")
-        ]
-        for (pragma, name) in pragmas {
-            var errorMessage: UnsafeMutablePointer<CChar>?
-            if sqlite3_exec(db, "PRAGMA \(pragma);", nil, nil, &errorMessage) != SQLITE_OK {
-                let detail = errorMessage.map { String(cString: $0) } ?? "unknown"
+        db = SQLiteHandle.open(
+            at: dbPath,
+            onOpenFailure: { sqliteError in
+                AppLogger.speakers.error("Failed to open speaker database — all speaker operations will be skipped", ["path": dbPath.path, "sqlite_error": sqliteError])
+            },
+            onPragmaFailure: { name, detail in
                 AppLogger.speakers.error("PRAGMA failed", ["pragma": name, "detail": detail])
-                sqlite3_free(errorMessage)
             }
+        )
+        guard db != nil else {
+            isDatabaseOpen = false
+            return
         }
         // Security: mark the database open only after all pragmas are applied so any concurrent
         // reader that observes isDatabaseOpen=true is guaranteed to see a fully-configured handle.
         isDatabaseOpen = true
+
+        // Corruption detection: run quick_check to verify database integrity
+        if !verifyDatabaseIntegrity() {
+            AppLogger.speakers.error("CRITICAL: Speaker database corrupt — backing up and recreating", ["path": dbPath.path])
+            sqlite3_close(db)
+            db = nil
+            // Backup corrupt file with timestamp
+            let backupName = "speakers_corrupt_\(DateFormattingHelper.formatFilename(Date())).sqlite"
+            let backupPath = dbPath.deletingLastPathComponent().appendingPathComponent(backupName)
+            try? FileManager.default.moveItem(at: dbPath, to: backupPath)
+            // Recreate fresh database
+            db = SQLiteHandle.open(
+                at: dbPath,
+                onPragmaFailure: { name, detail in
+                    AppLogger.speakers.error("PRAGMA failed", ["pragma": name, "detail": detail])
+                }
+            )
+            if db != nil {
+                isDatabaseOpen = true
+                AppLogger.speakers.info("Recreated fresh database after corruption recovery")
+            } else {
+                isDatabaseOpen = false
+                AppLogger.speakers.error("Failed to recreate database after corruption recovery")
+            }
+        } else {
+            AppLogger.speakers.info("Opened database", ["path": dbPath.path])
+        }
     }
 
     /// Verify database integrity using PRAGMA quick_check.
