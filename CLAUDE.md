@@ -56,7 +56,7 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 - Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `python3 scripts/dev/check-build-source-lists.py` + `bash run-e2e-smoke.sh`
 - Touched the slow-pasteback smoke path (`Tests/E2E/SlowPastebackSmoke.swift`, `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/Support/TranscriptedConstants.swift`, `run-slow-pasteback-smoke.sh`) → `python3 scripts/dev/check-build-source-lists.py` + `bash run-slow-pasteback-smoke.sh`
 - Touched QA bench/corpus files (`scripts/ops/transcripted-qa-bench.sh`, `scripts/ops/validate-meeting-corpus.py`, `scripts/ops/compare-meeting-corpus.py`, `docs/qa-test-bench.md`) → quick QA bench + Python compile checks
-- Touched live-capture smoke paths (`Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift`, `run-live-capture-smoke.sh`, `scripts/entrypoints/run-live-capture-smoke.sh`) → `bash run-live-capture-smoke.sh --skip-build`
+- Touched live-capture smoke paths (`Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift`, `run-live-capture-smoke.sh`, `scripts/entrypoints/run-live-capture-smoke.sh`) → `bash run-live-capture-smoke.sh --skip-build`
 - Touched `Package.swift`, `Sources/TranscriptedCore/**`, or `Tests/TranscriptedCoreTests/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh` + `swift test`
 - Touched `Sources/Observability/**`, `Info.plist`, `docs/sparkle-updates.md`, or `docs/appcast.xml` → `bash build.sh --no-open` + `bash run-tests.sh`
 - Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh --no-open` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>`
@@ -80,6 +80,10 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 ### Running a single test
 
 Fast tests are top-level functions, not XCTest cases. To run one in isolation, use `bash run-tests.sh --filter <entryFn|File>` (e.g. `bash run-tests.sh --filter testJSONLWriter`); the selector matches an entry function, a file name, or a case-insensitive substring of either, and `bash run-tests.sh --list` prints the known entry functions. For the SPM target use `swift test --filter <TestName>` (e.g. `swift test --filter MicRecordingFileMergerTests`).
+
+### Scoped test loops (`Tests/TranscriptedCoreTests/`)
+
+`Tests/TranscriptedCoreTests/` is split into five per-subsystem SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`, `StorageTests`, `UtilitiesTests` — mirroring `Sources/TranscriptedCore/{Audio,Speaker,Pipeline,Storage,Logging,Utilities,...}`, instead of one monolithic `TranscriptedCoreTests` target. When iterating on one subsystem, scope the run with `swift test --filter '^<Target>Tests\.'` (e.g. `swift test --filter '^SpeakerTests\.'`) — SwiftPM's `--filter` matches `<test-target>.<test-case>`, so this runs only that target's tests. Plain `swift test` with no filter still runs every target and is what CI and the verification-rules table above use, so nothing about full-suite behavior changed. `swift test --filter <ClassName>` still works for a single class too, including for `TranscriptionTaskManagerMetadataTests`, whose 64 tests live in `PipelineTests` split across several files that extend one class.
 
 ## Build-system shape
 

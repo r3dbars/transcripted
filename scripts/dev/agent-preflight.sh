@@ -319,7 +319,7 @@ if [ -n "$changed_paths" ]; then
             add_command "bash -n scripts/ops/qa-gate-closeout.sh"
         fi
 
-        if matches_any "$path" "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift" "run-live-capture-smoke.sh" "scripts/entrypoints/run-live-capture-smoke.sh"; then
+        if matches_any "$path" "Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift" "run-live-capture-smoke.sh" "scripts/entrypoints/run-live-capture-smoke.sh"; then
             add_command "bash run-live-capture-smoke.sh --skip-build"
         fi
 

@@ -22,6 +22,75 @@ import Foundation
 
 let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 
+// TranscriptedCoreTests used to be ONE monolithic test target covering the
+// entire package, so every one-file change paid the whole suite's compile +
+// link + run cost. It is now split per source subsystem
+// (Sources/TranscriptedCore/{Audio,Speaker,Pipeline,Storage,Logging,Utilities,...})
+// so `swift test --filter <Target>Tests` (or Xcode's per-target test navigator)
+// gives a fast, scoped loop, while `swift test` with no filter still runs every
+// target — CI and `swift test --filter TranscriptionTaskManagerMetadataTests`
+// (still a valid class-name filter: PipelineTests splits that class across
+// several files via same-target extensions) behave exactly as before.
+//
+// Each split-out test target is its own xctest bundle, so every target repeats
+// the same deps-frameworks/deps-modules/deps-libs flags the old single target
+// used — @testable import TranscriptedCore transitively re-exports
+// FluidAudio/MLX module interfaces in every target that imports it, and each
+// target's xctest binary needs to resolve those symbols at link time.
+let coreTestUnsafeSwiftFlags: [String] = [
+    "-F", "\(repoRoot)/deps-frameworks",
+    "-I", "\(repoRoot)/deps-modules",
+    "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
+    "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
+    "-I", "\(repoRoot)/deps-modules/yyjson",
+    "-F", "\(repoRoot)/deps-frameworks",
+]
+
+let coreTestLinkerSettings: [LinkerSetting] = [
+    .unsafeFlags([
+        "-F\(repoRoot)/deps-frameworks",
+        "-L\(repoRoot)/deps-libs",
+        "-lExternalDeps",
+        "-lc++",
+        "-Xlinker", "-rpath",
+        "-Xlinker", "\(repoRoot)/deps-frameworks",
+    ]),
+    .linkedFramework("Metal"),
+    .linkedFramework("MetalKit"),
+    .linkedFramework("Accelerate"),
+    .linkedFramework("CoreML"),
+    .linkedFramework("CoreAudio"),
+    .linkedFramework("AVFoundation"),
+    .linkedFramework("Network"),
+    .linkedFramework("ScreenCaptureKit"),
+]
+
+func coreTestTarget(_ name: String, _ path: String) -> Target {
+    .testTarget(
+        name: name,
+        dependencies: ["TranscriptedCore"],
+        path: path,
+        swiftSettings: [.unsafeFlags(coreTestUnsafeSwiftFlags)],
+        linkerSettings: coreTestLinkerSettings
+    )
+}
+
+// Per-subsystem test targets, mapped from Tests/TranscriptedCoreTests/ contents
+// (see the directory split alongside this file). There is no separate "Common"
+// target: none of the current test files share a fixture or helper across
+// subsystem boundaries (every helper type/fixture in the old monolithic target
+// was already `private`/file-scoped, or — for the ERes2Net JSON fixture — has
+// exactly one consumer), so a resource-only shared target would add SPM
+// ceremony with no current benefit. Revisit if a future fixture needs sharing
+// across these targets.
+let coreTestTargets: [Target] = [
+    coreTestTarget("AudioTests", "Tests/TranscriptedCoreTests/AudioTests"),
+    coreTestTarget("SpeakerTests", "Tests/TranscriptedCoreTests/SpeakerTests"),
+    coreTestTarget("PipelineTests", "Tests/TranscriptedCoreTests/PipelineTests"),
+    coreTestTarget("StorageTests", "Tests/TranscriptedCoreTests/StorageTests"),
+    coreTestTarget("UtilitiesTests", "Tests/TranscriptedCoreTests/UtilitiesTests"),
+]
+
 let package = Package(
     name: "TranscriptedCore",
     platforms: [.macOS("26.0")],
@@ -67,42 +136,5 @@ let package = Package(
                 .linkedFramework("ScreenCaptureKit"),
             ]
         ),
-        .testTarget(
-            name: "TranscriptedCoreTests",
-            dependencies: ["TranscriptedCore"],
-            path: "Tests/TranscriptedCoreTests",
-            swiftSettings: [
-                // @testable import TranscriptedCore transitively re-exports FluidAudio/MLX
-                // module interfaces, so the test target needs the same -I search paths.
-                .unsafeFlags([
-                    "-F", "\(repoRoot)/deps-frameworks",
-                    "-I", "\(repoRoot)/deps-modules",
-                    "-I", "\(repoRoot)/deps-modules/FastClusterWrapper",
-                    "-I", "\(repoRoot)/deps-modules/MachTaskSelfWrapper",
-                    "-I", "\(repoRoot)/deps-modules/yyjson",
-                    "-F", "\(repoRoot)/deps-frameworks",
-                ]),
-            ],
-            linkerSettings: [
-                // Mirror Core target linker flags so the xctest binary can resolve
-                // FluidAudio symbols pulled in through @testable.
-                .unsafeFlags([
-                    "-F\(repoRoot)/deps-frameworks",
-                    "-L\(repoRoot)/deps-libs",
-                    "-lExternalDeps",
-                    "-lc++",
-                    "-Xlinker", "-rpath",
-                    "-Xlinker", "\(repoRoot)/deps-frameworks",
-                ]),
-                .linkedFramework("Metal"),
-                .linkedFramework("MetalKit"),
-                .linkedFramework("Accelerate"),
-                .linkedFramework("CoreML"),
-                .linkedFramework("CoreAudio"),
-                .linkedFramework("AVFoundation"),
-                .linkedFramework("Network"),
-                .linkedFramework("ScreenCaptureKit"),
-            ]
-        ),
-    ]
+    ] + coreTestTargets
 )
