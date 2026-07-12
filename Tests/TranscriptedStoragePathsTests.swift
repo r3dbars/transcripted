@@ -119,6 +119,46 @@ func testTranscriptedStoragePaths() {
         )
     }
 
+    runSuite("Transcripted MCP directory manifest — matches the live meeting/dictation support dirs") {
+        // Drift guard: the manifest writer used to re-derive "meetings"/"dictations"
+        // inline instead of reusing `meetingSupportDir`/`dictationSupportDir`'s
+        // naming. This proves the on-disk manifest for a real (temp) capture-library
+        // root always matches what those computed properties report, so a future
+        // rename of one without the other fails this test instead of shipping.
+        let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        defer {
+            restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        }
+
+        let customRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("TranscriptedStoragePathsTests-parity-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: customRoot) }
+
+        let persisted = TranscriptedStoragePreferences.setCaptureLibraryURL(customRoot)
+        assertTrue(persisted, "test setup should persist a safe custom capture-library root")
+
+        let manifestURL = FileManager.default.transcriptedMCPDirectoriesManifestURL
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: data) else {
+            assertTrue(false, "manifest should be readable JSON after setting a custom capture library")
+            return
+        }
+
+        let meetings = FileManager.default.meetingSupportDir
+        let dictations = FileManager.default.dictationSupportDir
+
+        assertEqual(
+            manifest.meetingsDirectory,
+            meetings.path,
+            "manifest meetingsDirectory should match FileManager.meetingSupportDir for the same capture root"
+        )
+        assertEqual(
+            manifest.dictationsDirectory,
+            dictations.path,
+            "manifest dictationsDirectory should match FileManager.dictationSupportDir for the same capture root"
+        )
+    }
+
     runSuite("Transcripted capture library helpers — custom capture folders stay owner-only") {
         let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         defer {
