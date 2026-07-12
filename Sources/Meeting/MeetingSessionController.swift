@@ -62,63 +62,15 @@ final class MeetingSessionController: ObservableObject {
 
     typealias ModelWarmupStatus = MeetingWarmupStatus
 
-    struct FailedMeetingItem: Identifiable, Equatable {
-        let id: UUID
-        let timestamp: Date
-        let title: String
-        let detail: String
-        let meta: String
-        let failureKind: MeetingFailureKind
-        let isRetryable: Bool
-        let isRetrying: Bool
-        let hasAudioFiles: Bool
-        let audioURLs: [URL]
-    }
+    // Moved to FailedMeetingStore.swift / TranscriptionQueueCoordinator.swift
+    // (audit 2026-07-08 wave 2, W2-B). Typealiases keep every existing
+    // reference — including `MeetingSessionController.FailedMeetingItem` in
+    // UI files — resolving unchanged.
+    typealias FailedMeetingItem = FailedMeetingStore.FailedMeetingItem
+    typealias QueuedTranscriptionJob = TranscriptionQueueCoordinator.QueuedTranscriptionJob
+    typealias BackgroundTranscriptionWorkSnapshot = TranscriptionQueueCoordinator.BackgroundTranscriptionWorkSnapshot
 
-    private struct QueuedTranscriptionJob {
-        enum Kind {
-            case recorded(
-                micURL: URL,
-                systemURL: URL?,
-                healthInfo: RecordingHealthInfo,
-                captureDiagnostics: [String: String],
-                meetingTitle: String?,
-                recordingDate: Date
-            )
-            case imported(
-                audioURL: URL,
-                suggestedTitle: String,
-                recordingDate: Date
-            )
-        }
-
-        let id = UUID()
-        let kind: Kind
-        let startTrigger: StartTrigger
-        let sttModel: TranscriptionModelChoice
-        let promptTelemetryProperties: [String: String]?
-        let promptRecordingStartedAt: Date?
-
-        var captureDiagnostics: [String: String]? {
-            switch kind {
-            case .recorded(_, _, _, let captureDiagnostics, _, _):
-                return captureDiagnostics
-            case .imported:
-                return nil
-            }
-        }
-
-        var artifactRetained: Bool {
-            switch kind {
-            case .recorded:
-                return true
-            case .imported:
-                return true
-            }
-        }
-    }
-
-    private enum TerminalTranscriptionOutcome: Equatable {
+    enum TerminalTranscriptionOutcome: Equatable {
         case transcriptSaved
         case failed(String)
     }
@@ -132,11 +84,6 @@ final class MeetingSessionController: ObservableObject {
         let pipelineSnapshot: AudioPipelineDiagnosticsSnapshot
         let suggestedTitle: String?
         let recordingStartedAt: Date?
-    }
-
-    private struct BackgroundTranscriptionWorkSnapshot {
-        let activeCount: Int
-        let speakerNamingRequest: SpeakerNamingRequest?
     }
 
     // MARK: - Published state (for meeting UI bindings)
@@ -191,7 +138,9 @@ final class MeetingSessionController: ObservableObject {
     // MARK: - Core services (owned)
 
     private let storagePaths: CoreStoragePaths
-    private let sttRouter: STTRouter
+    // Was `private`; FailedMeetingStore / TranscriptionQueueCoordinator live in
+    // sibling files and need module-internal access (audit 2026-07-08 W2-B).
+    let sttRouter: STTRouter
     let capture: MeetingCaptureBridge
     private let liveCodexSession = LiveMeetingCodexSession()
     private let liveMeetingTranscriber = LiveMeetingTranscriber()
@@ -200,52 +149,59 @@ final class MeetingSessionController: ObservableObject {
     let liveTranscriptFeed = LiveMeetingTranscriptFeed()
     let services: AppServices
     let taskManager: TranscriptionTaskManager
-    private let failedManager: FailedTranscriptionManager
-    private let diarization: DiarizationService
-    private let sttAdapter: MeetingSTTAdapter
+    let failedManager: FailedTranscriptionManager
+    let diarization: DiarizationService
+    let sttAdapter: MeetingSTTAdapter
     private let speakerDatabase: SpeakerDatabase
     private let statsDatabase: StatsDatabase
-    private let downloader: MeetingModelDownloader
+    let downloader: MeetingModelDownloader
     var calendarSuggestedTitleProvider: (() -> String?)?
+
+    /// Failed-meeting queue/persistence/retry bookkeeping (audit 2026-07-08
+    /// wave 2, W2-B). Plain owned object — this controller stays the single
+    /// ObservableObject; `failedMeetings` below is still published here.
+    /// Implicitly-unwrapped: `FailedMeetingStore` holds an `unowned` back
+    /// reference to this controller, so it can only be constructed with
+    /// `self` — which Swift only allows once every OTHER stored property is
+    /// set. A plain `let` here would make `self` unusable for its own
+    /// assignment; this is constructed once, immediately, in `init` and
+    /// never nil afterward.
+    private(set) var failedMeetingStore: FailedMeetingStore!
+    /// Background-transcription queue/dispatch bookkeeping (audit 2026-07-08
+    /// wave 2, W2-B). Plain owned object, same rationale as above.
+    private(set) var transcriptionQueue: TranscriptionQueueCoordinator!
 
     private var cancellables: Set<AnyCancellable> = []
     private var modelPreparationTask: Task<Result<Void, Error>, Never>?
     private var savedTranscriptRestyleTask: Task<StyledMeetingTranscript, Never>?
-    private var retryingFailedMeetingIDs: Set<UUID> = []
-    private var queuedTranscriptionJobs: [QueuedTranscriptionJob] = []
-    private var preparingQueuedTranscriptionJob: QueuedTranscriptionJob?
-    private var queuedTranscriptionStartTask: Task<Void, Never>?
     private var importPreparationTask: Task<PreparedImportedMeetingAudio, Error>?
     private var importPreparationToken: UUID?
-    private var queuedRuntimeDiagnosticsJobIDs: Set<UUID> = []
-    private var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
-    private var activeTranscriptionCaptureDiagnostics: [String: String]?
+    var lastTerminalTranscriptionOutcome: TerminalTranscriptionOutcome?
+    var activeTranscriptionCaptureDiagnostics: [String: String]?
     private var activeDetectedPromptRecordingTelemetryProperties: [String: String]?
     private var activeDetectedPromptRecordingStartedAt: Date?
-    private var activeDetectedPromptTranscriptionTelemetryProperties: [String: String]?
-    private var activeDetectedPromptTranscriptionRecordingStartedAt: Date?
+    var activeDetectedPromptTranscriptionTelemetryProperties: [String: String]?
+    var activeDetectedPromptTranscriptionRecordingStartedAt: Date?
     private var activeRecordingTrigger: StartTrigger = .unknown
     private var activeRecordingIdentity: UUID?
     private var micBoostPromptRecordingIdentity: UUID?
     private var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
     private var activeRecordingSuggestedTitle: String?
     private var activeRecordingStartedAt: Date?
-    private var activeTranscriptionTrigger: StartTrigger = .unknown
+    var activeTranscriptionTrigger: StartTrigger = .unknown
     private var isFinishingRecording = false
     private var shouldSurfaceMeetingWarmupFailure = false
     private var audioInactivityDetector = MeetingAudioInactivityDetector()
     private var latestMicLevel: Float = 0
     private var latestSystemLevel: Float = 0
     private var liveCodexSessionIsActive = false
-    private var liveCodexSessionAwaitingFinalTranscript = false
+    var liveCodexSessionAwaitingFinalTranscript = false
     private var liveCodexSessionCanAttachFinalTranscript = false
     private var liveCodexSessionOwnedByActiveRecording = false
     private var liveCodexPreviewHandlersNeedClearingAfterActiveRecording = false
-    private var liveCodexFinalTranscriptNeedsQueuedJobID = false
-    private var liveCodexAwaitedTranscriptionJobID: UUID?
-    private var activeQueuedTranscriptionJobID: UUID?
-    private var failedAudioCompressionTask: Task<Void, Never>?
-    private var failedAudioCompressionNeedsReschedule = false
+    var liveCodexFinalTranscriptNeedsQueuedJobID = false
+    var liveCodexAwaitedTranscriptionJobID: UUID?
+    var activeQueuedTranscriptionJobID: UUID?
 
     var shouldConfirmQuitForActiveCapture: Bool {
         isCaptureSessionActive || isFinishingRecording
@@ -257,6 +213,23 @@ final class MeetingSessionController: ObservableObject {
 
     var shouldBlockDictationForActiveMeetingCapture: Bool {
         isCaptureSessionActive || isFinishingRecording
+    }
+
+    // MARK: - State-transition callbacks (for owned subsystems)
+
+    /// FailedMeetingStore / TranscriptionQueueCoordinator drive some of the
+    /// controller's `@Published` state as part of their own dispatch logic
+    /// (audit 2026-07-08 wave 2, W2-B design: "callbacks/async funcs back
+    /// into the controller for state transitions"). These two setters are
+    /// that seam — `state`/`displayStatus` themselves stay `private(set)`
+    /// so every other transition still goes through the controller's own
+    /// code in this file.
+    func setState(_ newState: State) {
+        state = newState
+    }
+
+    func setDisplayStatus(_ newStatus: DisplayStatus) {
+        displayStatus = newStatus
     }
 
     // MARK: - Init
@@ -352,6 +325,14 @@ final class MeetingSessionController: ObservableObject {
 
         // Model downloader — coordinates selected STT + PyAnnote readiness.
         self.downloader = MeetingModelDownloader(stt: sttAdapter, diarization: diarization)
+
+        // Failed-meeting and transcription-queue bookkeeping (audit
+        // 2026-07-08 wave 2, W2-B). Constructed last, after every other
+        // stored property, since each holds an `unowned` back-reference to
+        // this controller. `wireSubscriptions()` below calls into
+        // `failedMeetingStore` synchronously, so both must exist first.
+        self.failedMeetingStore = FailedMeetingStore(controller: self)
+        self.transcriptionQueue = TranscriptionQueueCoordinator(controller: self)
 
         capture.onUnexpectedRecordingComplete = { [weak self] result in
             self?.handleUnexpectedCaptureStop(result)
@@ -745,7 +726,7 @@ final class MeetingSessionController: ObservableObject {
 
         let stopTimeoutFailedTaskId = UUID()
         let stopResult = await capture.stopAndAwaitFiles { [weak self] lateResult in
-            self?.refreshTimedOutFailedMeetingAudio(
+            self?.failedMeetingStore.refreshTimedOutFailedMeetingAudio(
                 id: stopTimeoutFailedTaskId,
                 result: lateResult
             )
@@ -834,7 +815,7 @@ final class MeetingSessionController: ObservableObject {
         )
 
         guard let micURL = files.micURL else {
-            let preserved = preserveFailedMeetingForRetry(
+            let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
                 micAudioURL: nil,
                 systemAudioURL: files.systemURL,
                 errorMessage: "Recording stopped without microphone audio.",
@@ -879,7 +860,7 @@ final class MeetingSessionController: ObservableObject {
                     "reason": reason.rawValue
                 ]
             )
-            let preserved = preserveFailedMeetingForRetry(
+            let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
                 taskId: stopTimeoutFailedTaskId,
                 micAudioURL: micURL,
                 systemAudioURL: files.systemURL,
@@ -929,7 +910,7 @@ final class MeetingSessionController: ObservableObject {
             healthInfoForSave = recordingSnapshot.healthInfo
         }
 
-        let outcome = enqueueTranscriptionJob(
+        let outcome = transcriptionQueue.enqueueTranscriptionJob(
             micURL: micURL,
             systemURL: files.systemURL,
             healthInfo: healthInfoForSave,
@@ -946,7 +927,7 @@ final class MeetingSessionController: ObservableObject {
         )
         clearDetectedPromptRecordingTelemetry()
 
-        let queueDepth = queuedTranscriptionJobs.count
+        let queueDepth = transcriptionQueue.queuedTranscriptionJobs.count
         DiagnosticsTrail.record(
             engine: "meeting",
             event: outcome == .startedImmediately ? "meeting_transcription_started" : "meeting_transcription_queued",
@@ -1355,7 +1336,7 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
-        let outcome = enqueueImportedAudioJob(
+        let outcome = transcriptionQueue.enqueueImportedAudioJob(
             audioURL: preparedAudio.copiedAudioURL,
             suggestedTitle: preparedAudio.suggestedTitle,
             recordingDate: preparedAudio.recordingDate,
@@ -1372,7 +1353,7 @@ final class MeetingSessionController: ObservableObject {
                 : "Imported meeting transcription queued",
             context: baseDiagnosticsContext(
                 extra: [
-                    "queue_depth": "\(queuedTranscriptionJobs.count)",
+                    "queue_depth": "\(transcriptionQueue.queuedTranscriptionJobs.count)",
                     "trigger": StartTrigger.fileImport.rawValue
                 ]
             )
@@ -1380,7 +1361,7 @@ final class MeetingSessionController: ObservableObject {
         AnalyticsReporter.track(
             "meeting_file_imported",
             properties: [
-                "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count),
             ]
         )
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
@@ -1405,12 +1386,12 @@ final class MeetingSessionController: ObservableObject {
         importPreparationTask = nil
         importPreparationToken = nil
 
-        let queuedJobs = queuedTranscriptionJobs
-        queuedTranscriptionJobs.removeAll()
-        let preparingJob = preparingQueuedTranscriptionJob
-        queuedTranscriptionStartTask?.cancel()
-        queuedTranscriptionStartTask = nil
-        preparingQueuedTranscriptionJob = nil
+        let queuedJobs = transcriptionQueue.queuedTranscriptionJobs
+        transcriptionQueue.queuedTranscriptionJobs.removeAll()
+        let preparingJob = transcriptionQueue.preparingQueuedTranscriptionJob
+        transcriptionQueue.queuedTranscriptionStartTask?.cancel()
+        transcriptionQueue.queuedTranscriptionStartTask = nil
+        transcriptionQueue.preparingQueuedTranscriptionJob = nil
         lastTerminalTranscriptionOutcome = nil
         activeTranscriptionTrigger = .unknown
         activeTranscriptionCaptureDiagnostics = nil
@@ -1418,7 +1399,7 @@ final class MeetingSessionController: ObservableObject {
         for job in queuedJobs + [preparingJob].compactMap({ $0 }) {
             switch job.kind {
             case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate):
-                preserveFailedMeetingForRetry(
+                failedMeetingStore.preserveFailedMeetingForRetry(
                     micAudioURL: micURL,
                     systemAudioURL: systemURL,
                     errorMessage: "Transcription cancelled",
@@ -1429,7 +1410,7 @@ final class MeetingSessionController: ObservableObject {
                 if reason == .userRequested {
                     try? FileManager.default.removeItem(at: audioURL)
                 } else {
-                    preserveFailedMeetingForRetry(
+                    failedMeetingStore.preserveFailedMeetingForRetry(
                         micAudioURL: nil,
                         systemAudioURL: audioURL,
                         errorMessage: "Imported audio saved before cancellation. Audio is safe; finish the transcript from Home.",
@@ -1477,7 +1458,7 @@ final class MeetingSessionController: ObservableObject {
 
             let shutdownFailedTaskId = UUID()
             let files = await capture.stopAndAwaitFiles { [weak self] lateResult in
-                self?.refreshTimedOutFailedMeetingAudio(
+                self?.failedMeetingStore.refreshTimedOutFailedMeetingAudio(
                     id: shutdownFailedTaskId,
                     result: lateResult
                 )
@@ -1492,7 +1473,7 @@ final class MeetingSessionController: ObservableObject {
             activeRecordingStartedAt = nil
 
             if files.micURL != nil || files.systemURL != nil {
-                didPreserveRecording = preserveFailedMeetingForRetry(
+                didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
                     taskId: shutdownFailedTaskId,
                     micAudioURL: files.micURL,
                     systemAudioURL: files.systemURL,
@@ -1506,7 +1487,7 @@ final class MeetingSessionController: ObservableObject {
             recordingTrigger = .unknown
         }
 
-        let queuedPreserved = preserveQueuedTranscriptionJobsForShutdown(
+        let queuedPreserved = transcriptionQueue.preserveQueuedTranscriptionJobsForShutdown(
             errorMessage: "Meeting saved before quit. Audio is safe; finish the queued transcript from Home after reopening."
         )
         let activePreserved = taskManager.preserveActiveTranscriptionsForShutdown(
@@ -1567,7 +1548,7 @@ final class MeetingSessionController: ObservableObject {
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
 
-        let preserved = preserveFailedMeetingForRetry(
+        let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
             micAudioURL: files.micURL,
             systemAudioURL: files.systemURL,
             errorMessage: failureMessage,
@@ -1616,108 +1597,15 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
-    private func preserveQueuedTranscriptionJobsForShutdown(errorMessage: String) -> Int {
-        let preparingJob = preparingQueuedTranscriptionJob
-        let jobs = queuedTranscriptionJobs + [preparingJob].compactMap { $0 }
-        guard !jobs.isEmpty else { return 0 }
+    // preserveQueuedTranscriptionJobsForShutdown moved to
+    // TranscriptionQueueCoordinator.swift (audit 2026-07-08 wave 2, W2-B).
 
-        queuedTranscriptionStartTask?.cancel()
-        queuedTranscriptionStartTask = nil
-        preparingQueuedTranscriptionJob = nil
-        queuedTranscriptionJobs.removeAll()
-
-        var preservedCount = 0
-        for job in jobs {
-            switch job.kind {
-            case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate):
-                if preserveFailedMeetingForRetry(
-                    micAudioURL: micURL,
-                    systemAudioURL: systemURL,
-                    errorMessage: errorMessage,
-                    meetingTitle: meetingTitle,
-                    recordingDate: recordingDate
-                ) {
-                    preservedCount += 1
-                }
-            case .imported(let audioURL, let suggestedTitle, let recordingDate):
-                if preserveFailedMeetingForRetry(
-                    micAudioURL: audioURL,
-                    systemAudioURL: nil,
-                    errorMessage: errorMessage,
-                    meetingTitle: suggestedTitle,
-                    recordingDate: recordingDate
-                ) {
-                    preservedCount += 1
-                }
-            }
-        }
-        return preservedCount
-    }
-
+    // Full implementation moved to FailedMeetingStore.swift (audit
+    // 2026-07-08 wave 2, W2-B). This forwarder keeps the public signature
+    // controller callers (Settings/Home UI) already depend on.
     @discardableResult
     func retryFailedMeeting(id: UUID) -> Bool {
-        guard !isRecording, !hasBackgroundTranscriptionWork, !isSpeakerReviewPending else { return false }
-        guard !retryingFailedMeetingIDs.contains(id) else { return false }
-        guard failedManager.failedTranscriptions.contains(where: { $0.id == id }) else {
-            refreshFailedMeetings()
-            return false
-        }
-
-        failedAudioCompressionTask?.cancel()
-        retryingFailedMeetingIDs.insert(id)
-        activeTranscriptionTrigger = .unknown
-        refreshFailedMeetings()
-        let retryStartedAt = CFAbsoluteTimeGetCurrent()
-        WorkflowRecoveryTelemetry.attempted(
-            workflowKind: "meeting_transcription",
-            failureKind: "failed_meeting",
-            retrySource: "failed_meeting_retry",
-            surface: "home",
-            artifactRetained: true
-        )
-
-        Task { [weak self] in
-            guard let self else { return }
-            await self.prepareModels()
-            guard case .ready = self.state else {
-                DiagnosticsTrail.record(
-                    level: .warning,
-                    engine: "meeting",
-                    event: "meeting_failed_retry_blocked_models",
-                    message: "Failed meeting retry blocked because models were not ready",
-                    context: self.baseDiagnosticsContext(extra: ["failed_id": id.uuidString])
-                )
-                self.retryingFailedMeetingIDs.remove(id)
-                self.refreshFailedMeetings()
-                WorkflowRecoveryTelemetry.finished(
-                    workflowKind: "meeting_transcription",
-                    failureKind: "failed_meeting",
-                    retrySource: "failed_meeting_retry",
-                    result: "failed",
-                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - retryStartedAt,
-                    surface: "home",
-                    artifactRetained: true
-                )
-                return
-            }
-
-            let retryPublished = await self.taskManager.retryFailedTranscription(
-                failedId: id,
-                outputFolder: MeetingStoragePaths.transcriptsFolder
-            )
-            self.retryingFailedMeetingIDs.remove(id)
-            self.refreshFailedMeetings()
-            WorkflowRecoveryTelemetry.finished(
-                workflowKind: "meeting_transcription",
-                failureKind: "failed_meeting",
-                retrySource: "failed_meeting_retry",
-                result: retryPublished ? "success" : "failed",
-                elapsedSeconds: CFAbsoluteTimeGetCurrent() - retryStartedAt,
-                surface: "home",
-                artifactRetained: true
-            )
-        }
-        return true
+        failedMeetingStore.retryFailedMeeting(id: id)
     }
 
     @discardableResult
@@ -1832,20 +1720,17 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
+    // Full implementations moved to FailedMeetingStore.swift (audit
+    // 2026-07-08 wave 2, W2-B). These forwarders keep the public signatures
+    // controller callers (Settings/Home UI) already depend on.
     @discardableResult
     func dismissFailedMeeting(id: UUID) -> Bool {
-        retryingFailedMeetingIDs.remove(id)
-        let didDismiss = failedManager.removeFailedTranscription(id: id)
-        refreshFailedMeetings()
-        return didDismiss || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
+        failedMeetingStore.dismissFailedMeeting(id: id)
     }
 
     @discardableResult
     func deleteFailedMeeting(id: UUID) -> Bool {
-        retryingFailedMeetingIDs.remove(id)
-        let didDelete = failedManager.deleteFailedTranscription(id: id)
-        refreshFailedMeetings()
-        return didDelete || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
+        failedMeetingStore.deleteFailedMeeting(id: id)
     }
 
     // MARK: - Subscriptions
@@ -1941,7 +1826,7 @@ final class MeetingSessionController: ObservableObject {
             .combineLatest(taskManager.$speakerNamingRequest)
             .sink { [weak self] activeCount, speakerNamingRequest in
                 guard let self else { return }
-                self.handleBackgroundTranscriptionWorkChanged(
+                self.transcriptionQueue.handleBackgroundTranscriptionWorkChanged(
                     snapshot: BackgroundTranscriptionWorkSnapshot(
                         activeCount: activeCount,
                         speakerNamingRequest: speakerNamingRequest
@@ -2309,7 +2194,9 @@ final class MeetingSessionController: ObservableObject {
         liveCodexPreviewHandlersNeedClearingAfterActiveRecording = false
     }
 
-    private func finishLiveCodexSession(
+    // Was `private`; TranscriptionQueueCoordinator lives in a sibling file
+    // and needs module-internal access (audit 2026-07-08 wave 2, W2-B).
+    func finishLiveCodexSession(
         status: LiveMeetingCodexSessionStatus,
         shouldAwaitFinalTranscript: Bool,
         clearPreviewHandlers: Bool = true
@@ -2486,15 +2373,12 @@ final class MeetingSessionController: ObservableObject {
         refreshWarmupStatus()
     }
 
-    private enum QueueInsertionOutcome: Equatable {
-        case startedImmediately
-        case queued(position: Int)
-    }
-
-    private var hasBackgroundTranscriptionWork: Bool {
+    // Was `private`; FailedMeetingStore lives in a sibling file and needs
+    // module-internal access (audit 2026-07-08 wave 2, W2-B).
+    var hasBackgroundTranscriptionWork: Bool {
         taskManager.activeCount > 0
-            || isPreparingQueuedTranscriptionStart
-            || !queuedTranscriptionJobs.isEmpty
+            || transcriptionQueue.isPreparingQueuedTranscriptionStart
+            || !transcriptionQueue.queuedTranscriptionJobs.isEmpty
     }
 
     var hasRuntimeDiagnosticsWork: Bool {
@@ -2502,7 +2386,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     var queuedTranscriptionCount: Int {
-        queuedTranscriptionJobs.count
+        transcriptionQueue.queuedTranscriptionJobs.count
     }
 
     var isSpeakerReviewPending: Bool {
@@ -2510,7 +2394,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     private var hasVisibleBackgroundTranscriptionWork: Bool {
-        hasVisibleBackgroundTranscriptionWork(snapshot: currentBackgroundTranscriptionWorkSnapshot)
+        transcriptionQueue.hasVisibleBackgroundTranscriptionWork(snapshot: transcriptionQueue.currentBackgroundTranscriptionWorkSnapshot)
     }
 
     private var isSpeechModelPreparedForSelection: Bool {
@@ -2518,283 +2402,21 @@ final class MeetingSessionController: ObservableObject {
             && sttAdapter.isReady
     }
 
-    private var canStartQueuedTranscriptionImmediately: Bool {
-        canStartQueuedTranscriptionImmediately(snapshot: currentBackgroundTranscriptionWorkSnapshot)
-    }
-
-    private var isPreparingQueuedTranscriptionStart: Bool {
-        preparingQueuedTranscriptionJob != nil || queuedTranscriptionStartTask != nil
-    }
-
-    private var currentBackgroundTranscriptionWorkSnapshot: BackgroundTranscriptionWorkSnapshot {
-        BackgroundTranscriptionWorkSnapshot(
-            activeCount: taskManager.activeCount,
-            speakerNamingRequest: taskManager.speakerNamingRequest
-        )
-    }
-
-    private var isCaptureSessionActive: Bool {
+    // Was `private`; TranscriptionQueueCoordinator lives in a sibling file
+    // and needs module-internal access (audit 2026-07-08 wave 2, W2-B).
+    var isCaptureSessionActive: Bool {
         if case .recording = state {
             return true
         }
         return isRecording
     }
 
-    private func enqueueTranscriptionJob(
-        micURL: URL,
-        systemURL: URL?,
-        healthInfo: RecordingHealthInfo,
-        captureDiagnostics: [String: String],
-        meetingTitle: String?,
-        recordingDate: Date,
-        startTrigger: StartTrigger,
-        promptTelemetryProperties: [String: String]? = nil,
-        promptRecordingStartedAt: Date? = nil
-    ) -> QueueInsertionOutcome {
-        let job = QueuedTranscriptionJob(
-            kind: .recorded(
-                micURL: micURL,
-                systemURL: systemURL,
-                healthInfo: healthInfo,
-                captureDiagnostics: captureDiagnostics,
-                meetingTitle: meetingTitle,
-                recordingDate: recordingDate
-            ),
-            startTrigger: startTrigger,
-            sttModel: sttRouter.selectedModel,
-            promptTelemetryProperties: promptTelemetryProperties,
-            promptRecordingStartedAt: promptRecordingStartedAt
-        )
-
-        if liveCodexFinalTranscriptNeedsQueuedJobID && liveCodexSessionAwaitingFinalTranscript {
-            liveCodexAwaitedTranscriptionJobID = job.id
-            liveCodexFinalTranscriptNeedsQueuedJobID = false
-        }
-        return enqueue(job)
-    }
-
-    private func enqueueImportedAudioJob(
-        audioURL: URL,
-        suggestedTitle: String,
-        recordingDate: Date,
-        startTrigger: StartTrigger
-    ) -> QueueInsertionOutcome {
-        let job = QueuedTranscriptionJob(
-            kind: .imported(
-                audioURL: audioURL,
-                suggestedTitle: suggestedTitle,
-                recordingDate: recordingDate
-            ),
-            startTrigger: startTrigger,
-            sttModel: sttRouter.selectedModel,
-            promptTelemetryProperties: nil,
-            promptRecordingStartedAt: nil
-        )
-
-        return enqueue(job)
-    }
-
-    private func enqueue(_ job: QueuedTranscriptionJob) -> QueueInsertionOutcome {
-        if canStartQueuedTranscriptionImmediately {
-            startQueuedTranscription(job)
-            return .startedImmediately
-        }
-
-        queuedTranscriptionJobs.append(job)
-        return .queued(position: queuedTranscriptionJobs.count)
-    }
-
-    private func startQueuedTranscription(_ job: QueuedTranscriptionJob) {
-        lastTerminalTranscriptionOutcome = nil
-        activeTranscriptionTrigger = job.startTrigger
-        activeTranscriptionCaptureDiagnostics = job.captureDiagnostics
-        activeDetectedPromptTranscriptionTelemetryProperties = job.promptTelemetryProperties
-        activeDetectedPromptTranscriptionRecordingStartedAt = job.promptRecordingStartedAt
-        sttAdapter.selectPreparedModel(job.sttModel)
-        preparingQueuedTranscriptionJob = job
-
-        if !isCaptureSessionActive {
-            state = .transcribing
-        }
-        recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for: job)
-
-        displayStatus = .gettingReady
-        queuedTranscriptionStartTask?.cancel()
-        queuedTranscriptionStartTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.prepareAndStartQueuedTranscription(job)
-        }
-    }
-
-    private func prepareAndStartQueuedTranscription(_ job: QueuedTranscriptionJob) async {
-        let modelsReady = await ensureModelsReadyForQueuedTranscription(job)
-
-        // A cancelled task must not touch shared state: a newer
-        // startQueuedTranscription has already taken ownership of
-        // queuedTranscriptionStartTask / preparingQueuedTranscriptionJob.
-        guard !Task.isCancelled else { return }
-        guard preparingQueuedTranscriptionJob?.id == job.id else { return }
-
-        queuedTranscriptionStartTask = nil
-        preparingQueuedTranscriptionJob = nil
-
-        guard modelsReady else {
-            failQueuedTranscriptionJobAfterModelRecovery(job)
-            handleBackgroundTranscriptionWorkChanged()
-            return
-        }
-
-        runPreparedQueuedTranscription(job)
-    }
-
-    private func ensureModelsReadyForQueuedTranscription(_ job: QueuedTranscriptionJob) async -> Bool {
-        sttAdapter.selectPreparedModel(job.sttModel)
-
-        if sttAdapter.isReady && diarization.isReady {
-            return true
-        }
-
-        DiagnosticsTrail.record(
-            engine: "meeting",
-            event: "meeting_transcription_model_recovery_started",
-            message: "Meeting transcription is loading models before starting queued audio",
-            context: baseDiagnosticsContext(
-                extra: [
-                    "trigger": job.startTrigger.rawValue,
-                    "queued_stt_model": job.sttModel.rawValue
-                ]
-            )
-        )
-        let modelRecoveryStartedAt = CFAbsoluteTimeGetCurrent()
-        WorkflowRecoveryTelemetry.attempted(
-            workflowKind: "model_preparation",
-            failureKind: "models_not_ready",
-            retrySource: "queued_transcription",
-            surface: "meeting",
-            artifactRetained: job.artifactRetained
-        )
-
-        do {
-            try await TranscriptedConstants.withDetachedTimeout(
-                seconds: TranscriptedConstants.modelLoadWaitBudget
-            ) {
-                try await self.downloader.ensureModelsReady(sttModel: job.sttModel)
-            }
-            sttAdapter.selectPreparedModel(job.sttModel)
-        } catch {
-            DiagnosticsTrail.record(
-                level: .error,
-                engine: "meeting",
-                event: "meeting_transcription_model_recovery_failed",
-                message: "Meeting transcription models could not be loaded before queued audio started",
-                context: baseDiagnosticsContext(
-                    extra: [
-                        "error": error.localizedDescription,
-                        "trigger": job.startTrigger.rawValue,
-                        "queued_stt_model": job.sttModel.rawValue
-                    ]
-                )
-            )
-            WorkflowRecoveryTelemetry.finished(
-                workflowKind: "model_preparation",
-                failureKind: "models_not_ready",
-                retrySource: "queued_transcription",
-                result: "failed",
-                elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelRecoveryStartedAt,
-                surface: "meeting",
-                artifactRetained: job.artifactRetained
-            )
-            return false
-        }
-
-        let ready = sttAdapter.isReady && diarization.isReady
-        if !ready {
-            DiagnosticsTrail.record(
-                level: .error,
-                engine: "meeting",
-                event: "meeting_transcription_model_recovery_failed",
-                message: "Meeting transcription models were still unavailable after reload",
-                context: baseDiagnosticsContext(
-                    extra: [
-                        "trigger": job.startTrigger.rawValue,
-                        "queued_stt_model": job.sttModel.rawValue
-                    ]
-                )
-            )
-        }
-
-        WorkflowRecoveryTelemetry.finished(
-            workflowKind: "model_preparation",
-            failureKind: "models_not_ready",
-            retrySource: "queued_transcription",
-            result: ready ? "success" : "failed",
-            elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelRecoveryStartedAt,
-            surface: "meeting",
-            artifactRetained: job.artifactRetained
-        )
-
-        return ready
-    }
-
-    private func runPreparedQueuedTranscription(_ job: QueuedTranscriptionJob) {
-        sttAdapter.selectPreparedModel(job.sttModel)
-        queuedRuntimeDiagnosticsJobIDs.remove(job.id)
-        activeQueuedTranscriptionJobID = job.id
-
-        switch job.kind {
-        case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate):
-            taskManager.startTranscription(
-                taskId: job.id,
-                micURL: micURL,
-                systemURL: systemURL,
-                outputFolder: MeetingStoragePaths.transcriptsFolder,
-                healthInfo: healthInfo,
-                meetingTitle: meetingTitle,
-                splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-                recordingDate: recordingDate
-            )
-        case .imported(let audioURL, let suggestedTitle, let recordingDate):
-            taskManager.startImportedTranscription(
-                audioURL: audioURL,
-                outputFolder: MeetingStoragePaths.transcriptsFolder,
-                meetingTitle: suggestedTitle,
-                recordingDate: recordingDate
-            )
-        }
-    }
-
-    private func failQueuedTranscriptionJobAfterModelRecovery(_ job: QueuedTranscriptionJob) {
-        let message = "Meeting transcription models were not ready. Try again after models finish loading."
-        lastTerminalTranscriptionOutcome = .failed(message)
-        state = .error(message)
-        displayStatus = .failed(message: message)
-        if liveCodexAwaitedTranscriptionJobID == job.id {
-            finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
-        }
-        if activeQueuedTranscriptionJobID == job.id {
-            activeQueuedTranscriptionJobID = nil
-        }
-
-        switch job.kind {
-        case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate):
-            preserveFailedMeetingForRetry(
-                micAudioURL: micURL,
-                systemAudioURL: systemURL,
-                errorMessage: message,
-                meetingTitle: meetingTitle,
-                recordingDate: recordingDate
-            )
-        case .imported(let audioURL, let suggestedTitle, let recordingDate):
-            preserveFailedMeetingForRetry(
-                micAudioURL: nil,
-                systemAudioURL: audioURL,
-                errorMessage: message,
-                meetingTitle: suggestedTitle,
-                recordingDate: recordingDate
-            )
-        }
-        clearQueuedTranscriptionRuntimeDiagnosticsIfOwned(for: job, outcome: "model_recovery_failed")
-    }
+    // enqueueTranscriptionJob, enqueueImportedAudioJob, enqueue,
+    // startQueuedTranscription, prepareAndStartQueuedTranscription,
+    // ensureModelsReadyForQueuedTranscription, runPreparedQueuedTranscription,
+    // and failQueuedTranscriptionJobAfterModelRecovery moved to
+    // TranscriptionQueueCoordinator.swift (audit 2026-07-08 wave 2, W2-B).
+    // Call sites below now go through `transcriptionQueue.`.
 
     private func finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded(
         failedJobID: UUID? = nil,
@@ -2810,100 +2432,13 @@ final class MeetingSessionController: ObservableObject {
         finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
     }
 
-    private func recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for job: QueuedTranscriptionJob) {
-        guard !isCaptureSessionActive else { return }
-        guard !(sttRouter.isRecording || sttRouter.isTranscribing) else { return }
-        queuedRuntimeDiagnosticsJobIDs.insert(job.id)
-        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "transcribing")
-    }
-
-    private func clearQueuedTranscriptionRuntimeDiagnosticsIfOwned(
-        for job: QueuedTranscriptionJob,
-        outcome: String
-    ) {
-        guard queuedRuntimeDiagnosticsJobIDs.remove(job.id) != nil else { return }
-        guard !isCaptureSessionActive else { return }
-        guard !(sttRouter.isRecording || sttRouter.isTranscribing) else { return }
-        Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: outcome)
-    }
-
-    private func canStartQueuedTranscriptionImmediately(
-        snapshot: BackgroundTranscriptionWorkSnapshot
-    ) -> Bool {
-        MeetingSessionUIPolicy.canStartQueuedTranscription(
-            activeTranscriptions: snapshot.activeCount,
-            isPreparingQueuedTranscriptionStart: isPreparingQueuedTranscriptionStart
-        )
-    }
-
-    private func hasVisibleBackgroundTranscriptionWork(
-        snapshot: BackgroundTranscriptionWorkSnapshot
-    ) -> Bool {
-        MeetingSessionUIPolicy.shouldShowTranscribing(
-            activeTranscriptions: snapshot.activeCount + (isPreparingQueuedTranscriptionStart ? 1 : 0),
-            queuedTranscriptions: queuedTranscriptionJobs.count
-        )
-    }
-
-    private func handleBackgroundTranscriptionWorkChanged() {
-        handleBackgroundTranscriptionWorkChanged(snapshot: currentBackgroundTranscriptionWorkSnapshot)
-    }
-
-    private func handleBackgroundTranscriptionWorkChanged(
-        snapshot: BackgroundTranscriptionWorkSnapshot
-    ) {
-        if canStartQueuedTranscriptionImmediately(snapshot: snapshot) {
-            if let nextJob = popNextQueuedTranscriptionJob() {
-                startQueuedTranscription(nextJob)
-                return
-            }
-
-            finalizeBackgroundTranscriptionStateIfNeeded(snapshot: snapshot)
-            return
-        }
-
-        if !hasVisibleBackgroundTranscriptionWork(snapshot: snapshot) {
-            finalizeBackgroundTranscriptionStateIfNeeded(snapshot: snapshot)
-            return
-        }
-
-        if !isCaptureSessionActive {
-            state = .transcribing
-        }
-    }
-
-    private func popNextQueuedTranscriptionJob() -> QueuedTranscriptionJob? {
-        guard !queuedTranscriptionJobs.isEmpty else { return nil }
-        return queuedTranscriptionJobs.removeFirst()
-    }
-
-    private func finalizeBackgroundTranscriptionStateIfNeeded() {
-        finalizeBackgroundTranscriptionStateIfNeeded(snapshot: currentBackgroundTranscriptionWorkSnapshot)
-    }
-
-    private func finalizeBackgroundTranscriptionStateIfNeeded(
-        snapshot: BackgroundTranscriptionWorkSnapshot
-    ) {
-        guard !hasVisibleBackgroundTranscriptionWork(snapshot: snapshot) else { return }
-        guard !isCaptureSessionActive else { return }
-        if MeetingSessionUIPolicy.shouldClearTranscriptionTriggerAfterBackgroundWork(
-            hasTerminalOutcome: lastTerminalTranscriptionOutcome != nil,
-            hasSpeakerReviewWork: snapshot.speakerNamingRequest != nil
-        ) {
-            activeTranscriptionTrigger = .unknown
-        }
-
-        switch lastTerminalTranscriptionOutcome {
-        case .failed(let message):
-            state = .error(message)
-        case .transcriptSaved:
-            state = .ready
-        case .none:
-            if case .transcribing = state {
-                state = .ready
-            }
-        }
-    }
+    // recordQueuedTranscriptionRuntimeDiagnosticsIfSafe,
+    // clearQueuedTranscriptionRuntimeDiagnosticsIfOwned,
+    // canStartQueuedTranscriptionImmediately(snapshot:),
+    // hasVisibleBackgroundTranscriptionWork(snapshot:),
+    // handleBackgroundTranscriptionWorkChanged, popNextQueuedTranscriptionJob,
+    // and finalizeBackgroundTranscriptionStateIfNeeded moved to
+    // TranscriptionQueueCoordinator.swift (audit 2026-07-08 wave 2, W2-B).
 
     private func restoreStateAfterRecordingEndedWithoutNewWork() {
         guard !hasVisibleBackgroundTranscriptionWork else {
@@ -2932,14 +2467,14 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting transcript saved",
                 context: baseDiagnosticsContext(
                     extra: [
-                        "queue_depth": "\(queuedTranscriptionJobs.count)",
+                        "queue_depth": "\(transcriptionQueue.queuedTranscriptionJobs.count)",
                         "trigger": transcriptionTrigger.rawValue
                     ]
                 )
             )
             trackSavedTranscriptAnalyticsInBackground(
                 baseProperties: [
-                    "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                    "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count),
                     "trigger": transcriptionTrigger.rawValue,
                 ],
                 promptTelemetryProperties: promptTelemetryProperties,
@@ -2971,7 +2506,7 @@ final class MeetingSessionController: ObservableObject {
                     context: baseDiagnosticsContext(
                         extra: [
                             "failure_kind": failureKind.rawValue,
-                            "queue_depth": "\(queuedTranscriptionJobs.count)",
+                            "queue_depth": "\(transcriptionQueue.queuedTranscriptionJobs.count)",
                             "trigger": transcriptionTrigger.rawValue
                         ]
                     )
@@ -2997,7 +2532,7 @@ final class MeetingSessionController: ObservableObject {
                 state = .error(diagnosticMessage)
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: failureKind.rawValue)
-                handleBackgroundTranscriptionWorkChanged()
+                transcriptionQueue.handleBackgroundTranscriptionWorkChanged()
                 return
             }
 
@@ -3007,7 +2542,7 @@ final class MeetingSessionController: ObservableObject {
                     allowLastSavedTranscriptOwner: true
                 )
                 activeQueuedTranscriptionJobID = nil
-                let queueDepthBucket = AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)
+                let queueDepthBucket = AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count)
                 DiagnosticsTrail.record(
                     level: .error,
                     engine: "meeting",
@@ -3017,7 +2552,7 @@ final class MeetingSessionController: ObservableObject {
                         extra: [
                             "failure_kind": failureKind.rawValue,
                             "session_stage": CaptureFailureStage.save.rawValue,
-                            "queue_depth": "\(queuedTranscriptionJobs.count)",
+                            "queue_depth": "\(transcriptionQueue.queuedTranscriptionJobs.count)",
                             "queue_depth_bucket": queueDepthBucket,
                             "trigger": transcriptionTrigger.rawValue
                         ]
@@ -3047,7 +2582,7 @@ final class MeetingSessionController: ObservableObject {
                 )
                 activeTranscriptionCaptureDiagnostics = nil
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "speaker_finalization_failed")
-                handleBackgroundTranscriptionWorkChanged()
+                transcriptionQueue.handleBackgroundTranscriptionWorkChanged()
                 return
             }
 
@@ -3063,7 +2598,7 @@ final class MeetingSessionController: ObservableObject {
                 [
                     "error": message,
                     "diagnostic_error": diagnosticMessage,
-                    "queue_depth": "\(queuedTranscriptionJobs.count)",
+                    "queue_depth": "\(transcriptionQueue.queuedTranscriptionJobs.count)",
                 ],
                 uniquingKeysWith: { _, new in new }
             )
@@ -3093,7 +2628,7 @@ final class MeetingSessionController: ObservableObject {
             )
             activeTranscriptionCaptureDiagnostics = nil
             Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcript_failed")
-            handleBackgroundTranscriptionWorkChanged()
+            transcriptionQueue.handleBackgroundTranscriptionWorkChanged()
         case .gettingReady:
             if previousStatus.diagnosticName != status.diagnosticName {
                 DiagnosticsTrail.record(
@@ -3180,7 +2715,7 @@ final class MeetingSessionController: ObservableObject {
         (activeTranscriptionCaptureDiagnostics ?? [:]).merging(
             [
                 "failure_kind": failureKind.rawValue,
-                "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count),
+                "queue_depth_bucket": AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count),
                 "trigger": transcriptionTrigger.rawValue,
             ],
             uniquingKeysWith: { _, new in new }
@@ -3426,7 +2961,10 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
-    private func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {
+    // Was `private`; FailedMeetingStore / TranscriptionQueueCoordinator live
+    // in sibling files and need module-internal access (audit 2026-07-08
+    // wave 2, W2-B).
+    func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {
         var context: [String: String] = [
             "session_state": state.diagnosticName,
             "display_status": displayStatus.diagnosticName,
@@ -3434,7 +2972,7 @@ final class MeetingSessionController: ObservableObject {
             "dictation_model_state": sttRouter.modelDownloadState.diagnosticName,
             "meeting_model_state": diarization.modelState.diagnosticName,
             "system_audio_status": capture.systemAudioStatus.diagnosticName,
-            "queue_depth": "\(queuedTranscriptionJobs.count)"
+            "queue_depth": "\(transcriptionQueue.queuedTranscriptionJobs.count)"
         ]
 
         for (key, value) in extra {
@@ -3448,135 +2986,26 @@ final class MeetingSessionController: ObservableObject {
         MeetingSystemAudioStatusCopy.message(for: status)
     }
 
-    private func boolString(_ value: Bool) -> String {
+    // Was `private`; FailedMeetingStore lives in a sibling file and needs
+    // module-internal access (audit 2026-07-08 wave 2, W2-B).
+    func boolString(_ value: Bool) -> String {
         value ? "true" : "false"
     }
 
-    @discardableResult
-    private func preserveFailedMeetingForRetry(
-        taskId: UUID = UUID(),
-        micAudioURL: URL?,
-        systemAudioURL: URL?,
-        errorMessage: String,
-        meetingTitle: String?,
-        recordingDate: Date? = nil,
-        archiveAudio: Bool = true
-    ) -> Bool {
-        let preserved = taskManager.addFailedTranscriptionRetainingAvailableAudio(
-            micAudioURL: micAudioURL,
-            systemAudioURL: systemAudioURL,
-            errorMessage: errorMessage,
-            taskId: taskId,
-            meetingTitle: meetingTitle,
-            recordingDate: recordingDate,
-            archiveAudio: archiveAudio
-        )
-        if preserved {
-            refreshFailedMeetings()
-        }
-        return preserved
-    }
+    // preserveFailedMeetingForRetry, refreshTimedOutFailedMeetingAudio, and
+    // scheduleFailedAudioCompression moved to FailedMeetingStore.swift
+    // (audit 2026-07-08 wave 2, W2-B). Call sites now go through
+    // `failedMeetingStore.`.
 
-    private func refreshTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
-        let existingFailure = failedManager.failedTranscriptions
-            .first(where: { $0.id == id })
-        let existingMicURL = existingFailure?.micAudioURL
-        let existingSystemURL = existingFailure?.systemAudioURL
-        guard let micURL = result.micURL ?? existingMicURL else { return }
-        let systemURL = result.systemURL ?? existingSystemURL
-
-        let updated = taskManager.promoteFinalizedFailedTranscriptionAudio(
-            id: id,
-            micAudioURL: micURL,
-            systemAudioURL: systemURL
-        )
-        DiagnosticsTrail.record(
-            level: updated ? .info : .warning,
-            engine: "meeting",
-            event: "meeting_recording_stop_timeout_audio_finalized",
-            message: updated
-                ? "Timed-out meeting audio finalized and failed queue was refreshed"
-                : "Timed-out meeting audio finalized but failed queue entry was not found",
-            context: baseDiagnosticsContext(
-                extra: [
-                    "failed_id": id.uuidString,
-                    "mic_file_present": boolString(FileManager.default.fileExists(atPath: micURL.path)),
-                    "system_file_present": boolString(systemURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
-                ]
-            )
-        )
-        if updated {
-            refreshFailedMeetings()
-        }
-    }
-
-    private func refreshFailedMeetings(_ updatedFailedTranscriptions: [FailedTranscription]? = nil) {
-        let failedTranscriptions = updatedFailedTranscriptions ?? failedManager.failedTranscriptions
-        retryingFailedMeetingIDs.formIntersection(Set(failedTranscriptions.map(\.id)))
-
-        failedMeetings = failedTranscriptions
-            .sorted(by: { $0.timestamp > $1.timestamp })
-            .map { failed in
-                FailedMeetingPresentation.item(
-                    from: failed,
-                    isRetrying: retryingFailedMeetingIDs.contains(failed.id)
-                )
-            }
-        scheduleFailedAudioCompression(for: failedTranscriptions)
-    }
-
-    private func scheduleFailedAudioCompression(for failedTranscriptions: [FailedTranscription]) {
-        guard failedAudioCompressionTask == nil else {
-            failedAudioCompressionNeedsReschedule = true
-            return
-        }
-
-        let candidates = failedTranscriptions.compactMap { failed -> FailedMeetingAudioCompressionCandidate? in
-            guard !retryingFailedMeetingIDs.contains(failed.id) else { return nil }
-            var urls = [failed.micAudioURL]
-            if let systemAudioURL = failed.systemAudioURL {
-                urls.append(systemAudioURL)
-            }
-            guard urls.contains(where: { $0.pathExtension.localizedCaseInsensitiveCompare("wav") == .orderedSame }) else {
-                return nil
-            }
-            return FailedMeetingAudioCompressionCandidate(
-                id: failed.id,
-                micAudioURL: failed.micAudioURL,
-                systemAudioURL: failed.systemAudioURL
-            )
-        }
-        guard !candidates.isEmpty else { return }
-
-        failedAudioCompressionNeedsReschedule = false
-        let audioArchiveRoot = MeetingStoragePaths.audioArchiveFolder
-        failedAudioCompressionTask = Task { [weak self] in
-            _ = await MeetingAudioStorageManager.compressFailedTranscriptionAudio(
-                candidates: candidates,
-                audioArchiveRoot: audioArchiveRoot,
-                persistUpdate: { [weak self] update in
-                    await MainActor.run {
-                        guard let self,
-                              !self.retryingFailedMeetingIDs.contains(update.id) else {
-                            return false
-                        }
-                        return self.failedManager.updateFailedTranscriptionAudio(
-                            id: update.id,
-                            micAudioURL: update.micAudioURL,
-                            systemAudioURL: update.systemAudioURL
-                        )
-                    }
-                }
-            )
-            await MainActor.run { [weak self] in
-                let shouldReschedule = self?.failedAudioCompressionNeedsReschedule == true
-                self?.failedAudioCompressionTask = nil
-                self?.failedAudioCompressionNeedsReschedule = false
-                if shouldReschedule, let self {
-                    self.scheduleFailedAudioCompression(for: self.failedManager.failedTranscriptions)
-                }
-            }
-        }
+    /// Recomputes and assigns the published failed-meeting list. Kept on the
+    /// controller (rather than moved wholesale) because `failedMeetings` is
+    /// `@Published` here — the store computes the list, the controller owns
+    /// the publish.
+    // Was `private`; FailedMeetingStore lives in a sibling file and calls
+    // back into this method after every mutation (audit 2026-07-08 wave 2,
+    // W2-B).
+    func refreshFailedMeetings(_ updatedFailedTranscriptions: [FailedTranscription]? = nil) {
+        failedMeetings = failedMeetingStore.refreshFailedMeetings(updatedFailedTranscriptions)
     }
 }
 
