@@ -880,87 +880,83 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeeting(_ item: RecentMeetingItem) {
         trackSettingsAction("copy_meeting", page: .home)
-        // Resolve the transcript first so a row whose path drifted (restyle/
-        // rename after scanning) still copies, and a genuinely missing file
-        // surfaces an error instead of silently no-op'ing on the empty clipboard.
-        guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
-            ActivationTelemetry.trackHabitLoopAction(
-                actionKind: .whatDidIPromise,
-                surface: .homeRow,
-                artifactKind: .meeting,
-                artifactDate: item.date,
-                result: .failed
-            )
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .meetingBundle,
-                actionKind: .copied,
-                agentTarget: .localAgent,
-                surface: .homeRow,
-                result: .failed,
-                artifactKind: .meeting
-            )
-            presentHomeActionFailure(
-                title: "Could not copy meeting",
-                message: SettingsArtifactMessage.meetingTranscriptNotFound,
-                retry: {
-                    handleCopyMeeting(item)
-                }
-            )
-            return
+        // Resolution + the transcript read (and bundle assembly) touch disk and
+        // can be sizeable for long meetings, so do them off the main thread and
+        // hop back only to write the clipboard / update UI state.
+        Task { @MainActor in
+            let result = await Self.loadCopyMeetingText(for: item)
+            switch result {
+            case .missingFile:
+                // Resolution failed so a row whose path drifted (restyle/rename
+                // after scanning) still copies, and a genuinely missing file
+                // surfaces an error instead of silently no-op'ing on the empty
+                // clipboard.
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .whatDidIPromise,
+                    surface: .homeRow,
+                    artifactKind: .meeting,
+                    artifactDate: item.date,
+                    result: .failed
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .meetingBundle,
+                    actionKind: .copied,
+                    agentTarget: .localAgent,
+                    surface: .homeRow,
+                    result: .failed,
+                    artifactKind: .meeting
+                )
+                presentHomeActionFailure(
+                    title: "Could not copy meeting",
+                    message: SettingsArtifactMessage.meetingTranscriptNotFound,
+                    retry: {
+                        handleCopyMeeting(item)
+                    }
+                )
+            case .readFailure:
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .whatDidIPromise,
+                    surface: .homeRow,
+                    artifactKind: .meeting,
+                    artifactDate: item.date,
+                    result: .failed
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .meetingBundle,
+                    actionKind: .copied,
+                    agentTarget: .localAgent,
+                    surface: .homeRow,
+                    result: .failed,
+                    artifactKind: .meeting
+                )
+                presentHomeActionFailure(
+                    title: "Could not copy meeting",
+                    message: "Transcripted found this meeting's transcript but couldn't read it. The file may be open exclusively elsewhere or corrupted.",
+                    retry: {
+                        handleCopyMeeting(item)
+                    }
+                )
+            case .success(let text, let usedBundle):
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .whatDidIPromise,
+                    surface: .homeRow,
+                    artifactKind: .meeting,
+                    artifactDate: item.date
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: usedBundle ? .meetingBundle : .meetingMarkdown,
+                    actionKind: .copied,
+                    agentTarget: .localAgent,
+                    surface: .homeRow,
+                    result: usedBundle ? .success : .fallbackCopied,
+                    artifactKind: .meeting
+                )
+                flashCopied(rowID: item.id)
+            }
         }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        let usedBundle: Bool
-        if let bundle = AgentConnectionGuide.portableMeetingBundle(
-            title: item.title,
-            date: item.date,
-            transcriptURL: transcriptURL
-        ) {
-            pasteboard.setString(bundle, forType: .string)
-            usedBundle = true
-        } else if let raw = try? String(contentsOf: transcriptURL, encoding: .utf8) {
-            pasteboard.setString(raw, forType: .string)
-            usedBundle = false
-        } else {
-            ActivationTelemetry.trackHabitLoopAction(
-                actionKind: .whatDidIPromise,
-                surface: .homeRow,
-                artifactKind: .meeting,
-                artifactDate: item.date,
-                result: .failed
-            )
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .meetingBundle,
-                actionKind: .copied,
-                agentTarget: .localAgent,
-                surface: .homeRow,
-                result: .failed,
-                artifactKind: .meeting
-            )
-            presentHomeActionFailure(
-                title: "Could not copy meeting",
-                message: "Transcripted found this meeting's transcript but couldn't read it. The file may be open exclusively elsewhere or corrupted.",
-                retry: {
-                    handleCopyMeeting(item)
-                }
-            )
-            return
-        }
-        ActivationTelemetry.trackHabitLoopAction(
-            actionKind: .whatDidIPromise,
-            surface: .homeRow,
-            artifactKind: .meeting,
-            artifactDate: item.date
-        )
-        ActivationTelemetry.trackAgentPromptAction(
-            promptKind: usedBundle ? .meetingBundle : .meetingMarkdown,
-            actionKind: .copied,
-            agentTarget: .localAgent,
-            surface: .homeRow,
-            result: usedBundle ? .success : .fallbackCopied,
-            artifactKind: .meeting
-        )
-        flashCopied(rowID: item.id)
     }
 
     private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
@@ -1491,6 +1487,31 @@ struct TranscriptedSettingsView: View {
                 return .success(try String(contentsOf: resolved, encoding: .utf8))
             } catch {
                 return .failure(error.localizedDescription)
+            }
+        }.value
+    }
+
+    private enum HomeCopyMeetingReadResult {
+        case missingFile
+        case readFailure
+        case success(text: String, usedBundle: Bool)
+    }
+
+    private static func loadCopyMeetingText(for item: RecentMeetingItem) async -> HomeCopyMeetingReadResult {
+        await Task.detached(priority: .userInitiated) {
+            guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
+                return .missingFile
+            }
+            if let bundle = AgentConnectionGuide.portableMeetingBundle(
+                title: item.title,
+                date: item.date,
+                transcriptURL: transcriptURL
+            ) {
+                return .success(text: bundle, usedBundle: true)
+            } else if let raw = try? String(contentsOf: transcriptURL, encoding: .utf8) {
+                return .success(text: raw, usedBundle: false)
+            } else {
+                return .readFailure
             }
         }.value
     }
