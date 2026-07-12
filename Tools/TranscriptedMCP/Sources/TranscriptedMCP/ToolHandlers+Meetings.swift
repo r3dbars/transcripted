@@ -194,7 +194,12 @@ private func meetingTranscriptPageResult(
 
 /// Raw YAML frontmatter block, matching the exact slice the speakers section
 /// has always returned (both fences plus the character after the closing one).
-private func frontmatterBlock(of content: String) -> String? {
+///
+/// Internal (not private) so FrontmatterCorpusParityTests can pin this
+/// against the shared corpus in Tests/Fixtures/frontmatter-corpus/ — see
+/// that directory's README for why this fence-detection copy is one of
+/// three independent implementations audit W3-A is guarding against drift.
+func frontmatterBlock(of content: String) -> String? {
     guard content.count >= 8, content.hasPrefix("---"),
           let endRange = content.range(of: "\n---\n", range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex) else {
         return nil

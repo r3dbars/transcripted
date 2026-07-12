@@ -1,0 +1,10 @@
+{
+  "hasFrontmatter": true,
+  "body": "\n## Transcript\n\nHello world.\n",
+  "values": {
+    "capture_type": "meeting",
+    "title": "Roadmap Sync",
+    "duration": "42:17",
+    "transcription_engine": "parakeet_local"
+  }
+}

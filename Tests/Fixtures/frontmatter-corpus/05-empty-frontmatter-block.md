@@ -1,0 +1,4 @@
+---
+---
+
+Body only, empty frontmatter.
