@@ -9,11 +9,15 @@ public enum TranscriptScanner {
     /// - Parameters:
     ///   - directory: Directory to scan (defaults to Transcripted folder)
     ///   - progressHandler: Called with progress updates (0.0 to 1.0)
+    ///   - statsStore: Stats database to migrate into. Defaults to `StatsDatabase.shared`;
+    ///     pass a custom instance (e.g. a temp-path instance in tests) to avoid touching
+    ///     the real database.
     /// - Returns: Number of transcripts migrated
     @discardableResult
     public static func migrateExistingTranscripts(
         from directory: URL? = nil,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        statsStore: StatsDatabase? = nil
     ) async -> Int {
         let transcriptDir = directory ?? TranscriptSaver.defaultSaveDirectory
 
@@ -48,7 +52,7 @@ public enum TranscriptScanner {
         AppLogger.pipeline.info("TranscriptScanner found files to scan", ["count": "\(markdownFiles.count)"])
         progressHandler?(0.0, "Found \(markdownFiles.count) transcripts...")
 
-        let database = StatsDatabase.shared
+        let database = statsStore ?? StatsDatabase.shared
         var migrated = 0
 
         for (index, fileURL) in markdownFiles.enumerated() {
@@ -203,8 +207,11 @@ public enum TranscriptScanner {
     }
 
     /// Check if migration is needed
-    public static func needsMigration() -> Bool {
-        let database = StatsDatabase.shared
+    /// - Parameter statsStore: Stats database to check. Defaults to `StatsDatabase.shared`;
+    ///   pass a custom instance (e.g. a temp-path instance in tests) to avoid touching
+    ///   the real database.
+    public static func needsMigration(statsStore: StatsDatabase? = nil) -> Bool {
+        let database = statsStore ?? StatsDatabase.shared
         let dbCount = database.getTotalRecordingsCount()
 
         // If database has no records, check if there are transcript files
