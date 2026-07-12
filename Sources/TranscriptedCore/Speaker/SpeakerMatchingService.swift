@@ -214,9 +214,15 @@ extension Transcription {
             var parent = Dictionary(uniqueKeysWithValues: clusters.map { ($0, $0) })
             func find(_ x: Int) -> Int {
                 var r = x
-                while parent[r]! != r { r = parent[r]! }
+                // A missing key can only mean `r` was never inserted (e.g. an id
+                // outside `clusters`); treat it as its own root rather than trapping.
+                while let next = parent[r], next != r { r = next }
                 var n = x
-                while n != r { let nx = parent[n]!; parent[n] = r; n = nx }
+                while n != r {
+                    guard let nx = parent[n] else { break }
+                    parent[n] = r
+                    n = nx
+                }
                 return r
             }
             func union(_ a: Int, _ b: Int) {
@@ -225,7 +231,8 @@ extension Transcription {
             }
             for i in 0..<clusters.count {
                 for j in (i + 1)..<clusters.count {
-                    let s = cosineSimilarityStatic(meanBySpeaker[clusters[i]]!, meanBySpeaker[clusters[j]]!)
+                    guard let embA = meanBySpeaker[clusters[i]], let embB = meanBySpeaker[clusters[j]] else { continue }
+                    let s = cosineSimilarityStatic(embA, embB)
                     if SpeakerWritePathPolicy.shouldFuseMatchedClusters(crossClusterSimilarity: s) {
                         union(clusters[i], clusters[j])
                     }
@@ -243,7 +250,10 @@ extension Transcription {
             var components: [Int: [Int]] = [:]
             for c in clusters { components[find(c), default: []].append(c) }
             for (root, members) in components {
-                let rep = members.max(by: { rank($0) < rank($1) })!
+                // `members` is always non-empty (seeded from `clusters`), but guard
+                // rather than force-unwrap so an empty component fails closed instead
+                // of trapping.
+                guard let rep = members.max(by: { rank($0) < rank($1) }) else { continue }
                 for other in members where other != rep { plan.remaps[other] = rep }
                 if root != keeperRoot { plan.spinOffs.append(rep) }
             }

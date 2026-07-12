@@ -21,6 +21,33 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster.capture — focused element cast is crash-proof") {
+            // Regression: kAXFocusedUIElementAttribute's CFTypeRef was force-cast
+            // straight to AXUIElement with no type check. AXUIElement is a toll-free
+            // CF opaque type, so Swift can't verify `as?`/`as!` against it at runtime
+            // (the compiler treats the downcast as unconditionally successful) — the
+            // real guard has to be an explicit CFGetTypeID comparison before the cast,
+            // matching the existing AXValue-cast pattern in this file. A live
+            // AXUIElement isn't constructible in a unit test, so this asserts on
+            // source shape like the sibling test above.
+            let source = try! String(
+                contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
+                encoding: .utf8
+            )
+            assertTrue(
+                source.contains("CFGetTypeID(focusedElement) == AXUIElementGetTypeID()"),
+                "the focused UI element must be type-checked before use, since AXUIElement casts can't fail at runtime on their own"
+            )
+            assertTrue(
+                source.contains("focused UI element attribute returned an unexpected CF type"),
+                "a mismatched CF type should log and degrade to no confirmation instead of misusing the wrong object with AX APIs"
+            )
+            assertFalse(
+                source.contains("import TranscriptedCore"),
+                "this file is compiled directly into the fast-test binary without the TranscriptedCore module search path"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — preserves user clipboard changes") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()

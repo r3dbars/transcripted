@@ -96,7 +96,12 @@ struct HomeMeetingPreviewContent {
     }
 
     private static func parseBracketTimestampMarker(_ line: String) -> TranscriptMarker? {
-        guard let timeEnd = line.firstIndex(of: "]") else { return nil }
+        // Defensive parity with RecentCaptureScanners' sibling parser: this function
+        // assumes a leading "[". Without the hasPrefix guard, firstIndex(of: "]")
+        // landing at startIndex (a line that never had a leading "[") would make
+        // line.index(after: line.startIndex) step past it, producing an inverted
+        // range and trapping.
+        guard line.hasPrefix("["), let timeEnd = line.firstIndex(of: "]") else { return nil }
         let time = String(line[line.index(after: line.startIndex)..<timeEnd])
         guard looksLikeTimestamp(time) else { return nil }
         let remainder = line[line.index(after: timeEnd)...].trimmingCharacters(in: .whitespacesAndNewlines)

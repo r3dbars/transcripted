@@ -144,7 +144,13 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
     }
 
     private static func speakerLabel(fromBracketTimestampLine line: String) -> String? {
-        guard let timeEnd = line.firstIndex(of: "]") else { return nil }
+        // Callers besides the direct "[" dispatch (e.g. the bold-prefix fallback in
+        // speakerLabel(fromTranscriptLine:)) can hand this a string that never had a
+        // leading "[". Without this guard, a line whose first character is "]" (e.g. the
+        // malformed "**]" transcript line, which unbolds to "]") makes firstIndex(of: "]")
+        // land at startIndex while line.index(after: line.startIndex) steps one past it,
+        // producing an inverted range and trapping.
+        guard line.hasPrefix("["), let timeEnd = line.firstIndex(of: "]") else { return nil }
         let time = String(line[line.index(after: line.startIndex)..<timeEnd])
         guard looksLikeTimestamp(time) else { return nil }
         let remainder = String(line[line.index(after: timeEnd)...])

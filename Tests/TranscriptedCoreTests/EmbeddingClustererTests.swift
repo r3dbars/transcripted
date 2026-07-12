@@ -4,6 +4,26 @@ import XCTest
 @available(macOS 14.0, *)
 final class EmbeddingClustererTests: XCTestCase {
 
+    // MARK: - Empty-input edge cases (crash-proofing regression, codebase audit 2026-07-08)
+
+    func testPairwiseMergeWithNoSegmentsReturnsEmpty() {
+        // The union-find helpers inside pairwiseMerge must never run for empty input;
+        // this guards the early-return path (speakerIds.count >= 2) that keeps the
+        // dictionary-backed find()/union() helpers from ever touching a missing key.
+        let merged = EmbeddingClusterer.pairwiseMerge(segments: [], threshold: 0.85)
+        XCTAssertTrue(merged.isEmpty)
+    }
+
+    func testPairwiseMergeWithSingleSpeakerSkipsUnionFind() {
+        // A single speaker never reaches the union-find loop (speakerIds.count >= 2
+        // guard) and must be returned unchanged.
+        let segments = [
+            segment(speakerId: 1, startTime: 0, endTime: 3, embedding: [1.0, 0.0]),
+        ]
+        let merged = EmbeddingClusterer.pairwiseMerge(segments: segments, threshold: 0.85)
+        XCTAssertEqual(merged.map(\.speakerId), [1])
+    }
+
     func testPairwiseMergeHandlesTransitiveSpeakerMatches() {
         let merged = EmbeddingClusterer.pairwiseMerge(
             segments: [

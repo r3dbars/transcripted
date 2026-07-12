@@ -149,6 +149,36 @@ final class SpeakerWritePathPolicyTests: XCTestCase {
         XCTAssertEqual(plan.remaps, [z: y], "its second fragment fuses into it, not a third profile")
     }
 
+    // MARK: - Empty-input edge cases (crash-proofing regression, codebase audit 2026-07-08)
+
+    func testPlanCrossClusterLinksWithNoSpeakersReturnsEmptyPlan() {
+        // The union-find setup inside planCrossClusterLinks must never run for an
+        // empty input; this guards the early-return path that keeps the
+        // dictionary-backed find()/union() helpers from ever touching a missing key.
+        let plan = Transcription.planCrossClusterLinks(
+            matchedProfileBySpeaker: [:],
+            matchSimilarityBySpeaker: [:],
+            meanBySpeaker: [:],
+            segmentCountBySpeaker: [:]
+        )
+        XCTAssertTrue(plan.remaps.isEmpty)
+        XCTAssertTrue(plan.spinOffs.isEmpty)
+    }
+
+    func testPlanCrossClusterLinksWithSingleSpeakerSkipsUnionFind() {
+        // A single cluster on a profile never reaches the union-find loop
+        // (ids.count >= 2 guard) and must not fuse or spin off anything.
+        let p = UUID()
+        let plan = Transcription.planCrossClusterLinks(
+            matchedProfileBySpeaker: [1: p],
+            matchSimilarityBySpeaker: [1: 0.95],
+            meanBySpeaker: [1: unit(cos: 1.0)],
+            segmentCountBySpeaker: [1: 5]
+        )
+        XCTAssertTrue(plan.remaps.isEmpty)
+        XCTAssertTrue(plan.spinOffs.isEmpty)
+    }
+
     // MARK: - Helpers
 
     /// 2-D unit vector with a given cosine to the x-axis reference [1, 0].
