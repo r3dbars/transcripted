@@ -103,201 +103,6 @@ final class TranscriptIndex: @unchecked Sendable {
         exec("PRAGMA synchronous=NORMAL")
     }
 
-    private func createTables() {
-        exec("""
-            CREATE TABLE IF NOT EXISTS meetings (
-                filename TEXT PRIMARY KEY,
-                date TEXT NOT NULL,
-                datetime TEXT NOT NULL,
-                duration_seconds INTEGER NOT NULL,
-                speaker_count INTEGER NOT NULL,
-                word_count INTEGER NOT NULL,
-                json_modified_at REAL NOT NULL
-            )
-        """)
-
-        exec("""
-            CREATE TABLE IF NOT EXISTS meeting_speakers (
-                filename TEXT NOT NULL,
-                speaker_name TEXT NOT NULL,
-                persistent_speaker_id TEXT,
-                word_count INTEGER NOT NULL DEFAULT 0,
-                speaking_seconds REAL NOT NULL DEFAULT 0,
-                PRIMARY KEY (filename, speaker_name)
-            )
-        """)
-
-        exec("""
-            CREATE TABLE IF NOT EXISTS utterances (
-                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL,
-                speaker_name TEXT NOT NULL,
-                utterance_start REAL NOT NULL,
-                utterance_end REAL NOT NULL,
-                text TEXT NOT NULL
-            )
-        """)
-
-        exec("""
-            CREATE TABLE IF NOT EXISTS dictation_days (
-                filename TEXT PRIMARY KEY,
-                date TEXT NOT NULL,
-                datetime TEXT NOT NULL,
-                markdown_filename TEXT NOT NULL,
-                entry_count INTEGER NOT NULL,
-                word_count INTEGER NOT NULL,
-                json_modified_at REAL NOT NULL
-            )
-        """)
-
-        exec("""
-            CREATE TABLE IF NOT EXISTS dictation_entries (
-                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL,
-                entry_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                source_app_name TEXT NOT NULL,
-                source_app_bundle_id TEXT,
-                delivery TEXT NOT NULL,
-                word_count INTEGER NOT NULL,
-                character_count INTEGER NOT NULL,
-                text TEXT NOT NULL
-            )
-        """)
-
-        exec("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS dictation_entries_fts USING fts5(
-                text, title, source_app_name,
-                content='dictation_entries', content_rowid='rowid',
-                tokenize='porter unicode61'
-            )
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS dictation_entries_ai AFTER INSERT ON dictation_entries BEGIN
-                INSERT INTO dictation_entries_fts(rowid, text, title, source_app_name)
-                VALUES (new.rowid, new.text, new.title, new.source_app_name);
-            END
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS dictation_entries_ad AFTER DELETE ON dictation_entries BEGIN
-                INSERT INTO dictation_entries_fts(dictation_entries_fts, rowid, text, title, source_app_name)
-                VALUES ('delete', old.rowid, old.text, old.title, old.source_app_name);
-            END
-        """)
-
-        exec("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS utterances_fts USING fts5(
-                text, speaker_name,
-                content='utterances', content_rowid='rowid',
-                tokenize='porter unicode61'
-            )
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS utterances_ai AFTER INSERT ON utterances BEGIN
-                INSERT INTO utterances_fts(rowid, text, speaker_name)
-                VALUES (new.rowid, new.text, new.speaker_name);
-            END
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS utterances_ad AFTER DELETE ON utterances BEGIN
-                INSERT INTO utterances_fts(utterances_fts, rowid, text, speaker_name)
-                VALUES ('delete', old.rowid, old.text, old.speaker_name);
-            END
-        """)
-
-        // Structured summary fields (Decisions / Action Items / Open Questions)
-        // parsed from each meeting's local summary. One row per bullet, keyed to
-        // the meeting filename, with a `kind` discriminator so cross-meeting tools
-        // (list_action_items, open_questions roll-ups) can aggregate over all
-        // meetings without a per-category table. Mirrors the utterances + FTS5 +
-        // triggers pattern above.
-        exec("""
-            CREATE TABLE IF NOT EXISTS meeting_summary_items (
-                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                position INTEGER NOT NULL,
-                owner TEXT,
-                text TEXT NOT NULL,
-                status TEXT,
-                due TEXT
-            )
-        """)
-
-        exec("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS meeting_summary_items_fts USING fts5(
-                text, owner, status, due,
-                content='meeting_summary_items', content_rowid='rowid',
-                tokenize='porter unicode61'
-            )
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ai AFTER INSERT ON meeting_summary_items BEGIN
-                INSERT INTO meeting_summary_items_fts(rowid, text, owner, status, due)
-                VALUES (new.rowid, new.text, new.owner, new.status, new.due);
-            END
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ad AFTER DELETE ON meeting_summary_items BEGIN
-                INSERT INTO meeting_summary_items_fts(meeting_summary_items_fts, rowid, text, owner, status, due)
-                VALUES ('delete', old.rowid, old.text, old.owner, old.status, old.due);
-            END
-        """)
-
-        exec("""
-            CREATE TABLE IF NOT EXISTS meeting_summary_documents (
-                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL UNIQUE,
-                title TEXT NOT NULL DEFAULT '',
-                attendees TEXT NOT NULL DEFAULT '',
-                decisions TEXT NOT NULL DEFAULT '',
-                action_items TEXT NOT NULL DEFAULT '',
-                open_questions TEXT NOT NULL DEFAULT ''
-            )
-        """)
-
-        exec("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS meeting_summary_documents_fts USING fts5(
-                title, attendees, decisions, action_items, open_questions,
-                content='meeting_summary_documents', content_rowid='rowid',
-                tokenize='porter unicode61'
-            )
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS meeting_summary_documents_ai AFTER INSERT ON meeting_summary_documents BEGIN
-                INSERT INTO meeting_summary_documents_fts(rowid, title, attendees, decisions, action_items, open_questions)
-                VALUES (new.rowid, new.title, new.attendees, new.decisions, new.action_items, new.open_questions);
-            END
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS meeting_summary_documents_ad AFTER DELETE ON meeting_summary_documents BEGIN
-                INSERT INTO meeting_summary_documents_fts(meeting_summary_documents_fts, rowid, title, attendees, decisions, action_items, open_questions)
-                VALUES ('delete', old.rowid, old.title, old.attendees, old.decisions, old.action_items, old.open_questions);
-            END
-        """)
-
-        exec("CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(date)")
-        exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_name ON meeting_speakers(speaker_name COLLATE NOCASE)")
-        exec("CREATE INDEX IF NOT EXISTS idx_meeting_speakers_persistent_id ON meeting_speakers(persistent_speaker_id)")
-        exec("CREATE INDEX IF NOT EXISTS idx_utterances_filename ON utterances(filename)")
-        exec("CREATE INDEX IF NOT EXISTS idx_dictation_days_date ON dictation_days(date)")
-        exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_filename ON dictation_entries(filename)")
-        exec("CREATE INDEX IF NOT EXISTS idx_dictation_entries_created_at ON dictation_entries(created_at)")
-        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_filename ON meeting_summary_items(filename)")
-        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON meeting_summary_items(kind)")
-        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_owner ON meeting_summary_items(owner COLLATE NOCASE)")
-        exec("CREATE INDEX IF NOT EXISTS idx_summary_documents_filename ON meeting_summary_documents(filename)")
-    }
-
     // MARK: - Reconciliation
 
     func reconcile(meetingsDir: URL, dictationsDir: URL) throws {
@@ -1856,81 +1661,39 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     // MARK: - SQLite Helpers
-
-    private enum SQLBinding {
-        case text(String)
-        case int(Int)
-        case double(Double)
-        case null
-    }
+    //
+    // Thin wrappers over the shared free functions in SQLiteHelpers.swift,
+    // bound to this instance's `db` handle. Kept as instance methods so every
+    // existing call site in this file (bind(...), bindExec(...), etc.) is
+    // unchanged.
 
     private func bind(stmt: OpaquePointer?, index: Int32, value: SQLBinding) {
-        switch value {
-        case .text(let s):
-            sqlite3_bind_text(stmt, index, (s as NSString).utf8String, -1, SQLITE_TRANSIENT)
-        case .int(let i):
-            sqlite3_bind_int64(stmt, index, Int64(i))
-        case .double(let d):
-            sqlite3_bind_double(stmt, index, d)
-        case .null:
-            sqlite3_bind_null(stmt, index)
-        }
+        sqlBind(stmt: stmt, index: index, value: value)
     }
 
-    /// Write-path statement execution. Logs and throws on failure so callers can
-    /// roll back instead of silently committing a half-indexed artifact.
     private func bindExec(_ sql: String, bindings: [SQLBinding]) throws {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            let message = dbError()
-            log("SQL prepare failed: \(message) for: \(sql)")
-            throw MCPIndexError.queryFailed(message)
-        }
-        defer { sqlite3_finalize(stmt) }
-        for (i, binding) in bindings.enumerated() {
-            bind(stmt: stmt, index: Int32(i + 1), value: binding)
-        }
-        if sqlite3_step(stmt) != SQLITE_DONE {
-            let message = dbError()
-            log("SQL exec failed: \(message) for: \(sql)")
-            throw MCPIndexError.queryFailed(message)
-        }
+        try sqlBindExec(db: db, sql: sql, bindings: bindings)
     }
 
-    /// Best-effort execution for setup pragmas and rollback-in-defer, where a
-    /// failure is logged but must not throw.
-    private func exec(_ sql: String) {
-        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
-            log("SQL exec failed: \(dbError()) for: \(sql)")
-        }
+    /// Not `private` — TranscriptIndex+Schema.swift's createTables() extension
+    /// calls this cross-file, and `private` is file-scoped in Swift.
+    func exec(_ sql: String) {
+        sqlExec(db: db, sql: sql)
     }
 
-    /// Write-path variant of exec(). Logs and throws on failure — used for
-    /// BEGIN/COMMIT so a failed transaction boundary aborts the write instead of
-    /// degrading to per-statement autocommit.
     private func execOrThrow(_ sql: String) throws {
-        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
-            let message = dbError()
-            log("SQL exec failed: \(message) for: \(sql)")
-            throw MCPIndexError.queryFailed(message)
-        }
+        try sqlExecOrThrow(db: db, sql: sql)
     }
 
     private func colText(_ stmt: OpaquePointer?, _ col: Int32) -> String {
-        guard let ptr = sqlite3_column_text(stmt, col) else { return "" }
-        return String(cString: ptr)
+        sqlColText(stmt, col)
     }
 
     private func colTextOptional(_ stmt: OpaquePointer?, _ col: Int32) -> String? {
-        guard sqlite3_column_type(stmt, col) != SQLITE_NULL,
-              let ptr = sqlite3_column_text(stmt, col) else { return nil }
-        return String(cString: ptr)
+        sqlColTextOptional(stmt, col)
     }
 
     private func dbError() -> String {
-        if let db = db {
-            return String(cString: sqlite3_errmsg(db))
-        }
-        return "database not open"
+        sqlDBError(db)
     }
 }
