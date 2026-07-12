@@ -68,7 +68,7 @@ extension ParakeetEngine {
         // not surprise users with a hidden or out-of-context prompt.
 
         modelDownloadState = .loading
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | initializing models...")
+        AppLogger.transcription.info("PARAKEET | initializing models...")
 
         var failureStage: ParakeetModelInitStage = .authorizationRequest
         var loadSource: ParakeetModelLoadSource = .unresolved
@@ -87,7 +87,7 @@ extension ParakeetEngine {
             if let bundlePath = bundledModelPath {
                 failureStage = .bundleLoad
                 loadSource = .bundle
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET | loading from bundle: \(bundlePath.path)")
+                AppLogger.transcription.info("PARAKEET | loading from bundle: \(bundlePath.path)")
                 models = try await AsrModels.load(from: bundlePath, version: .v3)
                 guard !Task.isCancelled, !isShuttingDown else { return }
                 loadSourceName = loadSource.rawValue
@@ -111,7 +111,7 @@ extension ParakeetEngine {
                 loadSource = .download
                 let downloadedPath: URL
                 if let modelFilePrefetchTask {
-                    TranscriptedCore.AppLogger.transcription.info("PARAKEET | waiting for background Parakeet model cache...")
+                    AppLogger.transcription.info("PARAKEET | waiting for background Parakeet model cache...")
                     modelDownloadState = .downloading(progress: 0.0)
                     downloadedPath = try await modelFilePrefetchTask.value
                     prefetchedModelPath = downloadedPath
@@ -122,14 +122,14 @@ extension ParakeetEngine {
                     prefetchedModelPath = cachedModelPath
                     downloadedPath = cachedModelPath
                 } else {
-                    TranscriptedCore.AppLogger.transcription.info("PARAKEET | models not bundled, downloading (~600MB)...")
+                    AppLogger.transcription.info("PARAKEET | models not bundled, downloading (~600MB)...")
                     modelDownloadState = .downloading(progress: 0.0)
                     downloadedPath = try await AsrModels.download(version: .v3)
                     prefetchedModelPath = downloadedPath
                 }
                 guard !Task.isCancelled, !isShuttingDown else { return }
                 modelDownloadState = .loading
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET | loading downloaded models from: \(downloadedPath.path)")
+                AppLogger.transcription.info("PARAKEET | loading downloaded models from: \(downloadedPath.path)")
                 models = try await AsrModels.load(from: downloadedPath, version: .v3)
                 guard !Task.isCancelled, !isShuttingDown else { return }
                 loadSourceName = loadSource.rawValue
@@ -146,7 +146,7 @@ extension ParakeetEngine {
             asrManager = manager
             asrManagerReady = true
             modelDownloadState = .ready
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET | TDT V3 models loaded (source: \(loadSourceName))")
+            AppLogger.transcription.info("PARAKEET | TDT V3 models loaded (source: \(loadSourceName))")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "models_loaded",
                 message: "Parakeet ASR models initialized successfully",
                 context: ["load_source": loadSourceName])
@@ -161,7 +161,7 @@ extension ParakeetEngine {
             prefetchedModelPath = nil
             let friendlyMessage = ModelDownloadService.classifyError(error).detail
             modelDownloadState = .failed(friendlyMessage)
-            TranscriptedCore.AppLogger.transcription.error("PARAKEET | model initialization failed: \(error.localizedDescription)")
+            AppLogger.transcription.error("PARAKEET | model initialization failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "model_init_failed",
                 message: error.localizedDescription,
                 context: ParakeetModelInitDiagnostics.failureContext(
@@ -264,13 +264,13 @@ extension ParakeetEngine {
 
             let modelDir: URL
             if let bundlePath = bundledModelPath(subdirectory: "parakeet-eou-120m-coreml", checkFile: "streaming_encoder.mlmodelc") {
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET EOU | loading from bundle: \(bundlePath.path)")
+                AppLogger.transcription.info("PARAKEET EOU | loading from bundle: \(bundlePath.path)")
                 modelDir = bundlePath
             } else {
                 // Download from HuggingFace (~120MB) and cache locally
                 // DownloadUtils nests inside <directory>/<repo.folderName>/, so we use the parent
                 guard let appSupportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-                    TranscriptedCore.AppLogger.transcription.warning("PARAKEET EOU | application support directory unavailable")
+                    AppLogger.transcription.warning("PARAKEET EOU | application support directory unavailable")
                     EventReporter.shared.capture(
                         level: .warning,
                         engine: "parakeet",
@@ -283,10 +283,10 @@ extension ParakeetEngine {
                 let expectedDir = cacheBase.appendingPathComponent("parakeet-eou-streaming/320ms", isDirectory: true)
                 let checkFile = expectedDir.appendingPathComponent("streaming_encoder.mlmodelc")
                 if FileManager.default.fileExists(atPath: checkFile.path) {
-                    TranscriptedCore.AppLogger.transcription.info("PARAKEET EOU | loading from cache: \(expectedDir.path)")
+                    AppLogger.transcription.info("PARAKEET EOU | loading from cache: \(expectedDir.path)")
                     modelDir = expectedDir
                 } else {
-                    TranscriptedCore.AppLogger.transcription.warning("PARAKEET EOU | streaming model download unavailable with current FluidAudio API")
+                    AppLogger.transcription.warning("PARAKEET EOU | streaming model download unavailable with current FluidAudio API")
                     EventReporter.shared.capture(
                         level: .warning,
                         engine: "parakeet",
@@ -324,12 +324,12 @@ extension ParakeetEngine {
             }
 
             eouManager = eou
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET EOU | streaming model ready")
+            AppLogger.transcription.info("PARAKEET EOU | streaming model ready")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "eou_model_loaded",
                 message: "Parakeet EOU streaming model initialized")
         } catch {
             // Non-fatal — live display will just stay empty until batch result arrives
-            TranscriptedCore.AppLogger.transcription.warning("PARAKEET EOU | model load failed (live display disabled): \(error.localizedDescription)")
+            AppLogger.transcription.warning("PARAKEET EOU | model load failed (live display disabled): \(error.localizedDescription)")
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "eou_model_failed",
                 message: error.localizedDescription)
         }
@@ -350,11 +350,11 @@ extension ParakeetEngine {
               !fileManager.fileExists(atPath: newDir.path) else { return }
         do {
             try fileManager.moveItem(at: legacyDir, to: newDir)
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET | migrated legacy model cache to \(newDir.lastPathComponent)")
+            AppLogger.transcription.info("PARAKEET | migrated legacy model cache to \(newDir.lastPathComponent)")
             EventReporter.shared.capture(level: .info, engine: "parakeet", event: "model_cache_migrated",
                 message: "Renamed pre-0.15 FluidAudio model cache folder")
         } catch {
-            TranscriptedCore.AppLogger.transcription.warning("PARAKEET | legacy model cache migration failed: \(error.localizedDescription)")
+            AppLogger.transcription.warning("PARAKEET | legacy model cache migration failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "model_cache_migration_failed",
                 message: error.localizedDescription)
         }
@@ -399,7 +399,7 @@ extension ParakeetEngine {
         if cleanupDecision == .cleanupNow {
             Task { await mgr?.cleanup() }
         } else {
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET | deferring ASR manager cleanup while transcription is active")
+            AppLogger.transcription.info("PARAKEET | deferring ASR manager cleanup while transcription is active")
         }
     }
 }

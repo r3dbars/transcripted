@@ -7,7 +7,7 @@ anonymous analytics, and Sparkle update plumbing.
 
 ## Key Files
 
-- `AppLogger.swift` — developer-facing debug log writer
+- `AppLogSink.swift` — developer-facing debug log writer (in-app debug panel + `debug.log`); see `docs/observability.md` for how this relates to `TranscriptedCore`'s `AppLogger`
 - `EventReporter.swift` — structured event capture
 - `ObservabilityEvent.swift` — shared structured event payload used by local event logging and derived reliability packets
 - `LocalObservabilityPayloadSanitizer.swift` — redacts local event messages and context before disk writes
@@ -52,7 +52,7 @@ anonymous analytics, and Sparkle update plumbing.
 - Timeline analytics should route through `TimelineAnalyticsTelemetry` so future Dayflow events keep screen-derived data local and only send coarse enum/bucket payloads.
 - Non-fatal error forwarding to Sentry is allowlisted. New `.error` events should not automatically assume they are safe to send off-device.
 - `RuntimeDiagnostics` writes only coarse runtime state under app-owned state. Keep it free of transcript text, raw audio, file paths, device names, meeting titles, and speaker names.
-- `ReliabilityPacketRecorder` derives packets from already-reviewed observability events. Keep its context allowlist coarse and bucketed; do not add raw error text, transcript text, raw audio, file paths, device names, meeting titles, speaker names, emails, tokens, or source app names.
+- `ReliabilityPacketRecorder` derives packets from already-reviewed observability events (`EventReporter.capture` calls `ReliabilityPacketRecorder.record` directly — see the sink map in `docs/observability.md`). Keep its context allowlist coarse and bucketed; do not add raw error text, transcript text, raw audio, file paths, device names, meeting titles, speaker names, emails, tokens, or source app names.
 - Update telemetry should keep using `UpdateFailureKind` instead of ad hoc string parsing so dashboards stay stable across Sparkle error wording changes.
 
 ## Verification

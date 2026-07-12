@@ -1,11 +1,15 @@
-// AppLogger.swift
+// AppLogSink.swift
 // Shared logging service — tracks every user action with timestamps.
 // Writes to both the in-app debug panel and the app-owned logs folder.
+//
+// See docs/observability.md for how this fits alongside TranscriptedCore's
+// AppLogger, FileLogger, EventReporter, and ReliabilityPacketRecorder.
 
 import Foundation
 import SwiftUI
+import TranscriptedCore
 
-private actor AppLogFileWriter {
+private actor AppLogSinkFileWriter {
     private var logPath: String?
     private var handle: FileHandle?
 
@@ -19,16 +23,16 @@ private actor AppLogFileWriter {
             do {
                 let attrs = try fm.attributesOfItem(atPath: path)
                 if let size = attrs[.size] as? UInt64, size > TranscriptedConstants.logRotationThreshold {
-                    if let data = fm.contents(atPath: path),
-                       let content = String(data: data, encoding: .utf8) {
-                        let lines = content.components(separatedBy: "\n")
-                        let kept = lines.suffix(TranscriptedConstants.logRotationKeepLines).joined(separator: "\n")
-                        do {
-                            try kept.write(toFile: path, atomically: true, encoding: .utf8)
-                        } catch {
-                            fputs("⚠️ LOGGER | log rotation write failed: \(error.localizedDescription)\n", stderr)
-                        }
-                    }
+                    // Trigger (byte size, checked once here at session start) stays
+                    // local; the actual read/trim/rewrite mechanics are shared with
+                    // TranscriptedCore's FileLogger via LogTailTrimmer.
+                    LogTailTrimmer.trimIfNeeded(
+                        at: path,
+                        maxLines: nil,
+                        keepLines: TranscriptedConstants.logRotationKeepLines,
+                        filterEmptyLines: false,
+                        appendsTrailingNewline: false
+                    )
                 }
             } catch {
                 fputs("⚠️ LOGGER | failed to read log file attributes: \(error.localizedDescription)\n", stderr)
@@ -73,13 +77,13 @@ private actor AppLogFileWriter {
 }
 
 @MainActor
-class AppLogger: ObservableObject {
+class AppLogSink: ObservableObject {
     @Published var entries: [String] = []
 
     private let logFilePath = FileManager.default.transcriptedLogsDirURL
         .appendingPathComponent("debug.log", isDirectory: false)
         .path
-    private let fileWriter = AppLogFileWriter()
+    private let fileWriter = AppLogSinkFileWriter()
     private var lastLogByKey: [String: CFAbsoluteTime] = [:]
 
     private let dateFormatter: DateFormatter = {

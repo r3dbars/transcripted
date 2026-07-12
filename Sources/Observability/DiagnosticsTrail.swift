@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 enum DiagnosticsTrail {
     static func record(
-        logger: AppLogger? = nil,
+        logger: AppLogSink? = nil,
         level: EventLevel = .info,
         engine: String,
         event: String,

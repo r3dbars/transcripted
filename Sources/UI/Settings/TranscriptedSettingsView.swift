@@ -14,7 +14,7 @@ struct TranscriptedSettingsView: View {
     @ObservedObject private var statsService: StatsService = .shared
 
     private let actions: TranscriptedSettingsActions
-    private let appLogger: AppLogger
+    private let appLogger: AppLogSink
 
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()

@@ -467,7 +467,7 @@ class ParakeetEngine: ObservableObject {
 
         prewarmRetryCount = 0
         markFormatReadyAndPublish()
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | input ready (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
+        AppLogger.transcription.info("PARAKEET | input ready (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
     }
 
     private func canContinuePrewarm(generation: Int) -> Bool {
@@ -1317,7 +1317,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func handleSystemWake() async {
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | system wake detected, resetting audio engine")
+        AppLogger.transcription.info("PARAKEET | system wake detected, resetting audio engine")
         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake",
             message: "System woke from sleep, resetting audio engine",
             context: ["was_recording": "\(isRecording)", "was_prewarmed": "\(isEnginePrewarmed)"])
@@ -1432,7 +1432,7 @@ class ParakeetEngine: ObservableObject {
               lastInputSelectionReportKey != reportKey else { return }
 
         lastInputSelectionReportKey = reportKey
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | using \(selection.selectedInput.name) instead of \(selection.defaultInput.name) to avoid Bluetooth headset mode")
+        AppLogger.transcription.info("PARAKEET | using \(selection.selectedInput.name) instead of \(selection.defaultInput.name) to avoid Bluetooth headset mode")
         EventReporter.shared.capture(
             level: .info,
             engine: "parakeet",
@@ -1669,7 +1669,7 @@ class ParakeetEngine: ObservableObject {
                     for: readiness.startFailureReason ?? .invalidAudioFormat,
                     isRecoveryAttempt: isRecoveryAttempt
                 )
-                TranscriptedCore.AppLogger.transcription.warning("PARAKEET | input format unavailable (\(readiness.rawValue)): output=\(snapshot.outputFormat.sampleRate)Hz/\(snapshot.outputFormat.channelCount)ch hw=\(snapshot.hwFormat.sampleRate)Hz/\(snapshot.hwFormat.channelCount)ch")
+                AppLogger.transcription.warning("PARAKEET | input format unavailable (\(readiness.rawValue)): output=\(snapshot.outputFormat.sampleRate)Hz/\(snapshot.outputFormat.channelCount)ch hw=\(snapshot.hwFormat.sampleRate)Hz/\(snapshot.hwFormat.channelCount)ch")
                 var context = audioStartContext(
                     attempt: attempt,
                     isRecoveryAttempt: isRecoveryAttempt,
@@ -1797,7 +1797,7 @@ class ParakeetEngine: ObservableObject {
 
                 if shouldRetry {
                     startGeneration = audioGraphGeneration
-                    TranscriptedCore.AppLogger.transcription.warning("PARAKEET | audio engine start failed, resetting graph and retrying once: \(error.localizedDescription)")
+                    AppLogger.transcription.warning("PARAKEET | audio engine start failed, resetting graph and retrying once: \(error.localizedDescription)")
                     EventReporter.shared.capture(
                         level: .warning,
                         engine: "parakeet",
@@ -1809,7 +1809,7 @@ class ParakeetEngine: ObservableObject {
                 }
 
                 if failureReason == .audioRouteNotSettled {
-                    TranscriptedCore.AppLogger.transcription.warning("PARAKEET | audio route format unsupported while starting; waiting for CoreAudio to settle")
+                    AppLogger.transcription.warning("PARAKEET | audio route format unsupported while starting; waiting for CoreAudio to settle")
                     EventReporter.shared.capture(
                         level: .warning,
                         engine: "parakeet",
@@ -1827,7 +1827,7 @@ class ParakeetEngine: ObservableObject {
                 }
 
                 if operationTimedOut {
-                    TranscriptedCore.AppLogger.transcription.error("PARAKEET | audio engine start timed out after \(attempt) attempt(s): \(error.localizedDescription)")
+                    AppLogger.transcription.error("PARAKEET | audio engine start timed out after \(attempt) attempt(s): \(error.localizedDescription)")
                     EventReporter.shared.capture(
                         level: .error,
                         engine: "parakeet",
@@ -1844,7 +1844,7 @@ class ParakeetEngine: ObservableObject {
                     return await failAudioStart()
                 }
 
-                TranscriptedCore.AppLogger.transcription.error("PARAKEET | audio engine failed after \(attempt) attempt(s): \(error.localizedDescription)")
+                AppLogger.transcription.error("PARAKEET | audio engine failed after \(attempt) attempt(s): \(error.localizedDescription)")
                 reportAudioStartFailureIfNeeded(message: error.localizedDescription, context: context)
                 if startFailureAction.markFormatUnready {
                     markStartFailedAndPublish()
@@ -1885,7 +1885,7 @@ class ParakeetEngine: ObservableObject {
             }
             Task { await eouManager?.reset() }
         }
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
+        AppLogger.transcription.info("PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
 
         // Watchdog: detect zombie audio engine (running but no usable signal after sleep/wake).
         // Only on first attempt — recovery attempt doesn't re-watchdog to prevent infinite loops.
@@ -1995,11 +1995,11 @@ class ParakeetEngine: ObservableObject {
 
             // Retry once — isRecoveryAttempt prevents another watchdog
             if await self.startRecording(isRecoveryAttempt: true) {
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET | zombie engine recovered — recording restarted")
+                AppLogger.transcription.info("PARAKEET | zombie engine recovered — recording restarted")
                 EventReporter.shared.capture(level: .info, engine: "parakeet", event: "zombie_engine_recovered",
                     message: "Audio engine recovered after reset")
             } else {
-                TranscriptedCore.AppLogger.transcription.error("PARAKEET | zombie engine recovery failed")
+                AppLogger.transcription.error("PARAKEET | zombie engine recovery failed")
                 EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zombie_engine_recovery_failed",
                     message: "Audio engine could not recover after reset",
                     context: ["audio_device": self.inputDeviceName])
@@ -2061,7 +2061,7 @@ class ParakeetEngine: ObservableObject {
         isRecording = false
         audioLevel = 0
         let stopSampleRate = safeNativeSampleRate()
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / stopSampleRate))s)")
+        AppLogger.transcription.info("PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / stopSampleRate))s)")
     }
 
     // MARK: - EOU Streaming (live display)
@@ -2230,7 +2230,7 @@ class ParakeetEngine: ObservableObject {
         }
         let nativeCount = recorded.nativeSampleCount
         let resampled = recorded.samples16k
-        TranscriptedCore.AppLogger.transcription.info("\(engineName.uppercased()) | resampled \(nativeCount) → \(resampled.count) samples")
+        AppLogger.transcription.info("\(engineName.uppercased()) | resampled \(nativeCount) → \(resampled.count) samples")
 
         let shortAudioDecision = ParakeetShortAudioGate.dictation(
             nativeSampleCount: nativeCount,
@@ -2239,7 +2239,7 @@ class ParakeetEngine: ObservableObject {
         guard shortAudioDecision.shouldTranscribe else {
             lastEmptyTranscriptionReason = .recordingTooShort
             let audioDuration = shortAudioDecision.context["audio_duration_s"] ?? "0.00"
-            TranscriptedCore.AppLogger.transcription.warning("\(engineName.uppercased()) | skipping transcription for short audio (\(audioDuration)s)")
+            AppLogger.transcription.warning("\(engineName.uppercased()) | skipping transcription for short audio (\(audioDuration)s)")
             EventReporter.shared.capture(
                 level: .warning,
                 engine: engineName,
@@ -2353,7 +2353,7 @@ class ParakeetEngine: ObservableObject {
             return nil
         }
         guard let manager = asrManager, asrManagerReady else {
-            TranscriptedCore.AppLogger.transcription.error("PARAKEET | ASR manager not available")
+            AppLogger.transcription.error("PARAKEET | ASR manager not available")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "asr_manager_unavailable",
                 message: "ASR manager not available for transcription")
             return nil
@@ -2368,7 +2368,7 @@ class ParakeetEngine: ObservableObject {
         }
         let nativeCount = recorded.nativeSampleCount
         let resampled = recorded.samples16k
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
+        AppLogger.transcription.info("PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
 
         let shortAudioDecision = ParakeetShortAudioGate.dictation(
             nativeSampleCount: nativeCount,
@@ -2377,7 +2377,7 @@ class ParakeetEngine: ObservableObject {
         guard shortAudioDecision.shouldTranscribe else {
             lastEmptyTranscriptionReason = .recordingTooShort
             let audioDuration = shortAudioDecision.context["audio_duration_s"] ?? "0.00"
-            TranscriptedCore.AppLogger.transcription.warning("PARAKEET | skipping transcription for short audio (\(audioDuration)s)")
+            AppLogger.transcription.warning("PARAKEET | skipping transcription for short audio (\(audioDuration)s)")
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "parakeet",
@@ -2400,7 +2400,7 @@ class ParakeetEngine: ObservableObject {
 
             let audioDuration = Double(resampled.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s, chars=\(corrected.count)")
+            AppLogger.transcription.info("PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s, chars=\(corrected.count)")
 
             if trimmed.isEmpty {
                 let analysis = DictationAudioRecovery.analyze(
@@ -2511,7 +2511,7 @@ class ParakeetEngine: ObservableObject {
                 return nil
             }
 
-            TranscriptedCore.AppLogger.transcription.error("PARAKEET | transcription failed: \(error.localizedDescription)")
+            AppLogger.transcription.error("PARAKEET | transcription failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "transcription_failed",
                 message: error.localizedDescription,
                 context: ["samples": "\(nativeCount)", "elapsed": String(format: "%.2f", elapsed)])
