@@ -316,13 +316,23 @@ extension FileManager {
 
     /// <capture-library>/meetings/
     var meetingSupportDir: URL {
-        transcriptedCaptureLibrarySubdirectory("meetings")
+        transcriptedCaptureLibrarySubdirectory(Self.meetingsDirectoryName)
     }
 
     /// <capture-library>/dictations/
     var dictationSupportDir: URL {
-        transcriptedCaptureLibrarySubdirectory("dictations")
+        transcriptedCaptureLibrarySubdirectory(Self.dictationsDirectoryName)
     }
+
+    /// Sole source of truth for the `meetings` capture-library folder name.
+    /// Both `meetingSupportDir` and `writeTranscriptedMCPDirectoriesManifestIfNeeded`
+    /// read this constant so the two cannot drift apart.
+    static let meetingsDirectoryName = "meetings"
+
+    /// Sole source of truth for the `dictations` capture-library folder name.
+    /// Both `dictationSupportDir` and `writeTranscriptedMCPDirectoriesManifestIfNeeded`
+    /// read this constant so the two cannot drift apart.
+    static let dictationsDirectoryName = "dictations"
 
     private func transcriptedCaptureLibrarySubdirectory(_ name: String) -> URL {
         let url = transcriptedCaptureLibraryDir.appendingPathComponent(name, isDirectory: true)
@@ -353,8 +363,12 @@ extension FileManager {
     ) throws {
         let manifestURL = manifestURL ?? transcriptedMCPDirectoriesManifestURL
         let captureLibrary = captureLibraryURL.standardizedFileURL
-        let meetings = captureLibrary.appendingPathComponent("meetings", isDirectory: true)
-        let dictations = captureLibrary.appendingPathComponent("dictations", isDirectory: true)
+        // Reuses the same folder-name constants as `meetingSupportDir`/`dictationSupportDir`
+        // (rather than calling those computed properties directly) so this manifest write,
+        // which itself runs from inside `transcriptedCaptureLibraryDir`'s getter, can't
+        // recurse back into `transcriptedCaptureLibraryDir` through them.
+        let meetings = captureLibrary.appendingPathComponent(Self.meetingsDirectoryName, isDirectory: true)
+        let dictations = captureLibrary.appendingPathComponent(Self.dictationsDirectoryName, isDirectory: true)
 
         if let existingData = try? Data(contentsOf: manifestURL),
            let existing = try? JSONDecoder().decode(TranscriptedMCPDirectoriesManifest.self, from: existingData),
