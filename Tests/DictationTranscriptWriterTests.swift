@@ -46,6 +46,14 @@ func testDictationTranscriptWriter() {
         assertTrue(contents.contains("## 4:45 PM -"), "second dictation section should include time heading")
         assertTrue(contents.contains("first note from the morning"), "first dictation text should be present")
         assertTrue(contents.contains("second note from the afternoon"), "second dictation text should be present")
+
+        // Regression guard for the DateFormattingHelper.formatDayStamp /
+        // formatISO8601WithFractionalSeconds consolidation (audit 2026-07-08, W1-A5).
+        assertTrue(contents.contains("date: 2026-04-07"), "day header date field should keep the yyyy-MM-dd shape")
+        assertTrue(
+            contents.contains(DateFormattingHelper.formatISO8601WithFractionalSeconds(firstDate)),
+            "Captured: line should use the shared ISO8601-with-fractional-seconds formatter"
+        )
     }
 
     runSuite("DictationTranscriptWriter.save — keeps daily markdown owner-only") {

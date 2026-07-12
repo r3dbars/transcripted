@@ -35,22 +35,13 @@ enum MeetingTranscriptFileUpdateSerializer {
 /// The date comes from the meeting's recorded date; `<name>` is the sanitized title
 /// with no date of its own (the date lives in the filename and in frontmatter).
 enum MeetingArtifactRenamer {
-    private static let datePrefixFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     private static let formatterQueue = DispatchQueue(label: "Transcripted.MeetingArtifactRenamer.formatter")
 
     // MARK: - Stem building
 
     /// `YYYY-MM-dd` prefix for the given recording date.
     static func datePrefix(for date: Date) -> String {
-        formatterQueue.sync { datePrefixFormatter.string(from: date) }
+        formatterQueue.sync { DateFormattingHelper.formatDayStamp(date) }
     }
 
     /// Canonical file stem: `YYYY-MM-dd <sanitized title>`.

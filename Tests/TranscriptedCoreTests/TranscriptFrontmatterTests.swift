@@ -61,6 +61,23 @@ final class TranscriptFrontmatterTests: XCTestCase {
         XCTAssertEqual(components.second, 15)
     }
 
+    /// Regression guard for the DateFormattingHelper.parseDayStamp consolidation
+    /// (audit 2026-07-08, W1-A5): `date(values:)` must keep parsing the bare
+    /// `yyyy-MM-dd` frontmatter `date` field identically to before.
+    func testParsesDateOnly() throws {
+        let date = try XCTUnwrap(TranscriptFrontmatter.date(values: ["date": "2026-04-22"]))
+
+        let components = Calendar(identifier: .gregorian)
+            .dateComponents(in: TimeZone.current, from: date)
+        XCTAssertEqual(components.year, 2026)
+        XCTAssertEqual(components.month, 4)
+        XCTAssertEqual(components.day, 22)
+    }
+
+    func testDateOnlyRejectsMissingField() {
+        XCTAssertNil(TranscriptFrontmatter.date(values: [:]))
+    }
+
     func testReadValuesUsesBoundedPrefix() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptFrontmatterTests-\(UUID().uuidString)", isDirectory: true)
