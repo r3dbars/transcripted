@@ -88,7 +88,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/HomeTranscriptionActivityCopy.swift` — pure transcript-name and failed-transcription copy helpers extracted out of `HomeTranscriptionActivityPresentation` so they stay unit-testable without its `MeetingSessionController`/`DisplayStatus` dependency
 - `Settings/HomeView.swift` — Home canvas (greeting header with inline stats line, needs-attention pills, day-grouped capture lists with hover-reveal row actions), meeting-audio playback, failed-meeting recovery, preview/feedback sheets with AI-summary lead, and the stats detail sheet
 - `Settings/HotkeyRecorderAppKitView.swift` — AppKit view for recording custom hotkey bindings
-- `Settings/PermissionsOnboardingView.swift` — first-launch permissions walkthrough
+- `Settings/PermissionsOnboardingView.swift` — four-step first-launch flow (welcome, single permissions screen, live dictation try-out, ready recap with optional agent connect); prefetches the voice model in the background and hard-gates only on Microphone
 - `Settings/SettingsContentLayoutPolicy.swift` — layout policy for compact settings content spacing and scroll behavior
 - `Settings/SettingsRecentCaptureRefreshPolicy.swift` — central policy for whether Settings should refresh the home dashboard, the recent meetings/dictations lists, or neither when navigation changes
 - `Settings/SpeakerNameAutocompleteField.swift` — SwiftUI `NSComboBox` wrapper that gives the Speakers screen's "Who is this?" field the same name autocomplete (via `SpeakerNameSelectionPolicy`) the post-meeting naming sheet uses

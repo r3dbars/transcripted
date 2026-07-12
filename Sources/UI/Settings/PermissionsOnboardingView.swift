@@ -1,10 +1,13 @@
 // PermissionsOnboardingView.swift
 // First-run onboarding for Transcripted's local dictation and meeting capture.
+//
+// The flow is intentionally four steps: welcome → permissions → try dictation
+// → ready. Every grant lives on the single permissions screen, the voice model
+// prefetches in the background from the first screen, and the only hard gate
+// is Microphone so meeting-only users are never trapped on optional grants.
 
 import SwiftUI
 import AppKit
-import AVFoundation
-import ApplicationServices
 
 extension Notification.Name {
     /// Posted by app-termination cleanup so onboarding can attribute an
@@ -36,6 +39,8 @@ extension FirstRunLocalModelState {
 @MainActor
 struct PermissionsOnboardingView: View {
     var onComplete: () -> Void
+    var startModelPrefetch: @MainActor () -> Void
+    var modelStateProvider: @MainActor () -> FirstRunLocalModelState
 
     static let preferredSize = NSSize(width: 960, height: 680)
     private static let defaultDictationShortcut = "Right Option"
@@ -46,62 +51,69 @@ struct PermissionsOnboardingView: View {
     @State private var micGranted = false
     @State private var accessibilityGranted = false
     @State private var systemAudioGranted = false
-    @State private var calendarGranted = false
-    @State private var meetingPromptsEnabled = true
-    @State private var selectedUseCase: OnboardingUseCase = .meetings
-    @State private var leaveDictationShortcutsOff = true
     @State private var diagnosticsEnabled = CrashReportingPreferences.isEnabled() && AnalyticsPreferences.isEnabled()
     @State private var demoDictationText = ""
+    @State private var modelState: FirstRunLocalModelState = .notLoaded
     @State private var copiedAgentItem: AgentCopyItem?
     @State private var claudeDesktopConnectPhase: OnboardingAgentConnectPhase = .idle
     @State private var copiedResetTask: Task<Void, Never>?
     @State private var pollTask: Task<Void, Never>?
-    @State private var permissionRevalidationTask: Task<Void, Never>?
+    @State private var systemAudioProbeTask: Task<Void, Never>?
     @State private var flowStartedAt: CFAbsoluteTime?
     @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
     @State private var didTrackAbandonment = false
+    @State private var didStartModelPrefetch = false
     @State private var pendingSystemSettingsHandoff = false
+    @State private var pendingSystemSettingsHandoffKind: TranscriptedPermissionKind?
     @State private var lastPermissionStatuses: [TranscriptedPermissionKind: String] = [:]
     @FocusState private var demoEditorFocused: Bool
 
-    init(onComplete: @escaping () -> Void) {
+    init(
+        startModelPrefetch: @escaping @MainActor () -> Void = {},
+        modelStateProvider: @escaping @MainActor () -> FirstRunLocalModelState = { .notLoaded },
+        onComplete: @escaping () -> Void
+    ) {
+        self.startModelPrefetch = startModelPrefetch
+        self.modelStateProvider = modelStateProvider
         self.onComplete = onComplete
     }
+
+    private static let stepSequence: [OnboardingStepSpec] = [
+        .init(kind: .welcome),
+        .init(kind: .permissions),
+        .init(kind: .tryDictation, canSkip: true),
+        .init(kind: .ready),
+    ]
+
+    private var steps: [OnboardingStepSpec] { Self.stepSequence }
 
     private var currentStep: OnboardingStepSpec {
         steps[min(currentStepIndex, steps.count - 1)]
     }
 
-    private var steps: [OnboardingStepSpec] {
-        Self.steps(for: selectedUseCase)
+    /// Microphone is the only hard gate. System Audio and Accessibility are
+    /// strongly nudged in place, but meeting-only users must never be trapped
+    /// behind grants they do not need yet.
+    private var hasRequiredPermissions: Bool {
+        FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: micGranted)
     }
 
-    private var hasRequiredPermissions: Bool {
-        switch selectedUseCase {
-        case .meetings:
-            return FirstRunExperience.hasRequiredMeetingSetup(
-                microphoneGranted: micGranted
-            )
-        case .dictation:
-            return FirstRunExperience.hasRequiredDictationSetup(
-                microphoneGranted: micGranted,
-                accessibilityGranted: accessibilityGranted
-            )
-        }
+    private var dictationReady: Bool {
+        FirstRunExperience.hasRequiredDictationSetup(
+            microphoneGranted: micGranted,
+            accessibilityGranted: accessibilityGranted
+        )
     }
 
     private var primaryButtonTitle: String {
         if currentStepIndex == 0 { return "Begin" }
-        if currentStep.kind == .useCase {
-            return selectedUseCase == .meetings ? "Set up meetings" : "Set up dictation"
-        }
         if currentStepIndex == steps.count - 1 { return "Open Transcripted" }
         return "Continue"
     }
 
     private var primaryButtonDisabled: Bool {
-        (currentStep.kind == .permissions || currentStep.kind == .done) && !hasRequiredPermissions
+        (currentStep.kind == .permissions || currentStep.kind == .ready) && !hasRequiredPermissions
     }
 
     var body: some View {
@@ -126,8 +138,16 @@ struct PermissionsOnboardingView: View {
             if flowStartedAt == nil {
                 flowStartedAt = CFAbsoluteTimeGetCurrent()
             }
+            if !didStartModelPrefetch {
+                // Start caching the on-device voice model while the user reads
+                // the first screens, so the first dictation is not blocked on a
+                // large download.
+                didStartModelPrefetch = true
+                startModelPrefetch()
+            }
             checkAllPermissions(trackChanges: false)
-            revalidateSystemAudioPermission(trackChanges: false)
+            revalidateSystemAudioIfAlreadyKnown()
+            refreshModelState()
             trackCurrentStepViewed()
             startPolling()
         }
@@ -135,7 +155,7 @@ struct PermissionsOnboardingView: View {
             trackCurrentStepViewed()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            pendingSystemSettingsHandoff = false
+            handleAppBecameActive()
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptedOnboardingWillTerminate)) { _ in
             trackAbandonmentIfNeeded()
@@ -153,259 +173,95 @@ struct PermissionsOnboardingView: View {
         case .welcome:
             CenterStage {
                 Kicker("Transcripted")
-                Headline(primary: "Your spoken work becomes text.", emphasis: "Meetings first, if you want.")
-                Lede("Record a meeting. Dictate a thought. Ask your agent what happened.")
+                Headline(primary: "Speak. It's written.", emphasis: "Private, on this Mac.")
+                Lede("Dictate into any app. Record meetings with both sides of the call. Everything becomes local Markdown you and your agent can search.", maxWidth: 560)
                 HeroWaveCircle()
-                    .padding(.top, 14)
-            }
-        case .privacy:
-            CenterStage {
-                Kicker("Before we start")
-                Headline(primary: "Your conversations.\nYour files.", emphasis: "Stays on your Mac.")
-                Lede("No accounts. No sign-in. Your audio and Markdown stay on this computer.", maxWidth: 500)
+                    .padding(.top, 10)
                 HStack(spacing: 14) {
                     PrivacyPill("On-device transcription")
-                    PrivacyPill("Stored as markdown")
-                    PrivacyPill("No cloud, no sync")
+                    PrivacyPill("Saved as Markdown")
+                    PrivacyPill("No accounts, no cloud")
                 }
-                .padding(.top, 18)
-            }
-        case .useCase:
-            CenterStage {
-                Kicker("Choose your setup")
-                Headline(primary: "What do you need first?", size: 42)
-                BodyCopy("Pick the path that matches how you plan to use Transcripted today.", maxWidth: 520)
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 14) {
-                    UseCaseChoiceCard(
-                        title: "Meetings first",
-                        detail: "Record calls from the app. No dictation shortcut required.",
-                        footnote: "Best if you mainly want meeting notes.",
-                        icon: "person.2.wave.2.fill",
-                        isSelected: selectedUseCase == .meetings,
-                        automationIdentifier: "transcripted.onboarding.use-case.meetings"
-                    ) {
-                        selectedUseCase = .meetings
-                    }
-                    UseCaseChoiceCard(
-                        title: "Dictation too",
-                        detail: "Talk to type anywhere with a shortcut.",
-                        footnote: "Best if you want paste-back in other apps.",
-                        icon: "keyboard",
-                        isSelected: selectedUseCase == .dictation,
-                        automationIdentifier: "transcripted.onboarding.use-case.dictation"
-                    ) {
-                        selectedUseCase = .dictation
-                    }
-                }
-                .frame(width: 650)
-                .padding(.top, 8)
+                .padding(.top, 10)
             }
         case .permissions:
-            CenterStage {
-                Kicker(selectedUseCase == .meetings ? "Meeting setup" : "Dictation setup")
-                Headline(
-                    primary: selectedUseCase == .meetings
-                        ? "Set up meetings."
-                        : "Set up dictation.",
-                    emphasis: selectedUseCase == .meetings ? "No paste-back required." : nil,
-                    size: 42
-                )
-                BodyCopy(
-                    selectedUseCase == .meetings
-                        ? "Meetings need your mic and the other side of the call. Dictation paste-back can wait."
-                        : "Dictation needs your mic and permission to paste text back where you were typing.",
-                    maxWidth: 520
-                )
-                .multilineTextAlignment(.center)
+            CenterStage(spacing: 14) {
+                Kicker("One-time setup")
+                Headline(primary: "Allow three things.", emphasis: "Everything stays on this Mac.", size: 42)
+                BodyCopy("Each one is a click. macOS will confirm with you directly, and you can change any of them later in System Settings.", maxWidth: 540)
+                    .multilineTextAlignment(.center)
                 permissionRows
-                    .frame(width: 500)
-                    .padding(.top, 8)
-                if selectedUseCase == .meetings {
-                    ToggleCard(
-                        title: "Leave dictation shortcuts off",
-                        detail: "You can still start meetings from the app. Turn dictation on later in Settings > Shortcuts.",
-                        isOn: $leaveDictationShortcutsOff,
-                        automationIdentifier: "transcripted.onboarding.permissions.leave-dictation-shortcuts-off"
-                    )
-                    .frame(width: 500)
-                    .padding(.top, 2)
-                }
-                Text(requiredPermissionsStatusText)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(OnboardingTheme.muted)
-                    .padding(.top, 4)
-            }
-        case .dictation:
-            SplitStage {
-                Kicker("Dictation")
-                Headline(primary: "Talk to type.", emphasis: "In any app.", size: 42, alignment: .leading)
-                BodyCopy("Tap Right Option once to start. Tap it again to stop. Your words land where your cursor is.")
-                BulletList(["Mail, docs, Slack, code, anywhere", "On-device. Fast.", "Never leaves your Mac"])
-            } right: {
-                DictationDemoCard()
-            }
-        case .shortcut:
-            CenterStage {
-                Kicker("Your turn")
-                Headline(primary: "Try dictation\nright now.", size: 42)
-                BodyCopy("Tap Right Option, say what you want, then tap Right Option again. Transcripted will paste it here.", maxWidth: 540)
-                DemoPasteTarget(text: $demoDictationText)
-                    .focused($demoEditorFocused)
+                    .frame(width: 560)
                     .padding(.top, 6)
-                HStack(spacing: 12) {
-                    DictationPill(label: Self.defaultDictationShortcut)
-                    Text("You can change it anytime in Settings.")
-                        .font(.system(size: 12))
-                        .italic()
-                        .foregroundStyle(OnboardingTheme.muted)
-                }
-                .padding(.top, 6)
-                .onAppear {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        demoEditorFocused = true
-                    }
-                }
-            }
-        case .meetingStart:
-            SplitStage {
-                Kicker("Meetings first")
-                Headline(primary: "Transcripted notices\nwhen a call starts.", emphasis: "Then it asks, once.", size: 42, alignment: .leading)
-                BodyCopy("Any app or browser tab using your mic counts — Zoom, Meet, whatever — no calendar invite required. Prefer to start it yourself? Click Transcripted in the menu bar and choose Start Meeting.")
-                BulletList([
-                    leaveDictationShortcutsOff ? "Dictation shortcuts are off for this setup" : "Dictation shortcuts stay available",
-                    "Works with any call, calendar invite or not",
-                    "Turn auto-detect off anytime in Settings"
-                ])
-            } right: {
-                MeetingStartPathCard(dictationShortcutsOff: leaveDictationShortcutsOff)
-            }
-        case .systemAudio:
-            SplitStage {
-                Kicker("Meeting transcripts")
-                Headline(primary: "Record meetings.\nGet the transcript.", size: 42, alignment: .leading)
-                BodyCopy("Transcripted needs two audio streams to write the whole conversation: your microphone for you, and system audio for everyone else.")
-                BulletList(["macOS calls this Screen Recording", "Used only to hear meeting audio", "Everything stays on your Mac"])
-                Button(systemAudioGranted ? "System audio enabled" : "Enable system audio") {
-                    requestPermission(.systemAudioRecording, required: false)
-                }
-                .buttonStyle(InkButtonStyle(isSubtle: systemAudioGranted))
-                .padding(.top, 12)
-                .accessibilityIdentifier("transcripted.onboarding.system-audio.enable")
-                Text("You can skip this now, but meeting transcripts need it to include the other side of the call.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(OnboardingTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            } right: {
-                DualStreamVisual(systemReady: systemAudioGranted)
-            }
-        case .meeting:
-            SplitStage {
-                Kicker("After the call")
-                Headline(primary: "A transcript you can actually use.", size: 42, alignment: .leading)
-                BodyCopy(systemAudioGranted
-                    ? "Every recorded meeting becomes a local Markdown file with timestamps and speaker labels."
-                    : "Once System Audio is on, recorded meetings become local Markdown with both sides of the conversation.")
-                BulletList(systemAudioGranted
-                    ? ["Find decisions later", "Copy exact quotes", "Give your agent the right context"]
-                    : ["Meeting prompts are ready now", "System Audio adds everyone else's voice", "Turn it on from the app when you are ready"])
-            } right: {
-                MeetingDemoCard()
-            }
-        case .calendar:
-            SplitStage {
-                Kicker("Calendar")
-                Headline(primary: "Calendar adds\nan early nudge.", size: 42, alignment: .leading)
-                BodyCopy("Transcripted already notices when a call starts — any app or browser tab using your mic, no invite required — and asks once. Add calendar access and it can nudge you a few minutes before a scheduled meeting even begins.")
                 ToggleCard(
-                    title: "Calendar reminders",
-                    detail: "Use read-only calendar access for a heads-up before scheduled calls.",
-                    isOn: $meetingPromptsEnabled,
-                    automationIdentifier: "transcripted.onboarding.calendar.meeting-reminders"
+                    title: "Share anonymous diagnostics",
+                    detail: "Crash reports and feature counts. Never audio, transcripts, or anything you type or say.",
+                    isOn: $diagnosticsEnabled,
+                    compact: true,
+                    automationIdentifier: "transcripted.onboarding.diagnostics.share"
                 )
-                .frame(maxWidth: 440)
-                .padding(.top, 4)
-                .onChange(of: meetingPromptsEnabled) { _, newValue in
-                    if !newValue {
-                        calendarGranted = false
-                    }
-                }
-                Button(calendarGranted ? "Calendar connected" : "Allow calendar access") {
-                    requestPermission(.calendar, required: false)
-                }
-                .buttonStyle(InkButtonStyle(isSubtle: calendarGranted || !meetingPromptsEnabled))
-                .disabled(!meetingPromptsEnabled)
-                .padding(.top, 6)
-                .accessibilityIdentifier("transcripted.onboarding.calendar.allow")
-                Text("Read-only. Events stay on your Mac.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(OnboardingTheme.muted)
-            } right: {
-                CalendarMock(connected: calendarGranted && meetingPromptsEnabled)
-            }
-        case .memory:
-            CenterStage {
-                Kicker("The payoff")
-                Headline(
-                    primary: selectedUseCase == .meetings ? "Every meeting you've recorded," : "Every word you've said,",
-                    emphasis: "searchable.",
-                    size: 52
-                )
-                Lede(
-                    selectedUseCase == .meetings
-                        ? "Meetings become local Markdown your agent can search, summarize, and reason over."
-                        : "Dictations and meetings flow into one place on your Mac. Your second brain, for your agent to reason over.",
-                    maxWidth: 560
-                )
-                MemoryFlowVisual()
-                    .padding(.top, 16)
-            }
-        case .agentDemo:
-            SplitStage {
-                Kicker("Your agent")
-                Headline(primary: "Ask about", emphasis: "last Tuesday.", size: 42, alignment: .leading)
-                BodyCopy("Your agent gets a new skill: your voice history. Answers come back with citations from your own words.")
-            } right: {
-                AgentDemoCard()
-            }
-        case .connectAgent:
-            ConnectAgentStage(
-                copiedItem: copiedAgentItem,
-                connectPhase: claudeDesktopConnectPhase,
-                onCopy: copyAgentItem,
-                onConnectClaudeDesktop: connectClaudeDesktop
-            )
-        case .diagnostics:
-            CenterStage {
-                Kicker("One last thing")
-                Headline(primary: "Help us make it better?", size: 42)
-                BodyCopy("Anonymous diagnostics help us find bugs and fix them fast.", maxWidth: 480)
-                    ToggleCard(
-                        title: "Share anonymous diagnostics",
-                        detail: "Crash reports, feature counts, app version, and macOS version. Never audio, transcripts, or anything you type or say.",
-                        isOn: $diagnosticsEnabled,
-                        automationIdentifier: "transcripted.onboarding.diagnostics.share"
-                    )
-                .frame(width: 480)
-                .padding(.top, 10)
+                .frame(width: 560)
                 .onChange(of: diagnosticsEnabled) { _, newValue in
                     CrashReportingPreferences.setEnabled(newValue)
                     AnalyticsPreferences.setEnabled(newValue)
                 }
+                Text(readinessLine)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(OnboardingTheme.muted)
+                    .padding(.top, 2)
             }
-        case .done:
+        case .tryDictation:
             CenterStage {
+                Kicker("Your turn")
+                Headline(primary: "Try dictation right now.", size: 42)
+                if dictationReady {
+                    BodyCopy("Tap \(Self.defaultDictationShortcut) once, say anything, then tap it again. Transcripted pastes your words right here.", maxWidth: 540)
+                        .multilineTextAlignment(.center)
+                    DemoPasteTarget(text: $demoDictationText)
+                        .focused($demoEditorFocused)
+                        .padding(.top, 6)
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                demoEditorFocused = true
+                            }
+                        }
+                    HStack(spacing: 12) {
+                        DictationPill(label: Self.defaultDictationShortcut)
+                        ModelStatusCapsule(state: modelState)
+                    }
+                    .padding(.top, 6)
+                    Text("Works in any app — Mail, docs, Slack, code. Change the shortcut anytime in Settings.")
+                        .font(.system(size: 12))
+                        .italic()
+                        .foregroundStyle(OnboardingTheme.muted)
+                } else {
+                    BodyCopy("Dictation listens with the microphone and pastes with Accessibility. Finish those two and try it without leaving this window.", maxWidth: 540)
+                        .multilineTextAlignment(.center)
+                    tryDictationSetupRows
+                        .frame(width: 560)
+                        .padding(.top, 6)
+                    Text("Or skip for now — you can dictate anytime with \(Self.defaultDictationShortcut) once setup is done.")
+                        .font(.system(size: 12))
+                        .italic()
+                        .foregroundStyle(OnboardingTheme.muted)
+                        .padding(.top, 4)
+                }
+            }
+        case .ready:
+            CenterStage(spacing: 16) {
                 Kicker("You're set")
-                Headline(
-                    primary: selectedUseCase == .meetings ? "Record. Review. Ask." : "Dictate. Record. Ask.",
-                    size: 52
+                Headline(primary: "Dictate. Record. Ask.", size: 48)
+                Lede(readyStepLede, maxWidth: 560)
+                ThreeActionsRecap()
+                    .padding(.top, 10)
+                AgentConnectStrip(
+                    copiedItem: copiedAgentItem,
+                    connectPhase: claudeDesktopConnectPhase,
+                    onCopy: copyAgentItem,
+                    onConnectClaudeDesktop: connectClaudeDesktop
                 )
-                Lede(
-                    doneStepLede,
-                    maxWidth: 560
-                )
-                ThreeActionsRecap(useCase: selectedUseCase)
-                    .padding(.top, 22)
+                .frame(width: 640)
+                .padding(.top, 8)
             }
         }
     }
@@ -415,63 +271,82 @@ struct PermissionsOnboardingView: View {
         VStack(spacing: 12) {
             PermissionGrantRow(
                 title: "Microphone",
-                reason: selectedUseCase == .meetings ? "For your side of the meeting." : "So Transcripted can hear you.",
+                reason: "Hears you — dictation and your side of meetings.",
                 icon: "mic.fill",
                 granted: micGranted,
-                actionTitle: "Allow",
+                requirementLabel: "Required",
                 automationIdentifier: "transcripted.onboarding.permissions.microphone"
             ) {
                 requestPermission(.microphone, required: true)
             }
 
-            switch selectedUseCase {
-            case .meetings:
+            PermissionGrantRow(
+                title: "System Audio",
+                reason: "Hears everyone else on a call, so meeting transcripts have both sides.",
+                icon: "speaker.wave.2.fill",
+                granted: systemAudioGranted,
+                requirementLabel: "For meetings",
+                automationIdentifier: "transcripted.onboarding.permissions.system-audio"
+            ) {
+                requestPermission(.systemAudioRecording, required: false)
+            }
+
+            PermissionGrantRow(
+                title: "Accessibility",
+                reason: "Types for you — pastes dictation wherever your cursor is.",
+                icon: "hand.raised.fill",
+                granted: accessibilityGranted,
+                requirementLabel: "For dictation",
+                automationIdentifier: "transcripted.onboarding.permissions.accessibility"
+            ) {
+                requestPermission(.accessibility, required: false)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var tryDictationSetupRows: some View {
+        VStack(spacing: 12) {
+            if !micGranted {
                 PermissionGrantRow(
-                    title: "System Audio",
-                    reason: "For everyone else on the call.",
-                    icon: "speaker.wave.2.fill",
-                    granted: systemAudioGranted,
-                    actionTitle: "Allow",
-                    automationIdentifier: "transcripted.onboarding.permissions.system-audio"
+                    title: "Microphone",
+                    reason: "Hears you — dictation and your side of meetings.",
+                    icon: "mic.fill",
+                    granted: micGranted,
+                    requirementLabel: "Required",
+                    automationIdentifier: "transcripted.onboarding.try.permissions.microphone"
                 ) {
-                    requestPermission(.systemAudioRecording, required: false)
+                    requestPermission(.microphone, required: true)
                 }
-            case .dictation:
+            }
+            if !accessibilityGranted {
                 PermissionGrantRow(
                     title: "Accessibility",
-                    reason: "So paste-back works in other apps.",
+                    reason: "Types for you — pastes dictation wherever your cursor is.",
                     icon: "hand.raised.fill",
                     granted: accessibilityGranted,
-                    actionTitle: "Allow",
-                    automationIdentifier: "transcripted.onboarding.permissions.accessibility"
+                    requirementLabel: "For dictation",
+                    automationIdentifier: "transcripted.onboarding.try.permissions.accessibility"
                 ) {
-                    requestPermission(.accessibility, required: true)
+                    requestPermission(.accessibility, required: false)
                 }
             }
         }
     }
 
-    private var requiredPermissionsStatusText: String {
-        if hasRequiredPermissions {
-            return selectedUseCase == .meetings
-                ? (systemAudioGranted ? "Meeting recording is ready." : "Meeting prompts are ready. System Audio can be set up next.")
-                : "Dictation is ready."
-        }
-
-        return selectedUseCase == .meetings
-            ? "Allow Microphone to continue. System Audio is next for full meeting transcripts."
-            : "Allow Microphone and Accessibility to continue."
+    private var readinessLine: String {
+        FirstRunExperience.setupReadinessLine(
+            microphoneGranted: micGranted,
+            systemAudioGranted: systemAudioGranted,
+            accessibilityGranted: accessibilityGranted
+        )
     }
 
-    private var doneStepLede: String {
-        switch selectedUseCase {
-        case .meetings:
-            return systemAudioGranted
-                ? "Start meetings from Transcripted. Dictation can stay off until you want it."
-                : "Transcripted can spot calls now. Turn on System Audio from the app before recording a full meeting transcript."
-        case .dictation:
-            return "Three actions to remember: use your voice anywhere, capture meetings, then ask your agent what happened."
+    private var readyStepLede: String {
+        if systemAudioGranted {
+            return "That's the whole app. Transcripted notices when a call starts — calendar invite or not — and asks once before recording."
         }
+        return "Transcripted notices when a call starts — calendar invite or not — and asks once. Allow System Audio from Settings before your first full meeting transcript."
     }
 
     private func goBack() {
@@ -496,18 +371,8 @@ struct PermissionsOnboardingView: View {
         if currentStepIndex == steps.count - 1 {
             completeOnboarding()
         } else {
-            if currentStep.kind == .useCase || currentStep.kind == .permissions {
-                applySelectedUseCasePreferences()
-            }
             goNext()
         }
-    }
-
-    private func applySelectedUseCasePreferences() {
-        OnboardingDictationShortcutPolicy.apply(
-            useCase: selectedUseCase.shortcutPolicyUseCase,
-            leaveDictationShortcutsOff: leaveDictationShortcutsOff
-        )
     }
 
     private func connectClaudeDesktop() {
@@ -518,7 +383,7 @@ struct PermissionsOnboardingView: View {
             "onboarding_agent_cta_clicked",
             properties: [
                 "agent_cta": "claude_desktop_connect",
-                "step_id": "connect_agent",
+                "step_id": currentStep.kind.analyticsID,
             ]
         )
 
@@ -582,7 +447,7 @@ struct PermissionsOnboardingView: View {
             "onboarding_agent_cta_clicked",
             properties: [
                 "agent_cta": agentCTA,
-                "step_id": "connect_agent",
+                "step_id": currentStep.kind.analyticsID,
             ]
         )
 
@@ -601,8 +466,6 @@ struct PermissionsOnboardingView: View {
         micGranted = TranscriptedPermissionAccess.isGranted(.microphone)
         accessibilityGranted = TranscriptedPermissionAccess.isGranted(.accessibility)
         systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
-        calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
-        revalidateSystemAudioPermissionForStatusSurfaces()
 
         let updatedStatuses = currentPermissionStatuses()
         if trackChanges && !previousStatuses.isEmpty {
@@ -611,16 +474,46 @@ struct PermissionsOnboardingView: View {
         lastPermissionStatuses = updatedStatuses
     }
 
-    private func revalidateSystemAudioPermissionForStatusSurfaces() {
-        guard permissionRevalidationTask == nil else { return }
+    /// System audio has no passive status API, so its cached status can go
+    /// stale between launches. Freshen it once per appearance, but only when a
+    /// decision has already been made — probing an undetermined status would
+    /// surface the macOS prompt before the user asked for it.
+    private func revalidateSystemAudioIfAlreadyKnown() {
         guard TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown else { return }
-        permissionRevalidationTask = Task { @MainActor in
+        probeSystemAudioPermission(trackChanges: false)
+    }
+
+    private func probeSystemAudioPermission(trackChanges: Bool) {
+        guard systemAudioProbeTask == nil else { return }
+        systemAudioProbeTask = Task { @MainActor in
             _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
-            systemAudioGranted = TranscriptedPermissionAccess.isGranted(.systemAudioRecording)
-            permissionRevalidationTask = nil
+            checkAllPermissions(trackChanges: trackChanges)
+            systemAudioProbeTask = nil
         }
     }
 
+    private func handleAppBecameActive() {
+        let handoffKind = pendingSystemSettingsHandoffKind
+        let hadHandoff = pendingSystemSettingsHandoff
+        pendingSystemSettingsHandoff = false
+        pendingSystemSettingsHandoffKind = nil
+        checkAllPermissions(trackChanges: true)
+
+        // Returning from a System Settings handoff is the one moment a user can
+        // have flipped the System Audio toggle behind our back; re-probe it.
+        // Never probe while the status is undetermined unless the handoff was
+        // for System Audio itself, so no surprise macOS prompt appears.
+        guard hadHandoff else { return }
+        if handoffKind == .systemAudioRecording
+            || TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown {
+            probeSystemAudioPermission(trackChanges: true)
+        }
+    }
+
+    /// Cheap 1s status refresh so rows flip live while the user grants
+    /// permissions. Microphone/Accessibility reads are free; System Audio is
+    /// read from its cache here and only re-probed on click, appearance, or
+    /// return from System Settings.
     private func startPolling() {
         pollTask?.cancel()
         pollTask = Task { @MainActor in
@@ -629,7 +522,8 @@ struct PermissionsOnboardingView: View {
             // user has the System Settings menu open. A Task-driven loop keeps
             // polling regardless and dies cleanly when onDisappear cancels it.
             while !Task.isCancelled {
-                await revalidateSystemAudioPermissionNow(trackChanges: true)
+                checkAllPermissions(trackChanges: true)
+                refreshModelState()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
@@ -638,25 +532,22 @@ struct PermissionsOnboardingView: View {
     private func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
-        permissionRevalidationTask?.cancel()
-        permissionRevalidationTask = nil
+        systemAudioProbeTask?.cancel()
+        systemAudioProbeTask = nil
     }
 
-    private func revalidateSystemAudioPermission(trackChanges: Bool) {
-        Task { @MainActor in
-            await revalidateSystemAudioPermissionNow(trackChanges: trackChanges)
-        }
-    }
-
-    private func revalidateSystemAudioPermissionNow(trackChanges: Bool) async {
-        guard currentStep.kind == .permissions
-            || TranscriptedPermissionAccess.systemAudioRecordingStatus() != .unknown
-        else {
-            checkAllPermissions(trackChanges: trackChanges)
-            return
-        }
-        _ = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus()
-        checkAllPermissions(trackChanges: trackChanges)
+    private func refreshModelState() {
+        let updated = modelStateProvider()
+        guard updated != modelState else { return }
+        AnalyticsReporter.track(
+            "onboarding_model_state_changed",
+            properties: [
+                "from_status": modelState.analyticsStatus,
+                "step_id": currentStep.kind.analyticsID,
+                "to_status": updated.analyticsStatus,
+            ]
+        )
+        modelState = updated
     }
 
     private func completeOnboarding() {
@@ -673,10 +564,10 @@ struct PermissionsOnboardingView: View {
         AnalyticsReporter.track(
             "onboarding_completed",
             properties: FirstRunExperience.onboardingCompletionAnalyticsProperties(
-                completionPath: selectedUseCase.completionPath,
+                completionPath: .unified,
                 systemAudioGranted: systemAudioGranted,
-                calendarGranted: calendarGranted,
-                meetingPromptsEnabled: meetingPromptsEnabled,
+                calendarGranted: TranscriptedPermissionAccess.isGranted(.calendar),
+                meetingPromptsEnabled: true,
                 firstDictationSaved: PermissionsOnboardingPreferences.hasTrackedFirstDictationSaved(),
                 anonymousUsageEnabled: AnalyticsPreferences.isEnabled(),
                 crashReportingEnabled: CrashReportingPreferences.isEnabled(),
@@ -712,7 +603,18 @@ struct PermissionsOnboardingView: View {
             ]
         )
 
+        // First System Audio ask: run the native capture probe so macOS shows
+        // its own permission dialog right here, instead of bouncing the user
+        // into System Settings. Once a decision exists, the regular
+        // request-or-open-Settings path takes over for retries.
+        if kind == .systemAudioRecording,
+           TranscriptedPermissionAccess.systemAudioRecordingStatus() == .unknown {
+            probeSystemAudioPermission(trackChanges: true)
+            return
+        }
+
         pendingSystemSettingsHandoff = true
+        pendingSystemSettingsHandoffKind = kind
         TranscriptedPermissionAccess.openSettings(for: kind)
         checkAllPermissions(trackChanges: false)
     }
@@ -770,9 +672,6 @@ struct PermissionsOnboardingView: View {
 
     private var primaryCTAAnalyticsID: String {
         if currentStepIndex == 0 { return "begin" }
-        if currentStep.kind == .useCase {
-            return selectedUseCase == .meetings ? "set_up_meetings" : "set_up_dictation"
-        }
         if currentStepIndex == steps.count - 1 { return "open_transcripted" }
         return "continue"
     }
@@ -791,50 +690,12 @@ struct PermissionsOnboardingView: View {
             .accessibility: accessibilityGranted ? "granted" : "not_granted",
             .systemAudioRecording: systemAudioGranted ? "granted" : "not_granted",
             .screenRecording: TranscriptedPermissionAccess.isGranted(.screenRecording) ? "granted" : "not_granted",
-            .calendar: calendarGranted ? "granted" : "not_granted",
+            .calendar: TranscriptedPermissionAccess.isGranted(.calendar) ? "granted" : "not_granted",
         ]
     }
 
     private func permissionStatus(for kind: TranscriptedPermissionKind) -> String {
         currentPermissionStatuses()[kind] ?? "unknown"
-    }
-
-    private static func steps(for useCase: OnboardingUseCase) -> [OnboardingStepSpec] {
-        switch useCase {
-        case .meetings:
-            return [
-                .init(kind: .welcome),
-                .init(kind: .privacy),
-                .init(kind: .useCase),
-                .init(kind: .permissions),
-                .init(kind: .meetingStart),
-                .init(kind: .systemAudio, canSkip: true),
-                .init(kind: .meeting),
-                .init(kind: .calendar, canSkip: true),
-                .init(kind: .memory),
-                .init(kind: .agentDemo),
-                .init(kind: .connectAgent, canSkip: true),
-                .init(kind: .diagnostics, canSkip: true),
-                .init(kind: .done),
-            ]
-        case .dictation:
-            return [
-                .init(kind: .welcome),
-                .init(kind: .privacy),
-                .init(kind: .useCase),
-                .init(kind: .permissions),
-                .init(kind: .dictation),
-                .init(kind: .shortcut),
-                .init(kind: .systemAudio, canSkip: true),
-                .init(kind: .meeting),
-                .init(kind: .calendar, canSkip: true),
-                .init(kind: .memory),
-                .init(kind: .agentDemo),
-                .init(kind: .connectAgent, canSkip: true),
-                .init(kind: .diagnostics, canSkip: true),
-                .init(kind: .done),
-            ]
-        }
     }
 }
 
@@ -845,76 +706,40 @@ private struct OnboardingStepSpec {
 
 private enum OnboardingStepKind: Hashable {
     case welcome
-    case privacy
-    case useCase
     case permissions
-    case dictation
-    case shortcut
-    case meetingStart
-    case systemAudio
-    case meeting
-    case calendar
-    case memory
-    case agentDemo
-    case connectAgent
-    case diagnostics
-    case done
+    case tryDictation
+    case ready
 
     var analyticsID: String {
         switch self {
         case .welcome:
             return "welcome"
-        case .privacy:
-            return "privacy"
-        case .useCase:
-            return "use_case"
         case .permissions:
             return "permissions"
-        case .dictation:
-            return "dictation_intro"
-        case .shortcut:
+        case .tryDictation:
+            // Keeps funnel continuity with the previous flow's dictation test step.
             return "dictation_test"
-        case .meetingStart:
-            return "meeting_start"
-        case .systemAudio:
-            return "system_audio"
-        case .meeting:
-            return "meeting_value"
-        case .calendar:
-            return "calendar"
-        case .memory:
-            return "memory"
-        case .agentDemo:
-            return "agent_demo"
-        case .connectAgent:
-            return "connect_agent"
-        case .diagnostics:
-            return "diagnostics"
-        case .done:
+        case .ready:
             return "done"
         }
     }
 }
 
-private enum OnboardingUseCase: Hashable {
-    case meetings
-    case dictation
-
-    var shortcutPolicyUseCase: OnboardingDictationShortcutPolicy.UseCase {
+private extension FirstRunLocalModelState {
+    var analyticsStatus: String {
         switch self {
-        case .meetings:
-            return .meetings
-        case .dictation:
-            return .dictation
-        }
-    }
-
-    var completionPath: FirstRunCompletionPath {
-        switch self {
-        case .meetings:
-            return .meetings
-        case .dictation:
-            return .dictation
+        case .notLoaded:
+            return "not_loaded"
+        case .downloading:
+            return "downloading"
+        case .cached:
+            return "cached"
+        case .loading:
+            return "loading"
+        case .ready:
+            return "ready"
+        case .failed:
+            return "failed"
         }
     }
 }
@@ -1010,8 +835,9 @@ private struct OnboardingWindowShell<Content: View>: View {
             OnboardingTheme.window
 
             VStack(spacing: 0) {
+                // The real macOS close button sits in the transparent titlebar
+                // on the left; only the step counter is drawn here.
                 HStack(alignment: .center) {
-                    TrafficLights()
                     Spacer()
                     ProgressCounter(current: current, total: total)
                 }
@@ -1042,17 +868,6 @@ private struct OnboardingWindowShell<Content: View>: View {
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.22), radius: 45, y: 24)
-    }
-}
-
-private struct TrafficLights: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.34))
-            Circle().fill(Color(red: 1.0, green: 0.74, blue: 0.18))
-            Circle().fill(OnboardingTheme.success)
-        }
-        .frame(width: 52, height: 12)
     }
 }
 
@@ -1142,48 +957,24 @@ private struct NavBar: View {
 }
 
 private struct CenterStage<Content: View>: View {
+    var spacing: CGFloat
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(spacing: CGFloat = 18, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
         self.content = content()
     }
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
-            VStack(spacing: 18) {
+            VStack(spacing: spacing) {
                 content
             }
             .frame(maxWidth: 800)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 60)
-    }
-}
-
-private struct SplitStage<Left: View, Right: View>: View {
-    let left: Left
-    let right: Right
-
-    init(@ViewBuilder left: () -> Left, @ViewBuilder right: () -> Right) {
-        self.left = left()
-        self.right = right()
-    }
-
-    var body: some View {
-        HStack(spacing: 30) {
-            VStack(alignment: .leading, spacing: 18) {
-                left
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            ZStack {
-                right
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .padding(.horizontal, 60)
-        .padding(.vertical, 28)
     }
 }
 
@@ -1208,8 +999,8 @@ private struct Headline: View {
     var size: CGFloat = 58
     var alignment: TextAlignment = .center
     // Cap the line measure so long headings wrap onto balanced lines instead of
-    // running nearly edge-to-edge (CenterStage is 800pt, SplitStage's column is
-    // full width) and leaving an orphan word on the last line.
+    // running nearly edge-to-edge (CenterStage is 800pt) and leaving an orphan
+    // word on the last line.
     var measure: CGFloat = 640
 
     var body: some View {
@@ -1337,7 +1128,7 @@ private struct PermissionGrantRow: View {
     let reason: String
     let icon: String
     let granted: Bool
-    let actionTitle: String
+    var requirementLabel: String?
     let automationIdentifier: String
     let action: () -> Void
 
@@ -1353,20 +1144,32 @@ private struct PermissionGrantRow: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                    if let requirementLabel, !granted {
+                        Text(requirementLabel.uppercased())
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .kerning(1.1)
+                            .foregroundStyle(OnboardingTheme.muted)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(OnboardingTheme.cardSoft))
+                            .overlay(Capsule().stroke(OnboardingTheme.border, lineWidth: 1))
+                    }
+                }
                 Text(reason)
                     .font(.system(size: 12))
-                    .foregroundStyle(OnboardingTheme.muted)
+                    .foregroundStyle(granted ? OnboardingTheme.window.opacity(0.72) : OnboardingTheme.muted)
             }
             .foregroundStyle(granted ? OnboardingTheme.window : OnboardingTheme.ink)
 
             Spacer()
 
-            Button(granted ? "Granted" : actionTitle) {
+            Button(granted ? "On" : "Allow") {
                 action()
             }
-            .buttonStyle(InkButtonStyle(isSubtle: granted, compact: true))
+            .buttonStyle(InkButtonStyle(isSubtle: granted, compact: true, onInk: granted))
             .disabled(granted)
             .accessibilityIdentifier(automationIdentifier)
         }
@@ -1386,82 +1189,17 @@ private struct PermissionGrantRow: View {
     }
 }
 
-private struct UseCaseChoiceCard: View {
-    let title: String
-    let detail: String
-    let footnote: String
-    let icon: String
-    let isSelected: Bool
-    let automationIdentifier: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .center) {
-                    Image(systemName: icon)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(isSelected ? OnboardingTheme.window : OnboardingTheme.ink)
-                        .frame(width: 34, height: 34)
-                        .background(
-                            Circle()
-                                .fill(isSelected ? OnboardingTheme.ink : OnboardingTheme.cardSoft)
-                        )
-
-                    Spacer()
-
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(isSelected ? OnboardingTheme.success : OnboardingTheme.muted.opacity(0.5))
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(OnboardingTheme.ink)
-                    Text(detail)
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(OnboardingTheme.body)
-                        .lineSpacing(2)
-                        .lineLimit(3)
-                        .minimumScaleFactor(0.94)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(footnote)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(OnboardingTheme.muted)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity, minHeight: 185, alignment: .leading)
-            .background(isSelected ? OnboardingTheme.card : OnboardingTheme.cardSoft.opacity(0.65))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(
-                        isSelected ? OnboardingTheme.ink.opacity(0.62) : OnboardingTheme.border,
-                        lineWidth: isSelected ? CGFloat(FirstRunOnboardingPolishContract.selectedStateStrokeWidth) : 1
-                    )
-            )
-            .shadow(color: .black.opacity(isSelected ? 0.08 : 0.03), radius: isSelected ? 16 : 8, y: 8)
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(automationIdentifier)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
 private struct InkButtonStyle: ButtonStyle {
     var isSubtle = false
     var compact = false
+    /// When the button sits on an ink-filled surface, subtle labels need the
+    /// light window tone to stay legible.
+    var onInk = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: compact ? 12 : 14, weight: .semibold))
-            .foregroundStyle(isSubtle ? OnboardingTheme.ink : OnboardingTheme.window)
+            .foregroundStyle(isSubtle ? (onInk ? OnboardingTheme.window : OnboardingTheme.ink) : OnboardingTheme.window)
             .padding(.horizontal, compact ? 14 : 22)
             .padding(.vertical, compact ? 8 : 12)
             .frame(minWidth: CGFloat(compact ? FirstRunOnboardingPolishContract.minimumCompactButtonHeight : FirstRunOnboardingPolishContract.minimumHitTarget))
@@ -1472,103 +1210,11 @@ private struct InkButtonStyle: ButtonStyle {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: compact ? 8 : 10, style: .continuous)
-                    .stroke(isSubtle ? OnboardingTheme.border : Color.clear, lineWidth: 1)
+                    .stroke(isSubtle ? (onInk ? OnboardingTheme.window.opacity(0.35) : OnboardingTheme.border) : Color.clear, lineWidth: 1)
             )
             .opacity(configuration.isPressed ? 0.72 : 1)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-private struct BulletList: View {
-    let items: [String]
-
-    init(_ items: [String]) {
-        self.items = items
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(items, id: \.self) { item in
-                HStack(alignment: .top, spacing: 12) {
-                    Circle()
-                        .fill(OnboardingTheme.ink)
-                        .frame(width: 4, height: 4)
-                        .padding(.top, 8)
-                    Text(item)
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(OnboardingTheme.body)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.95)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .padding(.top, 8)
-    }
-}
-
-private struct DictationDemoCard: View {
-    private let phrase = "I think we should ship the pricing change before the board meeting."
-
-    var body: some View {
-        VStack(spacing: 18) {
-            MiniWindow(title: "Mail - Reply") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(phrase)
-                        .font(.system(size: 15))
-                        .lineSpacing(4)
-                        .foregroundStyle(OnboardingTheme.ink)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Rectangle()
-                        .fill(OnboardingTheme.ink)
-                        .frame(width: 2, height: 18)
-                        .opacity(0.7)
-                }
-                .padding(18)
-            }
-            .frame(width: 360, height: 170)
-
-            DictationPill(label: "Listening")
-        }
-    }
-}
-
-private struct MiniWindow<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Circle().fill(OnboardingTheme.border).frame(width: 7, height: 7)
-                Circle().fill(OnboardingTheme.border).frame(width: 7, height: 7)
-                Circle().fill(OnboardingTheme.border).frame(width: 7, height: 7)
-                Text(title)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(OnboardingTheme.muted.opacity(0.7))
-                    .padding(.leading, 6)
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 26)
-            .overlay(Rectangle().fill(OnboardingTheme.border).frame(height: 1), alignment: .bottom)
-
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(OnboardingTheme.border, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.06), radius: 18, y: 10)
     }
 }
 
@@ -1589,6 +1235,28 @@ private struct DictationPill: View {
         .padding(.vertical, 10)
         .background(Capsule().fill(OnboardingTheme.card))
         .overlay(Capsule().stroke(OnboardingTheme.border, lineWidth: 1))
+    }
+}
+
+private struct ModelStatusCapsule: View {
+    let state: FirstRunLocalModelState
+
+    var body: some View {
+        let status = FirstRunExperience.onboardingModelStatus(for: state)
+        HStack(spacing: 8) {
+            Circle()
+                .fill(status.isReady ? OnboardingTheme.success : OnboardingTheme.muted.opacity(0.55))
+                .frame(width: 7, height: 7)
+            Text(status.text)
+                .font(.system(size: 11, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(OnboardingTheme.muted)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Capsule().fill(OnboardingTheme.cardSoft))
+        .overlay(Capsule().stroke(OnboardingTheme.border, lineWidth: 1))
+        .accessibilityLabel(Text(status.text))
     }
 }
 
@@ -1676,177 +1344,20 @@ private struct MiniWaveform: View {
     }
 }
 
-private struct DualStreamVisual: View {
-    let systemReady: Bool
-
-    var body: some View {
-        VStack(spacing: 22) {
-            StreamCard(label: "You", subtitle: "Mic", color: Color(red: 0.55, green: 0.65, blue: 1.0), active: true)
-            StreamCard(label: "Everyone else", subtitle: "System audio", color: Color(red: 1.0, green: 0.70, blue: 0.55), active: systemReady)
-            Text("-> local transcript with speaker labels")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .kerning(1.2)
-                .textCase(.uppercase)
-                .foregroundStyle(OnboardingTheme.muted)
-        }
-        .frame(width: 380)
-    }
-}
-
-private struct StreamCard: View {
-    let label: String
-    let subtitle: String
-    let color: Color
-    let active: Bool
-
-    var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(color.opacity(active ? 1 : 0.25))
-                    .frame(width: 32, height: 32)
-                Text(String(label.prefix(1)))
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(OnboardingTheme.ink)
-            }
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label)
-                    .font(.system(size: 13.5, weight: .semibold))
-                Text(subtitle)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(OnboardingTheme.muted)
-            }
-
-            Spacer()
-            MiniWaveform(color: OnboardingTheme.ink.opacity(active ? 0.85 : 0.25), width: 80, height: 22)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(OnboardingTheme.border, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.04), radius: 14, y: 6)
-    }
-}
-
-private struct MeetingDemoCard: View {
-    private let lines = [
-        ("00:00", "You", "Thanks for making time today."),
-        ("00:04", "Alex", "Happy to help. Let's get started."),
-        ("00:08", "You", "Can you walk me through the rollout plan?"),
-        ("00:13", "Alex", "Sure. We staged it in three regions.")
-    ]
-
-    var body: some View {
-        MiniWindow(title: "Transcript.md") {
-            VStack(alignment: .leading, spacing: 12) {
-                ForEach(lines, id: \.0) { time, speaker, text in
-                    HStack(alignment: .top, spacing: 10) {
-                        Text(time)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(OnboardingTheme.muted)
-                            .frame(width: 42, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(speaker)
-                                .font(.system(size: 12, weight: .semibold))
-                            Text(text)
-                                .font(.system(size: 12))
-                                .foregroundStyle(OnboardingTheme.body)
-                        }
-                    }
-                }
-            }
-            .padding(18)
-        }
-        .frame(width: 380, height: 250)
-    }
-}
-
-private struct MeetingStartPathCard: View {
-    let dictationShortcutsOff: Bool
-
-    var body: some View {
-        VStack(spacing: 14) {
-            MiniWindow(title: "Transcripted") {
-                VStack(alignment: .leading, spacing: 12) {
-                    MeetingMenuRow(title: "Start Meeting", detail: "Record this call", icon: "record.circle.fill", isPrimary: true)
-                    MeetingMenuRow(title: "Import Audio", detail: "Transcribe a file", icon: "waveform")
-                    MeetingMenuRow(title: "Recent Meetings", detail: "Open saved transcripts", icon: "clock")
-                    Divider()
-                        .overlay(OnboardingTheme.border)
-                    MeetingMenuRow(
-                        title: "Dictation shortcuts",
-                        detail: dictationShortcutsOff ? "Off" : "On",
-                        icon: dictationShortcutsOff ? "keyboard.badge.ellipsis" : "keyboard"
-                    )
-                }
-                .padding(16)
-            }
-            .frame(width: 360, height: 260)
-
-            HStack(spacing: 8) {
-                Image(systemName: "cursorarrow.click.2")
-                    .font(.system(size: 13, weight: .semibold))
-                Text("Menu bar > Start Meeting")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-            }
-            .foregroundStyle(OnboardingTheme.ink)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(Capsule().fill(OnboardingTheme.card))
-            .overlay(Capsule().stroke(OnboardingTheme.border, lineWidth: 1))
-        }
-    }
-}
-
-private struct MeetingMenuRow: View {
-    let title: String
-    let detail: String
-    let icon: String
-    var isPrimary = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isPrimary ? OnboardingTheme.recording : OnboardingTheme.muted)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(OnboardingTheme.ink)
-                Text(detail)
-                    .font(.system(size: 11))
-                    .foregroundStyle(OnboardingTheme.muted)
-            }
-
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(isPrimary ? OnboardingTheme.cardSoft : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
 private struct ToggleCard: View {
     let title: String
     let detail: String
     @Binding var isOn: Bool
+    var compact = false
     var automationIdentifier: String? = nil
 
     var body: some View {
         HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: compact ? 2 : 4) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: compact ? 13 : 14, weight: .semibold))
                 Text(detail)
-                    .font(.system(size: 12))
+                    .font(.system(size: compact ? 11.5 : 12))
                     .lineSpacing(2)
                     .foregroundStyle(OnboardingTheme.muted)
             }
@@ -1861,15 +1372,15 @@ private struct ToggleCard: View {
                 )
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.vertical, compact ? 8 : 16)
         .frame(minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget))
-        .background(OnboardingTheme.card)
+        .background(compact ? OnboardingTheme.cardSoft : OnboardingTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.04), radius: 12, y: 6)
+        .shadow(color: .black.opacity(compact ? 0.02 : 0.04), radius: compact ? 6 : 12, y: compact ? 3 : 6)
     }
 }
 
@@ -1884,497 +1395,33 @@ private extension View {
     }
 }
 
-private struct CalendarMock: View {
-    let connected: Bool
-    private let events = [
-        ("10:00", "Design review", "45m", Color(red: 0.55, green: 0.65, blue: 1.0)),
-        ("11:30", "Team sync", "30m", Color(red: 1.0, green: 0.70, blue: 0.55)),
-        ("02:00", "1:1 with Priya", "30m", Color(red: 0.55, green: 0.90, blue: 0.76))
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Today")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .kerning(1.8)
-                .foregroundStyle(OnboardingTheme.muted)
-                .textCase(.uppercase)
-
-            VStack(spacing: 10) {
-                ForEach(events, id: \.1) { time, name, duration, color in
-                    HStack(spacing: 12) {
-                        RoundedRectangle(cornerRadius: 2, style: .continuous)
-                            .fill(color)
-                            .frame(width: 3, height: 32)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(name)
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("\(time) - \(duration)")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(OnboardingTheme.muted)
-                        }
-                        Spacer()
-                        if connected {
-                            Text("prompt")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(OnboardingTheme.muted)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(connected ? OnboardingTheme.cardSoft : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .opacity(connected ? 1 : 0.45)
-                }
-            }
-        }
-        .padding(20)
-        .frame(width: 340)
-        .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(OnboardingTheme.border, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.08), radius: 24, y: 12)
-    }
-}
-
-private struct MemoryFlowVisual: View {
-    var body: some View {
-        HStack(spacing: 14) {
-            VStack(spacing: 10) {
-                MemorySourceCard(
-                    label: "Dictation",
-                    title: "Voice notes",
-                    detail: "Ship notes from today"
-                )
-                MemorySourceCard(
-                    label: "Meeting",
-                    title: "Transcript",
-                    detail: "Alex: rollout in 3 regions"
-                )
-            }
-
-            MemoryConnector(label: "saved")
-
-            MemoryIndexCard()
-
-            MemoryConnector(label: "ask")
-
-            VStack(spacing: 10) {
-                MemoryQuestionCard(text: "What did Alex decide?")
-                MemoryQuestionCard(text: "Find the launch notes")
-                MemoryQuestionCard(text: "Summarize last Tuesday")
-            }
-            .frame(width: 170)
-        }
-        .frame(width: 720, height: 210)
-    }
-}
-
-private struct MemorySourceCard: View {
-    let label: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .kerning(1.4)
-                .foregroundStyle(OnboardingTheme.muted)
-                .textCase(.uppercase)
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(OnboardingTheme.ink)
-            Text(detail)
-                .font(.system(size: 11))
-                .foregroundStyle(OnboardingTheme.muted)
-                .lineLimit(1)
-        }
-        .padding(14)
-        .frame(width: 158, height: 84, alignment: .leading)
-        .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(OnboardingTheme.border, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.04), radius: 12, y: 6)
-    }
-}
-
-private struct MemoryConnector: View {
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .kerning(1.2)
-                .foregroundStyle(OnboardingTheme.muted)
-                .textCase(.uppercase)
-            Canvas { context, size in
-                var path = Path()
-                path.move(to: CGPoint(x: 0, y: size.height / 2))
-                path.addCurve(
-                    to: CGPoint(x: size.width, y: size.height / 2),
-                    control1: CGPoint(x: size.width * 0.34, y: 0),
-                    control2: CGPoint(x: size.width * 0.66, y: size.height)
-                )
-                context.stroke(
-                    path,
-                    with: .color(OnboardingTheme.ink.opacity(0.28)),
-                    style: StrokeStyle(lineWidth: 1.3, dash: [3, 4])
-                )
-            }
-            .frame(width: 58, height: 34)
-        }
-        .frame(width: 64)
-    }
-}
-
-private struct MemoryIndexCard: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("LOCAL MEMORY")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .kerning(1.4)
-                        .foregroundStyle(OnboardingTheme.muted)
-                    Text("on your Mac")
-                        .font(.system(size: 11))
-                        .foregroundStyle(OnboardingTheme.body)
-                }
-                Spacer()
-                Circle()
-                    .fill(OnboardingTheme.codex)
-                    .frame(width: 10, height: 10)
-            }
-
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(OnboardingTheme.muted)
-                Text("search voice history")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(OnboardingTheme.ink)
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(OnboardingTheme.cardSoft)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 8) {
-                MemoryTagRow(label: "decisions", value: "18")
-                MemoryTagRow(label: "people", value: "42")
-                MemoryTagRow(label: "dates", value: "all local")
-            }
-        }
-        .padding(16)
-        .frame(width: 210, height: 174)
-        .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(OnboardingTheme.ink.opacity(0.18), lineWidth: 1.3)
-        )
-        .shadow(color: .black.opacity(0.08), radius: 22, y: 12)
-    }
-}
-
-private struct MemoryTagRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(OnboardingTheme.body)
-            Spacer()
-            Text(value)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(OnboardingTheme.muted)
-        }
-    }
-}
-
-private struct MemoryQuestionCard: View {
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(OnboardingTheme.claude)
-                .frame(width: 7, height: 7)
-            Text(text)
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(OnboardingTheme.ink)
-                .lineLimit(1)
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 42)
-        .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(OnboardingTheme.border, lineWidth: 1)
-        )
-    }
-}
-
-private struct AgentDemoCard: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ChatBubble(role: "You", text: "What did Alex say last Tuesday?")
-            ChatBubble(role: "Agent", text: "Alex wanted the rollout staged in three regions. Source: Design review transcript.", accent: OnboardingTheme.codex)
-            HStack(spacing: 8) {
-                Image(systemName: "quote.bubble")
-                Text("Cited from your local transcript")
-            }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(OnboardingTheme.muted)
-        }
-        .padding(18)
-        .frame(width: 380)
-        .background(OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(OnboardingTheme.border, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.06), radius: 20, y: 10)
-    }
-}
-
-private struct ChatBubble: View {
-    let role: String
-    let text: String
-    var accent: Color = OnboardingTheme.ink
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(role)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .kerning(1.2)
-                .foregroundStyle(OnboardingTheme.muted)
-                .textCase(.uppercase)
-            Text(text)
-                .font(.system(size: 13))
-                .lineSpacing(2)
-                .foregroundStyle(OnboardingTheme.body)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(accent.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-private struct ConnectAgentStage: View {
-    let copiedItem: AgentCopyItem?
-    let connectPhase: OnboardingAgentConnectPhase
-    let onCopy: (AgentCopyItem) -> Void
-    let onConnectClaudeDesktop: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Kicker("Connect an agent")
-            Headline(primary: "Give your agent a memory.", size: 42, alignment: .leading)
-
-            HStack(spacing: 16) {
-                AgentOptionCard(
-                    eyebrow: "Option 1 - Start here",
-                    title: "Claude Desktop",
-                    detail: claudeDesktopDetail,
-                    glyph: "◆",
-                    color: OnboardingTheme.claude,
-                    buttonTitle: claudeDesktopButtonTitle,
-                    automationIdentifier: "transcripted.onboarding.agent.connect-claude-desktop"
-                ) {
-                    onConnectClaudeDesktop()
-                }
-
-                AgentOptionCard(
-                    eyebrow: "Option 2 - Other apps",
-                    title: "Claude Code, Codex, Cursor",
-                    detail: "Copy one prompt for local coding agents, or connect them one click each later in Settings > Agent.",
-                    glyph: "●",
-                    color: OnboardingTheme.codex,
-                    buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt",
-                    automationIdentifier: "transcripted.onboarding.agent.copy-local-agent-prompt"
-                ) {
-                    onCopy(.localAgentPrompt)
-                }
-            }
-            .frame(height: 300)
-            .padding(.top, 28)
-
-            Text("Or skip. Everything still works without an agent.")
-                .font(.system(size: 12))
-                .italic()
-                .foregroundStyle(OnboardingTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 12)
-        }
-        .padding(.horizontal, 60)
-        .padding(.vertical, 34)
-    }
-
-    private var claudeDesktopDetail: String {
-        switch connectPhase {
-        case .idle, .connecting:
-            return "One click installs Transcripted's direct tools. Restart Claude Desktop afterwards to pick them up."
-        case .connected:
-            return "Direct tools installed. Restart Claude Desktop, then ask it about your latest meeting."
-        case .failed(let message):
-            return message
-        }
-    }
-
-    private var claudeDesktopButtonTitle: String {
-        switch connectPhase {
-        case .idle:
-            return "Connect"
-        case .connecting:
-            return "Connecting..."
-        case .connected:
-            return "Connected"
-        case .failed:
-            return "Try again"
-        }
-    }
-}
-
-private struct AgentOptionCard: View {
-    let eyebrow: String
-    let title: String
-    let detail: String
-    let glyph: String
-    let color: Color
-    let buttonTitle: String
-    let automationIdentifier: String
-    var inverted = false
-    let action: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(eyebrow.uppercased())
-                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                .kerning(2)
-                .foregroundStyle(inverted ? OnboardingTheme.window.opacity(0.62) : OnboardingTheme.muted)
-
-            HStack(spacing: 12) {
-                AgentGlyph(glyph: glyph, color: color)
-                Text(title)
-                    .font(.system(size: 20, weight: .semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Text(detail)
-                .font(.system(size: 13))
-                .lineSpacing(3)
-                .foregroundStyle(inverted ? OnboardingTheme.window.opacity(0.72) : OnboardingTheme.body)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer()
-
-            Button(buttonTitle) {
-                action()
-            }
-            .buttonStyle(InkButtonStyle(isSubtle: inverted))
-            .accessibilityIdentifier(automationIdentifier)
-        }
-        .foregroundStyle(inverted ? OnboardingTheme.window : OnboardingTheme.ink)
-        .padding(22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(inverted ? OnboardingTheme.ink : OnboardingTheme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(OnboardingTheme.border, lineWidth: 1)
-        )
-    }
-}
-
-private struct AgentGlyph: View {
-    let glyph: String
-    let color: Color
-    var size: CGFloat = 36
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                .fill(color)
-                .frame(width: size, height: size)
-            Text(glyph)
-                .font(.system(size: size * 0.48, weight: .bold))
-                .foregroundStyle(.white)
-        }
-    }
-}
-
 private struct ThreeActionsRecap: View {
-    let useCase: OnboardingUseCase
-
     var body: some View {
         HStack(spacing: 14) {
-            if useCase == .meetings {
-                ActionStepCard(
-                    number: "1",
-                    title: "Record",
-                    command: "Start Meeting",
-                    detail: "Click Transcripted in the menu bar.",
-                    color: OnboardingTheme.recording,
-                    icon: "record.circle"
-                )
-                ActionStepCard(
-                    number: "2",
-                    title: "Review",
-                    command: "Open Markdown",
-                    detail: "Your transcript is saved on this Mac.",
-                    color: OnboardingTheme.codex,
-                    icon: "doc.text"
-                )
-                ActionStepCard(
-                    number: "3",
-                    title: "Ask",
-                    command: "Ask your agent",
-                    detail: "Use the meeting as local context.",
-                    color: OnboardingTheme.claude,
-                    icon: "magnifyingglass"
-                )
-            } else {
-                ActionStepCard(
-                    number: "1",
-                    title: "Dictate",
-                    command: "Right Option",
-                    detail: "Tap once to talk. Tap again to paste.",
-                    color: OnboardingTheme.codex,
-                    icon: "keyboard"
-                )
-                ActionStepCard(
-                    number: "2",
-                    title: "Record",
-                    command: "Option-M",
-                    detail: "Start or stop a meeting recording.",
-                    color: OnboardingTheme.recording,
-                    icon: "record.circle"
-                )
-                ActionStepCard(
-                    number: "3",
-                    title: "Ask",
-                    command: "Ask your agent",
-                    detail: "Use your saved voice memory as context.",
-                    color: OnboardingTheme.claude,
-                    icon: "magnifyingglass"
-                )
-            }
+            ActionStepCard(
+                number: "1",
+                title: "Dictate",
+                command: "Right Option",
+                detail: "Tap once to talk, again to paste. Works in any app.",
+                color: OnboardingTheme.codex,
+                icon: "keyboard"
+            )
+            ActionStepCard(
+                number: "2",
+                title: "Record",
+                command: "Auto-detected",
+                detail: "Transcripted notices when a call starts and asks once. Or use the menu bar.",
+                color: OnboardingTheme.recording,
+                icon: "record.circle"
+            )
+            ActionStepCard(
+                number: "3",
+                title: "Ask",
+                command: "Your agent",
+                detail: "Every capture is local Markdown your agent can search.",
+                color: OnboardingTheme.claude,
+                icon: "magnifyingglass"
+            )
         }
     }
 }
@@ -2419,6 +1466,7 @@ private struct ActionStepCard: View {
                 .font(.system(size: 17, weight: .semibold, design: .monospaced))
                 .foregroundStyle(OnboardingTheme.ink)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
 
             Text(detail)
                 .font(.system(size: 11.5))
@@ -2427,7 +1475,7 @@ private struct ActionStepCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
-        .frame(width: 190, height: 150, alignment: .leading)
+        .frame(width: 200, height: 156, alignment: .leading)
         .background(OnboardingTheme.card)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
@@ -2435,5 +1483,136 @@ private struct ActionStepCard: View {
                 .stroke(OnboardingTheme.border, lineWidth: 1)
         )
         .shadow(color: color.opacity(0.12), radius: 18, y: 10)
+    }
+}
+
+private struct AgentConnectStrip: View {
+    let copiedItem: AgentCopyItem?
+    let connectPhase: OnboardingAgentConnectPhase
+    let onCopy: (AgentCopyItem) -> Void
+    let onConnectClaudeDesktop: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            AgentConnectRow(
+                glyph: "◆",
+                color: OnboardingTheme.claude,
+                title: "Claude Desktop",
+                detail: claudeDesktopDetail,
+                buttonTitle: claudeDesktopButtonTitle,
+                automationIdentifier: "transcripted.onboarding.agent.connect-claude-desktop",
+                action: onConnectClaudeDesktop
+            )
+
+            Divider()
+                .overlay(OnboardingTheme.border)
+                .padding(.horizontal, 18)
+
+            AgentConnectRow(
+                glyph: "●",
+                color: OnboardingTheme.codex,
+                title: "Claude Code, Codex, Cursor",
+                detail: "Copy one prompt for local coding agents — or connect them later in Settings.",
+                buttonTitle: copiedItem == .localAgentPrompt ? "Copied" : "Copy prompt",
+                automationIdentifier: "transcripted.onboarding.agent.copy-local-agent-prompt"
+            ) {
+                onCopy(.localAgentPrompt)
+            }
+        }
+        .background(OnboardingTheme.card)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(OnboardingTheme.border, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.04), radius: 12, y: 6)
+        .overlay(alignment: .top) {
+            Text("OPTIONAL — GIVE YOUR AGENT YOUR VOICE HISTORY")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .kerning(1.4)
+                .foregroundStyle(OnboardingTheme.muted)
+                .padding(.horizontal, 10)
+                .background(OnboardingTheme.window)
+                .offset(y: -7)
+        }
+    }
+
+    private var claudeDesktopDetail: String {
+        switch connectPhase {
+        case .idle, .connecting:
+            return "One click installs Transcripted's tools. Restart Claude Desktop to pick them up."
+        case .connected:
+            return "Connected. Restart Claude Desktop, then ask it about your latest meeting."
+        case .failed(let message):
+            return message
+        }
+    }
+
+    private var claudeDesktopButtonTitle: String {
+        switch connectPhase {
+        case .idle:
+            return "Connect"
+        case .connecting:
+            return "Connecting..."
+        case .connected:
+            return "Connected"
+        case .failed:
+            return "Try again"
+        }
+    }
+}
+
+private struct AgentConnectRow: View {
+    let glyph: String
+    let color: Color
+    let title: String
+    let detail: String
+    let buttonTitle: String
+    let automationIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            AgentGlyph(glyph: glyph, color: color, size: 30)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(OnboardingTheme.ink)
+                Text(detail)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(OnboardingTheme.muted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+
+            Button(buttonTitle) {
+                action()
+            }
+            .buttonStyle(InkButtonStyle(compact: true))
+            .accessibilityIdentifier(automationIdentifier)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .frame(minHeight: CGFloat(FirstRunOnboardingPolishContract.minimumHitTarget))
+    }
+}
+
+private struct AgentGlyph: View {
+    let glyph: String
+    let color: Color
+    var size: CGFloat = 36
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                .fill(color)
+                .frame(width: size, height: size)
+            Text(glyph)
+                .font(.system(size: size * 0.48, weight: .bold))
+                .foregroundStyle(.white)
+        }
     }
 }

@@ -45,9 +45,9 @@ func testHomeFirstArtifactVisibility() {
             "the meeting saved overlay should name the Markdown artifact at the moment of first value"
         )
         assertTrue(
-            onboardingSource.contains(#"command: "Open Markdown""#)
-                && onboardingSource.contains(#"detail: "Your transcript is saved on this Mac.""#),
-            "meeting onboarding should make the saved local Markdown artifact the visible first-value step"
+            onboardingSource.contains(#"PrivacyPill("Saved as Markdown")"#)
+                && onboardingSource.contains(#"detail: "Every capture is local Markdown your agent can search.""#),
+            "onboarding should keep the saved local Markdown artifact visible at the first-value moments"
         )
         assertTrue(
             settingsSource.contains("AgentConnectionGuide.portableMeetingBundle(")

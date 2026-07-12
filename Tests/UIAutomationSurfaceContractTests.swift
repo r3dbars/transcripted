@@ -510,37 +510,53 @@ func testUIAutomationSurfaceContract() {
         )
 
         for requiredOnboardingHook in [
-            "Enable system audio",
-            "Allow calendar access",
             "Skip for now",
+            "case welcome",
+            "case permissions",
+            "case tryDictation",
+            "case ready",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(requiredOnboardingHook), "\(requiredOnboardingHook) should stay in onboarding automation scope")
         }
 
+        // The single-flow onboarding must never trap users behind optional
+        // grants: Microphone is the only hard gate, and System Audio plus
+        // Accessibility are requested as optional from the one permissions step.
         assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".init(kind: .meetingStart),\n                .init(kind: .systemAudio, canSkip: true),\n                .init(kind: .meeting)")
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("FirstRunExperience.hasRequiredMeetingSetup(microphoneGranted: micGranted)")
                 && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requestPermission(.systemAudioRecording, required: false)")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Meeting prompts are ready. System Audio can be set up next."),
-            "meetings-first onboarding should not hard-block permission progress on System Audio; it should continue after Microphone, then explain optional System Audio before meeting value"
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requestPermission(.accessibility, required: false)")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requestPermission(.microphone, required: true)"),
+            "onboarding should hard-gate only on Microphone and keep System Audio and Accessibility as optional one-click grants"
         )
 
-        // Auto-detect calls is default-on (AutoCallDetectionPreferences) but onboarding
-        // used to teach only the manual menu-bar path and frame detection as
-        // calendar-only. These guard the copy fix: the meetingStart step should prime
-        // users that Transcripted notices a call starting in any app/browser using the
-        // mic and asks once, and the calendar step should frame calendar access as an
-        // addition to that always-on detection rather than the only way calls get noticed.
+        // The first System Audio ask must stay in context: run the native
+        // capture probe (macOS shows its own dialog) instead of bouncing the
+        // user into System Settings before a decision even exists.
         assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Transcripted notices")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("when a call starts.")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("no calendar invite required")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Works with any call, calendar invite or not"),
-            "the meetingStart onboarding step should teach auto-detect calls instead of only the manual menu-bar path"
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("TranscriptedPermissionAccess.systemAudioRecordingStatus() == .unknown")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("probeSystemAudioPermission(trackChanges: true)")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("revalidateSystemAudioRecordingStatus()"),
+            "the first System Audio ask should use the native probe in place, with System Settings only as the retry path"
         )
+
+        // The voice model prefetch starts on the first onboarding screen so the
+        // try-dictation step is not blocked behind a large first download.
         assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("already notices when a call starts")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("Calendar reminders"),
-            "the calendar onboarding step should frame calendar access as an addition to always-on call detection, not the only way calls get noticed"
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("didStartModelPrefetch = true")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("startModelPrefetch()")
+                && contractSource("Sources/TranscriptedApp.swift").contains("prefetchSelectedModelFilesForExistingInstall()"),
+            "onboarding should prefetch voice-model files in the background from its first screen"
+        )
+
+        // Auto-detect calls is default-on (AutoCallDetectionPreferences); the
+        // ready step must keep teaching that calls are noticed with or without
+        // a calendar invite instead of framing recording as manual-only.
+        assertTrue(
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("notices when a call starts")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("calendar invite or not")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("asks once"),
+            "the ready onboarding step should teach auto-detected calls, calendar invite or not"
         )
 
         for identifier in [
@@ -751,15 +767,11 @@ func testUIAutomationSurfaceContract() {
             "transcripted.onboarding.nav.skip",
             "transcripted.onboarding.nav.primary",
             "transcripted.onboarding.dictation-test.clear",
-            "transcripted.onboarding.use-case.meetings",
-            "transcripted.onboarding.use-case.dictation",
             "transcripted.onboarding.permissions.microphone",
             "transcripted.onboarding.permissions.system-audio",
             "transcripted.onboarding.permissions.accessibility",
-            "transcripted.onboarding.permissions.leave-dictation-shortcuts-off",
-            "transcripted.onboarding.system-audio.enable",
-            "transcripted.onboarding.calendar.meeting-reminders",
-            "transcripted.onboarding.calendar.allow",
+            "transcripted.onboarding.try.permissions.microphone",
+            "transcripted.onboarding.try.permissions.accessibility",
             "transcripted.onboarding.diagnostics.share",
             "transcripted.onboarding.agent.connect-claude-desktop",
             "transcripted.onboarding.agent.copy-local-agent-prompt",
@@ -768,12 +780,11 @@ func testUIAutomationSurfaceContract() {
         }
 
         assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("UseCaseChoiceCard(")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.use-case.meetings")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcripted.onboarding.use-case.dictation")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("selectedStateStrokeWidth")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))"),
-            "onboarding use-case cards should keep their scriptable card-button and selected-state hooks"
+            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("PermissionGrantRow(")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requirementLabel: \"Required\"")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requirementLabel: \"For meetings\"")
+                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("requirementLabel: \"For dictation\""),
+            "the single onboarding permissions step should keep all three labeled permission rows scriptable"
         )
 
         assertTrue(
@@ -826,8 +837,9 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.tab.general",
             "transcripted.settings.sidebar.settings-toggle",
             "transcripted.settings.sidebar.dictations",
-            "transcripted.onboarding.use-case.dictation",
+            "transcripted.onboarding.permissions.microphone",
             "transcripted.onboarding.permissions.system-audio",
+            "transcripted.onboarding.permissions.accessibility",
         ] {
             assertTrue(contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift").contains(requiredHarnessHook), "\(requiredHarnessHook) should stay pinned in the UI smoke harness")
         }

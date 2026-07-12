@@ -33,7 +33,6 @@
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
 - `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
 - `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls
-- `OnboardingDictationShortcutPolicy.swift` — first-run shortcut policy that keeps dictation setup copy aligned with trigger preferences
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
 - `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts, including migration from older right-Option settings
 - `QuitConfirmationPreferences.swift` — default-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit

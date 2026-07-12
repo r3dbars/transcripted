@@ -59,26 +59,19 @@ func testHotkeyPreferences() {
         )
     }
 
-    runSuite("Onboarding keeps Daniel Goncalves's meeting-only setup fully off") {
-        let suiteName = "HotkeyPreferencesTests.danielMeetingOnly.\(UUID().uuidString)"
+    runSuite("Unified onboarding leaves shortcut preferences untouched") {
+        let suiteName = "HotkeyPreferencesTests.unifiedOnboarding.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        OnboardingDictationShortcutPolicy.apply(
-            useCase: .meetings,
-            leaveDictationShortcutsOff: true,
-            userDefaults: defaults
-        )
-
+        // The single-flow onboarding writes no shortcut preference at all, so
+        // the stored defaults must already mean "ready to dictate" while
+        // meeting-only users opt out later in Settings > Shortcuts (covered by
+        // the disabled-shortcuts suite above).
         assertEqual(
             HotkeyPreferences.dictationShortcutsEnabled(userDefaults: defaults),
-            false,
-            "meeting-only onboarding should let users leave dictation shortcuts off"
-        )
-        assertEqual(
-            HotkeyPreferences.rightOptionDictationEnabled(userDefaults: defaults),
-            false,
-            "meeting-only onboarding should not leave Right Option armed behind the master switch"
+            true,
+            "fresh installs should finish onboarding with dictation shortcuts armed"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),

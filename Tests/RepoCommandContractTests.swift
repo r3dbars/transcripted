@@ -3296,7 +3296,7 @@ func testRepoCommandContract() {
             "copying onboarding agent setup should emit the existing first-value activation event"
         )
         assertTrue(
-            contents.contains("\"agent_cta\": agentCTA") && contents.contains("\"step_id\": \"connect_agent\""),
+            contents.contains("\"agent_cta\": agentCTA") && contents.contains("\"step_id\": currentStep.kind.analyticsID"),
             "onboarding agent setup telemetry should stay limited to coarse CTA and step ids"
         )
         assertFalse(
@@ -3726,7 +3726,7 @@ func testRepoCommandContract() {
             "resetting the capture library should confirm/copy/switch like choosing a folder"
         )
         assertTrue(
-            onboardingContents.contains("revalidateSystemAudioPermissionNow")
+            onboardingContents.contains("revalidateSystemAudioRecordingStatus()")
                 && settingsContents.contains("revalidateSystemAudioRecordingStatus()")
                 && permissionAccessContents.contains("static func revalidateSystemAudioRecordingStatus() async -> Bool"),
             "onboarding and Settings should revalidate the System Audio Recording cache"
