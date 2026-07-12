@@ -132,7 +132,7 @@ func testDictationAudioRecovery() {
             "recovery preservation should have a single cleanup path"
         )
         assertTrue(
-            engineSource.contains("private func interruptRecordingAndClearRecoveredTimeline()"),
+            engineSource.contains("func interruptRecordingAndClearRecoveredTimeline()"),
             "interrupted recovery should clear preserved audio before publishing interruption"
         )
         let directInterruptAssignments = engineSource.components(separatedBy: "recordingInterrupted = true").count - 1

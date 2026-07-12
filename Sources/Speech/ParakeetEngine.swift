@@ -27,10 +27,10 @@ class ParakeetEngine: ObservableObject {
         !recoveredRecordingTimeline.isEmpty
     }
 
-    private var audioEngine = AVAudioEngine()
+    var audioEngine = AVAudioEngine()
     private var audioEngineQueue = ParakeetEngine.makeAudioEngineQueue()
-    private var audioGraphGeneration = 0
-    private var audioStartInProgress = false
+    var audioGraphGeneration = 0
+    var audioStartInProgress = false
     private var inputTapInstalled = false
     private var sampleBuffer: [Float] = []
     private var recoveredRecordingTimeline = RecordedAudioTimeline()
@@ -41,67 +41,67 @@ class ParakeetEngine: ObservableObject {
     private var pendingSamples: [Float] = []
     private var didReportPendingSampleTruncation = false
     private nonisolated(unsafe) var lastLevelUpdate: CFAbsoluteTime = 0
-    private var isEnginePrewarmed = false
+    var isEnginePrewarmed = false
     private var wakeObserver: NSObjectProtocol?
-    private var inputDeviceChangeListener: AudioObjectPropertyListenerBlock?
+    var inputDeviceChangeListener: AudioObjectPropertyListenerBlock?
     private var recentAudioEngineRebuildTimestamps: [CFAbsoluteTime] = []
     private var didReportAudioEngineRebuildChurn = false
 
     // Live streaming text is intentionally disabled — the product focuses on
     // stable capture and final transcription rather than provisional text.
-    private let liveDisplayEnabled = false
-    private nonisolated(unsafe) var eouManager: StreamingEouAsrManager?
-    private var committedStreamText: String = ""
+    let liveDisplayEnabled = false
+    nonisolated(unsafe) var eouManager: StreamingEouAsrManager?
+    var committedStreamText: String = ""
     // Protected by streamingSamplesLock — accessed from both the audio render thread and MainActor.
-    private let streamingSamplesLock = NSLock()
-    private var streamingSampleBuffer: [Float] = []
+    let streamingSamplesLock = NSLock()
+    var streamingSampleBuffer: [Float] = []
     // Feed EOU in ~320ms chunks (shift size). The manager buffers internally and processes
     // when it has a full chunk (10240 samples = 64 mel frames at hop=160).
     private let eouChunkSamples: Int = 5120
     // Cached format for makePCMBuffer — always 16kHz mono, no need to recreate per chunk
     private let eouPCMFormat = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)
-    private var configChangeObserver: NSObjectProtocol?
-    private var configChangeDebounceTask: Task<Void, Never>?
-    private var configRecoveryTask: Task<Void, Never>?
-    private var configRecoveryTimeoutTask: Task<Void, Never>?
+    var configChangeObserver: NSObjectProtocol?
+    var configChangeDebounceTask: Task<Void, Never>?
+    var configRecoveryTask: Task<Void, Never>?
+    var configRecoveryTimeoutTask: Task<Void, Never>?
     /// Tracks whether a recording was active when the first config change in a
     /// burst arrived. Subsequent changes during recovery inherit this flag so
     /// the final recovery attempt knows to restart recording.
-    private var configChangeWasRecording = false
+    var configChangeWasRecording = false
     /// Pure-logic state machine for device-change recovery. Owns the generation
     /// counter and the readiness flags. Mirrored into @Published so the UI can
     /// observe via Combine.
-    private var recoveryState = ParakeetRecoveryState()
+    var recoveryState = ParakeetRecoveryState()
     /// Counts consecutive failed prewarm attempts. Reset on successful prewarm or
     /// on a fresh config-change burst. Bounded by `prewarmRetryBudget` to prevent
     /// infinite Task chains when the mic is permanently unavailable.
-    private var prewarmRetryCount: Int = 0
-    private var prewarmRetryTask: Task<Void, Never>?
-    private var isShuttingDown = false
+    var prewarmRetryCount: Int = 0
+    var prewarmRetryTask: Task<Void, Never>?
+    var isShuttingDown = false
 
     // FluidAudio ASR
-    private var asrManager: AsrManager?
-    private var modelInitializationTask: Task<Void, Never>?
-    private var modelFilePrefetchTask: Task<URL, Error>?
-    private var prefetchedModelPath: URL?
+    var asrManager: AsrManager?
+    var modelInitializationTask: Task<Void, Never>?
+    var modelFilePrefetchTask: Task<URL, Error>?
+    var prefetchedModelPath: URL?
     private var audioWatchdogTask: Task<Void, Never>?
     private var zombieRecoveryRestartPending = false
     private var asrInferenceActivity = ParakeetASRInferenceActivityState()
     private var asrInferenceHandoffCount = 0
     private var asrInferenceWaiters: [CheckedContinuation<Void, Never>] = []
     private var pureSampleTranscriptionActivityCount = 0
-    private var asrManagerReady = false
+    var asrManagerReady = false
     private nonisolated(unsafe) var didReceiveAudioSamples = false
     private nonisolated(unsafe) var didReceiveNonZeroAudioSamples = false
     private var recordingStartedOnLikelyBluetoothHandsFreeRoute = false
-    private var cachedInputDeviceName = "Unknown"
+    var cachedInputDeviceName = "Unknown"
     /// Last known dictation input selection, refreshed on start, prewarm,
     /// route/device-change notifications, and background refreshes. Serves
     /// analytics callers without a live CoreAudio device enumeration.
-    private var cachedInputDeviceSelection: DictationInputDeviceSelection?
+    var cachedInputDeviceSelection: DictationInputDeviceSelection?
     private var lastAudioStartFailureReportAt: TimeInterval?
     private var lastInputSelectionReportKey: String?
-    private var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
+    var ignoreInputSelectionConfigChangesUntil: CFAbsoluteTime = 0
     private var pendingSystemInputRestore: (temporaryInput: AudioDeviceID, previousInput: AudioDeviceID)?
 
     var isModelLoaded: Bool { asrManagerReady }
@@ -147,7 +147,7 @@ class ParakeetEngine: ObservableObject {
         DispatchQueue(label: "com.transcripted.parakeet.audio-engine", qos: .userInitiated)
     }
 
-    nonisolated private static func loadDictationInputDeviceSelection(
+    nonisolated static func loadDictationInputDeviceSelection(
         allowsBuiltInBluetoothFallback: Bool = true
     ) -> DictationInputDeviceSelection? {
         do {
@@ -192,7 +192,7 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    nonisolated private static var unknownInputDeviceSelection: DictationInputDeviceSelection {
+    nonisolated static var unknownInputDeviceSelection: DictationInputDeviceSelection {
         let unknownDevice = DictationAudioDevice(
             id: AudioDeviceID(kAudioObjectUnknown),
             name: "Unknown",
@@ -207,7 +207,7 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    private func scheduleInputDeviceNameRefresh() {
+    func scheduleInputDeviceNameRefresh() {
         Task.detached(priority: .utility) { [weak self] in
             if let selection = Self.loadDictationInputDeviceSelection() {
                 await self?.updateCachedInputDeviceSelection(selection)
@@ -351,384 +351,9 @@ class ParakeetEngine: ObservableObject {
         cachedInputDeviceName = deviceName
     }
 
-    private func updateCachedInputDeviceSelection(_ selection: DictationInputDeviceSelection) {
+    func updateCachedInputDeviceSelection(_ selection: DictationInputDeviceSelection) {
         cachedInputDeviceName = selection.selectedInput.name
         cachedInputDeviceSelection = selection
-    }
-
-    private func handleDefaultInputDeviceChange(selection: DictationInputDeviceSelection) {
-        cachedInputDeviceName = selection.selectedInput.name
-        cachedInputDeviceSelection = selection
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | default input changed → \(selection.defaultInput.name); dictation input → \(selection.selectedInput.name)")
-        EventReporter.shared.capture(
-            level: .info,
-            engine: "parakeet",
-            event: "default_input_device_changed",
-            message: "Default input device changed",
-            context: inputSelectionContext(selection)
-        )
-        Task { @MainActor [weak self] in
-            await self?.handleAudioConfigChange()
-        }
-    }
-
-    // MARK: - Model Initialization
-
-    /// Load Parakeet models from the app bundle (preferred) or download from HuggingFace (fallback).
-    /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
-    func initialize() async {
-        guard !isShuttingDown, !Task.isCancelled else { return }
-
-        if let modelInitializationTask {
-            await modelInitializationTask.value
-            return
-        }
-
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.performInitialize()
-        }
-        modelInitializationTask = task
-        await task.value
-    }
-
-    /// Await the in-flight model initialization task, if any. Returns true
-    /// when a task was joined. Unlike polling `modelDownloadState`, this
-    /// resumes the moment initialization settles (ready or failed).
-    func joinModelInitialization() async -> Bool {
-        guard let modelInitializationTask else { return false }
-        await modelInitializationTask.value
-        return true
-    }
-
-    private func performInitialize() async {
-        defer { modelInitializationTask = nil }
-        guard !isShuttingDown, !Task.isCancelled else { return }
-        scheduleInputDeviceNameRefresh()
-        markCachedRuntimeModelIfAvailable()
-
-        guard asrManager == nil else {
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "already_initialized",
-                message: "initialize() called but ASR manager already exists — ignoring")
-            modelDownloadState = .ready
-            return
-        }
-
-        switch modelDownloadState {
-        case .downloading:
-            break
-        case .loading:
-            return
-        case .notLoaded, .cached, .ready, .failed:
-            break
-        }
-
-        // Keep background model warmup quiet. The onboarding/settings surfaces
-        // own microphone permission requests so launch-time initialization does
-        // not surprise users with a hidden or out-of-context prompt.
-
-        modelDownloadState = .loading
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | initializing models...")
-
-        var failureStage: ParakeetModelInitStage = .authorizationRequest
-        var loadSource: ParakeetModelLoadSource = .unresolved
-        Self.migrateLegacyParakeetCacheIfNeeded()
-        // FluidAudio 0.15.x resolves bundled models as <parent>/<repo folderName>, and the
-        // folder name lost its -coreml suffix. Gate on JointDecisionv3.mlmodelc (new required
-        // file) so an incomplete bundle can't trigger a download into the signed app bundle.
-        let bundledModelPath = bundledModelPath(subdirectory: "parakeet-tdt-0.6b-v3", checkFile: "JointDecisionv3.mlmodelc")
-        let bundledModelPresent = bundledModelPath != nil
-
-        do {
-            let models: AsrModels
-            let loadSourceName: String
-
-            // Try loading from app bundle first (bundled by build.sh)
-            if let bundlePath = bundledModelPath {
-                failureStage = .bundleLoad
-                loadSource = .bundle
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET | loading from bundle: \(bundlePath.path)")
-                models = try await AsrModels.load(from: bundlePath, version: .v3)
-                guard !Task.isCancelled, !isShuttingDown else { return }
-                loadSourceName = loadSource.rawValue
-            } else {
-                // Fallback: download from HuggingFace (~600MB on first run).
-                //
-                // SECURITY: AsrModels.download() pulls model artifacts from HuggingFace
-                // through FluidAudio. Transcripted does not currently re-verify the
-                // downloaded artifacts against pinned SHA-256 digests. Trust here rests
-                // on the system TLS chain plus HuggingFace's CDN integrity. A targeted
-                // TLS interception or CDN compromise could swap the model files, with
-                // a worst-case impact of bad transcriptions or — much less likely —
-                // exploitation of a Core ML deserialization bug.
-                //
-                // To close this gap we'd ship a static `[filename: sha256]` table for
-                // each supported Parakeet variant and verify it after download, before
-                // calling AsrModels.load(...). The hashes need to be computed from a
-                // trusted release of the model bundle; without that source of truth a
-                // verification stub would be worse than no check at all.
-                failureStage = .downloadModels
-                loadSource = .download
-                let downloadedPath: URL
-                if let modelFilePrefetchTask {
-                    TranscriptedCore.AppLogger.transcription.info("PARAKEET | waiting for background Parakeet model cache...")
-                    modelDownloadState = .downloading(progress: 0.0)
-                    downloadedPath = try await modelFilePrefetchTask.value
-                    prefetchedModelPath = downloadedPath
-                    self.modelFilePrefetchTask = nil
-                } else if let prefetchedModelPath {
-                    downloadedPath = prefetchedModelPath
-                } else if let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory() {
-                    prefetchedModelPath = cachedModelPath
-                    downloadedPath = cachedModelPath
-                } else {
-                    TranscriptedCore.AppLogger.transcription.info("PARAKEET | models not bundled, downloading (~600MB)...")
-                    modelDownloadState = .downloading(progress: 0.0)
-                    downloadedPath = try await AsrModels.download(version: .v3)
-                    prefetchedModelPath = downloadedPath
-                }
-                guard !Task.isCancelled, !isShuttingDown else { return }
-                modelDownloadState = .loading
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET | loading downloaded models from: \(downloadedPath.path)")
-                models = try await AsrModels.load(from: downloadedPath, version: .v3)
-                guard !Task.isCancelled, !isShuttingDown else { return }
-                loadSourceName = loadSource.rawValue
-            }
-
-            failureStage = .managerInitialize
-            let manager = AsrManager(config: .default)
-            try await manager.loadModels(models)
-            guard !Task.isCancelled, !isShuttingDown else {
-                Task { await manager.cleanup() }
-                return
-            }
-
-            asrManager = manager
-            asrManagerReady = true
-            modelDownloadState = .ready
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET | TDT V3 models loaded (source: \(loadSourceName))")
-            EventReporter.shared.capture(level: .info, engine: "parakeet", event: "models_loaded",
-                message: "Parakeet ASR models initialized successfully",
-                context: ["load_source": loadSourceName])
-
-            if liveDisplayEnabled {
-                await initializeEouModel()
-            }
-
-        } catch {
-            guard !Task.isCancelled, !isShuttingDown else { return }
-            modelFilePrefetchTask = nil
-            prefetchedModelPath = nil
-            let friendlyMessage = ModelDownloadService.classifyError(error).detail
-            modelDownloadState = .failed(friendlyMessage)
-            TranscriptedCore.AppLogger.transcription.error("PARAKEET | model initialization failed: \(error.localizedDescription)")
-            EventReporter.shared.capture(level: .error, engine: "parakeet", event: "model_init_failed",
-                message: error.localizedDescription,
-                context: ParakeetModelInitDiagnostics.failureContext(
-                    stage: failureStage,
-                    loadSource: loadSource,
-                    bundledModelPresent: bundledModelPresent,
-                    microphoneStatus: AVCaptureDevice.authorizationStatus(for: .audio)
-                ))
-        }
-    }
-
-    func prefetchModelFilesIfNeeded() async {
-        guard !isShuttingDown, !Task.isCancelled else { return }
-        guard asrManager == nil else { return }
-
-        guard bundledModelPath(
-            subdirectory: "parakeet-tdt-0.6b-v3-coreml",
-            checkFile: "Encoder.mlmodelc"
-        ) == nil else {
-            return
-        }
-
-        if markCachedRuntimeModelIfAvailable() {
-            return
-        }
-
-        switch modelDownloadState {
-        case .downloading, .cached, .loading, .ready:
-            return
-        case .notLoaded, .failed:
-            break
-        }
-
-        let task: Task<URL, Error>
-        if let modelFilePrefetchTask {
-            task = modelFilePrefetchTask
-        } else {
-            modelDownloadState = .downloading(progress: 0.0)
-            task = Task.detached(priority: .utility) {
-                try await AsrModels.download(version: .v3)
-            }
-            modelFilePrefetchTask = task
-        }
-
-        do {
-            let downloadedPath = try await task.value
-            guard !Task.isCancelled, !isShuttingDown else { return }
-            guard modelInitializationTask == nil, asrManager == nil, !asrManagerReady else {
-                if modelFilePrefetchTask != nil {
-                    modelFilePrefetchTask = nil
-                }
-                return
-            }
-            prefetchedModelPath = downloadedPath
-            modelDownloadState = .cached
-            if modelFilePrefetchTask != nil {
-                modelFilePrefetchTask = nil
-            }
-            EventReporter.shared.capture(
-                level: .info,
-                engine: "parakeet",
-                event: "model_files_prefetched",
-                message: "Parakeet model files are cached for first use",
-                context: ["load_source": ParakeetModelLoadSource.download.rawValue]
-            )
-        } catch {
-            guard !Task.isCancelled, !isShuttingDown else { return }
-            if modelFilePrefetchTask != nil {
-                modelFilePrefetchTask = nil
-            }
-            let friendlyMessage = ModelDownloadService.classifyError(error).detail
-            modelDownloadState = .failed(friendlyMessage)
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
-                event: "model_file_prefetch_failed",
-                message: error.localizedDescription
-            )
-        }
-    }
-
-    @discardableResult
-    private func markCachedRuntimeModelIfAvailable() -> Bool {
-        guard let cachedModelPath = ModelCacheInventory.activeParakeetModelDirectory() else {
-            return false
-        }
-
-        prefetchedModelPath = cachedModelPath
-        if !asrManagerReady {
-            modelDownloadState = .cached
-        }
-        return true
-    }
-
-    /// Load Parakeet EOU 120M for streaming live display.
-    /// Non-fatal — if EOU fails, live transcript stays empty but batch result still works.
-    private func initializeEouModel() async {
-        do {
-            let eou = StreamingEouAsrManager(chunkSize: .ms320, eouDebounceMs: 1280)
-
-            let modelDir: URL
-            if let bundlePath = bundledModelPath(subdirectory: "parakeet-eou-120m-coreml", checkFile: "streaming_encoder.mlmodelc") {
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET EOU | loading from bundle: \(bundlePath.path)")
-                modelDir = bundlePath
-            } else {
-                // Download from HuggingFace (~120MB) and cache locally
-                // DownloadUtils nests inside <directory>/<repo.folderName>/, so we use the parent
-                guard let appSupportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-                    TranscriptedCore.AppLogger.transcription.warning("PARAKEET EOU | application support directory unavailable")
-                    EventReporter.shared.capture(
-                        level: .warning,
-                        engine: "parakeet",
-                        event: "eou_app_support_unavailable",
-                        message: "Application support directory lookup returned no results; cannot resolve EOU model cache"
-                    )
-                    return
-                }
-                let cacheBase = appSupportRoot.appendingPathComponent("FluidAudio/Models", isDirectory: true)
-                let expectedDir = cacheBase.appendingPathComponent("parakeet-eou-streaming/320ms", isDirectory: true)
-                let checkFile = expectedDir.appendingPathComponent("streaming_encoder.mlmodelc")
-                if FileManager.default.fileExists(atPath: checkFile.path) {
-                    TranscriptedCore.AppLogger.transcription.info("PARAKEET EOU | loading from cache: \(expectedDir.path)")
-                    modelDir = expectedDir
-                } else {
-                    TranscriptedCore.AppLogger.transcription.warning("PARAKEET EOU | streaming model download unavailable with current FluidAudio API")
-                    EventReporter.shared.capture(
-                        level: .warning,
-                        engine: "parakeet",
-                        event: "eou_model_unavailable",
-                        message: "Streaming EOU model download is unavailable with the current FluidAudio version"
-                    )
-                    return
-                }
-            }
-            try await eou.loadModels(modelDir: modelDir)
-
-            // Partial callback fires on every chunk with new tokens — live "ghost text" display
-            await eou.setPartialCallback { [weak self] partial in
-                Task { @MainActor [weak self] in
-                    guard let self = self else { return }
-                    let trimmed = partial.trimmingCharacters(in: .whitespaces)
-                    guard !trimmed.isEmpty else { return }
-                    self.liveTranscript = self.committedStreamText.isEmpty
-                        ? trimmed
-                        : self.committedStreamText + " " + trimmed
-                }
-            }
-
-            // EOU callback fires after silence — commits the utterance so partial text resets
-            await eou.setEouCallback { [weak self] transcript in
-                Task { @MainActor [weak self] in
-                    guard let self = self else { return }
-                    let trimmed = transcript.trimmingCharacters(in: .whitespaces)
-                    guard !trimmed.isEmpty else { return }
-                    self.committedStreamText = self.committedStreamText.isEmpty
-                        ? trimmed
-                        : self.committedStreamText + " " + trimmed
-                    self.liveTranscript = self.committedStreamText
-                }
-            }
-
-            eouManager = eou
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET EOU | streaming model ready")
-            EventReporter.shared.capture(level: .info, engine: "parakeet", event: "eou_model_loaded",
-                message: "Parakeet EOU streaming model initialized")
-        } catch {
-            // Non-fatal — live display will just stay empty until batch result arrives
-            TranscriptedCore.AppLogger.transcription.warning("PARAKEET EOU | model load failed (live display disabled): \(error.localizedDescription)")
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "eou_model_failed",
-                message: error.localizedDescription)
-        }
-    }
-
-    /// FluidAudio 0.15.x renamed the v3 cache folder from `parakeet-tdt-0.6b-v3-coreml`
-    /// to `parakeet-tdt-0.6b-v3` (ModelNames.folderName strips the suffix). Rename a
-    /// 0.7.9-era cache in place so existing users keep their ~600MB download; FluidAudio
-    /// then only fetches the one file new in 0.15.x (JointDecisionv3.mlmodelc). A failed
-    /// rename is harmless — the loader falls back to a fresh download.
-    private static func migrateLegacyParakeetCacheIfNeeded() {
-        let newDir = AsrModels.defaultCacheDirectory(for: .v3)
-        guard !newDir.lastPathComponent.hasSuffix("-coreml") else { return }
-        let legacyDir = newDir.deletingLastPathComponent()
-            .appendingPathComponent(newDir.lastPathComponent + "-coreml", isDirectory: true)
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: legacyDir.path),
-              !fileManager.fileExists(atPath: newDir.path) else { return }
-        do {
-            try fileManager.moveItem(at: legacyDir, to: newDir)
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET | migrated legacy model cache to \(newDir.lastPathComponent)")
-            EventReporter.shared.capture(level: .info, engine: "parakeet", event: "model_cache_migrated",
-                message: "Renamed pre-0.15 FluidAudio model cache folder")
-        } catch {
-            TranscriptedCore.AppLogger.transcription.warning("PARAKEET | legacy model cache migration failed: \(error.localizedDescription)")
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "model_cache_migration_failed",
-                message: error.localizedDescription)
-        }
-    }
-
-    /// Check for a Parakeet model bundled in the app at build time.
-    /// Expected layout: Contents/Resources/parakeet-models/{subdirectory}/{checkFile}
-    private func bundledModelPath(subdirectory: String, checkFile: String) -> URL? {
-        guard let resourcePath = Bundle.main.resourcePath else { return nil }
-        let path = URL(fileURLWithPath: resourcePath)
-            .appendingPathComponent("parakeet-models")
-            .appendingPathComponent(subdirectory)
-        guard FileManager.default.fileExists(atPath: path.appendingPathComponent(checkFile).path) else { return nil }
-        return path
     }
 
     // MARK: - Input readiness
@@ -842,7 +467,7 @@ class ParakeetEngine: ObservableObject {
 
         prewarmRetryCount = 0
         markFormatReadyAndPublish()
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | input ready (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
+        AppLogger.transcription.info("PARAKEET | input ready (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
     }
 
     private func canContinuePrewarm(generation: Int) -> Bool {
@@ -852,7 +477,7 @@ class ParakeetEngine: ObservableObject {
             && audioGraphGeneration == generation
     }
 
-    private func schedulePrewarmRetry() {
+    func schedulePrewarmRetry() {
         guard !isShuttingDown else { return }
         // Bounded retry — give CoreAudio time to settle, but don't loop forever.
         // Each call counts toward the budget; budget resets on a successful prewarm
@@ -929,501 +554,7 @@ class ParakeetEngine: ObservableObject {
         installInputDeviceChangeListenerIfNeeded()
     }
 
-    private func installAudioEngineConfigObserverIfNeeded() {
-        guard configChangeObserver == nil else { return }
-        configChangeObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: audioEngine,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.handleAudioConfigChange()
-            }
-        }
-    }
-
-    private func removeAudioEngineConfigObserver() {
-        guard let observer = configChangeObserver else { return }
-        NotificationCenter.default.removeObserver(observer)
-        configChangeObserver = nil
-    }
-
-    private func installInputDeviceChangeListenerIfNeeded() {
-        guard inputDeviceChangeListener == nil else { return }
-
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            Task.detached(priority: .utility) { [weak self] in
-                let selection = Self.loadDictationInputDeviceSelection() ?? Self.unknownInputDeviceSelection
-                await self?.handleDefaultInputDeviceChange(selection: selection)
-            }
-        }
-
-        let status = AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            .main,
-            listener
-        )
-
-        guard status == noErr else {
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
-                event: "default_input_listener_failed",
-                message: "Failed to register default input device listener",
-                context: ["status": "\(status)"]
-            )
-            return
-        }
-
-        inputDeviceChangeListener = listener
-    }
-
-    private func removeInputDeviceChangeListener() {
-        unregisterDefaultInputDeviceListener(inputDeviceChangeListener)
-        inputDeviceChangeListener = nil
-    }
-
-    private func handleAudioConfigChange() async {
-        // Recording startup owns route selection and format validation. Letting
-        // the config-change recovery path run at the same time makes it fight
-        // the intentional Bluetooth -> built-in override and can create a
-        // restore/override loop between consecutive dictations.
-        if audioStartInProgress {
-            return
-        }
-        if CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil {
-            return
-        }
-        audioGraphGeneration += 1
-
-        // Track whether any config change in the current burst interrupted a
-        // recording. Once set, subsequent changes in the same burst inherit it.
-        if isRecording {
-            configChangeWasRecording = true
-        }
-
-        // Bump the generation counter and signal UI that engine is recovering.
-        // DictationSessionController waits on these flags instead of racing.
-        cancelConfigRecoveryTimeout()
-        let recoveryGeneration = recoveryState.beginConfigChange()
-        publishRecoveryState()
-        // Load the new route off the main actor — the enumeration is blocking
-        // coreaudiod IPC — then refresh the analytics cache and report.
-        let wasRecordingForAnalytics = configChangeWasRecording
-        Task.detached(priority: .utility) { [weak self] in
-            let selection = Self.loadDictationInputDeviceSelection()
-            await self?.recordRouteChangeAnalytics(
-                selection: selection,
-                wasRecording: wasRecordingForAnalytics
-            )
-        }
-        scheduleConfigRecoveryTimeout(
-            generation: recoveryGeneration,
-            wasRecording: configChangeWasRecording
-        )
-        // Fresh device state warrants a fresh retry budget for prewarm.
-        prewarmRetryCount = 0
-
-        // Immediately tear down anything that's running — the system has
-        // already stopped the engine internally before posting this notification,
-        // so the tap and prewarm state are stale.
-        cancelAudioWatchdog()
-        prewarmRetryTask?.cancel()
-        prewarmRetryTask = nil
-
-        if isRecording {
-            preserveCurrentRecordingBuffersForRecovery()
-            streamingSamplesLock.withLock { streamingSampleBuffer.removeAll(keepingCapacity: true) }
-            Task { await eouManager?.reset() }
-            await removeRecordingTap()
-            isRecording = false
-            audioLevel = 0
-        }
-
-        await stopAudioEngine()
-        isEnginePrewarmed = false
-        await rebuildAudioEngine(reason: "configuration_change")
-
-        // Cancel any in-flight recovery — the latest device change wins.
-        // Bluetooth disconnect/reconnect fires multiple notifications over
-        // 500-1500ms; each cancels the previous recovery so only the final
-        // stable device state gets a recovery attempt.
-        configChangeDebounceTask?.cancel()
-        configRecoveryTask?.cancel()
-
-        configChangeDebounceTask = Task { @MainActor [weak self] in
-            // 250ms debounce — long enough to coalesce rapid BT notifications,
-            // short enough that dictation recovery feels responsive.
-            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)
-            guard !Task.isCancelled, let self = self else { return }
-            self.attemptDeviceRecovery()
-        }
-    }
-
-    private func recordRouteChangeAnalytics(
-        selection: DictationInputDeviceSelection?,
-        wasRecording: Bool
-    ) {
-        if let selection {
-            updateCachedInputDeviceSelection(selection)
-        }
-        AnalyticsReporter.track(
-            "dictation_audio_route_changed",
-            properties: dictationRouteAnalyticsContext(
-                selection: selection,
-                extra: [
-                    "was_recording": "\(wasRecording)"
-                ]
-            )
-        )
-    }
-
-    private func attemptDeviceRecovery() {
-        let shouldRestartRecording = configChangeWasRecording
-        configChangeWasRecording = false
-        let myGeneration = recoveryState.generation
-        let recoveryStartedAt = CFAbsoluteTimeGetCurrent()
-
-        configRecoveryTask = Task { @MainActor [weak self] in
-            // Wait for CoreAudio to finish settling the new device graph.
-            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-            guard !Task.isCancelled, let self = self else { return }
-            guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-            var workflowRecoveryFinished = false
-            func finishWorkflowRecovery(result: String, artifactRetained: Bool) {
-                guard !workflowRecoveryFinished else { return }
-                workflowRecoveryFinished = true
-                WorkflowRecoveryTelemetry.finished(
-                    workflowKind: "dictation",
-                    failureKind: "route_changed",
-                    retrySource: "audio_route_recovery",
-                    result: result,
-                    elapsedSeconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt,
-                    surface: "runtime",
-                    artifactRetained: artifactRetained
-                )
-            }
-            defer {
-                finishWorkflowRecovery(
-                    result: Task.isCancelled ? "cancelled" : "superseded",
-                    artifactRetained: shouldRestartRecording
-                )
-            }
-            WorkflowRecoveryTelemetry.attempted(
-                workflowKind: "dictation",
-                failureKind: "route_changed",
-                retrySource: "audio_route_recovery",
-                surface: "runtime",
-                artifactRetained: shouldRestartRecording
-            )
-
-            let recoverySelection = await Task.detached(priority: .utility) {
-                Self.loadDictationInputDeviceSelection()
-            }.value
-            guard !Task.isCancelled else { return }
-            guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-            if ParakeetPrewarmPolicy.shouldDeferHardwareRecovery(
-                for: recoverySelection,
-                wasRecording: shouldRestartRecording
-            ) {
-                if let recoverySelection {
-                    self.updateCachedInputDeviceSelection(recoverySelection)
-                }
-                self.prewarmRetryCount = 0
-                guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
-                self.cancelConfigRecoveryTimeout()
-                self.publishRecoveryState()
-                EventReporter.shared.capture(
-                    level: .info,
-                    engine: "parakeet",
-                    event: "prewarm_deferred_for_bluetooth_fallback",
-                    message: "Deferred idle microphone graph changes until dictation starts",
-                    context: self.dictationRouteDiagnosticsContext(selection: recoverySelection)
-                )
-                finishWorkflowRecovery(result: "success", artifactRetained: false)
-                return
-            }
-
-            do {
-                var recoveryAttempt = 0
-                var readySnapshot: ParakeetAudioInputSnapshot?
-                while readySnapshot == nil {
-                    recoveryAttempt += 1
-                    let snapshot = try await self.audioInputSnapshot(
-                        operation: recoveryAttempt == 1 ? "device_recovery" : "device_recovery_retry",
-                        recoveryGeneration: myGeneration
-                    )
-                    let readiness = self.audioFormatReadiness(
-                        outputFormat: snapshot.outputFormat,
-                        hwFormat: snapshot.hwFormat,
-                        selection: snapshot.selection
-                    )
-                    switch ParakeetDeviceRecoveryReadinessPolicy.action(for: readiness) {
-                    case .finishRecovery:
-                        readySnapshot = snapshot
-                    case .keepWaiting:
-                        var context = self.audioFormatContext(
-                            outputFormat: snapshot.outputFormat,
-                            hwFormat: snapshot.hwFormat,
-                            selection: snapshot.selection,
-                            readiness: readiness
-                        )
-                        context["recovery_attempt"] = "\(recoveryAttempt)"
-                        EventReporter.shared.capture(
-                            level: .warning,
-                            engine: "parakeet",
-                            event: "device_change_rewarm_deferred",
-                            message: "Audio route still settling after device change",
-                            context: context
-                        )
-                        try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-                        guard !Task.isCancelled else { return }
-                        guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                        continue
-                    }
-                }
-                guard let snapshot = readySnapshot else { return }
-                self.updateNativeSampleRate(snapshot.outputFormat.sampleRate)
-                self.prewarmRetryCount = 0
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET | audio device changed → \(self.inputDeviceName) (\(self.safeNativeSampleRate())Hz), input ready")
-
-                guard !Task.isCancelled else { return }
-                guard self.recoveryState.finishRecovery(success: true, generation: myGeneration) else { return }
-                self.cancelConfigRecoveryTimeout()
-                self.publishRecoveryState()
-                AnalyticsReporter.track(
-                    "dictation_audio_route_recovery_finished",
-                    properties: self.dictationRouteAnalyticsContext(
-                        outputFormat: snapshot.outputFormat,
-                        hwFormat: snapshot.hwFormat,
-                        selection: snapshot.selection,
-                        extra: [
-                            "outcome": "success",
-                            "recovery_latency_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt),
-                            "was_recording": "\(shouldRestartRecording)"
-                        ]
-                    )
-                )
-
-                // If we were recording, try to restart on the new device.
-                // The watchdog (via isRecoveryAttempt=false) catches silent
-                // failures where the device looks functional but produces no
-                // samples. The watchdog gets one retry before giving up.
-                if shouldRestartRecording {
-                    var restarted = false
-                    for attempt in 1...TranscriptedConstants.recordingRestartAttempts {
-                        guard !Task.isCancelled else { return }
-                        guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                        if await self.startRecording() {
-                            restarted = true
-                            TranscriptedCore.AppLogger.transcription.info("PARAKEET | recording recovered on new device (\(self.inputDeviceName)) after \(attempt) attempt(s)")
-                            EventReporter.shared.capture(level: .info, engine: "parakeet",
-                                event: "recording_recovered_device_change",
-                                message: "Recording recovered after device change",
-                                context: [
-                                    "audio_device": self.inputDeviceName,
-                                    "sample_rate": "\(self.safeNativeSampleRate())",
-                                    "attempts": "\(attempt)"
-                                ])
-                            finishWorkflowRecovery(result: "success", artifactRetained: true)
-                            break
-                        }
-                        // BT format negotiation can take ~1-2s; wait between attempts.
-                        try? await Task.sleep(nanoseconds: TranscriptedConstants.recordingRestartRetryDelay)
-                    }
-                    if !restarted {
-                        self.interruptRecordingAndClearRecoveredTimeline()
-                        EventReporter.shared.capture(level: .error, engine: "parakeet",
-                            event: "recording_interrupted",
-                            message: "Recording could not restart after device change within retry budget",
-                            context: self.dictationRouteDiagnosticsContext(
-                                outputFormat: snapshot.outputFormat,
-                                hwFormat: snapshot.hwFormat,
-                                selection: snapshot.selection,
-                                extra: [
-                                    "audio_device": self.inputDeviceName,
-                                    "reason": "recording_restart_budget_exhausted"
-                                ]
-                            ))
-                        finishWorkflowRecovery(result: "failed", artifactRetained: false)
-                    }
-                } else {
-                    finishWorkflowRecovery(result: "success", artifactRetained: false)
-                }
-            } catch {
-                guard !self.recoveryState.isStale(generation: myGeneration) else { return }
-                // A timed-out audio-engine operation means the serial engine queue
-                // is wedged behind a CoreAudio call that never returned (the AirPods
-                // / Bluetooth route-switch hang). Rebuilding on that same queue would
-                // never run, so fail safe by abandoning the blocked graph instead.
-                let audioEngineQueueBlocked = error is ParakeetAudioEngineWorkError
-                let failureAction = ParakeetDeviceRecoveryFailurePolicy.action(wasRecording: shouldRestartRecording)
-                if self.recoveryState.finishRecovery(success: false, generation: myGeneration) {
-                    self.cancelConfigRecoveryTimeout()
-                    self.publishRecoveryState()
-                }
-                AnalyticsReporter.track(
-                    "dictation_audio_route_recovery_finished",
-                    properties: self.dictationRouteAnalyticsContext(
-                        selection: self.cachedInputDeviceSelection,
-                        extra: [
-                            "outcome": "failed",
-                            "recovery_latency_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - recoveryStartedAt),
-                            "was_recording": "\(shouldRestartRecording)"
-                        ]
-                    )
-                )
-                finishWorkflowRecovery(result: "failed", artifactRetained: shouldRestartRecording)
-                if failureAction.markRecordingInterrupted {
-                    self.interruptRecordingAndClearRecoveredTimeline()
-                    EventReporter.shared.capture(level: .error, engine: "parakeet",
-                        event: "recording_interrupted",
-                        message: "Recording interrupted — engine rewarm failed after device change",
-                        context: self.dictationRouteDiagnosticsContext(
-                            selection: self.cachedInputDeviceSelection,
-                            extra: [
-                                "audio_device": self.inputDeviceName,
-                                "error": error.localizedDescription
-                            ]
-                        ))
-                }
-                if failureAction.reportSentryFailure {
-                    EventReporter.shared.capture(level: .error, engine: "parakeet",
-                        event: "device_change_rewarm_failed",
-                        message: error.localizedDescription,
-                        context: self.dictationRouteDiagnosticsContext(
-                            selection: self.cachedInputDeviceSelection,
-                            extra: [
-                                "audio_device": self.inputDeviceName,
-                                "was_recording": "\(shouldRestartRecording)",
-                                "recovery_generation": "\(myGeneration)"
-                            ]
-                        ))
-                } else {
-                    EventReporter.shared.capture(level: .warning, engine: "parakeet",
-                        event: "device_change_rewarm_deferred",
-                        message: "Idle audio route still settling after device change",
-                        context: self.dictationRouteDiagnosticsContext(
-                            selection: self.cachedInputDeviceSelection,
-                            extra: [
-                                "was_recording": "false",
-                                "error": error.localizedDescription,
-                                "recovery_generation": "\(myGeneration)"
-                            ]
-                        ))
-                }
-                switch ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(
-                    audioEngineQueueBlocked: audioEngineQueueBlocked
-                ) {
-                case .queuedOnAudioEngineQueue:
-                    await self.rebuildAudioEngine(reason: "device_change_rewarm_failed")
-                case .abandonBlockedAudioGraph:
-                    self.abandonBlockedAudioEngine(reason: "device_change_rewarm_failed")
-                }
-                if failureAction.schedulePrewarmRetry {
-                    self.prewarmRetryCount = 0
-                    self.schedulePrewarmRetry()
-                }
-            }
-        }
-    }
-
-    private func scheduleConfigRecoveryTimeout(generation: UInt64, wasRecording: Bool) {
-        configRecoveryTimeoutTask?.cancel()
-        configRecoveryTimeoutTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: TranscriptedConstants.audioDeviceRecoveryTimeout)
-            guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
-            guard self.recoveryState.timeoutRecovery(generation: generation) else { return }
-
-            self.configRecoveryTimeoutTask = nil
-            self.publishRecoveryState()
-            let timeoutAction = ParakeetDeviceRecoveryTimeoutPolicy.action(wasRecording: wasRecording)
-            let failureAction = timeoutAction.failureAction
-            AnalyticsReporter.track(
-                "dictation_audio_route_recovery_timeout",
-                properties: self.dictationRouteAnalyticsContext(
-                    selection: self.cachedInputDeviceSelection,
-                    extra: [
-                        "recovery_latency_bucket": AnalyticsReporter.durationBucket(
-                            seconds: Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000
-                        ),
-                        "was_recording": "\(wasRecording)"
-                    ]
-                )
-            )
-            WorkflowRecoveryTelemetry.finished(
-                workflowKind: "dictation",
-                failureKind: "route_changed",
-                retrySource: "audio_route_recovery",
-                result: "failed",
-                elapsedSeconds: Double(TranscriptedConstants.audioDeviceRecoveryTimeout) / 1_000_000_000,
-                surface: "runtime",
-                artifactRetained: wasRecording
-            )
-            let diagnosticsEvent = failureAction.reportSentryFailure
-                ? "device_change_recovery_timeout"
-                : "device_change_recovery_deferred"
-            let diagnosticsLevel: EventLevel = failureAction.reportSentryFailure ? .error : .warning
-            let diagnosticsMessage = failureAction.reportSentryFailure
-                ? "Audio device recovery timed out"
-                : "Idle audio route still settling after device change"
-            EventReporter.shared.capture(
-                level: diagnosticsLevel,
-                engine: "parakeet",
-                event: diagnosticsEvent,
-                message: diagnosticsMessage,
-                context: self.dictationRouteDiagnosticsContext(
-                    selection: self.cachedInputDeviceSelection,
-                    extra: [
-                        "recovery_generation": "\(generation)",
-                        "timeout_ms": "\(TranscriptedConstants.audioDeviceRecoveryTimeout / 1_000_000)",
-                        "was_recording": "\(wasRecording)",
-                        "audio_device": self.inputDeviceName
-                    ]
-                )
-            )
-            if failureAction.markRecordingInterrupted {
-                self.interruptRecordingAndClearRecoveredTimeline()
-                EventReporter.shared.capture(
-                    level: .error,
-                    engine: "parakeet",
-                    event: "recording_interrupted",
-                    message: "Recording interrupted because audio device recovery timed out",
-                    context: self.dictationRouteDiagnosticsContext(
-                        selection: self.cachedInputDeviceSelection,
-                        extra: [
-                            "audio_device": self.inputDeviceName,
-                            "reason": "device_change_recovery_timeout"
-                        ]
-                    )
-                )
-            }
-            switch timeoutAction.rebuildStrategy {
-            case .queuedOnAudioEngineQueue:
-                await self.rebuildAudioEngine(reason: "device_change_recovery_timeout")
-            case .abandonBlockedAudioGraph:
-                self.abandonBlockedAudioEngine(reason: "device_change_recovery_timeout")
-            }
-            if failureAction.schedulePrewarmRetry {
-                self.prewarmRetryCount = 0
-                self.schedulePrewarmRetry()
-            }
-        }
-    }
-
-    private func cancelConfigRecoveryTimeout() {
-        configRecoveryTimeoutTask?.cancel()
-        configRecoveryTimeoutTask = nil
-    }
-
-    private func publishRecoveryState() {
+    func publishRecoveryState() {
         isRecovering = recoveryState.isRecovering
         inputFormatReady = recoveryState.inputFormatReady
     }
@@ -1452,11 +583,11 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    private func safeNativeSampleRate() -> Double {
+    func safeNativeSampleRate() -> Double {
         ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(nativeSampleRate)
     }
 
-    private func updateNativeSampleRate(_ sampleRate: Double) {
+    func updateNativeSampleRate(_ sampleRate: Double) {
         nativeSampleRate = ParakeetAudioFormatReadinessPolicy.captureSampleRateOrFallback(sampleRate)
     }
 
@@ -1474,7 +605,7 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private func audioFormatReadiness(
+    func audioFormatReadiness(
         outputFormat: ParakeetAudioFormatSummary,
         hwFormat: ParakeetAudioFormatSummary,
         selection: DictationInputDeviceSelection?
@@ -1502,7 +633,7 @@ class ParakeetEngine: ObservableObject {
         selection?.defaultOutput.map(DictationInputDeviceSelectionPolicy.deviceClass(for:)) ?? "unknown"
     }
 
-    private func audioFormatContext(
+    func audioFormatContext(
         outputFormat: ParakeetAudioFormatSummary,
         hwFormat: ParakeetAudioFormatSummary,
         selection: DictationInputDeviceSelection?,
@@ -1533,7 +664,7 @@ class ParakeetEngine: ObservableObject {
         return context
     }
 
-    private func dictationRouteDiagnosticsContext(
+    func dictationRouteDiagnosticsContext(
         outputFormat: ParakeetAudioFormatSummary? = nil,
         hwFormat: ParakeetAudioFormatSummary? = nil,
         selection: DictationInputDeviceSelection?,
@@ -1555,7 +686,7 @@ class ParakeetEngine: ObservableObject {
         return context
     }
 
-    private func dictationRouteAnalyticsContext(
+    func dictationRouteAnalyticsContext(
         outputFormat: ParakeetAudioFormatSummary? = nil,
         hwFormat: ParakeetAudioFormatSummary? = nil,
         selection: DictationInputDeviceSelection?,
@@ -1673,7 +804,7 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private func audioInputSnapshot(
+    func audioInputSnapshot(
         operation: String,
         recoveryGeneration: UInt64? = nil,
         allowsBuiltInBluetoothFallback: Bool = true
@@ -2016,7 +1147,7 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private func removeRecordingTap(force: Bool = false) async {
+    func removeRecordingTap(force: Bool = false) async {
         guard force || inputTapInstalled else { return }
         await runAudioEngineWork { audioEngine in
             // Stop + drain before removing the tap; the canonical stop path
@@ -2061,7 +1192,7 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private func stopAudioEngine() async {
+    func stopAudioEngine() async {
         await runAudioEngineWork { audioEngine in
             if audioEngine.isRunning {
                 audioEngine.stop()
@@ -2120,7 +1251,7 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    private func rebuildAudioEngine(reason: String) async {
+    func rebuildAudioEngine(reason: String) async {
         trackAudioEngineRebuildChurn(reason: reason)
         audioGraphGeneration += 1
         removeAudioEngineConfigObserver()
@@ -2154,7 +1285,7 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    private func abandonBlockedAudioEngine(reason: String) {
+    func abandonBlockedAudioEngine(reason: String) {
         trackAudioEngineRebuildChurn(reason: reason)
         audioGraphGeneration += 1
         removeAudioEngineConfigObserver()
@@ -2186,7 +1317,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private func handleSystemWake() async {
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | system wake detected, resetting audio engine")
+        AppLogger.transcription.info("PARAKEET | system wake detected, resetting audio engine")
         EventReporter.shared.capture(level: .info, engine: "parakeet", event: "system_wake",
             message: "System woke from sleep, resetting audio engine",
             context: ["was_recording": "\(isRecording)", "was_prewarmed": "\(isEnginePrewarmed)"])
@@ -2301,7 +1432,7 @@ class ParakeetEngine: ObservableObject {
               lastInputSelectionReportKey != reportKey else { return }
 
         lastInputSelectionReportKey = reportKey
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | using \(selection.selectedInput.name) instead of \(selection.defaultInput.name) to avoid Bluetooth headset mode")
+        AppLogger.transcription.info("PARAKEET | using \(selection.selectedInput.name) instead of \(selection.defaultInput.name) to avoid Bluetooth headset mode")
         EventReporter.shared.capture(
             level: .info,
             engine: "parakeet",
@@ -2311,7 +1442,7 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    private func inputSelectionContext(
+    func inputSelectionContext(
         _ selection: DictationInputDeviceSelection,
         operation: String? = nil
     ) -> [String: String] {
@@ -2538,7 +1669,7 @@ class ParakeetEngine: ObservableObject {
                     for: readiness.startFailureReason ?? .invalidAudioFormat,
                     isRecoveryAttempt: isRecoveryAttempt
                 )
-                TranscriptedCore.AppLogger.transcription.warning("PARAKEET | input format unavailable (\(readiness.rawValue)): output=\(snapshot.outputFormat.sampleRate)Hz/\(snapshot.outputFormat.channelCount)ch hw=\(snapshot.hwFormat.sampleRate)Hz/\(snapshot.hwFormat.channelCount)ch")
+                AppLogger.transcription.warning("PARAKEET | input format unavailable (\(readiness.rawValue)): output=\(snapshot.outputFormat.sampleRate)Hz/\(snapshot.outputFormat.channelCount)ch hw=\(snapshot.hwFormat.sampleRate)Hz/\(snapshot.hwFormat.channelCount)ch")
                 var context = audioStartContext(
                     attempt: attempt,
                     isRecoveryAttempt: isRecoveryAttempt,
@@ -2666,7 +1797,7 @@ class ParakeetEngine: ObservableObject {
 
                 if shouldRetry {
                     startGeneration = audioGraphGeneration
-                    TranscriptedCore.AppLogger.transcription.warning("PARAKEET | audio engine start failed, resetting graph and retrying once: \(error.localizedDescription)")
+                    AppLogger.transcription.warning("PARAKEET | audio engine start failed, resetting graph and retrying once: \(error.localizedDescription)")
                     EventReporter.shared.capture(
                         level: .warning,
                         engine: "parakeet",
@@ -2678,7 +1809,7 @@ class ParakeetEngine: ObservableObject {
                 }
 
                 if failureReason == .audioRouteNotSettled {
-                    TranscriptedCore.AppLogger.transcription.warning("PARAKEET | audio route format unsupported while starting; waiting for CoreAudio to settle")
+                    AppLogger.transcription.warning("PARAKEET | audio route format unsupported while starting; waiting for CoreAudio to settle")
                     EventReporter.shared.capture(
                         level: .warning,
                         engine: "parakeet",
@@ -2696,7 +1827,7 @@ class ParakeetEngine: ObservableObject {
                 }
 
                 if operationTimedOut {
-                    TranscriptedCore.AppLogger.transcription.error("PARAKEET | audio engine start timed out after \(attempt) attempt(s): \(error.localizedDescription)")
+                    AppLogger.transcription.error("PARAKEET | audio engine start timed out after \(attempt) attempt(s): \(error.localizedDescription)")
                     EventReporter.shared.capture(
                         level: .error,
                         engine: "parakeet",
@@ -2713,7 +1844,7 @@ class ParakeetEngine: ObservableObject {
                     return await failAudioStart()
                 }
 
-                TranscriptedCore.AppLogger.transcription.error("PARAKEET | audio engine failed after \(attempt) attempt(s): \(error.localizedDescription)")
+                AppLogger.transcription.error("PARAKEET | audio engine failed after \(attempt) attempt(s): \(error.localizedDescription)")
                 reportAudioStartFailureIfNeeded(message: error.localizedDescription, context: context)
                 if startFailureAction.markFormatUnready {
                     markStartFailedAndPublish()
@@ -2754,7 +1885,7 @@ class ParakeetEngine: ObservableObject {
             }
             Task { await eouManager?.reset() }
         }
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
+        AppLogger.transcription.info("PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
 
         // Watchdog: detect zombie audio engine (running but no usable signal after sleep/wake).
         // Only on first attempt — recovery attempt doesn't re-watchdog to prevent infinite loops.
@@ -2864,11 +1995,11 @@ class ParakeetEngine: ObservableObject {
 
             // Retry once — isRecoveryAttempt prevents another watchdog
             if await self.startRecording(isRecoveryAttempt: true) {
-                TranscriptedCore.AppLogger.transcription.info("PARAKEET | zombie engine recovered — recording restarted")
+                AppLogger.transcription.info("PARAKEET | zombie engine recovered — recording restarted")
                 EventReporter.shared.capture(level: .info, engine: "parakeet", event: "zombie_engine_recovered",
                     message: "Audio engine recovered after reset")
             } else {
-                TranscriptedCore.AppLogger.transcription.error("PARAKEET | zombie engine recovery failed")
+                AppLogger.transcription.error("PARAKEET | zombie engine recovery failed")
                 EventReporter.shared.capture(level: .error, engine: "parakeet", event: "zombie_engine_recovery_failed",
                     message: "Audio engine could not recover after reset",
                     context: ["audio_device": self.inputDeviceName])
@@ -2930,7 +2061,7 @@ class ParakeetEngine: ObservableObject {
         isRecording = false
         audioLevel = 0
         let stopSampleRate = safeNativeSampleRate()
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / stopSampleRate))s)")
+        AppLogger.transcription.info("PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / stopSampleRate))s)")
     }
 
     // MARK: - EOU Streaming (live display)
@@ -2950,7 +2081,7 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private func preserveCurrentRecordingBuffersForRecovery() {
+    func preserveCurrentRecordingBuffersForRecovery() {
         drainPendingSamplesIntoSampleBuffer()
         if !sampleBuffer.isEmpty {
             recoveredRecordingTimeline.append(sampleBuffer, sampleRate: safeNativeSampleRate())
@@ -2964,7 +2095,7 @@ class ParakeetEngine: ObservableObject {
         preservingRecordingAcrossRecovery = false
     }
 
-    private func interruptRecordingAndClearRecoveredTimeline() {
+    func interruptRecordingAndClearRecoveredTimeline() {
         clearRecoveredRecordingTimeline(keepingCapacity: true)
         markRecordingInterrupted()
     }
@@ -3099,7 +2230,7 @@ class ParakeetEngine: ObservableObject {
         }
         let nativeCount = recorded.nativeSampleCount
         let resampled = recorded.samples16k
-        TranscriptedCore.AppLogger.transcription.info("\(engineName.uppercased()) | resampled \(nativeCount) → \(resampled.count) samples")
+        AppLogger.transcription.info("\(engineName.uppercased()) | resampled \(nativeCount) → \(resampled.count) samples")
 
         let shortAudioDecision = ParakeetShortAudioGate.dictation(
             nativeSampleCount: nativeCount,
@@ -3108,7 +2239,7 @@ class ParakeetEngine: ObservableObject {
         guard shortAudioDecision.shouldTranscribe else {
             lastEmptyTranscriptionReason = .recordingTooShort
             let audioDuration = shortAudioDecision.context["audio_duration_s"] ?? "0.00"
-            TranscriptedCore.AppLogger.transcription.warning("\(engineName.uppercased()) | skipping transcription for short audio (\(audioDuration)s)")
+            AppLogger.transcription.warning("\(engineName.uppercased()) | skipping transcription for short audio (\(audioDuration)s)")
             EventReporter.shared.capture(
                 level: .warning,
                 engine: engineName,
@@ -3133,7 +2264,7 @@ class ParakeetEngine: ObservableObject {
         clearRecoveredRecordingTimeline(keepingCapacity: true)
     }
 
-    private var hasActiveASRWork: Bool {
+    var hasActiveASRWork: Bool {
         asrInferenceActivity.isActive
             || asrInferenceHandoffCount > 0
             || !asrInferenceWaiters.isEmpty
@@ -3222,7 +2353,7 @@ class ParakeetEngine: ObservableObject {
             return nil
         }
         guard let manager = asrManager, asrManagerReady else {
-            TranscriptedCore.AppLogger.transcription.error("PARAKEET | ASR manager not available")
+            AppLogger.transcription.error("PARAKEET | ASR manager not available")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "asr_manager_unavailable",
                 message: "ASR manager not available for transcription")
             return nil
@@ -3237,7 +2368,7 @@ class ParakeetEngine: ObservableObject {
         }
         let nativeCount = recorded.nativeSampleCount
         let resampled = recorded.samples16k
-        TranscriptedCore.AppLogger.transcription.info("PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
+        AppLogger.transcription.info("PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
 
         let shortAudioDecision = ParakeetShortAudioGate.dictation(
             nativeSampleCount: nativeCount,
@@ -3246,7 +2377,7 @@ class ParakeetEngine: ObservableObject {
         guard shortAudioDecision.shouldTranscribe else {
             lastEmptyTranscriptionReason = .recordingTooShort
             let audioDuration = shortAudioDecision.context["audio_duration_s"] ?? "0.00"
-            TranscriptedCore.AppLogger.transcription.warning("PARAKEET | skipping transcription for short audio (\(audioDuration)s)")
+            AppLogger.transcription.warning("PARAKEET | skipping transcription for short audio (\(audioDuration)s)")
             EventReporter.shared.capture(
                 level: .warning,
                 engine: "parakeet",
@@ -3269,7 +2400,7 @@ class ParakeetEngine: ObservableObject {
 
             let audioDuration = Double(resampled.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s, chars=\(corrected.count)")
+            AppLogger.transcription.info("PARAKEET | transcribed in \(String(format: "%.2f", elapsed))s, chars=\(corrected.count)")
 
             if trimmed.isEmpty {
                 let analysis = DictationAudioRecovery.analyze(
@@ -3380,7 +2511,7 @@ class ParakeetEngine: ObservableObject {
                 return nil
             }
 
-            TranscriptedCore.AppLogger.transcription.error("PARAKEET | transcription failed: \(error.localizedDescription)")
+            AppLogger.transcription.error("PARAKEET | transcription failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "transcription_failed",
                 message: error.localizedDescription,
                 context: ["samples": "\(nativeCount)", "elapsed": String(format: "%.2f", elapsed)])
@@ -3606,7 +2737,7 @@ class ParakeetEngine: ObservableObject {
         isEnginePrewarmed = false
     }
 
-    private func cancelAudioWatchdog() {
+    func cancelAudioWatchdog() {
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
         zombieRecoveryRestartPending = false
@@ -3614,10 +2745,7 @@ class ParakeetEngine: ObservableObject {
 
     func cleanup() {
         isShuttingDown = true
-        modelInitializationTask?.cancel()
-        modelInitializationTask = nil
-        modelFilePrefetchTask?.cancel()
-        modelFilePrefetchTask = nil
+        cancelModelWork()
         cancelAudioWatchdog()
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil
@@ -3640,21 +2768,7 @@ class ParakeetEngine: ObservableObject {
             wakeObserver = nil
         }
         removeInputDeviceChangeListener()
-        let cleanupDecision = ParakeetASRManagerCleanupPolicy.decision(
-            isTranscribing: isTranscribing || hasActiveASRWork
-        )
-        let mgr = asrManager
-        if cleanupDecision == .cleanupNow {
-            asrManager = nil
-        }
-        asrManagerReady = false
-        eouManager = nil
-        modelDownloadState = .notLoaded
-        if cleanupDecision == .cleanupNow {
-            Task { await mgr?.cleanup() }
-        } else {
-            TranscriptedCore.AppLogger.transcription.info("PARAKEET | deferring ASR manager cleanup while transcription is active")
-        }
+        teardownModel()
     }
 
     deinit {

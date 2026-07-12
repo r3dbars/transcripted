@@ -131,24 +131,17 @@ final class FileLogger: @unchecked Sendable {
         flock(lockFd, LOCK_EX)
         defer { flock(lockFd, LOCK_UN); close(lockFd) }
 
-        guard let data = try? Data(contentsOf: logFileURL),
-              let content = String(data: data, encoding: .utf8) else { return }
+        let didTrim = LogTailTrimmer.trimIfNeeded(
+            at: logFileURL.path,
+            maxLines: maxEntries,
+            keepLines: trimTarget,
+            filterEmptyLines: true,
+            appendsTrailingNewline: true
+        )
+        guard didTrim else { return }
 
-        let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
-        guard lines.count > maxEntries else { return }
-
-        // Keep the most recent entries
-        let trimmed = Array(lines.suffix(trimTarget))
-        let newContent = trimmed.joined(separator: "\n") + "\n"
-
-        // Close handle, rewrite file, reopen
+        // Close handle, reopen against the rewritten file
         try? fileHandle?.close()
-
-        try? newContent.write(to: logFileURL, atomically: true, encoding: .utf8)
-        // Security: atomic rewrite creates a replacement inode that may inherit default
-        // permissions (for example 0644). Re-tighten after every trim so sensitive logs
-        // never drift from owner-only access.
-        FileManager.default.restrictToOwnerOnly(atPath: logFileURL.path)
 
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
         if fileHandle == nil {

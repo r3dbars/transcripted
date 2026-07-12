@@ -19,13 +19,6 @@ enum MeetingTranscriptStyler {
         return formatter
     }()
 
-    private static let detailFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale.current
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
     private static let formatterQueue = DispatchQueue(label: "Transcripted.MeetingTranscriptStyler.formatters")
 
     static func restyleTranscript(at url: URL) -> StyledMeetingTranscript {
@@ -373,7 +366,7 @@ enum MeetingTranscriptStyler {
 
     private static func detailString(from date: Date) -> String {
         formatterQueue.sync {
-            detailFormatter.string(from: date)
+            DateFormattingHelper.formatDisplay(date)
         }
     }
 

@@ -14,7 +14,7 @@ struct TranscriptedSettingsView: View {
     @ObservedObject private var statsService: StatsService = .shared
 
     private let actions: TranscriptedSettingsActions
-    private let appLogger: AppLogger
+    private let appLogger: AppLogSink
 
     @State private var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
         for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
@@ -691,15 +691,47 @@ struct TranscriptedSettingsView: View {
     }
 
     private var dictationsPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Dictations",
-                summary: "Recent dictations saved to daily Markdown files."
-            )
-
-            homeDictationsListSection
-        }
-        .accessibilityIdentifier("transcripted.settings.page.dictations")
+        DictationsSettingsPage(
+            homeViewModel: homeViewModel,
+            actions: actions,
+            homeCopiedRowID: homeCopiedRowID,
+            onStartDictation: {
+                trackSettingsAction("empty_start_dictation", page: .dictations)
+                actions.startDictation()
+            },
+            onLoadMoreDictations: {
+                trackSettingsAction("load_more_dictations", page: navigation.selectedPage)
+                homeViewModel.loadMoreDictations()
+            },
+            onOpenDictation: { entry in
+                trackSettingsAction("open_recent_dictation", page: navigation.selectedPage)
+                let didOpen = openOwnFile(
+                    candidateURLs: [entry.url],
+                    failureTitle: "Could not open dictation",
+                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
+                )
+                ActivationTelemetry.trackArtifactAction(
+                    artifactKind: .dictation,
+                    actionKind: .openMarkdown,
+                    surface: .homeRow,
+                    artifactDate: entry.createdAt,
+                    result: didOpen ? .success : .failed
+                )
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .reviewYesterday,
+                    surface: .homeRow,
+                    artifactKind: .dictation,
+                    artifactDate: entry.createdAt,
+                    result: didOpen ? .success : .failed
+                )
+            },
+            onCopyDictation: { entry in handleCopyDictation(entry) },
+            onFlagDictation: { entry in
+                trackSettingsAction("flag_dictation", page: navigation.selectedPage)
+                homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
+            },
+            dictationRowMenuItems: { entry in dictationRowMenuItems(for: entry) }
+        )
     }
 
     private var homeMeetingsListSection: some View {
@@ -776,64 +808,6 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private var homeDictationsListSection: some View {
-        HomeCaptureListSection(
-            sections: homeViewModel.dictationDaySections,
-            emptyMessage: HomeCaptureListCopy.emptyDictations,
-            emptyState: HomeListEmptyState(
-                symbolName: "mic",
-                title: "No dictations yet",
-                message: "Hold your dictation shortcut and speak in any app — Transcripted types it out for you and keeps a copy here.",
-                actionTitle: "Start a dictation",
-                automationIdentifier: "transcripted.home.dictations.empty.start",
-                action: {
-                    trackSettingsAction("empty_start_dictation", page: .dictations)
-                    actions.startDictation()
-                }
-            ),
-            isLoading: homeViewModel.isLoading,
-            isLoadingMore: homeViewModel.isLoadingMore,
-            canLoadMore: homeViewModel.canLoadMoreDictations,
-            getID: { AnyHashable($0.id) },
-            onLoadMore: {
-                trackSettingsAction("load_more_dictations", page: navigation.selectedPage)
-                homeViewModel.loadMoreDictations()
-            }
-        ) { entry in
-            HomeDictationRow(
-                entry: entry,
-                isCopied: homeCopiedRowID == entry.id,
-                onOpen: {
-                    trackSettingsAction("open_recent_dictation", page: navigation.selectedPage)
-                    let didOpen = openOwnFile(
-                        candidateURLs: [entry.url],
-                        failureTitle: "Could not open dictation",
-                        failureMessage: SettingsArtifactMessage.dictationFileNotFound
-                    )
-                    ActivationTelemetry.trackArtifactAction(
-                        artifactKind: .dictation,
-                        actionKind: .openMarkdown,
-                        surface: .homeRow,
-                        artifactDate: entry.createdAt,
-                        result: didOpen ? .success : .failed
-                    )
-                    ActivationTelemetry.trackHabitLoopAction(
-                        actionKind: .reviewYesterday,
-                        surface: .homeRow,
-                        artifactKind: .dictation,
-                        artifactDate: entry.createdAt,
-                        result: didOpen ? .success : .failed
-                    )
-                },
-                onCopy: { handleCopyDictation(entry) },
-                onFlag: {
-                    trackSettingsAction("flag_dictation", page: navigation.selectedPage)
-                    homeFeedbackTarget = HomeFeedbackTarget.dictation(entry)
-                },
-                menuItems: dictationRowMenuItems(for: entry)
-            )
-        }
-    }
 
     private var homeGreeting: String {
         HomeCanvasGreeting.text(
@@ -906,87 +880,83 @@ struct TranscriptedSettingsView: View {
 
     private func handleCopyMeeting(_ item: RecentMeetingItem) {
         trackSettingsAction("copy_meeting", page: .home)
-        // Resolve the transcript first so a row whose path drifted (restyle/
-        // rename after scanning) still copies, and a genuinely missing file
-        // surfaces an error instead of silently no-op'ing on the empty clipboard.
-        guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
-            ActivationTelemetry.trackHabitLoopAction(
-                actionKind: .whatDidIPromise,
-                surface: .homeRow,
-                artifactKind: .meeting,
-                artifactDate: item.date,
-                result: .failed
-            )
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .meetingBundle,
-                actionKind: .copied,
-                agentTarget: .localAgent,
-                surface: .homeRow,
-                result: .failed,
-                artifactKind: .meeting
-            )
-            presentHomeActionFailure(
-                title: "Could not copy meeting",
-                message: SettingsArtifactMessage.meetingTranscriptNotFound,
-                retry: {
-                    handleCopyMeeting(item)
-                }
-            )
-            return
+        // Resolution + the transcript read (and bundle assembly) touch disk and
+        // can be sizeable for long meetings, so do them off the main thread and
+        // hop back only to write the clipboard / update UI state.
+        Task { @MainActor in
+            let result = await Self.loadCopyMeetingText(for: item)
+            switch result {
+            case .missingFile:
+                // Resolution failed so a row whose path drifted (restyle/rename
+                // after scanning) still copies, and a genuinely missing file
+                // surfaces an error instead of silently no-op'ing on the empty
+                // clipboard.
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .whatDidIPromise,
+                    surface: .homeRow,
+                    artifactKind: .meeting,
+                    artifactDate: item.date,
+                    result: .failed
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .meetingBundle,
+                    actionKind: .copied,
+                    agentTarget: .localAgent,
+                    surface: .homeRow,
+                    result: .failed,
+                    artifactKind: .meeting
+                )
+                presentHomeActionFailure(
+                    title: "Could not copy meeting",
+                    message: SettingsArtifactMessage.meetingTranscriptNotFound,
+                    retry: {
+                        handleCopyMeeting(item)
+                    }
+                )
+            case .readFailure:
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .whatDidIPromise,
+                    surface: .homeRow,
+                    artifactKind: .meeting,
+                    artifactDate: item.date,
+                    result: .failed
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: .meetingBundle,
+                    actionKind: .copied,
+                    agentTarget: .localAgent,
+                    surface: .homeRow,
+                    result: .failed,
+                    artifactKind: .meeting
+                )
+                presentHomeActionFailure(
+                    title: "Could not copy meeting",
+                    message: "Transcripted found this meeting's transcript but couldn't read it. The file may be open exclusively elsewhere or corrupted.",
+                    retry: {
+                        handleCopyMeeting(item)
+                    }
+                )
+            case .success(let text, let usedBundle):
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: .whatDidIPromise,
+                    surface: .homeRow,
+                    artifactKind: .meeting,
+                    artifactDate: item.date
+                )
+                ActivationTelemetry.trackAgentPromptAction(
+                    promptKind: usedBundle ? .meetingBundle : .meetingMarkdown,
+                    actionKind: .copied,
+                    agentTarget: .localAgent,
+                    surface: .homeRow,
+                    result: usedBundle ? .success : .fallbackCopied,
+                    artifactKind: .meeting
+                )
+                flashCopied(rowID: item.id)
+            }
         }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        let usedBundle: Bool
-        if let bundle = AgentConnectionGuide.portableMeetingBundle(
-            title: item.title,
-            date: item.date,
-            transcriptURL: transcriptURL
-        ) {
-            pasteboard.setString(bundle, forType: .string)
-            usedBundle = true
-        } else if let raw = try? String(contentsOf: transcriptURL, encoding: .utf8) {
-            pasteboard.setString(raw, forType: .string)
-            usedBundle = false
-        } else {
-            ActivationTelemetry.trackHabitLoopAction(
-                actionKind: .whatDidIPromise,
-                surface: .homeRow,
-                artifactKind: .meeting,
-                artifactDate: item.date,
-                result: .failed
-            )
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .meetingBundle,
-                actionKind: .copied,
-                agentTarget: .localAgent,
-                surface: .homeRow,
-                result: .failed,
-                artifactKind: .meeting
-            )
-            presentHomeActionFailure(
-                title: "Could not copy meeting",
-                message: "Transcripted found this meeting's transcript but couldn't read it. The file may be open exclusively elsewhere or corrupted.",
-                retry: {
-                    handleCopyMeeting(item)
-                }
-            )
-            return
-        }
-        ActivationTelemetry.trackHabitLoopAction(
-            actionKind: .whatDidIPromise,
-            surface: .homeRow,
-            artifactKind: .meeting,
-            artifactDate: item.date
-        )
-        ActivationTelemetry.trackAgentPromptAction(
-            promptKind: usedBundle ? .meetingBundle : .meetingMarkdown,
-            actionKind: .copied,
-            agentTarget: .localAgent,
-            surface: .homeRow,
-            result: usedBundle ? .success : .fallbackCopied,
-            artifactKind: .meeting
-        )
-        flashCopied(rowID: item.id)
     }
 
     private func handleCopyMeetingPreview(_ preview: HomeMeetingPreview) {
@@ -1517,6 +1487,31 @@ struct TranscriptedSettingsView: View {
                 return .success(try String(contentsOf: resolved, encoding: .utf8))
             } catch {
                 return .failure(error.localizedDescription)
+            }
+        }.value
+    }
+
+    private enum HomeCopyMeetingReadResult {
+        case missingFile
+        case readFailure
+        case success(text: String, usedBundle: Bool)
+    }
+
+    private static func loadCopyMeetingText(for item: RecentMeetingItem) async -> HomeCopyMeetingReadResult {
+        await Task.detached(priority: .userInitiated) {
+            guard let transcriptURL = OwnFileResolver.resolveExistingFile(candidateURLs: [item.transcriptURL]) else {
+                return .missingFile
+            }
+            if let bundle = AgentConnectionGuide.portableMeetingBundle(
+                title: item.title,
+                date: item.date,
+                transcriptURL: transcriptURL
+            ) {
+                return .success(text: bundle, usedBundle: true)
+            } else if let raw = try? String(contentsOf: transcriptURL, encoding: .utf8) {
+                return .success(text: raw, usedBundle: false)
+            } else {
+                return .readFailure
             }
         }.value
     }
@@ -3453,18 +3448,10 @@ struct TranscriptedSettingsView: View {
     }
 
     private var peoplePage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Speakers",
-                summary: "Name new voices and manage the people in your meetings."
-            )
-
-            SpeakerPeopleSettingsSection(
-                model: speakerPeopleModel,
-                onStartMeeting: { actions.startMeeting() }
-            )
-        }
-        .accessibilityIdentifier("transcripted.settings.page.people")
+        PeopleSettingsPage(
+            speakerPeopleModel: speakerPeopleModel,
+            onStartMeeting: { actions.startMeeting() }
+        )
     }
 
     private var storagePage: some View {
@@ -4519,250 +4506,54 @@ struct TranscriptedSettingsView: View {
     }
 
     private var privacyPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Privacy",
-                summary: "Permissions and optional reporting."
-            )
-
-            SettingsSection(
-                title: "Permissions",
-                detail: "Needed for capture, paste-back, and meeting prompts."
-            ) {
-                ForEach(TranscriptedPermissionKind.allCases) { kind in
-                    PermissionStatusRow(kind: kind, granted: permissionStates[kind] ?? false) {
-                        trackPermissionCTA(kind)
-                        Task { @MainActor in
-                            await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: kind)
-                            refreshPermissions()
-                        }
-                    }
-                }
-            }
-
-            SettingsSection(
-                title: "Meeting Audio",
-                detail: "How Transcripted handles your microphone during meetings."
-            ) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Picker("Meeting mic processing", selection: Binding(
-                        get: { meetingMicProcessingMode },
-                        set: { newValue in
-                            meetingMicProcessingMode = newValue
-                            trackSettingsToggle("meeting_mic_processing_\(newValue.rawValue)", enabled: true, page: .privacy)
-                            MicrophoneProcessingPreferences.setMode(newValue)
-                        }
-                    )) {
-                        ForEach(MicrophoneProcessingMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("transcripted.settings.privacy.meeting-mic-processing")
-
-                    Text(meetingMicProcessingMode.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                SettingsToggleRow(
-                    title: "Identify multiple people on this Mac",
-                    detail: splitLocalSpeakersEnabled
-                        ? "On. After shared-room meetings, Transcripted asks you to name the people captured by your mic."
-                        : "Off. The local mic stays as You, which is simpler when you are the only person near this Mac.",
-                    isOn: Binding(
-                        get: { splitLocalSpeakersEnabled },
-                        set: { newValue in
-                            splitLocalSpeakersEnabled = newValue
-                            trackSettingsToggle("local_speaker_split", enabled: newValue, page: .privacy)
-                            LocalSpeakerPreferences.setEnabled(newValue)
-                        }
-                    )
-                )
-
-                Text("Changes here apply from the next recording.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-
-            SettingsSection(
-                title: "Reporting",
-                detail: "Optional. Scrubbed before anything leaves this Mac."
-            ) {
-                SettingsToggleRow(
-                    title: "Send crash and error reports",
-                    detail: crashReportingFootnote,
-                    isOn: Binding(
-                        get: { crashReportingEnabled },
-                        set: { newValue in
-                            crashReportingEnabled = newValue
-                            trackSettingsToggle("crash_reporting", enabled: newValue, page: .privacy)
-                            CrashReportingPreferences.setEnabled(newValue)
-                            CrashReporter.applySessionTrackingPreference()
-                            sentryTestStatus = nil
-                            diagnosticsActionStatus = nil
-                        }
-                    )
-                )
-                    .disabled(!CrashReporter.isAvailable)
-
-                SettingsToggleRow(
-                    title: "Send anonymous usage stats",
-                    detail: analyticsFootnote,
-                    isOn: Binding(
-                        get: { anonymousAnalyticsEnabled },
-                        set: { newValue in
-                            anonymousAnalyticsEnabled = newValue
-                            if newValue {
-                                AnalyticsPreferences.setEnabled(true)
-                                trackSettingsToggle("anonymous_analytics", enabled: true, page: .privacy)
-                            } else {
-                                trackSettingsToggle("anonymous_analytics", enabled: false, page: .privacy)
-                                AnalyticsPreferences.setEnabled(false)
-                            }
-                            diagnosticsActionStatus = nil
-                        }
-                    )
-                )
-                    .disabled(!AnalyticsReporter.isAvailable)
-
-                HStack {
-                    SettingsInlineActionButton(title: "Send Test Sentry Event", tone: .warning) {
-                        trackSettingsAction("send_test_sentry_event", page: .privacy)
-                        sendTestSentryEvent()
-                    }
-                    .disabled(!CrashReporter.isAvailable || !crashReportingEnabled)
-
-                    if let sentryTestStatus {
-                        Text(sentryTestStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Text("Never sent: transcript text, audio, names, emails, file paths, raw URLs, or meeting titles.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
+        PrivacySettingsPage(
+            meetingMicProcessingMode: $meetingMicProcessingMode,
+            splitLocalSpeakersEnabled: $splitLocalSpeakersEnabled,
+            crashReportingEnabled: $crashReportingEnabled,
+            anonymousAnalyticsEnabled: $anonymousAnalyticsEnabled,
+            sentryTestStatus: $sentryTestStatus,
+            permissionStates: permissionStates,
+            onDiagnosticsStatusesCleared: { diagnosticsActionStatus = nil },
+            onTrackPermissionCTA: { kind in trackPermissionCTA(kind) },
+            onRefreshPermissions: { refreshPermissions() },
+            onTrackSettingsToggle: { settingID, enabled, page in
+                trackSettingsToggle(settingID, enabled: enabled, page: page)
+            },
+            onTrackSettingsAction: { actionID, page in
+                trackSettingsAction(actionID, page: page)
+            },
+            onSendTestSentryEvent: { sendTestSentryEvent() }
+        )
     }
 
     private var aboutPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "About",
-                summary: "Version and updates."
-            )
-
-            SettingsSection(
-                title: "Version",
-                detail: "Build info and update controls."
-            ) {
-                SettingsStatusCard(
-                    title: "Transcripted",
-                    status: TranscriptedSupportActions.appVersionDescription,
-                    detail: "Local-first dictation and meeting notes.",
-                    tone: .ready
-                )
-
-                SettingsStatusCard(
-                    title: "Updates",
-                    status: aboutUpdateStatusTitle,
-                    detail: aboutUpdateStatusDetail,
-                    tone: aboutUpdateStatusTone
-                )
-
-                VStack(alignment: .leading, spacing: 8) {
-                    SettingsToggleRow(
-                        title: "Check automatically",
-                        detail: sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled
-                            ? "Transcripted checks for updates in the background."
-                            : "Transcripted only checks when you ask.",
-                        isOn: Binding(
-                            get: { sparkleUpdater.automaticUpdateSettings.automaticChecksEnabled },
-                            set: { newValue in
-                                trackSettingsToggle("automatic_update_checks", enabled: newValue, page: .about)
-                                sparkleUpdater.setAutomaticallyChecksForUpdates(newValue)
-                            }
-                        )
-                    )
-
-                    SettingsToggleRow(
-                        title: "Download automatically",
-                        detail: sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled
-                            ? "Transcripted downloads available updates in the background."
-                            : "Transcripted waits before downloading updates.",
-                        isOn: Binding(
-                            get: { sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled },
-                            set: { newValue in
-                                trackSettingsToggle("automatic_update_downloads", enabled: newValue, page: .about)
-                                sparkleUpdater.setAutomaticallyDownloadsUpdates(newValue)
-                            }
-                        )
-                    )
-                        .disabled(!sparkleUpdater.automaticUpdateSettings.automaticDownloadsAllowed)
-
-                    Text(automaticUpdatesDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack {
-                    SettingsInlineActionButton(
-                        title: aboutUpdateButtonTitle,
-                        tone: .accent
-                    ) {
-                        guard aboutUpdateButtonEnabled else { return }
-                        trackSettingsAction(settingsUpdateActionID, page: .about)
-                        sparkleUpdater.performUserUpdateAction(surface: "settings_about")
-                    }
-                    .disabled(!aboutUpdateButtonEnabled)
-                }
+        AboutSettingsPage(
+            sparkleUpdater: sparkleUpdater,
+            onTrackSettingsToggle: { settingID, enabled, page in
+                trackSettingsToggle(settingID, enabled: enabled, page: page)
+            },
+            updateActionEnabled: { status in updateActionEnabled(for: status) },
+            onPerformUpdateAction: {
+                trackSettingsAction(settingsUpdateActionID, page: .about)
+                sparkleUpdater.performUserUpdateAction(surface: "settings_about")
             }
-        }
-        .accessibilityIdentifier("transcripted.settings.page.about")
+        )
     }
 
     private var supportPage: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            SettingsPageIntro(
-                title: "Support",
-                summary: "Need help, found a bug, or want to send feedback? Email is the best way to reach the team building Transcripted."
-            )
-
-            SupportActionCard(
-                symbolName: "envelope.fill",
-                title: "Email support",
-                detail: "Send feedback, ask for help, or tell us what felt broken. This opens a prefilled email to help@transcripted.app.",
-                buttonTitle: "Email support",
-                buttonSymbolName: "paperplane.fill",
-                tone: .primary,
-                status: nil,
-                isEnabled: true
-            ) {
+        SupportSettingsPage(
+            actions: actions,
+            diagnosticsActionStatus: diagnosticsActionStatus,
+            crashReportingEnabled: crashReportingEnabled,
+            onSubmitFeedback: {
                 trackSettingsAction("submit_feedback", page: .support)
                 actions.sendFeedback()
-            }
-
-            SupportActionCard(
-                symbolName: "waveform.path.ecg",
-                title: "Send diagnostics",
-                detail: "Had an error or something felt broken? Send a privacy-safe diagnostic event so we can investigate and try to fix it.",
-                buttonTitle: "One-click send diagnostics",
-                buttonSymbolName: "bolt.fill",
-                tone: .secondary,
-                status: diagnosticsActionStatus,
-                isEnabled: CrashReporter.isAvailable && crashReportingEnabled
-            ) {
+            },
+            onSendDiagnosticEvent: {
                 trackSettingsAction("send_diagnostic_event", page: .support)
                 sendDiagnosticEvent()
             }
-
-            SupportPrivacyNote()
-        }
-        .accessibilityIdentifier("transcripted.settings.page.support")
+        )
     }
 
     private var settingsFooterShowsUpdateBadge: Bool {
@@ -5661,96 +5452,6 @@ struct TranscriptedSettingsView: View {
                 return url.deletingPathExtension().lastPathComponent
             }
         )
-    }
-
-    private var aboutUpdateStatusTitle: String {
-        switch sparkleUpdater.updateStatus.state {
-        case .unknown, .readyToCheck:
-            return "Ready to check"
-        case .checking:
-            return "Checking for updates"
-        case .noUpdateAvailable:
-            return "Up to date"
-        case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
-                return "Preparing update (\(version))"
-            }
-            return "Update available (\(version))"
-        case .downloading(let version):
-            return "Downloading update (\(version))"
-        case .readyToInstall(let version):
-            return "Ready to restart (\(version))"
-        }
-    }
-
-    private var aboutUpdateStatusDetail: String {
-        switch sparkleUpdater.updateStatus.state {
-        case .unknown, .readyToCheck:
-            return "Check for a newer release."
-        case .checking:
-            return "Looking for updates now."
-        case .noUpdateAvailable:
-            return "This Mac is on the newest visible version."
-        case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
-                return "Transcripted is preparing version \(version). You only need to restart when it is ready."
-            }
-            return "Version \(version) is ready to install."
-        case .downloading(let version):
-            return "Version \(version) is downloading."
-        case .readyToInstall(let version):
-            return "Version \(version) is downloaded."
-        }
-    }
-
-    private var aboutUpdateStatusTone: SettingsStatusCard.Tone {
-        switch sparkleUpdater.updateStatus.state {
-        case .unknown, .readyToCheck:
-            return .working
-        case .checking:
-            return .working
-        case .noUpdateAvailable:
-            return .ready
-        case .updateAvailable where sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled:
-            return .working
-        case .downloading:
-            return .working
-        case .updateAvailable, .readyToInstall:
-            return .caution
-        }
-    }
-
-    private var aboutUpdateButtonTitle: String {
-        switch sparkleUpdater.updateStatus.state {
-        case .updateAvailable(let version):
-            if sparkleUpdater.automaticUpdateSettings.automaticDownloadsEnabled {
-                return "Preparing Update…"
-            }
-            return "Install \(version)"
-        case .downloading:
-            return "Downloading…"
-        case .readyToInstall:
-            return "Restart to Update"
-        case .checking:
-            return "Checking for Updates…"
-        case .unknown, .readyToCheck, .noUpdateAvailable:
-            return "Check for Updates"
-        }
-    }
-
-    private var aboutUpdateButtonEnabled: Bool {
-        updateActionEnabled(for: sparkleUpdater.updateStatus)
-    }
-
-    private var automaticUpdatesDetail: String {
-        let settings = sparkleUpdater.automaticUpdateSettings
-        if settings.automaticDownloadsEnabled {
-            return "Transcripted will download updates in the background. When one is ready, you only need to restart."
-        }
-        if settings.automaticChecksEnabled {
-            return "Transcripted will check in the background and show an update badge when one is ready."
-        }
-        return "Turn on automatic checks to see updates sooner."
     }
 
     private var settingsUpdateActionID: String {

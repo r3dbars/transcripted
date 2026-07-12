@@ -10,7 +10,7 @@ enum TranscriptedSupportActions {
         NSWorkspace.shared.open(url)
     }
 
-    static func sendFeedback(logger: AppLogger?) {
+    static func sendFeedback(logger: AppLogSink?) {
         guard let url = FeedbackIssueBuilder.emailURL(rawLogLines: logger?.entries) else { return }
         NSWorkspace.shared.open(url)
     }
@@ -34,7 +34,7 @@ enum TranscriptedSupportActions {
         return CrashReporter.shared.captureSupportDiagnosticEvent(extra: context)
     }
 
-    static func feedbackEmailURL(logger: AppLogger?) -> URL? {
+    static func feedbackEmailURL(logger: AppLogSink?) -> URL? {
         FeedbackIssueBuilder.emailURL(rawLogLines: logger?.entries)
     }
 

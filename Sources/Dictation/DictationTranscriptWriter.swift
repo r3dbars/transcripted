@@ -3,6 +3,9 @@
 
 import AppKit
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 struct SavedDictationTranscript: Sendable {
     let url: URL
@@ -38,13 +41,6 @@ enum DictationTranscriptMutationLock {
 }
 
 enum DictationTranscriptWriter {
-    private static let dayFilenameFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     private static let entryIdFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -71,12 +67,6 @@ enum DictationTranscriptWriter {
         let formatter = DateFormatter()
         formatter.locale = Locale.current
         formatter.dateFormat = "MMM d 'at' h:mm a"
-        return formatter
-    }()
-
-    private static let isoFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
 
@@ -165,7 +155,7 @@ enum DictationTranscriptWriter {
     }
 
     static func dailyFileURL(for date: Date, in directory: URL) -> URL {
-        let slug = dayFilenameFormatter.string(from: date)
+        let slug = DateFormattingHelper.formatDayStamp(date)
         return directory.appendingPathComponent("Dictations_\(slug).md", isDirectory: false)
     }
 
@@ -179,7 +169,7 @@ enum DictationTranscriptWriter {
         return """
         ---
         title: "\(escapedTitle)"
-        date: \(dayFilenameFormatter.string(from: date))
+        date: \(DateFormattingHelper.formatDayStamp(date))
         capture_type: dictation_day
         format_version: 1
         ---
@@ -206,7 +196,7 @@ enum DictationTranscriptWriter {
         ## \(sectionTimeFormatter.string(from: createdAt)) - \(headingTitle)
 
         Entry ID: `\(entryID)`
-        Captured: \(isoFormatter.string(from: createdAt))
+        Captured: \(DateFormattingHelper.formatISO8601WithFractionalSeconds(createdAt))
         Source app: \(sourceAppName)\(bundleLine)
         Delivery: \(delivery.rawValue)
         Words: \(wordCount)

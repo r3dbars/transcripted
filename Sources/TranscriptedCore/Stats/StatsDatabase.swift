@@ -63,59 +63,52 @@ public final class StatsDatabase {
     // MARK: - Database Setup
 
     private func openDatabase() {
-        if sqlite3_open(dbPath.path, &db) != SQLITE_OK {
-            let sqliteError = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
-            AppLogger.stats.error("Failed to open stats database", ["path": dbPath.path, "sqlite_error": sqliteError])
-            isDatabaseOpen = false
-        } else {
-            configureOpenDatabase()
-
-            // Corruption detection: run quick_check to verify database integrity
-            if !verifyDatabaseIntegrity() {
-                AppLogger.stats.error("CRITICAL: Stats database corrupt — backing up and recreating", ["path": dbPath.path])
-                sqlite3_close(db)
-                db = nil
-                // Backup corrupt file with timestamp
-                let backupName = "stats_corrupt_\(DateFormattingHelper.formatFilename(Date())).sqlite"
-                let backupPath = dbPath.deletingLastPathComponent().appendingPathComponent(backupName)
-                try? FileManager.default.moveItem(at: dbPath, to: backupPath)
-                // Recreate fresh database
-                if sqlite3_open(dbPath.path, &db) == SQLITE_OK {
-                    configureOpenDatabase()
-                    AppLogger.stats.info("Recreated fresh database after corruption recovery")
-                } else {
-                    isDatabaseOpen = false
-                    AppLogger.stats.error("Failed to recreate database after corruption recovery")
-                }
-            } else {
-                AppLogger.stats.info("Opened database", ["path": dbPath.path])
-            }
-        }
-    }
-
-    /// Apply permissions and WAL pragmas to an already-opened database handle.
-    /// Called on both initial open and corruption-recovery re-open.
-    private func configureOpenDatabase() {
-        FileManager.default.restrictSQLiteArtifactsToOwnerOnly(atPath: dbPath.path)
         // Security: check each PRAGMA return value so a silent failure (e.g. WAL mode refused
         // because another process holds the db) is logged rather than silently misconfiguring
-        // the database. Matches the same pattern used in SpeakerDatabase.configureOpenDatabase().
-        let pragmas = [
-            ("journal_mode=WAL", "journal_mode"),
-            ("busy_timeout=5000", "busy_timeout"),
-            ("synchronous=NORMAL", "synchronous")
-        ]
-        for (pragma, name) in pragmas {
-            var errorMessage: UnsafeMutablePointer<CChar>?
-            if sqlite3_exec(db, "PRAGMA \(pragma);", nil, nil, &errorMessage) != SQLITE_OK {
-                let detail = errorMessage.map { String(cString: $0) } ?? "unknown"
+        // the database. Matches the same pattern used in SpeakerDatabase.openDatabase().
+        db = SQLiteHandle.open(
+            at: dbPath,
+            onOpenFailure: { sqliteError in
+                AppLogger.stats.error("Failed to open stats database", ["path": dbPath.path, "sqlite_error": sqliteError])
+            },
+            onPragmaFailure: { name, detail in
                 AppLogger.stats.error("PRAGMA failed", ["pragma": name, "detail": detail])
-                sqlite3_free(errorMessage)
             }
+        )
+        guard db != nil else {
+            isDatabaseOpen = false
+            return
         }
         // Security: mark the database open only after all pragmas are applied so any concurrent
         // reader that observes isDatabaseOpen=true is guaranteed to see a fully-configured handle.
         isDatabaseOpen = true
+
+        // Corruption detection: run quick_check to verify database integrity
+        if !verifyDatabaseIntegrity() {
+            AppLogger.stats.error("CRITICAL: Stats database corrupt — backing up and recreating", ["path": dbPath.path])
+            sqlite3_close(db)
+            db = nil
+            // Backup corrupt file with timestamp
+            let backupName = "stats_corrupt_\(DateFormattingHelper.formatFilename(Date())).sqlite"
+            let backupPath = dbPath.deletingLastPathComponent().appendingPathComponent(backupName)
+            try? FileManager.default.moveItem(at: dbPath, to: backupPath)
+            // Recreate fresh database
+            db = SQLiteHandle.open(
+                at: dbPath,
+                onPragmaFailure: { name, detail in
+                    AppLogger.stats.error("PRAGMA failed", ["pragma": name, "detail": detail])
+                }
+            )
+            if db != nil {
+                isDatabaseOpen = true
+                AppLogger.stats.info("Recreated fresh database after corruption recovery")
+            } else {
+                isDatabaseOpen = false
+                AppLogger.stats.error("Failed to recreate database after corruption recovery")
+            }
+        } else {
+            AppLogger.stats.info("Opened database", ["path": dbPath.path])
+        }
     }
 
     /// Verify database integrity using PRAGMA quick_check.

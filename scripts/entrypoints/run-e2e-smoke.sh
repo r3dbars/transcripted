@@ -36,6 +36,7 @@ SWIFT_SOURCES=(
     "Sources/Support/LocalMeetingSummaryPreferences.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"
+    "Sources/TranscriptedCore/Utilities/DateFormattingHelper.swift"
     "Sources/Dictation/DictationTranscriptStore.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
     "Sources/Meeting/LocalMeetingSummarizer.swift"
@@ -50,6 +51,7 @@ SWIFT_SOURCES=(
     "Sources/TranscriptedCore/Audio/WAVHeaderRepair.swift"
     "Sources/TranscriptedCore/Logging/AppLogger.swift"
     "Sources/TranscriptedCore/Logging/FileLogger.swift"
+    "Sources/TranscriptedCore/Logging/LogTailTrimmer.swift"
     "Sources/TranscriptedCore/Logging/LogPrivacySanitizer.swift"
     "Sources/TranscriptedCore/Utilities/FilePermissions.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
@@ -68,8 +70,10 @@ SWIFT_SOURCES=(
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptLoader.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingProvider.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingStore.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/SQLiteHelpers.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/SemanticSearchFusion.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+Schema.swift"
 )
 
 for source in "${SWIFT_SOURCES[@]}"; do

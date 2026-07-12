@@ -220,134 +220,11 @@ extension TranscriptSaver {
     }
 
     // MARK: - Settings Rename/Merge Helpers
-
-    /// Markdown transcripts under the capture directory, including user-created
-    /// subfolders. Depth-bounded so audio bundles and deep trees stay cheap;
-    /// the db_id frontmatter check still gates every write.
-    private static func transcriptMarkdownFiles(under directory: URL) -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return [] }
-
-        var files: [URL] = []
-        for case let url as URL in enumerator {
-            if enumerator.level > 4 {
-                enumerator.skipDescendants()
-                continue
-            }
-            if url.pathExtension == "md" {
-                files.append(url)
-            }
-        }
-        return files.sorted { $0.path < $1.path }
-    }
-
-    /// Verdict from the cheap frontmatter pre-scan that gates retroactive rewrites.
-    private enum FrontmatterScanResult {
-        case matched
-        case notMatched
-        case needsFullRead
-    }
-
-    /// Cheap pre-filter for the library-wide rename/merge scans. `db_id` lines are
-    /// only ever written inside the YAML frontmatter `speakers:` block
-    /// (`TranscriptFormatter.formatTranscriptMarkdown` and
-    /// `writeFrontmatterSpeakerMetadata`), so reading a file only up to its closing
-    /// `---` decides whether it can reference the profile at all — without loading
-    /// whole transcript bodies into memory. The search is byte-level so chunk
-    /// boundaries can't split UTF-8 sequences or the needle, and anything that does
-    /// not look like a well-formed frontmatter block (no leading `---`, no closing
-    /// `\n---\n` within the scan cap) falls back to the historical full read so no
-    /// file is ever silently skipped on ambiguity.
-    private static func scanFrontmatter(at url: URL, for needle: String) -> FrontmatterScanResult {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return .needsFullRead }
-        defer { try? handle.close() }
-
-        let needleBytes = Data(needle.utf8)
-        let openDelimiter = Data("---\n".utf8)
-        let closeDelimiter = Data("\n---\n".utf8)
-        let chunkSize = 64 * 1024
-        let maxScanBytes = 1024 * 1024
-        var buffer = Data()
-
-        while buffer.count < maxScanBytes {
-            guard let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty else {
-                return .needsFullRead
-            }
-            buffer.append(chunk)
-
-            if buffer.count >= openDelimiter.count, !buffer.starts(with: openDelimiter) {
-                return .needsFullRead
-            }
-
-            // Mirrors frontmatterContentRange: the frontmatter ends at the first
-            // "\n---\n" after the opening "---\n".
-            if buffer.count > openDelimiter.count,
-               let closeRange = buffer.range(of: closeDelimiter, in: openDelimiter.count..<buffer.count) {
-                return buffer[..<closeRange.lowerBound].range(of: needleBytes) != nil
-                    ? .matched
-                    : .notMatched
-            }
-        }
-        return .needsFullRead
-    }
-
-    private struct FrontmatterSpeakerRow {
-        var nameLineIndex: Int?
-        var channel: UtteranceChannel?
-        var dbId: UUID?
-        var name: String?
-    }
-
-    /// Parse the `speakers:` rows out of YAML frontmatter. Tolerates rows without
-    /// a channel field (older dictation-era transcripts).
-    private static func parseFrontmatterSpeakerRows(in lines: [String]) -> [FrontmatterSpeakerRow] {
-        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return [] }
-
-        var rows: [FrontmatterSpeakerRow] = []
-        var current: FrontmatterSpeakerRow?
-        var inSpeakers = false
-        var speakersIndent = 0
-
-        for index in 1..<lines.count {
-            let line = lines[index]
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed == "---" { break }
-
-            if !inSpeakers {
-                if trimmed == "speakers:" {
-                    inSpeakers = true
-                    speakersIndent = line.prefix(while: { $0 == " " }).count
-                }
-                continue
-            }
-
-            let indent = line.prefix(while: { $0 == " " }).count
-            if !trimmed.isEmpty, indent <= speakersIndent, !trimmed.hasPrefix("-") {
-                break
-            }
-
-            if trimmed.hasPrefix("- ") {
-                if let row = current { rows.append(row) }
-                current = FrontmatterSpeakerRow()
-            }
-            guard current != nil else { continue }
-
-            if let value = extractYAMLQuotedString(from: line, prefix: "db_id: ") {
-                current?.dbId = UUID(uuidString: value)
-            } else if let value = extractYAMLQuotedString(from: line, prefix: "name: ") {
-                current?.name = value
-                current?.nameLineIndex = index
-            } else if trimmed.hasPrefix("channel: ") {
-                let raw = String(trimmed.dropFirst("channel: ".count)).trimmingCharacters(in: .whitespaces)
-                current?.channel = UtteranceChannel(rawValue: raw)
-            }
-        }
-        if let row = current { rows.append(row) }
-        return rows
-    }
+    //
+    // File scanning (transcriptMarkdownFiles, scanFrontmatter), frontmatter row
+    // parsing (FrontmatterSpeakerRow, parseFrontmatterSpeakerRows), and YAML value
+    // extraction (extractYAMLQuotedString, extractTranscriptId) live in
+    // RetroactiveSpeakerUpdater+Scanning.swift (audit 2026-07-08 wave 2).
 
     /// Rename one person (by db_id) inside a single transcript without bleeding into
     /// other speakers who share the old display name.
@@ -960,136 +837,10 @@ extension TranscriptSaver {
         )
     }
 
-    @discardableResult
-    private static func replaceTranscriptSpeakerLabels(
-        in content: inout String,
-        prefix: String,
-        oldName: String,
-        newName: String
-    ) -> Int {
-        let replacements = [
-            ("[\(prefix)/\(oldName)]", "[\(prefix)/\(newName)]"),
-            ("[\(prefix)/[[\(oldName)]]]", "[\(prefix)/[[\(newName)]]]"),
-        ]
-        var lines = content.components(separatedBy: "\n")
-        var changed = false
-        var replacementCount = 0
-
-        for index in lines.indices {
-            var line = lines[index]
-            for (oldLabel, newLabel) in replacements {
-                guard let labelRange = line.range(of: oldLabel),
-                      isTranscriptLabelPrefix(line[..<labelRange.lowerBound]) else {
-                    continue
-                }
-
-                line.replaceSubrange(labelRange, with: newLabel)
-                lines[index] = line
-                changed = true
-                replacementCount += 1
-                break
-            }
-        }
-
-        if changed {
-            content = lines.joined(separator: "\n")
-        }
-        return replacementCount
-    }
-
-    private static func countTranscriptSpeakerLabels(
-        in content: String,
-        prefix: String,
-        oldName: String
-    ) -> Int {
-        let labels = [
-            "[\(prefix)/\(oldName)]",
-            "[\(prefix)/[[\(oldName)]]]",
-        ]
-
-        return content.components(separatedBy: "\n").reduce(0) { count, line in
-            guard let labelRange = labels.compactMap({ line.range(of: $0) }).first,
-                  isTranscriptLabelPrefix(line[..<labelRange.lowerBound]) else {
-                return count
-            }
-            return count + 1
-        }
-    }
-
-    private static func isTranscriptLabelPrefix(_ prefix: Substring) -> Bool {
-        let normalized = String(prefix)
-            .replacingOccurrences(of: "**", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        let parts = normalized.split(separator: ":")
-        guard parts.count >= 2, parts.count <= 3 else { return false }
-        return parts.allSatisfy { part in
-            !part.isEmpty && part.allSatisfy { $0.isNumber }
-        }
-    }
-
-    @discardableResult
-    private static func replaceSpeakerBreakdownName(
-        in content: inout String,
-        oldName: String,
-        newName: String,
-        channel: UtteranceChannel
-    ) -> Int {
-        guard let breakdownRange = speakerBreakdownContentRange(in: content, channel: channel) else { return 0 }
-
-        let oldPrefix = "- **\(oldName):**"
-        let newPrefix = "- **\(newName):**"
-        var replacementCount = 0
-        let replacement = String(content[breakdownRange])
-            .components(separatedBy: "\n")
-            .map { line -> String in
-                guard line.hasPrefix(oldPrefix) else { return line }
-                replacementCount += 1
-                return newPrefix + line.dropFirst(oldPrefix.count)
-            }
-            .joined(separator: "\n")
-
-        content.replaceSubrange(breakdownRange, with: replacement)
-        return replacementCount
-    }
-
-    private static func countSpeakerBreakdownRows(
-        in content: String,
-        oldName: String,
-        channel: UtteranceChannel
-    ) -> Int {
-        guard let breakdownRange = speakerBreakdownContentRange(in: content, channel: channel) else { return 0 }
-        let oldPrefix = "- **\(oldName):**"
-        return String(content[breakdownRange])
-            .components(separatedBy: "\n")
-            .filter { $0.hasPrefix(oldPrefix) }
-            .count
-    }
-
-    private static func speakerBreakdownContentRange(
-        in content: String,
-        channel: UtteranceChannel
-    ) -> Range<String.Index>? {
-        let header = channel == .mic
-            ? "#### Local Speaker Breakdown\n\n"
-            : "#### Remote Speaker Breakdown\n\n"
-        guard let headerRange = content.range(of: header) else { return nil }
-
-        let footerCandidates = [
-            "\n\n#### ",
-            "\n\n### ",
-            "\n\n## ",
-            "\n\n---\n\n",
-            "\n#### ",
-            "\n### ",
-            "\n## ",
-            "\n---\n",
-        ]
-        let footerStart = footerCandidates
-            .compactMap { content.range(of: $0, range: headerRange.upperBound..<content.endIndex)?.lowerBound }
-            .min() ?? content.endIndex
-        return headerRange.upperBound..<footerStart
-    }
+    // replaceTranscriptSpeakerLabels / countTranscriptSpeakerLabels / isTranscriptLabelPrefix
+    // moved to RetroactiveSpeakerUpdater+TranscriptRewrite.swift.
+    // replaceSpeakerBreakdownName / countSpeakerBreakdownRows / speakerBreakdownContentRange
+    // moved to RetroactiveSpeakerUpdater+BreakdownRewrite.swift. (audit 2026-07-08 wave 2)
 
     private static func makeSpeakerNameChangesByChannelKey(
         updates: [SpeakerNameUpdate],
@@ -1111,106 +862,86 @@ extension TranscriptSaver {
         return changes
     }
 
-    private static func applyScopedTranscriptLabelReplacements(
+    /// Shared engine behind `applyScopedTranscriptLabelReplacements` (transcript
+    /// body labels) and `applyScopedBreakdownNameReplacements` (speaker breakdown
+    /// rows): both are used as a fallback when a full-section rewrite can't prove
+    /// itself unambiguous. Each builds a plan of pending speaker-name swaps gated on
+    /// an exact occurrence-count match (so a rename is skipped rather than partially
+    /// applied when the document's counts don't line up with what's expected), then
+    /// stages the swaps behind placeholder tokens before resolving them to the real
+    /// new names, so overlapping old/new names can't collide mid-pass.
+    ///
+    /// The two callers differ in:
+    /// - whether a key with no resolvable channel/diarizer target is a hard failure
+    ///   (transcript) or a soft skip (breakdown, which is already scoped to specific
+    ///   `channels` and expects unrelated keys to be skipped);
+    /// - whether the occurrence count is checked while building the plan (transcript,
+    ///   against the expected utterance count) or deferred to a second pass over the
+    ///   built plans (breakdown, always requiring exactly one row); and
+    /// - how "occurrences" are counted/replaced (transcript labels vs. breakdown rows)
+    ///   and what a valid replaced-count looks like (`> 0` vs. `== 1`).
+    ///
+    /// Deduped from two ~80-line near-identical copies (audit 2026-07-08 wave 2).
+    static func applyScopedReplacements(
         in content: inout String,
         updatesByChannelKey: [String: (oldName: String, newName: String)],
-        result: TranscriptionResult
+        result: TranscriptionResult,
+        channelFilter: Set<UtteranceChannel>?,
+        missingTargetFails: Bool,
+        tokenKind: String,
+        gateCountAtPlanTime: Bool,
+        countOccurrences: (String, String, String, UtteranceChannel) -> Int,
+        performReplace: (inout String, String, String, String, UtteranceChannel) -> Int,
+        replacedCountIsValid: (Int) -> Bool
     ) -> Bool {
-        var replacementPlans: [(prefix: String, oldName: String, newName: String)] = []
+        var replacementPlans: [(prefix: String, oldName: String, newName: String, channel: UtteranceChannel)] = []
+
         for key in updatesByChannelKey.keys.sorted() {
             guard let update = updatesByChannelKey[key] else { continue }
             guard update.oldName != update.newName else { continue }
-            guard let target = channelAndDiarizerID(forSpeakerKey: key) else { return false }
+
+            guard let target = channelAndDiarizerID(forSpeakerKey: key) else {
+                if missingTargetFails { return false }
+                continue
+            }
+            if let channelFilter, !channelFilter.contains(target.channel) {
+                continue
+            }
+
             let prefix = target.channel == .mic ? "Mic" : "System"
             let expectedCount = expectedVisibleUtteranceCount(
                 in: result,
                 channel: target.channel,
                 diarizerSpeakerId: target.diarizerSpeakerId
             )
-            let labelCount = countTranscriptSpeakerLabels(
-                in: content,
-                prefix: prefix,
-                oldName: update.oldName
-            )
+
             if expectedCount == 0 {
-                guard labelCount == 0 else { return false }
+                guard countOccurrences(content, prefix, update.oldName, target.channel) == 0 else { return false }
                 continue
             }
-            guard labelCount == expectedCount else {
-                return false
-            }
-            replacementPlans.append((prefix: prefix, oldName: update.oldName, newName: update.newName))
-        }
 
-        var deferredReplacements: [(token: String, newName: String)] = []
-        for (index, plan) in replacementPlans.enumerated() {
-            let token = scopedReplacementToken(kind: "transcript", index: index)
-            let replaced = replaceTranscriptSpeakerLabels(
-                in: &content,
-                prefix: plan.prefix,
-                oldName: plan.oldName,
-                newName: token
-            )
-            guard replaced > 0 else { return false }
-            deferredReplacements.append((token: token, newName: plan.newName))
-        }
-        applyDeferredScopedReplacements(in: &content, replacements: deferredReplacements)
-        return true
-    }
-
-    private static func applyScopedBreakdownNameReplacements(
-        in content: inout String,
-        updatesByChannelKey: [String: (oldName: String, newName: String)],
-        channels: Set<UtteranceChannel>,
-        result: TranscriptionResult
-    ) -> Bool {
-        var replacementPlans: [(prefix: String, oldName: String, newName: String, channel: UtteranceChannel)] = []
-        for key in updatesByChannelKey.keys.sorted() {
-            guard let update = updatesByChannelKey[key],
-                  let target = channelAndDiarizerID(forSpeakerKey: key),
-                  channels.contains(target.channel) else {
-                continue
-            }
-            let prefix = target.channel == .mic ? "Mic" : "System"
-            guard update.oldName != update.newName else { continue }
-            let expectedCount = expectedVisibleUtteranceCount(
-                in: result,
-                channel: target.channel,
-                diarizerSpeakerId: target.diarizerSpeakerId
-            )
-            if expectedCount == 0 {
-                guard countSpeakerBreakdownRows(
-                    in: content,
-                    oldName: update.oldName,
-                    channel: target.channel
-                ) == 0 else {
+            if gateCountAtPlanTime {
+                guard countOccurrences(content, prefix, update.oldName, target.channel) == expectedCount else {
                     return false
                 }
-                continue
             }
+
             replacementPlans.append((prefix: prefix, oldName: update.oldName, newName: update.newName, channel: target.channel))
         }
 
-        for plan in replacementPlans {
-            guard countSpeakerBreakdownRows(
-                in: content,
-                oldName: plan.oldName,
-                channel: plan.channel
-            ) == 1 else {
-                return false
+        if !gateCountAtPlanTime {
+            for plan in replacementPlans {
+                guard countOccurrences(content, plan.prefix, plan.oldName, plan.channel) == 1 else {
+                    return false
+                }
             }
         }
 
         var deferredReplacements: [(token: String, newName: String)] = []
         for (index, plan) in replacementPlans.enumerated() {
-            let token = scopedReplacementToken(kind: "breakdown", index: index)
-            let replaced = replaceSpeakerBreakdownName(
-                in: &content,
-                oldName: plan.oldName,
-                newName: token,
-                channel: plan.channel
-            )
-            guard replaced == 1 else { return false }
+            let token = scopedReplacementToken(kind: tokenKind, index: index)
+            let replaced = performReplace(&content, plan.prefix, plan.oldName, token, plan.channel)
+            guard replacedCountIsValid(replaced) else { return false }
             deferredReplacements.append((token: token, newName: plan.newName))
         }
         applyDeferredScopedReplacements(in: &content, replacements: deferredReplacements)
@@ -1252,60 +983,8 @@ extension TranscriptSaver {
         }.count
     }
 
-    /// Parse a YAML double-quoted string value after a known key prefix.
-    /// Handles backslash escape sequences (`\"`, `\\`, etc.) and returns the unescaped value.
-    /// Returns nil if the prefix is not found or the closing quote is missing.
-    private static func extractYAMLQuotedString(from line: String, prefix: String) -> String? {
-        let fullPrefix = prefix + "\""
-        guard let prefixRange = line.range(of: fullPrefix) else { return nil }
-        var index = prefixRange.upperBound
-        var result = ""
-        while index < line.endIndex {
-            let c = line[index]
-            index = line.index(after: index)
-            if c == "\\" && index < line.endIndex {
-                let next = line[index]
-                index = line.index(after: index)
-                switch next {
-                case "\"": result.append("\"")
-                case "\\": result.append("\\")
-                case "n":  result.append("\n")
-                case "t":  result.append("\t")
-                default:
-                    result.append("\\")
-                    result.append(next)
-                }
-            } else if c == "\"" {
-                return result
-            } else {
-                result.append(c)
-            }
-        }
-        return nil
-    }
-
-    static func extractTranscriptId(from url: URL) -> UUID? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        // read(upToCount:) (error-returning) instead of the legacy readData(ofLength:),
-        // which raises an uncatchable ObjC NSException on I/O failure and hard-crashes.
-        let header = try? handle.read(upToCount: 2048)
-        try? handle.close()
-        guard let header, let text = String(data: header, encoding: .utf8) else { return nil }
-        return extractTranscriptId(fromFrontmatter: text)
-    }
-
-    private static func extractTranscriptId(fromFrontmatter text: String) -> UUID? {
-        for line in text.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("transcript_id:") else { continue }
-            let value = trimmed
-                .dropFirst("transcript_id:".count)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            return UUID(uuidString: value)
-        }
-        return nil
-    }
+    // extractYAMLQuotedString / extractTranscriptId(from:) / extractTranscriptId(fromFrontmatter:)
+    // moved to RetroactiveSpeakerUpdater+Scanning.swift. (audit 2026-07-08 wave 2)
 
     private static func updateFrontmatterSpeakerMetadata(
         in content: inout String,
@@ -1431,7 +1110,7 @@ extension TranscriptSaver {
         return content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound
     }
 
-    private static func currentSpeakerName(
+    static func currentSpeakerName(
         in content: String,
         diarizerSpeakerId: String,
         channel: UtteranceChannel
@@ -1539,518 +1218,14 @@ extension TranscriptSaver {
         return false
     }
 
-    private static func rewriteFullTranscriptSection(
-        in content: inout String,
-        result: TranscriptionResult,
-        updatesByChannelKey: [String: (oldName: String, newName: String)],
-        obsidianEnabled: Bool
-    ) -> Bool {
-        if let range = fullTranscriptContentRange(in: content) {
-            return rewriteLegacyTranscriptSection(
-                in: &content,
-                range: range,
-                result: result,
-                updatesByChannelKey: updatesByChannelKey,
-                obsidianEnabled: obsidianEnabled
-            )
-        }
-
-        if let range = styledTranscriptContentRange(in: content) {
-            return rewriteStyledTranscriptSection(
-                in: &content,
-                range: range,
-                result: result,
-                updatesByChannelKey: updatesByChannelKey,
-                obsidianEnabled: obsidianEnabled
-            )
-        }
-
-        if let range = bareTranscriptContentRange(in: content) {
-            return rewriteLegacyTranscriptSection(
-                in: &content,
-                range: range,
-                result: result,
-                updatesByChannelKey: updatesByChannelKey,
-                obsidianEnabled: obsidianEnabled
-            )
-        }
-
-        return false
-    }
-
-    private static func rewriteRemoteSpeakerBreakdown(
-        in content: inout String,
-        result: TranscriptionResult,
-        updatesByChannelKey: [String: (oldName: String, newName: String)]
-    ) -> Bool {
-        guard !result.systemUtterances.isEmpty else { return true }
-        guard content.contains("#### Remote Speaker Breakdown\n\n") else { return true }
-
-        return rewriteSpeakerBreakdown(
-            in: &content,
-            header: "#### Remote Speaker Breakdown\n\n",
-            utterances: result.systemUtterances,
-            channel: .system,
-            updatesByChannelKey: updatesByChannelKey
-        )
-    }
-
-    private static func rewriteLocalSpeakerBreakdownIfPresent(
-        in content: inout String,
-        result: TranscriptionResult,
-        updatesByChannelKey: [String: (oldName: String, newName: String)]
-    ) -> Bool {
-        guard content.contains("#### Local Speaker Breakdown\n\n") else { return true }
-
-        return rewriteSpeakerBreakdown(
-            in: &content,
-            header: "#### Local Speaker Breakdown\n\n",
-            utterances: result.micUtterances,
-            channel: .mic,
-            updatesByChannelKey: updatesByChannelKey
-        )
-    }
-
-    private static func rewriteSpeakerBreakdown(
-        in content: inout String,
-        header: String,
-        utterances: [TranscriptionUtterance],
-        channel: UtteranceChannel,
-        updatesByChannelKey: [String: (oldName: String, newName: String)]
-    ) -> Bool {
-        guard let headerRange = content.range(of: header) else {
-            return false
-        }
-
-        let footerCandidates = [
-            "\n\n#### ",
-            "\n\n### ",
-            "\n\n## ",
-            "\n\n---\n\n",
-            "\n#### ",
-            "\n### ",
-            "\n## ",
-            "\n---\n",
-        ]
-        guard let footerRange = footerCandidates.compactMap({
-            content.range(of: $0, range: headerRange.upperBound..<content.endIndex)
-        }).min(by: { $0.lowerBound < $1.lowerBound }) else {
-            return false
-        }
-
-        let speakerGroups = Dictionary(grouping: utterances, by: { $0.speakerId })
-        let lines = speakerGroups.keys.sorted().map { speakerId in
-            let utterances = speakerGroups[speakerId] ?? []
-            let speakerKey = channel.speakerKey(diarizerSpeakerId: String(speakerId))
-            let speakerName = updatesByChannelKey[speakerKey]?.newName
-                ?? updatesByChannelKey[speakerKey]?.oldName
-                ?? currentSpeakerName(in: content, diarizerSpeakerId: String(speakerId), channel: channel)
-                ?? "Speaker \(speakerId)"
-            let speakingTime = utterances.reduce(0.0) { $0 + ($1.end - $1.start) }
-            let wordCount = utterances.reduce(0) { $0 + $1.transcript.split(separator: " ").count }
-            return "- **\(speakerName):** \(utterances.count) utterances, ~\(wordCount) words, \(DateFormattingHelper.formatDuration(speakingTime))"
-        }
-
-        content.replaceSubrange(headerRange.upperBound..<footerRange.lowerBound, with: lines.joined(separator: "\n"))
-        return true
-    }
-
-    private static func fullTranscriptContentRange(in content: String) -> Range<String.Index>? {
-        guard let headerRange = content.range(of: "## Full Transcript\n\n"),
-              let footerRange = content.range(
-                of: "\n\n---\n\n*Generated by Transcripted",
-                range: headerRange.upperBound..<content.endIndex
-              ) else {
-            return nil
-        }
-
-        return headerRange.upperBound..<footerRange.lowerBound
-    }
-
-    private static func styledTranscriptContentRange(in content: String) -> Range<String.Index>? {
-        guard let headerRange = content.range(of: "## Transcript\n\n") else {
-            return nil
-        }
-
-        let footerCandidates = [
-            "\n\n---\n\n",
-            "\n\n**Participants:** ",
-        ]
-        let footerStart = footerCandidates
-            .compactMap { content.range(of: $0, range: headerRange.upperBound..<content.endIndex)?.lowerBound }
-            .min() ?? content.endIndex
-        return headerRange.upperBound..<footerStart
-    }
-
-    private static func bareTranscriptContentRange(in content: String) -> Range<String.Index>? {
-        guard let separatorRange = content.range(of: "\n---\n\n", options: .backwards) else {
-            return nil
-        }
-
-        let start = separatorRange.upperBound
-        guard start < content.endIndex else { return nil }
-        return start..<content.endIndex
-    }
-
-    private static func rewriteLegacyTranscriptSection(
-        in content: inout String,
-        range: Range<String.Index>,
-        result: TranscriptionResult,
-        updatesByChannelKey: [String: (oldName: String, newName: String)],
-        obsidianEnabled: Bool
-    ) -> Bool {
-        let lines = String(content[range]).components(separatedBy: "\n")
-        let utterances = result.allUtterances
-        var rewrittenLines = lines
-        var utteranceIndex = 0
-
-        for index in lines.indices {
-            guard let components = parseTranscriptLine(lines[index]) else { continue }
-            guard utteranceIndex < utterances.count else { return false }
-
-            let utterance = utterances[utteranceIndex]
-            utteranceIndex += 1
-
-            let expectedTimestamp = formatTranscriptTimestamp(utterance.start)
-            let expectedSource = utterance.channel == 0 ? "Mic" : "System"
-            guard components.timestamp == expectedTimestamp, components.source == expectedSource else {
-                return false
-            }
-
-            let channel: UtteranceChannel = utterance.channel == 0 ? .mic : .system
-            let speakerKey = channel.speakerKey(diarizerSpeakerId: String(utterance.speakerId))
-            guard let update = updatesByChannelKey[speakerKey] else { continue }
-
-            let label = transcriptLabel(
-                for: update.newName,
-                currentLabel: components.label,
-                obsidianEnabled: obsidianEnabled
-            )
-            rewrittenLines[index] = "[\(components.timestamp)] [\(components.source)/\(label)] \(components.text)"
-        }
-
-        guard utteranceIndex == utterances.count else { return false }
-        content.replaceSubrange(range, with: rewrittenLines.joined(separator: "\n"))
-        return true
-    }
-
-    private static func rewriteStyledTranscriptSection(
-        in content: inout String,
-        range: Range<String.Index>,
-        result: TranscriptionResult,
-        updatesByChannelKey: [String: (oldName: String, newName: String)],
-        obsidianEnabled: Bool
-    ) -> Bool {
-        let chunks = String(content[range])
-            .components(separatedBy: "\n\n")
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        let utterances = result.allUtterances.filter {
-            !$0.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        guard chunks.count == utterances.count else { return false }
-
-        var rewrittenChunks: [String] = []
-        rewrittenChunks.reserveCapacity(chunks.count)
-
-        for (chunk, utterance) in zip(chunks, utterances) {
-            let lines = chunk.components(separatedBy: "\n")
-            guard let header = lines.first,
-                  let components = parseStyledTranscriptHeader(header) else {
-                return false
-            }
-
-            let expectedTimestamp = formatTranscriptTimestamp(utterance.start)
-            let expectedSource = utterance.channel == 0 ? "Mic" : "System"
-            guard components.timestamp == expectedTimestamp, components.source == expectedSource else {
-                return false
-            }
-
-            let utteranceChannel: UtteranceChannel = utterance.channel == 0 ? .mic : .system
-            let speakerKey = utteranceChannel.speakerKey(diarizerSpeakerId: String(utterance.speakerId))
-            if let update = updatesByChannelKey[speakerKey] {
-                let label = transcriptLabel(
-                    for: update.newName,
-                    currentLabel: components.label,
-                    obsidianEnabled: obsidianEnabled
-                )
-                var rewrittenLines = lines
-                rewrittenLines[0] = "**\(components.timestamp)**  [\(components.source)/\(label)]"
-                rewrittenChunks.append(rewrittenLines.joined(separator: "\n"))
-            } else {
-                rewrittenChunks.append(chunk)
-            }
-        }
-
-        content.replaceSubrange(range, with: rewrittenChunks.joined(separator: "\n\n"))
-        return true
-    }
-
-
-    private static func parseTranscriptLine(_ line: String) -> (timestamp: String, source: String, label: String, text: String)? {
-        guard line.hasPrefix("["),
-              let timestampEnd = line.firstIndex(of: "]"),
-              line.indices.contains(line.index(after: timestampEnd)),
-              line[line.index(after: timestampEnd)...].hasPrefix(" [") else {
-            return nil
-        }
-
-        let timestamp = String(line[line.index(after: line.startIndex)..<timestampEnd])
-        let sourceStart = line.index(timestampEnd, offsetBy: 3)
-        guard let labelEnd = line.range(of: "] ", range: sourceStart..<line.endIndex) else {
-            return nil
-        }
-
-        let sourceLabel = line[sourceStart..<labelEnd.lowerBound]
-        guard let separator = sourceLabel.firstIndex(of: "/") else {
-            return nil
-        }
-
-        let source = String(sourceLabel[..<separator])
-        let label = String(sourceLabel[sourceLabel.index(after: separator)...])
-        let textStart = labelEnd.upperBound
-        let text = String(line[textStart...])
-        return (timestamp, source, label, text)
-    }
-
-    private static let styledHeaderRegex = try? NSRegularExpression(pattern: #"^([0-9:]+)\s+\[(.+?)\]$"#)
-
-    private static func parseStyledTranscriptHeader(_ line: String) -> (timestamp: String, source: String, label: String)? {
-        let normalizedHeader = line
-            .replacingOccurrences(of: "**", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let regex = styledHeaderRegex else {
-            return nil
-        }
-
-        let nsHeader = normalizedHeader as NSString
-        let range = NSRange(location: 0, length: nsHeader.length)
-        guard let match = regex.firstMatch(in: normalizedHeader, range: range),
-              match.numberOfRanges >= 3 else {
-            return nil
-        }
-
-        let timestamp = nsHeader.substring(with: match.range(at: 1))
-        let sourceLabel = nsHeader.substring(with: match.range(at: 2))
-        guard let separator = sourceLabel.firstIndex(of: "/") else { return nil }
-
-        let source = String(sourceLabel[..<separator])
-        let label = String(sourceLabel[sourceLabel.index(after: separator)...])
-        return (timestamp, source, label)
-    }
-
-    private static func transcriptLabel(
-        for name: String,
-        currentLabel: String,
-        obsidianEnabled: Bool
-    ) -> String {
-        let usesWikiLink = (currentLabel.hasPrefix("[[") && currentLabel.hasSuffix("]]"))
-            || (obsidianEnabled && !name.hasPrefix("Speaker "))
-        guard usesWikiLink else { return name }
-        return "[[\(name)]]"
-    }
-
-    private static func formatTranscriptTimestamp(_ seconds: Double) -> String {
-        let startMinutes = Int(seconds) / 60
-        let startSeconds = Int(seconds) % 60
-        return String(format: "%02d:%02d", startMinutes, startSeconds)
-    }
+    // rewriteFullTranscriptSection and its legacy/styled transcript-section helpers
+    // moved to RetroactiveSpeakerUpdater+TranscriptRewrite.swift. rewriteRemoteSpeakerBreakdown,
+    // rewriteLocalSpeakerBreakdownIfPresent, and rewriteSpeakerBreakdown moved to
+    // RetroactiveSpeakerUpdater+BreakdownRewrite.swift. (audit 2026-07-08 wave 2)
 
     private static func isObsidianFormatted(_ content: String) -> Bool {
         content.contains("\ncssclasses:\n  - transcripted")
             || content.contains("\naliases:\n  - \"Meeting ")
     }
 
-}
-
-enum SpeakerBreakdownConsolidator {
-    private static let breakdownHeader = "#### Remote Speaker Breakdown\n\n"
-    private static let breakdownFooters = [
-        "\n\n#### ",
-        "\n\n### ",
-        "\n\n## ",
-        "\n\n---\n\n",
-        "\n#### ",
-        "\n### ",
-        "\n## ",
-        "\n---\n",
-    ]
-    private static let speakerCountPrefix = "- **Speakers Detected:** "
-    private static let lineRegex = try? NSRegularExpression(
-        pattern: #"- \*\*(.+?):\*\* (\d+) utterances?, ~(\d+) words?, (\d+):(\d+)"#
-    )
-    private static let footerRegex = try? NSRegularExpression(pattern: #"\| (\d+) speakers\*"#)
-
-    struct SpeakerStats {
-        var utterances = 0
-        var words = 0
-        var speakingSeconds = 0.0
-
-        mutating func accumulate(_ entry: SpeakerBreakdownEntry) {
-            utterances += entry.utterances
-            words += entry.words
-            speakingSeconds += entry.speakingSeconds
-        }
-    }
-
-    struct SpeakerBreakdownEntry {
-        let name: String
-        let utterances: Int
-        let words: Int
-        let speakingSeconds: Double
-    }
-
-    static func consolidate(_ content: String) -> String {
-        guard let breakdownStart = content.range(of: breakdownHeader) else {
-            return content
-        }
-
-        let footerStart = breakdownFooters.compactMap({
-            content.range(of: $0, range: breakdownStart.upperBound..<content.endIndex)
-        }).min(by: { $0.lowerBound < $1.lowerBound })?.lowerBound
-        let breakdownEnd: String.Index
-        if let footerStart {
-            breakdownEnd = footerStart
-        } else if let footerlessEnd = footerlessBreakdownContentEnd(in: content, from: breakdownStart.upperBound) {
-            breakdownEnd = footerlessEnd
-        } else {
-            return content
-        }
-
-        let breakdownRange = breakdownStart.upperBound..<breakdownEnd
-        let entries = parseEntries(from: String(content[breakdownRange]))
-        guard !entries.isEmpty else { return content }
-
-        var statsByName: [String: SpeakerStats] = [:]
-        var nameOrder: [String] = []
-
-        for entry in entries {
-            if statsByName[entry.name] == nil {
-                nameOrder.append(entry.name)
-            }
-
-            var stats = statsByName[entry.name] ?? SpeakerStats()
-            stats.accumulate(entry)
-            statsByName[entry.name] = stats
-        }
-
-        guard statsByName.count < entries.count else { return content }
-
-        let oldSystemSpeakers = entries.count
-        let newSystemSpeakers = statsByName.count
-
-        var result = content
-        result.replaceSubrange(
-            breakdownRange,
-            with: renderedBreakdown(nameOrder: nameOrder, statsByName: statsByName)
-        )
-        result = result.replacingOccurrences(
-            of: "system_speakers: \(oldSystemSpeakers)",
-            with: "system_speakers: \(newSystemSpeakers)"
-        )
-        result = result.replacingOccurrences(
-            of: "\(speakerCountPrefix)\(oldSystemSpeakers)\n\n\(breakdownHeader.trimmingCharacters(in: .newlines))",
-            with: "\(speakerCountPrefix)\(newSystemSpeakers)\n\n\(breakdownHeader.trimmingCharacters(in: .newlines))"
-        )
-        result = adjustFooterSpeakerCount(in: result, delta: oldSystemSpeakers - newSystemSpeakers)
-
-        AppLogger.pipeline.info("Consolidated duplicate speaker names in breakdown", [
-            "before": "\(oldSystemSpeakers)",
-            "after": "\(newSystemSpeakers)"
-        ])
-
-        return result
-    }
-
-    private static func footerlessBreakdownContentEnd(
-        in content: String,
-        from start: String.Index
-    ) -> String.Index? {
-        var current = start
-        var lastEntryEnd: String.Index?
-
-        while current < content.endIndex {
-            let lineEnd = content[current...].firstIndex(of: "\n") ?? content.endIndex
-            let line = String(content[current..<lineEnd])
-            let nextLineStart = lineEnd < content.endIndex
-                ? content.index(after: lineEnd)
-                : content.endIndex
-
-            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                guard lastEntryEnd == nil else { break }
-                current = nextLineStart
-                continue
-            }
-
-            guard isBreakdownEntryLine(line) else { break }
-            lastEntryEnd = nextLineStart
-            current = nextLineStart
-        }
-
-        return lastEntryEnd
-    }
-
-    private static func isBreakdownEntryLine(_ line: String) -> Bool {
-        guard let lineRegex else { return false }
-        return lineRegex.firstMatch(
-            in: line,
-            range: NSRange(location: 0, length: (line as NSString).length)
-        ) != nil
-    }
-
-    private static func parseEntries(from breakdownText: String) -> [SpeakerBreakdownEntry] {
-        guard let lineRegex else { return [] }
-
-        return breakdownText
-            .components(separatedBy: "\n")
-            .compactMap { line in
-                let nsLine = line as NSString
-                let range = NSRange(location: 0, length: nsLine.length)
-                guard let match = lineRegex.firstMatch(in: line, range: range) else { return nil }
-
-                let name = nsLine.substring(with: match.range(at: 1))
-                let utterances = Int(nsLine.substring(with: match.range(at: 2))) ?? 0
-                let words = Int(nsLine.substring(with: match.range(at: 3))) ?? 0
-                let minutes = Double(nsLine.substring(with: match.range(at: 4))) ?? 0
-                let seconds = Double(nsLine.substring(with: match.range(at: 5))) ?? 0
-
-                return SpeakerBreakdownEntry(
-                    name: name,
-                    utterances: utterances,
-                    words: words,
-                    speakingSeconds: minutes * 60 + seconds
-                )
-            }
-    }
-
-    private static func renderedBreakdown(
-        nameOrder: [String],
-        statsByName: [String: SpeakerStats]
-    ) -> String {
-        nameOrder.compactMap { name in
-            guard let stats = statsByName[name] else { return nil }
-            let mins = Int(stats.speakingSeconds) / 60
-            let secs = Int(stats.speakingSeconds) % 60
-            let timeStr = String(format: "%02d:%02d", mins, secs)
-            return "- **\(name):** \(stats.utterances) utterances, ~\(stats.words) words, \(timeStr)\n"
-        }.joined()
-    }
-
-    private static func adjustFooterSpeakerCount(in content: String, delta: Int) -> String {
-        guard delta > 0,
-              let footerRegex,
-              let footerMatch = footerRegex.firstMatch(
-                in: content,
-                range: NSRange(location: 0, length: (content as NSString).length)
-              ),
-              let oldTotal = Int((content as NSString).substring(with: footerMatch.range(at: 1))) else {
-            return content
-        }
-
-        let newTotal = oldTotal - delta
-        return content.replacingOccurrences(
-            of: "| \(oldTotal) speakers*",
-            with: "| \(newTotal) speakers*"
-        )
-    }
 }

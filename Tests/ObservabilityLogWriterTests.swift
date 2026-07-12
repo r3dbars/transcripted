@@ -150,11 +150,11 @@ func testObservabilityLogWriter() {
         assertEqual(sanitized.context?["trigger"], "physical_key", "coarse diagnostics should stay useful")
     }
 
-    runSuite("AppLogger routes direct debug-log messages through the shared redactor") {
-        let appLoggerSource = readObservabilityTestRepoTextFile("Sources/Observability/AppLogger.swift")
+    runSuite("AppLogSink routes direct debug-log messages through the shared redactor") {
+        let appLoggerSource = readObservabilityTestRepoTextFile("Sources/Observability/AppLogSink.swift")
         assertTrue(
             appLoggerSource.contains("ObservabilityTextRedactor.redact(message)"),
-            "AppLogger.log should scrub direct debug messages before storing or writing"
+            "AppLogSink.log should scrub direct debug messages before storing or writing"
         )
 
         let sanitized = ObservabilityTextRedactor.redact(
@@ -239,7 +239,7 @@ func testObservabilityLogWriter() {
             "Sources/Observability/LockedFileAppender.swift",
             "Sources/Observability/EventReporter.swift",
             "Sources/Observability/ReliabilityPacketRecorder.swift",
-            "Sources/Observability/AppLogger.swift",
+            "Sources/Observability/AppLogSink.swift",
             "Sources/TranscriptedCore/Logging/FileLogger.swift",
             "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift",
         ]

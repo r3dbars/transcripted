@@ -372,6 +372,15 @@ final class EmbeddingStore: @unchecked Sendable {
     }
 
     // MARK: - SQLite helpers (own connection)
+    //
+    // colText/dbErrorLocked are byte-identical to SQLiteHelpers.swift's
+    // sqlColText/sqlDBError, so they delegate. execLocked keeps its own body:
+    // its "Vector store SQL failed" log prefix (vs. the shared helper's
+    // generic "SQL exec failed") is intentionally distinct so vector-store
+    // failures are identifiable in logs, and the raw prepare/bind sequences
+    // above (lines ~113-171, ~230-253, ~337-367) mix in loop/transaction
+    // control flow that isn't a 1:1 mechanical match for the shared helpers,
+    // so they're left as-is rather than risk a behavior change.
 
     private func execLocked(_ sql: String) {
         if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
@@ -380,12 +389,10 @@ final class EmbeddingStore: @unchecked Sendable {
     }
 
     private func colText(_ stmt: OpaquePointer?, _ col: Int32) -> String {
-        guard let ptr = sqlite3_column_text(stmt, col) else { return "" }
-        return String(cString: ptr)
+        sqlColText(stmt, col)
     }
 
     private func dbErrorLocked() -> String {
-        if let db = db { return String(cString: sqlite3_errmsg(db)) }
-        return "database not open"
+        sqlDBError(db)
     }
 }

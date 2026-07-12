@@ -411,7 +411,7 @@ private struct FocusedTextPasteConfirmation {
         // compiled directly into the fast-test binary without the TranscriptedCore
         // module's search path (see APP_SOURCES in run-tests.sh), so importing that
         // module here isn't an option — this follows the same fputs(..., stderr)
-        // idiom Sources/Observability/AppLogger.swift itself falls back to for
+        // idiom Sources/Observability/AppLogSink.swift itself falls back to for
         // internal diagnostics.
         guard CFGetTypeID(focusedElement) == AXUIElementGetTypeID() else {
             fputs("⚠️ ClipboardRestoringTextPaster | focused UI element attribute returned an unexpected CF type (expected AXUIElement)\n", stderr)

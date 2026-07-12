@@ -30,6 +30,30 @@ public enum DateFormattingHelper {
         return formatter
     }()
 
+    /// Day stamp format: "2024-01-15"
+    private static let dayStampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    /// ISO8601 without fractional seconds: "2024-01-15T14:30:45Z"
+    private static let iso8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    /// ISO8601 with fractional seconds: "2024-01-15T14:30:45.123Z"
+    private static let iso8601FractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
     // MARK: - Public API
 
     /// Format for audio filenames with millisecond precision
@@ -56,5 +80,29 @@ public enum DateFormattingHelper {
         let minutes = Int(interval) / 60
         let seconds = Int(interval) % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    /// Format a day stamp for filenames and frontmatter dates.
+    /// Example: "2024-01-15"
+    public static func formatDayStamp(_ date: Date) -> String {
+        dayStampFormatter.string(from: date)
+    }
+
+    /// Parse a day stamp produced by `formatDayStamp`.
+    /// Example: "2024-01-15" -> Date
+    public static func parseDayStamp(_ string: String) -> Date? {
+        dayStampFormatter.date(from: string)
+    }
+
+    /// Format an ISO8601 timestamp without fractional seconds.
+    /// Example: "2024-01-15T14:30:45Z"
+    public static func formatISO8601(_ date: Date) -> String {
+        iso8601Formatter.string(from: date)
+    }
+
+    /// Format an ISO8601 timestamp with millisecond fractional seconds.
+    /// Example: "2024-01-15T14:30:45.123Z"
+    public static func formatISO8601WithFractionalSeconds(_ date: Date) -> String {
+        iso8601FractionalFormatter.string(from: date)
     }
 }

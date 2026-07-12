@@ -12,6 +12,7 @@ swiftc \
   "$ROOT_DIR/Sources/Support/TranscriptedStoragePaths.swift" \
   "$ROOT_DIR/Sources/Dictation/DictationStoragePaths.swift" \
   "$ROOT_DIR/Sources/Dictation/DictationTranscriptWriter.swift" \
+  "$ROOT_DIR/Sources/TranscriptedCore/Utilities/DateFormattingHelper.swift" \
   "$ROOT_DIR/Sources/Dictation/DictationTranscriptStore.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingArtifactRenamer.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingStoragePaths.swift" \

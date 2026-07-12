@@ -8,7 +8,7 @@ import TranscriptedCore
 class TranscriptedAppState: ObservableObject {
     private static let wakeHotkeyRetryAttempts = 3
     private static let wakeHotkeyRetryDelay: UInt64 = 500_000_000
-    let logger = AppLogger()
+    let logger = AppLogSink()
     let sparkleUpdater = SparkleUpdaterController()
     let contextCapture = ContextCaptureEngine()
     let sttRouter = STTRouter()
