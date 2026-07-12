@@ -25,6 +25,11 @@ private func contractSource(_ relativePath: String) -> String {
     return contents
 }
 
+private func homeSurfaceContractContains(_ needle: String) -> Bool {
+    contractSource("Sources/UI/Settings/HomeView.swift").contains(needle)
+        || contractSource("Sources/UI/Settings/HomeMeetingPreviewSheet.swift").contains(needle)
+}
+
 func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
         assertTrue(
@@ -258,12 +263,12 @@ func testUIAutomationSurfaceContract() {
             "ClosureMenuItem(menuItem: item)",
             "title: \"Copy for agent\"",
         ] {
-            assertTrue(contractSource("Sources/UI/Settings/HomeView.swift").contains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
+            assertTrue(homeSurfaceContractContains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
         assertTrue(
-            contractSource("Sources/UI/Settings/HomeView.swift").contains("private enum HomeHitTarget")
-                && contractSource("Sources/UI/Settings/HomeView.swift").contains("static let minimum: CGFloat = 40")
-                && contractSource("Sources/UI/Settings/HomeView.swift").contains("HomeHitTarget.minimum"),
+            homeSurfaceContractContains("enum HomeHitTarget")
+                && homeSurfaceContractContains("static let minimum: CGFloat = 40")
+                && homeSurfaceContractContains("HomeHitTarget.minimum"),
             "Home icon buttons and compact row actions should keep a shared 40pt hit-target floor"
         )
         for requiredFailedMeetingPolicyHook in [
@@ -667,7 +672,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.home.load-more",
             "transcripted.home.needs-attention.review.",
         ] {
-            assertTrue(contractSource("Sources/UI/Settings/HomeView.swift").contains(identifier), "\(identifier) should stay attached to Home click-flow controls")
+            assertTrue(homeSurfaceContractContains(identifier), "\(identifier) should stay attached to Home click-flow controls")
         }
 
         for identifier in [
