@@ -68,8 +68,10 @@ SWIFT_SOURCES=(
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptLoader.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingProvider.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingStore.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/SQLiteHelpers.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/SemanticSearchFusion.swift"
     "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift"
+    "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+Schema.swift"
 )
 
 for source in "${SWIFT_SOURCES[@]}"; do
