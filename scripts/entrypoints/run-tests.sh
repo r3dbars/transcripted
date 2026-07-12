@@ -360,7 +360,6 @@ APP_SOURCES=(
     "Sources/Observability/TimelineAnalyticsTelemetry.swift"
     "Sources/Observability/FeatureDiscoveryTelemetry.swift"
     "Sources/Observability/LockedFileAppender.swift"
-    "Sources/Observability/JSONLWriter.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"
     "Sources/Observability/UpdateActionSafetyPolicy.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"

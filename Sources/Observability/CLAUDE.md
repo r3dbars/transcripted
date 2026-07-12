@@ -12,7 +12,6 @@ anonymous analytics, and Sparkle update plumbing.
 - `ObservabilityEvent.swift` — shared structured event payload used by local event logging and derived reliability packets
 - `LocalObservabilityPayloadSanitizer.swift` — redacts local event messages and context before disk writes
 - `ReliabilityPacketRecorder.swift` — writes privacy-safe `reliability.jsonl` packets for important dictation, meeting, and runtime outcomes so support feedback can include failure shape without raw audio or transcript data
-- `JSONLWriter.swift` — shared append-only JSONL writer that reuses file handles and falls back cleanly if log files are rotated or recreated
 - `LockedFileAppender.swift` — cross-process-safe file append helper that serializes writes and uses `flock` so concurrent JSONL/debug-log writers do not interleave records
 - `DiagnosticsTrail.swift` — lightweight high-signal diagnostics helper
 - `RuntimeDiagnostics.swift` — app runtime heartbeat, dirty-shutdown detection, and active session stage tracking for force quits / silent exits

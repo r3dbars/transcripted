@@ -9,8 +9,6 @@ import SQLite3
 @available(macOS 14.0, *)
 public final class SpeakerDatabase: @unchecked Sendable {
 
-    public static let shared = SpeakerDatabase()
-
     var db: OpaquePointer?
     // Thread-safety invariant:
     // - Writes happen only during `init` (single-threaded construction) inside
@@ -23,19 +21,6 @@ public final class SpeakerDatabase: @unchecked Sendable {
     var isDatabaseOpen = false
     let dbPath: URL
     let queue = DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)
-
-    private init() {
-        let paths = CoreStoragePaths.default
-        // Ensure the parent directory exists before sqlite3_open, otherwise the open will fail
-        // silently and every subsequent query will return no-op.
-        try? FileManager.default.createDirectory(
-            at: paths.speakerDB.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        dbPath = paths.speakerDB
-        openDatabase()
-        createTables()
-    }
 
     /// Public initializer that accepts a custom SQLite path.
     /// Used by tests and by callers that want to store the database outside the default
