@@ -56,7 +56,7 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 - Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `python3 scripts/dev/check-build-source-lists.py` + `bash run-e2e-smoke.sh`
 - Touched the slow-pasteback smoke path (`Tests/E2E/SlowPastebackSmoke.swift`, `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/Support/TranscriptedConstants.swift`, `run-slow-pasteback-smoke.sh`) → `python3 scripts/dev/check-build-source-lists.py` + `bash run-slow-pasteback-smoke.sh`
 - Touched QA bench/corpus files (`scripts/ops/transcripted-qa-bench.sh`, `scripts/ops/validate-meeting-corpus.py`, `scripts/ops/compare-meeting-corpus.py`, `docs/qa-test-bench.md`) → quick QA bench + Python compile checks
-- Touched live-capture smoke paths (`Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift`, `run-live-capture-smoke.sh`, `scripts/entrypoints/run-live-capture-smoke.sh`) → `bash run-live-capture-smoke.sh --skip-build`
+- Touched live-capture smoke paths (`Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift`, `run-live-capture-smoke.sh`, `scripts/entrypoints/run-live-capture-smoke.sh`) → `bash run-live-capture-smoke.sh --skip-build`
 - Touched `Package.swift`, `Sources/TranscriptedCore/**`, or `Tests/TranscriptedCoreTests/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh` + `swift test`
 - Touched `Sources/Observability/**`, `Info.plist`, `docs/sparkle-updates.md`, or `docs/appcast.xml` → `bash build.sh --no-open` + `bash run-tests.sh`
 - Touched release path (`build-beta.sh`, `scripts/entrypoints/build-beta.sh`, `scripts/release/**`, `docs/release-packaging.md`, `docs/sparkle-updates.md`, `Casks/**`, `docs/appcast.xml`) → `bash build.sh --no-open` + `bash run-tests.sh` + `SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>`
@@ -79,7 +79,11 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 
 ### Running a single test
 
-Fast tests are top-level functions, not XCTest cases. To run one in isolation, use `bash run-tests.sh --filter <entryFn|File>` (e.g. `bash run-tests.sh --filter testJSONLWriter`); the selector matches an entry function, a file name, or a case-insensitive substring of either, and `bash run-tests.sh --list` prints the known entry functions. For the SPM target use `swift test --filter <TestName>` (e.g. `swift test --filter MicRecordingFileMergerTests`).
+Fast tests are top-level functions, not XCTest cases. To run one in isolation, use `bash run-tests.sh --filter <entryFn|File>` (e.g. `bash run-tests.sh --filter testPayloadSanitizationCore`); the selector matches an entry function, a file name, or a case-insensitive substring of either, and `bash run-tests.sh --list` prints the known entry functions. For the SPM target use `swift test --filter <TestName>` (e.g. `swift test --filter MicRecordingFileMergerTests`).
+
+### Scoped test loops (`Tests/TranscriptedCoreTests/`)
+
+`Tests/TranscriptedCoreTests/` is split into five per-subsystem SPM test targets — `AudioTests`, `SpeakerTests`, `PipelineTests`, `StorageTests`, `UtilitiesTests` — mirroring `Sources/TranscriptedCore/{Audio,Speaker,Pipeline,Storage,Logging,Utilities,...}`, instead of one monolithic `TranscriptedCoreTests` target. When iterating on one subsystem, scope the run with `swift test --filter '^<Target>Tests\.'` (e.g. `swift test --filter '^SpeakerTests\.'`) — SwiftPM's `--filter` matches `<test-target>.<test-case>`, so this runs only that target's tests. Plain `swift test` with no filter still runs every target and is what CI and the verification-rules table above use, so nothing about full-suite behavior changed. `swift test --filter <ClassName>` still works for a single class too, including for `TranscriptionTaskManagerMetadataTests`, whose 64 tests live in `PipelineTests` split across several files that extend one class.
 
 ## Build-system shape
 
@@ -100,7 +104,6 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 | Path | Owns |
 |------|------|
 | `Sources/Accessibility/` | focused-editor AX metadata, overlay placement, paste-back context |
-| `Sources/Beta/` | beta-build configuration |
 | `Sources/Capture/` | physical dictation trigger capture, meeting hotkey routing, `ContextCaptureEngine` |
 | `Sources/Dictation/` | dictation transcript persistence, daily Markdown files, timeout helpers |
 | `Sources/Meeting/` | app-side bridge into `TranscriptedCore`; live capture, imported-audio/video prep, queued meeting transcription, `MeetingSTTAdapter` |
@@ -119,13 +122,18 @@ Subsystem boundaries (each has a local `CLAUDE.md`):
 
 Keep `Sources/TranscriptedCore/` a library boundary — meetings reuse the app's STT path through `Sources/Meeting/MeetingSTTAdapter.swift`. Sources/Speech/ owns dictation STT.
 
+Naming traps (confirmed by the 2026-07-08 audit):
+
+- `Sources/Support/CaptureLibrary*.swift` is capture-**library** migration/relocation logic (the user-relocatable folder of saved meeting/dictation Markdown and audio) — it is not `Sources/Capture/`, which is screen/audio capture triggering. See `Sources/Support/CLAUDE.md`.
+- `Sources/Support/ModelCacheInventory.swift` inventories `Sources/Speech/` STT model caches even though it lives in `Support/`.
+
 ## Storage layout
 
 App-owned state lives under `~/Library/Application Support/Transcripted/`:
 
 - `captures/meetings/` — saved meeting Markdown + audio
 - `captures/dictations/` — daily dictation Markdown
-- `logs/app.jsonl`, `logs/events.jsonl`, `logs/debug.log`
+- `logs/app.jsonl`, `logs/events.jsonl`, `logs/debug.log` (see `docs/observability.md` for the full sink map)
 
 Users can relocate the capture library via `transcriptSaveLocation` in Settings; app state/cache/logs/tmp stay under Application Support. Historic `Draft`-named paths still exist for migration and standalone-tool fallback. Canonical map: `docs/storage-paths.md`.
 
@@ -157,6 +165,23 @@ Treat as reference, not current runtime truth:
 - `docs/archive/`
 - `.claude/` (older planning)
 - references to `Sources/Text/` or `Sources/Style/` in older docs
+
+## Hotspots
+
+Files still over 1500 lines after the 2026-07 god-file splits (measured with `wc -l`). These are dense, high-blast-radius files — read the whole file and the relevant subsystem `CLAUDE.md` before editing; do not casually append another responsibility to any of them:
+
+- `Sources/UI/Settings/TranscriptedSettingsView.swift` (~5.6k) — settings shell, navigation, and page routing for every settings surface; most page bodies have already moved to `Sources/UI/Settings/Pages/` and sibling files, but the shell itself stays huge because it wires all of them together
+- `Sources/Meeting/MeetingSessionController.swift` (~3.1k) — the meeting state machine; failed-meeting and queue bookkeeping were split into `FailedMeetingStore.swift`/`TranscriptionQueueCoordinator.swift`, but permission gating, capture start/stop, and transcript-save handoff still live here
+- `Sources/Speech/ParakeetEngine.swift` (~2.8k) — the dictation STT engine; device recovery and model lifecycle already moved to `ParakeetDeviceRecovery.swift`/`ParakeetModelLifecycle.swift`, this file is still the public-API owner and `@MainActor` home for recording state
+- `Sources/UI/Overlay/MeetingOverlayController.swift` (~2.7k) — the non-activating meeting-prompt/recording panel controller; touches capture state, live-transcript drawer, and prompt UI all at once
+- `Sources/UI/Settings/PermissionsOnboardingView.swift` (~2.4k) — first-run onboarding walkthrough; sequences several distinct permission/setup stages in one view
+- `Sources/UI/Settings/HomeView.swift` (~2.4k) — the Home canvas (greeting, stats, capture lists, preview/feedback sheets); most small formatting/policy helpers already live in sibling files (`HomePresentation.swift`, `HomeCanvasGreeting.swift`, etc.), this is the view assembly itself
+- `Sources/UI/Overlay/DictationSessionController.swift` (~2.2k) — dictation session orchestration
+- `Sources/Meeting/LocalMeetingSummarizer.swift` (~1.9k) — opt-in local AI meeting-summary runners for both providers (Gemma MLX, Apple Foundation Models)
+- `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (~1.7k) — the MCP server's SQLite index; schema DDL already split into `TranscriptIndex+Schema.swift`, this file is still the query/reconcile surface
+- `Sources/TranscriptedCore/Speaker/SpeakerNamingSimulationRunner.swift` (~1.7k) — offline speaker-naming simulation harness
+- `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` (~1.7k) — the single-flight transcription queue/orchestrator
+- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (~1.6k) — the speakers settings surface (voice-to-name queue, duplicate suggestions, searchable list)
 
 ## Response voice
 

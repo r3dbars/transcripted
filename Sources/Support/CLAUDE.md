@@ -12,6 +12,7 @@
 - `AgentMCPConnector.swift` — per-agent MCP connect seam: detection, connection state, and config writers for Claude Code (via the `claude` CLI), Codex (`~/.codex/config.toml`), and Cursor (`~/.cursor/mcp.json`), all pointing at the shared installed helper
 - `CaptureLibraryChangeBroadcaster.swift` — single source of truth for the debounced `.meetingCaptureArtifactsDidChange` notification; coalesces background WAV→M4A recompression and transcript-rename file mutations so Home can re-resolve its cached transcript/audio URLs (empty id set means a library-wide change of unknown scope)
 - `CaptureLibraryMigrationPlanner.swift` — copy-only planning and execution for capture-library relocation: detects captures in the old folder, enumerates meeting Markdown plus retained `audio/*_audio/` directories plus dictation day files, skips destination collisions, and never deletes originals
+- `CaptureLibrarySize.swift` — once-per-launch on-disk size measurement/bucketing for the capture library, reported next to the retention setting so unbounded retained-audio growth is visible in the event log
 - `ClaudeDesktopIntegrationInstaller.swift` — installs the bundled read-only MCP helper for Claude Desktop, safely merges `mcpServers` JSON configs, runs the helper self-test, and silently refreshes a stale installed helper at app launch
 - `ClipboardRestoringTextPaster.swift` — paste helper that preserves clipboard contents while inserting the latest dictation into the target app
 - `CustomDictionaryPreferences.swift` — persisted custom spoken-term replacements plus text post-processing helpers
@@ -32,7 +33,9 @@
 - `MeetingOverlayPillPreferences.swift` — persisted "keep controls visible" pin that opts the meeting pill out of resting to its compact capsule
 - `MenuBarVisibilityPreferences.swift` — persisted Home toggles for optional menubar popover rows
 - `MicrophoneProcessingPreferences.swift` — persisted mic processing mode, toggling between raw/off input, default software AGC, and optional Apple voice processing (VPIO) for users who need the WebRTC-specific recovery path in meetings or dictation
-- `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls
+- `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls; despite living in `Support/`, it inventories `Sources/Speech/` STT model caches (Parakeet/Whisper/Nemotron), not app-wide caches
+- `SpeakerEmbedderFactory.swift` — app-layer resolution of the optional speaker-embedding model; keeps `Bundle.main`/filesystem lookups out of `TranscriptedCore` and hands the meeting controller a ready `SpeakerSegmentEmbedder` or nil
+- `SpeakerEmbedderPreferences.swift` — persisted choice between the diarizer's built-in WeSpeaker embedder and the optional ERes2Net model used for same-voice consolidation and cross-call speaker matching; mirrors `TranscriptionModelPreferences`
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
 - `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts, including migration from older right-Option settings
 - `QuitConfirmationPreferences.swift` — default-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit
@@ -48,6 +51,8 @@
 
 ## Current notes
 
+- Naming trap: `Support/CaptureLibrary*.swift` (`CaptureLibraryChangeBroadcaster`, `CaptureLibraryMigrationPlanner`, `CaptureLibrarySize`) is capture-**library** migration/relocation/change-broadcast logic — the user-relocatable folder of saved meeting/dictation Markdown and audio. It is unrelated to `Sources/Capture/`, which is screen/audio capture triggering (`ContextCaptureEngine`, physical hotkey routing). Same "capture" word, different subsystem — do not conflate them when searching or routing changes.
+- Naming trap: `ModelCacheInventory.swift` lives in `Support/` but inventories `Sources/Speech/` STT model caches, not a generic app cache. If you're looking for Speech model cache logic, check here first.
 - Keep preference keys and notification names centralized here so UI and controllers do not drift.
 - `PhysicalDictationTriggerPreferences` is the canonical binding layer for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts. Avoid reintroducing ad hoc keycode logic or special-case right-Option handling in UI or capture code.
 - `TranscriptionModelPreferences` is the shared switch between `Parakeet`, the available local Whisper variants, and the beta-gated Nemotron streaming model (`SpeechModelBetaPreferences` controls its availability; `effectiveModel()` falls back to the default while the gate is off). Model-specific runtime behavior still belongs in `Sources/Speech/` and `Sources/Meeting/`.

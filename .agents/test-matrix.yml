@@ -298,7 +298,7 @@ rules:
       - "bash -n scripts/ops/qa-gate-closeout.sh"
 
   - paths:
-      - "Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift"
+      - "Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift"
       - "run-live-capture-smoke.sh"
       - "scripts/entrypoints/run-live-capture-smoke.sh"
     checks:

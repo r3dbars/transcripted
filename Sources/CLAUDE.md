@@ -37,7 +37,6 @@ Important entry points:
 ## Directory map
 
 - `Accessibility/` — AX helpers for overlay positioning
-- `Beta/` — beta-only config currently; older API docs are historical
 - `Capture/` — physical dictation trigger capture, meeting trigger routing, context parsing, and capture routing
 - `Dictation/` — dictation transcript persistence and timeout helpers
 - `Meeting/` — app-side meeting bridge, prompts, imported-audio prep, storage, and transcript restyling
@@ -69,7 +68,7 @@ app target entirely. If a historical doc still mentions `Sources/Text/` or
 - touching overlay, menubar, onboarding, settings, or agent-connect UI: `Sources/UI/CLAUDE.md`
 - touching hotkeys or physical dictation trigger routing: `Sources/Capture/CLAUDE.md`
 - touching focused-editor AX metadata, overlay placement, or paste-back context: `Sources/Accessibility/CLAUDE.md`
-- touching beta-build configuration: `Sources/Beta/CLAUDE.md`
+- touching beta-gated model/summary opt-ins: `Sources/Support/SpeechModelBetaPreferences.swift` / `Sources/Support/LocalMeetingSummaryPreferences.swift` (`Sources/Beta/` no longer exists — beta preferences now live in `Sources/Support/`)
 - touching wake / sleep recovery or hotkey recovery: `Sources/Reliability/CLAUDE.md`
 - touching crash reporting, analytics, logs, diagnostics, or Sparkle updates: `Sources/Observability/CLAUDE.md`
 - touching tests or package boundaries: `Tests/README.md`

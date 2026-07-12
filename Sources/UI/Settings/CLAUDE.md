@@ -44,6 +44,13 @@ settings-side agent connection flow.
 - `SpeakerNamingSheet.swift` - completed-meeting speaker review sheet.
 - `TypingTimeSavedFormatter.swift` - Foundation-pure formatter for Home's
   typing-time-saved stat.
+- `Pages/` - one file per settings tab-strip page split out of
+  `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
+  `DictationsSettingsPage.swift`, `PeopleSettingsPage.swift`,
+  `PrivacySettingsPage.swift`, `SupportSettingsPage.swift`). New settings
+  pages should land here as their own file instead of growing the shell.
+- `TranscriptedSettingsSupportViews.swift` - shared small SwiftUI views used
+  across multiple settings pages (support/diagnostics-adjacent rows).
 
 ## Guardrails
 

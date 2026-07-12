@@ -728,7 +728,7 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - live capture smoke stays explicit and opt-in") {
         let wrapper = readRepoTextFile("run-live-capture-smoke.sh")
         let entrypoint = readRepoTextFile("scripts/entrypoints/run-live-capture-smoke.sh")
-        let liveSmokeTest = readRepoTextFile("Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift")
+        let liveSmokeTest = readRepoTextFile("Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift")
         let testsReadme = readRepoTextFile("Tests/README.md")
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
 
@@ -755,7 +755,7 @@ func testRepoCommandContract() {
             "Tests README should document the local permission requirements"
         )
         assertTrue(
-            matrix.contains("Tests/TranscriptedCoreTests/LiveCaptureSmokeTests.swift")
+            matrix.contains("Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift")
                 && matrix.contains("bash run-live-capture-smoke.sh --skip-build"),
             "test matrix should map live-smoke changes to the permission-aware command"
         )
