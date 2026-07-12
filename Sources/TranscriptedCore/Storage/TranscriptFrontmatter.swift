@@ -28,13 +28,6 @@ public enum TranscriptFrontmatter {
         return formatter
     }()
 
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     private static let formatterQueue = DispatchQueue(label: "TranscriptedCore.TranscriptFrontmatter.formatters")
 
     public static func document(in raw: String) -> TranscriptFrontmatterDocument? {
@@ -164,7 +157,7 @@ public enum TranscriptFrontmatter {
         guard let date = values["date"] else { return nil }
 
         return formatterQueue.sync {
-            dateFormatter.date(from: date)
+            DateFormattingHelper.parseDayStamp(date)
         }
     }
 

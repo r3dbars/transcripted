@@ -5,6 +5,7 @@ func testMeetingAudioArchiveResolver() {
         testResolverUsesCanonicalMeetingArtifactAudioDirectory()
         testMeetingArtifactRenamerStripsLeadingDots()
         testMeetingArtifactRenamerFallsBackForAllDots()
+        testMeetingArtifactRenamerDatePrefixFormat()
         testResolverKeepsLiveMeetingAudioPairButUsesSinglePlaybackSource()
         testResolverFallsBackToMicrophonePlayback()
         testAttachmentPlaybackPrefersSystemForFailedMeetingAudio()
@@ -34,6 +35,22 @@ private func testMeetingArtifactRenamerFallsBackForAllDots() {
         MeetingArtifactRenamer.sanitizedTitleStem(for: "...", fallback: "Untitled Meeting"),
         "Untitled Meeting",
         "All-dot meeting titles should fall back to a visible artifact name"
+    )
+}
+
+// Regression guard for the DateFormattingHelper.formatDayStamp consolidation
+// (audit 2026-07-08, W1-A5): datePrefix(for:) must keep producing `yyyy-MM-dd`
+// in the local timezone identically to the old bespoke DateFormatter.
+private func testMeetingArtifactRenamerDatePrefixFormat() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .current
+    let components = DateComponents(calendar: calendar, year: 2026, month: 4, day: 7, hour: 9, minute: 15)
+    let date = components.date ?? Date(timeIntervalSince1970: 0)
+
+    assertEqual(
+        MeetingArtifactRenamer.datePrefix(for: date),
+        "2026-04-07",
+        "datePrefix should keep the yyyy-MM-dd shape after the DateFormattingHelper migration"
     )
 }
 
