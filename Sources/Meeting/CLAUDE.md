@@ -7,6 +7,12 @@
 ## Files
 
 - `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles, retained-audio URLs, and retry metadata
+- `FailedMeetingStore.swift` — failed-meeting queue/persistence/retry bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Plain owned object, not an `ObservableObject`; the controller still owns the published `failedMeetings` surface and lends this store callback access for state it doesn't own
+- `TranscriptionQueueCoordinator.swift` — background-transcription queue/dispatch bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Drives the controller's state/display-status transitions via callbacks; job dispatch reaches back into the controller for `taskManager` and live-sidecar bookkeeping
+- `MeetingCaptureHealthTelemetry.swift` — coarse, privacy-safe telemetry for capture-health signals (mic/system audio dropouts, recovery outcomes) surfaced during a recording
+- `MeetingPromptTelemetry.swift` — `MeetingPromptCallTelemetry` and the bucketed funnel-event emission for detected-call/prompt outcomes
+- `MeetingQuickSummaryExtractor.swift` — extracts the quick-summary candidate text/metadata from a saved transcript for the opt-in local AI summary flow
+- `MeetingQuickSummaryWriter.swift` — writes the quick-summary sidecar file alongside a saved meeting transcript
 - `MeetingAudioStorageManager.swift` — compresses retained meeting WAVs to M4A, compresses queue-tracked failed-meeting WAVs without deleting untracked orphans, applies audio-retention cleanup, and backfills existing retained audio after launch or Settings changes
 - `MeetingAudioInactivityDetector.swift` — detects prolonged audio silence during meetings and emits warning/cleared events so the UI can prompt the user to confirm the recording is still needed
 - `MeetingCaptureBridge.swift` — `@MainActor` wrapper around core `Audio` that converts start/stop into async flows, waits for both live capture and system-audio-file readiness, and mirrors live levels for the UI
@@ -89,7 +95,8 @@
 - `MeetingFailureKind` is the canonical place for stable failed-meeting categories used by presentation and metadata. Keep new classification rules centralized there.
 - `MeetingFailureCopy` is the canonical place for human-facing failed-meeting titles and details. Keep retry messaging centralized there.
 - `MeetingSessionUIPolicy` is the canonical place for deciding whether background meeting work should still surface as an active transcribing/saving state. Speaker review alone should not keep that state visible.
-- `TranscriptionTaskManager` stays single-flight. App-level queueing belongs in `MeetingSessionController`, not in ad hoc background tasks.
+- `TranscriptionTaskManager` stays single-flight. App-level queueing belongs in `TranscriptionQueueCoordinator` (called by `MeetingSessionController`), not in ad hoc background tasks.
+- Failed-meeting queue/persistence/retry bookkeeping belongs in `FailedMeetingStore`, not scattered back into `MeetingSessionController`. Both extracted objects are plain code-motion splits (audit 2026-07-08 wave 2): they still reach back into the controller via a `controller` callback for state they don't own, and legacy nested-type references (`FailedMeetingItem`, `QueuedTranscriptionJob`, `BackgroundTranscriptionWorkSnapshot`) stay resolvable as typealiases on the controller.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
 - Local meeting summaries rewrite the saved transcript after a slow local model run. Always re-read the transcript before writing and fail closed if transcript text changed while generation was in flight. Keep provider-specific setup and metadata explicit so Gemma MLX and Apple Foundation Models summaries remain distinguishable.
 
@@ -120,7 +127,7 @@ their available recording audio there while keeping scratch files available for
 retry. Explicit discard still removes the scratch recording without saving a
 transcript or retained audio.
 
-Core logging for the embedded meeting pipeline is redirected to `~/Library/Application Support/Transcripted/logs/`.
+Core logging for the embedded meeting pipeline is redirected to `~/Library/Application Support/Transcripted/logs/`. See `docs/observability.md` for the full sink map.
 
 See `docs/storage-paths.md` for the full map.
 

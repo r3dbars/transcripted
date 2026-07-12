@@ -35,11 +35,11 @@ When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
-## Package Layout (24 Swift files)
+## Package Layout (37 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
-- `Sources/TranscriptedMCP/` — 13 source files for server startup, directory resolution, path validation, indexing, telemetry, semantic search, and tool handlers
-- `Tests/TranscriptedMCPTests/` — 11 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, tool handlers, markdown loading, logging, telemetry, name variants, semantic search, and shared fixtures
+- `Sources/TranscriptedMCP/` — 23 source files for server startup, directory resolution, path validation, indexing, telemetry, semantic search, tool handlers (split by tool family), and the MCP Apps widget surface
+- `Tests/TranscriptedMCPTests/` — 14 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, tool handlers, markdown loading, logging, telemetry, name variants, semantic search, the recent-meetings widget, audio-directory naming, frontmatter corpus parity, and shared fixtures
 
 ## File Index
 
@@ -47,8 +47,18 @@ that mode the SQLite index also defaults to the shared root unless
 |------|---------|
 | `Main.swift` | `@main` entry point; resolves directories, builds the index (with an `NLEmbeddingProvider` for semantic search), starts file watchers, then starts the MCP stdio server |
 | `DataDirectories.swift` | Index-dir resolution plus a thin wrapper over `TranscriptedCaptureKit`'s shared capture-library resolver |
-| `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct loader or index method |
+| `ToolHandlers.swift` | Registers every MCP tool and routes requests to the correct handler; the tool bodies themselves live in the `ToolHandlers+*.swift` files below |
+| `ToolHandlers+Meetings.swift` | `list_meetings` / `read_meeting` handlers |
+| `ToolHandlers+Dictations.swift` | `list_dictations` / `read_dictation` handlers |
+| `ToolHandlers+Search.swift` | `search` / `search_context` / `recent_context` / `who_is` handlers |
+| `ToolHandlers+Rollups.swift` | `recap` / `list_action_items` / `list_decisions` / `digest` handlers |
+| `ToolHandlers+Receipts.swift` | `decisions` / `commitments` / `open_questions` / `search_meetings` WS2.3 receipt-API handlers; they share a common `handleReceiptQuery` tail |
+| `UIResourceHandlers.swift` | MCP Apps (SEP-1865, `io.modelcontextprotocol/ui`) surface: the `ui://` HTML resource and the `show_recent_meetings` tool that returns it |
+| `RecentMeetingsWidget.swift` | Widget data model for one meeting card, shared by the widget builder and the HTML renderer / `structuredContent` payload |
+| `RecentMeetingsWidgetBuilder.swift` | Builds the recent-meetings widget model from the local capture library, reusing the same read-tool data access rather than re-plumbing it |
 | `TranscriptIndex.swift` | SQLite-backed index, incremental updates, and query methods across meetings and dictations; routes `lexical`/`semantic`/`hybrid` search modes |
+| `TranscriptIndex+Schema.swift` | Declarative DDL: table, FTS5 virtual table, trigger, and index definitions for the index database, split out of `TranscriptIndex.swift` |
+| `SQLiteHelpers.swift` | Shared free-function SQLite plumbing used by both `TranscriptIndex` and `EmbeddingStore`'s independent connections |
 | `EmbeddingProvider.swift` | `EmbeddingProvider` protocol, the default `NLEmbeddingProvider` (Apple NaturalLanguage, zero-bundle on-device), `SearchMode`, and `VectorMath` helpers |
 | `EmbeddingStore.swift` | Vector store on its own SQLite connection; embeds rows, stores Float32 vectors, and runs cosine semantic search over utterances and dictation entries |
 | `SemanticSearchFusion.swift` | Reciprocal-rank fusion that merges lexical (FTS) and semantic result lists for hybrid search |
@@ -67,12 +77,15 @@ that mode the SQLite index also defaults to the shared root unless
 | `TranscriptIndexTests.swift` | Full index lifecycle: reconcile, query, date filters, speaker search, and mixed-context indexing |
 | `SummaryItemIndexTests.swift` | Structured summary parse→index→query: decisions/action-items/open-questions, owner + unassigned rollup, reindex/delete, sidecar-not-a-meeting |
 | `TranscriptLoaderTests.swift` | Markdown and YAML frontmatter parsing edge cases, including path-safety checks |
+| `FrontmatterCorpusParityTests.swift` | Checks the kit's frontmatter parsing stays in parity across a corpus of real saved transcripts |
 | `LoggingTests.swift` | JSON log emission coverage for MCP startup and indexing diagnostics |
 | `NameVariantsTests.swift` | Name variant matching accuracy |
 | `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
 | `ToolHandlersTests.swift` | Handler-level coverage: title hydration, telemetry, status tool payload, self-describing empty results, done-filter error, read pagination windows and size guard |
 | `AgentCaptureQueryTelemetryTests.swift` | Bucketing and payload coverage for agent capture-query telemetry |
 | `SemanticSearchTests.swift` | Semantic + hybrid search via a deterministic stub provider, graceful fallback, model-change re-embed, vector-math, and RRF fusion |
+| `RecentMeetingsWidgetTests.swift` | Widget-model and builder coverage for the `show_recent_meetings` MCP Apps surface |
+| `AudioDirectoryNamingTests.swift` | Retained-audio directory naming/resolution coverage |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |
 
 ## MCP Tools
@@ -98,6 +111,7 @@ All tools are read-only.
 | `open_questions` | WS2.3 receipt API for local open-question lookup by project/range |
 | `search_meetings` | WS2.3 receipt API for local keyword search over meeting utterances |
 | `status` | Server version, resolved capture directories and which resolution rule selected them, index location, and indexed counts |
+| `show_recent_meetings` | MCP Apps (SEP-1865) tool: returns a `ui://` HTML resource that renders a recent-meetings widget inline in a rendering-capable client, plus the same data as `structuredContent`. See `Sources/TranscriptedMCP/UIResourceHandlers.swift` |
 
 The rollup and WS2.3 tools are cross-meeting reads over local structured summary
 fields and raw utterance FTS. They query the same `meeting_summary_items` index
