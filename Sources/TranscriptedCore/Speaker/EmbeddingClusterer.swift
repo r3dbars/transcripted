@@ -114,11 +114,13 @@ public enum EmbeddingClusterer {
 
         func find(_ x: Int) -> Int {
             var root = x
-            while parent[root] != root { root = parent[root]! }
+            // A missing key can only mean `root` was never inserted (e.g. an id
+            // outside `speakerIds`); treat it as its own root rather than trapping.
+            while let next = parent[root], next != root { root = next }
             // Path compression
             var node = x
             while node != root {
-                let next = parent[node]!
+                guard let next = parent[node] else { break }
                 parent[node] = root
                 node = next
             }

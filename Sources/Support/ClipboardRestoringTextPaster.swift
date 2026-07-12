@@ -404,6 +404,19 @@ private struct FocusedTextPasteConfirmation {
             return nil
         }
 
+        // AXUIElement is a toll-free-bridged CF opaque type: Swift can't runtime-check
+        // `as?`/`as!` against it (the compiler treats the downcast as unconditionally
+        // successful), so CFGetTypeID is the actual safety net before we hand this
+        // value to AX APIs that assume it really is an AXUIElement. This file is
+        // compiled directly into the fast-test binary without the TranscriptedCore
+        // module's search path (see APP_SOURCES in run-tests.sh), so importing that
+        // module here isn't an option — this follows the same fputs(..., stderr)
+        // idiom Sources/Observability/AppLogger.swift itself falls back to for
+        // internal diagnostics.
+        guard CFGetTypeID(focusedElement) == AXUIElementGetTypeID() else {
+            fputs("⚠️ ClipboardRestoringTextPaster | focused UI element attribute returned an unexpected CF type (expected AXUIElement)\n", stderr)
+            return nil
+        }
         let element = focusedElement as! AXUIElement
         AXUIElementSetMessagingTimeout(element, messagingTimeout)
         return FocusedTextPasteConfirmation(

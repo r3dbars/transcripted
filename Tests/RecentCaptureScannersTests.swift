@@ -79,6 +79,34 @@ func testRecentCaptureScanners() async {
         )
     }
 
+    runSuite("RecentMeetingSpeakerStatus.detect tolerates a malformed bold-prefixed line without crashing") {
+        // Regression for a real crash: "**]" is a line that hasPrefix("**") (safe to
+        // offset into), but after speakerLabel(fromTranscriptLine:) strips the "**"
+        // and trims stray asterisks/whitespace, the remainder "]" is handed to
+        // speakerLabel(fromBracketTimestampLine:) without ever having a leading "[".
+        // firstIndex(of: "]") then lands at startIndex while
+        // line.index(after: line.startIndex) steps one past it, building an inverted
+        // range (`1..<0`) that trapped with "Range requires lowerBound <= upperBound"
+        // before the hasPrefix("[") guard was added.
+        let markdown = """
+        # Malformed transcript
+
+        ## Transcript
+
+        **]
+        A stray closing bracket right after the bold marker used to crash the scanner.
+
+        **00:01**  [System/Maya]
+        A valid speaker label on the next line should still be recognized.
+        """
+
+        assertEqual(
+            RecentMeetingSpeakerStatus.detect(in: markdown),
+            .ready,
+            "A malformed '**]' line must not crash the scanner and must not itself be treated as a speaker label"
+        )
+    }
+
     runSuite("RecentMeetingSpeakerStatus.detect deduplicates repeated generic labels") {
         let markdown = """
         # Repeated generic labels
