@@ -19,6 +19,7 @@ final class FrontmatterCorpusParityTests: XCTestCase {
     private static var corpusDirectory: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // FrontmatterCorpusParityTests.swift
+            .deletingLastPathComponent() // StorageTests
             .deletingLastPathComponent() // TranscriptedCoreTests
             .appendingPathComponent("Fixtures/frontmatter-corpus")
     }
