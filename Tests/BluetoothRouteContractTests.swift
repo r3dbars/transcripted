@@ -330,7 +330,7 @@ func testBluetoothRouteContract() {
     runSuite("Bluetooth route contract - engine tap wiring keeps sample-rate pinning") {
         let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
         guard let tapStart = source.range(of: "private func installTapAndStartEngine"),
-              let tapEnd = source.range(of: "private func removeRecordingTap", range: tapStart.upperBound..<source.endIndex) else {
+              let tapEnd = source.range(of: "func removeRecordingTap", range: tapStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find dictation tap wiring")
             return
         }
@@ -353,7 +353,7 @@ func testBluetoothRouteContract() {
 
     runSuite("Bluetooth route contract - input override happens before format reads") {
         let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
-        guard let snapshotStart = source.range(of: "private func audioInputSnapshot"),
+        guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
               let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find dictation audioInputSnapshot")
             return
@@ -381,7 +381,7 @@ func testBluetoothRouteContract() {
 
     runSuite("Bluetooth route contract - system input override restores after recording") {
         let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
-        guard let snapshotStart = source.range(of: "private func audioInputSnapshot"),
+        guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
               let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex),
               let startStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
               let startEnd = source.range(of: "private func extractMonoSamples", range: startStart.upperBound..<source.endIndex),
@@ -448,7 +448,9 @@ func testBluetoothRouteContract() {
     }
 
     runSuite("Bluetooth route contract - active startup owns its config changes") {
-        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
+        // Device-change detection/recovery lives in ParakeetDeviceRecovery.swift
+        // (codebase audit 2026-07-08 wave 2).
+        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetDeviceRecovery.swift")
         guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
               let handlerEnd = source.range(of: "private func recordRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the audio config-change handler")

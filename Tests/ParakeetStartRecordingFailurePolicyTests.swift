@@ -791,7 +791,11 @@ func testParakeetStartRecordingFailurePolicy() {
         // It guards a REAL invariant behind the device_change_rewarm_failed (x207)
         // and app.unclean_shutdown_detected (x166) Sentry pair. If you move/rename
         // attemptDeviceRecovery or reorder its catch handling, update this together.
-        let source = readParakeetEngineSource()
+        //
+        // Device-change detection/recovery lives in ParakeetDeviceRecovery.swift
+        // (codebase audit 2026-07-08 wave 2) — read that file instead of
+        // ParakeetEngine.swift.
+        let source = readParakeetDeviceRecoverySource()
         guard let recoveryStart = source.range(of: "private func attemptDeviceRecovery()"),
               let recoveryEnd = source.range(of: "private func scheduleConfigRecoveryTimeout", range: recoveryStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the attemptDeviceRecovery body")
@@ -921,6 +925,21 @@ private func readParakeetEngineSource(file: String = #file, line: Int = #line) -
         failedTests += 1
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
         print("  FAIL [\(loc)] could not read ParakeetEngine.swift: \(error)")
+        return ""
+    }
+}
+
+/// Device-change detection/recovery lives in ParakeetDeviceRecovery.swift
+/// (codebase audit 2026-07-08 wave 2), split out of ParakeetEngine.swift.
+private func readParakeetDeviceRecoverySource(file: String = #file, line: Int = #line) -> String {
+    let url = repoFixtureURL("Sources/Speech/ParakeetDeviceRecovery.swift")
+    do {
+        return try String(contentsOf: url, encoding: .utf8)
+    } catch {
+        totalTests += 1
+        failedTests += 1
+        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+        print("  FAIL [\(loc)] could not read ParakeetDeviceRecovery.swift: \(error)")
         return ""
     }
 }

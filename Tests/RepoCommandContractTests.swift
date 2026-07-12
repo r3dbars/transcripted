@@ -1819,7 +1819,7 @@ func testRepoCommandContract() {
         let startBlock = sourceSlice(
             contents,
             from: "private func installTapAndStartEngine",
-            to: "private func removeRecordingTap"
+            to: "func removeRecordingTap"
         )
 
         guard
@@ -2832,6 +2832,10 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - dictation joins existing model downloads") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/DictationSessionController.swift")
         let engineContents = readRepoTextFile("Sources/Speech/ParakeetEngine.swift")
+        // Model init/load/download/warmup lives in ParakeetModelLifecycle.swift
+        // (codebase audit 2026-07-08 wave 2); the task property itself stays on
+        // ParakeetEngine as owned state.
+        let lifecycleContents = readRepoTextFile("Sources/Speech/ParakeetModelLifecycle.swift")
         assertTrue(
             overlayContents.contains("case .notLoaded, .cached:")
                 && overlayContents.contains("await appState.sttRouter.initializeSelectedModel()")
@@ -2848,8 +2852,8 @@ func testRepoCommandContract() {
             "the post-stop model wait should fail fast when the concurrent load reports failure instead of polling out the budget"
         )
         assertTrue(
-            engineContents.contains("private var modelInitializationTask: Task<Void, Never>?")
-                && engineContents.contains("await modelInitializationTask.value"),
+            engineContents.contains("var modelInitializationTask: Task<Void, Never>?")
+                && lifecycleContents.contains("await modelInitializationTask.value"),
             "Parakeet initialization should join an in-progress direct first-use download/load"
         )
     }

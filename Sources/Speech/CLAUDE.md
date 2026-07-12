@@ -6,7 +6,9 @@
 
 ## Key Files
 
-- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, final dictation transcription, model initialization, permission-aware input-readiness checks, audio-device handling, short-audio gating, wake-recovery support, live level metering, and sanitized failure reporting for model init errors
+- `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, final dictation transcription, permission-aware input-readiness checks, short-audio gating, live level metering, and sanitized failure reporting for model init errors. Device-change recovery and model load/download/warmup/teardown are split into the two files below — ParakeetEngine remains the public-API owner and `@MainActor` home for that state; the split files are internal collaborator extensions.
+- `ParakeetDeviceRecovery.swift` — `ParakeetEngine` extension: device-change detection (CoreAudio default-input listener, `AVAudioEngineConfigurationChange` observer) and the `attemptDeviceRecovery` / `scheduleConfigRecoveryTimeout` executor that rewarms the audio graph after a route change. The pure decision tables it consults (`ParakeetDeviceRecoveryReadinessPolicy`, `ParakeetDeviceRecoveryFailurePolicy`, `ParakeetDeviceRecoveryTimeoutPolicy`) live in `ParakeetStartRecordingFailurePolicy.swift`, not here.
+- `ParakeetModelLifecycle.swift` — `ParakeetEngine` extension: model load/download/warmup/teardown paths (`initialize`, `performInitialize`, `prefetchModelFilesIfNeeded`, `initializeEouModel`, `cancelModelWork`, `teardownModel`)
 - `ParakeetAudioDeviceLookup.swift` — CoreAudio default-input lookup and dictation input selection descriptors used before Parakeet starts recording
 - `ParakeetAudioEngineSupport.swift` — support types for Parakeet engine startup snapshots, retired-engine retention, default-input listener teardown, and the disabled live-display shim
 - `WhisperEngine.swift` — app-owned WhisperKit STT engine used when advanced users select a Whisper model
@@ -69,4 +71,5 @@ Relevant direct coverage:
 - `Tests/ParakeetRecoveryStateTests.swift`
 - `Tests/ParakeetShortAudioGateTests.swift`
 - `Tests/ParakeetStartRecordingFailurePolicyTests.swift`
+- `Tests/DeviceRecoveryPolicyTests.swift`
 - `Tests/RecordedAudioTimelineTests.swift`
