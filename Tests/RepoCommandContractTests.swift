@@ -2197,16 +2197,21 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - queued meetings recover unloaded models before transcription") {
+        // Queue-dispatch logic moved to TranscriptionQueueCoordinator.swift
+        // (audit 2026-07-08 wave 2, W2-B) — this suite now reads that file
+        // for anything that moved, and the controller only for what stayed
+        // (visible first-run model warmup).
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let coordinatorContents = readRepoTextFile("Sources/Meeting/TranscriptionQueueCoordinator.swift")
         let downloaderContents = readRepoTextFile("Sources/Meeting/MeetingModelDownloader.swift")
 
         assertTrue(
-            controllerContents.contains("await ensureModelsReadyForQueuedTranscription(job)")
-                && controllerContents.contains("runPreparedQueuedTranscription(job)"),
+            coordinatorContents.contains("await ensureModelsReadyForQueuedTranscription(job)")
+                && coordinatorContents.contains("runPreparedQueuedTranscription(job)"),
             "queued meeting jobs should load models before entering TranscriptionTaskManager"
         )
         assertTrue(
-            controllerContents.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
+            coordinatorContents.contains("downloader.ensureModelsReady(sttModel: job.sttModel)"),
             "queued meeting jobs should reload the STT model selected when the audio was queued"
         )
         let visibleWarmupBlock = sourceSlice(
@@ -2221,9 +2226,9 @@ func testRepoCommandContract() {
             "visible meeting model warmup should fail through the existing model-load budget instead of staying stuck in loadingModels"
         )
         let queuedRecoveryBlock = sourceSlice(
-            controllerContents,
+            coordinatorContents,
             from: "private func ensureModelsReadyForQueuedTranscription(_ job: QueuedTranscriptionJob) async -> Bool {",
-            to: "let ready = sttAdapter.isReady && diarization.isReady"
+            to: "let ready = controller.sttAdapter.isReady && controller.diarization.isReady"
         )
         assertTrue(
             queuedRecoveryBlock.contains("TranscriptedConstants.withDetachedTimeout")
@@ -2232,41 +2237,41 @@ func testRepoCommandContract() {
             "queued meeting model recovery should use the same bounded readiness wait as visible first-run warmup"
         )
         assertTrue(
-            controllerContents.contains("preparingQueuedTranscriptionJob")
-                && controllerContents.contains("isPreparingQueuedTranscriptionStart")
-                && controllerContents.contains("preparingQueuedTranscriptionJob?.id == job.id"),
+            coordinatorContents.contains("preparingQueuedTranscriptionJob")
+                && coordinatorContents.contains("isPreparingQueuedTranscriptionStart")
+                && coordinatorContents.contains("preparingQueuedTranscriptionJob?.id == job.id"),
             "model recovery should count as active background work and stale prep tasks must not clear newer queued work"
         )
         let startQueuedBlock = sourceSlice(
-            controllerContents,
+            coordinatorContents,
             from: "private func startQueuedTranscription(_ job: QueuedTranscriptionJob) {",
             to: "private func prepareAndStartQueuedTranscription(_ job: QueuedTranscriptionJob) async {"
         )
         assertTrue(
             startQueuedBlock.contains("recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for: job)")
-                && controllerContents.contains("recordSession(kind: \"meeting\", stage: \"transcribing\")"),
+                && coordinatorContents.contains("recordSession(kind: \"meeting\", stage: \"transcribing\")"),
             "each queued meeting start should refresh runtime diagnostics away from the previous terminal outcome"
         )
         assertTrue(
-            controllerContents.contains("queuedRuntimeDiagnosticsJobIDs")
-                && controllerContents.contains("recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for: job)")
-                && controllerContents.contains("guard !isCaptureSessionActive else { return }"),
+            coordinatorContents.contains("queuedRuntimeDiagnosticsJobIDs")
+                && coordinatorContents.contains("recordQueuedTranscriptionRuntimeDiagnosticsIfSafe(for: job)")
+                && coordinatorContents.contains("guard !controller.isCaptureSessionActive else { return }"),
             "queued meeting diagnostics should not clobber foreground recording diagnostics"
         )
         assertTrue(
-            controllerContents.contains("guard !(sttRouter.isRecording || sttRouter.isTranscribing) else { return }"),
+            coordinatorContents.contains("guard !(controller.sttRouter.isRecording || controller.sttRouter.isTranscribing) else { return }"),
             "queued meeting diagnostics should not clobber foreground dictation diagnostics"
         )
         let queuedRecoveryFailureBlock = sourceSlice(
-            controllerContents,
+            coordinatorContents,
             from: "private func failQueuedTranscriptionJobAfterModelRecovery(_ job: QueuedTranscriptionJob) {",
             to: "private func canStartQueuedTranscriptionImmediately("
         )
         assertTrue(
             queuedRecoveryFailureBlock.contains("clearQueuedTranscriptionRuntimeDiagnosticsIfOwned(for: job, outcome: \"model_recovery_failed\")")
-                && controllerContents.contains("queuedRuntimeDiagnosticsJobIDs.remove(job.id)")
-                && queuedRecoveryFailureBlock.contains("guard !isCaptureSessionActive else { return }")
-                && queuedRecoveryFailureBlock.contains("guard !(sttRouter.isRecording || sttRouter.isTranscribing) else { return }"),
+                && coordinatorContents.contains("queuedRuntimeDiagnosticsJobIDs.remove(job.id)")
+                && queuedRecoveryFailureBlock.contains("guard !controller.isCaptureSessionActive else { return }")
+                && queuedRecoveryFailureBlock.contains("guard !(controller.sttRouter.isRecording || controller.sttRouter.isTranscribing) else { return }"),
             "queued model recovery failures should clear only the runtime diagnostics session started before recovery"
         )
         assertTrue(
@@ -2340,28 +2345,25 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - failed audio compression reschedules queue changes") {
-        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
-        let schedulerBlock = sourceSlice(
-            controllerContents,
-            from: "private func scheduleFailedAudioCompression(",
-            to: "private extension MeetingSessionController.State"
-        )
+        // Failed-meeting bookkeeping moved to FailedMeetingStore.swift
+        // (audit 2026-07-08 wave 2, W2-B).
+        let storeContents = readRepoTextFile("Sources/Meeting/FailedMeetingStore.swift")
         let retryBlock = sourceSlice(
-            controllerContents,
+            storeContents,
             from: "func retryFailedMeeting(id: UUID) -> Bool",
             to: "Task { [weak self] in"
         )
 
         assertTrue(
-            controllerContents.contains("failedAudioCompressionNeedsReschedule"),
+            storeContents.contains("failedAudioCompressionNeedsReschedule"),
             "failed audio compression should track queue changes that arrive during an active pass"
         )
         assertTrue(
-            schedulerBlock.contains("failedAudioCompressionNeedsReschedule = true"),
+            storeContents.contains("failedAudioCompressionNeedsReschedule = true"),
             "an active compression pass should mark that the failed queue needs another scan"
         )
         assertTrue(
-            schedulerBlock.contains("self.scheduleFailedAudioCompression(for: self.failedManager.failedTranscriptions)"),
+            storeContents.contains("self.scheduleFailedAudioCompression(for: self.controller.failedManager.failedTranscriptions)"),
             "compression completion should re-check the latest failed queue before going idle"
         )
         assertTrue(
@@ -2372,20 +2374,23 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - stop-timeout failed meetings refresh Home immediately") {
+        // preserveFailedMeetingForRetry / refreshTimedOutFailedMeetingAudio
+        // moved to FailedMeetingStore.swift (audit 2026-07-08 wave 2, W2-B).
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        let storeContents = readRepoTextFile("Sources/Meeting/FailedMeetingStore.swift")
         let timeoutBlock = sourceSlice(
             controllerContents,
             from: "if stopResult.didTimeOut {",
-            to: "let outcome = enqueueTranscriptionJob("
+            to: "let outcome = transcriptionQueue.enqueueTranscriptionJob("
         )
         let helperBlock = sourceSlice(
-            controllerContents,
-            from: "private func preserveFailedMeetingForRetry(",
-            to: "private func refreshFailedMeetings("
+            storeContents,
+            from: "func preserveFailedMeetingForRetry(",
+            to: "func refreshTimedOutFailedMeetingAudio("
         )
 
         assertTrue(
-            timeoutBlock.contains("let preserved = preserveFailedMeetingForRetry("),
+            timeoutBlock.contains("let preserved = failedMeetingStore.preserveFailedMeetingForRetry("),
             "stop timeouts should route retained audio through the refresh helper before returning"
         )
         assertTrue(
@@ -2394,16 +2399,16 @@ func testRepoCommandContract() {
         )
         assertTrue(
             controllerContents.contains("refreshTimedOutFailedMeetingAudio(")
-                && controllerContents.contains("promoteFinalizedFailedTranscriptionAudio("),
+                && storeContents.contains("promoteFinalizedFailedTranscriptionAudio("),
             "late WAV finalization should promote finalized failed audio before refreshing the failed queue"
         )
         let refreshTimedOutAudioBlock = sourceSlice(
-            controllerContents,
-            from: "private func refreshTimedOutFailedMeetingAudio(",
-            to: "private func refreshFailedMeetings("
+            storeContents,
+            from: "func refreshTimedOutFailedMeetingAudio(",
+            to: "func refreshFailedMeetings("
         )
         assertTrue(
-            refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
+            refreshTimedOutAudioBlock.contains("let existingFailure = controller.failedManager.failedTranscriptions")
                 && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
                 && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL"),
             "late finalization should still promote system-only failed audio by reusing the failed queue mic placeholder"
@@ -2414,7 +2419,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             helperBlock.contains("taskManager.addFailedTranscriptionRetainingAvailableAudio(")
-                && helperBlock.contains("if preserved {\n            refreshFailedMeetings()"),
+                && helperBlock.contains("if preserved {\n            controller.refreshFailedMeetings()"),
             "retained failed-meeting audio should refresh MeetingSessionController.failedMeetings immediately"
         )
         assertTrue(
@@ -2422,16 +2427,17 @@ func testRepoCommandContract() {
             "the failed-manager subscription should render the emitted queue instead of re-reading stale @Published state"
         )
         assertFalse(
-            controllerContents.contains("taskManager.addFailedTranscriptionRetainingAudio("),
+            controllerContents.contains("taskManager.addFailedTranscriptionRetainingAudio(")
+                || storeContents.contains("taskManager.addFailedTranscriptionRetainingAudio("),
             "MeetingSessionController should not bypass the failed-meeting refresh helper"
         )
         assertEqual(
             countOccurrences(
                 of: "taskManager.addFailedTranscriptionRetainingAvailableAudio(",
-                in: controllerContents
+                in: storeContents
             ),
             1,
-            "direct failed-queue writes in MeetingSessionController should stay centralized in the refresh helper"
+            "direct failed-queue writes should stay centralized in FailedMeetingStore's refresh helper"
         )
     }
 
@@ -2471,7 +2477,11 @@ func testRepoCommandContract() {
         let helperBlock = sourceSlice(
             controllerContents,
             from: "private func finishLiveCodexSessionForCurrentTranscriptionFailureIfNeeded",
-            to: "private func canStartQueuedTranscriptionImmediately("
+            // canStartQueuedTranscriptionImmediately moved to
+            // TranscriptionQueueCoordinator.swift (audit 2026-07-08 wave 2,
+            // W2-B); the next controller function after this one is now
+            // restoreStateAfterRecordingEndedWithoutNewWork.
+            to: "private func restoreStateAfterRecordingEndedWithoutNewWork()"
         )
 
         assertTrue(
@@ -2494,6 +2504,10 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - failed meeting transcripts carry capture diagnostics") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        // startQueuedTranscription moved to TranscriptionQueueCoordinator.swift
+        // (audit 2026-07-08 wave 2, W2-B) — it sets
+        // activeTranscriptionCaptureDiagnostics on the controller it holds.
+        let coordinatorContents = readRepoTextFile("Sources/Meeting/TranscriptionQueueCoordinator.swift")
         let failureBlock = sourceSlice(
             controllerContents,
             from: "case .failed(let message):",
@@ -2501,7 +2515,7 @@ func testRepoCommandContract() {
         )
 
         assertTrue(
-            controllerContents.contains("activeTranscriptionCaptureDiagnostics = job.captureDiagnostics"),
+            coordinatorContents.contains("controller.activeTranscriptionCaptureDiagnostics = job.captureDiagnostics"),
             "failed meeting transcript diagnostics should use the capture health context stored with the active queued job"
         )
         assertTrue(
@@ -2513,7 +2527,7 @@ func testRepoCommandContract() {
             "failed meeting transcript diagnostics should not sample the live capture singleton after transcription fails"
         )
         assertTrue(
-            failureBlock.contains("\"queue_depth_bucket\": AnalyticsReporter.queueDepthBucket(queuedTranscriptionJobs.count)"),
+            failureBlock.contains("\"queue_depth_bucket\": AnalyticsReporter.queueDepthBucket(transcriptionQueue.queuedTranscriptionJobs.count)"),
             "failed meeting transcript diagnostics should include bucketed queue depth"
         )
         assertTrue(
@@ -2696,6 +2710,10 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - live sidecar attaches only its queued meeting") {
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
+        // enqueueTranscriptionJob / enqueueImportedAudioJob / startTranscription
+        // call site moved to TranscriptionQueueCoordinator.swift (audit
+        // 2026-07-08 wave 2, W2-B).
+        let coordinatorContents = readRepoTextFile("Sources/Meeting/TranscriptionQueueCoordinator.swift")
         let taskManagerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
         let startBlock = sourceSlice(
             controllerContents,
@@ -2703,9 +2721,9 @@ func testRepoCommandContract() {
             to: "private func finishLiveCodexSession"
         )
         let recordedEnqueueBlock = sourceSlice(
-            controllerContents,
-            from: "private func enqueueTranscriptionJob(",
-            to: "private func enqueueImportedAudioJob("
+            coordinatorContents,
+            from: "func enqueueTranscriptionJob(",
+            to: "func enqueueImportedAudioJob("
         )
         let attachBlock = sourceSlice(
             controllerContents,
@@ -2731,7 +2749,7 @@ func testRepoCommandContract() {
             "starting another meeting should not overwrite a sidecar that is still waiting for its final transcript handoff"
         )
         assertTrue(
-            recordedEnqueueBlock.contains("liveCodexFinalTranscriptNeedsQueuedJobID && liveCodexSessionAwaitingFinalTranscript"),
+            recordedEnqueueBlock.contains("controller.liveCodexFinalTranscriptNeedsQueuedJobID && controller.liveCodexSessionAwaitingFinalTranscript"),
             "only the recording that stopped an owned sidecar should assign the next queued transcript job as its final handoff owner"
         )
         assertTrue(
@@ -2755,7 +2773,7 @@ func testRepoCommandContract() {
             "TranscriptedCore should preserve the saved-transcript owner across speaker-review rewrites, even after another transcript saves"
         )
         assertTrue(
-            controllerContents.contains("taskManager.startTranscription(\n                taskId: job.id,"),
+            coordinatorContents.contains("taskManager.startTranscription(\n                taskId: job.id,"),
             "the app queue id should be passed into TranscriptedCore so the saved-transcript owner matches the awaited live handoff job"
         )
     }

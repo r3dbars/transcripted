@@ -42,7 +42,9 @@ func testAuditRegressionCoverageContract() {
     }
 
     runSuite("AuditRegressionCoverageContract — failed meeting queue survives synchronous terminal failures") {
-        let source = readAuditContractSource("Sources/Meeting/MeetingSessionController.swift")
+        // Queue-dispatch logic moved to TranscriptionQueueCoordinator.swift
+        // (audit 2026-07-08 wave 2, W2-B).
+        let source = readAuditContractSource("Sources/Meeting/TranscriptionQueueCoordinator.swift")
         assertTrue(
             source.contains("finalizeBackgroundTranscriptionStateIfNeeded()"),
             "terminal display-status handlers should revisit background queue state"
