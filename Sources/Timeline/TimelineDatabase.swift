@@ -1,5 +1,8 @@
 import Foundation
 import SQLite3
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 struct TimelineScreenshotRow: Equatable {
     let id: Int64
@@ -261,9 +264,29 @@ final class TimelineDatabase {
         }
 
         fileManager.restrictSQLiteArtifactsToOwnerOnly(at: databaseURL)
+        #if canImport(TranscriptedCore)
+        // `ownerOnly: false` because permission hardening here goes through the injected
+        // `fileManager` (test seam), not `SQLiteHandle`'s hardcoded `FileManager.default`.
+        // `onPragmaFailure` throws, so SQLiteHandle stops at the first failing pragma —
+        // matching the pre-extraction behavior where each `try execute(...)` aborted
+        // `open()` immediately.
+        try SQLiteHandle.configure(
+            db,
+            at: databaseURL,
+            ownerOnly: false,
+            onPragmaFailure: { _, detail in
+                throw TimelineDatabaseError.executeFailed(detail)
+            }
+        )
+        #else
+        // The fast-test harness (scripts/entrypoints/run-tests.sh) compiles this file
+        // without linking TranscriptedCore (see the same `canImport` guard elsewhere in
+        // this codebase, e.g. Sources/Meeting/MeetingAudioStorageManager.swift), so it
+        // falls back to the pre-extraction inline pragma application.
         try execute("PRAGMA journal_mode=WAL;")
         try execute("PRAGMA busy_timeout=5000;")
         try execute("PRAGMA synchronous=NORMAL;")
+        #endif
         fileManager.restrictSQLiteArtifactsToOwnerOnly(at: databaseURL)
     }
 
