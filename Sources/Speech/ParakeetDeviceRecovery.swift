@@ -99,6 +99,13 @@ extension ParakeetEngine {
     }
 
     private func handleAudioConfigChange() async {
+        // Meeting capture owns the live audio graph while dictation borrows
+        // its PCM. A system route change belongs to the meeting recovery path;
+        // do not wake or rebuild the dormant dictation AVAudioEngine.
+        if sharedMeetingMicRecording {
+            scheduleInputDeviceNameRefresh()
+            return
+        }
         // Recording startup owns route selection and format validation. Letting
         // the config-change recovery path run at the same time makes it fight
         // the intentional Bluetooth -> built-in override and can create a

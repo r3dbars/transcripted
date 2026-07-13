@@ -1,5 +1,16 @@
 import Foundation
 
+public enum DiarizationResultError: LocalizedError, Sendable {
+    case noSpeechDetected
+
+    public var errorDescription: String? {
+        switch self {
+        case .noSpeechDetected:
+            return "No speech detected in audio"
+        }
+    }
+}
+
 // MARK: - Speaker Diarization Engine Protocol
 // Conformer: DiarizationService
 

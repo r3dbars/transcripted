@@ -214,7 +214,13 @@ public class DiarizationService: ObservableObject {
 
         AppLogger.transcription.info("Offline diarization starting", ["samples": "\(samples.count)", "duration": "\(String(format: "%.1f", Double(samples.count) / Double(sampleRate)))s"])
 
-        let result = try await manager.process(audio: samples)
+        let result = try await {
+            do {
+                return try await manager.process(audio: samples)
+            } catch where Self.isVendorNoSpeechResult(error) {
+                throw DiarizationResultError.noSpeechDetected
+            }
+        }()
 
         // Copy FluidAudio/CoreML-backed outputs into plain Swift values before
         // result cleanup can recycle CoreML feature buffers on another queue.
@@ -238,6 +244,15 @@ public class DiarizationService: ObservableObject {
         logSpeakerSummaries(finalSegments)
 
         return finalSegments
+    }
+
+    nonisolated static func isVendorNoSpeechResult(_ error: Error) -> Bool {
+        let message = error.localizedDescription
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return message == "no speech detected"
+            || message == "no speech detected in audio"
+            || message == "no speech detected in the audio."
     }
 
     /// Re-derive each segment's embedding with `segmentEmbedder` when present.

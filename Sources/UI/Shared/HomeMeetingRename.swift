@@ -80,6 +80,7 @@ enum HomeMeetingRename {
         let finalURL = MeetingArtifactRenamer.rename(
             transcriptAt: url,
             toStem: preferredStem,
+            displayTitle: normalizedTitle,
             fileManager: fileManager
         )
 
@@ -98,6 +99,7 @@ enum HomeMeetingRename {
         var inFrontmatter = false
         var frontmatterClosed = false
         var didReplaceTitle = false
+        var didReplaceGeneratedSummaryTitle = false
         var didReplaceHeading = false
 
         for index in lines.indices {
@@ -118,6 +120,12 @@ enum HomeMeetingRename {
                 if !didReplaceTitle, trimmed.hasPrefix("title:") {
                     lines[index] = "title: \"\(escapedTitle)\""
                     didReplaceTitle = true
+                } else if !didReplaceGeneratedSummaryTitle,
+                          trimmed.hasPrefix("local_summary_title:") {
+                    // An explicit user rename must win over the AI-generated
+                    // display title that Home otherwise prefers.
+                    lines[index] = "local_summary_title: \"\(escapedTitle)\""
+                    didReplaceGeneratedSummaryTitle = true
                 }
             } else if frontmatterClosed, !didReplaceHeading, trimmed.hasPrefix("# ") {
                 lines[index] = "# \(title)"

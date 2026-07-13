@@ -100,4 +100,20 @@ func testHomePresentation() {
             "transcripted.home.meeting-preview.rename"
         )
     }
+
+    runSuite("HomeMeetingTitleEditPolicy commits only a meaningful changed title") {
+        assertEqual(
+            HomeMeetingTitleEditPolicy.titleToCommit(draft: "  New title  ", currentTitle: "Old title"),
+            "New title",
+            "rename should trim the submitted title"
+        )
+        assertNil(
+            HomeMeetingTitleEditPolicy.titleToCommit(draft: "   ", currentTitle: "Old title"),
+            "blank rename should stay a cancel"
+        )
+        assertNil(
+            HomeMeetingTitleEditPolicy.titleToCommit(draft: "Old title", currentTitle: "Old title"),
+            "unchanged rename should not rewrite artifacts"
+        )
+    }
 }

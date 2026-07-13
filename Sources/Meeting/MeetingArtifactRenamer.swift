@@ -86,6 +86,7 @@ enum MeetingArtifactRenamer {
     static func rename(
         transcriptAt url: URL,
         toStem preferredStem: String,
+        displayTitle: String? = nil,
         fileManager: FileManager = .default,
         logFailure: (_ event: String, _ context: [String: String]) -> Void = { _, _ in }
     ) -> URL {
@@ -121,6 +122,7 @@ enum MeetingArtifactRenamer {
         renameSummarySidecarIfNeeded(
             from: url,
             to: targetURL,
+            displayTitle: displayTitle,
             fileManager: fileManager,
             logFailure: logFailure
         )
@@ -209,6 +211,7 @@ enum MeetingArtifactRenamer {
     private static func renameSummarySidecarIfNeeded(
         from sourceTranscriptURL: URL,
         to targetTranscriptURL: URL,
+        displayTitle: String?,
         fileManager: FileManager,
         logFailure: (_ event: String, _ context: [String: String]) -> Void
     ) {
@@ -224,10 +227,13 @@ enum MeetingArtifactRenamer {
         let targetSummaryURL = LocalMeetingSummaryStore.summaryURL(for: targetTranscriptURL)
 
         do {
+            let renamedMeetingTitle = displayTitle
+                ?? (try? TranscriptFrontmatter.readValues(from: targetTranscriptURL))?["title"]
             if let rewritten = rewriteSummarySource(
                 at: sourceSummaryURL,
                 from: sourceTranscriptURL.lastPathComponent,
-                to: targetTranscriptURL.lastPathComponent
+                to: targetTranscriptURL.lastPathComponent,
+                displayTitle: renamedMeetingTitle
             ) {
                 try rewritten.write(to: sourceSummaryURL, atomically: true, encoding: .utf8)
                 FileManager.default.restrictFileToOwnerOnly(at: sourceSummaryURL)
@@ -279,16 +285,27 @@ enum MeetingArtifactRenamer {
 
     /// Rewrite the summary sidecar's `source_transcript` pointer line(s). Returns nil
     /// when nothing changed so callers can skip an unnecessary write.
-    private static func rewriteSummarySource(at url: URL, from oldName: String, to newName: String) -> String? {
+    private static func rewriteSummarySource(
+        at url: URL,
+        from oldName: String,
+        to newName: String,
+        displayTitle: String?
+    ) -> String? {
         guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
 
         var didChange = false
+        let escapedTitle = displayTitle?.replacingOccurrences(of: "\"", with: "'")
         let updatedLines = raw.components(separatedBy: "\n").map { line -> String in
-            guard line.trimmingCharacters(in: .whitespaces).hasPrefix("source_transcript:") else {
-                return line
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("source_transcript:") {
+                didChange = true
+                return line.replacingOccurrences(of: oldName, with: newName)
             }
-            didChange = true
-            return line.replacingOccurrences(of: oldName, with: newName)
+            if let escapedTitle, trimmed.hasPrefix("summary_title:") {
+                didChange = true
+                return "summary_title: \"\(escapedTitle)\""
+            }
+            return line
         }
 
         return didChange ? updatedLines.joined(separator: "\n") : nil

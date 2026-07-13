@@ -28,9 +28,16 @@ extension MeetingCaptureBridge {
     // `onMicPCMBuffer` docstring in TranscriptedCore for the full contract.
 
     /// Install a live-preview handler for mic buffers, or clear with `nil`.
-    /// Call once before `startRecording()`; do not reassign mid-session.
+    /// The stable relay makes changing this consumer safe while capture runs.
     func setMicLivePreviewHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
-        audio.onMicPCMBuffer = handler
+        micPCMRelay.setLivePreviewHandler(handler)
+    }
+
+    /// Install the shared-meeting-mic dictation consumer, or clear it. The
+    /// consumer is installed before capture and only records while dictation
+    /// explicitly arms its own bounded buffer.
+    func setSharedDictationMicHandler(_ handler: ((AVAudioPCMBuffer) -> Void)?) {
+        micPCMRelay.setDictationHandler(handler)
     }
 
     /// Install a live-preview handler for system-audio buffers, or clear

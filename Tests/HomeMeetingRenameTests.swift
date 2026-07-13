@@ -31,6 +31,19 @@ func testHomeMeetingRename() {
                     "inline summary metadata should repoint at the renamed transcript"
                 )
                 assertTrue(
+                    updated.contains("local_summary_title: \"Launch planning\""),
+                    "an explicit rename should override the AI-generated display title"
+                )
+                let renamedSummaryPreview = RecentMeetingSummaryPreviewParser.inlinePreview(
+                    from: updated,
+                    url: result.transcriptURL
+                )
+                assertEqual(
+                    renamedSummaryPreview?.title,
+                    "Launch planning",
+                    "Home should show the user rename instead of the stale generated title"
+                )
+                assertTrue(
                     updated.contains("Source transcript: `2026-06-05 Launch planning.md`"),
                     "managed inline summary block should show the renamed source transcript"
                 )
@@ -50,6 +63,10 @@ func testHomeMeetingRename() {
                 assertTrue(
                     summaryContent.contains("source_transcript: \"2026-06-05 Launch planning.md\""),
                     "summary should repoint at the renamed transcript"
+                )
+                assertTrue(
+                    summaryContent.contains("summary_title: \"Launch planning\""),
+                    "legacy summary display title should follow the explicit user rename"
                 )
             } catch {
                 assertionFailure("rename should not throw: \(error)")
@@ -195,6 +212,7 @@ private func writeRenameSummary(_ url: URL, sourceTranscript: String) throws {
     ---
     capture_type: meeting_summary
     source_transcript: "\(sourceTranscript)"
+    summary_title: "Generated Summary"
     ---
 
     # Summary

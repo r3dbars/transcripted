@@ -486,6 +486,7 @@ enum MeetingTranscriptStyler {
         return MeetingArtifactRenamer.rename(
             transcriptAt: url,
             toStem: preferredStem,
+            displayTitle: title,
             logFailure: { event, context in
                 logFailure(event: event, message: "Failed to rename styled transcript artifact", context: context)
             }
