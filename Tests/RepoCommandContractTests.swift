@@ -2670,6 +2670,18 @@ func testRepoCommandContract() {
             "normal stop should switch to transcribing and enqueue the captured audio instead of deleting scratch files"
         )
         assertTrue(
+            stopBlock.contains("guard let systemURL = files.systemURL else")
+                && stopBlock.contains("event: \"meeting_recording_missing_system_audio\"")
+                && stopBlock.contains("systemURL: systemURL"),
+            "a live meeting must not fall back to mic-only transcription when the finished system-audio source is missing"
+        )
+        let pipelineContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift")
+        assertTrue(
+            pipelineContents.contains("hasUsableCaptureSignal(samples: micSamples, sampleRate: 16000)")
+                && pipelineContents.contains("throw PipelineError.microphoneAudioUnusable"),
+            "multichannel transcription must reject a missing or unusable mic artifact before saving system-only output"
+        )
+        assertTrue(
             cancelBlock.contains("capture.stopAndDiscardFiles()")
                 && cancelBlock.contains("restoreStateAfterRecordingEndedWithoutNewWork()"),
             "explicit discard should use the discard path and restore idle/ready state without queueing transcription"

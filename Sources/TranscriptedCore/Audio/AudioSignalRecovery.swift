@@ -47,6 +47,12 @@ enum AudioSignalRecovery {
     static let parakeetSampleRate: Double = 16_000
     static let parakeetMinimumInferenceSamples = 16_000
     static let legacySpeechDetectionThreshold: Float = 0.010
+    // This is a capture-health floor, not a speech detector. It is deliberately
+    // lower than hasSpeechCandidate so quiet but valid microphone input is kept.
+    static let minimumCapturePeak: Float = 0.0008
+    static let minimumCaptureActiveDuration: Double = 0.20
+    private static let captureFrameDuration: Double = 0.10
+    private static let minimumCaptureFrameRMS: Float = 0.0001
 
     static func analyze(samples: [Float], sampleRate: Double) -> AudioSignalAnalysis {
         guard !samples.isEmpty, AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else {
@@ -81,6 +87,39 @@ enum AudioSignalRecovery {
             rms: rms,
             activeRatio: Double(activeCount) / Double(samples.count)
         )
+    }
+
+    /// Returns whether the finished microphone artifact contains a sustained,
+    /// low-level capture signal. This deliberately does not claim that speech
+    /// was spoken or understood; it only prevents an all-silent/one-buffer mic
+    /// artifact from being saved as a healthy two-source meeting.
+    static func hasUsableCaptureSignal(samples: [Float], sampleRate: Double) -> Bool {
+        guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate),
+              samples.count >= Int(sampleRate * minimumCaptureActiveDuration) else {
+            return false
+        }
+
+        let frameSize = max(1, Int(sampleRate * captureFrameDuration))
+        var peak: Float = 0
+        var activeDuration = 0.0
+        for start in stride(from: 0, to: samples.count, by: frameSize) {
+            let end = min(samples.count, start + frameSize)
+            let frame = samples[start..<end]
+            guard !frame.isEmpty else { continue }
+            var sumOfSquares = 0.0
+            for sample in frame {
+                peak = max(peak, abs(sample))
+                sumOfSquares += Double(sample * sample)
+            }
+            let frameRMS = Float(sqrt(sumOfSquares / Double(frame.count)))
+            if frameRMS >= minimumCaptureFrameRMS {
+                activeDuration += Double(frame.count) / sampleRate
+            }
+            if activeDuration >= minimumCaptureActiveDuration {
+                return peak >= minimumCapturePeak
+            }
+        }
+        return peak >= minimumCapturePeak && activeDuration >= minimumCaptureActiveDuration
     }
 
     static func normalizeForSpeech(

@@ -1,6 +1,35 @@
 import Foundation
 
 func testMeetingSessionUIPolicy() {
+    runSuite("Meeting route warning publisher sequence — a reset permits the same outcome in the next recording") {
+        // This is the optional publisher sequence used by the controller:
+        // removeDuplicates runs before compactMap so nil resets the latch.
+        let outcomeSequence: [String?] = [
+            String?(nil),
+            "switched_to_built_in",
+            String?(nil),
+            "switched_to_built_in",
+            "switched_to_built_in",
+        ]
+        var deduplicated: [String?] = []
+        var hasPreviousOutcome = false
+        var previousOutcome: String?
+        for outcome in outcomeSequence {
+            if !hasPreviousOutcome || previousOutcome != outcome {
+                deduplicated.append(outcome)
+            }
+            previousOutcome = outcome
+            hasPreviousOutcome = true
+        }
+        let deliveredOutcomes = deduplicated.compactMap { $0 }
+
+        assertEqual(
+            deliveredOutcomes,
+            ["switched_to_built_in", "switched_to_built_in"],
+            "the nil reset must separate identical warning outcomes across recordings"
+        )
+    }
+
     runSuite("MeetingSessionUIPolicy.shouldShowTranscribing — ignores speaker review without real pipeline work") {
         assertFalse(
             MeetingSessionUIPolicy.shouldShowTranscribing(

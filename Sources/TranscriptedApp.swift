@@ -98,6 +98,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     lazy var micActivityMonitor = MicActivityMonitor()
     @available(macOS 14.0, *)
     lazy var cameraActivityMonitor = CameraActivityMonitor()
+    @available(macOS 14.0, *)
+    private var meetingPromptRecordAction: MeetingPromptRecordAction?
     private var meetingPromptShownAtByCandidateID: [String: Date] = [:]
     private var workspaceObservers: [NSObjectProtocol] = []
     private var micPreferenceObserver: NSObjectProtocol?
@@ -157,6 +159,24 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 ).allowsDetectedMeetingPrompt
             }
             meetingOverlayController.setup(meetingSession: meetingSession)
+            let promptRecordAction = MeetingPromptRecordAction(
+                onStartRequested: { [weak self] in
+                    self?.meetingOverlayController.showDetectedMeetingStartInProgress()
+                },
+                startRecording: { [weak self] candidate, promptTelemetryProperties in
+                    guard let self else { return false }
+                    return await self.appState.meetingSession.startRecording(
+                        trigger: .detectedPrompt,
+                        suggestedTitle: candidate.suggestedTranscriptTitle,
+                        promptTelemetryProperties: promptTelemetryProperties
+                    )
+                },
+                onCompleted: { [weak self] candidate, started in
+                    guard started else { return }
+                    self?.meetingPromptDetector.markAccepted(candidate: candidate)
+                }
+            )
+            meetingPromptRecordAction = promptRecordAction
             let recordPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
@@ -165,6 +185,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     for: candidate,
                     readiness: readiness
                 )
+                guard promptRecordAction.record(
+                    candidate: candidate,
+                    promptTelemetryProperties: promptFunnelProperties
+                ) else { return }
                 AnalyticsReporter.track(
                     "meeting_prompt_choice_made",
                     properties: MeetingPromptTelemetry.choiceProperties(
@@ -182,17 +206,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         signals: self.meetingPromptDetector.currentSignalSnapshot()
                     )
                 )
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    let started = await self.appState.meetingSession.startRecording(
-                        trigger: .detectedPrompt,
-                        suggestedTitle: candidate.suggestedTranscriptTitle,
-                        promptTelemetryProperties: promptFunnelProperties
-                    )
-                    if started {
-                        self.meetingPromptDetector.markAccepted(candidate: candidate)
-                    }
-                }
             }
             let dismissPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }

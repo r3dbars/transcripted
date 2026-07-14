@@ -1410,6 +1410,7 @@ final class MeetingOverlayController: NSObject {
     private var currentPrompt: PromptDisplay?
     private var promptCandidate: MeetingPromptDetector.Candidate?
     private var promptKind: PromptKind?
+    private var audioRouteWarningOutcome: CaptureRouteStabilizationOutcome?
     private var promptCountdownTask: Task<Void, Never>?
     private var promptSecondsRemaining = 0
 
@@ -1436,6 +1437,7 @@ final class MeetingOverlayController: NSObject {
         case detectedMeeting
         case audioInactivity
         case micBoost
+        case audioRoute
         // Post-call "that call wasn't recorded" awareness nudge. No candidate,
         // no detector callbacks — Got It / Don't show again only.
         case missedCall
@@ -1561,6 +1563,28 @@ final class MeetingOverlayController: NSObject {
         return true
     }
 
+    /// The capture pill dismisses before its Record callback returns. Keep a
+    /// visible, non-interactive status panel up while the app checks
+    /// permissions, models, and the audio route so Record never looks ignored.
+    func showDetectedMeetingStartInProgress() {
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+        promptCandidate = nil
+        currentPrompt = nil
+        promptKind = nil
+        currentWarmupStatus = .init(
+            title: "Starting meeting…",
+            subtitle: "Checking permissions and audio",
+            detail: "",
+            progress: 0.12,
+            dictationStatus: "Ready",
+            meetingsStatus: "Starting"
+        )
+        state = .preparing
+        showPanel()
+        pushToView()
+    }
+
     /// Post-call awareness nudge: a detected call just ended without a
     /// recording. Same non-activating prompt panel; no candidate, no detector
     /// backoff — resolution is reported through `onMissedCallNudgeResolved`.
@@ -1654,6 +1678,13 @@ final class MeetingOverlayController: NSObject {
             }
             .store(in: &subscriptions)
 
+        session.$audioRouteWarning
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] outcome in
+                self?.applyAudioRouteWarning(outcome)
+            }
+            .store(in: &subscriptions)
+
         let feed = session.liveTranscriptFeed
         feed.$finalEntries
             .combineLatest(feed.$partialEntries, feed.$phase)
@@ -1734,6 +1765,7 @@ final class MeetingOverlayController: NSObject {
             return
         }
         guard meetingSession?.state == .recording else { return }
+        if state == .prompt, promptKind == .audioRoute { return }
         // Precedence: never replace an active audio-inactivity prompt (it can
         // auto-stop the recording). The post-meeting Home hint is the backstop.
         if state == .prompt, promptKind == .audioInactivity { return }
@@ -1752,6 +1784,56 @@ final class MeetingOverlayController: NSObject {
         // No schedulePromptCountdown(): expiry must never auto-enable VPIO.
     }
 
+    private func applyAudioRouteWarning(
+        _ outcome: CaptureRouteStabilizationOutcome?
+    ) {
+        audioRouteWarningOutcome = outcome
+        guard let outcome else {
+            clearAudioRoutePrompt()
+            return
+        }
+        guard meetingSession?.state == .recording else { return }
+        // An inactivity prompt owns its stop policy. The route warning is
+        // latched on the session and appears as soon as that prompt clears.
+        if state == .prompt, promptKind == .audioInactivity { return }
+
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+        promptCandidate = nil
+        promptKind = .audioRoute
+        promptSecondsRemaining = 0
+        currentPrompt = audioRouteWarningPromptDisplay(outcome: outcome)
+        bloomFromRest()
+        state = .prompt
+        showPanel()
+        pushToView()
+    }
+
+    private func clearAudioRoutePrompt() {
+        guard promptKind == .audioRoute else { return }
+
+        promptCountdownTask?.cancel()
+        promptKind = nil
+        currentPrompt = nil
+
+        if meetingSession?.state == .recording {
+            if let inactivityWarning = meetingSession?.audioInactivityWarning {
+                applyAudioInactivityWarning(inactivityWarning)
+            } else if meetingSession?.isMicBoostPromptVisible == true {
+                applyMicBoostPrompt(true)
+            } else {
+                state = .recording
+                showPanel()
+                pushToView()
+                flushPendingTranscriptIfNeeded()
+                scheduleRestIfNeeded()
+            }
+        } else {
+            state = .idle
+            hidePanel()
+        }
+    }
+
     private func clearMicBoostPrompt() {
         guard promptKind == .micBoost else { return }
 
@@ -1760,6 +1842,10 @@ final class MeetingOverlayController: NSObject {
         currentPrompt = nil
 
         if meetingSession?.state == .recording {
+            if let routeWarning = meetingSession?.audioRouteWarning {
+                applyAudioRouteWarning(routeWarning)
+                return
+            }
             state = .recording
             showPanel()
             pushToView()
@@ -2004,6 +2090,8 @@ final class MeetingOverlayController: NSObject {
                 meetingSession?.dismissAudioInactivityWarning()
             case .micBoost:
                 meetingSession?.declineMicBoostPrompt()
+            case .audioRoute:
+                meetingSession?.dismissAudioRouteWarning()
             case .missedCall:
                 // "Don't show again" — the wiring persists the opt-out.
                 onMissedCallNudgeResolved?(.disabled)
@@ -2027,6 +2115,11 @@ final class MeetingOverlayController: NSObject {
             Task { @MainActor [weak self] in
                 guard let session = self?.meetingSession else { return }
                 await session.endRecordingFromAudioInactivityPrompt(automatic: false)
+            }
+        case .audioRoute:
+            Task { @MainActor [weak self] in
+                guard let session = self?.meetingSession else { return }
+                await session.stopRecording(reason: .audioRouteWarning)
             }
         case .micBoost:
             // Session clears the published flag, which routes back through
@@ -2434,6 +2527,10 @@ final class MeetingOverlayController: NSObject {
             // for the next ASR update.
             flushPendingTranscriptIfNeeded()
             scheduleRestIfNeeded()
+            if let routeWarning = meetingSession?.audioRouteWarning {
+                applyAudioRouteWarning(routeWarning)
+                return
+            }
             // A mic-boost prompt may have fired while the inactivity prompt
             // was up (suppressed by precedence) or been replaced by it. The
             // session still latches it visible — and already recorded its
@@ -2480,6 +2577,10 @@ final class MeetingOverlayController: NSObject {
             )
         case .micBoost:
             currentPrompt = micBoostPromptDisplay()
+        case .audioRoute:
+            if let outcome = audioRouteWarningOutcome {
+                currentPrompt = audioRouteWarningPromptDisplay(outcome: outcome)
+            }
         case .missedCall:
             if let call = missedCallPrompt {
                 currentPrompt = missedCallPromptDisplay(call: call)
@@ -2494,6 +2595,8 @@ final class MeetingOverlayController: NSObject {
         case .micBoost:
             // Defensive no-op: a countdown is never scheduled for this kind,
             // and expiry must never auto-enable VPIO.
+            return
+        case .audioRoute:
             return
         case .audioInactivity:
             guard meetingSession?.audioInactivityWarning?.automaticStopAllowed != false else {
@@ -2557,6 +2660,32 @@ final class MeetingOverlayController: NSObject {
             countdownText: "Ends in \(max(0, countdownSeconds))s",
             secondaryTitle: "Keep Recording",
             secondaryAccessibilityLabel: "Keep recording",
+            remindTitle: nil,
+            remindAccessibilityLabel: nil,
+            primaryTitle: "End & Transcribe",
+            primaryAccessibilityLabel: "End and transcribe meeting"
+        )
+    }
+
+    private func audioRouteWarningPromptDisplay(
+        outcome: CaptureRouteStabilizationOutcome
+    ) -> PromptDisplay {
+        let detail: String
+        switch outcome {
+        case .switchedToBuiltIn:
+            detail = "Using the built-in mic while keeping Bluetooth output."
+        case .builtInUnavailable, .switchFailed:
+            detail = "Choose a built-in mic in System Settings, or keep recording."
+        case .notNeeded:
+            detail = "Transcripted is still recording."
+        }
+
+        return PromptDisplay(
+            title: "Bluetooth mic is unstable",
+            detail: detail,
+            countdownText: "",
+            secondaryTitle: "Keep Recording",
+            secondaryAccessibilityLabel: "Keep recording with the current audio input",
             remindTitle: nil,
             remindAccessibilityLabel: nil,
             primaryTitle: "End & Transcribe",

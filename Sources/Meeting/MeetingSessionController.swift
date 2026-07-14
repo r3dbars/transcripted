@@ -47,6 +47,7 @@ final class MeetingSessionController: ObservableObject {
         case quitConfirmation = "quit_confirmation"
         case audioInactivityPrompt = "audio_inactivity_prompt"
         case audioInactivityTimeout = "audio_inactivity_timeout"
+        case audioRouteWarning = "audio_route_warning"
         case unknown = "unknown"
     }
 
@@ -126,6 +127,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var savedMeetingReplacementCommitCount: Int = 0
     @Published private(set) var audioInactivityWarning: MeetingAudioInactivityWarning?
     @Published private(set) var isMicBoostPromptVisible = false
+    @Published private(set) var audioRouteWarning: CaptureRouteStabilizationOutcome?
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
     @Published private(set) var warmupStatus: ModelWarmupStatus = .ready {
@@ -188,6 +190,7 @@ final class MeetingSessionController: ObservableObject {
     private var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
     private var activeRecordingSuggestedTitle: String?
     private var activeRecordingStartedAt: Date?
+    private var isStartingRecording = false
     var activeTranscriptionTrigger: StartTrigger = .unknown
     private var isFinishingRecording = false
     private var shouldSurfaceMeetingWarmupFailure = false
@@ -433,15 +436,17 @@ final class MeetingSessionController: ObservableObject {
         suggestedTitle: String? = nil,
         promptTelemetryProperties: [String: String]? = nil
     ) async -> Bool {
-        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "start_requested")
-        activeDetectedPromptRecordingTelemetryProperties = trigger == .detectedPrompt ? promptTelemetryProperties : nil
-        activeDetectedPromptRecordingStartedAt = nil
-        DiagnosticsTrail.record(
-            engine: "meeting",
-            event: "meeting_start_requested",
-            message: "Meeting start requested",
-            context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
-        )
+        guard !isStartingRecording else {
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_start_ignored",
+                message: "Meeting start ignored because another start is already in progress",
+                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+            )
+            // The caller did not start a recording. Returning false keeps a
+            // prompt action from treating a competing start as accepted.
+            return false
+        }
 
         switch state {
         case .recording:
@@ -451,11 +456,22 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting start ignored because another meeting flow is active",
                 context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
             )
-            clearDetectedPromptRecordingTelemetry()
             return true
         case .idle, .loadingModels, .ready, .transcribing, .error:
             break
         }
+
+        isStartingRecording = true
+        defer { isStartingRecording = false }
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "start_requested")
+        activeDetectedPromptRecordingTelemetryProperties = trigger == .detectedPrompt ? promptTelemetryProperties : nil
+        activeDetectedPromptRecordingStartedAt = nil
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_start_requested",
+            message: "Meeting start requested",
+            context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+        )
 
         let startDecision = await resolveStartRecordingPermissionDecision(trigger: trigger)
         guard startDecision.canStart else {
@@ -511,6 +527,7 @@ final class MeetingSessionController: ObservableObject {
         micBoostPromptRecordingIdentity = nil
         micBoostPromptOutcome = .notShown
         isMicBoostPromptVisible = false
+        audioRouteWarning = nil
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         installSharedDictationMicRelay()
         startLiveCodexSessionIfNeeded(title: resolvedMeetingTitle)
@@ -731,6 +748,7 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
+        audioRouteWarning = nil
         clearActiveRecordingIdentity()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
@@ -758,7 +776,8 @@ final class MeetingSessionController: ObservableObject {
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        let shouldAwaitFinalLiveCodexTranscript = files.micURL != nil && !stopResult.didTimeOut
+        let shouldAwaitFinalLiveCodexTranscript =
+            files.micURL != nil && files.systemURL != nil && !stopResult.didTimeOut
         finishLiveCodexSessionForActiveRecording(
             status: shouldAwaitFinalLiveCodexTranscript ? .stopped : .failed,
             shouldAwaitFinalTranscript: shouldAwaitFinalLiveCodexTranscript
@@ -918,6 +937,32 @@ final class MeetingSessionController: ObservableObject {
             return
         }
 
+        guard let systemURL = files.systemURL else {
+            let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
+                micAudioURL: micURL,
+                systemAudioURL: nil,
+                errorMessage: "Recording stopped without system audio.",
+                meetingTitle: recordingSnapshot.suggestedTitle,
+                recordingDate: recordingSnapshot.recordingStartedAt
+            )
+            DiagnosticsTrail.record(
+                level: .error,
+                engine: "meeting",
+                event: "meeting_recording_missing_system_audio",
+                message: "Meeting recording stopped without a system-audio file",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "reason": reason.rawValue,
+                        "mic_file_present": boolString(true),
+                        "preserved_for_retry": boolString(preserved)
+                    ]
+                )
+            )
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "missing_system_audio")
+            state = .error("System audio was missing. Open Transcripted Home to retry the saved meeting.")
+            return
+        }
+
         // Issue #500: when stop diagnostics classified an unrecovered
         // voice-processed quiet mic, ride the facts into the saved transcript
         // frontmatter so Home can surface the enable-for-next-time hint.
@@ -938,7 +983,7 @@ final class MeetingSessionController: ObservableObject {
 
         let outcome = transcriptionQueue.enqueueTranscriptionJob(
             micURL: micURL,
-            systemURL: files.systemURL,
+            systemURL: systemURL,
             healthInfo: healthInfoForSave,
             captureDiagnostics: stopCaptureDiagnostics,
             meetingTitle: recordingSnapshot.suggestedTitle,
@@ -986,6 +1031,21 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
+    func dismissAudioRouteWarning() {
+        guard audioRouteWarning != nil else { return }
+        audioRouteWarning = nil
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_capture_route_warning_dismissed",
+            message: "Meeting Bluetooth route warning dismissed",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+    }
+
     private func handleMicAttenuationCue() {
         guard case .recording = state,
               let activeRecordingIdentity else { return }
@@ -1016,6 +1076,39 @@ final class MeetingSessionController: ObservableObject {
                 "trigger": activeRecordingTrigger.rawValue,
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
             ]
+        )
+    }
+
+    private func handleRouteStabilityWarning(
+        _ outcome: CaptureRouteStabilizationOutcome
+    ) {
+        // Audio inactivity and mic-boost prompts belong to the overlay; they
+        // leave the session state as .recording. The route outcome is latched
+        // here and the overlay restores its priority after those prompts.
+        guard case .recording = state else { return }
+        guard audioRouteWarning == nil else { return }
+        audioRouteWarning = outcome
+
+        let snapshot = capture.pipelineDiagnosticsSnapshot()
+        let properties = meetingCaptureAnalyticsProperties(snapshot: snapshot).merging(
+            [
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+                "stabilization_outcome": outcome.rawValue,
+                "trigger": activeRecordingTrigger.rawValue,
+                "warning_kind": "bluetooth_route_unstable",
+            ],
+            uniquingKeysWith: { _, new in new }
+        )
+        DiagnosticsTrail.record(
+            level: .warning,
+            engine: "meeting",
+            event: "meeting_capture_route_warning_shown",
+            message: "Meeting Bluetooth route instability detected",
+            context: baseDiagnosticsContext(extra: properties)
+        )
+        AnalyticsReporter.track(
+            "meeting_capture_route_warning_shown",
+            properties: properties
         )
     }
 
@@ -1101,6 +1194,7 @@ final class MeetingSessionController: ObservableObject {
     private func clearActiveRecordingIdentity() {
         activeRecordingIdentity = nil
         micBoostPromptRecordingIdentity = nil
+        audioRouteWarning = nil
     }
 
     func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
@@ -1782,6 +1876,7 @@ final class MeetingSessionController: ObservableObject {
                     // stop path running. The boost prompt must never outlive
                     // the recording it offered to fix.
                     self.isMicBoostPromptVisible = false
+                    self.audioRouteWarning = nil
                 }
                 self.applyAudioInactivityEvent(event)
             }
@@ -1831,6 +1926,16 @@ final class MeetingSessionController: ObservableObject {
             .filter { $0 }
             .sink { [weak self] _ in
                 self?.handleMicAttenuationCue()
+            }
+            .store(in: &cancellables)
+
+        capture.$routeStabilityWarningOutcome
+            // Keep the nil reset in the deduplication stream. It separates
+            // identical outcomes from consecutive recordings.
+            .removeDuplicates()
+            .compactMap { $0 }
+            .sink { [weak self] outcome in
+                self?.handleRouteStabilityWarning(outcome)
             }
             .store(in: &cancellables)
 

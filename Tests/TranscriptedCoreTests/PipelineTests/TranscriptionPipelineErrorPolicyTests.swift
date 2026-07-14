@@ -24,6 +24,10 @@ final class TranscriptionPipelineErrorPolicyTests: XCTestCase {
             TranscriptionTaskManager.safeFailureDiagnosticMessage(for: PipelineError.invalidAudioFormat(detail: "bad")),
             "Invalid audio format"
         )
+        XCTAssertEqual(
+            TranscriptionTaskManager.safeFailureDiagnosticMessage(for: PipelineError.microphoneAudioUnusable),
+            "Microphone audio was not usable"
+        )
     }
 
     func testSafeFailureDiagnosticMessageRoutesTypedSystemAndModelErrors() {

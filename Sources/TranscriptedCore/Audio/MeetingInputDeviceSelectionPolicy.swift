@@ -12,6 +12,11 @@ enum MeetingAudioTransport: String {
     case other
 }
 
+enum MeetingInputDeviceSelectionMode: String {
+    case automatic
+    case preserveDefault
+}
+
 struct MeetingAudioDevice: Equatable {
     let id: AudioDeviceID
     let name: String
@@ -21,6 +26,7 @@ struct MeetingAudioDevice: Equatable {
 
 enum MeetingInputDeviceSelectionReason: String {
     case defaultIsSafe
+    case preservedDefaultInput
     case preferredBuiltInForBluetoothHeadset
     case noBuiltInFallbackAvailable
 }
@@ -37,10 +43,19 @@ struct MeetingInputDeviceSelection: Equatable {
 }
 
 enum MeetingInputDeviceSelectionPolicy {
+    static func selectionAfterStabilizationAttempt(
+        pinnedSelection: MeetingInputDeviceSelection,
+        attemptedSelection: MeetingInputDeviceSelection,
+        outcome: CaptureRouteStabilizationOutcome
+    ) -> MeetingInputDeviceSelection {
+        outcome == .switchedToBuiltIn ? attemptedSelection : pinnedSelection
+    }
+
     static func selection(
         defaultInput: MeetingAudioDevice,
         defaultOutput: MeetingAudioDevice?,
-        availableInputs: [MeetingAudioDevice]
+        availableInputs: [MeetingAudioDevice],
+        mode: MeetingInputDeviceSelectionMode = .automatic
     ) -> MeetingInputDeviceSelection {
         guard shouldAvoidBluetoothHeadsetInput(defaultInput, defaultOutput: defaultOutput) else {
             return MeetingInputDeviceSelection(
@@ -48,6 +63,15 @@ enum MeetingInputDeviceSelectionPolicy {
                 selectedInput: defaultInput,
                 defaultOutput: defaultOutput,
                 reason: .defaultIsSafe
+            )
+        }
+
+        guard mode == .automatic else {
+            return MeetingInputDeviceSelection(
+                defaultInput: defaultInput,
+                selectedInput: defaultInput,
+                defaultOutput: defaultOutput,
+                reason: .preservedDefaultInput
             )
         }
 
@@ -66,6 +90,14 @@ enum MeetingInputDeviceSelectionPolicy {
             defaultOutput: defaultOutput,
             reason: .preferredBuiltInForBluetoothHeadset
         )
+    }
+
+    static func preferredBuiltInFallback(
+        for selectedInput: MeetingAudioDevice,
+        availableInputs: [MeetingAudioDevice]
+    ) -> MeetingAudioDevice? {
+        guard isBluetoothHeadsetInput(selectedInput) else { return nil }
+        return preferredBuiltInInput(from: availableInputs, defaultInput: selectedInput)
     }
 
     private static func shouldAvoidBluetoothHeadsetInput(
@@ -167,7 +199,9 @@ enum MeetingInputDeviceSelectionPolicy {
 }
 
 private enum MeetingInputDeviceLookup {
-    static func preferredInputSelection() throws -> MeetingInputDeviceSelection {
+    static func preferredInputSelection(
+        mode: MeetingInputDeviceSelectionMode = .automatic
+    ) throws -> MeetingInputDeviceSelection {
         let defaultInputID = try AudioObjectID.readDefaultInputDevice()
         var availableInputs = try allInputDevices()
 
@@ -187,7 +221,17 @@ private enum MeetingInputDeviceLookup {
         return MeetingInputDeviceSelectionPolicy.selection(
             defaultInput: defaultInput,
             defaultOutput: defaultOutput,
-            availableInputs: availableInputs
+            availableInputs: availableInputs,
+            mode: mode
+        )
+    }
+
+    static func preferredBuiltInFallback(
+        for selectedInput: MeetingAudioDevice
+    ) throws -> MeetingAudioDevice? {
+        MeetingInputDeviceSelectionPolicy.preferredBuiltInFallback(
+            for: selectedInput,
+            availableInputs: try allInputDevices()
         )
     }
 
@@ -322,50 +366,156 @@ private enum MeetingInputDeviceLookup {
 }
 
 extension Audio {
-    func applyPreferredMeetingInputDevice(
+    @discardableResult
+    func applyMeetingInputDevice(
         to inputNode: AVAudioInputNode,
-        operation: String
-    ) {
-        let selection: MeetingInputDeviceSelection
-        do {
-            selection = try MeetingInputDeviceLookup.preferredInputSelection()
-        } catch {
-            AppLogger.audioMic.warning("Meeting input selection unavailable", [
-                "operation": operation,
-                "error": error.localizedDescription
-            ])
-            return
+        operation: String,
+        routeWasUnstable: Bool = false
+    ) -> CaptureRouteStabilizationOutcome {
+        var selection = meetingInputSelectionSnapshot()
+        if selection == nil {
+            do {
+                selection = try MeetingInputDeviceLookup.preferredInputSelection(
+                    mode: .preserveDefault
+                )
+                if let selection {
+                    setMeetingInputSelection(selection)
+                }
+            } catch {
+                AppLogger.audioMic.warning("Meeting input selection unavailable", [
+                    "operation": operation,
+                    "error": error.localizedDescription
+                ])
+                return .notNeeded
+            }
         }
 
-        guard inputNode.auAudioUnit.deviceID != selection.selectedInput.id else {
-            if selection.didOverrideDefault {
-                AppLogger.audioMic.info("Meeting input already using preferred microphone", [
+        guard let selection else {
+            AppLogger.audioMic.warning("Meeting input selection unavailable", [
+                "operation": operation
+            ])
+            return .notNeeded
+        }
+
+        var stabilizationOutcome = CaptureRouteStabilizationOutcome.notNeeded
+        let stabilizationAlreadyAttempted = meetingRouteStabilizationOutcomeValue != CaptureRouteStabilizationOutcome.notNeeded.rawValue
+        let selectedInputIsBluetooth = selection.selectedInput.transport == .bluetooth
+            || selection.selectedInput.transport == .bluetoothLE
+
+        if routeWasUnstable, selectedInputIsBluetooth, !stabilizationAlreadyAttempted {
+            do {
+                guard let builtInInput = try MeetingInputDeviceLookup.preferredBuiltInFallback(
+                    for: selection.selectedInput
+                ) else {
+                    stabilizationOutcome = .builtInUnavailable
+                    recordMeetingRouteStabilizationAttempt(outcome: stabilizationOutcome)
+                    AppLogger.audioMic.warning("Bluetooth meeting input stayed selected after route instability", [
+                        "operation": operation,
+                        "outcome": stabilizationOutcome.rawValue
+                    ])
+                    emitMeetingRouteStabilityWarningIfNeeded(outcome: stabilizationOutcome)
+                    return applySelectedMeetingInputDevice(
+                        selection: selection,
+                        to: inputNode,
+                        operation: operation,
+                        stabilizationOutcome: stabilizationOutcome
+                    )
+                }
+
+                let fallbackSelection = MeetingInputDeviceSelection(
+                    defaultInput: selection.defaultInput,
+                    selectedInput: builtInInput,
+                    defaultOutput: selection.defaultOutput,
+                    reason: .preferredBuiltInForBluetoothHeadset
+                )
+                stabilizationOutcome = .switchedToBuiltIn
+                recordMeetingRouteStabilizationAttempt(outcome: stabilizationOutcome)
+
+                let outcome = applySelectedMeetingInputDevice(
+                    selection: fallbackSelection,
+                    to: inputNode,
+                    operation: operation,
+                    stabilizationOutcome: stabilizationOutcome
+                )
+                // Keep the original Bluetooth selection pinned until the
+                // fallback is actually applied. A failed setDeviceID must
+                // not turn the next recovery into another built-in loop.
+                setMeetingInputSelection(
+                    MeetingInputDeviceSelectionPolicy.selectionAfterStabilizationAttempt(
+                        pinnedSelection: selection,
+                        attemptedSelection: fallbackSelection,
+                        outcome: outcome
+                    )
+                )
+                if routeWasUnstable, outcome != .notNeeded {
+                    emitMeetingRouteStabilityWarningIfNeeded(outcome: outcome)
+                }
+                return outcome
+            } catch {
+                stabilizationOutcome = .builtInUnavailable
+                recordMeetingRouteStabilizationAttempt(outcome: stabilizationOutcome)
+                AppLogger.audioMic.warning("Bluetooth meeting input fallback unavailable", [
                     "operation": operation,
-                    "reason": selection.reason.rawValue,
-                    "defaultTransport": selection.defaultInput.transport.rawValue,
-                    "selectedTransport": selection.selectedInput.transport.rawValue
+                    "outcome": stabilizationOutcome.rawValue,
+                    "error": error.localizedDescription
                 ])
             }
-            return
+        }
+
+        let outcome = applySelectedMeetingInputDevice(
+            selection: selection,
+            to: inputNode,
+            operation: operation,
+            stabilizationOutcome: stabilizationOutcome
+        )
+        if routeWasUnstable, outcome != .notNeeded {
+            emitMeetingRouteStabilityWarningIfNeeded(outcome: outcome)
+        }
+        return outcome
+    }
+
+    private func applySelectedMeetingInputDevice(
+        selection: MeetingInputDeviceSelection,
+        to inputNode: AVAudioInputNode,
+        operation: String,
+        stabilizationOutcome: CaptureRouteStabilizationOutcome
+    ) -> CaptureRouteStabilizationOutcome {
+        guard inputNode.auAudioUnit.deviceID != selection.selectedInput.id else {
+            if selection.didOverrideDefault {
+                AppLogger.audioMic.info("Meeting input pinned to selected microphone", [
+                    "operation": operation,
+                    "reason": selection.reason.rawValue,
+                    "selectedTransport": selection.selectedInput.transport.rawValue,
+                    "stabilizationOutcome": stabilizationOutcome.rawValue
+                ])
+            }
+            return stabilizationOutcome
         }
 
         do {
             try inputNode.auAudioUnit.setDeviceID(selection.selectedInput.id)
             let message = selection.didOverrideDefault
-                ? "Meeting input changed away from Bluetooth headset microphone"
+                ? "Meeting input pinned to selected microphone"
                 : "Meeting input synced to selected microphone"
             AppLogger.audioMic.info(message, [
                 "operation": operation,
                 "reason": selection.reason.rawValue,
-                "defaultTransport": selection.defaultInput.transport.rawValue,
-                "selectedTransport": selection.selectedInput.transport.rawValue
+                "selectedTransport": selection.selectedInput.transport.rawValue,
+                "stabilizationOutcome": stabilizationOutcome.rawValue
             ])
+            return stabilizationOutcome
         } catch {
-            AppLogger.audioMic.warning("Meeting input override failed", [
+            if stabilizationOutcome == .switchedToBuiltIn {
+                setMeetingRouteStabilizationOutcome(.switchFailed)
+                emitMeetingRouteStabilityWarningIfNeeded(outcome: .switchFailed)
+                return .switchFailed
+            }
+            AppLogger.audioMic.warning("Meeting input selection failed", [
                 "operation": operation,
                 "reason": selection.reason.rawValue,
                 "error": error.localizedDescription
             ])
+            return stabilizationOutcome
         }
     }
 }

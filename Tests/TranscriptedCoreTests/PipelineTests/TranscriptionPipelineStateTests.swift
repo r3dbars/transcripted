@@ -94,6 +94,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: false,
+                micAudioFileURL: url,
+                micAudioStreaming: true,
                 systemAudioFileURL: url,
                 systemAudioStreaming: true,
                 errorMessage: nil
@@ -110,6 +112,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: URL(fileURLWithPath: "/tmp/mic.wav"),
+                micAudioStreaming: true,
                 systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
                 systemAudioStreaming: false,
                 errorMessage: nil
@@ -124,6 +128,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: URL(fileURLWithPath: "/tmp/mic.wav"),
+                micAudioStreaming: true,
                 systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
                 systemAudioStreaming: true,
                 errorMessage: ""
@@ -137,6 +143,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: URL(fileURLWithPath: "/tmp/mic.wav"),
+                micAudioStreaming: true,
                 systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
                 systemAudioStreaming: true,
                 errorMessage: "permission denied"
@@ -147,11 +155,19 @@ final class TranscriptionPipelineStateTests: XCTestCase {
 
     func testTimeoutFailureMessageFallsBackToCanonicalCopy() {
         XCTAssertEqual(
-            AudioCaptureStartState.timeoutFailureMessage(existingErrorMessage: nil),
+            AudioCaptureStartState.timeoutFailureMessage(
+                existingErrorMessage: nil,
+                micAudioStreaming: true,
+                systemAudioStreaming: false
+            ),
             "System audio capture did not become ready in time."
         )
         XCTAssertEqual(
-            AudioCaptureStartState.timeoutFailureMessage(existingErrorMessage: ""),
+            AudioCaptureStartState.timeoutFailureMessage(
+                existingErrorMessage: "",
+                micAudioStreaming: true,
+                systemAudioStreaming: false
+            ),
             "System audio capture did not become ready in time."
         )
     }
@@ -159,7 +175,9 @@ final class TranscriptionPipelineStateTests: XCTestCase {
     func testTimeoutFailureMessagePreservesExistingError() {
         XCTAssertEqual(
             AudioCaptureStartState.timeoutFailureMessage(
-                existingErrorMessage: "screen recording denied"
+                existingErrorMessage: "screen recording denied",
+                micAudioStreaming: true,
+                systemAudioStreaming: true
             ),
             "screen recording denied"
         )
@@ -169,6 +187,7 @@ final class TranscriptionPipelineStateTests: XCTestCase {
 
     func testPipelineErrorMarksAudioErrorsAsNonRetryable() {
         XCTAssertFalse(PipelineError.emptyAudioFile.isRetryable)
+        XCTAssertFalse(PipelineError.microphoneAudioUnusable.isRetryable)
         XCTAssertFalse(PipelineError.noSpeechDetected.isRetryable)
         XCTAssertFalse(PipelineError.recordingTooShort(duration: 0.5).isRetryable)
         XCTAssertFalse(PipelineError.invalidAudioFormat(detail: "x").isRetryable)
@@ -186,6 +205,13 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         let description = PipelineError.recordingTooShort(duration: 1.234).errorDescription ?? ""
         XCTAssertTrue(description.contains("1.2"), "Expected duration in description, got: \(description)")
         XCTAssertTrue(description.contains("At least 2 seconds"), description)
+    }
+
+    func testPipelineErrorIdentifiesUnusableMicrophoneAudioWithoutUserData() {
+        XCTAssertEqual(
+            PipelineError.microphoneAudioUnusable.localizedDescription,
+            "Microphone audio was not usable. Open Transcripted Home to retry the saved meeting."
+        )
     }
 
     // MARK: - SpeakerNamingPolicy seam used by the runner

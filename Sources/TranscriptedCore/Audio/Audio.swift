@@ -17,6 +17,17 @@ public enum CaptureLifecycleCue: Sendable {
     case recordingStarted
     case recordingStopped
     case micAttenuatedByForeignVoiceProcessing
+    case meetingRouteStabilityWarning(CaptureRouteStabilizationOutcome)
+}
+
+/// Coarse, privacy-safe result of the one bounded input-route stabilization
+/// attempt allowed during a meeting. The value is also safe to expose to host
+/// UI and analytics because it contains no device identity.
+public enum CaptureRouteStabilizationOutcome: String, Equatable, Sendable {
+    case notNeeded = "not_needed"
+    case switchedToBuiltIn = "switched_to_built_in"
+    case builtInUnavailable = "built_in_unavailable"
+    case switchFailed = "switch_failed"
 }
 
 /// Status of system audio capture for UI feedback
@@ -183,6 +194,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // Audio file URLs - returned when recording stops
     @Published public var micAudioFileURL: URL?
     @Published public var systemAudioFileURL: URL?
+
+    /// True once the microphone tap has actually delivered its first nonempty
+    /// buffer for the current recording. A mic WAV can be created before the
+    /// input tap has delivered anything, so meeting readiness must not treat a
+    /// file URL or a running engine as proof that microphone capture works.
+    /// The flag is generation-guarded from the mic callback and reset for each
+    /// fresh recording start.
+    @Published public internal(set) var micAudioStreaming: Bool = false
 
     /// True once the system-audio tap has actually delivered its first buffer
     /// for the current recording. Meeting-capture readiness
@@ -388,6 +407,107 @@ public class Audio: ObservableObject, @unchecked Sendable {
             _recoveryAttemptCount = newValue
         }
     }
+
+    // Meeting input is selected once at start and then pinned for the session.
+    // Recovery may make one bounded built-in fallback after a real Bluetooth
+    // mic outage, but it must never follow a changing system default forever.
+    private var _meetingInputSelection: MeetingInputDeviceSelection?
+    private var _meetingRouteStabilizationAttemptCount = 0
+    private var _meetingRouteStabilizationOutcome: CaptureRouteStabilizationOutcome = .notNeeded
+    private var _meetingRouteStabilityWarningEmitted = false
+    private let meetingRouteStateLock = NSLock()
+
+    var meetingInputSelectionReasonValue: String {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _meetingInputSelection?.reason.rawValue ?? "unavailable"
+    }
+
+    var meetingRouteStabilizationAttemptBucket: String {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        switch _meetingRouteStabilizationAttemptCount {
+        case 0: return "0"
+        case 1: return "1"
+        case 2...3: return "2_3"
+        case 4...9: return "4_9"
+        default: return "10_plus"
+        }
+    }
+
+    var meetingRouteStabilizationOutcomeValue: String {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _meetingRouteStabilizationOutcome.rawValue
+    }
+
+    var meetingRouteStabilityWarningEmitted: Bool {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _meetingRouteStabilityWarningEmitted
+    }
+
+    func meetingInputIsBluetooth() -> Bool {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        guard let selection = _meetingInputSelection else { return false }
+        return selection.selectedInput.transport == .bluetooth
+            || selection.selectedInput.transport == .bluetoothLE
+    }
+
+    func meetingInputSelectionSnapshot() -> MeetingInputDeviceSelection? {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _meetingInputSelection
+    }
+
+    func setMeetingInputSelection(_ selection: MeetingInputDeviceSelection) {
+        meetingRouteStateLock.lock()
+        _meetingInputSelection = selection
+        meetingRouteStateLock.unlock()
+    }
+
+    func recordMeetingRouteStabilizationAttempt(
+        outcome: CaptureRouteStabilizationOutcome
+    ) {
+        meetingRouteStateLock.lock()
+        _meetingRouteStabilizationAttemptCount += 1
+        _meetingRouteStabilizationOutcome = outcome
+        meetingRouteStateLock.unlock()
+    }
+
+    func setMeetingRouteStabilizationOutcome(
+        _ outcome: CaptureRouteStabilizationOutcome
+    ) {
+        meetingRouteStateLock.lock()
+        _meetingRouteStabilizationOutcome = outcome
+        meetingRouteStateLock.unlock()
+    }
+
+    func resetMeetingRouteState() {
+        meetingRouteStateLock.lock()
+        _meetingInputSelection = nil
+        _meetingRouteStabilizationAttemptCount = 0
+        _meetingRouteStabilizationOutcome = .notNeeded
+        _meetingRouteStabilityWarningEmitted = false
+        meetingRouteStateLock.unlock()
+    }
+
+    func emitMeetingRouteStabilityWarningIfNeeded(
+        outcome: CaptureRouteStabilizationOutcome
+    ) {
+        guard outcome != .notNeeded else { return }
+
+        meetingRouteStateLock.lock()
+        guard !_meetingRouteStabilityWarningEmitted else {
+            meetingRouteStateLock.unlock()
+            return
+        }
+        _meetingRouteStabilityWarningEmitted = true
+        meetingRouteStateLock.unlock()
+
+        onCaptureLifecycleCue?(.meetingRouteStabilityWarning(outcome))
+    }
     // Recording session generation - increments on each start/stop so delayed
     // recovery work from an old session cannot restart a newer one.
     private var _recordingSessionGeneration: UInt64 = 0
@@ -505,6 +625,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
             systemBufferCountLock.lock()
             defer { systemBufferCountLock.unlock() }
             _systemBufferCount = newValue
+        }
+    }
+
+    // Track nonempty mic buffers separately so the first-frame readiness
+    // latch only schedules one main-thread publication per recording.
+    private var _micBufferCount: Int = 0
+    private let micBufferCountLock = NSLock()
+    var micBufferCount: Int {
+        get {
+            micBufferCountLock.lock()
+            defer { micBufferCountLock.unlock() }
+            return _micBufferCount
+        }
+        set {
+            micBufferCountLock.lock()
+            defer { micBufferCountLock.unlock() }
+            _micBufferCount = newValue
         }
     }
 
@@ -958,6 +1095,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         error = nil
         isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
+        micBufferCount = 0
+        micAudioStreaming = false  // Re-gate readiness on a fresh first buffer
         systemAudioStreaming = false  // Re-gate readiness on a fresh first buffer
         resetSignalDiagnostics()
         // Fresh instance = clean one-shot latch per recording.
@@ -968,6 +1107,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
         recordingSessionGeneration &+= 1
+        resetMeetingRouteState()
 
         // Reset capture artifacts so a previous session cannot make a new start
         // look ready before the fresh mic/system files exist.
@@ -1159,6 +1299,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.recordingSessionGeneration == sessionGeneration else { return }
             self.systemAudioStreaming = true
+        }
+    }
+
+    /// Records that the microphone tap delivered a usable buffer for this
+    /// recording. Like the system-side latch, this is published on main and
+    /// guarded against callbacks that outlive their recording generation.
+    func markMicAudioStreamingIfCurrent(sessionGeneration: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.recordingSessionGeneration == sessionGeneration else { return }
+            self.micAudioStreaming = true
         }
     }
 

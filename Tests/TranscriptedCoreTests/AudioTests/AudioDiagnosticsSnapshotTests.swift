@@ -44,6 +44,17 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         XCTAssertNotNil(snapshot.privacySafeContext["captured_input_volume_during"])
     }
 
+    func testFreshRecordingStartResetsMicFrameReadiness() {
+        let audio = makeAudio()
+        audio.micAudioStreaming = true
+        audio.micBufferCount = 3
+
+        audio.prepareForNewRecordingStart()
+
+        XCTAssertFalse(audio.micAudioStreaming)
+        XCTAssertEqual(audio.micBufferCount, 0)
+    }
+
     func testHandleMicBufferAppliesAGCBeforeMicCallbackAndDiagnostics() throws {
         let audio = makeAudio()
         audio.prepareForNewRecordingStart()
@@ -63,7 +74,7 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         for _ in 0..<40 {
             let buffer = try makeMonoSineBuffer(peak: rawPeak)
             let originalPeak = audio.linearPeak(buffer: buffer)
-            audio.handleMicBuffer(buffer)
+            audio.handleMicBuffer(buffer, sessionGeneration: audio.recordingSessionGeneration)
 
             XCTAssertEqual(
                 audio.linearPeak(buffer: buffer),
@@ -104,7 +115,7 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
 
         let rawPeak: Float = 0.04
         let buffer = try makeMonoSineBuffer(peak: rawPeak)
-        audio.handleMicBuffer(buffer)
+        audio.handleMicBuffer(buffer, sessionGeneration: audio.recordingSessionGeneration)
 
         let processedPeak = try XCTUnwrap(callbackPeaks.last)
         XCTAssertEqual(processedPeak, rawPeak, accuracy: 0.002, "raw/off mode should not boost the mic copy")

@@ -88,6 +88,8 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: readyURL,
+                micAudioStreaming: true,
                 systemAudioFileURL: nil,
                 systemAudioStreaming: true,
                 errorMessage: nil
@@ -98,6 +100,8 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: readyURL,
+                micAudioStreaming: true,
                 systemAudioFileURL: readyURL,
                 systemAudioStreaming: true,
                 errorMessage: nil
@@ -108,6 +112,8 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: readyURL,
+                micAudioStreaming: true,
                 systemAudioFileURL: readyURL,
                 systemAudioStreaming: true,
                 errorMessage: "System audio unavailable"
@@ -124,6 +130,8 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: URL(fileURLWithPath: "/tmp/mic.wav"),
+                micAudioStreaming: true,
                 systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
                 systemAudioStreaming: false,
                 errorMessage: nil

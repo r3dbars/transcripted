@@ -34,6 +34,9 @@ final class MeetingCaptureBridge: ObservableObject {
     /// One-shot per recording: true once Core fired the issue #500
     /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
     @Published private(set) var micAttenuationCueObserved: Bool = false
+    /// One-shot per recording: set only after Core detects a real Bluetooth
+    /// mic route outage and performs its bounded stabilization decision.
+    @Published private(set) var routeStabilityWarningOutcome: CaptureRouteStabilizationOutcome?
 
     var onUnexpectedRecordingComplete: ((CaptureStopResult) -> Void)?
 
@@ -88,6 +91,7 @@ final class MeetingCaptureBridge: ObservableObject {
 
         errorMessage = nil
         micAttenuationCueObserved = false
+        routeStabilityWarningOutcome = nil
 
         // Apply the user's microphone-processing choice before each recording.
         // Read once at start; mid-session changes don't take effect until the
@@ -107,7 +111,9 @@ final class MeetingCaptureBridge: ObservableObject {
                 guard let self,
                       let continuation = self.startAttempt.resetIfCurrent(attemptID) else { return }
                 self.errorMessage = AudioCaptureStartState.timeoutFailureMessage(
-                    existingErrorMessage: self.errorMessage
+                    existingErrorMessage: self.errorMessage,
+                    micAudioStreaming: self.audio.micAudioStreaming,
+                    systemAudioStreaming: self.audio.systemAudioStreaming
                 )
                 self.audio.stop()
                 continuation.resume(returning: false)
@@ -196,6 +202,8 @@ final class MeetingCaptureBridge: ObservableObject {
     private func finishPendingStartAttemptIfPossible() {
         switch AudioCaptureStartState.meetingCaptureOutcome(
             isRecording: audio.isRecording,
+            micAudioFileURL: audio.micAudioFileURL,
+            micAudioStreaming: audio.micAudioStreaming,
             systemAudioFileURL: audio.systemAudioFileURL,
             systemAudioStreaming: audio.systemAudioStreaming,
             errorMessage: errorMessage
@@ -259,6 +267,8 @@ final class MeetingCaptureBridge: ObservableObject {
                     NSSound(named: "Pop")?.play()
                 case .micAttenuatedByForeignVoiceProcessing:
                     self?.micAttenuationCueObserved = true
+                case .meetingRouteStabilityWarning(let outcome):
+                    self?.routeStabilityWarningOutcome = outcome
                 }
             }
         }
@@ -300,11 +310,13 @@ final class MeetingCaptureBridge: ObservableObject {
             .store(in: &cancellables)
 
         sinkStartAttemptTriggers(from: audio.$isRecording)
+        sinkStartAttemptTriggers(from: audio.$micAudioFileURL)
         sinkStartAttemptTriggers(from: audio.$systemAudioFileURL)
-        // A tap can install (file URL assigned, isRecording true) yet never
-        // stream. Re-evaluate readiness when the first system buffer arrives so
-        // a silent-death tap stays `.waiting` and fails the start deadline
-        // instead of being reported as recording.
+        // Either tap can install (file URL assigned, isRecording true) yet
+        // never stream. Re-evaluate readiness when each first buffer arrives
+        // so a one-sided recording stays `.waiting` and fails the start
+        // deadline instead of being reported as recording.
+        sinkStartAttemptTriggers(from: audio.$micAudioStreaming)
         sinkStartAttemptTriggers(from: audio.$systemAudioStreaming)
     }
 

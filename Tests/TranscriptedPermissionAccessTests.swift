@@ -7,6 +7,40 @@ private final class PermissionRequestBox {
 }
 
 @MainActor
+private final class SystemAudioPermissionAttemptDriver {
+    var completion: ((Bool) -> Void)?
+    var timeoutAction: (() -> Void)?
+    var cleanupCount = 0
+    var timeoutCancellationCount = 0
+
+    func start(_ completion: @escaping (Bool) -> Void) {
+        self.completion = completion
+    }
+
+    func scheduleTimeout(_ action: @escaping () -> Void) -> () -> Void {
+        timeoutAction = action
+        return { [weak self] in
+            self?.timeoutCancellationCount += 1
+        }
+    }
+
+    func fireTimeout() {
+        timeoutAction?()
+    }
+}
+
+@MainActor
+private func waitForSystemAudioPermissionAttemptStart(
+    _ driver: SystemAudioPermissionAttemptDriver
+) async -> Bool {
+    for _ in 0..<20 {
+        if driver.completion != nil { return true }
+        await Task.yield()
+    }
+    return driver.completion != nil
+}
+
+@MainActor
 func testTranscriptedPermissionAccess() async {
     let knownKey = "systemAudioRecordingPermissionKnown"
     let grantedKey = "systemAudioRecordingPermissionGranted"
@@ -18,6 +52,129 @@ func testTranscriptedPermissionAccess() async {
         } else {
             UserDefaults.standard.removeObject(forKey: key)
         }
+    }
+
+    await runSuite("SystemAudioPermissionRequestAttempt — stalled requester times out with one denied result") {
+        let driver = SystemAudioPermissionAttemptDriver()
+        var timeoutCount = 0
+        var resolved: [Bool] = []
+        let attempt = SystemAudioPermissionRequestAttempt(
+            scheduleTimeout: driver.scheduleTimeout,
+            onTimeout: { timeoutCount += 1 },
+            onResolved: { resolved.append($0) }
+        )
+        let resultTask = Task { @MainActor in
+            await attempt.awaitResult(
+                start: driver.start,
+                cleanup: { driver.cleanupCount += 1 }
+            )
+        }
+
+        assertTrue(
+            await waitForSystemAudioPermissionAttemptStart(driver),
+            "the deterministic requester should start before its timeout is fired"
+        )
+        driver.fireTimeout()
+        let granted = await resultTask.value
+
+        assertFalse(granted, "a stalled permission requester must resolve as denied")
+        assertEqual(timeoutCount, 1, "the timeout diagnostic hook should fire once")
+        assertEqual(resolved, [false], "timeout should resolve the request exactly once")
+        assertEqual(driver.cleanupCount, 1, "timeout should clean up the in-flight requester")
+        assertEqual(driver.timeoutCancellationCount, 1, "timeout should cancel its pending timer once")
+    }
+
+    await runSuite("SystemAudioPermissionRequestAttempt — ignores a late success after timeout") {
+        let driver = SystemAudioPermissionAttemptDriver()
+        var resolved: [Bool] = []
+        let attempt = SystemAudioPermissionRequestAttempt(
+            scheduleTimeout: driver.scheduleTimeout,
+            onResolved: { resolved.append($0) }
+        )
+        let resultTask = Task { @MainActor in
+            await attempt.awaitResult(
+                start: driver.start,
+                cleanup: { driver.cleanupCount += 1 }
+            )
+        }
+
+        assertTrue(await waitForSystemAudioPermissionAttemptStart(driver), "the requester should start")
+        driver.fireTimeout()
+        let granted = await resultTask.value
+        driver.completion?(true)
+        await Task.yield()
+
+        assertFalse(granted, "a timeout must not be upgraded to a late success")
+        assertEqual(resolved, [false], "a late ScreenCaptureKit callback must be harmless")
+        assertEqual(driver.cleanupCount, 1, "late callbacks must not repeat cleanup")
+    }
+
+    await runSuite("SystemAudioPermissionRequestAttempt — returns real success and failure") {
+        let successDriver = SystemAudioPermissionAttemptDriver()
+        let successAttempt = SystemAudioPermissionRequestAttempt(scheduleTimeout: successDriver.scheduleTimeout)
+        let successTask = Task { @MainActor in
+            await successAttempt.awaitResult(
+                start: successDriver.start,
+                cleanup: { successDriver.cleanupCount += 1 }
+            )
+        }
+        assertTrue(await waitForSystemAudioPermissionAttemptStart(successDriver), "the success requester should start")
+        successDriver.completion?(true)
+        assertTrue(await successTask.value, "a successful ScreenCaptureKit probe should be granted")
+
+        let failureDriver = SystemAudioPermissionAttemptDriver()
+        let failureAttempt = SystemAudioPermissionRequestAttempt(scheduleTimeout: failureDriver.scheduleTimeout)
+        let failureTask = Task { @MainActor in
+            await failureAttempt.awaitResult(
+                start: failureDriver.start,
+                cleanup: { failureDriver.cleanupCount += 1 }
+            )
+        }
+        assertTrue(await waitForSystemAudioPermissionAttemptStart(failureDriver), "the failure requester should start")
+        failureDriver.completion?(false)
+        assertFalse(await failureTask.value, "a failed ScreenCaptureKit probe should stay denied")
+        assertEqual(successDriver.cleanupCount, 1, "success should clean up the probe stream")
+        assertEqual(failureDriver.cleanupCount, 1, "failure should clean up the probe stream")
+    }
+
+    await runSuite("SystemAudioPermissionRequestAttempt — duplicate callbacks and cancellation resolve once") {
+        let duplicateDriver = SystemAudioPermissionAttemptDriver()
+        var duplicateResolved: [Bool] = []
+        let duplicateAttempt = SystemAudioPermissionRequestAttempt(
+            scheduleTimeout: duplicateDriver.scheduleTimeout,
+            onResolved: { duplicateResolved.append($0) }
+        )
+        let duplicateTask = Task { @MainActor in
+            await duplicateAttempt.awaitResult(
+                start: duplicateDriver.start,
+                cleanup: { duplicateDriver.cleanupCount += 1 }
+            )
+        }
+        assertTrue(await waitForSystemAudioPermissionAttemptStart(duplicateDriver), "the duplicate-callback requester should start")
+        duplicateDriver.completion?(true)
+        assertTrue(await duplicateTask.value, "the first callback should win")
+        duplicateDriver.completion?(false)
+        await Task.yield()
+        assertEqual(duplicateResolved, [true], "duplicate callbacks must not resume twice")
+        assertEqual(duplicateDriver.cleanupCount, 1, "duplicate callbacks must not repeat cleanup")
+
+        let cancellationDriver = SystemAudioPermissionAttemptDriver()
+        var cancellationResolved: [Bool] = []
+        let cancellationAttempt = SystemAudioPermissionRequestAttempt(
+            scheduleTimeout: cancellationDriver.scheduleTimeout,
+            onResolved: { cancellationResolved.append($0) }
+        )
+        let cancellationTask = Task { @MainActor in
+            await cancellationAttempt.awaitResult(
+                start: cancellationDriver.start,
+                cleanup: { cancellationDriver.cleanupCount += 1 }
+            )
+        }
+        assertTrue(await waitForSystemAudioPermissionAttemptStart(cancellationDriver), "the cancellable requester should start")
+        cancellationTask.cancel()
+        assertFalse(await cancellationTask.value, "cancelling a request should return an honest denied result")
+        assertEqual(cancellationResolved, [false], "cancellation must resolve exactly once")
+        assertEqual(cancellationDriver.cleanupCount, 1, "cancellation should clean up the probe stream")
     }
 
     runSuite("TranscriptedPermissionAccess.systemAudioRecordingGranted — old onboarding completion no longer implies a real grant") {
