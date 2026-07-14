@@ -391,15 +391,23 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 mkdir -p "$APP_BUNDLE/Contents/Helpers"
 
-# Bundle Parakeet CoreML models
-PARAKEET_SRC="$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml"
+# Bundle the Parakeet CoreML directory used by FluidAudio 0.15.x at runtime.
+PARAKEET_MODELS_ROOT="$HOME/Library/Application Support/FluidAudio/Models"
+PARAKEET_MODEL_DIR="parakeet-tdt-0.6b-v3"
+PARAKEET_SRC="$PARAKEET_MODELS_ROOT/$PARAKEET_MODEL_DIR"
+if [ ! -d "$PARAKEET_SRC" ]; then
+    # Accept a pre-0.15 cache, but always stage it under the current runtime name.
+    PARAKEET_SRC="$PARAKEET_MODELS_ROOT/parakeet-tdt-0.6b-v3-coreml"
+fi
+PARAKEET_DEST="$APP_BUNDLE/Contents/Resources/parakeet-models/$PARAKEET_MODEL_DIR"
 if [ "$BUNDLE_PARAKEET_MODELS" = "0" ]; then
     echo "⚠️  Skipping bundled Parakeet models because BUNDLE_PARAKEET_MODELS=0"
     echo "   Runtime model download may occur on first launch."
-elif [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ]; then
-    echo "Bundling Parakeet models..."
-    mkdir -p "$APP_BUNDLE/Contents/Resources/parakeet-models"
-    cp -R "$PARAKEET_SRC" "$APP_BUNDLE/Contents/Resources/parakeet-models/"
+elif [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ] && [ -d "$PARAKEET_SRC/JointDecisionv3.mlmodelc" ]; then
+    echo "Bundling Parakeet models from $PARAKEET_SRC..."
+    mkdir -p "$(dirname "$PARAKEET_DEST")"
+    rm -rf "$PARAKEET_DEST"
+    ditto "$PARAKEET_SRC" "$PARAKEET_DEST"
 else
     if [ "$REQUIRE_BUNDLED_PARAKEET_MODELS" = "0" ]; then
         echo "⚠️  Parakeet models not found — proceeding because REQUIRE_BUNDLED_PARAKEET_MODELS=0"
@@ -414,16 +422,22 @@ else
     fi
 fi
 
-# Bundle offline diarizer CoreML models used by DiarizationService.
-DIARIZER_SRC="$HOME/Library/Application Support/FluidAudio/Models/speaker-diarization-coreml"
+# Bundle the FluidAudio 0.15.x offline diarizer cache used by DiarizationService.
+DIARIZER_SRC="$HOME/Library/Application Support/FluidAudio/Models/speaker-diarization"
 DIARIZER_DEST="$APP_BUNDLE/Contents/Resources/offline-diarizer-models"
+DIARIZER_RUNTIME_DIR="$DIARIZER_DEST/speaker-diarization"
 if [ "$BUNDLE_DIARIZER_MODELS" = "0" ]; then
     echo "⚠️  Skipping bundled offline diarizer models because BUNDLE_DIARIZER_MODELS=0"
     echo "   Runtime model download may occur on first meeting."
-elif [ -d "$DIARIZER_SRC/speaker-diarization-offline" ] && [ -d "$DIARIZER_SRC/wespeaker_v2.mlmodelc" ]; then
+elif [ -d "$DIARIZER_SRC/Segmentation.mlmodelc" ] \
+    && [ -d "$DIARIZER_SRC/FBank.mlmodelc" ] \
+    && [ -d "$DIARIZER_SRC/Embedding.mlmodelc" ] \
+    && [ -d "$DIARIZER_SRC/PldaRho.mlmodelc" ] \
+    && [ -f "$DIARIZER_SRC/plda-parameters.json" ]; then
     echo "Bundling offline diarizer models..."
     mkdir -p "$DIARIZER_DEST"
-    cp -R "$DIARIZER_SRC"/. "$DIARIZER_DEST/"
+    rm -rf "$DIARIZER_RUNTIME_DIR"
+    ditto "$DIARIZER_SRC" "$DIARIZER_RUNTIME_DIR"
 else
     if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
         echo "⚠️  Offline diarizer models not found — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"

@@ -816,7 +816,7 @@ run_gemma_summary_plan() {
 run_full_tail() {
   run_step_when_present "60-release-health" "Deterministic release health gate" "yes" \
     "scripts/ops/nightly-security-check.py" \
-    "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.48.json --write-report $(shell_quote "${RAW_DIR}/release-health.json")"
+    "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.49.json --write-report $(shell_quote "${RAW_DIR}/release-health.json")"
 
   run_step_when_present "62-posthog-product-tasks" "PostHog product task fixture gate" "yes" \
     "scripts/ops/posthog-product-dashboard-summary.py" \
