@@ -88,6 +88,10 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
     public let gapCount: Int
     public let routeChangeCount: Int
     public let recoveryAttemptCount: Int
+    public let selectionReason: String
+    public let stabilizationAttemptBucket: String
+    public let stabilizationOutcome: String
+    public let routeStabilityWarning: Bool
     public let micRecovering: Bool
     public let systemFailed: Bool
     public let voiceProcessingRequested: Bool
@@ -134,6 +138,10 @@ public struct AudioPipelineDiagnosticsSnapshot: Equatable, Sendable {
             "realtime_agc": boolString(realtimeAGCActive),
             "recovery_attempt_count": "\(recoveryAttemptCount)",
             "route_change_count": "\(routeChangeCount)",
+            "selection_reason": selectionReason,
+            "stabilization_attempt_bucket": stabilizationAttemptBucket,
+            "stabilization_outcome": stabilizationOutcome,
+            "route_stability_warning": boolString(routeStabilityWarning),
             "system_backend": systemBackend,
             "system_channels": systemChannels,
             "system_peak": systemAudioPeak,
@@ -193,6 +201,10 @@ extension Audio {
             gapCount: recordingGaps.count,
             routeChangeCount: deviceSwitchCount,
             recoveryAttemptCount: recoveryAttemptCount,
+            selectionReason: meetingInputSelectionReasonValue,
+            stabilizationAttemptBucket: meetingRouteStabilizationAttemptBucket,
+            stabilizationOutcome: meetingRouteStabilizationOutcomeValue,
+            routeStabilityWarning: meetingRouteStabilityWarningEmitted,
             micRecovering: isMicRecovering,
             systemFailed: systemAudioFailed,
             voiceProcessingRequested: enableVoiceProcessing,

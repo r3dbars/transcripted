@@ -1225,6 +1225,7 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy meeting_recording_stopped system_stream_present key is not silently filtered") {
         let policy = AnalyticsEventPolicy.policy(forEvent: "meeting_recording_stopped")
         let healthPolicy = AnalyticsEventPolicy.policy(forEvent: "meeting_capture_health_snapshot")
+        let routeWarningPolicy = AnalyticsEventPolicy.policy(forEvent: "meeting_capture_route_warning_shown")
         let startFailedPolicy = AnalyticsEventPolicy.policy(forEvent: "meeting_recording_start_failed")
         assertEqual(policy?.allowedProperties.contains("system_stream_present"), true, "system_stream_present should be in the allowlist")
         assertEqual(policy?.allowedProperties.contains("trigger"), true, "meeting stop events should preserve start trigger attribution")
@@ -1254,6 +1255,12 @@ func testAnalyticsEventPolicy() {
         assertEqual(healthPolicy?.allowedProperties.contains("default_system_output_volume_dropped"), true, "health snapshots should preserve system-output drop flags")
         assertEqual(policy?.allowedProperties.contains("mic_boost_prompt"), true, "meeting stop events should preserve the issue 500 mic-boost prompt outcome")
         assertEqual(healthPolicy?.allowedProperties.contains("mic_boost_prompt"), true, "health snapshots should preserve the issue 500 mic-boost prompt outcome")
+        assertEqual(healthPolicy?.allowedProperties.contains("selection_reason"), true, "health snapshots should preserve the coarse input-selection reason")
+        assertEqual(healthPolicy?.allowedProperties.contains("stabilization_attempt_bucket"), true, "health snapshots should preserve bounded stabilization attempts")
+        assertEqual(healthPolicy?.allowedProperties.contains("stabilization_outcome"), true, "health snapshots should preserve the stabilization outcome enum")
+        assertEqual(healthPolicy?.allowedProperties.contains("route_stability_warning"), true, "health snapshots should preserve whether the route warning was shown")
+        assertEqual(routeWarningPolicy?.allowedProperties.contains("warning_kind"), true, "route warnings should preserve a fixed warning kind")
+        assertEqual(routeWarningPolicy?.allowedProperties.contains("stabilization_outcome"), true, "route warnings should preserve the stabilization outcome enum")
 
         // Verify the key passes sanitization — it must not contain a sensitive fragment
         let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(

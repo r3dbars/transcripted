@@ -591,6 +591,37 @@ final class AudioInitializationTests: XCTestCase {
             "the current session's first system-audio buffer must mark the tap as streaming"
         )
     }
+
+    func testMeetingRouteStabilityWarningIsDeduplicatedAndAttemptsStayBucketed() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        var warningOutcomes: [CaptureRouteStabilizationOutcome] = []
+        audio.onCaptureLifecycleCue = { cue in
+            if case .meetingRouteStabilityWarning(let outcome) = cue {
+                warningOutcomes.append(outcome)
+            }
+        }
+
+        XCTAssertEqual(audio.meetingRouteStabilizationAttemptBucket, "0")
+        for _ in 0..<10 {
+            audio.recordMeetingRouteStabilizationAttempt(outcome: .switchedToBuiltIn)
+        }
+        XCTAssertEqual(audio.meetingRouteStabilizationAttemptBucket, "10_plus")
+
+        audio.emitMeetingRouteStabilityWarningIfNeeded(outcome: .switchedToBuiltIn)
+        audio.emitMeetingRouteStabilityWarningIfNeeded(outcome: .switchFailed)
+
+        XCTAssertEqual(warningOutcomes, [.switchedToBuiltIn])
+        XCTAssertTrue(audio.meetingRouteStabilityWarningEmitted)
+
+        audio.resetMeetingRouteState()
+        XCTAssertEqual(audio.meetingRouteStabilizationAttemptBucket, "0")
+        XCTAssertEqual(audio.meetingRouteStabilizationOutcomeValue, "not_needed")
+        XCTAssertFalse(audio.meetingRouteStabilityWarningEmitted)
+    }
 }
 
 @available(macOS 14.0, *)

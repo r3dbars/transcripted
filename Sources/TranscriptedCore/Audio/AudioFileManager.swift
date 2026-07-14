@@ -39,7 +39,7 @@ extension Audio {
             guard let activeInputNode = self.inputNode else {
                 throw NSError(domain: "Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine input node unavailable"])
             }
-            applyPreferredMeetingInputDevice(to: activeInputNode, operation: "start_recording")
+            applyMeetingInputDevice(to: activeInputNode, operation: "start_recording")
             recordRecordingStartCapturedInput(deviceID: activeInputNode.auAudioUnit.deviceID)
             armVoiceProcessing(on: activeInputNode)
 
