@@ -331,6 +331,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingFailureCopy.swift"
     "Sources/Meeting/MeetingFailureKind.swift"
     "Sources/Meeting/MeetingPromptDetector.swift"
+    "Sources/Meeting/MeetingPromptRecordAction.swift"
     "Sources/Meeting/MeetingPromptHeuristics.swift"
     "Sources/Meeting/MeetingPromptTelemetry.swift"
     "Sources/Meeting/MicActivityMonitor.swift"

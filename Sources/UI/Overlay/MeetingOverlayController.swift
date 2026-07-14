@@ -1561,6 +1561,28 @@ final class MeetingOverlayController: NSObject {
         return true
     }
 
+    /// The capture pill dismisses before its Record callback returns. Keep a
+    /// visible, non-interactive status panel up while the app checks
+    /// permissions, models, and the audio route so Record never looks ignored.
+    func showDetectedMeetingStartInProgress() {
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+        promptCandidate = nil
+        currentPrompt = nil
+        promptKind = nil
+        currentWarmupStatus = .init(
+            title: "Starting meeting…",
+            subtitle: "Checking permissions and audio",
+            detail: "",
+            progress: 0.12,
+            dictationStatus: "Ready",
+            meetingsStatus: "Starting"
+        )
+        state = .preparing
+        showPanel()
+        pushToView()
+    }
+
     /// Post-call awareness nudge: a detected call just ended without a
     /// recording. Same non-activating prompt panel; no candidate, no detector
     /// backoff — resolution is reported through `onMissedCallNudgeResolved`.
