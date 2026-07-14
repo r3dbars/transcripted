@@ -37,6 +37,51 @@ final class AudioSignalRecoveryTests: XCTestCase {
         XCTAssertFalse(analysis.hasSpeechCandidate, "pure silence should never look like a speech candidate")
     }
 
+    // MARK: - finished microphone artifact validation
+
+    func testUsableCaptureSignalRejectsAnEmptyArtifact() {
+        XCTAssertFalse(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: [], sampleRate: 16_000),
+            "an empty microphone artifact must not pass source validation"
+        )
+    }
+
+    func testUsableCaptureSignalRejectsFirstFrameThenStall() {
+        let firstFrameOnly = [Float](repeating: 0.02, count: 1_600)
+
+        XCTAssertFalse(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: firstFrameOnly, sampleRate: 16_000),
+            "one 100ms frame must not count as sustained microphone capture"
+        )
+    }
+
+    func testUsableCaptureSignalRejectsAllSilentSamples() {
+        let silent = [Float](repeating: 0, count: 32_000)
+
+        XCTAssertFalse(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: silent, sampleRate: 16_000),
+            "a non-empty but silent microphone WAV must not look healthy"
+        )
+    }
+
+    func testUsableCaptureSignalKeepsQuietButValidInput() {
+        let quiet = [Float](repeating: 0.002, count: 32_000)
+
+        XCTAssertTrue(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: quiet, sampleRate: 16_000),
+            "quiet input above the capture floor must not be rejected as missing"
+        )
+    }
+
+    func testUsableCaptureSignalRejectsBelowFloorNoise() {
+        let inaudible = [Float](repeating: 0.0004, count: 32_000)
+
+        XCTAssertFalse(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: inaudible, sampleRate: 16_000),
+            "below-floor input must not be accepted as a usable mic artifact"
+        )
+    }
+
     func testAnalyzeComputesPeakAndFullActiveRatioForUniformLoudSamples() {
         let analysis = AudioSignalRecovery.analyze(samples: [0.1, -0.1, 0.1, -0.1], sampleRate: 16_000)
 

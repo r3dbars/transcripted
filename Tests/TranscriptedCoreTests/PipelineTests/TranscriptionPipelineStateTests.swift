@@ -187,6 +187,7 @@ final class TranscriptionPipelineStateTests: XCTestCase {
 
     func testPipelineErrorMarksAudioErrorsAsNonRetryable() {
         XCTAssertFalse(PipelineError.emptyAudioFile.isRetryable)
+        XCTAssertFalse(PipelineError.microphoneAudioUnusable.isRetryable)
         XCTAssertFalse(PipelineError.noSpeechDetected.isRetryable)
         XCTAssertFalse(PipelineError.recordingTooShort(duration: 0.5).isRetryable)
         XCTAssertFalse(PipelineError.invalidAudioFormat(detail: "x").isRetryable)
@@ -204,6 +205,13 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         let description = PipelineError.recordingTooShort(duration: 1.234).errorDescription ?? ""
         XCTAssertTrue(description.contains("1.2"), "Expected duration in description, got: \(description)")
         XCTAssertTrue(description.contains("At least 2 seconds"), description)
+    }
+
+    func testPipelineErrorIdentifiesUnusableMicrophoneAudioWithoutUserData() {
+        XCTAssertEqual(
+            PipelineError.microphoneAudioUnusable.localizedDescription,
+            "Microphone audio was not usable. Open Transcripted Home to retry the saved meeting."
+        )
     }
 
     // MARK: - SpeakerNamingPolicy seam used by the runner

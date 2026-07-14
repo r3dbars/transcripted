@@ -159,6 +159,7 @@ struct MeetingFailureExplanation: Equatable {
              .modelNotLoaded,
              .pipelineFailed,
              .transcriptionInferenceFailed,
+             .microphoneAudioUnusable,
              .emptyAudio,
              .noSpeechDetected,
              .invalidAudioFormat,

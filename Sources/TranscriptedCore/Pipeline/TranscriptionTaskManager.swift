@@ -511,6 +511,8 @@ public class TranscriptionTaskManager: ObservableObject {
             switch pipelineError {
             case .emptyAudioFile:
                 return "Empty audio file"
+            case .microphoneAudioUnusable:
+                return "Microphone audio was not usable"
             case .noSpeechDetected:
                 return "No speech detected"
             case .recordingTooShort:

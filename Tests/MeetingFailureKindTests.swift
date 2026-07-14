@@ -70,6 +70,14 @@ func testMeetingFailureKind() {
         assertEqual(kind, .noSpeechDetected, "audio with no spoken content should get a direct user-facing bucket")
     }
 
+    runSuite("MeetingFailureKind classifies unusable microphone artifacts") {
+        let kind = MeetingFailureKind.classify(
+            message: "Microphone audio was not usable"
+        )
+
+        assertEqual(kind, .microphoneAudioUnusable, "mic artifact failures should stay source-specific")
+    }
+
     runSuite("MeetingFailureKind marks expected empty transcript outcomes as skipped") {
         assertTrue(
             MeetingFailureKind.recordingTooShort.shouldReportAsSkippedTranscript,
