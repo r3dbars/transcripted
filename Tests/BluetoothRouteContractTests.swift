@@ -384,7 +384,7 @@ func testBluetoothRouteContract() {
         guard let snapshotStart = source.range(of: "func audioInputSnapshot"),
               let snapshotEnd = source.range(of: "private func installTapAndStartEngine", range: snapshotStart.upperBound..<source.endIndex),
               let startStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
-              let startEnd = source.range(of: "private func extractMonoSamples", range: startStart.upperBound..<source.endIndex),
+              let startEnd = source.range(of: "/// Begin dictation by borrowing", range: startStart.upperBound..<source.endIndex),
               let cleanupStart = source.range(of: "// MARK: - Cleanup"),
               let cleanupEnd = source.range(of: "deinit", range: cleanupStart.upperBound..<source.endIndex),
               let stopStart = source.range(of: "func stopRecording() async"),

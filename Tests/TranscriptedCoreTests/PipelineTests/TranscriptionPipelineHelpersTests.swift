@@ -13,6 +13,75 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         XCTAssertNil(Transcription.embeddingWeight(forMicFraction: 0.85))
     }
 
+    @MainActor
+    func testSystemDiarizationNoSpeechContinuesWhenMicTrackExists() async throws {
+        let segments = try await Transcription.diarizeSystemAudio(
+            samples: [Float](repeating: 0, count: 16_000),
+            diarization: PipelineStubDiarizationEngine(error: DiarizationResultError.noSpeechDetected),
+            hasMicTrack: true
+        )
+
+        XCTAssertTrue(segments.isEmpty)
+    }
+
+    @MainActor
+    func testSystemDiarizationNoSpeechStillFailsWithoutMicTrack() async {
+        do {
+            _ = try await Transcription.diarizeSystemAudio(
+                samples: [Float](repeating: 0, count: 16_000),
+                diarization: PipelineStubDiarizationEngine(error: DiarizationResultError.noSpeechDetected),
+                hasMicTrack: false
+            )
+            XCTFail("Expected no-speech error to propagate")
+        } catch DiarizationResultError.noSpeechDetected {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    @MainActor
+    func testSystemDiarizationDoesNotHideOtherFailures() async {
+        let expected = NSError(
+            domain: "TranscriptionPipelineHelpersTests",
+            code: 41,
+            userInfo: [NSLocalizedDescriptionKey: "Diarization model failed"]
+        )
+
+        do {
+            _ = try await Transcription.diarizeSystemAudio(
+                samples: [Float](repeating: 0, count: 16_000),
+                diarization: PipelineStubDiarizationEngine(error: expected),
+                hasMicTrack: true
+            )
+            XCTFail("Expected diarization failure to propagate")
+        } catch let error as NSError {
+            XCTAssertEqual(error.domain, expected.domain)
+            XCTAssertEqual(error.code, expected.code)
+        }
+    }
+
+    @MainActor
+    func testSystemDiarizationDoesNotInferNoSpeechFromArbitraryErrorText() async {
+        let error = NSError(
+            domain: "UnrelatedEngine",
+            code: 9,
+            userInfo: [NSLocalizedDescriptionKey: "No speech detected in audio"]
+        )
+
+        do {
+            _ = try await Transcription.diarizeSystemAudio(
+                samples: [Float](repeating: 0, count: 16_000),
+                diarization: PipelineStubDiarizationEngine(error: error),
+                hasMicTrack: true
+            )
+            XCTFail("Expected untyped engine error to propagate")
+        } catch let caught as NSError {
+            XCTAssertEqual(caught.domain, error.domain)
+            XCTAssertEqual(caught.code, error.code)
+        }
+    }
+
     func testAudioCaptureStartStateWaitsForFreshSystemAudioFile() {
         let readyURL = URL(fileURLWithPath: "/tmp/system.wav")
 
@@ -460,9 +529,11 @@ private final class PipelineStubDiarizationEngine: DiarizationEngine {
     nonisolated let objectWillChange = ObservableObjectPublisher()
     var isReady = true
     private let segments: [SpeakerSegment]
+    private let error: Error?
 
-    init(segments: [SpeakerSegment]) {
+    init(segments: [SpeakerSegment] = [], error: Error? = nil) {
         self.segments = segments
+        self.error = error
     }
 
     func initialize() async {
@@ -470,11 +541,13 @@ private final class PipelineStubDiarizationEngine: DiarizationEngine {
     }
 
     func diarizeOffline(samples: [Float], sampleRate: Int) async throws -> [SpeakerSegment] {
-        segments
+        if let error { throw error }
+        return segments
     }
 
     func diarizeOffline(audioURL: URL) async throws -> [SpeakerSegment] {
-        segments
+        if let error { throw error }
+        return segments
     }
 
     func cleanup() {

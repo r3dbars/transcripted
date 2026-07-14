@@ -20,6 +20,14 @@ enum HomeMeetingRenameAffordance {
     static let automationIdentifier = "transcripted.home.meeting-preview.rename"
 }
 
+enum HomeMeetingTitleEditPolicy {
+    static func titleToCommit(draft: String, currentTitle: String) -> String? {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != currentTitle else { return nil }
+        return trimmed
+    }
+}
+
 // MARK: - Day section labels
 
 /// Foundation-pure day-section label derivation for the Home capture lists.

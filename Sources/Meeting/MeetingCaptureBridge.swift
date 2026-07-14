@@ -46,6 +46,7 @@ final class MeetingCaptureBridge: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private let completionAttempt = MeetingCaptureAttempt<CaptureStopResult>()
     private let startAttempt = MeetingCaptureAttempt<Bool>()
+    let micPCMRelay = MeetingMicPCMRelay()
     private var timedOutStopCompletionHandler: ((CaptureStopResult) -> Void)?
     private var isAwaitingTimedOutStopCompletion = false
 
@@ -57,6 +58,10 @@ final class MeetingCaptureBridge: ObservableObject {
                 didWakeName: Notification.Name("NSWorkspaceDidWakeNotification")
             )
         )
+        let micPCMRelay = self.micPCMRelay
+        self.audio.onMicPCMBuffer = { [weak micPCMRelay] buffer in
+            micPCMRelay?.enqueue(buffer)
+        }
         wireCallbacks()
         wireSubscriptions()
     }

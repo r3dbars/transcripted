@@ -185,15 +185,29 @@ private func testMeetingTranscriptStylerRenamesArtifacts() {
     let originalStem = "Call_2026-04-07_09-14-00"
     let transcriptURL = directory.appendingPathComponent("\(originalStem).md")
     try? sampleMeetingTranscript().write(to: transcriptURL, atomically: true, encoding: .utf8)
+    let summaryURL = LocalMeetingSummaryStore.summaryURL(for: transcriptURL)
+    let summary = """
+    ---
+    capture_type: meeting_summary
+    source_transcript: "\(transcriptURL.lastPathComponent)"
+    summary_title: "Old generated title"
+    ---
+
+    # Summary
+    """
+    try? summary.write(to: summaryURL, atomically: true, encoding: .utf8)
 
     let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
     let updatedMarkdown = try? String(contentsOf: styled.url, encoding: .utf8)
+    let renamedSummaryURL = LocalMeetingSummaryStore.summaryURL(for: styled.url)
+    let renamedSummary = (try? String(contentsOf: renamedSummaryURL, encoding: .utf8)) ?? ""
 
     assertEqual(styled.title, "Meeting with Alex", "Styler should promote named remote speakers into the title")
     assertEqual(styled.url.lastPathComponent, "2026-04-07 Meeting with Alex.md", "Styler should rename the markdown artifact to the date-prefixed final title")
     assertTrue(FileManager.default.fileExists(atPath: styled.url.path), "Renamed markdown should exist")
     assertFalse(FileManager.default.fileExists(atPath: transcriptURL.path), "Original markdown should be replaced")
     assertTrue(updatedMarkdown?.contains("# Meeting with Alex") == true, "Markdown body should be rewritten with the canonical title (no date prefix)")
+    assertTrue(renamedSummary.contains("summary_title: \"Meeting with Alex\""), "Automatic restyle should move the sidecar with the newly rendered title")
 }
 
 private func testMeetingTranscriptStylerDoesNotCreateSiblingArtifacts() {

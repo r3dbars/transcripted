@@ -255,14 +255,26 @@ func testDictationRecordingStartOverlayPolicy() {
         assertFalse(plan.cancelSpeechEngine, "idle overlay cleanup should not reset the speech engine")
     }
 
-    runSuite("DictationStartAvailabilityPolicy blocks dictation during active meeting capture") {
+    runSuite("DictationStartAvailabilityPolicy allows dictation during active meeting capture") {
+        assertNil(
+            DictationStartAvailabilityPolicy.unavailableReason(
+                hasActiveMeetingCapture: true,
+                canShareMeetingMic: true,
+                isSpeakerReviewPending: false
+            ),
+            "dictation should borrow the active meeting microphone stream"
+        )
+    }
+
+    runSuite("DictationStartAvailabilityPolicy waits while meeting capture finalizes") {
         assertEqual(
             DictationStartAvailabilityPolicy.unavailableReason(
                 hasActiveMeetingCapture: true,
+                canShareMeetingMic: false,
                 isSpeakerReviewPending: false
             ),
-            DictationStartAvailabilityPolicy.activeMeetingCaptureMessage,
-            "dictation should not start while meeting capture still owns the microphone"
+            DictationStartAvailabilityPolicy.meetingFinishingMessage,
+            "dictation should not open a second audio graph while meeting capture tears down"
         )
     }
 
@@ -270,6 +282,7 @@ func testDictationRecordingStartOverlayPolicy() {
         assertNil(
             DictationStartAvailabilityPolicy.unavailableReason(
                 hasActiveMeetingCapture: false,
+                canShareMeetingMic: false,
                 isSpeakerReviewPending: true
             ),
             "speaker review alone should not block dictation"
@@ -280,9 +293,28 @@ func testDictationRecordingStartOverlayPolicy() {
         assertNil(
             DictationStartAvailabilityPolicy.unavailableReason(
                 hasActiveMeetingCapture: false,
+                canShareMeetingMic: false,
                 isSpeakerReviewPending: false
             ),
             "idle meeting state should not block dictation"
+        )
+    }
+
+    runSuite("Unexpected meeting capture stop releases shared dictation mic") {
+        let source = (try? String(
+            contentsOfFile: "Sources/Meeting/MeetingSessionController.swift",
+            encoding: .utf8
+        )) ?? ""
+        guard let start = source.range(of: "private func handleUnexpectedCaptureStop"),
+              let end = source.range(of: "// preserveQueuedTranscriptionJobsForShutdown", range: start.upperBound..<source.endIndex) else {
+            assertTrue(false, "unexpected capture-stop handler should remain present")
+            return
+        }
+        let body = String(source[start.lowerBound..<end.lowerBound])
+        assertTrue(body.contains("clearSharedDictationMicRelay()"), "unexpected stop should drain the shared PCM relay")
+        assertTrue(
+            body.contains("resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded"),
+            "unexpected stop should resume any in-flight dictation on the regular mic"
         )
     }
 }

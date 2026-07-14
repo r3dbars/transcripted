@@ -76,7 +76,7 @@ struct HomeMeetingPreviewSheet: View {
 
                 Spacer()
 
-                SettingsInlineActionButton(title: "Done", tone: .accent, action: onDone)
+                SettingsInlineActionButton(title: "Done", tone: .accent, action: finishAndDismiss)
                     .keyboardShortcut(.defaultAction)
             }
 
@@ -244,13 +244,33 @@ struct HomeMeetingPreviewSheet: View {
     @ViewBuilder
     private var titleView: some View {
         if isEditingTitle {
-            TextField("Meeting title", text: $draftTitle)
-                .textFieldStyle(.plain)
-                .font(.system(size: 22, weight: .semibold))
-                .focused($isTitleFieldFocused)
-                .onSubmit { commitTitleEdit() }
-                .onExitCommand { cancelTitleEdit() }
-                .accessibilityIdentifier("transcripted.home.meeting-preview.title-field")
+            HStack(spacing: 6) {
+                TextField("Meeting title", text: $draftTitle)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 22, weight: .semibold))
+                    .focused($isTitleFieldFocused)
+                    .onSubmit { commitTitleEdit() }
+                    .onExitCommand { cancelTitleEdit() }
+                    .accessibilityIdentifier("transcripted.home.meeting-preview.title-field")
+
+                titleEditButton(
+                    symbolName: "checkmark",
+                    help: "Save meeting name",
+                    automationIdentifier: "transcripted.home.meeting-preview.rename-save",
+                    action: commitTitleEdit
+                )
+                .disabled(HomeMeetingTitleEditPolicy.titleToCommit(
+                    draft: draftTitle,
+                    currentTitle: preview.title
+                ) == nil)
+
+                titleEditButton(
+                    symbolName: "xmark",
+                    help: "Cancel renaming",
+                    automationIdentifier: "transcripted.home.meeting-preview.rename-cancel",
+                    action: cancelTitleEdit
+                )
+            }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(preview.title)
@@ -313,14 +333,45 @@ struct HomeMeetingPreviewSheet: View {
     private func commitTitleEdit() {
         isEditingTitle = false
         isTitleFieldFocused = false
-        let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != preview.title else { return }
-        onRenameTitle(trimmed)
+        guard let title = HomeMeetingTitleEditPolicy.titleToCommit(
+            draft: draftTitle,
+            currentTitle: preview.title
+        ) else { return }
+        onRenameTitle(title)
     }
 
     private func cancelTitleEdit() {
         isEditingTitle = false
         isTitleFieldFocused = false
+    }
+
+    private func finishAndDismiss() {
+        if isEditingTitle {
+            commitTitleEdit()
+        }
+        onDone()
+    }
+
+    private func titleEditButton(
+        symbolName: String,
+        help: String,
+        automationIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbolName)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 40, height: 40)
+        }
+        .buttonStyle(SettingsHoverButtonStyle(
+            tone: .neutral,
+            cornerRadius: 8,
+            normalFill: Color.primary.opacity(0.035),
+            normalStroke: Color.primary.opacity(0.08)
+        ))
+        .help(help)
+        .accessibilityLabel(help)
+        .accessibilityIdentifier(automationIdentifier)
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -686,4 +737,3 @@ enum HomeMeetingSpeakerColor {
         return Color(nsColor: palette[index])
     }
 }
-
