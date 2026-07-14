@@ -1,6 +1,6 @@
 cask "transcripted" do
-  version "1.1.48"
-  sha256 "8785d63f96e44794b2e01d27ec41893a16c93c7352ac663ccf516175657aa7fe"
+  version "1.1.49"
+  sha256 "be812d402e766cdd0e3b138d94f1ef62d2460b12c2d7e592edc66e46cabfad52"
 
   url "https://github.com/r3dbars/transcripted/releases/download/v#{version}/Transcripted-#{version}.dmg",
       verified: "github.com/r3dbars/transcripted/"

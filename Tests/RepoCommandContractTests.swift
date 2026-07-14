@@ -244,6 +244,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - build bundles only the runtime Parakeet model") {
         let contents = readRepoTextFile("scripts/entrypoints/build.sh")
+        let betaContents = readRepoTextFile("scripts/entrypoints/build-beta.sh")
         assertTrue(
             contents.contains("PARAKEET_MODEL_DIR=\"parakeet-tdt-0.6b-v3\""),
             "build.sh should bundle the FluidAudio 0.15.x Parakeet directory name loaded by ParakeetEngine"
@@ -255,6 +256,15 @@ func testRepoCommandContract() {
         assertFalse(
             contents.contains("$PARAKEET_BUNDLE_DIR/parakeet-tdt-0.6b-v3-coreml"),
             "build.sh should never bundle the legacy -coreml directory as a second ~600 MB copy"
+        )
+        assertTrue(
+            betaContents.contains("PARAKEET_MODEL_DIR=\"parakeet-tdt-0.6b-v3\"")
+                && betaContents.contains("ditto \"$PARAKEET_SRC\" \"$PARAKEET_DEST\""),
+            "build-beta.sh should stage the current or legacy cache under the FluidAudio 0.15.x runtime directory name"
+        )
+        assertTrue(
+            betaContents.contains("$PARAKEET_SRC/JointDecisionv3.mlmodelc"),
+            "build-beta.sh should reject an incomplete pre-0.15 Parakeet cache"
         )
     }
 
@@ -327,6 +337,11 @@ func testRepoCommandContract() {
                 && buildDepsScript.contains("mlx-swift-lm revision mismatch")
                 && buildDepsScript.contains("\"$MLX_SWIFT_LM_REVISION\"*"),
             "build-deps.sh should verify the resolved mlx-swift-lm checkout still matches the pinned revision"
+        )
+        assertTrue(
+            buildDepsScript.contains("SWIFT_JINJA_VERSION=\"${SWIFT_JINJA_VERSION:-2.3.6}\"")
+                && buildDepsScript.contains("swift-jinja.git\", exact: \"SWIFT_JINJA_VERSION_PLACEHOLDER\""),
+            "build-deps.sh should pin the last swift-jinja release compatible with swift-transformers 1.2.1"
         )
     }
 
@@ -1574,7 +1589,11 @@ func testRepoCommandContract() {
         assertTrue(
             betaBuildScript.contains("BUNDLE_DIARIZER_MODELS=\"${BUNDLE_DIARIZER_MODELS:-1}\"")
                 && betaBuildScript.contains("offline-diarizer-models")
-                && betaBuildScript.contains("speaker-diarization-coreml"),
+                && betaBuildScript.contains("speaker-diarization")
+                && betaBuildScript.contains("PldaRho.mlmodelc")
+                && betaBuildScript.contains("plda-parameters.json")
+                && betaBuildScript.contains("DIARIZER_RUNTIME_DIR=\"$DIARIZER_DEST/speaker-diarization\"")
+                && betaBuildScript.contains("ditto \"$DIARIZER_SRC\" \"$DIARIZER_RUNTIME_DIR\""),
             "beta release build should bundle the offline diarizer models used by meeting capture"
         )
         assertTrue(
