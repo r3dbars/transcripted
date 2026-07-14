@@ -47,6 +47,7 @@ final class MeetingSessionController: ObservableObject {
         case quitConfirmation = "quit_confirmation"
         case audioInactivityPrompt = "audio_inactivity_prompt"
         case audioInactivityTimeout = "audio_inactivity_timeout"
+        case audioRouteWarning = "audio_route_warning"
         case unknown = "unknown"
     }
 
@@ -126,6 +127,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var savedMeetingReplacementCommitCount: Int = 0
     @Published private(set) var audioInactivityWarning: MeetingAudioInactivityWarning?
     @Published private(set) var isMicBoostPromptVisible = false
+    @Published private(set) var audioRouteWarning: CaptureRouteStabilizationOutcome?
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
     @Published private(set) var warmupStatus: ModelWarmupStatus = .ready {
@@ -525,6 +527,7 @@ final class MeetingSessionController: ObservableObject {
         micBoostPromptRecordingIdentity = nil
         micBoostPromptOutcome = .notShown
         isMicBoostPromptVisible = false
+        audioRouteWarning = nil
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         installSharedDictationMicRelay()
         startLiveCodexSessionIfNeeded(title: resolvedMeetingTitle)
@@ -745,6 +748,7 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
+        audioRouteWarning = nil
         clearActiveRecordingIdentity()
 
         let recordingSnapshot = makeRecordingStopSnapshot()
@@ -1027,6 +1031,21 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
+    func dismissAudioRouteWarning() {
+        guard audioRouteWarning != nil else { return }
+        audioRouteWarning = nil
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_capture_route_warning_dismissed",
+            message: "Meeting Bluetooth route warning dismissed",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+    }
+
     private func handleMicAttenuationCue() {
         guard case .recording = state,
               let activeRecordingIdentity else { return }
@@ -1057,6 +1076,36 @@ final class MeetingSessionController: ObservableObject {
                 "trigger": activeRecordingTrigger.rawValue,
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
             ]
+        )
+    }
+
+    private func handleRouteStabilityWarning(
+        _ outcome: CaptureRouteStabilizationOutcome
+    ) {
+        guard case .recording = state else { return }
+        guard audioRouteWarning == nil else { return }
+        audioRouteWarning = outcome
+
+        let snapshot = capture.pipelineDiagnosticsSnapshot()
+        let properties = meetingCaptureAnalyticsProperties(snapshot: snapshot).merging(
+            [
+                "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingDuration),
+                "stabilization_outcome": outcome.rawValue,
+                "trigger": activeRecordingTrigger.rawValue,
+                "warning_kind": "bluetooth_route_unstable",
+            ],
+            uniquingKeysWith: { _, new in new }
+        )
+        DiagnosticsTrail.record(
+            level: .warning,
+            engine: "meeting",
+            event: "meeting_capture_route_warning_shown",
+            message: "Meeting Bluetooth route instability detected",
+            context: baseDiagnosticsContext(extra: properties)
+        )
+        AnalyticsReporter.track(
+            "meeting_capture_route_warning_shown",
+            properties: properties
         )
     }
 
@@ -1142,6 +1191,7 @@ final class MeetingSessionController: ObservableObject {
     private func clearActiveRecordingIdentity() {
         activeRecordingIdentity = nil
         micBoostPromptRecordingIdentity = nil
+        audioRouteWarning = nil
     }
 
     func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
@@ -1823,6 +1873,7 @@ final class MeetingSessionController: ObservableObject {
                     // stop path running. The boost prompt must never outlive
                     // the recording it offered to fix.
                     self.isMicBoostPromptVisible = false
+                    self.audioRouteWarning = nil
                 }
                 self.applyAudioInactivityEvent(event)
             }
@@ -1872,6 +1923,14 @@ final class MeetingSessionController: ObservableObject {
             .filter { $0 }
             .sink { [weak self] _ in
                 self?.handleMicAttenuationCue()
+            }
+            .store(in: &cancellables)
+
+        capture.$routeStabilityWarningOutcome
+            .compactMap { $0 }
+            .removeDuplicates()
+            .sink { [weak self] outcome in
+                self?.handleRouteStabilityWarning(outcome)
             }
             .store(in: &cancellables)
 

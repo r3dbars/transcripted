@@ -145,6 +145,7 @@ review_action
 review_reason
 route_ready
 route_shape
+route_stability_warning
 runtime
 sample_flow_started
 save_outcome
@@ -160,6 +161,7 @@ setup_kind
 setup_ready
 signal_kinds
 source
+stabilization_outcome
 stage
 stall_kind
 stall_stage
@@ -186,6 +188,7 @@ update_state
 version
 voice_processing
 voice_processing_active
+warning_kind
 was_recorded
 was_recording
 workflow_kind
