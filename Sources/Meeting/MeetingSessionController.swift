@@ -188,6 +188,7 @@ final class MeetingSessionController: ObservableObject {
     private var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
     private var activeRecordingSuggestedTitle: String?
     private var activeRecordingStartedAt: Date?
+    private var isStartingRecording = false
     var activeTranscriptionTrigger: StartTrigger = .unknown
     private var isFinishingRecording = false
     private var shouldSurfaceMeetingWarmupFailure = false
@@ -433,15 +434,17 @@ final class MeetingSessionController: ObservableObject {
         suggestedTitle: String? = nil,
         promptTelemetryProperties: [String: String]? = nil
     ) async -> Bool {
-        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "start_requested")
-        activeDetectedPromptRecordingTelemetryProperties = trigger == .detectedPrompt ? promptTelemetryProperties : nil
-        activeDetectedPromptRecordingStartedAt = nil
-        DiagnosticsTrail.record(
-            engine: "meeting",
-            event: "meeting_start_requested",
-            message: "Meeting start requested",
-            context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
-        )
+        guard !isStartingRecording else {
+            DiagnosticsTrail.record(
+                engine: "meeting",
+                event: "meeting_start_ignored",
+                message: "Meeting start ignored because another start is already in progress",
+                context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+            )
+            // The caller did not start a recording. Returning false keeps a
+            // prompt action from treating a competing start as accepted.
+            return false
+        }
 
         switch state {
         case .recording:
@@ -451,11 +454,22 @@ final class MeetingSessionController: ObservableObject {
                 message: "Meeting start ignored because another meeting flow is active",
                 context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
             )
-            clearDetectedPromptRecordingTelemetry()
             return true
         case .idle, .loadingModels, .ready, .transcribing, .error:
             break
         }
+
+        isStartingRecording = true
+        defer { isStartingRecording = false }
+        Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "start_requested")
+        activeDetectedPromptRecordingTelemetryProperties = trigger == .detectedPrompt ? promptTelemetryProperties : nil
+        activeDetectedPromptRecordingStartedAt = nil
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_start_requested",
+            message: "Meeting start requested",
+            context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
+        )
 
         let startDecision = await resolveStartRecordingPermissionDecision(trigger: trigger)
         guard startDecision.canStart else {
