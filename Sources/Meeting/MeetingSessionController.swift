@@ -1082,6 +1082,9 @@ final class MeetingSessionController: ObservableObject {
     private func handleRouteStabilityWarning(
         _ outcome: CaptureRouteStabilizationOutcome
     ) {
+        // Audio inactivity and mic-boost prompts belong to the overlay; they
+        // leave the session state as .recording. The route outcome is latched
+        // here and the overlay restores its priority after those prompts.
         guard case .recording = state else { return }
         guard audioRouteWarning == nil else { return }
         audioRouteWarning = outcome
@@ -1927,8 +1930,10 @@ final class MeetingSessionController: ObservableObject {
             .store(in: &cancellables)
 
         capture.$routeStabilityWarningOutcome
-            .compactMap { $0 }
+            // Keep the nil reset in the deduplication stream. It separates
+            // identical outcomes from consecutive recordings.
             .removeDuplicates()
+            .compactMap { $0 }
             .sink { [weak self] outcome in
                 self?.handleRouteStabilityWarning(outcome)
             }
