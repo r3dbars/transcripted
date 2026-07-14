@@ -127,6 +127,8 @@ final class LiveCaptureSmokeTests: XCTestCase {
         while Date() < deadline {
             let outcome = AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: audio.isRecording,
+                micAudioFileURL: audio.micAudioFileURL,
+                micAudioStreaming: audio.micAudioStreaming,
                 systemAudioFileURL: audio.systemAudioFileURL,
                 systemAudioStreaming: audio.systemAudioStreaming,
                 errorMessage: audio.error

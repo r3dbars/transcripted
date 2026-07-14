@@ -272,7 +272,7 @@ extension Audio {
                     operation: "device_recovery_restart"
                 )
                 newInputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                    self?.handleMicBuffer(buffer)
+                    self?.handleMicBuffer(buffer, sessionGeneration: sessionGeneration)
                 }
                 do {
                     engine.prepare()

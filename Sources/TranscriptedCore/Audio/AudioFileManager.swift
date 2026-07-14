@@ -303,7 +303,7 @@ extension Audio {
 
             // Install tap on microphone
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                self?.handleMicBuffer(buffer)
+                self?.handleMicBuffer(buffer, sessionGeneration: sessionGeneration)
             }
 
             do {
@@ -343,7 +343,16 @@ extension Audio {
     /// activity and the silence/inactivity detector still fires when the
     /// room is genuinely quiet. (AGC would otherwise amplify ambient noise
     /// up to "speech-looking" levels and defeat the inactivity prompt.)
-    func handleMicBuffer(_ buffer: AVAudioPCMBuffer) {
+    func handleMicBuffer(_ buffer: AVAudioPCMBuffer, sessionGeneration: UInt64) {
+        guard sessionGeneration == recordingSessionGeneration else { return }
+        // Empty callbacks do not prove the input route can deliver audio. Let
+        // the start gate and watchdog keep waiting for a real mic frame.
+        guard buffer.frameLength > 0 else { return }
+
+        micBufferCount += 1
+        if micBufferCount == 1 {
+            markMicAudioStreamingIfCurrent(sessionGeneration: sessionGeneration)
+        }
         lastBufferTime = CACurrentMediaTime()
         let rawPeak = linearPeak(buffer: buffer)
 

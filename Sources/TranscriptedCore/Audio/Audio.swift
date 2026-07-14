@@ -184,6 +184,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var micAudioFileURL: URL?
     @Published public var systemAudioFileURL: URL?
 
+    /// True once the microphone tap has actually delivered its first nonempty
+    /// buffer for the current recording. A mic WAV can be created before the
+    /// input tap has delivered anything, so meeting readiness must not treat a
+    /// file URL or a running engine as proof that microphone capture works.
+    /// The flag is generation-guarded from the mic callback and reset for each
+    /// fresh recording start.
+    @Published public internal(set) var micAudioStreaming: Bool = false
+
     /// True once the system-audio tap has actually delivered its first buffer
     /// for the current recording. Meeting-capture readiness
     /// (`AudioCaptureStartState`) must not promote `.waiting` → `.ready` on
@@ -505,6 +513,23 @@ public class Audio: ObservableObject, @unchecked Sendable {
             systemBufferCountLock.lock()
             defer { systemBufferCountLock.unlock() }
             _systemBufferCount = newValue
+        }
+    }
+
+    // Track nonempty mic buffers separately so the first-frame readiness
+    // latch only schedules one main-thread publication per recording.
+    private var _micBufferCount: Int = 0
+    private let micBufferCountLock = NSLock()
+    var micBufferCount: Int {
+        get {
+            micBufferCountLock.lock()
+            defer { micBufferCountLock.unlock() }
+            return _micBufferCount
+        }
+        set {
+            micBufferCountLock.lock()
+            defer { micBufferCountLock.unlock() }
+            _micBufferCount = newValue
         }
     }
 
@@ -958,6 +983,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         error = nil
         isMicRecovering = false
         systemBufferCount = 0  // Reset debug counter (lock-protected)
+        micBufferCount = 0
+        micAudioStreaming = false  // Re-gate readiness on a fresh first buffer
         systemAudioStreaming = false  // Re-gate readiness on a fresh first buffer
         resetSignalDiagnostics()
         // Fresh instance = clean one-shot latch per recording.
@@ -1159,6 +1186,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.recordingSessionGeneration == sessionGeneration else { return }
             self.systemAudioStreaming = true
+        }
+    }
+
+    /// Records that the microphone tap delivered a usable buffer for this
+    /// recording. Like the system-side latch, this is published on main and
+    /// guarded against callbacks that outlive their recording generation.
+    func markMicAudioStreamingIfCurrent(sessionGeneration: UInt64) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.recordingSessionGeneration == sessionGeneration else { return }
+            self.micAudioStreaming = true
         }
     }
 

@@ -94,6 +94,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: false,
+                micAudioFileURL: url,
+                micAudioStreaming: true,
                 systemAudioFileURL: url,
                 systemAudioStreaming: true,
                 errorMessage: nil
@@ -110,6 +112,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: URL(fileURLWithPath: "/tmp/mic.wav"),
+                micAudioStreaming: true,
                 systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
                 systemAudioStreaming: false,
                 errorMessage: nil
@@ -124,6 +128,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: URL(fileURLWithPath: "/tmp/mic.wav"),
+                micAudioStreaming: true,
                 systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
                 systemAudioStreaming: true,
                 errorMessage: ""
@@ -137,6 +143,8 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertEqual(
             AudioCaptureStartState.meetingCaptureOutcome(
                 isRecording: true,
+                micAudioFileURL: URL(fileURLWithPath: "/tmp/mic.wav"),
+                micAudioStreaming: true,
                 systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
                 systemAudioStreaming: true,
                 errorMessage: "permission denied"
@@ -147,11 +155,19 @@ final class TranscriptionPipelineStateTests: XCTestCase {
 
     func testTimeoutFailureMessageFallsBackToCanonicalCopy() {
         XCTAssertEqual(
-            AudioCaptureStartState.timeoutFailureMessage(existingErrorMessage: nil),
+            AudioCaptureStartState.timeoutFailureMessage(
+                existingErrorMessage: nil,
+                micAudioStreaming: true,
+                systemAudioStreaming: false
+            ),
             "System audio capture did not become ready in time."
         )
         XCTAssertEqual(
-            AudioCaptureStartState.timeoutFailureMessage(existingErrorMessage: ""),
+            AudioCaptureStartState.timeoutFailureMessage(
+                existingErrorMessage: "",
+                micAudioStreaming: true,
+                systemAudioStreaming: false
+            ),
             "System audio capture did not become ready in time."
         )
     }
@@ -159,7 +175,9 @@ final class TranscriptionPipelineStateTests: XCTestCase {
     func testTimeoutFailureMessagePreservesExistingError() {
         XCTAssertEqual(
             AudioCaptureStartState.timeoutFailureMessage(
-                existingErrorMessage: "screen recording denied"
+                existingErrorMessage: "screen recording denied",
+                micAudioStreaming: true,
+                systemAudioStreaming: true
             ),
             "screen recording denied"
         )
