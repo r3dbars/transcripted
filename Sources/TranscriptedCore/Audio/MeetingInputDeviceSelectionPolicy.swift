@@ -43,6 +43,14 @@ struct MeetingInputDeviceSelection: Equatable {
 }
 
 enum MeetingInputDeviceSelectionPolicy {
+    static func selectionAfterStabilizationAttempt(
+        pinnedSelection: MeetingInputDeviceSelection,
+        attemptedSelection: MeetingInputDeviceSelection,
+        outcome: CaptureRouteStabilizationOutcome
+    ) -> MeetingInputDeviceSelection {
+        outcome == .switchedToBuiltIn ? attemptedSelection : pinnedSelection
+    }
+
     static func selection(
         defaultInput: MeetingAudioDevice,
         defaultOutput: MeetingAudioDevice?,
@@ -382,7 +390,7 @@ extension Audio {
             }
         }
 
-        guard var selection else {
+        guard let selection else {
             AppLogger.audioMic.warning("Meeting input selection unavailable", [
                 "operation": operation
             ])
@@ -414,15 +422,35 @@ extension Audio {
                     )
                 }
 
-                selection = MeetingInputDeviceSelection(
+                let fallbackSelection = MeetingInputDeviceSelection(
                     defaultInput: selection.defaultInput,
                     selectedInput: builtInInput,
                     defaultOutput: selection.defaultOutput,
                     reason: .preferredBuiltInForBluetoothHeadset
                 )
-                setMeetingInputSelection(selection)
                 stabilizationOutcome = .switchedToBuiltIn
                 recordMeetingRouteStabilizationAttempt(outcome: stabilizationOutcome)
+
+                let outcome = applySelectedMeetingInputDevice(
+                    selection: fallbackSelection,
+                    to: inputNode,
+                    operation: operation,
+                    stabilizationOutcome: stabilizationOutcome
+                )
+                // Keep the original Bluetooth selection pinned until the
+                // fallback is actually applied. A failed setDeviceID must
+                // not turn the next recovery into another built-in loop.
+                setMeetingInputSelection(
+                    MeetingInputDeviceSelectionPolicy.selectionAfterStabilizationAttempt(
+                        pinnedSelection: selection,
+                        attemptedSelection: fallbackSelection,
+                        outcome: outcome
+                    )
+                )
+                if routeWasUnstable, outcome != .notNeeded {
+                    emitMeetingRouteStabilityWarningIfNeeded(outcome: outcome)
+                }
+                return outcome
             } catch {
                 stabilizationOutcome = .builtInUnavailable
                 recordMeetingRouteStabilizationAttempt(outcome: stabilizationOutcome)
