@@ -772,7 +772,8 @@ final class MeetingSessionController: ObservableObject {
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        let shouldAwaitFinalLiveCodexTranscript = files.micURL != nil && !stopResult.didTimeOut
+        let shouldAwaitFinalLiveCodexTranscript =
+            files.micURL != nil && files.systemURL != nil && !stopResult.didTimeOut
         finishLiveCodexSessionForActiveRecording(
             status: shouldAwaitFinalLiveCodexTranscript ? .stopped : .failed,
             shouldAwaitFinalTranscript: shouldAwaitFinalLiveCodexTranscript
@@ -932,6 +933,32 @@ final class MeetingSessionController: ObservableObject {
             return
         }
 
+        guard let systemURL = files.systemURL else {
+            let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
+                micAudioURL: micURL,
+                systemAudioURL: nil,
+                errorMessage: "Recording stopped without system audio.",
+                meetingTitle: recordingSnapshot.suggestedTitle,
+                recordingDate: recordingSnapshot.recordingStartedAt
+            )
+            DiagnosticsTrail.record(
+                level: .error,
+                engine: "meeting",
+                event: "meeting_recording_missing_system_audio",
+                message: "Meeting recording stopped without a system-audio file",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "reason": reason.rawValue,
+                        "mic_file_present": boolString(true),
+                        "preserved_for_retry": boolString(preserved)
+                    ]
+                )
+            )
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "missing_system_audio")
+            state = .error("System audio was missing. Open Transcripted Home to retry the saved meeting.")
+            return
+        }
+
         // Issue #500: when stop diagnostics classified an unrecovered
         // voice-processed quiet mic, ride the facts into the saved transcript
         // frontmatter so Home can surface the enable-for-next-time hint.
@@ -952,7 +979,7 @@ final class MeetingSessionController: ObservableObject {
 
         let outcome = transcriptionQueue.enqueueTranscriptionJob(
             micURL: micURL,
-            systemURL: files.systemURL,
+            systemURL: systemURL,
             healthInfo: healthInfoForSave,
             captureDiagnostics: stopCaptureDiagnostics,
             meetingTitle: recordingSnapshot.suggestedTitle,

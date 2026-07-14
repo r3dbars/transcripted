@@ -83,6 +83,21 @@ func testFailedMeetingPresentation() {
         )
     }
 
+    runSuite("FailedMeetingPresentation unusable mic artifacts point to recording repair") {
+        let copy = MeetingFailureCopy.make(
+            forMessage: "Microphone audio was not usable",
+            shortErrorMessage: "Microphone audio was not usable",
+            isRetryable: false
+        )
+
+        assertEqual(copy.title, "Microphone audio was not captured", "unusable mic artifacts should name the failed source")
+        assertEqual(
+            copy.detail,
+            "Transcripted kept the meeting audio, but the microphone track had no usable signal. Check the selected microphone and record the meeting again.",
+            "unusable mic artifacts should give deterministic recovery guidance"
+        )
+    }
+
     runSuite("MeetingSessionController surfaces skipped no-speech outcomes visibly") {
         let source = (try? String(
             contentsOf: repoFixtureURL("Sources/Meeting/MeetingSessionController.swift"),
