@@ -21,6 +21,18 @@ force-installed by Sparkle so existing users recover from a regression.
   focuses the speaker search). Sidebar rows now show their shortcut as a
   tooltip. Existing recordable dictation/meeting triggers are unchanged.
 
+## [1.1.50] - 2026-07-14
+
+### Fixed
+- Detected-meeting Record actions now reliably start capture, and system-audio
+  permission checks finish with clear guidance instead of spinning forever.
+- Meeting capture now verifies both microphone and system-audio readiness and
+  preserves unusable local-mic recordings with retryable, source-specific
+  guidance.
+- Bluetooth meeting capture now pins its starting microphone route, performs at
+  most one built-in-mic fallback after a real disconnect, keeps recording, and
+  shows one actionable warning instead of repeatedly switching routes.
+
 ## [1.1.47] - 2026-06-08
 
 ### Added
