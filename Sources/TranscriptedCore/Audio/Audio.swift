@@ -17,6 +17,17 @@ public enum CaptureLifecycleCue: Sendable {
     case recordingStarted
     case recordingStopped
     case micAttenuatedByForeignVoiceProcessing
+    case meetingRouteStabilityWarning(CaptureRouteStabilizationOutcome)
+}
+
+/// Coarse, privacy-safe result of the one bounded input-route stabilization
+/// attempt allowed during a meeting. The value is also safe to expose to host
+/// UI and analytics because it contains no device identity.
+public enum CaptureRouteStabilizationOutcome: String, Equatable, Sendable {
+    case notNeeded = "not_needed"
+    case switchedToBuiltIn = "switched_to_built_in"
+    case builtInUnavailable = "built_in_unavailable"
+    case switchFailed = "switch_failed"
 }
 
 /// Status of system audio capture for UI feedback
@@ -395,6 +406,107 @@ public class Audio: ObservableObject, @unchecked Sendable {
             defer { recoveryAttemptCountLock.unlock() }
             _recoveryAttemptCount = newValue
         }
+    }
+
+    // Meeting input is selected once at start and then pinned for the session.
+    // Recovery may make one bounded built-in fallback after a real Bluetooth
+    // mic outage, but it must never follow a changing system default forever.
+    private var _meetingInputSelection: MeetingInputDeviceSelection?
+    private var _meetingRouteStabilizationAttemptCount = 0
+    private var _meetingRouteStabilizationOutcome: CaptureRouteStabilizationOutcome = .notNeeded
+    private var _meetingRouteStabilityWarningEmitted = false
+    private let meetingRouteStateLock = NSLock()
+
+    var meetingInputSelectionReasonValue: String {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _meetingInputSelection?.reason.rawValue ?? "unavailable"
+    }
+
+    var meetingRouteStabilizationAttemptBucket: String {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        switch _meetingRouteStabilizationAttemptCount {
+        case 0: return "0"
+        case 1: return "1"
+        case 2...3: return "2_3"
+        case 4...9: return "4_9"
+        default: return "10_plus"
+        }
+    }
+
+    var meetingRouteStabilizationOutcomeValue: String {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _meetingRouteStabilizationOutcome.rawValue
+    }
+
+    var meetingRouteStabilityWarningEmitted: Bool {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _meetingRouteStabilityWarningEmitted
+    }
+
+    func meetingInputIsBluetooth() -> Bool {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        guard let selection = _meetingInputSelection else { return false }
+        return selection.selectedInput.transport == .bluetooth
+            || selection.selectedInput.transport == .bluetoothLE
+    }
+
+    func meetingInputSelectionSnapshot() -> MeetingInputDeviceSelection? {
+        meetingRouteStateLock.lock()
+        defer { meetingRouteStateLock.unlock() }
+        return _meetingInputSelection
+    }
+
+    func setMeetingInputSelection(_ selection: MeetingInputDeviceSelection) {
+        meetingRouteStateLock.lock()
+        _meetingInputSelection = selection
+        meetingRouteStateLock.unlock()
+    }
+
+    func recordMeetingRouteStabilizationAttempt(
+        outcome: CaptureRouteStabilizationOutcome
+    ) {
+        meetingRouteStateLock.lock()
+        _meetingRouteStabilizationAttemptCount += 1
+        _meetingRouteStabilizationOutcome = outcome
+        meetingRouteStateLock.unlock()
+    }
+
+    func setMeetingRouteStabilizationOutcome(
+        _ outcome: CaptureRouteStabilizationOutcome
+    ) {
+        meetingRouteStateLock.lock()
+        _meetingRouteStabilizationOutcome = outcome
+        meetingRouteStateLock.unlock()
+    }
+
+    func resetMeetingRouteState() {
+        meetingRouteStateLock.lock()
+        _meetingInputSelection = nil
+        _meetingRouteStabilizationAttemptCount = 0
+        _meetingRouteStabilizationOutcome = .notNeeded
+        _meetingRouteStabilityWarningEmitted = false
+        meetingRouteStateLock.unlock()
+    }
+
+    func emitMeetingRouteStabilityWarningIfNeeded(
+        outcome: CaptureRouteStabilizationOutcome
+    ) {
+        guard outcome != .notNeeded else { return }
+
+        meetingRouteStateLock.lock()
+        guard !_meetingRouteStabilityWarningEmitted else {
+            meetingRouteStateLock.unlock()
+            return
+        }
+        _meetingRouteStabilityWarningEmitted = true
+        meetingRouteStateLock.unlock()
+
+        onCaptureLifecycleCue?(.meetingRouteStabilityWarning(outcome))
     }
     // Recording session generation - increments on each start/stop so delayed
     // recovery work from an old session cannot restart a newer one.
@@ -995,6 +1107,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioStatus = .healthy  // Assume healthy until we hear otherwise
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
         recordingSessionGeneration &+= 1
+        resetMeetingRouteState()
 
         // Reset capture artifacts so a previous session cannot make a new start
         // look ready before the fresh mic/system files exist.

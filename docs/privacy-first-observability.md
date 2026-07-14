@@ -162,6 +162,7 @@ allowlist.
 - `meeting_missed_call_nudge`
 - `meeting_recording_stopped`
 - `meeting_capture_health_snapshot`
+- `meeting_capture_route_warning_shown`
 - `meeting_recording_cancelled`
 - `meeting_file_imported`
 - `meeting_file_import_failed`

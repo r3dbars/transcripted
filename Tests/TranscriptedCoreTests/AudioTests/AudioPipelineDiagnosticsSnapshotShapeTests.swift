@@ -30,6 +30,10 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             gapCount: 2,
             routeChangeCount: 1,
             recoveryAttemptCount: 3,
+            selectionReason: "preservedDefaultInput",
+            stabilizationAttemptBucket: "1",
+            stabilizationOutcome: "switched_to_built_in",
+            routeStabilityWarning: true,
             micRecovering: true,
             systemFailed: false,
             voiceProcessingRequested: false,
@@ -68,6 +72,10 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
         XCTAssertEqual(context["gap_count"], "2")
         XCTAssertEqual(context["route_change_count"], "1")
         XCTAssertEqual(context["recovery_attempt_count"], "3")
+        XCTAssertEqual(context["selection_reason"], "preservedDefaultInput")
+        XCTAssertEqual(context["stabilization_attempt_bucket"], "1")
+        XCTAssertEqual(context["stabilization_outcome"], "switched_to_built_in")
+        XCTAssertEqual(context["route_stability_warning"], "true")
         XCTAssertEqual(context["mic_recovering"], "true")
         XCTAssertEqual(context["system_failed"], "false")
         XCTAssertEqual(context["voice_processing"], "false")
@@ -105,6 +113,10 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             gapCount: requested.gapCount,
             routeChangeCount: requested.routeChangeCount,
             recoveryAttemptCount: requested.recoveryAttemptCount,
+            selectionReason: requested.selectionReason,
+            stabilizationAttemptBucket: requested.stabilizationAttemptBucket,
+            stabilizationOutcome: requested.stabilizationOutcome,
+            routeStabilityWarning: requested.routeStabilityWarning,
             micRecovering: requested.micRecovering,
             systemFailed: requested.systemFailed,
             voiceProcessingRequested: true,
@@ -143,6 +155,10 @@ final class AudioPipelineDiagnosticsSnapshotShapeTests: XCTestCase {
             gapCount: requested.gapCount,
             routeChangeCount: requested.routeChangeCount,
             recoveryAttemptCount: requested.recoveryAttemptCount,
+            selectionReason: requested.selectionReason,
+            stabilizationAttemptBucket: requested.stabilizationAttemptBucket,
+            stabilizationOutcome: requested.stabilizationOutcome,
+            routeStabilityWarning: requested.routeStabilityWarning,
             micRecovering: requested.micRecovering,
             systemFailed: requested.systemFailed,
             voiceProcessingRequested: false,

@@ -3,6 +3,88 @@ import XCTest
 @testable import TranscriptedCore
 
 final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
+    func testFailedBuiltInStabilizationRestoresPinnedBluetoothSelection() {
+        let bluetoothMic = device(id: 10, name: "Bluetooth Headset", transport: .bluetooth, channels: 1)
+        let builtInMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
+        let pinnedSelection = MeetingInputDeviceSelection(
+            defaultInput: bluetoothMic,
+            selectedInput: bluetoothMic,
+            defaultOutput: bluetoothMic,
+            reason: .preservedDefaultInput
+        )
+        let fallbackSelection = MeetingInputDeviceSelection(
+            defaultInput: bluetoothMic,
+            selectedInput: builtInMic,
+            defaultOutput: bluetoothMic,
+            reason: .preferredBuiltInForBluetoothHeadset
+        )
+
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.selectionAfterStabilizationAttempt(
+                pinnedSelection: pinnedSelection,
+                attemptedSelection: fallbackSelection,
+                outcome: .switchFailed
+            ),
+            pinnedSelection,
+            "a failed built-in setDeviceID must leave the original Bluetooth input pinned"
+        )
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.selectionAfterStabilizationAttempt(
+                pinnedSelection: pinnedSelection,
+                attemptedSelection: fallbackSelection,
+                outcome: .switchedToBuiltIn
+            ),
+            fallbackSelection,
+            "only a successful built-in application may replace the pinned selection"
+        )
+    }
+
+    func testPreserveDefaultModeDoesNotOverrideAnIntentionalBluetoothMic() {
+        let bluetoothMic = device(
+            id: 10,
+            name: "Bluetooth Headset Microphone",
+            transport: .bluetooth,
+            channels: 1
+        )
+        let macBookMic = device(
+            id: 20,
+            name: "MacBook Pro Microphone",
+            transport: .builtIn,
+            channels: 1
+        )
+
+        let selection = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: bluetoothMic,
+            defaultOutput: bluetoothMic,
+            availableInputs: [bluetoothMic, macBookMic],
+            mode: .preserveDefault
+        )
+
+        XCTAssertEqual(selection.selectedInput, bluetoothMic)
+        XCTAssertEqual(selection.reason, .preservedDefaultInput)
+        XCTAssertFalse(selection.didOverrideDefault)
+    }
+
+    func testBuiltInFallbackIsOnlyAvailableForBluetoothInputs() {
+        let bluetoothMic = device(id: 10, name: "Bluetooth Headset", transport: .bluetooth, channels: 1)
+        let macBookMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
+        let aggregateMic = device(id: 30, name: "Aggregate Input", transport: .aggregate, channels: 2)
+
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.preferredBuiltInFallback(
+                for: bluetoothMic,
+                availableInputs: [bluetoothMic, macBookMic, aggregateMic]
+            ),
+            macBookMic
+        )
+        XCTAssertNil(
+            MeetingInputDeviceSelectionPolicy.preferredBuiltInFallback(
+                for: aggregateMic,
+                availableInputs: [aggregateMic, macBookMic]
+            )
+        )
+    }
+
     func testPrefersBuiltInInputWhenDefaultInputAndOutputAreBluetooth() {
         let airPods = device(
             id: 10,

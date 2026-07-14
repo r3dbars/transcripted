@@ -156,8 +156,13 @@ extension Audio {
         // new device, in which case recordingFormat(for:) falls back to the
         // hardware format. Then refresh software AGC from the user's selected
         // mode so raw/off stays raw after device recovery.
+        let bluetoothInputWasSelected = reason == .deviceChange && meetingInputIsBluetooth()
         var recordingFormat = withAudioGraphLock {
-            applyPreferredMeetingInputDevice(to: newInputNode, operation: "device_recovery")
+            applyMeetingInputDevice(
+                to: newInputNode,
+                operation: "device_recovery",
+                routeWasUnstable: bluetoothInputWasSelected
+            )
             armVoiceProcessing(on: newInputNode)
             refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
 
@@ -185,7 +190,7 @@ extension Audio {
             return
         }
         let oldChannelCount = self.inputChannelCount
-        AppLogger.audioMic.info("Switched to default device", ["sampleRate": "\(recordingSnapshot.sampleRate)", "channels": "\(recordingSnapshot.channelCount)"])
+        AppLogger.audioMic.info("Rebuilt mic engine on pinned meeting input", ["sampleRate": "\(recordingSnapshot.sampleRate)", "channels": "\(recordingSnapshot.channelCount)"])
 
         // ALWAYS update channel count for proper downmix handling
         // This was a bug: if only channel count changed (not sample rate), downmix wouldn't work

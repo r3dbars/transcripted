@@ -34,6 +34,9 @@ final class MeetingCaptureBridge: ObservableObject {
     /// One-shot per recording: true once Core fired the issue #500
     /// `.micAttenuatedByForeignVoiceProcessing` cue. Reset at the next start.
     @Published private(set) var micAttenuationCueObserved: Bool = false
+    /// One-shot per recording: set only after Core detects a real Bluetooth
+    /// mic route outage and performs its bounded stabilization decision.
+    @Published private(set) var routeStabilityWarningOutcome: CaptureRouteStabilizationOutcome?
 
     var onUnexpectedRecordingComplete: ((CaptureStopResult) -> Void)?
 
@@ -88,6 +91,7 @@ final class MeetingCaptureBridge: ObservableObject {
 
         errorMessage = nil
         micAttenuationCueObserved = false
+        routeStabilityWarningOutcome = nil
 
         // Apply the user's microphone-processing choice before each recording.
         // Read once at start; mid-session changes don't take effect until the
@@ -263,6 +267,8 @@ final class MeetingCaptureBridge: ObservableObject {
                     NSSound(named: "Pop")?.play()
                 case .micAttenuatedByForeignVoiceProcessing:
                     self?.micAttenuationCueObserved = true
+                case .meetingRouteStabilityWarning(let outcome):
+                    self?.routeStabilityWarningOutcome = outcome
                 }
             }
         }
