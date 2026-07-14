@@ -473,6 +473,16 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertFalse(failure.isRetryable)
     }
 
+    func testFailedTranscriptionRetryabilityKeepsUnusableMicrophonePermanent() {
+        let failure = FailedTranscription(
+            micAudioURL: testRoot.appendingPathComponent("mic.wav"),
+            systemAudioURL: testRoot.appendingPathComponent("system.wav"),
+            errorMessage: "Microphone audio was not usable. Open Transcripted Home to retry the saved meeting."
+        )
+
+        XCTAssertFalse(failure.isRetryable)
+    }
+
     func testLoadHealsMissingMicAudioToMergedSibling() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

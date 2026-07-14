@@ -84,6 +84,9 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         if normalized.contains("no samples recorded") || normalized.contains("empty audio file") {
             return .emptyAudioFile
         }
+        if normalized.contains("microphone audio was not usable") {
+            return .microphoneAudioUnusable
+        }
         if normalized.contains("no speech detected") || normalized.contains("no speech was found") {
             return .noSpeechDetected
         }

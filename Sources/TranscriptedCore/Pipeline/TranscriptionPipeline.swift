@@ -67,7 +67,11 @@ extension Transcription {
             var systemSamples = try AudioResampler.loadAndResample(url: systemURL, targetRate: 16000)
             var micSamples: [Float]
             if let micURL {
-                micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
+                do {
+                    micSamples = try AudioResampler.loadAndResample(url: micURL, targetRate: 16000)
+                } catch PipelineError.emptyAudioFile {
+                    throw PipelineError.microphoneAudioUnusable
+                }
             } else {
                 micSamples = []
             }
@@ -89,6 +93,10 @@ extension Transcription {
                 context["suggested_gain"] = String(format: "%.2f", AudioSignalRecovery.normalizationGain(for: rawMicAnalysis))
                 AppLogger.transcription.info("Analyzed meeting mic signal", context)
                 micSignalAnalysis = rawMicAnalysis
+                guard AudioSignalRecovery.hasUsableCaptureSignal(samples: micSamples, sampleRate: 16000) else {
+                    AppLogger.transcription.error("Microphone artifact had no usable capture signal", context)
+                    throw PipelineError.microphoneAudioUnusable
+                }
             } else {
                 micSignalAnalysis = nil
             }

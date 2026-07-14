@@ -4,6 +4,7 @@ enum MeetingFailureKind: String {
     case systemAudioPermission = "system_audio_permission"
     case microphonePermission = "microphone_permission"
     case microphoneMissing = "microphone_missing"
+    case microphoneAudioUnusable = "microphone_audio_unusable"
     case audioDeviceUnavailable = "audio_device_unavailable"
     case recordingTooShort = "recording_too_short"
     case emptyAudio = "empty_audio"
@@ -94,6 +95,14 @@ enum MeetingFailureKind: String {
 
         if normalized.contains("no microphone found") {
             return .microphoneMissing
+        }
+
+        if normalized.contains(anyOf: [
+            "microphone audio was not usable",
+            "microphone audio was unusable",
+            "microphone artifact had no usable capture signal",
+        ]) {
+            return .microphoneAudioUnusable
         }
 
         if normalized.contains(anyOf: [
