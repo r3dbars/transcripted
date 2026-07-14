@@ -379,6 +379,7 @@ swiftc \
   "${REPO_ROOT}/Sources/Meeting/LocalMeetingSummarizer.swift" \
   "${REPO_ROOT}/Sources/Meeting/MeetingArtifactRenamer.swift" \
   "${REPO_ROOT}/Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift" \
+  "${REPO_ROOT}/Sources/TranscriptedCore/Utilities/DateFormattingHelper.swift" \
   -framework FoundationModels \
   -parse-as-library \
   -o "${BIN}"

@@ -146,7 +146,11 @@ extension Transcription {
             }
 
             AppLogger.transcription.info("Running offline diarization on system audio")
-            let rawSegments = try await diarization.diarizeOffline(samples: systemSamples, sampleRate: 16000)
+            let rawSegments = try await Self.diarizeSystemAudio(
+                samples: systemSamples,
+                diarization: diarization,
+                hasMicTrack: micURL != nil && !micSamples.isEmpty
+            )
 
             // Post-process diarization segments, but skip the broad pairwise merge
             // phase for PyAnnote/VBx output. Small-cluster absorption, same-voice
@@ -1083,6 +1087,36 @@ extension Transcription {
         case 0.3...: return 0.5
         default: return 1.0
         }
+    }
+
+    /// A silent system-audio channel is valid when the meeting still has a mic
+    /// track. Treat only the diarizer's explicit no-speech result as an empty
+    /// remote channel; model, format, cancellation, and other failures must
+    /// continue to propagate.
+    nonisolated static func diarizeSystemAudio(
+        samples: [Float],
+        diarization: any DiarizationEngine,
+        hasMicTrack: Bool
+    ) async throws -> [SpeakerSegment] {
+        do {
+            return try await diarization.diarizeOffline(samples: samples, sampleRate: 16000)
+        } catch {
+            guard hasMicTrack, isExplicitNoSpeechError(error) else { throw error }
+            AppLogger.transcription.info("System audio contained no speech; continuing with mic track")
+            return []
+        }
+    }
+
+    nonisolated static func isExplicitNoSpeechError(_ error: Error) -> Bool {
+        if let diarizationError = error as? DiarizationResultError,
+           case .noSpeechDetected = diarizationError {
+            return true
+        }
+        if let pipelineError = error as? PipelineError,
+           case .noSpeechDetected = pipelineError {
+            return true
+        }
+        return false
     }
 
     // MARK: - Utterance Merging

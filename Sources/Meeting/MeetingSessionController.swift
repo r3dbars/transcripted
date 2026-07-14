@@ -215,6 +215,17 @@ final class MeetingSessionController: ObservableObject {
         isCaptureSessionActive || isFinishingRecording
     }
 
+    var canShareMicWithDictation: Bool {
+        isCaptureSessionActive && !isFinishingRecording
+    }
+
+    /// Check capture ownership and arm borrowed dictation without an `await`
+    /// between those actions, so meeting stop cannot slip into the handoff.
+    func startDictationFromActiveMeetingMic() -> Bool {
+        guard canShareMicWithDictation else { return false }
+        return sttRouter.startRecordingFromSharedMeetingMic()
+    }
+
     // MARK: - State-transition callbacks (for owned subsystems)
 
     /// FailedMeetingStore / TranscriptionQueueCoordinator drive some of the
@@ -501,10 +512,12 @@ final class MeetingSessionController: ObservableObject {
         micBoostPromptOutcome = .notShown
         isMicBoostPromptVisible = false
         activeRecordingSuggestedTitle = resolvedMeetingTitle
+        installSharedDictationMicRelay()
         startLiveCodexSessionIfNeeded(title: resolvedMeetingTitle)
 
         let started = await capture.startRecording()
         guard started else {
+            clearSharedDictationMicRelay()
             finishLiveCodexSessionForActiveRecording(status: .failed, shouldAwaitFinalTranscript: false)
             activeRecordingTrigger = .unknown
             clearActiveRecordingIdentity()
@@ -578,6 +591,17 @@ final class MeetingSessionController: ObservableObject {
             )
         )
         return true
+    }
+
+    private func installSharedDictationMicRelay() {
+        let dictationEngine = sttRouter.parakeetEngine
+        capture.setSharedDictationMicHandler { [weak dictationEngine] buffer in
+            dictationEngine?.appendSharedMeetingMicBuffer(buffer)
+        }
+    }
+
+    private func clearSharedDictationMicRelay() {
+        capture.setSharedDictationMicHandler(nil)
     }
 
     private func resolveStartRecordingPermissionDecision(
@@ -731,6 +755,8 @@ final class MeetingSessionController: ObservableObject {
                 result: lateResult
             )
         }
+        clearSharedDictationMicRelay()
+        await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let shouldAwaitFinalLiveCodexTranscript = files.micURL != nil && !stopResult.didTimeOut
         finishLiveCodexSessionForActiveRecording(
@@ -1147,6 +1173,8 @@ final class MeetingSessionController: ObservableObject {
         )
 
         let stopResult = await capture.stopAndDiscardFiles()
+        clearSharedDictationMicRelay()
+        await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         finishLiveCodexSessionForActiveRecording(status: .cancelled, shouldAwaitFinalTranscript: false)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
@@ -1536,6 +1564,10 @@ final class MeetingSessionController: ObservableObject {
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
+        clearSharedDictationMicRelay()
+        Task { @MainActor [weak self] in
+            await self?.sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
+        }
 
         let recordingSnapshot = makeRecordingStopSnapshot()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
@@ -1760,6 +1792,7 @@ final class MeetingSessionController: ObservableObject {
                 guard let self else { return }
                 self.audioLevel = level
                 self.latestMicLevel = level
+                self.sttRouter.updateSharedMeetingMicAudioLevel(level)
                 self.observeAudioActivity()
             }
             .store(in: &cancellables)

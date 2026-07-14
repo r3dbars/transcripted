@@ -268,8 +268,35 @@ class DictationSessionController: ObservableObject {
         guard #available(macOS 14.0, *) else { return nil }
         return DictationStartAvailabilityPolicy.unavailableReason(
             hasActiveMeetingCapture: appState.meetingSession.shouldBlockDictationForActiveMeetingCapture,
+            canShareMeetingMic: appState.meetingSession.canShareMicWithDictation,
             isSpeakerReviewPending: appState.meetingSession.isSpeakerReviewPending
         )
+    }
+
+    private func canUseActiveMeetingMicForDictation(appState: TranscriptedAppState) -> Bool {
+        guard #available(macOS 14.0, *) else { return false }
+        return appState.meetingSession.canShareMicWithDictation
+    }
+
+    private func startDictationAudioRecording(
+        appState: TranscriptedAppState,
+        isRecoveryAttempt: Bool = false
+    ) async -> Bool {
+        if canUseActiveMeetingMicForDictation(appState: appState) {
+            if appState.meetingSession.startDictationFromActiveMeetingMic() {
+                return true
+            }
+            // The meeting may have entered stop between the caller's first
+            // observation and the atomic handoff. Only fall back to the normal
+            // mic once capture no longer owns the route.
+            if canUseActiveMeetingMicForDictation(appState: appState) {
+                return false
+            }
+        }
+        if isRecoveryAttempt {
+            return await appState.sttRouter.startRecordingRecoveryAttempt()
+        }
+        return await appState.sttRouter.startRecording()
     }
 
     /// Actually start dictation recording — called directly from startDictation
@@ -279,9 +306,10 @@ class DictationSessionController: ObservableObject {
 
         guard let appState = appState else { return }
 
+        let canUseMeetingMic = canUseActiveMeetingMicForDictation(appState: appState)
         switch DictationRecordingStartOverlayPolicy.plan(
-            isRecovering: appState.sttRouter.isRecovering,
-            inputFormatReady: appState.sttRouter.inputFormatReady
+            isRecovering: canUseMeetingMic ? false : appState.sttRouter.isRecovering,
+            inputFormatReady: canUseMeetingMic ? true : appState.sttRouter.inputFormatReady
         ) {
         case .skipLoadingAndStartRecording:
             // Fast path — engine is ready right now. The actual CoreAudio start
@@ -294,7 +322,7 @@ class DictationSessionController: ObservableObject {
                       let appState = self.appState,
                       let overlayController = self.overlayController else { return }
                 let startAttemptedAt = CFAbsoluteTimeGetCurrent()
-                let started = await appState.sttRouter.startRecording()
+                let started = await self.startDictationAudioRecording(appState: appState)
                 let startMs = Int((CFAbsoluteTimeGetCurrent() - startAttemptedAt) * 1000)
                 guard !Task.isCancelled, self.isDictating else {
                     if started {
@@ -497,7 +525,7 @@ class DictationSessionController: ObservableObject {
                         ]
                     )
                 )
-                let started = await appState.sttRouter.startRecordingRecoveryAttempt()
+                let started = await startDictationAudioRecording(appState: appState, isRecoveryAttempt: true)
                 guard !Task.isCancelled, isDictating else {
                     if started {
                         await appState.sttRouter.stopRecording()
@@ -538,7 +566,7 @@ class DictationSessionController: ObservableObject {
 
             case .startRecording:
                 startAttempts += 1
-                let started = await appState.sttRouter.startRecording()
+                let started = await startDictationAudioRecording(appState: appState)
                 guard !Task.isCancelled, isDictating else {
                     if started {
                         await appState.sttRouter.stopRecording()

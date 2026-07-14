@@ -41,15 +41,20 @@ struct DictationRecordingStartLifecyclePolicy {
 }
 
 struct DictationStartAvailabilityPolicy {
-    static let activeMeetingCaptureMessage = "Finish or save the meeting recording before starting dictation."
+    static let meetingFinishingMessage = "Wait for the meeting recording to finish saving before starting dictation."
     static let speakerReviewMessage = "Speaker review can wait. Dictation is available."
 
     static func unavailableReason(
         hasActiveMeetingCapture: Bool,
+        canShareMeetingMic: Bool,
         isSpeakerReviewPending: Bool
     ) -> String? {
-        if hasActiveMeetingCapture {
-            return activeMeetingCaptureMessage
+        // Active meeting capture is a supported source: dictation borrows the
+        // meeting mic stream instead of opening another audio graph. During
+        // finalization that stream is no longer safe to borrow, so wait for
+        // teardown instead of starting a competing audio graph.
+        if hasActiveMeetingCapture, !canShareMeetingMic {
+            return meetingFinishingMessage
         }
         _ = isSpeakerReviewPending
         return nil
