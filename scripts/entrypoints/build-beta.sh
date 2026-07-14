@@ -425,6 +425,7 @@ fi
 # Bundle the FluidAudio 0.15.x offline diarizer cache used by DiarizationService.
 DIARIZER_SRC="$HOME/Library/Application Support/FluidAudio/Models/speaker-diarization"
 DIARIZER_DEST="$APP_BUNDLE/Contents/Resources/offline-diarizer-models"
+DIARIZER_RUNTIME_DIR="$DIARIZER_DEST/speaker-diarization"
 if [ "$BUNDLE_DIARIZER_MODELS" = "0" ]; then
     echo "⚠️  Skipping bundled offline diarizer models because BUNDLE_DIARIZER_MODELS=0"
     echo "   Runtime model download may occur on first meeting."
@@ -435,7 +436,8 @@ elif [ -d "$DIARIZER_SRC/Segmentation.mlmodelc" ] \
     && [ -f "$DIARIZER_SRC/plda-parameters.json" ]; then
     echo "Bundling offline diarizer models..."
     mkdir -p "$DIARIZER_DEST"
-    ditto "$DIARIZER_SRC" "$DIARIZER_DEST"
+    rm -rf "$DIARIZER_RUNTIME_DIR"
+    ditto "$DIARIZER_SRC" "$DIARIZER_RUNTIME_DIR"
 else
     if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
         echo "⚠️  Offline diarizer models not found — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"

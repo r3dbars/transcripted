@@ -1591,7 +1591,9 @@ func testRepoCommandContract() {
                 && betaBuildScript.contains("offline-diarizer-models")
                 && betaBuildScript.contains("speaker-diarization")
                 && betaBuildScript.contains("PldaRho.mlmodelc")
-                && betaBuildScript.contains("plda-parameters.json"),
+                && betaBuildScript.contains("plda-parameters.json")
+                && betaBuildScript.contains("DIARIZER_RUNTIME_DIR=\"$DIARIZER_DEST/speaker-diarization\"")
+                && betaBuildScript.contains("ditto \"$DIARIZER_SRC\" \"$DIARIZER_RUNTIME_DIR\""),
             "beta release build should bundle the offline diarizer models used by meeting capture"
         )
         assertTrue(

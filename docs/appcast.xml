@@ -13,7 +13,7 @@
       <sparkle:shortVersionString>1.1.49</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
       <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.49/Transcripted-1.1.49.dmg" length="512800562" type="application/octet-stream" sparkle:edSignature="OVV4aTbddp9tp3FlpPjcn9iV416p+hctzOWZvgIaOZGKrxxBTGJiWuhThqOBNFqhgjRjzpNlleIfB72crtjpCQ==" />
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.49/Transcripted-1.1.49.dmg" length="512800112" type="application/octet-stream" sparkle:edSignature="pIXHrdRvGkIm+10WNQkdB+z+vJnTa7NDTckvMPZqEOTN3UkhVU0lBSrgXGOMkvzgPBf4/4zTsjndQWNb79RbCg==" />
       <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.49</link>
       <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.49</sparkle:releaseNotesLink>
     </item>
