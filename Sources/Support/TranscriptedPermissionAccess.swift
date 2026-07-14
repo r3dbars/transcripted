@@ -18,7 +18,6 @@ enum TranscriptedPermissionAccess {
 
     private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"
     private static let systemAudioRecordingKnownKey = "systemAudioRecordingPermissionKnown"
-    @MainActor private static var activeSystemAudioRequester: SystemAudioPermissionRequester?
     @MainActor private static var activeSystemAudioRevalidator: Task<Bool, Never>?
 
     static func isGranted(_ kind: TranscriptedPermissionKind) -> Bool {
@@ -269,16 +268,17 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     private static func performSystemAudioRecordingAccessRequest() async -> Bool {
-        return await withCheckedContinuation { continuation in
-            let requester = SystemAudioPermissionRequester()
-            activeSystemAudioRequester = requester
-            requester.requestAccess { granted in
-                Task { @MainActor in
-                    activeSystemAudioRequester = nil
-                    continuation.resume(returning: granted)
-                }
+        let requester = SystemAudioPermissionRequester()
+        let attempt = SystemAudioPermissionRequestAttempt()
+
+        return await attempt.awaitResult(
+            start: { completion in
+                requester.requestAccess(completion: completion)
+            },
+            cleanup: {
+                requester.cancel()
             }
-        }
+        )
     }
 
     @MainActor
@@ -302,67 +302,197 @@ extension Notification.Name {
     static let transcriptedPermissionsDidChange = Notification.Name("transcriptedPermissionsDidChange")
 }
 
+/// Bounds one callback-driven System Audio Recording permission request.
+///
+/// ScreenCaptureKit has no completion guarantee for every TCC or daemon state.
+/// This main-actor gate makes timeout, caller cancellation, and real callbacks
+/// race through one terminal result so a late callback cannot resume a checked
+/// continuation twice or revive a finished request.
+@MainActor
+final class SystemAudioPermissionRequestAttempt {
+    typealias Completion = (Bool) -> Void
+    typealias TimeoutScheduler = @MainActor (@escaping @MainActor () -> Void) -> @MainActor () -> Void
+
+    private let scheduleTimeout: TimeoutScheduler
+    private let onTimeout: () -> Void
+    private let onResolved: (Bool) -> Void
+    private var continuation: CheckedContinuation<Bool, Never>?
+    private var cancelTimeout: (() -> Void)?
+    private var cleanup: (() -> Void)?
+    private var result: Bool?
+
+    init(
+        scheduleTimeout: @escaping TimeoutScheduler = SystemAudioPermissionRequestAttempt.liveTimeoutScheduler,
+        onTimeout: @escaping () -> Void = {},
+        onResolved: @escaping (Bool) -> Void = { _ in }
+    ) {
+        self.scheduleTimeout = scheduleTimeout
+        self.onTimeout = onTimeout
+        self.onResolved = onResolved
+    }
+
+    func awaitResult(
+        start: @escaping (@escaping Completion) -> Void,
+        cleanup: @escaping () -> Void
+    ) async -> Bool {
+        await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { continuation in
+                if let result {
+                    continuation.resume(returning: result)
+                    return
+                }
+
+                self.continuation = continuation
+                self.cleanup = cleanup
+                self.cancelTimeout = scheduleTimeout { [weak self] in
+                    self?.timeout()
+                }
+                start { [weak self] granted in
+                    Task { @MainActor [weak self] in
+                        self?.finish(granted)
+                    }
+                }
+            }
+        }, onCancel: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.finish(false)
+            }
+        })
+    }
+
+    private func timeout() {
+        guard result == nil else { return }
+        onTimeout()
+        finish(false)
+    }
+
+    private func finish(_ granted: Bool) {
+        guard result == nil else { return }
+        result = granted
+
+        let continuation = continuation
+        self.continuation = nil
+        let cancelTimeout = cancelTimeout
+        self.cancelTimeout = nil
+        let cleanup = cleanup
+        self.cleanup = nil
+
+        cancelTimeout?()
+        cleanup?()
+        onResolved(granted)
+        continuation?.resume(returning: granted)
+    }
+
+    private static func liveTimeoutScheduler(
+        _ action: @escaping @MainActor () -> Void
+    ) -> @MainActor () -> Void {
+        let task = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: TranscriptedConstants.systemAudioPermissionRequestTimeout)
+            } catch {
+                return
+            }
+            action()
+        }
+        return {
+            task.cancel()
+        }
+    }
+}
+
 @available(macOS 26.0, *)
+@MainActor
 private final class SystemAudioPermissionRequester: NSObject, SCStreamOutput {
     private var stream: SCStream?
     private let sampleHandlerQueue = DispatchQueue(label: "Transcripted.SystemAudioPermission")
     private var completion: ((Bool) -> Void)?
+    private var stopCaptureRequested = false
 
     func requestAccess(completion: @escaping (Bool) -> Void) {
         self.completion = completion
 
         SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { [weak self] content, error in
-            guard let self else { return }
-
-            if error != nil {
-                self.finish(granted: false)
-                return
-            }
-
-            guard let display = content?.displays.first else {
-                self.finish(granted: false)
-                return
-            }
-
-            let filter = SCContentFilter(display: display, excludingWindows: [])
-            let config = SCStreamConfiguration()
-            config.capturesAudio = true
-            config.excludesCurrentProcessAudio = true
-            config.sampleRate = 48000
-            config.channelCount = 2
-            config.width = 2
-            config.height = 2
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-
-            let stream = SCStream(filter: filter, configuration: config, delegate: nil)
-            self.stream = stream
-
-            do {
-                try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: self.sampleHandlerQueue)
-            } catch {
-                self.finish(granted: false)
-                return
-            }
-
-            stream.startCapture { [weak self] error in
-                guard let self else { return }
-
-                if error != nil {
-                    self.finish(granted: false)
-                    return
-                }
-
-                stream.stopCapture { [weak self] _ in
-                    self?.finish(granted: true)
-                }
+            Task { @MainActor [weak self] in
+                self?.handleShareableContent(content, error: error)
             }
         }
     }
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {}
+    func cancel() {
+        completion = nil
+        guard let stream else { return }
+
+        self.stream = nil
+        guard !stopCaptureRequested else { return }
+        stopCaptureRequested = true
+        stream.stopCapture { _ in }
+    }
+
+    nonisolated func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of type: SCStreamOutputType
+    ) {}
+
+    private func handleShareableContent(_ content: SCShareableContent?, error: Error?) {
+        guard completion != nil else { return }
+
+        if error != nil {
+            finish(granted: false)
+            return
+        }
+
+        guard let display = content?.displays.first else {
+            finish(granted: false)
+            return
+        }
+
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let config = SCStreamConfiguration()
+        config.capturesAudio = true
+        config.excludesCurrentProcessAudio = true
+        config.sampleRate = 48000
+        config.channelCount = 2
+        config.width = 2
+        config.height = 2
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+
+        let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+        self.stream = stream
+        stopCaptureRequested = false
+
+        do {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleHandlerQueue)
+        } catch {
+            finish(granted: false)
+            return
+        }
+
+        stream.startCapture { [weak self] error in
+            Task { @MainActor [weak self] in
+                self?.handleStartCapture(error: error)
+            }
+        }
+    }
+
+    private func handleStartCapture(error: Error?) {
+        guard let stream, completion != nil else { return }
+
+        if error != nil {
+            finish(granted: false)
+            return
+        }
+
+        stopCaptureRequested = true
+        stream.stopCapture { [weak self] error in
+            Task { @MainActor [weak self] in
+                guard let self, self.stream != nil, self.completion != nil else { return }
+                self.finish(granted: error == nil)
+            }
+        }
+    }
 
     private func finish(granted: Bool) {
-        stream = nil
         let completion = completion
         self.completion = nil
         completion?(granted)

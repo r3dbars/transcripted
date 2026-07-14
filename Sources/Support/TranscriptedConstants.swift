@@ -80,6 +80,12 @@ enum TranscriptedConstants {
     /// neither the success nor error publisher has fired.
     static let meetingStartTimeout: UInt64 = 5_000_000_000  // 5 seconds
 
+    /// Bounds the ScreenCaptureKit probe used to verify System Audio Recording
+    /// access before meeting capture. A stalled TCC/ScreenCaptureKit callback
+    /// must return an honest denied result instead of leaving the meeting UI
+    /// in its starting state forever.
+    static let systemAudioPermissionRequestTimeout: UInt64 = 12_000_000_000  // 12 seconds
+
     /// Base timeout for waiting on meeting capture file-close callbacks after
     /// stop. Long recordings can need more time to flush and merge audio, so
     /// call `meetingStopTimeout(forRecordingDuration:)` for live capture.
