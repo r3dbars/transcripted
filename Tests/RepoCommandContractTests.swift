@@ -338,6 +338,11 @@ func testRepoCommandContract() {
                 && buildDepsScript.contains("\"$MLX_SWIFT_LM_REVISION\"*"),
             "build-deps.sh should verify the resolved mlx-swift-lm checkout still matches the pinned revision"
         )
+        assertTrue(
+            buildDepsScript.contains("SWIFT_JINJA_VERSION=\"${SWIFT_JINJA_VERSION:-2.3.6}\"")
+                && buildDepsScript.contains("swift-jinja.git\", exact: \"SWIFT_JINJA_VERSION_PLACEHOLDER\""),
+            "build-deps.sh should pin the last swift-jinja release compatible with swift-transformers 1.2.1"
+        )
     }
 
     runSuite("Repo command contract - fast test runner generation is per-process") {

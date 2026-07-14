@@ -52,6 +52,7 @@ WHISPERKIT_MODULE="$DEPS_MODULES/WhisperKit.swiftmodule/arm64-apple-macos.swiftm
 FLUID_AUDIO_VERSION="${FLUID_AUDIO_VERSION:-0.15.4}"
 MLX_SWIFT_LM_REVISION="${MLX_SWIFT_LM_REVISION:-25b00d4}"
 SWIFT_TRANSFORMERS_VERSION="${SWIFT_TRANSFORMERS_VERSION:-1.2.1}"
+SWIFT_JINJA_VERSION="${SWIFT_JINJA_VERSION:-2.3.6}"
 ARGMAX_OSS_SWIFT_VERSION="${ARGMAX_OSS_SWIFT_VERSION:-v0.18.0}"
 ARGMAX_OSS_SWIFT_REVISION="${ARGMAX_OSS_SWIFT_REVISION:-e2adabbe7d98dc4d0ab9a5b75424ecc42a9cdbef}"
 SPARKLE_VERSION="${SPARKLE_VERSION:-2.9.1}"
@@ -305,6 +306,7 @@ resolve_package_graph() {
     echo "  FluidAudio:         $FLUID_AUDIO_VERSION"
     echo "  mlx-swift-lm rev:   $MLX_SWIFT_LM_REVISION"
     echo "  swift-transformers: $SWIFT_TRANSFORMERS_VERSION"
+    echo "  swift-jinja:        $SWIFT_JINJA_VERSION"
     echo "  Argmax WhisperKit:  $ARGMAX_OSS_SWIFT_VERSION ($ARGMAX_OSS_SWIFT_REVISION)"
 
     if "${resolve_cmd[@]}"; then
@@ -415,6 +417,10 @@ let package = Package(
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "FLUID_AUDIO_VERSION_PLACEHOLDER"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", revision: "MLX_SWIFT_LM_REVISION_PLACEHOLDER"),
         .package(url: "https://github.com/huggingface/swift-transformers", exact: "SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER"),
+        // swift-transformers 1.2.1 still uses String-keyed Jinja objects.
+        // swift-jinja 2.4.0 changed those keys to ObjectKey and does not compile
+        // with that pinned transformers release, so keep the last compatible tag.
+        .package(url: "https://github.com/huggingface/swift-jinja.git", exact: "SWIFT_JINJA_VERSION_PLACEHOLDER"),
     ],
     targets: [
         // WhisperKit is vendored from argmaxinc/argmax-oss-swift instead of
@@ -471,8 +477,9 @@ PACKAGE_EOF
 FLUID_AUDIO_VERSION="$FLUID_AUDIO_VERSION" \
 MLX_SWIFT_LM_REVISION="$MLX_SWIFT_LM_REVISION" \
 SWIFT_TRANSFORMERS_VERSION="$SWIFT_TRANSFORMERS_VERSION" \
+SWIFT_JINJA_VERSION="$SWIFT_JINJA_VERSION" \
 perl -0pi \
-    -e 's/FLUID_AUDIO_VERSION_PLACEHOLDER/$ENV{FLUID_AUDIO_VERSION}/g; s/MLX_SWIFT_LM_REVISION_PLACEHOLDER/$ENV{MLX_SWIFT_LM_REVISION}/g; s/SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER/$ENV{SWIFT_TRANSFORMERS_VERSION}/g' \
+    -e 's/FLUID_AUDIO_VERSION_PLACEHOLDER/$ENV{FLUID_AUDIO_VERSION}/g; s/MLX_SWIFT_LM_REVISION_PLACEHOLDER/$ENV{MLX_SWIFT_LM_REVISION}/g; s/SWIFT_TRANSFORMERS_VERSION_PLACEHOLDER/$ENV{SWIFT_TRANSFORMERS_VERSION}/g; s/SWIFT_JINJA_VERSION_PLACEHOLDER/$ENV{SWIFT_JINJA_VERSION}/g' \
     "$DEPS_BUILD/Package.swift"
 
 cat > "$DEPS_BUILD/Sources/Shim.swift" << 'SWIFT_EOF'
@@ -488,6 +495,7 @@ cd "$DEPS_BUILD"
 export FLUID_AUDIO_VERSION
 export MLX_SWIFT_LM_REVISION
 export SWIFT_TRANSFORMERS_VERSION
+export SWIFT_JINJA_VERSION
 resolve_package_graph
 build_release_graph
 
