@@ -39,7 +39,21 @@ extension Audio {
             guard let activeInputNode = self.inputNode else {
                 throw NSError(domain: "Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine input node unavailable"])
             }
-            applyMeetingInputDevice(to: activeInputNode, operation: "start_recording")
+            let inputSelectionOutcome = applyMeetingInputDevice(
+                to: activeInputNode,
+                operation: "start_recording"
+            )
+            guard !MeetingInputDeviceSelectionPolicy.shouldAbortMeetingStart(
+                after: inputSelectionOutcome
+            ) else {
+                throw NSError(
+                    domain: "Audio",
+                    code: 4,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Could not safely switch microphones. Check your input device and try again."
+                    ]
+                )
+            }
             recordRecordingStartCapturedInput(deviceID: activeInputNode.auAudioUnit.deviceID)
             armVoiceProcessing(on: activeInputNode)
 
