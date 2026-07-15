@@ -1794,7 +1794,7 @@ func testRepoCommandContract() {
         )
         let delayRange = autoEnterBlock.range(of: "Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)")
         let readinessRange = autoEnterBlock.range(of: "await textPaster.waitForClipboardReadyForAutoEnter()")
-        let sendRange = autoEnterBlock.range(of: "return autoSender.send(DictationAutoSendPreferences.sendKey(), target: sessionPasteTarget)")
+        let sendRange = autoEnterBlock.range(of: "return autoSender.send(autoSendRequestDecision.key, target: sessionPasteTarget)")
 
         assertTrue(
             contents.contains("overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? \"Pasted\")")
@@ -1808,6 +1808,12 @@ func testRepoCommandContract() {
                 && delayRange!.lowerBound < readinessRange!.lowerBound
                 && readinessRange!.lowerBound < sendRange!.lowerBound,
             "Auto Enter should sleep briefly, wait for clipboard read/readiness, then send the follow-up key"
+        )
+        assertTrue(
+            contents.contains("autoSendRequestDecision = DictationAutoSendPolicy.requestDecision(")
+                && contents.contains("prepareForAutoSend: autoSendRequestDecision.expected")
+                && autoEnterBlock.contains("guard autoSendRequestDecision.expected,"),
+            "Auto Enter should use one captured policy decision for paste preparation and key dispatch"
         )
     }
 

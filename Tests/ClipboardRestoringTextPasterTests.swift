@@ -6,6 +6,41 @@ import Foundation
 
 func testClipboardRestoringTextPaster() async {
     await MainActor.run {
+        runSuite("DictationTargetConfirmationMode stays coarse and privacy-safe") {
+            assertEqual(
+                DictationTargetConfirmationMode.resolve(
+                    outcome: .pasted,
+                    diagnostic: ClipboardPasteConfirmationDiagnostic(
+                        event: "dictation_paste_confirmed",
+                        context: ["confirmation_mode": "text_value"]
+                    )
+                ),
+                .textValue,
+                "AX value confirmation should keep only its coarse mode"
+            )
+            assertEqual(
+                DictationTargetConfirmationMode.resolve(
+                    outcome: .copied("read only", reason: .pasteConfirmationUnavailableAutoSendEligible),
+                    diagnostic: nil
+                ),
+                .clipboardReadOnly,
+                "selected target clipboard reads should be distinguishable without naming the app"
+            )
+            assertEqual(
+                DictationTargetConfirmationMode.resolve(
+                    outcome: .copied("unconfirmed", reason: .pasteConfirmationUnavailable),
+                    diagnostic: ClipboardPasteConfirmationDiagnostic(
+                        event: "dictation_paste_confirmation_diagnostics",
+                        context: ["clipboard_read_after_dispatch": "false"]
+                    )
+                ),
+                .none,
+                "unconfirmed targets should not claim a confirmation mode"
+            )
+        }
+    }
+
+    await MainActor.run {
         runSuite("ClipboardRestoringTextPaster confirmation bounds synchronous AX reads") {
             let source = try! String(
                 contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",

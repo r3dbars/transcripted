@@ -52,9 +52,92 @@ func testDictationAutoSendPreferences() {
             "disabled Auto Enter should keep the plain pasted confirmation"
         )
         assertNil(
-            DictationAutoSendOutcome.failed("Accessibility is off").confirmationTitle,
+            DictationAutoSendOutcome.failed(.accessibilityMissing).confirmationTitle,
             "failed Auto Enter should route to the visible error path instead"
         )
+    }
+
+    runSuite("DictationAutoSendPolicy explains why Auto Enter was or was not expected") {
+        let expected = DictationAutoSendPolicy.requestDecision(
+            isEnabled: true,
+            key: .commandEnter,
+            text: "Send this",
+            duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+            sourceBundleID: "com.example.Chat",
+            allowedBundleIDs: ["com.example.Chat"]
+        )
+        assertEqual(
+            expected,
+            DictationAutoSendRequestDecision(expected: true, key: .commandEnter, blockReason: .none),
+            "selected apps should expose an expected Command+Enter decision without app identity telemetry"
+        )
+
+        let featureOff = DictationAutoSendPolicy.requestDecision(
+            isEnabled: false,
+            key: .commandEnter,
+            text: "Send this",
+            duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+            sourceBundleID: "com.example.Chat",
+            allowedBundleIDs: ["com.example.Chat"]
+        )
+        assertEqual(featureOff.blockReason, .featureOff, "disabled Auto Enter should have a coarse block reason")
+
+        let appNotAllowed = DictationAutoSendPolicy.requestDecision(
+            isEnabled: true,
+            key: .enter,
+            text: "Send this",
+            duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+            sourceBundleID: "com.example.Notes",
+            allowedBundleIDs: ["com.example.Chat"]
+        )
+        assertEqual(appNotAllowed.blockReason, .appNotAllowed, "unselected apps should have a coarse block reason")
+    }
+
+    runSuite("DictationAutoSendTelemetry distinguishes success, paste blocks, and send failures") {
+        let request = DictationAutoSendRequestDecision(expected: true, key: .commandEnter, blockReason: .none)
+
+        let success = DictationAutoSendTelemetry.snapshot(
+            request: request,
+            pasteOutcome: .pasted,
+            sendOutcome: .sent(.commandEnter)
+        )
+        assertEqual(success.expected, true, "successful Auto Enter should preserve the expected denominator")
+        assertEqual(success.blockReason, .none, "successful Auto Enter should not report a block")
+        assertEqual(success.analyticsProperties["auto_send_key"], "command_enter", "telemetry should retain only the coarse key choice")
+
+        let unconfirmed = DictationAutoSendTelemetry.snapshot(
+            request: request,
+            pasteOutcome: .copied("unconfirmed", reason: .pasteConfirmationUnavailable),
+            sendOutcome: .disabled
+        )
+        assertEqual(unconfirmed.expected, true, "an eligible user configuration should remain expected when paste evidence blocks sending")
+        assertEqual(unconfirmed.blockReason, .pasteConfirmationUnavailable, "the historical false-negative path should be queryable")
+
+        let targetChanged = DictationAutoSendTelemetry.snapshot(
+            request: request,
+            pasteOutcome: .pasted,
+            sendOutcome: .failed(.targetChanged)
+        )
+        assertEqual(targetChanged.blockReason, .targetChanged, "post-paste target changes should remain distinguishable")
+
+        let featureOffRequest = DictationAutoSendRequestDecision(
+            expected: false,
+            key: .commandEnter,
+            blockReason: .featureOff
+        )
+        let featureOff = DictationAutoSendTelemetry.snapshot(
+            request: featureOffRequest,
+            pasteOutcome: .pasted,
+            sendOutcome: .disabled
+        )
+        assertEqual(featureOff.blockReason, .featureOff, "a disabled request should retain its real policy reason instead of looking cancelled")
+
+        let cancelled = DictationAutoSendTelemetry.snapshot(
+            request: request,
+            pasteOutcome: .pasted,
+            sendOutcome: .disabled
+        )
+        assertEqual(cancelled.blockReason, .cancelled, "only an expected eligible send that stops should be classified as cancelled")
     }
 
     runSuite("DictationAutoSendPolicy sends only after an eligible paste dispatch with text") {

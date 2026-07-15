@@ -56,6 +56,37 @@ struct ClipboardPasteConfirmationDiagnostic: Equatable {
     let context: [String: String]
 }
 
+enum DictationTargetConfirmationMode: String, Equatable {
+    case textValue = "text_value"
+    case selectionRange = "selection_range"
+    case changeNotification = "change_notification"
+    case clipboardReadOnly = "clipboard_read_only"
+    case none
+
+    static func resolve(
+        outcome: TextPasteOutcome,
+        diagnostic: ClipboardPasteConfirmationDiagnostic?
+    ) -> DictationTargetConfirmationMode {
+        if outcome.copyReason == .pasteConfirmationUnavailableAutoSendEligible {
+            return .clipboardReadOnly
+        }
+
+        guard diagnostic?.event == "dictation_paste_confirmed" else {
+            return .none
+        }
+        switch diagnostic?.context["confirmation_mode"] {
+        case "text_value":
+            return .textValue
+        case "selection_range":
+            return .selectionRange
+        case "target_change_notification":
+            return .changeNotification
+        default:
+            return .none
+        }
+    }
+}
+
 @MainActor
 protocol ClipboardPasteboard: AnyObject {
     var changeCount: Int { get }
