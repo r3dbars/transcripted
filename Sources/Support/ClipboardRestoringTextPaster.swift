@@ -13,6 +13,7 @@ enum TextPasteCopyReason: Equatable {
     case focusChanged
     case pasteNotConfirmed
     case pasteConfirmationUnavailable
+    case pasteConfirmationUnavailableAutoSendEligible
 }
 
 enum TextPasteOutcome: Equatable {
@@ -584,6 +585,7 @@ final class ClipboardRestoringTextPaster {
         },
         pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
         pasteConfirmed: (@MainActor () -> Bool)? = nil,
+        prepareForAutoSend: Bool = false,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
@@ -686,6 +688,25 @@ final class ClipboardRestoringTextPaster {
                 event: "dictation_paste_confirmation_diagnostics",
                 context: diagnostics
             )
+            let clipboardReadAfterDispatch = (temporaryProvider?.firstReadAt ?? 0) >= pasteDispatchedAt
+            let targetStillFrontmost = target != nil && target?.matchesCurrentFrontmostApp() == true
+            if confirmationUnavailable,
+               prepareForAutoSend,
+               clipboardReadAfterDispatch,
+               targetStillFrontmost {
+                scheduleClipboardRestore(
+                    savedItems,
+                    temporaryString: text,
+                    temporaryChangeCount: temporaryChangeCount,
+                    to: pasteboard,
+                    generation: generation,
+                    delay: restoreDelay
+                )
+                return .copied(
+                    "Transcripted sent paste and the selected target read it, but the target exposed no text confirmation.",
+                    reason: .pasteConfirmationUnavailableAutoSendEligible
+                )
+            }
             guard leaveTemporaryClipboardAvailable() else {
                 return .failed("Couldn't keep the dictation copied after paste-back was unconfirmed. The dictation was saved, but paste-back did not run.")
             }

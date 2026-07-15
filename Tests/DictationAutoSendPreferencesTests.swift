@@ -57,11 +57,11 @@ func testDictationAutoSendPreferences() {
         )
     }
 
-    runSuite("DictationAutoSendPolicy only sends after a real paste with text") {
+    runSuite("DictationAutoSendPolicy sends only after an eligible paste dispatch with text") {
         assertTrue(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                delivery: .pasted,
+                pasteOutcome: .pasted,
                 text: "Send this",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
                 sourceBundleID: "com.example.Chat",
@@ -73,7 +73,7 @@ func testDictationAutoSendPreferences() {
         assertFalse(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: false,
-                delivery: .pasted,
+                pasteOutcome: .pasted,
                 text: "Send this",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
                 sourceBundleID: "com.example.Chat",
@@ -82,22 +82,52 @@ func testDictationAutoSendPreferences() {
             "disabled preference should not send"
         )
 
-        assertFalse(
+        assertTrue(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                delivery: .copied,
+                pasteOutcome: .copied(
+                    "Paste dispatched without target confirmation",
+                    reason: .pasteConfirmationUnavailableAutoSendEligible
+                ),
                 text: "Send this",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
                 sourceBundleID: "com.example.Chat",
                 allowedBundleIDs: ["com.example.Chat"]
             ),
-            "copied fallback should not send"
+            "an explicitly selected app should send after Cmd+V when that app exposes no confirmation surface"
         )
 
         assertFalse(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                delivery: .pasted,
+                pasteOutcome: .copied(
+                    "Paste dispatched without a target read",
+                    reason: .pasteConfirmationUnavailable
+                ),
+                text: "Send this",
+                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+                sourceBundleID: "com.example.Chat",
+                allowedBundleIDs: ["com.example.Chat"]
+            ),
+            "an unconfirmed dispatch without target-read evidence should not send"
+        )
+
+        assertFalse(
+            DictationAutoSendPolicy.shouldSend(
+                isEnabled: true,
+                pasteOutcome: .copied("Focus changed", reason: .focusChanged),
+                text: "Send this",
+                duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
+                sourceBundleID: "com.example.Chat",
+                allowedBundleIDs: ["com.example.Chat"]
+            ),
+            "a true copied-only fallback should not send"
+        )
+
+        assertFalse(
+            DictationAutoSendPolicy.shouldSend(
+                isEnabled: true,
+                pasteOutcome: .pasted,
                 text: "   \n",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
                 sourceBundleID: "com.example.Chat",
@@ -109,7 +139,7 @@ func testDictationAutoSendPreferences() {
         assertFalse(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                delivery: .pasted,
+                pasteOutcome: .pasted,
                 text: "Too fast",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration - 0.01,
                 sourceBundleID: "com.example.Chat",
@@ -121,7 +151,7 @@ func testDictationAutoSendPreferences() {
         assertFalse(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                delivery: .pasted,
+                pasteOutcome: .pasted,
                 text: "Send this",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
                 sourceBundleID: "com.example.Notes",
@@ -133,7 +163,7 @@ func testDictationAutoSendPreferences() {
         assertFalse(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                delivery: .pasted,
+                pasteOutcome: .pasted,
                 text: "Send this",
                 duration: TranscriptedConstants.dictationAutoEnterMinimumDuration,
                 sourceBundleID: nil,

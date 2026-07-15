@@ -1088,7 +1088,7 @@ class DictationSessionController: ObservableObject {
                     stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
                     let outcome = await self.performAutoEnterIfNeeded(
                         text: text,
-                        delivery: pasteOutcome.delivery
+                        pasteOutcome: pasteOutcome
                     )
                     stopTiming.autoEnterFinishedAt = CFAbsoluteTimeGetCurrent()
                     return outcome
@@ -1738,9 +1738,17 @@ class DictationSessionController: ObservableObject {
 
     private func pasteWithClipboardRestore(_ text: String) -> DictationPasteOutcome {
         retargetPasteToCurrentFocus()
+        let prepareForAutoSend = DictationAutoSendPolicy.isRequested(
+            isEnabled: DictationAutoSendPreferences.isEnabled(),
+            text: text,
+            duration: CFAbsoluteTimeGetCurrent() - sessionStartTime,
+            sourceBundleID: sessionSourceApp?.bundleIdentifier,
+            allowedBundleIDs: DictationAutoSendPreferences.allowedBundleIDs()
+        )
         let outcome = textPaster.paste(
             text,
-            target: sessionPasteTarget
+            target: sessionPasteTarget,
+            prepareForAutoSend: prepareForAutoSend
         )
         if let diagnostic = textPaster.lastConfirmationDiagnostic {
             EventReporter.shared.capture(
@@ -1773,6 +1781,10 @@ class DictationSessionController: ObservableObject {
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
                 message: "Paste-back was dispatched but the target did not expose confirmation")
             appState?.logger.log("DICTATION | paste confirmation unavailable, keeping text on clipboard")
+        case .pasteConfirmationUnavailableAutoSendEligible:
+            EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
+                message: "Selected Auto Enter target read paste-back but did not expose text confirmation")
+            appState?.logger.log("DICTATION | selected Auto Enter target read paste; restoring clipboard before follow-up key")
         case nil:
             break
         }
@@ -1811,12 +1823,12 @@ class DictationSessionController: ObservableObject {
 
     private func performAutoEnterIfNeeded(
         text: String,
-        delivery: DictationDelivery
+        pasteOutcome: DictationPasteOutcome
     ) async -> DictationAutoSendOutcome {
         let duration = CFAbsoluteTimeGetCurrent() - sessionStartTime
         guard DictationAutoSendPolicy.shouldSend(
             isEnabled: DictationAutoSendPreferences.isEnabled(),
-            delivery: delivery,
+            pasteOutcome: pasteOutcome,
             text: text,
             duration: duration,
             sourceBundleID: sessionSourceApp?.bundleIdentifier,
@@ -1827,7 +1839,7 @@ class DictationSessionController: ObservableObject {
 
         try? await Task.sleep(nanoseconds: TranscriptedConstants.dictationAutoEnterDelay)
         guard !Task.isCancelled else { return .disabled }
-        if delivery == .pasted {
+        if pasteOutcome.requiresClipboardReadinessBeforeAutoSend {
             await textPaster.waitForClipboardReadyForAutoEnter()
         }
         guard !Task.isCancelled else { return .disabled }
@@ -2241,7 +2253,7 @@ private extension TextPasteOutcome {
 private extension TextPasteCopyReason {
     var isPasteConfirmationOnly: Bool {
         switch self {
-        case .pasteConfirmationUnavailable:
+        case .pasteConfirmationUnavailable, .pasteConfirmationUnavailableAutoSendEligible:
             return true
         case .accessibilityMissing, .pasteEventCreationFailed, .focusChanged, .pasteNotConfirmed:
             return false
@@ -2260,6 +2272,8 @@ private extension TextPasteCopyReason {
             return "paste_not_confirmed"
         case .pasteConfirmationUnavailable:
             return "paste_confirmation_unavailable"
+        case .pasteConfirmationUnavailableAutoSendEligible:
+            return "paste_confirmation_unavailable_auto_send_eligible"
         }
     }
 }

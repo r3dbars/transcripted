@@ -77,20 +77,58 @@ enum DictationAutoSendPreferences {
 }
 
 enum DictationAutoSendPolicy {
-    static func shouldSend(
+    static func isRequested(
         isEnabled: Bool,
-        delivery: DictationDelivery,
         text: String,
         duration: TimeInterval,
         sourceBundleID: String?,
         allowedBundleIDs: Set<String>
     ) -> Bool {
         guard isEnabled else { return false }
-        guard delivery == .pasted else { return false }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         guard duration >= TranscriptedConstants.dictationAutoEnterMinimumDuration else { return false }
         guard let sourceBundleID, allowedBundleIDs.contains(sourceBundleID) else { return false }
         return true
+    }
+
+    static func shouldSend(
+        isEnabled: Bool,
+        pasteOutcome: TextPasteOutcome,
+        text: String,
+        duration: TimeInterval,
+        sourceBundleID: String?,
+        allowedBundleIDs: Set<String>
+    ) -> Bool {
+        guard pasteOutcome.allowsAutoSend else { return false }
+        return isRequested(
+            isEnabled: isEnabled,
+            text: text,
+            duration: duration,
+            sourceBundleID: sourceBundleID,
+            allowedBundleIDs: allowedBundleIDs
+        )
+    }
+}
+
+extension TextPasteOutcome {
+    var allowsAutoSend: Bool {
+        switch self {
+        case .pasted:
+            return true
+        case .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):
+            return true
+        case .copied, .failed:
+            return false
+        }
+    }
+
+    var requiresClipboardReadinessBeforeAutoSend: Bool {
+        switch self {
+        case .pasted, .copied(_, reason: .pasteConfirmationUnavailableAutoSendEligible):
+            return true
+        case .copied, .failed:
+            return false
+        }
     }
 }
 
