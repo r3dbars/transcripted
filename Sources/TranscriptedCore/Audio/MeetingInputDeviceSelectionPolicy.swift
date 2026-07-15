@@ -43,6 +43,12 @@ struct MeetingInputDeviceSelection: Equatable {
 }
 
 enum MeetingInputDeviceSelectionPolicy {
+    enum RouteReadiness: String, Equatable {
+        case ready
+        case deviceMismatch = "device_mismatch"
+        case sampleRateMismatch = "sample_rate_mismatch"
+    }
+
     /// Meeting capture must not pin the same Bluetooth headset input used by a
     /// call app. That HFP route can leave the other app unable to transmit mic
     /// audio until Transcripted quits. Prefer a built-in input at meeting start
@@ -89,6 +95,36 @@ enum MeetingInputDeviceSelectionPolicy {
         selectionReason == .preferredBuiltInForBluetoothHeadset
             ? .switchFailed
             : requestedOutcome
+    }
+
+    static func routeReadiness(
+        selection: MeetingInputDeviceSelection?,
+        actualInputDeviceID: AudioDeviceID,
+        capturedSampleRate: Double,
+        selectedNominalSampleRate: Double?,
+        voiceProcessingEnabled: Bool
+    ) -> RouteReadiness {
+        guard let selection else { return .ready }
+        guard actualInputDeviceID == selection.selectedInput.id else {
+            return .deviceMismatch
+        }
+
+        // A non-default built-in selection must expose that device's hardware
+        // rate. The failed AirPods handoff reported the built-in device ID but
+        // retained the 24 kHz HFP format and then delivered zero buffers.
+        // VPIO intentionally exposes a converter format, so only compare the
+        // raw hardware path.
+        guard selection.didOverrideDefault,
+              !voiceProcessingEnabled,
+              let selectedNominalSampleRate,
+              selectedNominalSampleRate.isFinite,
+              selectedNominalSampleRate > 0 else {
+            return .ready
+        }
+
+        return abs(capturedSampleRate - selectedNominalSampleRate) <= 1
+            ? .ready
+            : .sampleRateMismatch
     }
 
     static func selection(
@@ -563,7 +599,11 @@ extension Audio {
             )
             if outcome == .switchFailed {
                 setMeetingRouteStabilizationOutcome(.switchFailed)
-                emitMeetingRouteStabilityWarningIfNeeded(outcome: .switchFailed)
+                let retryableLifecycleOperation = operation.hasPrefix("start_recording")
+                    || operation.hasPrefix("device_recovery")
+                if !retryableLifecycleOperation {
+                    emitMeetingRouteStabilityWarningIfNeeded(outcome: .switchFailed)
+                }
             }
             AppLogger.audioMic.warning("Meeting input selection failed", [
                 "operation": operation,

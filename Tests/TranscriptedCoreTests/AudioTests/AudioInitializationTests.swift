@@ -6,6 +6,52 @@ import Combine
 @available(macOS 14.0, *)
 final class AudioInitializationTests: XCTestCase {
 
+    func testMicRecoveryOnlySucceedsAfterANewBuffer() {
+        XCTAssertFalse(
+            MicRecoveryReadinessPolicy.deliveredNewBuffer(before: 10, after: 10),
+            "a running engine without a new frame must not count as recovered"
+        )
+        XCTAssertTrue(
+            MicRecoveryReadinessPolicy.deliveredNewBuffer(before: 10, after: 11),
+            "the first post-restart frame confirms recovery"
+        )
+    }
+
+    func testMicWatchdogArmsOnlyAfterTheFirstNonemptyBuffer() {
+        XCTAssertFalse(
+            MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 0),
+            "startup must not race route recovery before a mic frame arrives"
+        )
+        XCTAssertTrue(
+            MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 1)
+        )
+        XCTAssertFalse(
+            MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 2),
+            "later frames must not create duplicate watchdog timers"
+        )
+    }
+
+    func testStaleMeetingGraphAttemptDoesNotClaimAnInputEngine() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("StaleMeetingGraphAttempt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let audio = Audio(paths: makeCoreStoragePaths(root: root))
+        audio.recordingSessionGeneration = 2
+
+        XCTAssertThrowsError(
+            try audio.makeReadyMeetingInputGraph(
+                operation: "start_recording",
+                resetMeetingSelectionBeforeRetry: true,
+                sessionGeneration: 1
+            )
+        ) { error in
+            XCTAssertTrue(error is AudioCaptureStaleSessionError)
+        }
+        XCTAssertNil(audio.engine)
+        XCTAssertNil(audio.inputNode)
+    }
+
     func testAudioInitDoesNotEagerlyCreateMicEngine() {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AudioInitializationTests-\(UUID().uuidString)", isDirectory: true)

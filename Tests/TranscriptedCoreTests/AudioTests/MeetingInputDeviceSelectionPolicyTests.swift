@@ -3,6 +3,70 @@ import XCTest
 @testable import TranscriptedCore
 
 final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
+    func testOverriddenBuiltInRouteRejectsStaleBluetoothSampleRate() {
+        let bluetoothMic = device(id: 10, name: "Bluetooth Headset", transport: .bluetooth, channels: 1)
+        let builtInMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
+        let selection = MeetingInputDeviceSelection(
+            defaultInput: bluetoothMic,
+            selectedInput: builtInMic,
+            defaultOutput: bluetoothMic,
+            reason: .preferredBuiltInForBluetoothHeadset
+        )
+
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.routeReadiness(
+                selection: selection,
+                actualInputDeviceID: builtInMic.id,
+                capturedSampleRate: 24_000,
+                selectedNominalSampleRate: 48_000,
+                voiceProcessingEnabled: false
+            ),
+            .sampleRateMismatch
+        )
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.routeReadiness(
+                selection: selection,
+                actualInputDeviceID: builtInMic.id,
+                capturedSampleRate: 48_000,
+                selectedNominalSampleRate: 48_000,
+                voiceProcessingEnabled: false
+            ),
+            .ready
+        )
+    }
+
+    func testRouteReadinessRejectsWrongDeviceButAllowsVoiceProcessingConverterRate() {
+        let bluetoothMic = device(id: 10, name: "Bluetooth Headset", transport: .bluetooth, channels: 1)
+        let builtInMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
+        let selection = MeetingInputDeviceSelection(
+            defaultInput: bluetoothMic,
+            selectedInput: builtInMic,
+            defaultOutput: bluetoothMic,
+            reason: .preferredBuiltInForBluetoothHeadset
+        )
+
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.routeReadiness(
+                selection: selection,
+                actualInputDeviceID: bluetoothMic.id,
+                capturedSampleRate: 24_000,
+                selectedNominalSampleRate: 48_000,
+                voiceProcessingEnabled: false
+            ),
+            .deviceMismatch
+        )
+        XCTAssertEqual(
+            MeetingInputDeviceSelectionPolicy.routeReadiness(
+                selection: selection,
+                actualInputDeviceID: builtInMic.id,
+                capturedSampleRate: 24_000,
+                selectedNominalSampleRate: 48_000,
+                voiceProcessingEnabled: true
+            ),
+            .ready
+        )
+    }
+
     func testFailedStartTimeSwitchDoesNotPersistUnappliedBuiltInSelection() {
         let bluetoothMic = device(id: 10, name: "Bluetooth Headset", transport: .bluetooth, channels: 1)
         let builtInMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)

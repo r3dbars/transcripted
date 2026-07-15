@@ -981,6 +981,231 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return (engine, inputNode)
     }
 
+    /// Create a detached mic graph instead of inheriting one used by
+    /// monitoring or a failed device switch. The new graph is not published
+    /// on `self` until its device and format are validated for the current
+    /// recording generation, so a concurrent Stop cannot miss a newly claimed
+    /// audio device.
+    func makeDetachedFreshInputEngine() -> (AVAudioEngine, AVAudioInputNode) {
+        if let currentEngine = engine {
+            if currentEngine.isRunning, let currentInputNode = inputNode {
+                tearDownInputTapSafely(
+                    engine: currentEngine,
+                    inputNode: currentInputNode,
+                    operation: "start_recording_replace_graph"
+                )
+            }
+            if let currentInputNode = inputNode {
+                disarmVoiceProcessing(
+                    on: currentInputNode,
+                    reason: "start_recording_replace_graph"
+                )
+            }
+            currentEngine.reset()
+            engine = nil
+            inputNode = nil
+        }
+
+        let freshEngine = AVAudioEngine()
+        let freshInputNode = freshEngine.inputNode
+        voiceProcessingEnabled = false
+        AppLogger.audioMic.info("Created detached fresh microphone graph")
+        return (freshEngine, freshInputNode)
+    }
+
+    func discardUnstartedInputGraph(
+        engine discardedEngine: AVAudioEngine,
+        inputNode discardedInputNode: AVAudioInputNode,
+        operation: String
+    ) {
+        let ownsPublishedGraph = engine === discardedEngine
+        if discardedEngine.isRunning {
+            tearDownInputTapSafely(
+                engine: discardedEngine,
+                inputNode: discardedInputNode,
+                operation: operation
+            )
+        }
+        if ownsPublishedGraph {
+            disarmVoiceProcessing(on: discardedInputNode, reason: operation)
+        } else if discardedInputNode.isVoiceProcessingEnabled {
+            do {
+                try discardedInputNode.setVoiceProcessingEnabled(false)
+            } catch {
+                AppLogger.audioMic.warning("Detached voice processing disable failed", [
+                    "operation": operation,
+                    "error": error.localizedDescription
+                ])
+            }
+        }
+        discardedEngine.reset()
+        if ownsPublishedGraph {
+            engine = nil
+            inputNode = nil
+            voiceProcessingEnabled = false
+        } else if engine == nil {
+            voiceProcessingEnabled = false
+        }
+    }
+
+    struct PreparedMeetingInputGraph {
+        let engine: AVAudioEngine
+        let inputNode: AVAudioInputNode
+        let recordingFormat: AVAudioFormat
+        let recordingSnapshot: AudioRecordingFormatSnapshot
+    }
+
+    /// Build and validate a meeting microphone graph. A failed device bind
+    /// taints the entire graph: CoreAudio may expose the requested device ID
+    /// while retaining the previous device's format and delivering no frames.
+    /// Each retry therefore starts from a new AVAudioEngine/input node.
+    func makeReadyMeetingInputGraph(
+        operation: String,
+        resetMeetingSelectionBeforeRetry: Bool,
+        sessionGeneration: UInt64,
+        routeWasUnstable: Bool = false
+    ) throws -> PreparedMeetingInputGraph {
+        var lastError: Error?
+
+        for attempt in 0..<2 {
+            guard sessionGeneration == recordingSessionGeneration else {
+                throw AudioCaptureStaleSessionError()
+            }
+
+            if attempt > 0 {
+                if resetMeetingSelectionBeforeRetry {
+                    resetMeetingRouteState()
+                }
+                // Let CoreAudio settle without blocking Stop's graph teardown.
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+
+            guard sessionGeneration == recordingSessionGeneration else {
+                throw AudioCaptureStaleSessionError()
+            }
+
+            do {
+                let preparedGraph = try withAudioGraphLock { () throws -> PreparedMeetingInputGraph in
+                    guard sessionGeneration == recordingSessionGeneration else {
+                        throw AudioCaptureStaleSessionError()
+                    }
+
+                    let (freshEngine, freshInputNode) = makeDetachedFreshInputEngine()
+                    do {
+                        let attemptOperation = attempt == 0 ? operation : "\(operation)_retry"
+                        let selectionOutcome = applyMeetingInputDevice(
+                            to: freshInputNode,
+                            operation: attemptOperation,
+                            routeWasUnstable: routeWasUnstable
+                        )
+                        guard !MeetingInputDeviceSelectionPolicy.shouldAbortMeetingStart(
+                            after: selectionOutcome
+                        ) else {
+                            throw NSError(
+                                domain: "Audio",
+                                code: 4,
+                                userInfo: [
+                                    NSLocalizedDescriptionKey: "Could not safely switch microphones. Check your input device and try again."
+                                ]
+                            )
+                        }
+
+                        armVoiceProcessing(on: freshInputNode)
+                        let recordingFormat = self.recordingFormat(for: freshInputNode)
+                        guard let recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat) else {
+                            throw NSError(
+                                domain: "Audio",
+                                code: 2,
+                                userInfo: [NSLocalizedDescriptionKey: "Invalid input format"]
+                            )
+                        }
+
+                        let selection = meetingInputSelectionSnapshot()
+                        let selectedNominalRate = selection.flatMap {
+                            try? $0.selectedInput.id.readNominalSampleRate()
+                        }
+                        let routeReadiness = MeetingInputDeviceSelectionPolicy.routeReadiness(
+                            selection: selection,
+                            actualInputDeviceID: freshInputNode.auAudioUnit.deviceID,
+                            capturedSampleRate: recordingSnapshot.sampleRate,
+                            selectedNominalSampleRate: selectedNominalRate,
+                            voiceProcessingEnabled: voiceProcessingEnabled
+                        )
+                        guard routeReadiness == .ready else {
+                            AppLogger.audioMic.warning("Meeting microphone route did not settle", [
+                                "attempt": "\(attempt + 1)",
+                                "operation": operation,
+                                "outcome": routeReadiness.rawValue,
+                                "capturedRate": "\(recordingSnapshot.sampleRate)",
+                                "selectedNominalRate": selectedNominalRate.map { "\($0)" } ?? "unknown"
+                            ])
+                            throw NSError(
+                                domain: "Audio",
+                                code: 5,
+                                userInfo: [
+                                    NSLocalizedDescriptionKey: "The microphone route did not become ready. Check your input device and try again."
+                                ]
+                            )
+                        }
+
+                        guard sessionGeneration == recordingSessionGeneration else {
+                            throw AudioCaptureStaleSessionError()
+                        }
+
+                        // Publish only after this detached graph is fully
+                        // validated for the still-current recording session.
+                        engine = freshEngine
+                        inputNode = freshInputNode
+                        return PreparedMeetingInputGraph(
+                            engine: freshEngine,
+                            inputNode: freshInputNode,
+                            recordingFormat: recordingFormat,
+                            recordingSnapshot: recordingSnapshot
+                        )
+                    } catch {
+                        discardUnstartedInputGraph(
+                            engine: freshEngine,
+                            inputNode: freshInputNode,
+                            operation: "\(operation)_discard_attempt"
+                        )
+                        throw error
+                    }
+                }
+
+                guard sessionGeneration == recordingSessionGeneration else {
+                    withAudioGraphLock {
+                        discardUnstartedInputGraph(
+                            engine: preparedGraph.engine,
+                            inputNode: preparedGraph.inputNode,
+                            operation: "\(operation)_discard_stale"
+                        )
+                    }
+                    throw AudioCaptureStaleSessionError()
+                }
+                return preparedGraph
+            } catch {
+                if error is AudioCaptureStaleSessionError {
+                    throw error
+                }
+                lastError = error
+                AppLogger.audioMic.warning("Meeting microphone graph attempt failed", [
+                    "attempt": "\(attempt + 1)",
+                    "operation": operation,
+                    "error": error.localizedDescription
+                ])
+            }
+        }
+
+        if meetingRouteStabilizationOutcomeValue == CaptureRouteStabilizationOutcome.switchFailed.rawValue {
+            emitMeetingRouteStabilityWarningIfNeeded(outcome: .switchFailed)
+        }
+        throw lastError ?? NSError(
+            domain: "Audio",
+            code: 5,
+            userInfo: [NSLocalizedDescriptionKey: "The microphone route did not become ready."]
+        )
+    }
+
     /// Format the mic tap will actually deliver. With VPIO enabled the tap
     /// receives the VPIO output (mono Float32 at the unit's preferred rate),
     /// not the raw hardware format. Without VPIO we keep using the hardware

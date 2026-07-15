@@ -21,67 +21,23 @@ extension Audio {
             throw AudioCaptureStaleSessionError()
         }
 
-        let (engine, inputNode, recordingFormat, recordingSnapshot) = try withAudioGraphLock { () throws -> (AVAudioEngine, AVAudioInputNode, AVAudioFormat, AudioRecordingFormatSnapshot) in
-            guard sessionIsCurrent() else {
-                throw AudioCaptureStaleSessionError()
-            }
-            let (engine, inputNode) = try ensureEngineInitialized()
-            if engine.isRunning {
-                tearDownInputTapSafely(
-                    engine: engine,
-                    inputNode: inputNode,
-                    operation: "start_recording_reset"
-                )
-                engine.reset()
-                voiceProcessingEnabled = false
-                self.inputNode = engine.inputNode
-            }
-            guard let activeInputNode = self.inputNode else {
-                throw NSError(domain: "Audio", code: 1, userInfo: [NSLocalizedDescriptionKey: "Engine input node unavailable"])
-            }
-            let inputSelectionOutcome = applyMeetingInputDevice(
-                to: activeInputNode,
-                operation: "start_recording"
-            )
-            guard !MeetingInputDeviceSelectionPolicy.shouldAbortMeetingStart(
-                after: inputSelectionOutcome
-            ) else {
-                throw NSError(
-                    domain: "Audio",
-                    code: 4,
-                    userInfo: [
-                        NSLocalizedDescriptionKey: "Could not safely switch microphones. Check your input device and try again."
-                    ]
-                )
-            }
-            recordRecordingStartCapturedInput(deviceID: activeInputNode.auAudioUnit.deviceID)
-            armVoiceProcessing(on: activeInputNode)
-
-            // When VPIO is off and software AGC is selected, run gain control
-            // in the mic tap callback to recover attenuated streams (issue
-            // #500). In raw/off mode this deliberately leaves realtimeAGC nil
-            // so tuned USB mics are not boosted by Transcripted.
-            refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
-
-            // Read the selected microphone's format after any headset fallback.
-            // recordingFormat(for:) returns:
-            //   - VPIO output format when armVoiceProcessing enabled it (mono
-            //     Float32 at the unit's preferred rate), which matches what the
-            //     tap on bus 0 will actually deliver.
-            //   - Hardware format via inputFormat(forBus: 1) otherwise — required
-            //     because outputFormat(forBus: 0) returns the converter format on
-            //     stock AVAudioEngine, which breaks Bluetooth capture.
-            let recordingFormat = self.recordingFormat(for: activeInputNode)
-            guard let recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat) else {
-                AppLogger.audioMic.error("Mic input format invalid", [
-                    "sampleRate": "\(recordingFormat.sampleRate)",
-                    "channels": "\(recordingFormat.channelCount)"
-                ])
-                throw NSError(domain: "Audio", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid input format"])
-            }
-
-            return (engine, activeInputNode, recordingFormat, recordingSnapshot)
+        let preparedGraph = try makeReadyMeetingInputGraph(
+            operation: "start_recording",
+            resetMeetingSelectionBeforeRetry: true,
+            sessionGeneration: sessionGeneration
+        )
+        guard sessionIsCurrent() else {
+            throw AudioCaptureStaleSessionError()
         }
+        let engine = preparedGraph.engine
+        let inputNode = preparedGraph.inputNode
+        let recordingFormat = preparedGraph.recordingFormat
+        let recordingSnapshot = preparedGraph.recordingSnapshot
+        recordRecordingStartCapturedInput(deviceID: inputNode.auAudioUnit.deviceID)
+
+        // When VPIO is off and software AGC is selected, run gain control in
+        // the mic tap callback. Raw/off mode deliberately leaves it nil.
+        refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
         AppLogger.audioMic.info("Mic input format", [
             "sampleRate": "\(recordingSnapshot.sampleRate)",
             "channels": "\(recordingSnapshot.channelCount)",
@@ -340,7 +296,6 @@ extension Audio {
             self.startTime = Date()
             self.recordingDuration = 0.0
             self.startTimer()
-            self.startWatchdog()
             cueHandler?(.recordingStarted)
         }
     }
@@ -364,8 +319,16 @@ extension Audio {
         guard buffer.frameLength > 0 else { return }
 
         micBufferCount += 1
-        if micBufferCount == 1 {
+        if MicWatchdogArmingPolicy.shouldArm(
+            afterNonemptyBufferCount: micBufferCount
+        ) {
             markMicAudioStreamingIfCurrent(sessionGeneration: sessionGeneration)
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.recordingSessionGeneration == sessionGeneration,
+                      self.isRecording else { return }
+                self.startWatchdog()
+            }
         }
         lastBufferTime = CACurrentMediaTime()
         let rawPeak = linearPeak(buffer: buffer)
