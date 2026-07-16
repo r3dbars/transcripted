@@ -1005,6 +1005,10 @@ func testAnalyticsEventPolicy() {
     runSuite("AnalyticsEventPolicy preserves dictation auto-send attribution") {
         let dictationCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_completed")
         assertEqual(dictationCompleted?.allowedProperties.contains("auto_send"), true, "dictation completion should allow the existing auto_send property")
+        assertEqual(dictationCompleted?.allowedProperties.contains("auto_send_expected"), true, "dictation completion should expose the expected denominator")
+        assertEqual(dictationCompleted?.allowedProperties.contains("auto_send_key"), true, "dictation completion should expose only the coarse key choice")
+        assertEqual(dictationCompleted?.allowedProperties.contains("auto_send_block_reason"), true, "dictation completion should preserve a coarse block reason")
+        assertEqual(dictationCompleted?.allowedProperties.contains("target_confirmation_mode"), true, "dictation completion should preserve a coarse target capability without app identity")
         assertEqual(dictationCompleted?.allowedProperties.contains("input_device_class"), true, "dictation completion should preserve coarse input device class")
         assertEqual(dictationCompleted?.allowedProperties.contains("hfp_suspected"), true, "dictation completion should preserve Bluetooth HFP suspicion only as a boolean")
         assertEqual(dictationCompleted?.allowedProperties.contains("sample_flow_started"), true, "dictation completion should preserve whether audio samples ever flowed")
@@ -1084,6 +1088,9 @@ func testAnalyticsEventPolicy() {
             [
                 "auto_enter_bucket": "lt_100ms",
                 "auto_send": "disabled",
+                "auto_send_block_reason": "paste_confirmation_unavailable",
+                "auto_send_expected": "true",
+                "auto_send_key": "command_enter",
                 "chars": "512",
                 "cleanup_bucket": "lt_100ms",
                 "cleanup_changed": "true",
@@ -1103,11 +1110,16 @@ func testAnalyticsEventPolicy() {
                 "stop_to_done_ms": "742",
                 "stop_to_paste_bucket": "500_999ms",
                 "stop_to_paste_ms": "621",
+                "target_confirmation_mode": "clipboard_read_only",
                 "trigger": "physical_key",
                 "word_count_bucket": "10_49",
             ],
             allowedKeys: stopLatency?.allowedProperties ?? []
         )
+        assertEqual(sanitized["auto_send_expected"], "true", "expected Auto Enter should survive as a boolean string")
+        assertEqual(sanitized["auto_send_key"], "command_enter", "coarse Auto Enter key choice should survive")
+        assertEqual(sanitized["auto_send_block_reason"], "paste_confirmation_unavailable", "coarse Auto Enter blocks should survive")
+        assertEqual(sanitized["target_confirmation_mode"], "clipboard_read_only", "coarse target confirmation mode should survive")
 
         assertEqual(sanitized["stop_to_paste_bucket"], "500_999ms", "bucketed stop-to-paste timing should survive")
         assertEqual(sanitized["stop_to_done_bucket"], "500_999ms", "bucketed total stop timing should survive")

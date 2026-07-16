@@ -11,9 +11,8 @@ import Foundation
 
 func testDictationSessionCap() {
     // The cap's whole point: recover the work without injecting it anywhere.
-    // DictationAutoSendPolicy gates auto-send on `delivery == .pasted`, so the
-    // session-cap delivery can never auto-send — even with every other condition
-    // satisfied.
+    // DictationAutoSendPolicy requires a paste outcome, so the session-cap save
+    // can never auto-send — even with every other condition satisfied.
     runSuite("A session-cap save can never auto-send into the focused app") {
         let allowed: Set<String> = ["com.example.editor"]
         let satisfiedDuration = TranscriptedConstants.dictationAutoEnterMinimumDuration + 1
@@ -22,7 +21,7 @@ func testDictationSessionCap() {
         assertTrue(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                delivery: .pasted,
+                pasteOutcome: .pasted,
                 text: "ship the release notes",
                 duration: satisfiedDuration,
                 sourceBundleID: "com.example.editor",
@@ -35,7 +34,7 @@ func testDictationSessionCap() {
         assertFalse(
             DictationAutoSendPolicy.shouldSend(
                 isEnabled: true,
-                delivery: .savedWithoutPaste,
+                pasteOutcome: .failed("saved without paste"),
                 text: "ship the release notes",
                 duration: satisfiedDuration,
                 sourceBundleID: "com.example.editor",

@@ -21,6 +21,9 @@ artifact_kind
 artifact_retained
 attenuation_kind
 auto_send
+auto_send_block_reason
+auto_send_expected
+auto_send_key
 automatic_downloads_enabled
 available
 backoff_kind
@@ -181,6 +184,7 @@ system_peak
 system_rate_hz
 system_status
 system_stream_present
+target_confirmation_mode
 to_status
 tool_kind
 trigger

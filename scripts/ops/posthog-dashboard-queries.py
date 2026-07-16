@@ -828,6 +828,34 @@ LIMIT 50
 """,
         ),
         QuerySpec(
+            id="retry_recovery.auto_send_health",
+            family="retry_recovery",
+            title="Dictation Auto Enter health",
+            description="Breaks expected Auto Enter outcomes down by coarse key, block reason, target confirmation mode, and installed build.",
+            columns=("app_version", "build_revision", "os_major", "auto_send_expected", "auto_send_key", "auto_send_block_reason", "target_confirmation_mode", "auto_send", "events", "devices"),
+            sql=f"""
+SELECT
+  properties['app_version'] AS app_version,
+  properties['build_revision'] AS build_revision,
+  properties['os_major'] AS os_major,
+  properties['auto_send_expected'] AS auto_send_expected,
+  properties['auto_send_key'] AS auto_send_key,
+  properties['auto_send_block_reason'] AS auto_send_block_reason,
+  properties['target_confirmation_mode'] AS target_confirmation_mode,
+  properties['auto_send'] AS auto_send,
+  count() AS events,
+  uniq(distinct_id) AS devices
+FROM events
+WHERE timestamp >= now() - INTERVAL {days} DAY
+  AND event = 'dictation_stop_latency_measured'
+  {app_version_filter(app_version)}
+GROUP BY app_version, build_revision, os_major, auto_send_expected, auto_send_key, auto_send_block_reason, target_confirmation_mode, auto_send
+ORDER BY events DESC
+LIMIT 100
+""",
+            notes=("Alert on expected=true rows whose auto_send is not sent_enter or sent_command_enter; keep low-volume builds count-based instead of relying on percentages alone.",),
+        ),
+        QuerySpec(
             id="onboarding_friction.step_friction",
             family="onboarding_friction",
             title="Onboarding friction by step",
