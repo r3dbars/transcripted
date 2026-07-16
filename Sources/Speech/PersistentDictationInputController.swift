@@ -18,6 +18,10 @@ final class PersistentDictationInputController {
     private var deviceListListener: AudioObjectPropertyListenerBlock?
     private var topologyRefreshTask: Task<Void, Never>?
     private var shouldRecoverInheritedTemporaryOverride = false
+    private var pendingDefaultInputChange = false
+    private var pendingDeviceListChange = false
+    private var runtimeOwnershipRelinquished = false
+    private var lastMaintainedInput: AudioDeviceID?
 
     func start() {
         guard preferenceObserver == nil else { return }
@@ -27,6 +31,8 @@ final class PersistentDictationInputController {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
+                self?.runtimeOwnershipRelinquished = false
+                self?.lastMaintainedInput = nil
                 self?.reconcileCurrentPreference()
             }
         }
@@ -46,7 +52,11 @@ final class PersistentDictationInputController {
         removeDeviceListListener()
         topologyRefreshTask?.cancel()
         topologyRefreshTask = nil
+        pendingDefaultInputChange = false
+        pendingDeviceListChange = false
         restoreIfStillOwned(operation: "app_termination")
+        runtimeOwnershipRelinquished = false
+        lastMaintainedInput = nil
     }
 
     private func installDefaultInputListener() {
@@ -58,7 +68,7 @@ final class PersistentDictationInputController {
         )
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             Task { @MainActor in
-                self?.scheduleTopologyRefresh()
+                self?.scheduleTopologyRefresh(defaultInputChanged: true)
             }
         }
         let status = AudioObjectAddPropertyListenerBlock(
@@ -104,7 +114,7 @@ final class PersistentDictationInputController {
         )
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             Task { @MainActor in
-                self?.scheduleTopologyRefresh()
+                self?.scheduleTopologyRefresh(deviceListChanged: true)
             }
         }
         let status = AudioObjectAddPropertyListenerBlock(
@@ -141,31 +151,56 @@ final class PersistentDictationInputController {
         self.deviceListListener = nil
     }
 
-    private func scheduleTopologyRefresh() {
+    private func scheduleTopologyRefresh(
+        defaultInputChanged: Bool = false,
+        deviceListChanged: Bool = false
+    ) {
         guard DictationPersistentInputPreferences.isEnabled()
                 || DictationPersistentInputPreferences.recoveryMarker() != nil
                 || shouldRecoverInheritedTemporaryOverride else { return }
+        pendingDefaultInputChange = pendingDefaultInputChange || defaultInputChanged
+        pendingDeviceListChange = pendingDeviceListChange || deviceListChanged
         topologyRefreshTask?.cancel()
         topologyRefreshTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: TranscriptedConstants.audioRecoveryDelay)
-            guard !Task.isCancelled else { return }
-            self?.reconcileCurrentPreference()
+            guard !Task.isCancelled, let self else { return }
+            let defaultInputChanged = self.pendingDefaultInputChange
+            let deviceListChanged = self.pendingDeviceListChange
+            self.pendingDefaultInputChange = false
+            self.pendingDeviceListChange = false
+            self.reconcileCurrentPreference(
+                defaultInputChanged: defaultInputChanged,
+                deviceListChanged: deviceListChanged
+            )
         }
     }
 
-    private func reconcileCurrentPreference() {
+    private func reconcileCurrentPreference(
+        defaultInputChanged: Bool = false,
+        deviceListChanged: Bool = false
+    ) {
         if shouldRecoverInheritedTemporaryOverride {
             recoverTemporaryOwnership()
         }
         recoverPersistedOwnership()
-        applyCurrentPreference()
+        applyCurrentPreference(
+            defaultInputChanged: defaultInputChanged,
+            deviceListChanged: deviceListChanged
+        )
     }
 
-    private func applyCurrentPreference() {
+    private func applyCurrentPreference(
+        defaultInputChanged: Bool,
+        deviceListChanged: Bool
+    ) {
         if !DictationPersistentInputPreferences.isEnabled() {
             restoreIfStillOwned(operation: "preference_disabled")
+            runtimeOwnershipRelinquished = false
+            lastMaintainedInput = nil
             return
         }
+
+        guard !runtimeOwnershipRelinquished else { return }
 
         do {
             let selection = try CoreAudioInputDeviceLookup.preferredDictationInputSelection()
@@ -180,7 +215,38 @@ final class PersistentDictationInputController {
                 availableInputs: availableInputs,
                 automaticFallback: selection.selectedInput
             )
+            let runtimeAction = DictationPersistentInputRuntimePolicy.action(
+                preferenceEnabled: true,
+                runtimeOwnershipRelinquished: runtimeOwnershipRelinquished,
+                defaultInputChanged: defaultInputChanged,
+                deviceListChanged: deviceListChanged,
+                currentInputID: selection.defaultInput.id,
+                desiredInputID: selectedInput.id,
+                lastMaintainedInputID: lastMaintainedInput,
+                lastMaintainedInputIsAvailable: lastMaintainedInput.map { inputID in
+                    availableInputs.contains(where: { $0.id == inputID })
+                } ?? false
+            )
+            if runtimeAction == .preserveExternalSelection {
+                activeOverride = nil
+                lastMaintainedInput = nil
+                runtimeOwnershipRelinquished = true
+                DictationPersistentInputPreferences.setRecoveryMarker(nil)
+                EventReporter.shared.capture(
+                    level: .info,
+                    engine: "parakeet",
+                    event: "dictation_persistent_input_external_selection_preserved",
+                    message: "Preserved a microphone selection changed outside Transcripted",
+                    context: [
+                        "current_input_class": DictationInputDeviceSelectionPolicy.deviceClass(for: selection.defaultInput),
+                        "preferred_input_class": DictationInputDeviceSelectionPolicy.deviceClass(for: selectedInput),
+                        "device_list_changed": String(deviceListChanged)
+                    ]
+                )
+                return
+            }
             if selection.defaultInput.id == selectedInput.id {
+                lastMaintainedInput = selectedInput.id
                 if activeOverride?.selectedInput == selectedInput.id {
                     return
                 }
@@ -230,6 +296,7 @@ final class PersistentDictationInputController {
                 previousInput: previousInput,
                 marker: recoveryMarker
             )
+            lastMaintainedInput = selectedInput.id
             EventReporter.shared.capture(
                 level: .info,
                 engine: "parakeet",

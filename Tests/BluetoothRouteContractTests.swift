@@ -499,6 +499,16 @@ func testBluetoothRouteContract() {
             source.contains("mSelector: kAudioHardwarePropertyDevices"),
             "the saved preferred microphone should be reconsidered when USB devices reconnect"
         )
+        assertTrue(
+            source.contains("scheduleTopologyRefresh(defaultInputChanged: true)")
+                && source.contains("scheduleTopologyRefresh(deviceListChanged: true)"),
+            "default-input changes must remain distinguishable from device reconnects"
+        )
+        assertTrue(
+            source.contains("dictation_persistent_input_external_selection_preserved")
+                && source.contains("runtimeOwnershipRelinquished = true"),
+            "an external microphone selection must relinquish persistent runtime ownership"
+        )
     }
 
     runSuite("Bluetooth route contract - QA report names mocked proof boundary") {
