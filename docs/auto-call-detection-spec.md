@@ -93,11 +93,11 @@ input is already a strong call signal (browsers rarely hold the mic otherwise).
 ## Architecture
 
 ```
-MicActivityMonitor (new)          MeetingPromptDetector (extend)          existing, unchanged
+MicActivityMonitor (new)          MeetingPromptDetector (extend)          detected-call prompt
 ┌──────────────────────┐         ┌──────────────────────────┐           ┌──────────────────────┐
-│ CA process-object     │ bundle  │ micInputCandidates()      │ Candidate │ overlayController     │
-│ listener → set of     │ IDs in  │  → map bundleID→provider  │──────────▶│ .presentDetected      │
-│ bundleIDs using mic   │────────▶│  → gate on own-capture    │           │  MeetingPrompt()      │
+│ CA process-object     │ bundle  │ micInputCandidates()      │ Candidate │ CapturePillController │
+│ listener → set of     │ IDs in  │  → map bundleID→provider  │──────────▶│ .present(candidate:)  │
+│ bundleIDs using mic   │────────▶│  → gate on own-capture    │           │ Record / dismiss      │
 │ (minus our own)       │  use    │  → score, into evaluate() │           │ (already built)       │
 └──────────────────────┘         └──────────────────────────┘           └──────────────────────┘
 ```
@@ -105,8 +105,8 @@ MicActivityMonitor (new)          MeetingPromptDetector (extend)          existi
 Data flow: monitor emits the set of non-self bundle IDs currently using the mic
 → `detector.updateMicInputUsers(_:)` stores it and re-runs `evaluate()` →
 `evaluate()` adds mic-input candidates alongside calendar/runtime candidates →
-highest-scored candidate goes to the existing `onPromptRequest` →
-`meetingOverlayController.presentDetectedMeetingPrompt(candidate)`.
+highest-scored candidate goes to `onPromptRequest` →
+`capturePillController.present(candidate:timeout:)`.
 
 ## Phase 0 — spike (de-risk first, ~half day)
 
@@ -199,7 +199,7 @@ scripts/dev/mic-activity-spike.swift [--watch] [--dump]`). Ran on macOS 26.5.1.
 ### Current wiring anchors (as of 2026-06-13, branch `fix/home-row-actions`; verify line numbers before editing)
 - `Sources/TranscriptedApp.swift:82` — `lazy var meetingPromptDetector = MeetingPromptDetector()`
 - `Sources/TranscriptedApp.swift:168` — `onPromptRequest = { … }`
-- `Sources/TranscriptedApp.swift:171` — `meetingOverlayController.presentDetectedMeetingPrompt(candidate)`
+- `Sources/TranscriptedApp.swift` — `capturePillController.present(candidate:timeout:)`
 - `Sources/TranscriptedApp.swift:180` / `:261` — `start()` / `stop()`
 - `Sources/Meeting/MeetingPromptDetector.swift:189` — `evaluate()`; `:199-211` — candidates array; `:278` — `runtimeReminderCandidates`
 - `Sources/Meeting/MeetingPromptHeuristics.swift:3` — `MeetingPromptProvider`; `:19` — `activeBundleIdentifiers`; `:38` — `supportsRuntimeOnlyPrompt`; `:181` — `runtimePresentation`
@@ -462,15 +462,15 @@ single prompt and existing snooze/dismiss/backoff applies unchanged.
 
 ### Leak 2 — an ignored prompt was treated as an explicit "no"
 
-The detected-meeting prompt shows a 30s countdown
-(`MeetingOverlayTokens.defaultDetectedMeetingPromptTimeoutSeconds`). Before this
+The detected-meeting capture pill shows a 30s countdown for calendar prompts
+(ad-hoc call prompts use the longer heuristic timeout). Before this
 phase, countdown expiry took the *same* path as clicking × —
 `detector.dismiss(candidate:)` — which suppresses the provider for up to 30
 minutes (Teams: 2h). A user heads-down in the call, on another Space, or away
 from the screen for the first minute lost the entire meeting to one missed
 30-second pill.
 
-**The fix:** expiry is now its own path. `MeetingOverlayController.onPromptExpired`
+**The fix:** expiry is now its own path. `CapturePillController.onExpired`
 → `MeetingPromptDetector.expire(candidate:)` schedules a short *candidate-level*
 re-offer (`promptExpiryReofferInterval`, 3 min) with **no provider-wide
 suppression**, so the same call re-prompts while its evidence persists.

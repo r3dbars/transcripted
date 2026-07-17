@@ -3213,6 +3213,18 @@ func testRepoCommandContract() {
                 && viewContents.contains("showGeneralPrivacySettings = true"),
             "legacy settings deep links should reveal their matching consolidated General controls"
         )
+        assertTrue(
+            viewContents.contains("case .general, .models, .shortcuts, .privacy:")
+                && viewContents.contains("generalPage"),
+            "legacy settings page aliases should render the single General implementation"
+        )
+        assertFalse(
+            viewContents.contains("private var modelsPage:")
+                || viewContents.contains("private var shortcutsPage:")
+                || viewContents.contains("private var privacyPage:")
+                || FileManager.default.fileExists(atPath: "Sources/UI/Settings/Pages/PrivacySettingsPage.swift"),
+            "consolidated settings should not retain unreachable standalone page bodies"
+        )
     }
 
     runSuite("Repo command contract - agent todo runner cleans unauthorized queued issues") {
@@ -3490,7 +3502,7 @@ func testRepoCommandContract() {
         assertTrue(
             overlayContents.contains("static let promptButtonHeight: CGFloat = 40")
                 && overlayContents.contains("let buttonHeight = MeetingOverlayTokens.promptButtonHeight"),
-            "meeting prompt primary, remind, and dismiss controls should use a named 40pt hit height"
+            "meeting overlay prompt primary and dismiss controls should use a named 40pt hit height"
         )
         assertTrue(
             overlayContents.contains("static let stopHeight: CGFloat  = 40")
