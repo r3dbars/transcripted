@@ -23,7 +23,6 @@ FAMILIES = (
     "speaker_trust",
     "retry_recovery",
     "onboarding_friction",
-    "timeline_dayflow",
     "release_health",
 )
 
@@ -148,18 +147,6 @@ ONBOARDING_FRICTION_EVENTS = (
     "onboarding_meeting_dry_run_clicked",
     "product_friction_observed",
     "workflow_abandoned",
-)
-
-TIMELINE_DAYFLOW_EVENTS = (
-    "timeline_enabled",
-    "timeline_screen_permission_ready",
-    "timeline_screen_permission_denied",
-    "timeline_capture_paused",
-    "timeline_capture_resumed",
-    "timeline_card_generated",
-    "timeline_card_opened",
-    "timeline_daily_markdown_written",
-    "timeline_used_again",
 )
 
 RELEASE_EVENTS = (
@@ -933,57 +920,6 @@ LIMIT 80
 """,
         ),
         QuerySpec(
-            id="timeline_dayflow.dayflow_events",
-            family="timeline_dayflow",
-            title="Timeline Dayflow adoption",
-            description="Queries shipped timeline/dayflow analytics by coarse provider, surface, card, and result buckets when those events are present.",
-            columns=("event", "provider_kind", "surface", "card_kind", "result", "events", "devices", "first_seen", "last_seen"),
-            sql=f"""
-SELECT
-  event,
-  properties['provider_kind'] AS provider_kind,
-  properties['surface'] AS surface,
-  properties['card_kind'] AS card_kind,
-  properties['result'] AS result,
-  count() AS events,
-  uniq(distinct_id) AS devices,
-  min(timestamp) AS first_seen,
-  max(timestamp) AS last_seen
-FROM events
-WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND {event_filter(TIMELINE_DAYFLOW_EVENTS)}
-  {app_version_filter(app_version)}
-GROUP BY event, provider_kind, surface, card_kind, result
-ORDER BY events DESC
-LIMIT 80
-""",
-            notes=("Keep this family separate from shipped release health; Dayflow rows can be sparse by design.",),
-        ),
-        QuerySpec(
-            id="timeline_dayflow.data_quality",
-            family="timeline_dayflow",
-            title="Timeline Dayflow data quality",
-            description="Counts timeline enablement, screen permission, card generation, and markdown write outcomes without screen text, screenshots, app names, or paths.",
-            columns=("event", "provider_kind", "permission_state", "card_kind", "result", "events", "devices"),
-            sql=f"""
-SELECT
-  event,
-  properties['provider_kind'] AS provider_kind,
-  properties['permission_state'] AS permission_state,
-  properties['card_kind'] AS card_kind,
-  properties['result'] AS result,
-  count() AS events,
-  uniq(distinct_id) AS devices
-FROM events
-WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('timeline_enabled', 'timeline_screen_permission_ready', 'timeline_screen_permission_denied', 'timeline_card_generated', 'timeline_daily_markdown_written')
-  {app_version_filter(app_version)}
-GROUP BY event, provider_kind, permission_state, card_kind, result
-ORDER BY events DESC
-LIMIT 50
-""",
-        ),
-        QuerySpec(
             id="release_health.installed_build_outcomes",
             family="release_health",
             title="Installed build launch and outcome counts",
@@ -1510,7 +1446,6 @@ def run_self_test() -> int:
         "speaker_trust.review_outcomes",
         "retry_recovery.failure_rates",
         "onboarding_friction.step_friction",
-        "timeline_dayflow.dayflow_events",
         "release_health.installed_build_outcomes",
     )
     for query_id in required:

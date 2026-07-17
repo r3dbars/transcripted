@@ -185,11 +185,6 @@
       },
       {
         "devices": 1,
-        "event": "timeline_viewed",
-        "events": 3
-      },
-      {
-        "devices": 1,
         "event": "meeting_file_imported",
         "events": 1
       }
@@ -303,16 +298,6 @@
         "reason_kind": "window_closed",
         "stage": "permissions",
         "step_id": "permissions"
-      }
-    ],
-    "timeline_dayflow": [
-      {
-        "devices": 1,
-        "event": "timeline_viewed",
-        "events": 3,
-        "mode": "day",
-        "provider": "localFoundation",
-        "result": "shown"
       }
     ]
   },

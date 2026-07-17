@@ -100,11 +100,10 @@ ID signing and notarization of the full app bundle.
 
 ## Permissions and TCC prompts
 
-Screen Recording (`NSScreenCaptureUsageDescription`) is requested only so
-meeting capture can capture system audio through ScreenCaptureKit. macOS uses
-the same TCC prompt for system-audio capture and screen capture, so the prompt
-mentions screen recording even though Transcripted does not read, store, or
-transmit screen pixels.
+Meeting capture requests macOS's System Audio Recording permission for an
+audio-only ScreenCaptureKit stream. `NSScreenCaptureUsageDescription` remains
+as compatibility usage copy for ScreenCaptureKit, but Transcripted does not
+request full Screen Recording access or read, store, or transmit screen pixels.
 
 ## Companion MCP server trust model
 

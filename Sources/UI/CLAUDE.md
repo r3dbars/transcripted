@@ -9,15 +9,10 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 - `MenuBar/`
 - `Settings/`
 - `Shared/`
-- `Timeline/`
 
 Draft-mode UI is not an active product path in this worktree.
 
-`Timeline/` is Phase 0 scaffolding for the future Dayflow-style timeline home
-surface. Touching it means also reading `Sources/UI/Timeline/CLAUDE.md` and the
-engine boundary in `Sources/Timeline/CLAUDE.md`.
-
-## Files (97 Swift files across Overlay/MenuBar/Settings/Shared; Timeline/ is still empty scaffolding)
+## Files (97 Swift files across Overlay/MenuBar/Settings/Shared)
 
 ### Overlay/
 
