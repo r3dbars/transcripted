@@ -3,7 +3,7 @@ import Foundation
 /// Resolves a directory containing a named bundle of ML models for offline use.
 ///
 /// `DiarizationService` (and future STT services) ask the provider for directories like
-/// `"sortformer-models"` or `"offline-diarizer-models"`. The provider returns the URL
+/// `"offline-diarizer-models"`. The provider returns the URL
 /// to that directory if it exists on disk, or `nil` to signal "not bundled, please
 /// download from HuggingFace instead".
 ///

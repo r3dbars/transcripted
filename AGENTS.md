@@ -211,7 +211,7 @@ Rules:
 ## Testing gotchas
 
 - `run-tests.sh` is a custom `swiftc` runner, not XCTest.
-- Adding a root `Tests/*Tests.swift` file is not enough by itself; it must be registered in `Tests/FastTests.manifest`.
+- Root fast tests are discovered by convention: `Tests/FooTests.swift` must expose exactly one top-level `testFoo()` entry function.
 - `Tests/TranscriptedCoreTests/` is a separate Swift Package target, run via `swift test` rather than `run-tests.sh`.
 
 ## Storage

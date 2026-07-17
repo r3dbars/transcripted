@@ -1,0 +1,130 @@
+{
+  "cases": [
+    {
+      "id": "empty",
+      "input": "",
+      "observability_output": "",
+      "core_log_output": ""
+    },
+    {
+      "id": "whitespace",
+      "input": "  \n\t  ",
+      "observability_output": "",
+      "core_log_output": ""
+    },
+    {
+      "id": "plain-trimmed",
+      "input": "  meeting started  \n",
+      "observability_output": "meeting started",
+      "core_log_output": "meeting started"
+    },
+    {
+      "id": "home-path-and-auth",
+      "input": "Saved /Users/jane/Client Calls/roadmap.md status=retry with Bearer abc.def and sk-proj-secret",
+      "observability_output": "Saved [redacted-path] and sk-****",
+      "core_log_output": "Saved [redacted-path] and sk-****"
+    },
+    {
+      "id": "synthetic-root-path",
+      "input": "Read /System/Volumes/Data/Users/jane/Library/Application Support/Transcripted/logs/app.jsonl code=1",
+      "observability_output": "Read [redacted-path] code=1",
+      "core_log_output": "Read [redacted-path] code=1"
+    },
+    {
+      "id": "volume-and-private-paths",
+      "input": "Copy /Volumes/External Disk/Meeting Imports/source audio.wav, then /private/var/folders/demo/file.txt stage=done",
+      "observability_output": "Copy [redacted-path], then [redacted-path] stage=done",
+      "core_log_output": "Copy [redacted-path], then [redacted-path] stage=done"
+    },
+    {
+      "id": "path-metadata-duration",
+      "input": "failed /tmp/imports duration=20 status=retry",
+      "observability_output": "failed [redacted-path] status=retry",
+      "core_log_output": "failed [redacted-path] duration=20 status=retry"
+    },
+    {
+      "id": "path-metadata-duration-ms",
+      "input": "failed /tmp/imports duration_ms=20 trigger=hotkey",
+      "observability_output": "failed [redacted-path] duration_ms=20 trigger=hotkey",
+      "core_log_output": "failed [redacted-path]"
+    },
+    {
+      "id": "path-metadata-outcome",
+      "input": "failed /tmp/imports outcome=retry wait_ms=30",
+      "observability_output": "failed [redacted-path] outcome=retry wait_ms=30",
+      "core_log_output": "failed [redacted-path]"
+    },
+    {
+      "id": "path-metadata-like-folder",
+      "input": "failed /Users/jane/Documents/Project status=retry Notes/source audio.wav status=done trigger=hotkey",
+      "observability_output": "failed [redacted-path] status=done trigger=hotkey",
+      "core_log_output": "failed [redacted-path] status=done trigger=hotkey"
+    },
+    {
+      "id": "path-punctuation",
+      "input": "failed /Users/jane/Documents/Report.pdf, permission denied code=1",
+      "observability_output": "failed [redacted-path], permission denied code=1",
+      "core_log_output": "failed [redacted-path], permission denied code=1"
+    },
+    {
+      "id": "url-email-host",
+      "input": "Contact person@example.com on workstation.local at https://example.com/private?token=abc",
+      "observability_output": "Contact [redacted-email] on [redacted-host] at [redacted-url]",
+      "core_log_output": "Contact [redacted-email] on [redacted-host] at [redacted-url]"
+    },
+    {
+      "id": "json-sensitive",
+      "input": "{\"meeting_title\":\"Customer \\\"ACME\\\" Call\",\"speaker_name\":\"Alice\",\"transcript_text\":\"private words\",\"other\":\"safe\"}",
+      "observability_output": "{\"meeting_title\":\"[redacted-sensitive-value]\",\"speaker_name\":\"[redacted-sensitive-value]\",\"transcript_text\":\"[redacted-sensitive-value]\",\"other\":\"safe\"}",
+      "core_log_output": "{\"meeting_title\":\"[redacted-sensitive-value]\",\"speaker_name\":\"[redacted-sensitive-value]\",\"transcript_text\":\"[redacted-sensitive-value]\",\"other\":\"safe\"}"
+    },
+    {
+      "id": "inline-sensitive",
+      "input": "ctx source_app_bundle=com.example.private meeting_title=Roadmap speaker_name=Jane Doe trigger=hotkey",
+      "observability_output": "ctx source_app_bundle=[redacted-sensitive-value] meeting_title=[redacted-sensitive-value] speaker_name=[redacted-sensitive-value] trigger=hotkey",
+      "core_log_output": "ctx source_app_bundle=[redacted-sensitive-value] meeting_title=[redacted-sensitive-value] speaker_name=[redacted-sensitive-value] trigger=hotkey"
+    },
+    {
+      "id": "engine-device",
+      "input": "route (parakeet, Jane's AirPods) then (whisper, USB Mic)",
+      "observability_output": "route (parakeet, [redacted-sensitive-value]) then (whisper, [redacted-sensitive-value])",
+      "core_log_output": "route (parakeet, [redacted-sensitive-value]) then (whisper, [redacted-sensitive-value])"
+    },
+    {
+      "id": "common-secrets",
+      "input": "github_pat_abcdefghijklmnopqrstuvwxyz_1234567890 ghp_123456789012345678901234567890123456 phc_abcdefghijklmnopqrstuvwxyz123456 AKIAIOSFODNN7EXAMPLE ASIAIOSFODNN7EXAMPLE AIzaSyA-BCDEFGHIJKLMNOPQRSTUVWXYZ123456 xoxb-1234567890-abcdefghij",
+      "observability_output": "[redacted-secret] [redacted-secret] [redacted-secret] [redacted-secret] [redacted-secret] [redacted-secret] [redacted-secret]",
+      "core_log_output": "[redacted-secret] [redacted-secret] [redacted-secret] [redacted-secret] [redacted-secret] [redacted-secret] [redacted-secret]"
+    },
+    {
+      "id": "authorization",
+      "input": "Authorization: Basic dXNlcjpwYXNz Proxy-Authorization=Bearer abc123 fallback Basic ZGVtbzpwYXNz",
+      "observability_output": "Authorization=[redacted-secret] Proxy-Authorization=[redacted-secret] fallback Basic ****",
+      "core_log_output": "Authorization=[redacted-secret] Proxy-Authorization=[redacted-secret] fallback Basic ****"
+    },
+    {
+      "id": "secret-assignments",
+      "input": "password=hunter2 client_secret:supersecret credential=temp-pass dsn=https://example@sentry.invalid/1",
+      "observability_output": "password=[redacted-secret] client_secret=[redacted-secret] credential=[redacted-secret] dsn=[redacted-secret]",
+      "core_log_output": "password=[redacted-secret] client_secret=[redacted-secret] credential=[redacted-secret] dsn=[redacted-secret]"
+    },
+    {
+      "id": "pem",
+      "input": "Failed:\n-----BEGIN OPENSSH PRIVATE KEY-----\nprivate-body\n-----END OPENSSH PRIVATE KEY-----\nretry",
+      "observability_output": "Failed:\n[redacted-secret]\nretry",
+      "core_log_output": "Failed:\n[redacted-secret]\nretry"
+    },
+    {
+      "id": "lookalikes",
+      "input": "safe_source_app_bundle=com.example.coarse Position (10, 20) public.locality=/relative/path",
+      "observability_output": "safe_source_app_bundle=com.example.coarse Position (10, 20) public.locality=/relative/path",
+      "core_log_output": "safe_source_app_bundle=com.example.coarse Position (10, 20) public.locality=/relative/path"
+    },
+    {
+      "id": "unicode-path",
+      "input": "open /Users/josé/Library/Application Support/Transcripted/Équipe Call.wav reason=retry",
+      "observability_output": "open [redacted-path]] reason=retry",
+      "core_log_output": "open [redacted-path]] reason=retry"
+    }
+  ]
+}

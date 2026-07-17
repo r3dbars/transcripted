@@ -1,10 +1,9 @@
 // FailedMeetingStore.swift
 // Failed-meeting queue/persistence/retry bookkeeping extracted from
-// MeetingSessionController (audit 2026-07-08 wave 2, W2-B). Pure code motion —
-// no behavior change. This is a plain owned object (not an ObservableObject);
+// MeetingSessionController (audit 2026-07-08 wave 2, W2-B). This is a plain
+// owned object (not an ObservableObject); runtime behavior stays unchanged.
 // MeetingSessionController still owns the `@Published var failedMeetings`
-// surface and calls back into the controller for state it doesn't itself own
-// (`taskManager`, `failedManager`, diagnostics helpers) via `controller`.
+// surface and supplies narrow callbacks for the state transitions it owns.
 //
 // MeetingSessionController.FailedMeetingItem stays resolvable via a typealias
 // on the controller so every existing call site (Settings/Home UI,
@@ -29,29 +28,49 @@ final class FailedMeetingStore {
         let audioURLs: [URL]
     }
 
-    unowned let controller: MeetingSessionController
+    private let taskManager: TranscriptionTaskManager
+    private let failedManager: FailedTranscriptionManager
+    private let canRetry: () -> Bool
+    private let prepareModelsForRetry: () async -> Bool
+    private let markRetryStarted: () -> Void
+    private let publishRefresh: () -> Void
+    private let diagnosticsContext: ([String: String]) -> [String: String]
 
     private var retryingFailedMeetingIDs: Set<UUID> = []
     private var failedAudioCompressionTask: Task<Void, Never>?
     private var failedAudioCompressionNeedsReschedule = false
 
-    init(controller: MeetingSessionController) {
-        self.controller = controller
+    init(
+        taskManager: TranscriptionTaskManager,
+        failedManager: FailedTranscriptionManager,
+        canRetry: @escaping () -> Bool,
+        prepareModelsForRetry: @escaping () async -> Bool,
+        markRetryStarted: @escaping () -> Void,
+        publishRefresh: @escaping () -> Void,
+        diagnosticsContext: @escaping ([String: String]) -> [String: String]
+    ) {
+        self.taskManager = taskManager
+        self.failedManager = failedManager
+        self.canRetry = canRetry
+        self.prepareModelsForRetry = prepareModelsForRetry
+        self.markRetryStarted = markRetryStarted
+        self.publishRefresh = publishRefresh
+        self.diagnosticsContext = diagnosticsContext
     }
 
     @discardableResult
     func retryFailedMeeting(id: UUID) -> Bool {
-        guard !controller.isRecording, !controller.hasBackgroundTranscriptionWork, !controller.isSpeakerReviewPending else { return false }
+        guard canRetry() else { return false }
         guard !retryingFailedMeetingIDs.contains(id) else { return false }
-        guard controller.failedManager.failedTranscriptions.contains(where: { $0.id == id }) else {
-            controller.refreshFailedMeetings()
+        guard failedManager.failedTranscriptions.contains(where: { $0.id == id }) else {
+            publishRefresh()
             return false
         }
 
         failedAudioCompressionTask?.cancel()
         retryingFailedMeetingIDs.insert(id)
-        controller.activeTranscriptionTrigger = .unknown
-        controller.refreshFailedMeetings()
+        markRetryStarted()
+        publishRefresh()
         let retryStartedAt = CFAbsoluteTimeGetCurrent()
         WorkflowRecoveryTelemetry.attempted(
             workflowKind: "meeting_transcription",
@@ -63,17 +82,16 @@ final class FailedMeetingStore {
 
         Task { [weak self] in
             guard let self else { return }
-            await self.controller.prepareModels()
-            guard case .ready = self.controller.state else {
+            guard await self.prepareModelsForRetry() else {
                 DiagnosticsTrail.record(
                     level: .warning,
                     engine: "meeting",
                     event: "meeting_failed_retry_blocked_models",
                     message: "Failed meeting retry blocked because models were not ready",
-                    context: self.controller.baseDiagnosticsContext(extra: ["failed_id": id.uuidString])
+                    context: self.diagnosticsContext(["failed_id": id.uuidString])
                 )
                 self.retryingFailedMeetingIDs.remove(id)
-                self.controller.refreshFailedMeetings()
+                self.publishRefresh()
                 WorkflowRecoveryTelemetry.finished(
                     workflowKind: "meeting_transcription",
                     failureKind: "failed_meeting",
@@ -86,12 +104,12 @@ final class FailedMeetingStore {
                 return
             }
 
-            let retryPublished = await self.controller.taskManager.retryFailedTranscription(
+            let retryPublished = await self.taskManager.retryFailedTranscription(
                 failedId: id,
                 outputFolder: MeetingStoragePaths.transcriptsFolder
             )
             self.retryingFailedMeetingIDs.remove(id)
-            self.controller.refreshFailedMeetings()
+            self.publishRefresh()
             WorkflowRecoveryTelemetry.finished(
                 workflowKind: "meeting_transcription",
                 failureKind: "failed_meeting",
@@ -108,17 +126,17 @@ final class FailedMeetingStore {
     @discardableResult
     func dismissFailedMeeting(id: UUID) -> Bool {
         retryingFailedMeetingIDs.remove(id)
-        let didDismiss = controller.failedManager.removeFailedTranscription(id: id)
-        controller.refreshFailedMeetings()
-        return didDismiss || !controller.failedManager.failedTranscriptions.contains(where: { $0.id == id })
+        let didDismiss = failedManager.removeFailedTranscription(id: id)
+        publishRefresh()
+        return didDismiss || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
     }
 
     @discardableResult
     func deleteFailedMeeting(id: UUID) -> Bool {
         retryingFailedMeetingIDs.remove(id)
-        let didDelete = controller.failedManager.deleteFailedTranscription(id: id)
-        controller.refreshFailedMeetings()
-        return didDelete || !controller.failedManager.failedTranscriptions.contains(where: { $0.id == id })
+        let didDelete = failedManager.deleteFailedTranscription(id: id)
+        publishRefresh()
+        return didDelete || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
     }
 
     @discardableResult
@@ -131,7 +149,7 @@ final class FailedMeetingStore {
         recordingDate: Date? = nil,
         archiveAudio: Bool = true
     ) -> Bool {
-        let preserved = controller.taskManager.addFailedTranscriptionRetainingAvailableAudio(
+        let preserved = taskManager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
@@ -141,20 +159,20 @@ final class FailedMeetingStore {
             archiveAudio: archiveAudio
         )
         if preserved {
-            controller.refreshFailedMeetings()
+            publishRefresh()
         }
         return preserved
     }
 
     func refreshTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
-        let existingFailure = controller.failedManager.failedTranscriptions
+        let existingFailure = failedManager.failedTranscriptions
             .first(where: { $0.id == id })
         let existingMicURL = existingFailure?.micAudioURL
         let existingSystemURL = existingFailure?.systemAudioURL
         guard let micURL = result.micURL ?? existingMicURL else { return }
         let systemURL = result.systemURL ?? existingSystemURL
 
-        let updated = controller.taskManager.promoteFinalizedFailedTranscriptionAudio(
+        let updated = taskManager.promoteFinalizedFailedTranscriptionAudio(
             id: id,
             micAudioURL: micURL,
             systemAudioURL: systemURL
@@ -166,16 +184,14 @@ final class FailedMeetingStore {
             message: updated
                 ? "Timed-out meeting audio finalized and failed queue was refreshed"
                 : "Timed-out meeting audio finalized but failed queue entry was not found",
-            context: controller.baseDiagnosticsContext(
-                extra: [
-                    "failed_id": id.uuidString,
-                    "mic_file_present": controller.boolString(FileManager.default.fileExists(atPath: micURL.path)),
-                    "system_file_present": controller.boolString(systemURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
-                ]
-            )
+            context: diagnosticsContext([
+                "failed_id": id.uuidString,
+                "mic_file_present": boolString(FileManager.default.fileExists(atPath: micURL.path)),
+                "system_file_present": boolString(systemURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+            ])
         )
         if updated {
-            controller.refreshFailedMeetings()
+            publishRefresh()
         }
     }
 
@@ -184,7 +200,7 @@ final class FailedMeetingStore {
     /// its own `@Published var failedMeetings` (kept on the controller —
     /// this store never touches the published surface directly).
     func refreshFailedMeetings(_ updatedFailedTranscriptions: [FailedTranscription]? = nil) -> [FailedMeetingItem] {
-        let failedTranscriptions = updatedFailedTranscriptions ?? controller.failedManager.failedTranscriptions
+        let failedTranscriptions = updatedFailedTranscriptions ?? failedManager.failedTranscriptions
         retryingFailedMeetingIDs.formIntersection(Set(failedTranscriptions.map(\.id)))
 
         let items = failedTranscriptions
@@ -234,7 +250,7 @@ final class FailedMeetingStore {
                               !self.retryingFailedMeetingIDs.contains(update.id) else {
                             return false
                         }
-                        return self.controller.failedManager.updateFailedTranscriptionAudio(
+                        return self.failedManager.updateFailedTranscriptionAudio(
                             id: update.id,
                             micAudioURL: update.micAudioURL,
                             systemAudioURL: update.systemAudioURL
@@ -247,9 +263,13 @@ final class FailedMeetingStore {
                 self?.failedAudioCompressionTask = nil
                 self?.failedAudioCompressionNeedsReschedule = false
                 if shouldReschedule, let self {
-                    self.scheduleFailedAudioCompression(for: self.controller.failedManager.failedTranscriptions)
+                    self.scheduleFailedAudioCompression(for: self.failedManager.failedTranscriptions)
                 }
             }
         }
+    }
+
+    private func boolString(_ value: Bool) -> String {
+        value ? "true" : "false"
     }
 }
