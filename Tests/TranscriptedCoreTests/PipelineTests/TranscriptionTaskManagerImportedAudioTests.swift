@@ -93,7 +93,10 @@ extension TranscriptionTaskManagerMetadataTests {
 
     func testSavedAudioRetranscriptionRequiresQuitConfirmationWithoutClaimingScratchOwnership() async throws {
         let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Saved audio retry completed.")
-        let manager = makeManager(speechToText: speech)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 2.5))
+        )
         let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
         try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
         let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
