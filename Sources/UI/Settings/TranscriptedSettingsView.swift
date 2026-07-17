@@ -3083,7 +3083,7 @@ struct TranscriptedSettingsView: View {
                     trackSettingsToggle("local_ai_meeting_summary_provider_\(provider.rawValue)", enabled: true, page: .beta)
                     refreshLocalSummarySetupStatus()
                     if localMeetingSummariesEnabled {
-                        cancelLocalSummaryJobs()
+                        cancelLocalSummaryJobs(reason: .providerChanged)
                         clearHomeLocalSummaryNotice()
                         cancelLocalSummaryModelPreparation()
                         localSummaryModelPreparationStatus = nil
