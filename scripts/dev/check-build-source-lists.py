@@ -63,30 +63,25 @@ def expected_app_sources() -> list[str]:
     )
 
 
-def validate_fast_manifest() -> list[str]:
+def validate_fast_test_conventions() -> list[str]:
     failures: list[str] = []
-    manifest = read_text("Tests/FastTests.manifest")
-    entries = [
-        line.strip()
-        for line in manifest.splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    manifest_files = sorted(entry.split(":", 1)[0] for entry in entries if ":" in entry)
-    actual_files = sorted(path.name for path in (REPO_ROOT / "Tests").glob("*Tests.swift"))
-    if manifest_files != actual_files:
-        failures.append("Tests/FastTests.manifest does not match root Tests/*Tests.swift files")
+    test_paths = sorted((REPO_ROOT / "Tests").glob("*Tests.swift"))
+    if not test_paths:
+        return ["no root fast tests found at Tests/*Tests.swift"]
 
-    for entry in entries:
-        if ":" not in entry:
-            failures.append(f"Tests/FastTests.manifest: malformed entry {entry!r}")
-            continue
-        filename, function = entry.split(":", 1)
-        test_path = REPO_ROOT / "Tests" / filename
-        if not test_path.is_file():
-            failures.append(f"Tests/FastTests.manifest: missing Tests/{filename}")
-            continue
-        if f"func {function}(" not in test_path.read_text(encoding="utf-8"):
-            failures.append(f"Tests/FastTests.manifest: missing entry function {function} in {filename}")
+    for test_path in test_paths:
+        base_name = test_path.name.removesuffix("Tests.swift")
+        function = f"test{base_name}"
+        declaration_count = len(
+            re.findall(rf"\bfunc\s+{re.escape(function)}\s*\(", test_path.read_text(encoding="utf-8"))
+        )
+        if declaration_count == 0:
+            failures.append(f"Tests/{test_path.name}: missing convention entry function {function}")
+        elif declaration_count > 1:
+            failures.append(
+                f"Tests/{test_path.name}: duplicated convention entry function {function} "
+                f"({declaration_count} declarations)"
+            )
     return failures
 
 
@@ -114,7 +109,7 @@ def main() -> int:
         except (RuntimeError, ValueError) as error:
             failures.append(str(error))
 
-    failures.extend(validate_fast_manifest())
+    failures.extend(validate_fast_test_conventions())
 
     if failures:
         print("Build source-list validation failed:", file=sys.stderr)

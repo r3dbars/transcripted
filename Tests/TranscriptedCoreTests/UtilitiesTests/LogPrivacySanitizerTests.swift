@@ -1,8 +1,34 @@
 import XCTest
 @testable import TranscriptedCore
 
+private struct PrivacyTextRedactorParityCorpus: Decodable {
+    let cases: [PrivacyTextRedactorParityCase]
+}
+
+private struct PrivacyTextRedactorParityCase: Decodable {
+    let id: String
+    let input: String
+    let coreLogOutput: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case input
+        case coreLogOutput = "core_log_output"
+    }
+}
+
 @available(macOS 14.0, *)
 final class LogPrivacySanitizerTests: XCTestCase {
+
+    private func loadParityCorpus() throws -> PrivacyTextRedactorParityCorpus {
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/PrivacyTextRedactorParityCorpus.json")
+        let data = try Data(contentsOf: fixtureURL)
+        return try JSONDecoder().decode(PrivacyTextRedactorParityCorpus.self, from: data)
+    }
 
     // MARK: - sanitizeText
 
@@ -67,6 +93,16 @@ final class LogPrivacySanitizerTests: XCTestCase {
             LogPrivacySanitizer.sanitizeText(text),
             "meeting_title=[redacted-sensitive-value]"
         )
+    }
+
+    func testSanitizeTextMatchesExactSharedParityCorpus() throws {
+        for testCase in try loadParityCorpus().cases {
+            XCTAssertEqual(
+                LogPrivacySanitizer.sanitizeText(testCase.input),
+                testCase.coreLogOutput,
+                "shared parity case \(testCase.id) must preserve the current core-log output"
+            )
+        }
     }
 
     // MARK: - sanitizeMetadata

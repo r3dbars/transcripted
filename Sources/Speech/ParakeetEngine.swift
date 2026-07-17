@@ -2648,6 +2648,16 @@ class ParakeetEngine: ObservableObject {
                         emptyContext["retry_samples"] = "\(retrySamples.count)"
                     } catch {
                         emptyContext["retry_error"] = error.localizedDescription
+                        EventReporter.shared.capture(
+                            level: .error,
+                            engine: "parakeet",
+                            event: "dictation_empty_retry_failed",
+                            message: "Focused retry failed after the initial empty transcription",
+                            context: emptyContext
+                        )
+                        lastEmptyTranscriptionReason = .modelFailure
+                        finishTranscription()
+                        return nil
                     }
                 } else if !analysis.hasUsableSpeechSignal {
                     EventReporter.shared.capture(

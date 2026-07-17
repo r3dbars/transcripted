@@ -113,12 +113,25 @@ func testNightlySecurityContract() {
     }
 
     runSuite("Nightly security sanitizer corpus stays shared and non-empty") {
+        let manifest = loadJSONFixture("config/security/nightly-security-manifest.json", as: [String: AnyDecodable].self)
+        let secretScan = manifest["secret_scan"]?.dictionaryValue ?? [:]
+        let trackedAllowlist = Set(secretScan["tracked_file_allowlist_globs"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+        let historyAllowlist = Set(secretScan["history_file_allowlist_globs"]?.arrayValue?.compactMap(\.stringValue) ?? [])
         let corpus = loadJSONFixture("Tests/Fixtures/ObservabilitySanitizerCorpus.json", as: ObservabilitySanitizerCorpus.self)
         let ids = corpus.cases.map(\.id)
+        let privacyParityCorpus = "Tests/Fixtures/PrivacyTextRedactorParityCorpus.json"
 
         assertTrue(corpus.cases.count >= 5, "shared sanitizer corpus should cover several privacy cases")
         assertEqual(Set(ids).count, ids.count, "shared sanitizer corpus ids should be unique")
         assertTrue(corpus.cases.allSatisfy { !$0.mustContain.isEmpty && !$0.mustNotContain.isEmpty }, "each sanitizer corpus case should define required and forbidden markers")
+        assertTrue(
+            trackedAllowlist.contains(privacyParityCorpus),
+            "the exact synthetic privacy parity corpus should be allowlisted from tracked secret scanning"
+        )
+        assertTrue(
+            historyAllowlist.contains(privacyParityCorpus),
+            "the exact synthetic privacy parity corpus should be allowlisted from history secret scanning"
+        )
     }
 
     runSuite("Nightly security docs reference the deterministic checker") {
@@ -164,7 +177,10 @@ func testNightlySecurityContract() {
         assertTrue(checker.contains("check_posthog_health_schema"), "nightly checker should pin PostHog health schema to AnalyticsEventPolicy")
         assertTrue(checker.contains("first_value_sources"), "PostHog first-value event checks should inspect each probe source independently")
         assertTrue(checker.contains("posthog-first-value-schema-"), "PostHog first-value drift findings should identify the missing probe source")
-        assertTrue(preflight.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.50.json"), "agent preflight should suggest a strict checker command with deterministic GitHub release metadata")
+        assertTrue(
+            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
+            "agent preflight should execute the matrix that owns the strict checker command"
+        )
         assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.50.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
     }
 

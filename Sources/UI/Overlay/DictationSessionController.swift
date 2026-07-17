@@ -1140,9 +1140,6 @@ class DictationSessionController: ObservableObject {
                 overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)
                 isDictating = false
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: emptyReason.runtimeOutcome)
-                if emptyReason != .modelFailure {
-                    self.discardStoppedAudioRecovery(explicitDiscard: true)
-                }
                 return
             }
 

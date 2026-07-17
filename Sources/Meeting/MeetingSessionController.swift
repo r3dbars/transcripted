@@ -151,7 +151,7 @@ final class MeetingSessionController: ObservableObject {
     let liveTranscriptFeed = LiveMeetingTranscriptFeed()
     let services: AppServices
     let taskManager: TranscriptionTaskManager
-    let failedManager: FailedTranscriptionManager
+    private let failedManager: FailedTranscriptionManager
     let diarization: DiarizationService
     let sttAdapter: MeetingSTTAdapter
     private let speakerDatabase: SpeakerDatabase
@@ -162,13 +162,10 @@ final class MeetingSessionController: ObservableObject {
     /// Failed-meeting queue/persistence/retry bookkeeping (audit 2026-07-08
     /// wave 2, W2-B). Plain owned object — this controller stays the single
     /// ObservableObject; `failedMeetings` below is still published here.
-    /// Implicitly-unwrapped: `FailedMeetingStore` holds an `unowned` back
-    /// reference to this controller, so it can only be constructed with
-    /// `self` — which Swift only allows once every OTHER stored property is
-    /// set. A plain `let` here would make `self` unusable for its own
-    /// assignment; this is constructed once, immediately, in `init` and
-    /// never nil afterward.
-    private(set) var failedMeetingStore: FailedMeetingStore!
+    /// Laziness lets the store receive narrow weak callbacks after this
+    /// controller has finished initializing, without an unowned back-reference
+    /// or an implicitly-unwrapped stored property.
+    private(set) lazy var failedMeetingStore = makeFailedMeetingStore()
     /// Background-transcription queue/dispatch bookkeeping (audit 2026-07-08
     /// wave 2, W2-B). Plain owned object, same rationale as above.
     private(set) var transcriptionQueue: TranscriptionQueueCoordinator!
@@ -341,12 +338,10 @@ final class MeetingSessionController: ObservableObject {
         // Model downloader — coordinates selected STT + PyAnnote readiness.
         self.downloader = MeetingModelDownloader(stt: sttAdapter, diarization: diarization)
 
-        // Failed-meeting and transcription-queue bookkeeping (audit
-        // 2026-07-08 wave 2, W2-B). Constructed last, after every other
-        // stored property, since each holds an `unowned` back-reference to
-        // this controller. `wireSubscriptions()` below calls into
-        // `failedMeetingStore` synchronously, so both must exist first.
-        self.failedMeetingStore = FailedMeetingStore(controller: self)
+        // Transcription-queue bookkeeping (audit 2026-07-08 wave 2, W2-B).
+        // Constructed last because it still holds an unowned controller
+        // reference. `failedMeetingStore` initializes lazily when
+        // `wireSubscriptions()` first needs it.
         self.transcriptionQueue = TranscriptionQueueCoordinator(controller: self)
 
         capture.onUnexpectedRecordingComplete = { [weak self] result in
@@ -2517,9 +2512,7 @@ final class MeetingSessionController: ObservableObject {
         refreshWarmupStatus()
     }
 
-    // Was `private`; FailedMeetingStore lives in a sibling file and needs
-    // module-internal access (audit 2026-07-08 wave 2, W2-B).
-    var hasBackgroundTranscriptionWork: Bool {
+    private var hasBackgroundTranscriptionWork: Bool {
         taskManager.activeCount > 0
             || transcriptionQueue.isPreparingQueuedTranscriptionStart
             || !transcriptionQueue.queuedTranscriptionJobs.isEmpty
@@ -3116,9 +3109,8 @@ final class MeetingSessionController: ObservableObject {
         )
     }
 
-    // Was `private`; FailedMeetingStore / TranscriptionQueueCoordinator live
-    // in sibling files and need module-internal access (audit 2026-07-08
-    // wave 2, W2-B).
+    // TranscriptionQueueCoordinator lives in a sibling file and needs
+    // module-internal access.
     func baseDiagnosticsContext(extra: [String: String] = [:]) -> [String: String] {
         var context: [String: String] = [
             "session_state": state.diagnosticName,
@@ -3141,10 +3133,36 @@ final class MeetingSessionController: ObservableObject {
         MeetingSystemAudioStatusCopy.message(for: status)
     }
 
-    // Was `private`; FailedMeetingStore lives in a sibling file and needs
-    // module-internal access (audit 2026-07-08 wave 2, W2-B).
-    func boolString(_ value: Bool) -> String {
+    private func boolString(_ value: Bool) -> String {
         value ? "true" : "false"
+    }
+
+    private func makeFailedMeetingStore() -> FailedMeetingStore {
+        FailedMeetingStore(
+            taskManager: taskManager,
+            failedManager: failedManager,
+            canRetry: { [weak self] in
+                guard let self else { return false }
+                return !self.isRecording
+                    && !self.hasBackgroundTranscriptionWork
+                    && !self.isSpeakerReviewPending
+            },
+            prepareModelsForRetry: { [weak self] in
+                guard let self else { return false }
+                await self.prepareModels()
+                guard case .ready = self.state else { return false }
+                return true
+            },
+            markRetryStarted: { [weak self] in
+                self?.activeTranscriptionTrigger = .unknown
+            },
+            publishRefresh: { [weak self] in
+                self?.refreshFailedMeetings()
+            },
+            diagnosticsContext: { [weak self] extra in
+                self?.baseDiagnosticsContext(extra: extra) ?? extra
+            }
+        )
     }
 
     // preserveFailedMeetingForRetry, refreshTimedOutFailedMeetingAudio, and
@@ -3156,10 +3174,7 @@ final class MeetingSessionController: ObservableObject {
     /// controller (rather than moved wholesale) because `failedMeetings` is
     /// `@Published` here — the store computes the list, the controller owns
     /// the publish.
-    // Was `private`; FailedMeetingStore lives in a sibling file and calls
-    // back into this method after every mutation (audit 2026-07-08 wave 2,
-    // W2-B).
-    func refreshFailedMeetings(_ updatedFailedTranscriptions: [FailedTranscription]? = nil) {
+    private func refreshFailedMeetings(_ updatedFailedTranscriptions: [FailedTranscription]? = nil) {
         failedMeetings = failedMeetingStore.refreshFailedMeetings(updatedFailedTranscriptions)
     }
 }

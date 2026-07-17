@@ -200,7 +200,15 @@ func testDictationStoppedAudioRecovery() {
                 "a successfully imported restart checkpoint should be retired after its transcript is saved"
             )
             assertTrue(source.contains("transcriptPersisted: saveResult.saved != nil"), "cleanup should be tied to successful transcript persistence")
-            assertTrue(source.contains("if emptyReason != .modelFailure"), "model failures should retain recovery audio")
+            assertFalse(
+                source.contains("if emptyReason != .modelFailure"),
+                "an empty result should retain recovery audio until transcript persistence or an explicit user discard"
+            )
+            assertTrue(
+                speechSource.contains("event: \"dictation_empty_retry_failed\"")
+                    && speechSource.contains("lastEmptyTranscriptionReason = .modelFailure"),
+                "focused retry exceptions should be classified as model failures"
+            )
             assertTrue(
                 source.contains("cancelDictation(preserveStoppedAudio: true)"),
                 "termination timeout must not convert a durable checkpoint into an implicit discard"
