@@ -211,7 +211,7 @@ final class MeetingSessionController: ObservableObject {
     }
 
     var shouldConfirmQuitForBackgroundTranscription: Bool {
-        taskManager.hasPreservableActiveTranscriptionAudio
+        taskManager.hasActiveTranscriptionWorkRequiringQuitConfirmation
             || transcriptionQueue.isPreparingQueuedTranscriptionStart
             || !transcriptionQueue.queuedTranscriptionJobs.isEmpty
     }

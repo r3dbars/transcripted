@@ -47,6 +47,19 @@ public class TranscriptionTaskManager: ObservableObject {
         activeTaskAudio.values.contains { $0.micURL != nil || $0.systemURL != nil }
     }
 
+    /// Active pipeline work that should keep quit confirmation enabled.
+    ///
+    /// Saved-audio retranscriptions and failed-row retries use already-retained
+    /// source files, so they intentionally do not enter `activeTaskAudio`. They
+    /// still need the background-work quit warning while inference is running.
+    /// Conversely, `cancelAll()` leaves non-cooperative model work in
+    /// `activeTasks` for single-flight occupancy, but marks it intentionally
+    /// cancelled after discarding any owned scratch audio. That cancelled
+    /// occupancy must not revive a misleading save-audio prompt.
+    public var hasActiveTranscriptionWorkRequiringQuitConfirmation: Bool {
+        activeTasks.keys.contains { !intentionallyCancelledTaskIds.contains($0) }
+    }
+
     public init(
         failedTranscriptionManager: FailedTranscriptionManager,
         speechToText: any SpeechToTextEngine,
