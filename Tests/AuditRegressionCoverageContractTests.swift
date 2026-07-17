@@ -28,8 +28,8 @@ func testAuditRegressionCoverageContract() {
     runSuite("AuditRegressionCoverageContract — pasteback focus changes downgrade to copied before Cmd+V") {
         let source = readAuditContractSource("Sources/Support/ClipboardRestoringTextPaster.swift")
         assertTrue(
-            source.contains("!target.matchesCurrentFrontmostApp()"),
-            "pasteback must re-check the captured target app before dispatching Cmd+V"
+            source.contains("!pasteTargetAdapter.isFrontmost()"),
+            "pasteback must re-check the target adapter before dispatching Cmd+V"
         )
         assertTrue(
             source.contains("reason: .focusChanged"),
