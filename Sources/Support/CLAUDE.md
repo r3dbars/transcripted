@@ -36,7 +36,6 @@
 - `ModelCacheInventory.swift` — scans and cleans known local model cache roots for Settings storage controls; despite living in `Support/`, it inventories `Sources/Speech/` STT model caches (Parakeet/Whisper/Nemotron), not app-wide caches
 - `SpeakerEmbedderFactory.swift` — app-layer resolution of the optional speaker-embedding model; keeps `Bundle.main`/filesystem lookups out of `TranscriptedCore` and hands the meeting controller a ready `SpeakerSegmentEmbedder` or nil
 - `SpeakerEmbedderPreferences.swift` — persisted choice between the diarizer's built-in WeSpeaker embedder and the optional ERes2Net model used for same-voice consolidation and cross-call speaker matching; mirrors `TranscriptionModelPreferences`
-- `OnboardingDictationShortcutPolicy.swift` — first-run shortcut policy that keeps dictation setup copy aligned with trigger preferences
 - `PermissionsOnboardingPreferences.swift` — persisted completion and forced-rerun state for the first-run permissions onboarding flow
 - `PhysicalDictationTriggerPreferences.swift` — canonical physical key / modifier trigger bindings for push-to-talk, hands-free dictation, paste-last-dictation, and meeting shortcuts, including migration from older right-Option settings
 - `QuitConfirmationPreferences.swift` — default-on quit safety policy and copy for warning before active meeting recordings are stopped by app quit

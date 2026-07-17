@@ -259,7 +259,6 @@ APP_SOURCES=(
     "Sources/Support/MenuBarVisibilityPreferences.swift"
     "Sources/Support/PermissionsOnboardingPreferences.swift"
     "Sources/Support/HotkeyPreferences.swift"
-    "Sources/Support/OnboardingDictationShortcutPolicy.swift"
     "Sources/Support/PhysicalDictationTriggerPreferences.swift"
     "Sources/Support/CustomDictionaryPreferences.swift"
     "Sources/Support/SpeakerEmbedderPreferences.swift"

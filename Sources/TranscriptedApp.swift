@@ -1032,7 +1032,21 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     }
 
     private func makeOnboardingView() -> PermissionsOnboardingView {
-        PermissionsOnboardingView { [weak self] in
+        PermissionsOnboardingView(
+            startModelPrefetch: { [weak self] in
+                // Cache the voice-model files while the user walks through
+                // onboarding so the first dictation is not blocked on a large
+                // download. File prefetch only; nothing loads into memory.
+                guard let self else { return }
+                Task(priority: .utility) {
+                    await self.appState.sttRouter.prefetchSelectedModelFilesForExistingInstall()
+                }
+            },
+            modelStateProvider: { [weak self] in
+                guard let self else { return .notLoaded }
+                return FirstRunLocalModelState(self.appState.sttRouter.modelDownloadState)
+            }
+        ) { [weak self] in
             self?.finishOnboarding()
         }
     }

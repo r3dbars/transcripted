@@ -33,8 +33,11 @@ settings-side agent connection flow.
   feedback, and failed meeting entry points.
 - `HomeCanvasGreeting.swift` - time-of-day greeting helper for the Home
   canvas header.
-- `PermissionsOnboardingView.swift` - first-run permissions and agent setup
-  walkthrough.
+- `PermissionsOnboardingView.swift` - four-step first-run flow: welcome, a
+  single permissions screen (Microphone required; System Audio and
+  Accessibility optional one-click grants), a live dictation try-out, and a
+  ready recap with compact optional agent connect. Voice-model files prefetch
+  in the background from the first screen.
 - `SpeakerPeopleSettingsSection.swift` - speakers surface: the voice-to-name
   queue (one row per distinct voice), compact duplicate-merge suggestions, and
   the searchable all-speakers list with per-row play/rename/merge/delete.

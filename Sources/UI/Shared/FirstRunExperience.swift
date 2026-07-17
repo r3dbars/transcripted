@@ -7,8 +7,28 @@ enum FirstRunLocalModelState: Equatable {
     case loading
     case ready
     case failed(String)
-}
 
+    var analyticsStatus: String {
+        switch self {
+        case .notLoaded:
+            return "not_loaded"
+        case .downloading:
+            return "downloading"
+        case .cached:
+            return "cached"
+        case .loading:
+            return "loading"
+        case .ready:
+            return "ready"
+        case .failed:
+            return "failed"
+        }
+    }
+
+    func shouldTrackAnalyticsTransition(to updated: FirstRunLocalModelState) -> Bool {
+        analyticsStatus != updated.analyticsStatus
+    }
+}
 struct FirstRunModelCardState: Equatable {
     enum Tone: Equatable {
         case ready
@@ -53,6 +73,8 @@ struct MenuBarPrimaryActionState: Equatable {
 enum FirstRunCompletionPath: String, Equatable {
     case meetings
     case dictation
+    /// The single-flow onboarding sets up dictation and meetings together.
+    case unified
 }
 
 enum FirstRunExperience {
@@ -83,7 +105,7 @@ enum FirstRunExperience {
         completionPath: FirstRunCompletionPath
     ) -> [TranscriptedPermissionKind] {
         switch completionPath {
-        case .meetings:
+        case .meetings, .unified:
             return [.microphone]
         case .dictation:
             return [.microphone, .accessibility]
@@ -92,6 +114,52 @@ enum FirstRunExperience {
 
     static func onboardingOptionalPermissions() -> [TranscriptedPermissionKind] {
         [.systemAudioRecording, .calendar]
+    }
+
+    /// One-line readiness status under the single onboarding permissions
+    /// screen. Names the next most useful grant instead of listing raw
+    /// permission states.
+    static func setupReadinessLine(
+        microphoneGranted: Bool,
+        systemAudioGranted: Bool,
+        accessibilityGranted: Bool
+    ) -> String {
+        guard microphoneGranted else {
+            return "Allow Microphone to unlock dictation and meetings."
+        }
+        switch (accessibilityGranted, systemAudioGranted) {
+        case (true, true):
+            return "Dictation and full meeting transcripts are ready."
+        case (false, true):
+            return "Meetings are ready. Allow Accessibility so dictation can paste in place."
+        case (true, false):
+            return "Dictation is ready. Allow System Audio to capture the other side of calls."
+        case (false, false):
+            return "Microphone is on. The other two finish dictation paste-back and full meeting transcripts."
+        }
+    }
+
+    /// Short voice-model status shown while the try-dictation step waits for
+    /// the background prefetch kicked off on the first onboarding screen.
+    static func onboardingModelStatus(
+        for state: FirstRunLocalModelState
+    ) -> (text: String, isReady: Bool) {
+        switch state {
+        case .notLoaded, .loading:
+            return ("Preparing the on-device voice model…", false)
+        case .downloading(let progress):
+            let percent = max(0, min(100, Int(progress * 100)))
+            guard percent > 0 else {
+                return ("Downloading the voice model…", false)
+            }
+            return ("Downloading the voice model · \(percent)%", false)
+        case .cached:
+            return ("Voice model cached — loads when you start", true)
+        case .ready:
+            return ("Voice model ready", true)
+        case .failed:
+            return ("Voice model will retry when dictation starts", false)
+        }
     }
 
     static func onboardingCompletionAnalyticsProperties(

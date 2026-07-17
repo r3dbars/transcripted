@@ -1,6 +1,95 @@
 import Foundation
 
 func testFirstRunExperience() {
+    runSuite("FirstRunExperience.setupReadinessLine — names the next most useful grant") {
+        assertEqual(
+            FirstRunExperience.setupReadinessLine(
+                microphoneGranted: false,
+                systemAudioGranted: true,
+                accessibilityGranted: true
+            ),
+            "Allow Microphone to unlock dictation and meetings.",
+            "the microphone gate should lead the readiness line whenever it is missing"
+        )
+        assertEqual(
+            FirstRunExperience.setupReadinessLine(
+                microphoneGranted: true,
+                systemAudioGranted: true,
+                accessibilityGranted: true
+            ),
+            "Dictation and full meeting transcripts are ready.",
+            "a fully granted setup should read as done, not list permissions"
+        )
+        assertEqual(
+            FirstRunExperience.setupReadinessLine(
+                microphoneGranted: true,
+                systemAudioGranted: false,
+                accessibilityGranted: true
+            ),
+            "Dictation is ready. Allow System Audio to capture the other side of calls.",
+            "a dictation-ready setup should point at the remaining meeting grant"
+        )
+        assertEqual(
+            FirstRunExperience.setupReadinessLine(
+                microphoneGranted: true,
+                systemAudioGranted: true,
+                accessibilityGranted: false
+            ),
+            "Meetings are ready. Allow Accessibility so dictation can paste in place.",
+            "a meeting-ready setup should point at the remaining dictation grant"
+        )
+        assertTrue(
+            FirstRunExperience.setupReadinessLine(
+                microphoneGranted: true,
+                systemAudioGranted: false,
+                accessibilityGranted: false
+            ).contains("Microphone is on"),
+            "a mic-only setup should acknowledge progress before naming the remaining grants"
+        )
+    }
+
+    runSuite("FirstRunExperience.onboardingModelStatus — keeps the try step honest about model readiness") {
+        let downloading = FirstRunExperience.onboardingModelStatus(for: .downloading(progress: 0.43))
+        assertEqual(downloading.text, "Downloading the voice model · 43%", "download progress should surface a live percentage")
+        assertFalse(downloading.isReady, "a mid-download model should not read as ready")
+
+        let starting = FirstRunExperience.onboardingModelStatus(for: .downloading(progress: 0))
+        assertEqual(starting.text, "Downloading the voice model…", "zero progress should not render a fake 0% label")
+
+        let clampedHigh = FirstRunExperience.onboardingModelStatus(for: .downloading(progress: 1.4))
+        assertEqual(clampedHigh.text, "Downloading the voice model · 100%", "over-complete progress should stay bounded")
+
+        assertTrue(
+            FirstRunExperience.onboardingModelStatus(for: .ready).isReady,
+            "a loaded model should read as ready"
+        )
+        assertTrue(
+            FirstRunExperience.onboardingModelStatus(for: .cached).isReady,
+            "cached model files are ready enough for a first dictation to start"
+        )
+        assertFalse(
+            FirstRunExperience.onboardingModelStatus(for: .failed("boom")).isReady,
+            "a failed model setup should not pretend to be ready"
+        )
+        assertFalse(
+            FirstRunExperience.onboardingModelStatus(for: .failed("boom")).text.contains("boom"),
+            "raw failure detail must not leak onto the onboarding surface"
+        )
+    }
+
+    runSuite("FirstRunLocalModelState analytics — progress ticks do not duplicate state events") {
+        assertFalse(
+            FirstRunLocalModelState.downloading(progress: 0.1)
+                .shouldTrackAnalyticsTransition(to: .downloading(progress: 0.8)),
+            "download progress should keep updating the UI without emitting duplicate downloading events"
+        )
+        assertTrue(
+            FirstRunLocalModelState.downloading(progress: 1)
+                .shouldTrackAnalyticsTransition(to: .cached),
+            "a real coarse model-state transition should still emit analytics"
+        )
+    }
+
     runSuite("FirstRunExperience.onboardingPermissions — keeps dictation setup separate from later meeting permissions") {
         let required = FirstRunExperience.onboardingRequiredPermissions()
         let optional = FirstRunExperience.onboardingOptionalPermissions()
@@ -14,6 +103,19 @@ func testFirstRunExperience() {
             optional,
             [.systemAudioRecording, .calendar],
             "system audio and calendar should stay in the later optional group"
+        )
+    }
+
+    runSuite("FirstRunExperience.onboardingPermissions — optional grants stay optional") {
+        assertEqual(
+            FirstRunExperience.onboardingOptionalPermissions(),
+            [.systemAudioRecording, .calendar],
+            "system audio and calendar should stay in the optional group"
+        )
+        assertEqual(
+            FirstRunExperience.onboardingRequiredPermissions(completionPath: .unified),
+            [.microphone],
+            "the unified single-flow onboarding should hard-require only Microphone"
         )
     }
 
@@ -86,6 +188,28 @@ func testFirstRunExperience() {
         assertEqual(properties["first_dictation_saved"], "false", "completion should not invent a first dictation save")
         assertEqual(properties["calendar_status"], "disabled", "disabled meeting prompts should not report calendar as granted")
         assertNil(properties["flow_elapsed_bucket"], "missing elapsed time should not invent a duration bucket")
+    }
+
+    runSuite("FirstRunExperience.onboardingCompletionAnalyticsProperties — reports the unified flow distinctly") {
+        let properties = FirstRunExperience.onboardingCompletionAnalyticsProperties(
+            completionPath: .unified,
+            systemAudioGranted: true,
+            calendarGranted: false,
+            meetingPromptsEnabled: true,
+            firstDictationSaved: true,
+            anonymousUsageEnabled: true,
+            crashReportingEnabled: true,
+            elapsedSeconds: 45
+        )
+
+        assertEqual(properties["completion_flow"], "unified", "the single-flow onboarding should be distinguishable from the old forked paths")
+        assertEqual(properties["meeting_recording_ready"], "true", "unified completion should preserve meeting readiness")
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            properties,
+            allowedKeys: AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")?.allowedProperties ?? []
+        )
+        assertEqual(sanitized["completion_flow"], "unified", "unified completion flow should survive analytics sanitization")
     }
 
     runSuite("FirstRunExperience.meetingAction — switches menu copy while recording") {
