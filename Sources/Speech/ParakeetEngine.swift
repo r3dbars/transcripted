@@ -902,10 +902,17 @@ class ParakeetEngine: ObservableObject {
         let systemInputOverrideError = await Self.systemInputWorkCoordinator.run {
             Self.applyPreferredSystemInputDevice(for: selection)
         }
+        func restoreSystemInputAfterOwnershipLoss(stage: String) async {
+            pendingSystemInputRestore.clear(ownedBy: systemInputOverrideOwner)
+            guard systemInputOverrideError == nil, let systemInputRestoreTarget else { return }
+            await restoreSystemInputIfStillTemporary(
+                temporaryInput: systemInputRestoreTarget.temporaryInput,
+                previousInput: systemInputRestoreTarget.previousInput,
+                operation: "\(operation)_system_input_stale_\(stage)"
+            )
+        }
         guard ownsAudioEngineQueue(operationOwner) else {
-            if systemInputOverrideError != nil {
-                pendingSystemInputRestore.clear(ownedBy: systemInputOverrideOwner)
-            }
+            await restoreSystemInputAfterOwnershipLoss(stage: "override")
             throw CancellationError()
         }
         stageTimings["audio_input_system_override_ms"] = Self.elapsedMilliseconds(since: systemInputOverrideStartedAt)
@@ -964,7 +971,10 @@ class ParakeetEngine: ObservableObject {
                 )
             }
         } catch {
-            guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
+            guard ownsAudioEngineQueue(operationOwner) else {
+                await restoreSystemInputAfterOwnershipLoss(stage: "snapshot_failure")
+                throw CancellationError()
+            }
             if !shouldRestoreSystemInputOnStop, let systemInputRestoreTarget {
                 await restoreSystemInputIfStillTemporary(
                     temporaryInput: systemInputRestoreTarget.temporaryInput,
@@ -974,7 +984,10 @@ class ParakeetEngine: ObservableObject {
             }
             throw error
         }
-        guard ownsAudioEngineQueue(operationOwner) else { throw CancellationError() }
+        guard ownsAudioEngineQueue(operationOwner) else {
+            await restoreSystemInputAfterOwnershipLoss(stage: "snapshot_success")
+            throw CancellationError()
+        }
         if !shouldRestoreSystemInputOnStop, let systemInputRestoreTarget {
             await restoreSystemInputIfStillTemporary(
                 temporaryInput: systemInputRestoreTarget.temporaryInput,

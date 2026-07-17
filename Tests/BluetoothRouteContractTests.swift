@@ -409,6 +409,19 @@ func testBluetoothRouteContract() {
             "superseded recovery snapshots should restore the temporary system input before throwing cancellation"
         )
         assertTrue(
+            snapshotBody.contains("func restoreSystemInputAfterOwnershipLoss(stage: String) async")
+                && snapshotBody.contains("pendingSystemInputRestore.clear(ownedBy: systemInputOverrideOwner)")
+                && snapshotBody.contains("guard systemInputOverrideError == nil, let systemInputRestoreTarget else { return }")
+                && snapshotBody.contains("await restoreSystemInputIfStillTemporary("),
+            "only a successful stale override should restore its captured system-input target"
+        )
+        for stage in ["override", "snapshot_failure", "snapshot_success"] {
+            assertTrue(
+                snapshotBody.contains("await restoreSystemInputAfterOwnershipLoss(stage: \"\(stage)\")"),
+                "\(stage) ownership loss must restore the route before throwing"
+            )
+        }
+        assertTrue(
             startBody.contains("func failAudioStart() async -> Bool"),
             "failed starts should share one bounded-retry path"
         )

@@ -701,6 +701,82 @@ func testParakeetRecoveryState() async {
         )
     }
 
+    await runSuite("Successful system-input fallback restores after cancel wake or graph replacement") {
+        enum OwnershipLoss: String, CaseIterable {
+            case cancel
+            case wake
+            case graphRebuild
+        }
+
+        enum SuspensionPoint: String, CaseIterable {
+            case systemOverride
+            case snapshotFailure
+            case snapshotSuccess
+        }
+
+        for ownershipLoss in OwnershipLoss.allCases {
+            for suspensionPoint in SuspensionPoint.allCases {
+                let oldEngine = NSObject()
+                let oldQueue = DispatchQueue(label: "test.parakeet.stale-system-input.old.\(ownershipLoss.rawValue)")
+                let oldOwner = ParakeetAudioEngineQueueOwnerToken(
+                    generation: 60,
+                    engine: oldEngine,
+                    queue: oldQueue
+                )
+                let successorEngine: NSObject = ownershipLoss == .graphRebuild ? NSObject() : oldEngine
+                let successorQueue = ownershipLoss == .graphRebuild
+                    ? DispatchQueue(label: "test.parakeet.stale-system-input.new.graph")
+                    : oldQueue
+                let successorOwner = ParakeetAudioEngineQueueOwnerToken(
+                    generation: 61,
+                    engine: successorEngine,
+                    queue: successorQueue
+                )
+                let coordinator = ParakeetSerialSystemInputWorkCoordinator(
+                    label: "test.parakeet.stale-system-input.\(ownershipLoss.rawValue).\(suspensionPoint.rawValue)"
+                )
+                let route = ParakeetSystemInputRouteTestState(
+                    route: "airpods-input",
+                    recoveryMarkerIsSet: true
+                )
+                let overrideEntered = ParakeetAsyncInterleavingGate()
+                let releaseOverride = DispatchSemaphore(value: 0)
+
+                let staleSnapshot = Task {
+                    await coordinator.run {
+                        route.applyReplacementInput("built-in-input")
+                        Task { await overrideEntered.open() }
+                        _ = releaseOverride.wait(timeout: .now() + 2)
+                    }
+                    guard oldOwner == successorOwner else {
+                        await coordinator.run {
+                            route.restoreIfStillTemporary(
+                                temporaryInput: "built-in-input",
+                                previousInput: "airpods-input"
+                            )
+                        }
+                        return true
+                    }
+                    return false
+                }
+
+                await overrideEntered.wait()
+                releaseOverride.signal()
+                let didRestoreBeforeCancellation = await staleSnapshot.value
+
+                assertTrue(
+                    didRestoreBeforeCancellation,
+                    "\(ownershipLoss.rawValue) should make the awaited fallback owner stale"
+                )
+                assertEqual(
+                    route.currentRoute(),
+                    "airpods-input",
+                    "\(ownershipLoss.rawValue) at \(suspensionPoint.rawValue) must restore the prior system input before stale work cancels"
+                )
+            }
+        }
+    }
+
     runSuite("ParakeetZombieRecoveryState emits exactly one terminal result per attempt") {
         var state = ParakeetZombieRecoveryState()
         let generation = state.begin(failureKind: "no_sample_callbacks")
