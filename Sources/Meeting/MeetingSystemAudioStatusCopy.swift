@@ -102,25 +102,42 @@ enum MeetingSystemAudioDegradationPolicy {
             return MeetingSystemAudioDegradationWarning(
                 cause: .interruption,
                 phase: .recovering,
-                isPromptDismissed: current?.cause == .interruption
-                    ? current?.isPromptDismissed ?? false
-                    : false
+                isPromptDismissed: carriesPromptDismissal(
+                    from: current,
+                    for: .interruption
+                )
             )
         case .silent:
             return MeetingSystemAudioDegradationWarning(
                 cause: .silence,
                 phase: .degraded,
-                isPromptDismissed: current?.isPromptDismissed ?? false
+                isPromptDismissed: carriesPromptDismissal(
+                    from: current,
+                    for: .silence
+                )
             )
         case .failed:
             return MeetingSystemAudioDegradationWarning(
                 cause: .failure,
                 phase: .degraded,
-                isPromptDismissed: current?.cause == .failure
-                    ? current?.isPromptDismissed ?? false
-                    : false
+                isPromptDismissed: carriesPromptDismissal(
+                    from: current,
+                    for: .failure
+                )
             )
         }
+    }
+
+    private static func carriesPromptDismissal(
+        from current: MeetingSystemAudioDegradationWarning?,
+        for cause: MeetingSystemAudioDegradationWarning.Cause
+    ) -> Bool {
+        guard let current,
+              current.phase != .recovered,
+              current.cause == cause else {
+            return false
+        }
+        return current.isPromptDismissed
     }
 }
 

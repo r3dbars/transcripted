@@ -119,6 +119,25 @@ func testMeetingStartFailureClassifier() {
             isRecording: true
         )
         assertTrue(terminalFailure?.shouldPresentPrompt == true, "a later terminal failure should alert again")
+
+        let recoveredAgain = MeetingSystemAudioDegradationPolicy.next(
+            current: dismissed,
+            status: .healthy,
+            isRecording: true
+        )
+        let secondInterruption = MeetingSystemAudioDegradationPolicy.next(
+            current: recoveredAgain,
+            status: .reconnecting,
+            isRecording: true
+        )
+        assertTrue(
+            secondInterruption?.shouldPresentPrompt == true,
+            "a new interruption after recovery should not inherit the old dismissal"
+        )
+        assertTrue(
+            secondInterruption?.isPromptDismissed == false,
+            "a new interruption should reset the prior prompt acknowledgement"
+        )
     }
 
     runSuite("Meeting system-audio silence uses a persistent nonmodal warning") {

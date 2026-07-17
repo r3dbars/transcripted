@@ -1719,7 +1719,10 @@ final class MeetingOverlayController: NSObject {
             pushToView()
             return
         }
-        guard meetingSession?.state == .recording else { return }
+        guard meetingSession?.state == .recording else {
+            pushToView()
+            return
+        }
 
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
