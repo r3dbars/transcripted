@@ -56,16 +56,16 @@ biggest gap. Treat the verdict as decisive for the *in-room multi-party* regime 
 
 ## Definitions (so the two directions are unambiguous)
 
-From the harness scorer (`scripts/score_speaker_eval.py`) and the in-app simulation runner
-(`SpeakerNamingSimulationRunner.swift`):
+From the harness scorer (`scripts/score_speaker_eval.py`) and the test-only simulation runner
+(`Tests/TranscriptedCoreTests/SpeakerTests/Support/SpeakerNamingSimulationRunner.swift`):
 
 - **Under-segmentation proxy = false-merge.** Scorer: a DB profile whose mass spans ≥2
-  distinct true speakers (≥10% each). Runner `falseMergeIndicators` (line 1339): one *actual*
+  distinct true speakers (≥10% each). Runner `falseMergeIndicators` (line 1368): one *actual*
   label maps to >1 expected label **and** >1 truth speaker. This is exactly "two+ people fused
   into one cluster" — the case a within-cluster split would fix.
 - **Over-segmentation proxy = fragmentation / false-split.** Scorer: distinct DB profiles
   each holding ≥10% of one person's speech (`fragmentation`, mean profiles/person). Runner
-  `falseSplitIndicators` (line 1354) + `duplicateIdentityIndicators`: one truth speaker spread
+  `falseSplitIndicators` (line 1383) + `duplicateIdentityIndicators`: one truth speaker spread
   across >1 actual label / profile. Already addressed by `consolidateSameVoiceClusters`,
   `absorbSmallClusters`, `RetroactiveSpeakerUpdater`, and the cross-meeting match threshold.
 - **DER split** (`pyannote.metrics`, collar 0.25s, overlap not skipped): **confusion** =

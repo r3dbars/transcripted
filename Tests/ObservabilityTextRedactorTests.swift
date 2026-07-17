@@ -13,7 +13,28 @@
 
 import Foundation
 
+private struct PrivacyTextRedactorParityCorpus: Decodable {
+    let cases: [PrivacyTextRedactorParityCase]
+}
+
+private struct PrivacyTextRedactorParityCase: Decodable {
+    let id: String
+    let input: String
+    let observabilityOutput: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case input
+        case observabilityOutput = "observability_output"
+    }
+}
+
 func testObservabilityTextRedactor() {
+    let parityCorpus = loadJSONFixture(
+        "Tests/Fixtures/PrivacyTextRedactorParityCorpus.json",
+        as: PrivacyTextRedactorParityCorpus.self
+    )
+
     runSuite("ObservabilityTextRedactor returns empty for empty or whitespace-only input") {
         assertEqual(ObservabilityTextRedactor.redact(""), "", "empty input must stay empty")
         assertEqual(ObservabilityTextRedactor.redact("   "), "", "whitespace-only input must collapse to empty")
@@ -288,5 +309,15 @@ func testObservabilityTextRedactor() {
         assertTrue(redacted.contains("\"duration_bucket\":\"5_14m\""), "coarse bucket should survive")
         assertTrue(redacted.contains("\"trigger\":\"hotkey\""), "coarse trigger should survive")
         assertTrue(redacted.contains("\"attempt\":3"), "numeric attempt counter should survive")
+    }
+
+    runSuite("ObservabilityTextRedactor matches the exact shared parity corpus") {
+        for testCase in parityCorpus.cases {
+            assertEqual(
+                ObservabilityTextRedactor.redact(testCase.input),
+                testCase.observabilityOutput,
+                "shared parity case \(testCase.id) must preserve the current observability output"
+            )
+        }
     }
 }

@@ -1,14 +1,13 @@
 # Path-to-verification map for coding agents.
 #
-# This file is intentionally simple YAML so humans and agents can read it
-# without a repo-specific parser. `scripts/dev/agent-preflight.sh` mirrors these
-# rules when it prints suggested checks for the current branch.
+# This file is intentionally simple YAML so humans and agents can read it and
+# the dependency-free `scripts/dev/test-matrix-checks.py` selector can execute
+# it. `scripts/dev/agent-preflight.sh` delegates here instead of copying rules.
 
 rules:
   - paths:
       - "Sources/**/*.swift"
-      - "Tests/*.swift"
-      - "Tests/FastTests.manifest"
+      - "Tests/**/*.swift"
     checks:
       - "bash build.sh --no-open"
       - "bash run-tests.sh"
@@ -72,7 +71,6 @@ rules:
   - paths:
       - "run-tests.sh"
       - "scripts/entrypoints/run-tests.sh"
-      - "Tests/FastTests.manifest"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 scripts/dev/check-build-source-lists.py"
@@ -126,6 +124,16 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/dev/check-build-source-lists.py"
       - "python3 scripts/dev/check-build-source-lists.py"
+
+  - paths:
+      - ".agents/test-matrix.yml"
+      - "scripts/dev/agent-preflight.sh"
+      - "scripts/dev/test-matrix-checks.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "bash -n scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/dev/test-matrix-checks.py"
+      - "python3 scripts/dev/test-matrix-checks.py --self-test"
 
   - paths:
       - "scripts/dev/check-superseded.py"
@@ -203,6 +211,14 @@ rules:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/release/post-dmg-release-audit.py"
       - "python3 scripts/release/post-dmg-release-audit.py --self-test"
+
+  - paths:
+      - "scripts/release/bump-release-version.py"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/release/bump-release-version.py"
+      - "python3 scripts/release/bump-release-version.py --self-test"
+      - "python3 scripts/release/bump-release-version.py --version 1.1.49 --dry-run"
 
   - paths:
       - "scripts/release/sentry-release-dry-run.py"
@@ -394,6 +410,7 @@ rules:
       - ".agents/**"
       - ".github/**"
       - "scripts/dev/agent-preflight.sh"
+      - "scripts/dev/test-matrix-checks.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
 

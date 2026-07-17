@@ -1,12 +1,15 @@
 import Foundation
 
-/// Shared building blocks for `SentryPayloadSanitizer` and `AnalyticsPayloadSanitizer`.
+/// Destination-agnostic payload mechanics shared by `SentryPayloadSanitizer`
+/// and `AnalyticsPayloadSanitizer`.
 ///
 /// Both sanitizers historically duplicated `shouldDrop` and the
 /// "redact then truncate to max length" pipeline. Centralizing those keeps
 /// the two destinations from drifting when redaction rules change — each
 /// sanitizer still owns its own sensitive-key list and length cap, but the
-/// mechanics live in one place.
+/// mechanics live in one place. Generic free-text patterns live in
+/// `PrivacyTextRedactor`; the app-specific path profile stays behind
+/// `ObservabilityTextRedactor`.
 enum PayloadSanitizationCore {
     /// Sensitive-key fragments shared by every off-device destination. A value
     /// is dropped when its lowercased key contains any of these as a substring.
@@ -36,10 +39,10 @@ enum PayloadSanitizationCore {
         "url",
     ]
 
-    /// Apply `ObservabilityTextRedactor.redact` and then cap the result at
-    /// `maxValueLength`, appending an ellipsis when truncated. Returns an
-    /// empty string when the input redacts to empty so callers can drop
-    /// the value cleanly.
+    /// Apply the app observability text profile and then cap the result at
+    /// `maxValueLength`, appending an ellipsis when truncated. Returns an empty
+    /// string when the input redacts to empty so callers can drop the value
+    /// cleanly.
     static func redactAndCap(_ text: String, maxValueLength: Int) -> String {
         let redacted = ObservabilityTextRedactor.redact(text)
         guard !redacted.isEmpty else { return "" }

@@ -195,7 +195,7 @@ extension Transcription {
             var droppedSegments = 0
             let totalSegments = speakerSegments.count
 
-            // Aggregate embeddings per Sortformer speaker ID for stable matching.
+            // Aggregate embeddings per diarizer speaker ID for stable matching.
             // Instead of matching each segment independently (noisy), we compute
             // a mean embedding per speaker and match that once against the DB.
             // Quality gate: skip low-quality segments to prevent noisy embeddings
