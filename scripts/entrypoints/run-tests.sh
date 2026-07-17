@@ -370,6 +370,7 @@ APP_SOURCES=(
     "Sources/Observability/UnrecognizedSelectorReason.swift"
     "Sources/Reliability/WakeRecoveryCoordinator.swift"
     "Sources/TranscriptedCore/Audio/MicRecordingSegment.swift"
+    "Sources/TranscriptedCore/Logging/PrivacyTextRedactor.swift"
     "Sources/TranscriptedCore/Models/SpeakerMapping.swift"
     "Sources/TranscriptedCore/Models/TranscriptionTypes.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
