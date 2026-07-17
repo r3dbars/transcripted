@@ -40,6 +40,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let onRemoveReclaimableModelCaches: () -> Void
     let onRemoveStaleModelCaches: () -> Void
     let onRemoveWhisperModelCache: () -> Void
+    let onLoadModelCacheSnapshot: () -> Void
     let onRefreshModelCacheSnapshot: () -> Void
     let failureDetailsButton: (String?) -> FailureDetailsButton
 
@@ -264,7 +265,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
             }
             .onAppear {
                 if modelCacheSnapshot == nil, !modelCacheLoading {
-                    onRefreshModelCacheSnapshot()
+                    onLoadModelCacheSnapshot()
                 }
             }
             .alert("Remove reclaimable cache?", isPresented: $showReclaimableCacheCleanupConfirmation) {

@@ -3063,6 +3063,9 @@ struct TranscriptedSettingsView: View {
             onRemoveWhisperModelCache: {
                 removeWhisperModelCache()
             },
+            onLoadModelCacheSnapshot: {
+                refreshModelCacheSnapshot()
+            },
             onRefreshModelCacheSnapshot: {
                 trackSettingsAction("refresh_model_cache_storage", page: .storage)
                 refreshModelCacheSnapshot()
