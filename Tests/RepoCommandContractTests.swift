@@ -2366,7 +2366,7 @@ func testRepoCommandContract() {
             "an active compression pass should mark that the failed queue needs another scan"
         )
         assertTrue(
-            storeContents.contains("self.scheduleFailedAudioCompression(for: self.controller.failedManager.failedTranscriptions)"),
+            storeContents.contains("self.scheduleFailedAudioCompression(for: self.failedManager.failedTranscriptions)"),
             "compression completion should re-check the latest failed queue before going idle"
         )
         assertTrue(
@@ -2411,7 +2411,7 @@ func testRepoCommandContract() {
             to: "func refreshFailedMeetings("
         )
         assertTrue(
-            refreshTimedOutAudioBlock.contains("let existingFailure = controller.failedManager.failedTranscriptions")
+            refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
                 && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
                 && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL"),
             "late finalization should still promote system-only failed audio by reusing the failed queue mic placeholder"
@@ -2422,7 +2422,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             helperBlock.contains("taskManager.addFailedTranscriptionRetainingAvailableAudio(")
-                && helperBlock.contains("if preserved {\n            controller.refreshFailedMeetings()"),
+                && helperBlock.contains("if preserved {\n            publishRefresh()"),
             "retained failed-meeting audio should refresh MeetingSessionController.failedMeetings immediately"
         )
         assertTrue(
@@ -2441,6 +2441,20 @@ func testRepoCommandContract() {
             ),
             1,
             "direct failed-queue writes should stay centralized in FailedMeetingStore's refresh helper"
+        )
+        assertFalse(
+            storeContents.contains("unowned let controller")
+                || storeContents.contains("controller."),
+            "FailedMeetingStore should depend on injected managers and narrow callbacks, not a controller back-reference"
+        )
+        assertTrue(
+            controllerContents.contains("private(set) lazy var failedMeetingStore = makeFailedMeetingStore()")
+                && controllerContents.contains("canRetry: { [weak self] in")
+                && controllerContents.contains("prepareModelsForRetry: { [weak self] in")
+                && controllerContents.contains("markRetryStarted: { [weak self] in")
+                && controllerContents.contains("publishRefresh: { [weak self] in")
+                && controllerContents.contains("diagnosticsContext: { [weak self] extra in"),
+            "MeetingSessionController should lazily inject weak retry, refresh, and diagnostics callbacks"
         )
     }
 
