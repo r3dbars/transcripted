@@ -179,7 +179,7 @@ Files still over 1500 lines after the 2026-07 god-file splits (measured with `wc
 - `Sources/UI/Overlay/DictationSessionController.swift` (~2.2k) — dictation session orchestration
 - `Sources/Meeting/LocalMeetingSummarizer.swift` (~1.9k) — opt-in local AI meeting-summary runners for both providers (Gemma MLX, Apple Foundation Models)
 - `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (~1.7k) — the MCP server's SQLite index; schema DDL already split into `TranscriptIndex+Schema.swift`, this file is still the query/reconcile surface
-- `Sources/TranscriptedCore/Speaker/SpeakerNamingSimulationRunner.swift` (~1.7k) — offline speaker-naming simulation harness
+- `Tests/TranscriptedCoreTests/SpeakerTests/Support/SpeakerNamingSimulationRunner.swift` (~1.7k) — test-only offline speaker-naming simulation harness
 - `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` (~1.7k) — the single-flight transcription queue/orchestrator
 - `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (~1.6k) — the speakers settings surface (voice-to-name queue, duplicate suggestions, searchable list)
 

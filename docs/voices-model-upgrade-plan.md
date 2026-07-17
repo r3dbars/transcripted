@@ -78,8 +78,7 @@ existing users unless they opt in.
   carries a no-op `StreamingEouAsrManager` stub and
   `ParakeetEngine.liveDisplayEnabled` is hardcoded `false`.
 - Diarization is offline PyAnnote through `OfflineDiarizerManager`
-  (`Sources/TranscriptedCore/Services/DiarizationService.swift`), with an
-  unused Sortformer streaming path.
+  (`Sources/TranscriptedCore/Services/DiarizationService.swift`).
 - No language selection UI; Parakeet v3 covers 25 European languages,
   anything else means falling back to slower Whisper.
 

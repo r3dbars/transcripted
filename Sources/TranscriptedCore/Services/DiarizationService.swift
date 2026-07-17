@@ -1,23 +1,14 @@
 // DiarizationService.swift
-// Dual-pipeline speaker diarization using FluidAudio.
-//
-// Streaming (Sortformer): Real-time diarization for live preview (future use,
-// optional during app warmup).
-//   - DiarizerManager, T×4 output matrix, up to 4 speakers.
-//
-// Offline (PyAnnote): Post-recording diarization for final transcripts.
+// Offline speaker diarization using FluidAudio's PyAnnote pipeline.
 //   - OfflineDiarizerManager, PyAnnote segmentation + WeSpeaker + VBx clustering.
 //   - Unlimited speakers, ~15% DER on VoxConverse via CoreML.
-//
-// Both pipelines produce identical 256-dim WeSpeaker embeddings,
-// so the entire speaker identification stack works unchanged.
 
 import Foundation
 @preconcurrency import FluidAudio
 
 /// A speaker segment from diarization with optional voice fingerprint
 public struct SpeakerSegment: Sendable {
-    public let speakerId: Int          // Unlimited speakers (PyAnnote offline) or 0-3 (Sortformer streaming)
+    public let speakerId: Int          // Unlimited speakers from PyAnnote offline diarization
     public let startTime: Double       // seconds
     public let endTime: Double         // seconds
     public let embedding: [Float]?     // 256-dim voice fingerprint (from WeSpeaker)
@@ -46,13 +37,8 @@ public enum DiarizationModelState: Equatable {
 public class DiarizationService: ObservableObject {
     @Published public var modelState: DiarizationModelState = .notLoaded
 
-    // Streaming pipeline (Sortformer) — for future real-time preview
-    private var diarizerManager: DiarizerManager?
-
     // Offline pipeline (PyAnnote) — for post-recording transcripts
     private var offlineDiarizerManager: OfflineDiarizerManager?
-    private var offlineModelState: DiarizationModelState = .notLoaded
-    private var optionalStreamingWarmupTask: Task<Void, Never>?
     private var offlineInitializationTask: Task<Void, Never>?
 
     /// Provider that resolves bundled model directories. Embedders can swap this to
@@ -87,11 +73,9 @@ public class DiarizationService: ObservableObject {
     // MARK: - Model Initialization
 
     /// Load the offline diarization models required by the current meeting pipeline.
-    /// Sortformer streaming is optional because no production meeting flow calls it yet.
     public func initialize() async {
         guard offlineDiarizerManager == nil else {
             modelState = .ready
-            startOptionalStreamingWarmupIfAvailable()
             AppLogger.transcription.debug("Offline diarization already initialized")
             return
         }
@@ -123,7 +107,6 @@ public class DiarizationService: ObservableObject {
             try await initializeOffline()
 
             modelState = .ready
-            startOptionalStreamingWarmupIfAvailable()
             AppLogger.transcription.info("Offline diarization models loaded and ready")
         } catch {
             let kind = ModelDownloadService.classifyError(error)
@@ -132,35 +115,8 @@ public class DiarizationService: ObservableObject {
         }
     }
 
-    /// Load Sortformer streaming models from the app bundle or download from HuggingFace.
-    private func initializeStreaming(allowDownload: Bool = true) async throws {
-        let loadStart = Date()
-        let manager = DiarizerManager(config: .default)
-
-        if let bundlePath = bundleProvider("sortformer-models") {
-            AppLogger.transcription.info("Sortformer loading from bundle", ["path": "\(bundlePath)"])
-            let models = try await DiarizerModels.load(from: bundlePath)
-            manager.initialize(models: models)
-        } else if allowDownload {
-            AppLogger.transcription.info("Sortformer models not bundled, loading from cache or downloading")
-            let models = try await ModelDownloadService.withRetry {
-                try await DiarizerModels.download()
-            }
-            manager.initialize(models: models)
-        } else {
-            throw NSError(domain: "DiarizationService", code: 3, userInfo: [
-                NSLocalizedDescriptionKey: "Sortformer streaming models are not bundled"
-            ])
-        }
-
-        diarizerManager = manager
-        let elapsed = String(format: "%.1fs", Date().timeIntervalSince(loadStart))
-        AppLogger.transcription.info("Sortformer streaming models loaded", ["elapsed": elapsed])
-    }
-
     /// Load PyAnnote offline diarization models from the app bundle or download.
     private func initializeOffline() async throws {
-        offlineModelState = .loading
         let loadStart = Date()
 
         // Optimized config from DER grid search (v2, 100 iterations across 16 Zoom meetings).
@@ -196,7 +152,6 @@ public class DiarizationService: ObservableObject {
         }
 
         offlineDiarizerManager = manager
-        offlineModelState = .ready
         let elapsed = String(format: "%.1fs", Date().timeIntervalSince(loadStart))
         AppLogger.transcription.info("Offline diarizer models loaded", ["elapsed": elapsed])
     }
@@ -305,62 +260,16 @@ public class DiarizationService: ObservableObject {
         return try await diarizeOffline(samples: samples, sampleRate: 16000)
     }
 
-    // MARK: - Streaming Diarization (Sortformer)
-
-    /// Run streaming speaker diarization on audio samples using Sortformer.
-    /// Limited to 4 speakers. Samples should be 16kHz mono Float32.
-    nonisolated public func diarizeStreaming(samples: [Float], sampleRate: Int = 16000) async throws -> [SpeakerSegment] {
-        guard let manager = await MainActor.run(body: { self.diarizerManager }),
-              manager.isAvailable else {
-            throw NSError(domain: "DiarizationService", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Sortformer model not loaded"
-            ])
-        }
-
-        AppLogger.transcription.info("Sortformer diarizing", ["samples": "\(samples.count)", "duration": "\(String(format: "%.1f", Double(samples.count) / Double(sampleRate)))s"])
-
-        let result = try manager.performCompleteDiarization(samples, sampleRate: sampleRate)
-
-        let segments = withExtendedLifetime(result) {
-            result.segments.map { segment in
-                let embedding = segment.embedding
-                return SpeakerSegment(
-                    speakerId: speakerIdFromString(segment.speakerId),
-                    startTime: Double(segment.startTimeSeconds),
-                    endTime: Double(segment.endTimeSeconds),
-                    embedding: embedding.isEmpty ? nil : embedding.map { $0 },
-                    qualityScore: segment.qualityScore
-                )
-            }
-        }
-
-        let speakerIds = Set(segments.map { $0.speakerId })
-        AppLogger.transcription.info("Sortformer diarization complete", ["segments": "\(segments.count)", "speakers": "\(speakerIds.count)"])
-        logSpeakerSummaries(segments)
-
-        return segments
-    }
-
-    /// Run streaming speaker diarization on a WAV file.
-    nonisolated public func diarizeStreaming(audioURL: URL) async throws -> [SpeakerSegment] {
-        let samples = try AudioResampler.loadAndResample(url: audioURL, targetRate: 16000)
-        return try await diarizeStreaming(samples: samples, sampleRate: 16000)
-    }
-
     // MARK: - Cleanup
 
     public func cleanup() {
-        optionalStreamingWarmupTask?.cancel()
-        optionalStreamingWarmupTask = nil
-        diarizerManager = nil
         offlineDiarizerManager = nil
         modelState = .notLoaded
-        offlineModelState = .notLoaded
     }
 
     // MARK: - Helpers
 
-    /// Log per-speaker segment summaries (shared by offline and streaming pipelines).
+    /// Log per-speaker segment summaries from the offline pipeline.
     private nonisolated func logSpeakerSummaries(_ segments: [SpeakerSegment]) {
         var summaries: [Int: (count: Int, duration: Double)] = [:]
         for segment in segments {
@@ -379,7 +288,7 @@ public class DiarizationService: ObservableObject {
 
     /// Convert FluidAudio's string speaker ID (e.g., "speaker_0") to integer
     nonisolated func speakerIdFromString(_ id: String) -> Int {
-        // Sortformer uses "speaker_0", "speaker_1", etc.
+        // Preserve compatibility with persisted/vendor IDs such as "speaker_0".
         if let separator = id.lastIndex(of: "_"),
            let intId = Int(id[id.index(after: separator)...]) {
             return intId
@@ -394,30 +303,6 @@ public class DiarizationService: ObservableObject {
         }
         AppLogger.transcription.error("speakerIdFromString failed to parse speaker ID, falling back to 0", ["raw_id": id])
         return 0
-    }
-}
-
-@available(macOS 14.0, *)
-private extension DiarizationService {
-    func startOptionalStreamingWarmupIfAvailable() {
-        guard diarizerManager == nil, optionalStreamingWarmupTask == nil else { return }
-        guard bundleProvider("sortformer-models") != nil else {
-            AppLogger.transcription.debug("Sortformer streaming models not bundled; skipping optional warmup")
-            return
-        }
-
-        optionalStreamingWarmupTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.optionalStreamingWarmupTask = nil }
-
-            do {
-                try await self.initializeStreaming(allowDownload: false)
-            } catch {
-                AppLogger.transcription.warning("Optional Sortformer streaming warmup skipped", [
-                    "error": error.localizedDescription
-                ])
-            }
-        }
     }
 }
 

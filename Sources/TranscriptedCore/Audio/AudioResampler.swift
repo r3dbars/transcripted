@@ -1,5 +1,5 @@
 // AudioResampler.swift
-// Resamples Float32 mono audio from native sample rate to 16kHz for Parakeet/Sortformer.
+// Resamples Float32 mono audio from native sample rate to 16kHz for local speech processing.
 // Pure Swift — linear interpolation, no dependencies.
 // Ported from the earlier app-side AudioResampler.
 

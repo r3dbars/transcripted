@@ -832,9 +832,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // MARK: - Live PCM buffer hooks (host app live-preview integration)
     //
     // These callbacks let an embedder tap the PCM buffers as they arrive
-    // from CoreAudio, in parallel with the WAV file writes. Used by the app to
-    // drive live dual-channel transcription preview via FluidAudio's
-    // StreamingEouAsrManager without a second audio engine.
+    // from CoreAudio, in parallel with the WAV file writes. The app uses them
+    // for live meeting transcription and to let dictation borrow the active
+    // meeting microphone without starting a second audio engine.
     //
     // Threading: fired on the audio thread (same thread as the tap callback).
     // Consumers MUST NOT do I/O, locks, or allocations on this thread — copy
