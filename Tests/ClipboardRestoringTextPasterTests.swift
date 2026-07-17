@@ -6,6 +6,41 @@ import Foundation
 
 func testClipboardRestoringTextPaster() async {
     await MainActor.run {
+        runSuite("DictationTargetConfirmationMode stays coarse and privacy-safe") {
+            assertEqual(
+                DictationTargetConfirmationMode.resolve(
+                    outcome: .pasted,
+                    diagnostic: ClipboardPasteConfirmationDiagnostic(
+                        event: "dictation_paste_confirmed",
+                        context: ["confirmation_mode": "text_value"]
+                    )
+                ),
+                .textValue,
+                "AX value confirmation should keep only its coarse mode"
+            )
+            assertEqual(
+                DictationTargetConfirmationMode.resolve(
+                    outcome: .copied("read only", reason: .pasteConfirmationUnavailableAutoSendEligible),
+                    diagnostic: nil
+                ),
+                .clipboardReadOnly,
+                "selected target clipboard reads should be distinguishable without naming the app"
+            )
+            assertEqual(
+                DictationTargetConfirmationMode.resolve(
+                    outcome: .copied("unconfirmed", reason: .pasteConfirmationUnavailable),
+                    diagnostic: ClipboardPasteConfirmationDiagnostic(
+                        event: "dictation_paste_confirmation_diagnostics",
+                        context: ["clipboard_read_after_dispatch": "false"]
+                    )
+                ),
+                .none,
+                "unconfirmed targets should not claim a confirmation mode"
+            )
+        }
+    }
+
+    await MainActor.run {
         runSuite("ClipboardRestoringTextPaster confirmation bounds synchronous AX reads") {
             let source = try! String(
                 contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
@@ -661,6 +696,49 @@ func testClipboardRestoringTextPaster() async {
             NSPasteboard(name: pasteboardName).string(forType: .string)
         }
         assertEqual(retainedClipboard, dictationText, "unconfirmed paste must keep recovery text available")
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.paste — selected Auto Enter target requires a clipboard read and restores the original") {
+        let existingClipboard = "selected app original clipboard"
+        let dictationText = "selected app dictation"
+        let pasteboardName = NSPasteboard.Name("TranscriptedSelectedAutoEnterReadTest-\(UUID().uuidString)")
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        let outcome = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(existingClipboard, forType: .string)
+            let target = DictationPasteTarget.capture(sourceApp: NSWorkspace.shared.frontmostApplication)
+            return paster.paste(
+                dictationText,
+                target: target,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                prepareForAutoSend: true,
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 120_000_000,
+                pasteConfirmationWait: 0.02
+            )
+        }
+
+        assertEqual(
+            outcome,
+            .copied(
+                "Transcripted sent paste and the selected target read it, but the target exposed no text confirmation.",
+                reason: .pasteConfirmationUnavailableAutoSendEligible
+            ),
+            "Auto Enter eligibility should require the selected target to remain focused and read after Cmd+V"
+        )
+        await paster.waitForClipboardReadyForAutoEnter()
+        let restoredClipboard = await MainActor.run {
+            NSPasteboard(name: pasteboardName).string(forType: .string)
+        }
+        assertEqual(restoredClipboard, existingClipboard, "Auto Enter should wait until the original clipboard is restored")
     }
 
     runSuite("ClipboardRestoringTextPaster.paste — provider reads are not an Auto Enter confirmation API") {
