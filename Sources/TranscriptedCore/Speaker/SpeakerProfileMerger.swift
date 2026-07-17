@@ -235,7 +235,7 @@ extension SpeakerDatabase {
             ? (source.nameSource ?? NameSource.userManual)
             : target.nameSource
 
-        let performMerge = {
+        let performMerge = { [self] in
             // Safety net: snapshot both profiles + re-point provenance BEFORE the blend
             // overwrites the target and the source row is deleted, so a wrong merge can
             // be reconstructed into two distinct profiles later. Same transaction → atomic.
