@@ -204,11 +204,6 @@ allowlist.
   `source_count_bucket`, `result_count_bucket`, `latency_bucket`, and validated
   owning-app build identity; never
   query text, capture IDs, titles, names, transcript text, paths, or user IDs
-- timeline analytics limited to `surface`, `result`, `provider_kind`,
-  `permission_state`, `pause_reason`, `card_kind`, `duration_bucket`,
-  `count_bucket`, and `return_window_bucket`
-
-  `duration_bucket`, `failure_kind`, and `stage`
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.
