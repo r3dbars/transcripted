@@ -149,6 +149,46 @@ final class SpeakerProfileMergerTests: XCTestCase {
         XCTAssertEqual(merged.confidence, min(1.0, targetBefore.confidence + 0.15), accuracy: 0.0001, "confidence bumps")
     }
 
+    func testMergeProfilesThrowsWhenEitherProfileIsMissing() throws {
+        let target = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.30, count: 256),
+            existingId: nil
+        )
+        let missingSourceId = UUID()
+
+        XCTAssertThrowsError(try database.mergeProfiles(sourceId: missingSourceId, into: target.id)) { error in
+            guard case SpeakerDatabase.ProfileMergeError.profileNotFound(
+                sourceId: missingSourceId,
+                targetId: target.id
+            ) = error else {
+                XCTFail("Expected profileNotFound, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testAtomicMergeBatchRollsBackEarlierMergeWhenLaterMergeFails() throws {
+        let firstSource = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.20, count: 256),
+            existingId: nil
+        )
+        let firstTarget = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.30, count: 256),
+            existingId: nil
+        )
+        let firstSourceBefore = try XCTUnwrap(database.getSpeaker(id: firstSource.id))
+        let firstTargetBefore = try XCTUnwrap(database.getSpeaker(id: firstTarget.id))
+
+        XCTAssertThrowsError(try database.performMutationBatch {
+            try database.mergeProfiles(sourceId: firstSource.id, into: firstTarget.id)
+            try database.mergeProfiles(sourceId: UUID(), into: firstTarget.id)
+        })
+
+        XCTAssertEqual(database.getSpeaker(id: firstSource.id), firstSourceBefore)
+        XCTAssertEqual(database.getSpeaker(id: firstTarget.id), firstTargetBefore)
+        XCTAssertTrue(database.recentUndoableMerges().isEmpty)
+    }
+
     func testMergeProfilesRollsBackAndThrowsWhenTargetUpdateCannotBePrepared() throws {
         let (source, target) = makeNamedSourceAndUnnamedTarget()
         let result = database.queue.sync {
@@ -244,6 +284,44 @@ final class SpeakerProfileMergerTests: XCTestCase {
 
         let survivors = [a.id, b.id].compactMap { database.getSpeaker(id: $0) }
         XCTAssertEqual(survivors.count, 1, "identical unnamed embeddings above threshold merge into one")
+    }
+
+    func testMergeDuplicatesContinuesAfterOuterProfileIsAbsorbed() {
+        let now = Date()
+        let lowCallOuter = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        let highCallKeeper = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        let remaining = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        database.restoreProfile(SpeakerProfile(
+            id: lowCallOuter.id, displayName: nil, nameSource: nil,
+            embedding: lowCallOuter.embedding, firstSeen: now, lastSeen: now,
+            callCount: 1, confidence: 0.5, disputeCount: 0
+        ))
+        database.restoreProfile(SpeakerProfile(
+            id: highCallKeeper.id, displayName: nil, nameSource: nil,
+            embedding: highCallKeeper.embedding, firstSeen: now, lastSeen: now.addingTimeInterval(-60),
+            callCount: 3, confidence: 0.7, disputeCount: 0
+        ))
+        database.restoreProfile(SpeakerProfile(
+            id: remaining.id, displayName: nil, nameSource: nil,
+            embedding: remaining.embedding, firstSeen: now, lastSeen: now.addingTimeInterval(-120),
+            callCount: 1, confidence: 0.5, disputeCount: 0
+        ))
+
+        database.mergeDuplicates(threshold: 0.6)
+
+        let survivors = [lowCallOuter.id, highCallKeeper.id, remaining.id].compactMap {
+            database.getSpeaker(id: $0)
+        }
+        XCTAssertEqual(survivors.map(\.id), [highCallKeeper.id])
     }
 
     func testPruneWeakProfilesRemovesNegativeExemplarsWithProfile() {

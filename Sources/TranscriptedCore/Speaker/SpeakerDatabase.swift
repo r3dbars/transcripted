@@ -31,12 +31,18 @@ public final class SpeakerDatabase: @unchecked Sendable {
     var isDatabaseOpen = false
     let dbPath: URL
     let queue = DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)
+    private let queueSpecificKey = DispatchSpecificKey<UInt8>()
+
+    var isExecutingOnQueue: Bool {
+        DispatchQueue.getSpecific(key: queueSpecificKey) != nil
+    }
 
     /// Public initializer that accepts a custom SQLite path.
     /// Used by tests and by callers that want to store the database outside the default
     /// `CoreStoragePaths.default` layout (e.g. a host app redirecting to its own data dir).
     public init(path: String) {
         dbPath = URL(fileURLWithPath: path)
+        queue.setSpecific(key: queueSpecificKey, value: 1)
         try? FileManager.default.createDirectory(
             at: dbPath.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -222,6 +228,16 @@ public final class SpeakerDatabase: @unchecked Sendable {
         }
     }
 
+    public func performMutationBatch(_ mutations: () throws -> Void) throws {
+        if isExecutingOnQueue {
+            try mutations()
+            return
+        }
+        try queue.sync {
+            try throwingTransaction(mutations)
+        }
+    }
+
     func prepareStatement(_ sql: String, operation: String) throws -> OpaquePointer? {
         var statement: OpaquePointer?
         let result = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
@@ -298,6 +314,9 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// call-count / last-seen (records the appearance without contaminating the identity).
     /// New-speaker inserts ignore `blendAlpha`. See `SpeakerWritePathPolicy`.
     public func addOrUpdateSpeaker(embedding: [Float], existingId: UUID?, blendAlpha: Float) -> SpeakerProfile {
+        if isExecutingOnQueue {
+            return addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId, blendAlpha: blendAlpha)
+        }
         return queue.sync {
             addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId, blendAlpha: blendAlpha)
         }
