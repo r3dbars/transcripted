@@ -128,15 +128,6 @@ allowlist.
 - `settings_toggle_changed`
 - `settings_permission_cta_clicked`
 - `settings_capture_library_changed`
-- `timeline_enabled`
-- `timeline_screen_permission_ready`
-- `timeline_screen_permission_denied`
-- `timeline_capture_paused`
-- `timeline_capture_resumed`
-- `timeline_card_generated`
-- `timeline_card_opened`
-- `timeline_daily_markdown_written`
-- `timeline_used_again`
 - `dictation_started`
 - `dictation_start_failed`
 - `dictation_completed`
@@ -211,10 +202,6 @@ allowlist.
 - local meeting summary analytics limited to `provider`, `summary_action`,
   `setup_ready`, `runtime`, `queue_depth_bucket`, `chunk_count_bucket`,
   `duration_bucket`, `failure_kind`, and `stage`
-- timeline analytics limited to `surface`, `result`, `provider_kind`,
-  `permission_state`, `pause_reason`, `card_kind`, `duration_bucket`,
-  `count_bucket`, and `return_window_bucket`
-
 Meeting workflow analytics should keep that same stable `trigger` enum on later
 stop/save/fail events so product and reliability reviews can attribute outcomes
 without joining against any sensitive context.

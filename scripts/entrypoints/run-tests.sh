@@ -75,7 +75,7 @@ if [ "$expect_filter_value" = true ]; then
 fi
 
 # Redirect the entire app-owned Transcripted container (Home meeting cache,
-# speakers/stats/timeline SQLite, logs, tmp) into a throwaway dir for the run so
+# speakers/stats SQLite, logs, and tmp) into a throwaway dir for the run so
 # tests can never write fixture rows into ~/Library/Application Support/
 # Transcripted. Exported before the test binary launches because
 # RecentMeetingMetadataCache.shared is a `static let` that captures its DB path at
@@ -253,8 +253,6 @@ APP_SOURCES=(
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
     "Sources/Support/TranscriptedStoragePaths.swift"
-    "Sources/Timeline/TimelineDatabase.swift"
-    "Sources/Timeline/TimelineRetentionManager.swift"
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/AgentMCPConnector.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
@@ -275,7 +273,6 @@ APP_SOURCES=(
     "Sources/Support/CaptureLibraryMigrationPlanner.swift"
     "Sources/Support/LiveMeetingCodexPreferences.swift"
     "Sources/Support/LocalMeetingSummaryPreferences.swift"
-    "Sources/Support/TimelinePreferences.swift"
     "Sources/Support/SpeechModelBetaPreferences.swift"
     "Sources/Support/TranscriptionModelPreferences.swift"
     "Sources/Support/ExistingInstallModelPrefetchPolicy.swift"
@@ -295,10 +292,6 @@ APP_SOURCES=(
     "Sources/Dictation/DictationTranscriptStore.swift"
     "Sources/Meeting/MeetingStoragePaths.swift"
     "Sources/Support/TranscriptedConstants.swift"
-    "Sources/Timeline/ActiveDisplayTracker.swift"
-    "Sources/Timeline/InputIdleSnapshot.swift"
-    "Sources/Timeline/ForegroundAppSampler.swift"
-    "Sources/Timeline/ScreenCaptureEngine.swift"
     "Sources/Speech/DictationInputDeviceSelectionPolicy.swift"
     "Sources/Speech/DictationReadinessWaitPolicy.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
@@ -347,7 +340,6 @@ APP_SOURCES=(
     "Sources/Observability/AnalyticsReporter.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"
     "Sources/Observability/ActivationTelemetry.swift"
-    "Sources/Observability/TimelineAnalyticsTelemetry.swift"
     "Sources/Observability/FeatureDiscoveryTelemetry.swift"
     "Sources/Observability/LockedFileAppender.swift"
     "Sources/Observability/AnalyticsEventPolicy.swift"

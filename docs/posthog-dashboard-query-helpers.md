@@ -3,7 +3,7 @@
 `scripts/ops/posthog-dashboard-queries.py` is the shared query catalog for
 Transcripted product-learning dashboards and health checks.
 
-It covers ten dashboard families:
+It covers nine dashboard families:
 
 - `100_wau` - WAU, DAU, first-value devices, return proxy, and version mix
 - `activation` - launch -> onboarding -> saved Markdown -> agent proxy -> return, plus the post-save habit loop (review-yesterday, promise-review, recent-meeting, daily digest)
@@ -13,7 +13,6 @@ It covers ten dashboard families:
 - `speaker_trust` - speaker review, auto-recognition, corrections, deferrals, and finalization failures
 - `retry_recovery` - workflow retry/recovery, failure kinds, and dictation latency buckets
 - `onboarding_friction` - first-run steps, permission readiness, dismissals, abandonment, and product friction
-- `timeline_dayflow` - shipped timeline/dayflow adoption and data-quality rows from the allowlisted timeline taxonomy
 - `release_health` - release-scoped workflow and Sparkle update health
 
 All query outputs are aggregate, bucketed, and privacy-safe. The helpers do not
@@ -183,10 +182,6 @@ raw error strings, device names, app names, or audio details.
 
 `onboarding_friction` tracks step, permission, abandonment, and product-friction
 buckets only.
-
-`timeline_dayflow` is intentionally separate because timeline analytics can be
-sparse. It must not export screen text, screenshots, app names, file paths, or
-raw timeline rows.
 
 `release_health` accepts `--app-version`. Workflow events use `app_version`;
 update events use `version`, so the helper filters both.
