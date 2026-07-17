@@ -623,10 +623,10 @@ func testAnalyticsEventPolicy() {
     }
 
     runSuite("AnalyticsEventPolicy allows local summary proof events") {
-        let requested = AnalyticsEventPolicy.policy(forEvent: LocalSummaryAttemptTelemetry.requestedEvent)
-        let finished = AnalyticsEventPolicy.policy(forEvent: LocalSummaryAttemptTelemetry.finishedEvent)
-        let failed = AnalyticsEventPolicy.policy(forEvent: LocalSummaryAttemptTelemetry.failedEvent)
-        let cancelled = AnalyticsEventPolicy.policy(forEvent: LocalSummaryAttemptTelemetry.cancelledEvent)
+        let requested = AnalyticsEventPolicy.policy(forEvent: "local_summary_requested")
+        let finished = AnalyticsEventPolicy.policy(forEvent: "local_summary_finished")
+        let failed = AnalyticsEventPolicy.policy(forEvent: "local_summary_failed")
+        let cancelled = AnalyticsEventPolicy.policy(forEvent: "local_summary_cancelled")
 
         assertEqual(
             requested?.allowedProperties ?? Set<String>(),
