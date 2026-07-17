@@ -30,6 +30,8 @@ class DictationSessionController: ObservableObject {
     }
     var overlayController: FloatingOverlayController? {
         didSet {
+            oldValue?.onActionableMessageDiscarded = nil
+            textPaster.discardPasteRetry()
             overlayController?.onEscapeDuringSession = { [weak self] in
                 guard let self else { return }
                 guard self.isDictating else {
@@ -41,6 +43,9 @@ class DictationSessionController: ObservableObject {
             overlayController?.onStopListening = { [weak self] in
                 guard let self = self, self.isDictating else { return }
                 self.stopDictationAndPaste(trigger: .overlayButton)
+            }
+            overlayController?.onActionableMessageDiscarded = { [weak self] in
+                self?.textPaster.discardPasteRetry()
             }
         }
     }
@@ -1100,10 +1105,9 @@ class DictationSessionController: ObservableObject {
             let saveFailureMessage = saveResult.failureMessage
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             stopTiming.completedAt = CFAbsoluteTimeGetCurrent()
-            let deliveryLevel: EventLevel = pasteOutcome.delivery == .pasted ? .info : .warning
             DiagnosticsTrail.record(
                 logger: appState.logger,
-                level: deliveryLevel,
+                level: pasteOutcome.diagnosticLevel,
                 engine: "dictation",
                 event: "dictation_delivery_completed",
                 message: pasteOutcome.diagnosticMessage,
@@ -1148,14 +1152,26 @@ class DictationSessionController: ObservableObject {
                 } else {
                     overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
                 }
-            case .copied(let message, reason: let reason) where reason.isPasteConfirmationOnly:
+            case .copied(let message, reason: let reason) where reason.isPasteConfirmationUnavailable:
                 AppSoundPlayer.shared.play(.dictationDelivered)
                 if let saveFailureMessage {
                     overlayController.showError(saveFailureMessage)
                 } else {
-                    overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Pasted")
+                    overlayController.showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? "Paste sent")
                 }
-                appState.logger.log("DICTATION | paste confirmation missing after Cmd+V; suppressing user warning: \(message)")
+                appState.logger.log("DICTATION | target does not expose paste confirmation; showing neutral delivery feedback: \(message)")
+            case .copied(let message, reason: .pasteNotConfirmed):
+                let visibleMessage = saveFailureMessage.map { "\(message) \($0)" } ?? message
+                overlayController.showError(
+                    visibleMessage,
+                    actionTitle: "Paste Again",
+                    action: { [weak self] in
+                        self?.retryPasteWithoutAutoEnter(
+                            text,
+                            saveFailureMessage: saveFailureMessage
+                        )
+                    }
+                )
             case .copied(let message, reason: _):
                 if let saveFailureMessage {
                     overlayController.showError("\(message) \(saveFailureMessage)")
@@ -1764,46 +1780,105 @@ class DictationSessionController: ObservableObject {
             target: sessionPasteTarget,
             prepareForAutoSend: autoSendRequestDecision.expected
         )
+        recordPasteAttemptOutcome(outcome, attempt: "initial")
+        return outcome
+    }
+
+    private func retryPasteWithoutAutoEnter(
+        _ text: String,
+        saveFailureMessage: String?
+    ) {
+        guard let overlayController else { return }
+        retargetPasteToCurrentFocus()
+        let outcome = DictationPasteRetryTelemetry.performUserRetry {
+            textPaster.retryPaste(
+                text,
+                target: sessionPasteTarget
+            )
+        }
+        recordPasteAttemptOutcome(outcome, attempt: "retry")
+
+        switch outcome {
+        case .pasted:
+            AppSoundPlayer.shared.play(.dictationDelivered)
+            if let saveFailureMessage {
+                overlayController.showError(saveFailureMessage)
+            } else {
+                overlayController.showSuccessAndDismiss(title: "Pasted")
+            }
+        case .copied(let message, reason: let reason) where reason.isPasteConfirmationUnavailable:
+            AppSoundPlayer.shared.play(.dictationDelivered)
+            if let saveFailureMessage {
+                overlayController.showError(saveFailureMessage)
+            } else {
+                overlayController.showSuccessAndDismiss(title: "Paste sent")
+            }
+            appState?.logger.log("DICTATION | Paste Again sent; target still does not expose confirmation: \(message)")
+        case .copied(let message, reason: .pasteNotConfirmed):
+            let retryMessage = "Still couldn't confirm the paste. The text is copied — press ⌘V."
+            overlayController.showError(
+                saveFailureMessage.map { "\(retryMessage) \($0)" } ?? retryMessage
+            )
+            appState?.logger.log("DICTATION | Paste Again remained unconfirmed: \(message)")
+        case .copied(let message, reason: _):
+            if let saveFailureMessage {
+                overlayController.showError("\(message) \(saveFailureMessage)")
+            } else {
+                overlayController.showClipboardNotice(message)
+            }
+        case .failed(let message):
+            overlayController.showError(
+                saveFailureMessage.map { "\(message) \($0)" } ?? message
+            )
+        }
+        appState?.logger.log("DICTATION | Paste Again completed with outcome \(outcome)")
+    }
+
+    private func recordPasteAttemptOutcome(
+        _ outcome: DictationPasteOutcome,
+        attempt: String
+    ) {
         if let diagnostic = textPaster.lastConfirmationDiagnostic {
+            var context = diagnostic.context
+            context["attempt"] = attempt
             EventReporter.shared.capture(
-                level: diagnostic.event == "dictation_paste_confirmed" ? .info : .warning,
+                level: diagnostic.event == "dictation_paste_confirmed" ? .info : outcome.diagnosticLevel,
                 engine: "overlay",
                 event: diagnostic.event,
                 message: diagnostic.event == "dictation_paste_confirmed"
                     ? "Paste delivery confirmed from privacy-safe target signals"
                     : "Paste delivery could not be confirmed from privacy-safe target signals",
-                context: diagnostic.context
+                context: context
             )
         }
 
+        let context = ["attempt": attempt]
         switch outcome.copyReason {
         case .accessibilityMissing:
             appState?.logger.log("DICTATION | Accessibility missing, copying text instead")
         case .pasteEventCreationFailed:
             EventReporter.shared.capture(level: .error, engine: "overlay", event: "cgevent_create_failed",
-                message: "CGEvent creation returned nil — paste will not work")
+                message: "CGEvent creation returned nil — paste will not work", context: context)
             appState?.logger.log("DICTATION | CGEvent paste failed, keeping text on clipboard")
         case .focusChanged:
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_target_changed",
-                message: "Focus changed before dictation paste")
+                message: "Focus changed before dictation paste", context: context)
             appState?.logger.log("DICTATION | focus changed, copying text instead")
         case .pasteNotConfirmed:
             EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_not_confirmed",
-                message: "Paste-back was dispatched but the target did not confirm reading the borrowed clipboard")
+                message: "Paste-back was dispatched but the target did not confirm reading the borrowed clipboard", context: context)
             appState?.logger.log("DICTATION | paste not confirmed, keeping text on clipboard")
         case .pasteConfirmationUnavailable:
-            EventReporter.shared.capture(level: .warning, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
-                message: "Paste-back was dispatched but the target did not expose confirmation")
+            EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
+                message: "Paste-back was dispatched but the target did not expose confirmation", context: context)
             appState?.logger.log("DICTATION | paste confirmation unavailable, keeping text on clipboard")
         case .pasteConfirmationUnavailableAutoSendEligible:
             EventReporter.shared.capture(level: .info, engine: "overlay", event: "dictation_paste_confirmation_unavailable",
-                message: "Selected Auto Enter target read paste-back but did not expose text confirmation")
+                message: "Selected Auto Enter target read paste-back but did not expose text confirmation", context: context)
             appState?.logger.log("DICTATION | selected Auto Enter target read paste; restoring clipboard before follow-up key")
         case nil:
             break
         }
-
-        return outcome
     }
 
     private func retargetPasteToCurrentFocus() {
@@ -1986,7 +2061,8 @@ class DictationSessionController: ObservableObject {
                 routeShape: dictationAnalyticsProperties()["route_shape"],
                 modelState: ProductFrictionTelemetry.modelState(isReady: appState?.sttRouter.isModelLoaded)
             )
-        } else if let copyReason = pasteOutcome.copyReason {
+        } else if let copyReason = pasteOutcome.copyReason,
+                  !copyReason.isPasteConfirmationUnavailable {
             ProductFrictionTelemetry.track(
                 surface: .dictation,
                 stage: "pasteback",
@@ -2057,7 +2133,7 @@ class DictationSessionController: ObservableObject {
 
         DiagnosticsTrail.record(
             logger: appState.logger,
-            level: pasteOutcome.delivery == .pasted && saveSucceeded ? .info : .warning,
+            level: saveSucceeded ? pasteOutcome.diagnosticLevel : .warning,
             engine: "dictation",
             event: "dictation_stop_latency_measured",
             message: "Measured dictation stop latency",
@@ -2264,10 +2340,21 @@ private extension TextPasteOutcome {
             return .failed
         }
     }
+
+    var diagnosticLevel: EventLevel {
+        switch self {
+        case .pasted:
+            return .info
+        case .copied(_, reason: let reason) where reason.isPasteConfirmationUnavailable:
+            return .info
+        case .copied, .failed:
+            return .warning
+        }
+    }
 }
 
 private extension TextPasteCopyReason {
-    var isPasteConfirmationOnly: Bool {
+    var isPasteConfirmationUnavailable: Bool {
         switch self {
         case .pasteConfirmationUnavailable, .pasteConfirmationUnavailableAutoSendEligible:
             return true

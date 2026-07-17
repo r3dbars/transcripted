@@ -140,6 +140,7 @@ allowlist.
 - `dictation_started`
 - `dictation_start_failed`
 - `dictation_completed`
+- `dictation_paste_retry_completed`
 - `dictation_artifact_saved`
 - `dictation_stop_latency_measured`
 - `dictation_cancelled`
@@ -189,6 +190,8 @@ allowlist.
 - booleans as `"true"` / `"false"`
 - coarse buckets like `10_29s`, `50_149`, `4_plus`
 - stable trigger enums like `hotkey`, `menu`, `detected_prompt`
+- paste retry outcomes limited to `result` and a coarse `reason`; never text,
+  capture identifiers, or target-app identifiers
 - retry attempt buckets like `start_attempt_bucket`, not raw retry counts
 - normalized failure kinds like `system_audio`, `recording_too_short`, `other`
 - normalized failure-code buckets like `url_-1009`, `sparkle_2003`, `other_42`

@@ -96,6 +96,7 @@ class FloatingOverlayController {
     /// Closure for Escape during active dictation overlay states.
     var onEscapeDuringSession: (() -> Void)?
     var onStopListening: (() -> Void)?
+    var onActionableMessageDiscarded: (() -> Void)?
 
     // MARK: - Panel & Views
 
@@ -391,8 +392,7 @@ class FloatingOverlayController {
         cancelMiniLoadingReveal()
         errorMessage = ""
         messageTone = .error
-        errorActionTitle = nil
-        errorActionHandler = nil
+        discardActionableMessageIfNeeded()
         listeningNotice = ""
         state = .starting
         resizePanelToCompact()
@@ -522,8 +522,7 @@ class FloatingOverlayController {
         errorDismissTask?.cancel()
         errorMessage = ""
         messageTone = .error
-        errorActionTitle = nil
-        errorActionHandler = nil
+        discardActionableMessageIfNeeded()
         if let presentation {
             loadingPresentation = presentation
         }
@@ -618,6 +617,7 @@ class FloatingOverlayController {
         errorDismissTask?.cancel()
         loadingTimerTask?.cancel()
         loadingTimerTask = nil
+        discardActionableMessageIfNeeded()
         errorMessage = message
         messageTone = tone
         errorActionTitle = actionTitle
@@ -646,9 +646,17 @@ class FloatingOverlayController {
         errorDismissTask?.cancel()
         errorDismissTask = nil
         errorMessage = ""
+        discardActionableMessageIfNeeded()
+        hideWithCancelAnimation()
+    }
+
+    private func discardActionableMessageIfNeeded() {
+        let hadAction = errorActionHandler != nil
         errorActionTitle = nil
         errorActionHandler = nil
-        hideWithCancelAnimation()
+        if hadAction {
+            onActionableMessageDiscarded?()
+        }
     }
 
     private func clearActionableErrorWithoutHiding() {
@@ -669,8 +677,7 @@ class FloatingOverlayController {
         errorDismissTask?.cancel()
         errorMessage = DictationNoSpeechPresentationPolicy.message(trigger: trigger, reason: reason)
         messageTone = .error
-        errorActionTitle = nil
-        errorActionHandler = nil
+        discardActionableMessageIfNeeded()
         state = .drafting
         resizePanel(to: NSSize(width: OverlayTokens.panelWidth, height: OverlayTokens.panelMinHeight))
         if !isVisible {
@@ -693,8 +700,7 @@ class FloatingOverlayController {
         successDismissTask?.cancel()
         errorMessage = ""
         messageTone = .error
-        errorActionTitle = nil
-        errorActionHandler = nil
+        discardActionableMessageIfNeeded()
         successTitle = title
         state = .success
         resizePanelToCompact()
@@ -735,8 +741,7 @@ class FloatingOverlayController {
         state = .idle
         errorMessage = ""
         messageTone = .error
-        errorActionTitle = nil
-        errorActionHandler = nil
+        discardActionableMessageIfNeeded()
         listeningNotice = ""
         loadingPresentation = .initial
     }
