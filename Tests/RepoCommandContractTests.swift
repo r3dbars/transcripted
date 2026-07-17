@@ -2267,6 +2267,20 @@ func testRepoCommandContract() {
                 && coordinatorContents.contains("preparingQueuedTranscriptionJob?.id == job.id"),
             "model recovery should count as active background work and stale prep tasks must not clear newer queued work"
         )
+        let importedEnqueueBlock = sourceSlice(
+            coordinatorContents,
+            from: "func enqueueImportedAudioJob(",
+            to: "private func enqueue(_ job: QueuedTranscriptionJob)"
+        )
+        assertTrue(
+            importedEnqueueBlock.contains("try persistImportedJournal(for: job)")
+                && importedEnqueueBlock.contains("queuedTranscriptionJobs.append(job)"),
+            "an accepted imported job should be journaled before it becomes crash-volatile queue state"
+        )
+        assertTrue(
+            controllerContents.contains("transcriptionQueue.recoverImportedAudioJobs()"),
+            "launch should reconstruct queued imported jobs from their durable journals"
+        )
         let startQueuedBlock = sourceSlice(
             coordinatorContents,
             from: "private func startQueuedTranscription(_ job: QueuedTranscriptionJob) {",

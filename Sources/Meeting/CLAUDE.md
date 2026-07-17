@@ -114,6 +114,7 @@ App-owned meeting state lives under `~/Library/Application Support/Transcripted/
 - `speakers.sqlite`
 - `stats.sqlite`
 - `failed_transcriptions.json`
+- `imported_transcription_queue/import-job-*.json` crash-recovery journals for imports waiting behind another transcript
 
 Temporary meeting scratch paths live under `~/Library/Application Support/Transcripted/tmp/recordings/`:
 

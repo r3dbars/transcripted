@@ -61,6 +61,7 @@ App-owned meeting state is stored separately under:
 - stats DB: `~/Library/Application Support/Transcripted/state/stats.sqlite`
 - timeline DB: `~/Library/Application Support/Transcripted/state/timeline.sqlite`
 - failed queue: `~/Library/Application Support/Transcripted/state/failed_transcriptions.json`
+- queued import journals: `~/Library/Application Support/Transcripted/state/imported_transcription_queue/`
 - runtime diagnostics marker: `~/Library/Application Support/Transcripted/state/runtime-diagnostics.json`
 
 The Dayflow-style timeline stores app-owned screen activity data separately from

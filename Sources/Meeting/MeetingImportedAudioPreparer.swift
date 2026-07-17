@@ -8,6 +8,115 @@ struct PreparedImportedMeetingAudio: Sendable {
     let recordingDate: Date
 }
 
+struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
+    let id: UUID
+    let audioFilename: String
+    let suggestedTitle: String
+    let recordingDate: Date
+    let sttModelRawValue: String
+}
+
+enum ImportedTranscriptionQueueJournalError: Error {
+    case audioOutsideScratchDirectory
+}
+
+enum ImportedTranscriptionQueueJournal {
+    private static let filenamePrefix = "import-job-"
+    private static let filenameExtension = "json"
+
+    static func persist(
+        id: UUID,
+        audioURL: URL,
+        suggestedTitle: String,
+        recordingDate: Date,
+        sttModelRawValue: String,
+        journalDirectory: URL,
+        scratchDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let normalizedAudioURL = audioURL.standardizedFileURL
+        let normalizedScratchDirectory = scratchDirectory.standardizedFileURL
+        guard normalizedAudioURL.deletingLastPathComponent() == normalizedScratchDirectory else {
+            throw ImportedTranscriptionQueueJournalError.audioOutsideScratchDirectory
+        }
+
+        fileManager.ensurePrivateDirectory(
+            at: journalDirectory,
+            context: "imported transcription queue journal"
+        )
+        let record = ImportedTranscriptionQueueJournalRecord(
+            id: id,
+            audioFilename: normalizedAudioURL.lastPathComponent,
+            suggestedTitle: suggestedTitle,
+            recordingDate: recordingDate,
+            sttModelRawValue: sttModelRawValue
+        )
+        let data = try JSONEncoder().encode(record)
+        let destination = journalURL(for: id, in: journalDirectory)
+        try data.write(to: destination, options: [.atomic])
+        fileManager.restrictFileToOwnerOnly(at: destination)
+    }
+
+    static func load(
+        journalDirectory: URL,
+        fileManager: FileManager = .default
+    ) -> [ImportedTranscriptionQueueJournalRecord] {
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: journalDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        return urls
+            .filter {
+                $0.pathExtension == filenameExtension
+                    && $0.deletingPathExtension().lastPathComponent.hasPrefix(filenamePrefix)
+            }
+            .compactMap { url in
+                guard let data = try? Data(contentsOf: url),
+                      let record = try? JSONDecoder().decode(
+                          ImportedTranscriptionQueueJournalRecord.self,
+                          from: data
+                      ),
+                      !record.audioFilename.isEmpty,
+                      URL(fileURLWithPath: record.audioFilename).lastPathComponent == record.audioFilename
+                else { return nil }
+                return record
+            }
+            .sorted { lhs, rhs in
+                if lhs.recordingDate == rhs.recordingDate {
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+                return lhs.recordingDate < rhs.recordingDate
+            }
+    }
+
+    static func remove(
+        id: UUID,
+        journalDirectory: URL,
+        fileManager: FileManager = .default
+    ) {
+        try? fileManager.removeItem(at: journalURL(for: id, in: journalDirectory))
+    }
+
+    static func audioURL(
+        for record: ImportedTranscriptionQueueJournalRecord,
+        scratchDirectory: URL
+    ) -> URL? {
+        guard !record.audioFilename.isEmpty,
+              URL(fileURLWithPath: record.audioFilename).lastPathComponent == record.audioFilename
+        else { return nil }
+        return scratchDirectory.appendingPathComponent(record.audioFilename, isDirectory: false)
+    }
+
+    private static func journalURL(for id: UUID, in directory: URL) -> URL {
+        directory.appendingPathComponent(
+            "\(filenamePrefix)\(id.uuidString).\(filenameExtension)",
+            isDirectory: false
+        )
+    }
+}
+
 enum MeetingImportedAudioPreparationError: LocalizedError, Equatable {
     case fileMissing
     case cannotInspect
