@@ -9,7 +9,9 @@ settings-side agent connection flow.
 ## Main split
 
 - `TranscriptedSettingsView.swift` - settings shell, navigation, shared state,
-  page routing, and page-level actions.
+  page routing, and page-level actions. General, Storage, and Beta presentation
+  now live in focused page files while their bindings and runtime work stay in
+  this shell.
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows: a primary
   content section (Home/Dictations/Speakers/Agent); the settings pages are
   reached via the sidebar gear and an in-content tab strip.
@@ -43,10 +45,12 @@ settings-side agent connection flow.
   typing-time-saved stat.
 - `Pages/` - one file per standalone settings page split out of
   `TranscriptedSettingsView` (`AboutSettingsPage.swift`,
-  `DictationsSettingsPage.swift`, `PeopleSettingsPage.swift`, and
-  `SupportSettingsPage.swift`). Model, shortcut, and privacy controls live in
-  General disclosures; their legacy page identifiers remain deep-link aliases.
-  New settings pages should land here as their own file instead of growing the shell.
+  `BetaSettingsPage.swift`, `DictationsSettingsPage.swift`,
+  `GeneralSettingsPage.swift`, `PeopleSettingsPage.swift`,
+  `StorageSettingsPage.swift`, and `SupportSettingsPage.swift`). Model,
+  shortcut, and privacy editors still live behind General disclosures; their
+  legacy page identifiers remain deep-link aliases. New settings pages should
+  land here as their own file instead of growing the shell.
 - `TranscriptedSettingsSupportViews.swift` - shared small SwiftUI views used
   across multiple settings pages (support/diagnostics-adjacent rows).
 

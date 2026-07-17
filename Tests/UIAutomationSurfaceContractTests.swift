@@ -30,6 +30,15 @@ private func homeSurfaceContractContains(_ needle: String) -> Bool {
         || contractSource("Sources/UI/Settings/HomeMeetingPreviewSheet.swift").contains(needle)
 }
 
+private func settingsSurfaceContractContains(_ needle: String) -> Bool {
+    [
+        "Sources/UI/Settings/TranscriptedSettingsView.swift",
+        "Sources/UI/Settings/Pages/GeneralSettingsPage.swift",
+        "Sources/UI/Settings/Pages/StorageSettingsPage.swift",
+        "Sources/UI/Settings/Pages/BetaSettingsPage.swift",
+    ].contains { contractSource($0).contains(needle) }
+}
+
 func testUIAutomationSurfaceContract() {
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
         assertTrue(
@@ -209,6 +218,18 @@ func testUIAutomationSurfaceContract() {
             "settings sidebar pages should expose stable automation identifiers"
         )
 
+        for (typeName, path) in [
+            ("GeneralSettingsPage", "Sources/UI/Settings/Pages/GeneralSettingsPage.swift"),
+            ("StorageSettingsPage", "Sources/UI/Settings/Pages/StorageSettingsPage.swift"),
+            ("BetaSettingsPage", "Sources/UI/Settings/Pages/BetaSettingsPage.swift"),
+        ] {
+            assertTrue(
+                contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("\(typeName)(")
+                    && contractSource(path).contains("struct \(typeName)"),
+                "\(typeName) should stay extracted while the Settings shell owns its bindings"
+            )
+        }
+
         assertTrue(
             contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains(".frame(width: 40, height: 40)")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsGeneralControls.swift").contains("accessibilityIdentifier(\"transcripted.settings.general.info.\\(automationSlug(info.title))\")"),
@@ -236,7 +257,7 @@ func testUIAutomationSurfaceContract() {
             "trackSettingsToggle(\"local_ai_meeting_summaries\"",
             "trackSettingsToggle(\"live_meeting_sidecar\"",
         ] {
-            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
+            assertTrue(settingsSurfaceContractContains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
         }
 
         for requiredHomeActionHook in [
@@ -695,7 +716,7 @@ func testUIAutomationSurfaceContract() {
             "transcripted.settings.beta.local-summary.install-uv",
             "transcripted.settings.beta.open-agent-setup",
         ] {
-            assertTrue(contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
+            assertTrue(settingsSurfaceContractContains(identifier), "\(identifier) should stay attached to Settings click-flow controls")
         }
 
         assertTrue(

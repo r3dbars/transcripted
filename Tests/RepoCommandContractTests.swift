@@ -3731,6 +3731,7 @@ func testRepoCommandContract() {
         let floatingOverlayContents = readRepoTextFile("Sources/UI/Overlay/FloatingOverlayController.swift")
         let overlayDraftingContents = readRepoTextFile("Sources/UI/Overlay/OverlayDraftingView.swift")
         let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        let storageSettingsContents = readRepoTextFile("Sources/UI/Settings/Pages/StorageSettingsPage.swift")
         let onboardingContents = readRepoTextFile("Sources/UI/Settings/PermissionsOnboardingView.swift")
         let menuContents = readRepoTextFile("Sources/UI/MenuBar/MenuBarPanelController.swift")
         let permissionAccessContents = readRepoTextFile("Sources/Support/TranscriptedPermissionAccess.swift")
@@ -3792,7 +3793,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             settingsContents.contains("resetCaptureLibraryToDefault()")
-                && settingsContents.contains("Copy to Default Folder")
+                && storageSettingsContents.contains("Copy to Default Folder")
                 && settingsContents.contains("applyCaptureLibraryChoice(nil)"),
             "resetting the capture library should confirm/copy/switch like choosing a folder"
         )
