@@ -38,6 +38,10 @@ extension SpeakerDatabase {
     /// comparisons at match time are consistent. No-ops on an empty embedding.
     public func recordNegativeExemplar(profileId: UUID, embedding: [Float]) {
         guard !embedding.isEmpty else { return }
+        if isExecutingOnQueue {
+            recordNegativeExemplarImpl(profileId: profileId, embedding: embedding)
+            return
+        }
         queue.sync { recordNegativeExemplarImpl(profileId: profileId, embedding: embedding) }
     }
 

@@ -323,23 +323,31 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let legacyClipsDirectory = self.legacyClipsDirectory
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            Self.promoteClipIfNeeded(
-                from: sourceId,
-                to: targetId,
-                preferredClipsDirectory: preferredClipsDirectory,
-                legacyClipsDirectory: legacyClipsDirectory
-            )
             do {
-                try speakerDatabase.mergeProfiles(sourceId: sourceId, into: targetId)
+                try SpeakerProfileMergeSideEffectCoordinator.merge(
+                    databaseMerge: {
+                        try speakerDatabase.mergeProfiles(sourceId: sourceId, into: targetId)
+                    },
+                    promoteClip: {
+                        Self.promoteClipIfNeeded(
+                            from: sourceId,
+                            to: targetId,
+                            preferredClipsDirectory: preferredClipsDirectory,
+                            legacyClipsDirectory: legacyClipsDirectory
+                        )
+                    },
+                    deleteSourceClips: {
+                        Self.deleteClips(
+                            for: sourceId,
+                            preferredClipsDirectory: preferredClipsDirectory,
+                            legacyClipsDirectory: legacyClipsDirectory
+                        )
+                    }
+                )
             } catch {
                 AppLogger.speakers.error("Manual speaker merge failed", ["error": error.localizedDescription])
                 return
             }
-            Self.deleteClips(
-                for: sourceId,
-                preferredClipsDirectory: preferredClipsDirectory,
-                legacyClipsDirectory: legacyClipsDirectory
-            )
 
             let resolvedName = speakerDatabase.getSpeaker(id: targetId)?.displayName
                 ?? targetName

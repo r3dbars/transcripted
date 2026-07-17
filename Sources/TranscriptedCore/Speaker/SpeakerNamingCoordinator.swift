@@ -128,6 +128,10 @@ extension TranscriptionTaskManager {
                 ) else {
                     return (didFinalize: false, resolvedURL: transcriptURL)
                 }
+                guard let originalTranscriptData = try? Data(contentsOf: resolvedURL) else {
+                    AppLogger.speakers.error("Speaker naming could not snapshot the transcript before update")
+                    return (didFinalize: false, resolvedURL: resolvedURL)
+                }
 
                 var didFinalize = visibleRegularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
                     transcriptURL: resolvedURL,
@@ -158,22 +162,32 @@ extension TranscriptionTaskManager {
                     )
                 }
 
+                if didFinalize {
+                    do {
+                        try speakerDB.performMutationBatch {
+                            try Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
+                            if let deferredReviewPlan {
+                                try Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
+                            }
+                        }
+                    } catch {
+                        AppLogger.speakers.error("Speaker naming persistence failed", ["error": error.localizedDescription])
+                        do {
+                            try originalTranscriptData.write(to: resolvedURL, options: .atomic)
+                            FileManager.default.restrictToOwnerOnly(atPath: resolvedURL.path)
+                        } catch {
+                            AppLogger.speakers.error("Speaker naming transcript rollback failed", [
+                                "error": error.localizedDescription
+                            ])
+                        }
+                        didFinalize = false
+                    }
+                }
+
                 return (didFinalize: didFinalize, resolvedURL: resolvedURL)
             }
             let didFinalizeTranscript = finalization.didFinalize
             let resolvedURL = finalization.resolvedURL
-
-            if didFinalizeTranscript {
-                do {
-                    try Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
-                    if let deferredReviewPlan {
-                        try Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
-                    }
-                } catch {
-                    AppLogger.speakers.error("Speaker naming persistence failed", ["error": error.localizedDescription])
-                    didFinalizeTranscript = false
-                }
-            }
 
             if didFinalizeTranscript {
                 speakerDB.recordMatchOutcomes(Self.plannedMatchOutcomes(
