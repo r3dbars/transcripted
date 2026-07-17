@@ -19,9 +19,26 @@ enum MicRecoveryReadinessPolicy {
     }
 }
 
+enum MicRecoveryRetryPolicy {
+    static func shouldResetMeetingSelectionBeforeRetry(
+        for reason: MicCaptureRestartReason
+    ) -> Bool {
+        switch reason {
+        case .deviceChange:
+            return true
+        case .processingChange:
+            return false
+        }
+    }
+}
+
 enum MicWatchdogArmingPolicy {
     static func shouldArm(afterNonemptyBufferCount bufferCount: Int) -> Bool {
         bufferCount == 1
+    }
+
+    static func shouldArmAfterSuccessfulStart(nonemptyBufferCount: Int) -> Bool {
+        nonemptyBufferCount > 0
     }
 }
 
@@ -166,7 +183,8 @@ extension Audio {
         do {
             preparedGraph = try makeReadyMeetingInputGraph(
                 operation: "device_recovery",
-                resetMeetingSelectionBeforeRetry: false,
+                resetMeetingSelectionBeforeRetry: MicRecoveryRetryPolicy
+                    .shouldResetMeetingSelectionBeforeRetry(for: reason),
                 sessionGeneration: sessionGeneration,
                 routeWasUnstable: bluetoothInputWasSelected
             )

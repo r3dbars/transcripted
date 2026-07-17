@@ -488,12 +488,8 @@ struct TranscriptedSettingsView: View {
             homePage
         case .dictations:
             dictationsPage
-        case .general:
+        case .general, .models, .shortcuts, .privacy:
             generalPage
-        case .models:
-            modelsPage
-        case .shortcuts:
-            shortcutsPage
         case .people:
             peoplePage
         case .storage:
@@ -502,8 +498,6 @@ struct TranscriptedSettingsView: View {
             connectAgentPage
         case .beta:
             betaPage
-        case .privacy:
-            privacyPage
         case .support:
             supportPage
         case .about:
@@ -2391,187 +2385,6 @@ struct TranscriptedSettingsView: View {
         return nil
     }
 
-    private var shortcutsPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Shortcuts",
-                summary: "Keyboard triggers and send-after-paste rules."
-            )
-
-            SettingsSection(
-                title: "Keys",
-                detail: "Set push-to-talk, hands-free, paste-last-dictation, and meeting shortcuts."
-            ) {
-                SettingsToggleRow(
-                    title: "Enable dictation shortcuts",
-                    detail: dictationShortcutsEnabled
-                        ? "Push-to-talk and hands-free keys can start dictation."
-                        : "Off. You can still start dictation from the app, and meeting controls still work.",
-                    isOn: Binding(
-                        get: { dictationShortcutsEnabled },
-                        set: { newValue in
-                            dictationShortcutsEnabled = newValue
-                            trackSettingsToggle("dictation_shortcuts", enabled: newValue, page: .shortcuts)
-                            HotkeyPreferences.setDictationShortcutsEnabled(newValue)
-                        }
-                    )
-                )
-
-                HotkeyRecorderContainer(dictationShortcutsEnabled: dictationShortcutsEnabled)
-                    .frame(height: HotkeyRecorderContainer.preferredHeight)
-
-                if dictationShortcutsEnabled, let dictationTriggerSystemWarning {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-
-                        Text(dictationTriggerSystemWarning)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .font(.caption)
-                }
-            }
-
-            SettingsSection(
-                title: "Send After Paste",
-                detail: "Press Enter only in the apps you choose."
-            ) {
-                SettingsToggleRow(
-                    title: "Send after dictation",
-                    detail: autoEnterEnabled
-                        ? "Transcripted sends \(autoEnterKey.title) after it pastes, only in selected apps."
-                        : "Off. Dictation only pastes text.",
-                    isOn: Binding(
-                        get: { autoEnterEnabled },
-                        set: { newValue in
-                            autoEnterEnabled = newValue
-                            trackSettingsToggle("auto_send", enabled: newValue, page: .shortcuts)
-                            DictationAutoSendPreferences.setEnabled(newValue)
-                        }
-                    )
-                )
-
-                Picker("Send key", selection: Binding(
-                    get: { autoEnterKey },
-                    set: { newValue in
-                        autoEnterKey = newValue
-                        trackSettingsAction("change_auto_send_key", page: .shortcuts)
-                        DictationAutoSendPreferences.setSendKey(newValue)
-                    }
-                )) {
-                    ForEach(DictationAutoSendKey.allCases) { key in
-                        Text(key.title).tag(key)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .disabled(!autoEnterEnabled)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Allowed Apps")
-                            .font(.subheadline.weight(.semibold))
-
-                        Spacer()
-
-                        SettingsInlineActionButton(title: "Refresh") {
-                            trackSettingsAction("refresh_auto_send_apps", page: .shortcuts)
-                            refreshAutoEnterAppCandidates()
-                        }
-
-                        SettingsInlineActionButton(title: "Add App...", symbolName: "plus") {
-                            trackSettingsAction("add_auto_send_app", page: .shortcuts)
-                            chooseAutoEnterApp()
-                        }
-                    }
-
-                    if autoEnterAllowedBundleIDs.isEmpty {
-                        Text("Add an app before Transcripted can send.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(sortedAutoEnterAllowedBundleIDs, id: \.self) { bundleID in
-                            AutoEnterAllowedAppRow(
-                                title: autoEnterDisplayName(for: bundleID),
-                                bundleID: bundleID
-                            ) {
-                                setAutoEnterApp(bundleID, isAllowed: false)
-                            }
-                        }
-                    }
-                }
-                .disabled(!autoEnterEnabled)
-
-                if !autoEnterAppCandidates.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Running Apps")
-                            .font(.subheadline.weight(.semibold))
-
-                        ForEach(autoEnterAppCandidates) { app in
-                            SettingsToggleRow(
-                                title: app.name,
-                                detail: app.bundleID,
-                                isOn: Binding(
-                                    get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
-                                    set: { isAllowed in
-                                        setAutoEnterApp(app.bundleID, isAllowed: isAllowed)
-                                    }
-                                ),
-                                help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name)."
-                            )
-                        }
-                    }
-                    .disabled(!autoEnterEnabled)
-                }
-            }
-
-            SettingsSection(
-                title: "Bluetooth Start Speed",
-                detail: "Avoid switching microphone routes every time dictation starts."
-            ) {
-                SettingsToggleRow(
-                    title: "Faster Bluetooth dictation",
-                    detail: keepRecommendedMicrophoneActive
-                        ? "Keeps your preferred non-Bluetooth microphone selected while Transcripted is open. This changes the microphone used by other apps, but does not record while idle."
-                        : "Off. Bluetooth dictation may take longer while macOS switches microphone routes.",
-                    isOn: Binding(
-                        get: { keepRecommendedMicrophoneActive },
-                        set: { newValue in
-                            keepRecommendedMicrophoneActive = newValue
-                            trackSettingsToggle("keep_recommended_microphone_active", enabled: newValue, page: .shortcuts)
-                            DictationPersistentInputPreferences.setEnabled(newValue)
-                        }
-                    )
-                )
-
-                Picker("Preferred microphone", selection: Binding(
-                    get: { preferredDictationInputUID },
-                    set: { newValue in
-                        preferredDictationInputUID = newValue
-                        trackSettingsAction("change_preferred_dictation_microphone", page: .shortcuts)
-                        DictationPersistentInputPreferences.setPreferredDeviceUID(newValue)
-                    }
-                )) {
-                    Text("Automatic (recommended)").tag(String?.none)
-                    ForEach(preferredDictationInputCandidates, id: \.id) { device in
-                        Text(device.name).tag(device.uid)
-                    }
-                }
-                .disabled(!keepRecommendedMicrophoneActive)
-
-                SettingsInlineActionButton(title: "Refresh microphones", symbolName: "arrow.clockwise") {
-                    trackSettingsAction("refresh_dictation_microphones", page: .shortcuts)
-                    refreshDictationInputCandidates()
-                }
-
-                Text("Fallback order: preferred microphone, then the recommended Mac or display microphone, then the current system input.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
     private var generalPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             GeneralSettingsHeader()
@@ -3364,87 +3177,6 @@ struct TranscriptedSettingsView: View {
             }
             .padding(.top, 4)
         }
-    }
-
-    private var modelsPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Models",
-                summary: "Choose the local engine used for transcription."
-            )
-
-            SettingsSection(
-                title: "Active Model",
-                detail: "Used for dictation, meetings, and audio imports."
-            ) {
-                SettingsStatusCard(
-                    title: "Active transcription engine",
-                    status: effectiveTranscriptionModel.title,
-                    detail: activeModelDetail,
-                    tone: .ready
-                )
-
-                let modelCard = FirstRunExperience.modelCard(
-                    for: FirstRunLocalModelState(sttRouter.modelDownloadState),
-                    model: effectiveTranscriptionModel
-                )
-                SettingsStatusCard(
-                    title: "Model files",
-                    status: modelCard.status,
-                    detail: modelCard.detail,
-                    tone: tone(for: modelCard.tone),
-                    progress: modelCard.progress,
-                    actionTitle: modelDownloadActionTitle,
-                    action: modelDownloadAction
-                )
-            }
-
-            SettingsSection(
-                title: "Switch Model",
-                detail: "Parakeet is the default. Whisper is optional."
-            ) {
-                DisclosureGroup("Change model", isExpanded: $showAdvancedModelControls) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Picker("Preferred model", selection: Binding(
-                            get: { preferredTranscriptionModel },
-                            set: { newValue in
-                                updatePreferredTranscriptionModel(newValue)
-                            }
-                        )) {
-                            ForEach(visibleTranscriptionModelChoices) { model in
-                                Text(model.title).tag(model)
-                            }
-                        }
-                        .pickerStyle(.menu)
-
-                        ForEach(visibleTranscriptionModelChoices) { model in
-                            ModelChoiceRow(
-                                model: model,
-                                isPreferred: preferredTranscriptionModel == model,
-                                isEffective: effectiveTranscriptionModel == model
-                            )
-                        }
-
-                        HStack {
-                            SettingsInlineActionButton(title: "Use Parakeet", tone: .accent) {
-                                updatePreferredTranscriptionModel(.parakeetTDTv3)
-                            }
-                            .disabled(preferredTranscriptionModel == .parakeetTDTv3)
-                            .help(preferredTranscriptionModel == .parakeetTDTv3
-                                ? "Parakeet is already the selected transcription model."
-                                : "")
-
-                            Text("Changes apply to the next capture.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(.top, 8)
-                }
-            }
-        }
-        .accessibilityIdentifier("transcripted.settings.page.general")
     }
 
     private var peoplePage: some View {
@@ -4505,27 +4237,6 @@ struct TranscriptedSettingsView: View {
         return "Normal meeting transcripts still save as usual. Turn this on only when you want a local agent to watch active meetings."
     }
 
-    private var privacyPage: some View {
-        PrivacySettingsPage(
-            meetingMicProcessingMode: $meetingMicProcessingMode,
-            splitLocalSpeakersEnabled: $splitLocalSpeakersEnabled,
-            crashReportingEnabled: $crashReportingEnabled,
-            anonymousAnalyticsEnabled: $anonymousAnalyticsEnabled,
-            sentryTestStatus: $sentryTestStatus,
-            permissionStates: permissionStates,
-            onDiagnosticsStatusesCleared: { diagnosticsActionStatus = nil },
-            onTrackPermissionCTA: { kind in trackPermissionCTA(kind) },
-            onRefreshPermissions: { refreshPermissions() },
-            onTrackSettingsToggle: { settingID, enabled, page in
-                trackSettingsToggle(settingID, enabled: enabled, page: page)
-            },
-            onTrackSettingsAction: { actionID, page in
-                trackSettingsAction(actionID, page: page)
-            },
-            onSendTestSentryEvent: { sendTestSentryEvent() }
-        )
-    }
-
     private var aboutPage: some View {
         AboutSettingsPage(
             sparkleUpdater: sparkleUpdater,
@@ -4653,10 +4364,6 @@ struct TranscriptedSettingsView: View {
         case .downloading, .loading, .ready:
             return nil
         }
-    }
-
-    private var modelDownloadAction: (() -> Void)? {
-        modelDownloadAction(page: .models)
     }
 
     private func modelDownloadAction(page: TranscriptedSettingsPage) -> (() -> Void)? {
@@ -5179,7 +4886,7 @@ struct TranscriptedSettingsView: View {
 
     private func updatePreferredTranscriptionModel(
         _ model: TranscriptionModelChoice,
-        page: TranscriptedSettingsPage = .models
+        page: TranscriptedSettingsPage = .general
     ) {
         preferredTranscriptionModel = model
         showAdvancedModelControls = true
@@ -5392,7 +5099,7 @@ struct TranscriptedSettingsView: View {
     private func setAutoEnterApp(
         _ bundleID: String,
         isAllowed: Bool,
-        page: TranscriptedSettingsPage = .shortcuts
+        page: TranscriptedSettingsPage = .general
     ) {
         if isAllowed {
             autoEnterAllowedBundleIDs.insert(bundleID)
@@ -5404,7 +5111,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private func pageShowsAutoEnterSettings(_ page: TranscriptedSettingsPage) -> Bool {
-        page == .general || page == .shortcuts
+        page == .general
     }
 
     private func refreshAutoEnterAppCandidates() {
@@ -5420,7 +5127,7 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    private func chooseAutoEnterApp(page: TranscriptedSettingsPage = .shortcuts) {
+    private func chooseAutoEnterApp(page: TranscriptedSettingsPage = .general) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.canChooseFiles = true

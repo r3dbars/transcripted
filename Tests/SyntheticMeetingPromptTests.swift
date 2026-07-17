@@ -71,7 +71,7 @@ private func evaluateSyntheticPrompt(
     )
 }
 
-func testSyntheticMeetingPrompts() {
+func testSyntheticMeetingPrompt() {
     guard #available(macOS 14.0, *) else { return }
 
     runSuite("SyntheticMeetingPrompts — calendar Zoom event creates one nearby prompt") {

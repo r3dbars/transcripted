@@ -17,6 +17,17 @@ final class AudioInitializationTests: XCTestCase {
         )
     }
 
+    func testMicRecoveryRetryDropsOnlyDisconnectedDeviceSelections() {
+        XCTAssertTrue(
+            MicRecoveryRetryPolicy.shouldResetMeetingSelectionBeforeRetry(for: .deviceChange),
+            "a disconnected pinned mic must not block the built-in fallback retry"
+        )
+        XCTAssertFalse(
+            MicRecoveryRetryPolicy.shouldResetMeetingSelectionBeforeRetry(for: .processingChange),
+            "a consented processing restart should keep the active meeting mic pinned"
+        )
+    }
+
     func testMicWatchdogArmsOnlyAfterTheFirstNonemptyBuffer() {
         XCTAssertFalse(
             MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 0),
@@ -28,6 +39,18 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertFalse(
             MicWatchdogArmingPolicy.shouldArm(afterNonemptyBufferCount: 2),
             "later frames must not create duplicate watchdog timers"
+        )
+        XCTAssertFalse(
+            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(nonemptyBufferCount: 0),
+            "start completion must not arm recovery before any mic frame arrives"
+        )
+        XCTAssertTrue(
+            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(nonemptyBufferCount: 1),
+            "start completion must recover the arm when the first frame won the startup race"
+        )
+        XCTAssertTrue(
+            MicWatchdogArmingPolicy.shouldArmAfterSuccessfulStart(nonemptyBufferCount: 2),
+            "any observed mic frame is enough to arm after startup completes"
         )
     }
 
