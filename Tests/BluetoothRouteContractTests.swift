@@ -327,20 +327,24 @@ func testBluetoothRouteContract() {
         assertEqual(timeline.segments.first?.sampleRate, 48_000, "recorded timeline should preserve the pinned tap rate")
     }
 
-    runSuite("Bluetooth route contract - engine tap wiring keeps sample-rate pinning") {
+    runSuite("Bluetooth route contract - engine tap and final inference keep sample-rate pinning") {
         let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetEngine.swift")
         guard let tapStart = source.range(of: "private func installTapAndStartEngine"),
-              let tapEnd = source.range(of: "func removeRecordingTap", range: tapStart.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find dictation tap wiring")
+              let tapEnd = source.range(of: "func removeRecordingTap", range: tapStart.upperBound..<source.endIndex),
+              let inferenceStart = source.range(of: "private func drainRecordedSamplesForInference"),
+              let inferenceEnd = source.range(of: "// MARK: - Transcription", range: inferenceStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find dictation tap and final inference wiring")
             return
         }
         let tapBody = String(source[tapStart.lowerBound..<tapEnd.lowerBound])
+        let inferenceBody = String(source[inferenceStart.lowerBound..<inferenceEnd.lowerBound])
 
         guard let installTap = tapBody.range(of: "inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil)"),
               let bufferFormat = tapBody.range(of: "Self.audioFormatSummary(buffer.format)"),
               let effectiveRate = tapBody.range(of: "ParakeetTapSampleRatePolicy.effectiveSampleRate"),
               let nativeRate = tapBody.range(of: "self.nativeSampleRate = effectiveSampleRate"),
-              let resampleRate = tapBody.range(of: "from: effectiveSampleRate") else {
+              let inputRate = inferenceBody.range(of: "let inputRate = safeNativeSampleRate()"),
+              let resampleRate = inferenceBody.range(of: "from: inputRate") else {
             assertTrue(false, "dictation tap should use the delivered buffer format for sample-rate bookkeeping")
             return
         }
@@ -348,7 +352,7 @@ func testBluetoothRouteContract() {
         assertTrue(installTap.lowerBound < bufferFormat.lowerBound, "tap should be installed with CoreAudio's delivered buffer format")
         assertTrue(bufferFormat.lowerBound < effectiveRate.lowerBound, "buffer.format should feed the sample-rate policy")
         assertTrue(effectiveRate.lowerBound < nativeRate.lowerBound, "nativeSampleRate should track the effective tap-buffer rate")
-        assertTrue(nativeRate.lowerBound < resampleRate.lowerBound, "downstream resampling should use the pinned tap-buffer rate")
+        assertTrue(inputRate.lowerBound < resampleRate.lowerBound, "final inference should resample from the pinned tap-buffer rate")
     }
 
     runSuite("Bluetooth route contract - input override happens before format reads") {
@@ -388,7 +392,7 @@ func testBluetoothRouteContract() {
               let cleanupStart = source.range(of: "// MARK: - Cleanup"),
               let cleanupEnd = source.range(of: "deinit", range: cleanupStart.upperBound..<source.endIndex),
               let stopStart = source.range(of: "func stopRecording() async"),
-              let stopEnd = source.range(of: "// MARK: - EOU Streaming", range: stopStart.upperBound..<source.endIndex) else {
+              let stopEnd = source.range(of: "// MARK: - Recorded Audio Buffering", range: stopStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find dictation audioInputSnapshot and stopRecording")
             return
         }

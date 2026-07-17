@@ -8,9 +8,9 @@
 
 - `ParakeetEngine.swift` — app-owned Parakeet STT engine, recording control, final dictation transcription, permission-aware input-readiness checks, short-audio gating, live level metering, and sanitized failure reporting for model init errors. Device-change recovery and model load/download/warmup/teardown are split into the two files below — ParakeetEngine remains the public-API owner and `@MainActor` home for that state; the split files are internal collaborator extensions.
 - `ParakeetDeviceRecovery.swift` — `ParakeetEngine` extension: device-change detection (CoreAudio default-input listener, `AVAudioEngineConfigurationChange` observer) and the `attemptDeviceRecovery` / `scheduleConfigRecoveryTimeout` executor that rewarms the audio graph after a route change. The pure decision tables it consults (`ParakeetDeviceRecoveryReadinessPolicy`, `ParakeetDeviceRecoveryFailurePolicy`, `ParakeetDeviceRecoveryTimeoutPolicy`) live in `ParakeetStartRecordingFailurePolicy.swift`, not here.
-- `ParakeetModelLifecycle.swift` — `ParakeetEngine` extension: model load/download/warmup/teardown paths (`initialize`, `performInitialize`, `prefetchModelFilesIfNeeded`, `initializeEouModel`, `cancelModelWork`, `teardownModel`)
+- `ParakeetModelLifecycle.swift` — `ParakeetEngine` extension: model load/download/warmup/teardown paths (`initialize`, `performInitialize`, `prefetchModelFilesIfNeeded`, `cancelModelWork`, `teardownModel`)
 - `ParakeetAudioDeviceLookup.swift` — CoreAudio default-input lookup and dictation input selection descriptors used before Parakeet starts recording
-- `ParakeetAudioEngineSupport.swift` — support types for Parakeet engine startup snapshots, retired-engine retention, default-input listener teardown, and the disabled live-display shim
+- `ParakeetAudioEngineSupport.swift` — support types for Parakeet engine startup snapshots, retired-engine retention, and default-input listener teardown
 - `WhisperEngine.swift` — app-owned WhisperKit STT engine used when advanced users select a Whisper model
 - `NemotronEngine.swift` — app-owned FluidAudio Nemotron streaming STT engine, beta-gated behind `SpeechModelBetaPreferences`; transcribes buffered samples only (recording stays in `ParakeetEngine`)
 - `DictationAudioLevelMeter.swift` — normalizes live PCM buffers into a 0...1 level used by the dictation waveform UI
@@ -36,7 +36,7 @@
 - `ParakeetEngine` consults `ParakeetStartRecordingFailurePolicy` when startup fails so format-reset, engine rebuild, and prewarm-retry behavior stay consistent across direct starts and recovery attempts.
 - `ParakeetEngine` stays `@MainActor` for app state, published UI state, and event reporting, but all `AVAudioEngine` graph work runs through its private serial audio-engine queue. Keep recording start/stop/readiness APIs async so callers do not block the main actor while CoreAudio settles, starts, stops, or rebuilds.
 - `ParakeetEngine` reports model-init failures with `ParakeetModelInitDiagnostics.failureContext(...)`, which keeps diagnostics useful for packaging/download/debugging issues without shipping raw transcript or device content.
-- Live transcript display is currently disabled in `ParakeetEngine`; the product favors stable capture and final transcription over provisional live text. Do not promise live transcript UI behavior unless that path is re-enabled and verified.
+- Dictation intentionally exposes only final transcription. The abandoned provisional-text/EOU path was removed rather than kept behind a false feature flag. A future live dictation experience must add a real streaming engine and end-to-end tests instead of reviving dormant audio-tap branches.
 - `DictationAudioLevelMeter` converts live audio buffers into normalized meter levels using `TranscriptedConstants` floor and ceiling thresholds. Keep waveform calibration changes here instead of burying them in overlay code.
 - `DictationAudioRecovery` analyzes buffered audio for usable speech signal (peak, RMS, active ratio) and can produce a focused, gain-normalized retry segment. `ParakeetEngine` uses it to retry transcription when an initial attempt returns empty rather than silently dropping audio that contained real speech.
 - The meeting pipeline reuses the same app-owned `STTRouter` through `Sources/Meeting/MeetingSTTAdapter.swift`.
@@ -55,7 +55,7 @@ Manual checks:
 
 - dictation can start and stop cleanly
 - very short recordings follow the expected drop / empty-result / transcribe behavior
-- final dictation text appears after stop/transcribe; live text remains disabled unless explicitly re-enabled
+- final dictation text appears after stop/transcribe; provisional live text is not shown
 - device changes do not leave the app stuck or force a Bluetooth headset mic when a safer built-in fallback exists
 - wake / resume does not strand buffered audio or leave recovery state hanging
 

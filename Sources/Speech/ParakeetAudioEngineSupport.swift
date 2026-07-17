@@ -24,29 +24,6 @@ func unregisterDefaultInputDeviceListener(_ listener: AudioObjectPropertyListene
     }
 }
 
-// No-op shim for the dormant live-display path (liveDisplayEnabled = false).
-// FluidAudio 0.15.x ships a real `StreamingEouAsrManager` again with a different
-// API; this local declaration deliberately shadows it so the disabled code path
-// keeps compiling unchanged. Delete this shim when live display is rewired to
-// the real streaming API (phase 3 of docs/voices-model-upgrade-plan.md).
-actor StreamingEouAsrManager {
-    enum ChunkSize {
-        case ms320
-    }
-
-    init(chunkSize: ChunkSize, eouDebounceMs: Int) {}
-
-    func loadModels(modelDir: URL) async throws {}
-
-    func setPartialCallback(_ callback: @escaping @Sendable (String) -> Void) async {}
-
-    func setEouCallback(_ callback: @escaping @Sendable (String) -> Void) async {}
-
-    func process(audioBuffer: AVAudioPCMBuffer) async throws -> String { "" }
-
-    func reset() async {}
-}
-
 enum ParakeetModelState {
     case notLoaded
     case downloading(progress: Double)

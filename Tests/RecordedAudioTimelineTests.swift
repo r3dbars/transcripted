@@ -90,19 +90,25 @@ func testRecordedAudioTimeline() {
         assertTrue(recorder.finish().isEmpty, "buffers after finish should be ignored")
     }
 
-    runSuite("Shared meeting mic path preserves live display feeding contract") {
+    runSuite("Shared meeting mic path always records borrowed PCM") {
         let source = (try? String(
             contentsOfFile: "Sources/Speech/ParakeetEngine.swift",
             encoding: .utf8
         )) ?? ""
         guard let start = source.range(of: "nonisolated func appendSharedMeetingMicBuffer"),
-              let end = source.range(of: "private func consumeSharedMeetingMicLiveDisplaySamples", range: start.upperBound..<source.endIndex) else {
-            assertTrue(false, "shared meeting mic live-display methods should remain present")
+              let end = source.range(of: "func updateSharedMeetingMicAudioLevel", range: start.upperBound..<source.endIndex) else {
+            assertTrue(false, "shared meeting mic append method should remain present")
             return
         }
-        let appendBody = String(source[start.lowerBound..<end.upperBound])
-        assertTrue(appendBody.contains("AudioResampler.resample"), "borrowed meeting PCM should be resampled for live display")
-        assertTrue(appendBody.contains("consumeSharedMeetingMicLiveDisplaySamples"), "borrowed meeting PCM should feed the EOU buffer")
+        let appendBody = String(source[start.lowerBound..<end.lowerBound])
+        assertTrue(
+            appendBody.contains("sharedMeetingMicRecorder.append(buffer)"),
+            "borrowed meeting PCM should always reach the recorder"
+        )
+        assertFalse(
+            appendBody.contains("liveDisplayEnabled"),
+            "recording borrowed meeting PCM must not depend on a provisional-text feature gate"
+        )
     }
 
     runSuite("SharedMeetingMicRecorder downmixes stereo and preserves route sample-rate changes") {

@@ -855,7 +855,7 @@ func testParakeetStartRecordingFailurePolicy() {
     runSuite("ParakeetEngine stopRecording cancels pending zombie restart while idle") {
         let source = readParakeetEngineSource()
         guard let stopStart = source.range(of: "func stopRecording()"),
-              let stopEnd = source.range(of: "// MARK: - EOU Streaming", range: stopStart.upperBound..<source.endIndex),
+              let stopEnd = source.range(of: "// MARK: - Recorded Audio Buffering", range: stopStart.upperBound..<source.endIndex),
               let cancelStart = source.range(of: "func cancelAudioWatchdog()") else {
             assertTrue(false, "test should find stopRecording and watchdog cancellation bodies")
             return
@@ -885,7 +885,7 @@ func testParakeetStartRecordingFailurePolicy() {
         guard let wakeStart = source.range(of: "private func handleSystemWake()"),
               let wakeEnd = source.range(of: "// MARK: - Recording", range: wakeStart.upperBound..<source.endIndex),
               let stopStart = source.range(of: "func stopRecording()"),
-              let stopEnd = source.range(of: "// MARK: - EOU Streaming", range: stopStart.upperBound..<source.endIndex) else {
+              let stopEnd = source.range(of: "// MARK: - Recorded Audio Buffering", range: stopStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find wake and stopRecording bodies")
             return
         }

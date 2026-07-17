@@ -155,8 +155,6 @@ extension ParakeetEngine {
 
         if isRecording {
             preserveCurrentRecordingBuffersForRecovery()
-            streamingSamplesLock.withLock { streamingSampleBuffer.removeAll(keepingCapacity: true) }
-            Task { await eouManager?.reset() }
             await removeRecordingTap()
             isRecording = false
             audioLevel = 0

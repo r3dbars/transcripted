@@ -1,11 +1,6 @@
 @preconcurrency import AVFoundation
 import Foundation
 
-struct SharedMeetingMicChunk: Sendable {
-    let samples: [Float]
-    let sampleRate: Double
-}
-
 /// Thread-safe storage for dictation samples borrowed from an active meeting.
 /// MeetingCaptureBridge delivers buffers on its relay queue, never on the
 /// CoreAudio tap thread. Synchronization makes MainActor start/stop atomic with
@@ -22,16 +17,14 @@ final class SharedMeetingMicRecorder: @unchecked Sendable {
         }
     }
 
-    @discardableResult
-    func append(_ buffer: AVAudioPCMBuffer) -> SharedMeetingMicChunk? {
-        guard let monoSamples = Self.extractMonoSamples(from: buffer), !monoSamples.isEmpty else { return nil }
+    func append(_ buffer: AVAudioPCMBuffer) {
+        guard let monoSamples = Self.extractMonoSamples(from: buffer), !monoSamples.isEmpty else { return }
         let sampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
             bufferSampleRate: buffer.format.sampleRate
         )
-        return lock.withLock {
-            guard isActive else { return nil }
+        lock.withLock {
+            guard isActive else { return }
             timeline.append(monoSamples, sampleRate: sampleRate)
-            return SharedMeetingMicChunk(samples: monoSamples, sampleRate: sampleRate)
         }
     }
 

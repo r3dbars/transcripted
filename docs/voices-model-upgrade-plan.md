@@ -71,12 +71,11 @@ existing users unless they opt in.
   and transcribed after the user stops talking.
 - Whisper Large V3 / Turbo via WhisperKit are the alternate choices
   (`Sources/Support/TranscriptionModelPreferences.swift`).
-- FluidAudio is pinned at **0.7.9**
-  (`scripts/entrypoints/build-deps.sh:52`). Upstream is at **0.15.4**
-  (June 16, 2026). That pin is why live display is dead: 0.7.9 dropped
-  the old streaming EOU manager, so `ParakeetAudioEngineSupport.swift`
-  carries a no-op `StreamingEouAsrManager` stub and
-  `ParakeetEngine.liveDisplayEnabled` is hardcoded `false`.
+- FluidAudio is pinned at **0.15.4**
+  (`scripts/entrypoints/build-deps.sh`). Dictation still uses the stable
+  batch Parakeet path and publishes only the final result. The old no-op
+  streaming EOU shim and its permanently-disabled audio-tap branches were
+  removed; live dictation now requires a deliberate end-to-end implementation.
 - Diarization is offline PyAnnote through `OfflineDiarizerManager`
   (`Sources/TranscriptedCore/Services/DiarizationService.swift`).
 - No language selection UI; Parakeet v3 covers 25 European languages,
@@ -191,17 +190,15 @@ Capture the numbers we'll compare against:
 - Record model cache disk usage via `ModelCacheInventory` for the
   storage-settings story.
 
-### Phase 1 — FluidAudio 0.7.9 → 0.15.x, behavior-neutral
+### Phase 1 — FluidAudio 0.7.9 → 0.15.x, behavior-neutral (complete)
 
 The riskiest step, so it ships alone.
 
 - Bump `FLUID_AUDIO_VERSION` in `scripts/entrypoints/build-deps.sh`;
   rebuild deps (`bash build-deps.sh --force`).
 - Fix API breaks in `ParakeetEngine` / `DiarizationService` /
-  `MeetingSTTAdapter`. Expect changes around `AsrManager` init, model
-  download entry points, and diarizer config types. Keep the EOU stub in
-  `ParakeetAudioEngineSupport.swift` for now — deleting it belongs to
-  phase 3.
+  `MeetingSTTAdapter`. The obsolete EOU compatibility stub was later
+  removed because no shipped path used it.
 - Confirm model cache layout under
   `~/Library/Application Support/Transcripted/FluidAudio/Models/` is
   unchanged, or add a migration shim in `ModelCacheInventory` +
@@ -240,14 +237,12 @@ The riskiest step, so it ships alone.
 
 ### Phase 3 — live streaming display
 
-- Replace the `StreamingEouAsrManager` stub with the real FluidAudio
-  0.15.x streaming manager; delete the 0.7.9 workaround comment block.
+- Add a real FluidAudio 0.15.x streaming manager as a new, tested path.
 - Wire partial-hypothesis callbacks into the dictation overlay
   (`Sources/UI/Overlay/DictationSessionController.swift`): show gray
-  provisional text, replace with the final pass on EoU. Flip
-  `liveDisplayEnabled` into a computed property: on when the selected
-  model streams, off for batch models — Parakeet/Whisper users see
-  exactly today's behavior.
+  provisional text, replace with the final pass on EoU. Keep the
+  streaming state owned by the selected streaming engine so batch
+  Parakeet/Whisper users see exactly today's behavior.
 - Meeting drawer: feed rolling partials into the existing live transcript
   drawer. Keep CoreAudio threading rules — partials hop off the capture
   queue via deep-copied buffers before touching `@MainActor` UI state.
