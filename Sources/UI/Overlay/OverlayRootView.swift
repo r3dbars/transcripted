@@ -138,11 +138,9 @@ final class OverlayRootView: NSView {
         loadingPresentation: FloatingOverlayController.LoadingPresentation,
         loadingElapsedSeconds: Int,
         successTitle: String,
-        isTranscribing: Bool,
         isRecording: Bool,
         isMiniCursorMode: Bool,
-        audioLevel: Float,
-        liveTranscript: String
+        audioLevel: Float
     ) {
         currentState = state
         currentErrorMessage = errorMessage
@@ -185,16 +183,12 @@ final class OverlayRootView: NSView {
 
         if showMessage {
             draftingView.isHidden = false
-            let statusText = isTranscribing ? "Transcribing..." : "Processing..."
             draftingView.update(
-                error: errorMessage.isEmpty ? nil : errorMessage,
+                message: errorMessage,
                 errorActionTitle: errorActionTitle,
                 onErrorAction: onErrorAction,
                 isNotice: isNotice,
-                onErrorDismiss: onErrorDismiss,
-                isTranscribing: isTranscribing,
-                transcriptText: liveTranscript,
-                statusText: statusText
+                onErrorDismiss: onErrorDismiss
             )
         }
 

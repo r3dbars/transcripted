@@ -220,12 +220,6 @@ class FloatingOverlayController {
             }
             .store(in: &subscriptions)
 
-        sttRouter.$isTranscribing
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.pushStateToViews()
-            }
-            .store(in: &subscriptions)
     }
 
     // MARK: - State → View Push
@@ -249,11 +243,9 @@ class FloatingOverlayController {
             loadingPresentation: loadingPresentation,
             loadingElapsedSeconds: loadingElapsedSeconds,
             successTitle: successTitle,
-            isTranscribing: sttRouter?.isTranscribing ?? false,
             isRecording: sttRouter?.isRecording ?? false,
             isMiniCursorMode: isCursorMiniPanelMode,
-            audioLevel: sttRouter?.audioLevel ?? 0,
-            liveTranscript: sttRouter?.liveTranscript ?? ""
+            audioLevel: sttRouter?.audioLevel ?? 0
         )
         updatePanelMouseBehavior()
         updatePanelCornerRadius()
