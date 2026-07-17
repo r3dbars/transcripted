@@ -113,12 +113,25 @@ func testNightlySecurityContract() {
     }
 
     runSuite("Nightly security sanitizer corpus stays shared and non-empty") {
+        let manifest = loadJSONFixture("config/security/nightly-security-manifest.json", as: [String: AnyDecodable].self)
+        let secretScan = manifest["secret_scan"]?.dictionaryValue ?? [:]
+        let trackedAllowlist = Set(secretScan["tracked_file_allowlist_globs"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+        let historyAllowlist = Set(secretScan["history_file_allowlist_globs"]?.arrayValue?.compactMap(\.stringValue) ?? [])
         let corpus = loadJSONFixture("Tests/Fixtures/ObservabilitySanitizerCorpus.json", as: ObservabilitySanitizerCorpus.self)
         let ids = corpus.cases.map(\.id)
+        let privacyParityCorpus = "Tests/Fixtures/PrivacyTextRedactorParityCorpus.json"
 
         assertTrue(corpus.cases.count >= 5, "shared sanitizer corpus should cover several privacy cases")
         assertEqual(Set(ids).count, ids.count, "shared sanitizer corpus ids should be unique")
         assertTrue(corpus.cases.allSatisfy { !$0.mustContain.isEmpty && !$0.mustNotContain.isEmpty }, "each sanitizer corpus case should define required and forbidden markers")
+        assertTrue(
+            trackedAllowlist.contains(privacyParityCorpus),
+            "the exact synthetic privacy parity corpus should be allowlisted from tracked secret scanning"
+        )
+        assertTrue(
+            historyAllowlist.contains(privacyParityCorpus),
+            "the exact synthetic privacy parity corpus should be allowlisted from history secret scanning"
+        )
     }
 
     runSuite("Nightly security docs reference the deterministic checker") {
