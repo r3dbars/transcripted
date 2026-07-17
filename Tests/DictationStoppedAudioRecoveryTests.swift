@@ -152,6 +152,22 @@ func testDictationStoppedAudioRecovery() {
                 snapshotRange.lowerBound < commitGuardRange.lowerBound && commitGuardRange.lowerBound < persistRange.lowerBound,
                 "cancel/session guard must run after the detached snapshot and before recovery persistence"
             )
+            assertTrue(
+                source.contains("let recovery = try await Task.detached(priority: .userInitiated)"),
+                "WAV encoding and disk writes must stay off the main actor"
+            )
+            assertTrue(
+                source.contains("preparedRecording: stoppedRecordingSnapshot"),
+                "transcription should reuse the already-resampled stopped recording snapshot"
+            )
+            let speechSource = try String(
+                contentsOf: repoFixtureURL("Sources/Speech/ParakeetEngine.swift"),
+                encoding: .utf8
+            )
+            assertTrue(
+                speechSource.contains("consumeRecordedSamples(preparedRecording: preparedRecording)"),
+                "speech inference should consume the prepared snapshot instead of resampling native buffers again"
+            )
             assertTrue(source.contains("transcriptPersisted: saveResult.saved != nil"), "cleanup should be tied to successful transcript persistence")
             assertTrue(source.contains("if emptyReason != .modelFailure"), "model failures should retain recovery audio")
             assertTrue(

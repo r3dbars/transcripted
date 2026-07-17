@@ -211,7 +211,7 @@ class STTRouter: ObservableObject {
         parakeetEngine.abandonBlockedRecordingStart(reason: reason)
     }
 
-    func transcribe() async -> String? {
+    func transcribe(preparedRecording: RecordedSpeechSamples? = nil) async -> String? {
         let model = activeRecordingModel ?? selectedModel
         lastEmptyTranscriptionReason = nil
         defer {
@@ -220,11 +220,14 @@ class STTRouter: ObservableObject {
 
         switch model {
         case .parakeetTDTv3:
-            let text = await parakeetEngine.transcribe()
+            let text = await parakeetEngine.transcribe(preparedRecording: preparedRecording)
             lastEmptyTranscriptionReason = text == nil ? parakeetEngine.lastEmptyTranscriptionReason : nil
             return text
         case .whisperLargeV3Turbo, .whisperLargeV3:
-            return await transcribeUsingExternalEngine(model: model) { [self] recording in
+            return await transcribeUsingExternalEngine(
+                model: model,
+                preparedRecording: preparedRecording
+            ) { [self] recording in
                 try await whisperEngine.transcribeSamples(
                     recording.samples16k,
                     source: .microphone,
@@ -232,7 +235,10 @@ class STTRouter: ObservableObject {
                 )
             }
         case .nemotronStreaming:
-            return await transcribeUsingExternalEngine(model: model) { [self] recording in
+            return await transcribeUsingExternalEngine(
+                model: model,
+                preparedRecording: preparedRecording
+            ) { [self] recording in
                 try await nemotronEngine.transcribeSamples(
                     recording.samples16k,
                     source: .microphone
@@ -246,6 +252,7 @@ class STTRouter: ObservableObject {
     /// Parakeet samples rather than owning the audio graph themselves.
     private func transcribeUsingExternalEngine(
         model: TranscriptionModelChoice,
+        preparedRecording: RecordedSpeechSamples?,
         transcribe: (RecordedSpeechSamples) async throws -> String
     ) async -> String? {
         await initialize(model: model)
@@ -261,7 +268,8 @@ class STTRouter: ObservableObject {
         }
 
         guard let recording = await parakeetEngine.drainRecordedSamplesForExternalTranscription(
-            engineName: model.engineName
+            engineName: model.engineName,
+            preparedRecording: preparedRecording
         ) else {
             lastEmptyTranscriptionReason = parakeetEngine.lastEmptyTranscriptionReason
             return nil
