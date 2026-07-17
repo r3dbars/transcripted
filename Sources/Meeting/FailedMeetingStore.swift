@@ -58,6 +58,15 @@ final class FailedMeetingStore {
         self.diagnosticsContext = diagnosticsContext
     }
 
+    var failedAudioURLs: Set<URL> {
+        Set(
+            failedManager.failedTranscriptions.flatMap { failure in
+                [failure.micAudioURL, failure.systemAudioURL]
+                    .compactMap { $0?.standardizedFileURL }
+            }
+        )
+    }
+
     @discardableResult
     func retryFailedMeeting(id: UUID) -> Bool {
         guard canRetry() else { return false }

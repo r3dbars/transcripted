@@ -38,6 +38,12 @@ enum MeetingStoragePaths {
         stateFolder.appendingPathComponent("failed_transcriptions.json", isDirectory: false)
     }
 
+    static var importedTranscriptionQueueFolder: URL {
+        let url = stateFolder.appendingPathComponent("imported_transcription_queue", isDirectory: true)
+        FileManager.default.ensurePrivateDirectory(at: url, context: "imported transcription queue")
+        return url
+    }
+
     static var cacheFolder: URL {
         FileManager.default.transcriptedCacheDir
     }

@@ -348,6 +348,7 @@ final class MeetingSessionController: ObservableObject {
         }
 
         wireSubscriptions()
+        transcriptionQueue.recoverImportedAudioJobs()
 
         // Recover recordings orphaned by a crash before any failed-queue entry
         // existed — they become visible, retryable items on Home.
@@ -1453,12 +1454,33 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
-        let outcome = transcriptionQueue.enqueueImportedAudioJob(
-            audioURL: preparedAudio.copiedAudioURL,
-            suggestedTitle: preparedAudio.suggestedTitle,
-            recordingDate: preparedAudio.recordingDate,
-            startTrigger: .fileImport
-        )
+        let outcome: TranscriptionQueueCoordinator.QueueInsertionOutcome
+        do {
+            outcome = try transcriptionQueue.enqueueImportedAudioJob(
+                audioURL: preparedAudio.copiedAudioURL,
+                suggestedTitle: preparedAudio.suggestedTitle,
+                recordingDate: preparedAudio.recordingDate,
+                startTrigger: .fileImport
+            )
+        } catch {
+            let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(
+                micAudioURL: nil,
+                systemAudioURL: preparedAudio.copiedAudioURL,
+                errorMessage: ImportedAudioQueuePersistenceFailureCopy.retryEntryMessage,
+                meetingTitle: preparedAudio.suggestedTitle,
+                recordingDate: preparedAudio.recordingDate
+            )
+            if !preservedForRelaunch {
+                try? FileManager.default.removeItem(at: preparedAudio.copiedAudioURL)
+            }
+            let message = ImportedAudioQueuePersistenceFailureCopy.displayMessage(
+                preservedForRelaunch: preservedForRelaunch
+            )
+            state = .error(message)
+            displayStatus = .failed(message: message)
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "import_queue_persist_failed")
+            return false
+        }
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -1526,14 +1548,17 @@ final class MeetingSessionController: ObservableObject {
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
                     try? FileManager.default.removeItem(at: audioURL)
+                    transcriptionQueue.removeImportedJournal(for: job)
                 } else {
-                    failedMeetingStore.preserveFailedMeetingForRetry(
+                    if failedMeetingStore.preserveFailedMeetingForRetry(
                         micAudioURL: nil,
                         systemAudioURL: audioURL,
                         errorMessage: "Imported audio saved before cancellation. Audio is safe; finish the transcript from Home.",
                         meetingTitle: suggestedTitle,
                         recordingDate: recordingDate
-                    )
+                    ) {
+                        transcriptionQueue.removeImportedJournal(for: job)
+                    }
                 }
             }
         }

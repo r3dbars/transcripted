@@ -496,6 +496,118 @@ func testMeetingImportedAudioPreparer() async {
             "a cancelled copy must remove the partial destination file"
         )
     }
+
+    runSuite("Imported transcription queue journal survives relaunch until ownership transfers") {
+        let root = temporaryImportAudioPreparerRoot()
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let journalURL = root.appendingPathComponent("state/queue", isDirectory: true)
+        let audioURL = scratchURL.appendingPathComponent("imported-call.wav")
+        let id = UUID()
+        let recordingDate = Date(timeIntervalSince1970: 1_704_067_200)
+        try! FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
+        try! Data([0, 1, 2, 3]).write(to: audioURL)
+
+        try! ImportedTranscriptionQueueJournal.persist(
+            id: id,
+            audioURL: audioURL,
+            suggestedTitle: "Customer Call",
+            recordingDate: recordingDate,
+            enqueuedAt: recordingDate.addingTimeInterval(10),
+            sttModelRawValue: "parakeet",
+            journalDirectory: journalURL,
+            scratchDirectory: scratchURL
+        )
+
+        let recovered = ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL)
+        assertEqual(recovered.count, 1, "a fresh journal reader should recover the accepted import")
+        assertEqual(recovered.first?.id, id, "recovery should preserve the queued job identity")
+        assertEqual(recovered.first?.audioFilename, audioURL.lastPathComponent, "journals should store only the app-owned scratch filename")
+        assertEqual(
+            recovered.first.flatMap {
+                ImportedTranscriptionQueueJournal.audioURL(for: $0, scratchDirectory: scratchURL)
+            },
+            audioURL,
+            "recovery should resolve audio only inside the configured scratch directory"
+        )
+        assertTrue(
+            ImportedTranscriptionQueueJournal.isDuplicate(
+                record: recovered[0],
+                audioURL: audioURL,
+                existingJobIDs: [id],
+                existingAudioURLs: []
+            ),
+            "recovery should recognize an already-enqueued journal by job identity"
+        )
+        assertTrue(
+            ImportedTranscriptionQueueJournal.isDuplicate(
+                record: recovered[0],
+                audioURL: audioURL,
+                existingJobIDs: [],
+                existingAudioURLs: [audioURL]
+            ),
+            "recovery should recognize an already-enqueued journal by normalized audio path"
+        )
+        let unsafeRecord = ImportedTranscriptionQueueJournalRecord(
+            id: UUID(),
+            audioFilename: "../outside.wav",
+            suggestedTitle: "Unsafe",
+            recordingDate: recordingDate,
+            enqueuedAt: recordingDate,
+            sttModelRawValue: "parakeet"
+        )
+        assertNil(
+            ImportedTranscriptionQueueJournal.audioURL(
+                for: unsafeRecord,
+                scratchDirectory: scratchURL
+            ),
+            "recovery must reject journal paths that escape app-owned scratch"
+        )
+
+        let olderSourceNewerQueueID = UUID()
+        let olderSourceNewerQueueAudioURL = scratchURL.appendingPathComponent("older-source-newer-queue.wav")
+        try! Data([4, 5, 6, 7]).write(to: olderSourceNewerQueueAudioURL)
+        try! ImportedTranscriptionQueueJournal.persist(
+            id: olderSourceNewerQueueID,
+            audioURL: olderSourceNewerQueueAudioURL,
+            suggestedTitle: "Older Source Imported Second",
+            recordingDate: recordingDate.addingTimeInterval(-86_400),
+            enqueuedAt: recordingDate.addingTimeInterval(20),
+            sttModelRawValue: "parakeet",
+            journalDirectory: journalURL,
+            scratchDirectory: scratchURL
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).map(\.id),
+            [id, olderSourceNewerQueueID],
+            "relaunch recovery should preserve enqueue FIFO instead of sorting by source recording date"
+        )
+
+        ImportedTranscriptionQueueJournal.remove(id: id, journalDirectory: journalURL)
+        ImportedTranscriptionQueueJournal.remove(id: olderSourceNewerQueueID, journalDirectory: journalURL)
+        assertTrue(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).isEmpty,
+            "the journal should disappear after transcription or durable failed-queue ownership transfers"
+        )
+    }
+
+    runSuite("Imported queue persistence failure copy only claims durable retry ownership when persisted") {
+        assertTrue(
+            ImportedAudioQueuePersistenceFailureCopy.displayMessage(preservedForRelaunch: true)
+                .contains("saved for retry in Home"),
+            "a persisted failed-queue entry should tell the user where to retry after relaunch"
+        )
+        let notPreserved = ImportedAudioQueuePersistenceFailureCopy.displayMessage(
+            preservedForRelaunch: false
+        )
+        assertFalse(
+            notPreserved.localizedCaseInsensitiveContains("saved"),
+            "a failed journal and failed retry entry must not claim that the copied audio is durable"
+        )
+        assertTrue(
+            notPreserved.contains("Import the original file again"),
+            "an unrecoverable copied import should give an honest recovery action"
+        )
+    }
 }
 
 private func assertImportedAudioPreparationError(
