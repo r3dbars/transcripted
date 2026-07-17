@@ -152,6 +152,7 @@ final class MeetingOverlayRootView: NSView {
     private let statusDot = NSView()
     private let titleLabel = NSTextField(labelWithString: "Meeting")
     private let timerLabel = NSTextField(labelWithString: "00:00")
+    private let systemAudioWarningIcon = NSImageView()
     private let detailLabel = NSTextField(labelWithString: "")
     private let micLabel = NSTextField(labelWithString: "Mic")
     private let systemLabel = NSTextField(labelWithString: "System audio")
@@ -225,6 +226,17 @@ final class MeetingOverlayRootView: NSView {
         timerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         timerLabel.textColor = MeetingOverlayTokens.textSecondary
         addSubview(timerLabel)
+
+        systemAudioWarningIcon.image = NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill",
+            accessibilityDescription: "System audio warning"
+        )
+        systemAudioWarningIcon.imageScaling = .scaleProportionallyUpOrDown
+        systemAudioWarningIcon.contentTintColor = MeetingOverlayTokens.dotPrompt
+        systemAudioWarningIcon.isHidden = true
+        systemAudioWarningIcon.setAccessibilityElement(true)
+        systemAudioWarningIcon.setAccessibilityRole(.image)
+        addSubview(systemAudioWarningIcon)
 
         detailLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         detailLabel.textColor = MeetingOverlayTokens.textSecondary
@@ -485,7 +497,20 @@ final class MeetingOverlayRootView: NSView {
             height: tokens.stopHeight
         )
 
-        let barsLeft = timerLabel.frame.maxX + tokens.headerGap
+        let warningIconSize: CGFloat = 14
+        let warningIconGap = systemAudioWarningIcon.isHidden ? 0 : tokens.headerGap
+        systemAudioWarningIcon.frame = systemAudioWarningIcon.isHidden
+            ? .zero
+            : NSRect(
+                x: timerLabel.frame.maxX + warningIconGap,
+                y: midY - warningIconSize / 2,
+                width: warningIconSize,
+                height: warningIconSize
+            )
+        let recordingContentRight = systemAudioWarningIcon.isHidden
+            ? timerLabel.frame.maxX
+            : systemAudioWarningIcon.frame.maxX
+        let barsLeft = recordingContentRight + tokens.headerGap
         let barsRight = closeButton.frame.minX - tokens.headerGap
         let availableBarsWidth = max(0, barsRight - barsLeft)
         let barsWidth = min(tokens.recordingWaveformWidth, availableBarsWidth)
@@ -529,9 +554,13 @@ final class MeetingOverlayRootView: NSView {
     private func layoutCondensedRecording(midY: CGFloat) {
         let tokens = MeetingOverlayTokens.self
 
-        // Centered capsule content: just the dot and the timer.
+        // Centered capsule content: dot, timer, and a latched warning icon.
         let timerSize = timerLabel.fittingSize
-        let contentWidth = tokens.dotSize + tokens.condensedGap + timerSize.width
+        let warningIconSize: CGFloat = 14
+        let warningContentWidth = systemAudioWarningIcon.isHidden
+            ? 0
+            : tokens.condensedGap + warningIconSize
+        let contentWidth = tokens.dotSize + tokens.condensedGap + timerSize.width + warningContentWidth
         let startX = max(tokens.condensedPadLeft, (bounds.width - contentWidth) / 2)
 
         statusDot.frame = NSRect(
@@ -546,6 +575,14 @@ final class MeetingOverlayRootView: NSView {
             width: timerSize.width,
             height: timerSize.height
         )
+        systemAudioWarningIcon.frame = systemAudioWarningIcon.isHidden
+            ? .zero
+            : NSRect(
+                x: timerLabel.frame.maxX + tokens.condensedGap,
+                y: midY - warningIconSize / 2,
+                width: warningIconSize,
+                height: warningIconSize
+            )
 
         pillBodyView.frame = bounds
 
@@ -560,7 +597,10 @@ final class MeetingOverlayRootView: NSView {
             width: tokens.stopHeight,
             height: tokens.stopHeight
         )
-        let barsLeft = timerLabel.frame.maxX + tokens.headerGap
+        let recordingContentRight = systemAudioWarningIcon.isHidden
+            ? timerLabel.frame.maxX
+            : systemAudioWarningIcon.frame.maxX
+        let barsLeft = recordingContentRight + tokens.headerGap
         let barsRight = closeButton.frame.minX - tokens.headerGap
         let barsWidth = max(0, min(tokens.recordingWaveformWidth, barsRight - barsLeft))
         audioWaveform.frame = NSRect(x: barsLeft, y: midY - 11, width: barsWidth, height: 22)
@@ -588,8 +628,20 @@ final class MeetingOverlayRootView: NSView {
             height: timerSize.height
         )
 
+        let warningIconSize: CGFloat = 14
+        systemAudioWarningIcon.frame = systemAudioWarningIcon.isHidden
+            ? .zero
+            : NSRect(
+                x: timerLabel.frame.minX - 8 - warningIconSize,
+                y: topY - warningIconSize / 2,
+                width: warningIconSize,
+                height: warningIconSize
+            )
         let titleX = statusDot.frame.maxX + 8
-        let titleWidth = max(0, timerLabel.frame.minX - titleX - 8)
+        let titleRight = systemAudioWarningIcon.isHidden
+            ? timerLabel.frame.minX
+            : systemAudioWarningIcon.frame.minX
+        let titleWidth = max(0, titleRight - titleX - 8)
         let titleSize = titleLabel.fittingSize
         titleLabel.frame = NSRect(
             x: titleX,
@@ -685,6 +737,7 @@ final class MeetingOverlayRootView: NSView {
         participants: [String],
         warmupStatus: MeetingSessionController.ModelWarmupStatus?,
         prompt: MeetingOverlayController.PromptDisplay?,
+        systemAudioWarning: MeetingSystemAudioDegradationWarning?,
         isCondensed: Bool,
         liveView: MeetingLiveViewAffordancePolicy.Affordance?,
         isTranscriptExpanded: Bool
@@ -715,6 +768,18 @@ final class MeetingOverlayRootView: NSView {
         statusDot.isHidden = isPreparing
         titleLabel.isHidden = isPreparing || state == .recording
         timerLabel.isHidden = isPreparing || (state != .recording && !isPrompting)
+        systemAudioWarningIcon.isHidden = !(state == .recording || isPrompting)
+            || systemAudioWarning == nil
+        if let systemAudioWarning {
+            let accessibilityLabel = MeetingSystemAudioDegradationCopy.accessibilityLabel(
+                for: systemAudioWarning
+            )
+            systemAudioWarningIcon.toolTip = accessibilityLabel
+            systemAudioWarningIcon.setAccessibilityLabel(accessibilityLabel)
+        } else {
+            systemAudioWarningIcon.toolTip = nil
+            systemAudioWarningIcon.setAccessibilityLabel("System audio warning")
+        }
         detailLabel.isHidden = !(isPrompting || isErrorState)
         micLabel.isHidden = true
         systemLabel.isHidden = true
@@ -776,7 +841,13 @@ final class MeetingOverlayRootView: NSView {
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
         case .recording:
             titleLabel.stringValue = "Recording meeting"
-            updateStatusDot(color: MeetingOverlayTokens.dotRecording, haloOpacity: 0.24, haloRadius: 3)
+            updateStatusDot(
+                color: systemAudioWarning == nil
+                    ? MeetingOverlayTokens.dotRecording
+                    : MeetingOverlayTokens.dotPrompt,
+                haloOpacity: 0.24,
+                haloRadius: 3
+            )
             timerLabel.font = .monospacedDigitSystemFont(ofSize: MeetingOverlayTokens.timerFontSize, weight: .medium)
             timerLabel.textColor = MeetingOverlayTokens.textPrimary
             closeButton.attributedTitle = buttonTitle("", size: 12, weight: .semibold)
@@ -1349,6 +1420,7 @@ final class MeetingOverlayController: NSObject {
     private var currentPrompt: PromptDisplay?
     private var promptKind: PromptKind?
     private var audioRouteWarningOutcome: CaptureRouteStabilizationOutcome?
+    private var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
     private var promptCountdownTask: Task<Void, Never>?
     private var promptSecondsRemaining = 0
 
@@ -1372,6 +1444,7 @@ final class MeetingOverlayController: NSObject {
     private var transcriptPushPending = false
 
     private enum PromptKind {
+        case systemAudio
         case audioInactivity
         case micBoost
         case audioRoute
@@ -1566,6 +1639,13 @@ final class MeetingOverlayController: NSObject {
             }
             .store(in: &subscriptions)
 
+        session.$systemAudioDegradationWarning
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] warning in
+                self?.applySystemAudioDegradationWarning(warning)
+            }
+            .store(in: &subscriptions)
+
         session.$isMicBoostPromptVisible
             .receive(on: DispatchQueue.main)
             .sink { [weak self] visible in
@@ -1627,6 +1707,59 @@ final class MeetingOverlayController: NSObject {
         pushTranscriptToView()
     }
 
+    private func applySystemAudioDegradationWarning(
+        _ warning: MeetingSystemAudioDegradationWarning?
+    ) {
+        systemAudioDegradationWarning = warning
+        guard MeetingSystemAudioPromptPolicy.shouldPresentSystemAudioPrompt(
+            warning: warning,
+            hasAudioInactivityWarning: meetingSession?.audioInactivityWarning != nil
+        ), let warning else {
+            clearSystemAudioPrompt()
+            pushToView()
+            return
+        }
+        guard meetingSession?.state == .recording else { return }
+
+        autoHideTask?.cancel()
+        promptCountdownTask?.cancel()
+        promptCandidate = nil
+        promptKind = .systemAudio
+        promptSecondsRemaining = 0
+        currentPrompt = systemAudioWarningPromptDisplay(warning: warning)
+        bloomFromRest()
+        state = .prompt
+        showPanel()
+        pushToView()
+    }
+
+    private func clearSystemAudioPrompt() {
+        guard promptKind == .systemAudio else { return }
+
+        promptCountdownTask?.cancel()
+        promptKind = nil
+        currentPrompt = nil
+
+        if meetingSession?.state == .recording {
+            if let inactivityWarning = meetingSession?.audioInactivityWarning {
+                applyAudioInactivityWarning(inactivityWarning)
+            } else if let routeWarning = meetingSession?.audioRouteWarning {
+                applyAudioRouteWarning(routeWarning)
+            } else if meetingSession?.isMicBoostPromptVisible == true {
+                applyMicBoostPrompt(true)
+            } else {
+                state = .recording
+                showPanel()
+                pushToView()
+                flushPendingTranscriptIfNeeded()
+                scheduleRestIfNeeded()
+            }
+        } else {
+            state = .idle
+            hidePanel()
+        }
+    }
+
     private func applyAudioInactivityWarning(_ warning: MeetingAudioInactivityWarning?) {
         guard let warning else {
             clearAudioInactivityPrompt()
@@ -1659,6 +1792,7 @@ final class MeetingOverlayController: NSObject {
             return
         }
         guard meetingSession?.state == .recording else { return }
+        if state == .prompt, promptKind == .systemAudio { return }
         if state == .prompt, promptKind == .audioRoute { return }
         // Precedence: never replace an active audio-inactivity prompt (it can
         // auto-stop the recording). The post-meeting Home hint is the backstop.
@@ -1686,6 +1820,7 @@ final class MeetingOverlayController: NSObject {
             return
         }
         guard meetingSession?.state == .recording else { return }
+        if state == .prompt, promptKind == .systemAudio { return }
         // An inactivity prompt owns its stop policy. The route warning is
         // latched on the session and appears as soon as that prompt clears.
         if state == .prompt, promptKind == .audioInactivity { return }
@@ -1711,6 +1846,8 @@ final class MeetingOverlayController: NSObject {
         if meetingSession?.state == .recording {
             if let inactivityWarning = meetingSession?.audioInactivityWarning {
                 applyAudioInactivityWarning(inactivityWarning)
+            } else if let warning = systemAudioDegradationWarning, warning.shouldPresentPrompt {
+                applySystemAudioDegradationWarning(warning)
             } else if meetingSession?.isMicBoostPromptVisible == true {
                 applyMicBoostPrompt(true)
             } else {
@@ -1734,6 +1871,14 @@ final class MeetingOverlayController: NSObject {
         currentPrompt = nil
 
         if meetingSession?.state == .recording {
+            if let inactivityWarning = meetingSession?.audioInactivityWarning {
+                applyAudioInactivityWarning(inactivityWarning)
+                return
+            }
+            if let warning = systemAudioDegradationWarning, warning.shouldPresentPrompt {
+                applySystemAudioDegradationWarning(warning)
+                return
+            }
             if let routeWarning = meetingSession?.audioRouteWarning {
                 applyAudioRouteWarning(routeWarning)
                 return
@@ -1974,6 +2119,8 @@ final class MeetingOverlayController: NSObject {
         switch state {
         case .prompt:
             switch promptKind {
+            case .systemAudio:
+                meetingSession?.acknowledgeSystemAudioDegradationWarning()
             case .audioInactivity:
                 meetingSession?.dismissAudioInactivityWarning()
             case .micBoost:
@@ -1999,6 +2146,11 @@ final class MeetingOverlayController: NSObject {
         promptCountdownTask?.cancel()
 
         switch promptKind {
+        case .systemAudio:
+            Task { @MainActor [weak self] in
+                guard let session = self?.meetingSession else { return }
+                await session.stopRecording(reason: .systemAudioWarning)
+            }
         case .audioInactivity:
             Task { @MainActor [weak self] in
                 guard let session = self?.meetingSession else { return }
@@ -2390,6 +2542,10 @@ final class MeetingOverlayController: NSObject {
         currentPrompt = nil
 
         if meetingSession?.state == .recording {
+            if let warning = systemAudioDegradationWarning, warning.shouldPresentPrompt {
+                applySystemAudioDegradationWarning(warning)
+                return
+            }
             state = .recording
             showPanel()
             pushToView()
@@ -2436,6 +2592,10 @@ final class MeetingOverlayController: NSObject {
 
     private func refreshPromptCountdownDisplay() {
         switch promptKind {
+        case .systemAudio:
+            if let warning = systemAudioDegradationWarning {
+                currentPrompt = systemAudioWarningPromptDisplay(warning: warning)
+            }
         case .audioInactivity:
             let warning = meetingSession?.audioInactivityWarning
                 ?? MeetingAudioInactivityWarning(
@@ -2463,6 +2623,8 @@ final class MeetingOverlayController: NSObject {
 
     private func handlePromptCountdownExpired() {
         switch promptKind {
+        case .systemAudio:
+            return
         case .micBoost:
             // Defensive no-op: a countdown is never scheduled for this kind,
             // and expiry must never auto-enable VPIO.
@@ -2485,6 +2647,21 @@ final class MeetingOverlayController: NSObject {
         }
     }
 
+    private func systemAudioWarningPromptDisplay(
+        warning: MeetingSystemAudioDegradationWarning
+    ) -> PromptDisplay {
+        PromptDisplay(
+            title: MeetingSystemAudioDegradationCopy.title(for: warning),
+            detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
+            countdownText: "",
+            secondaryTitle: "Keep Recording",
+            secondaryAccessibilityLabel: "Acknowledge system audio warning and keep recording",
+            remindTitle: nil,
+            remindAccessibilityLabel: nil,
+            primaryTitle: "End & Transcribe",
+            primaryAccessibilityLabel: "End and transcribe the meeting"
+        )
+    }
     private func audioInactivityPromptDisplay(
         warning: MeetingAudioInactivityWarning,
         countdownSeconds: Int
@@ -2588,6 +2765,7 @@ final class MeetingOverlayController: NSObject {
             participants: currentParticipants,
             warmupStatus: currentWarmupStatus,
             prompt: currentPrompt,
+            systemAudioWarning: systemAudioDegradationWarning,
             isCondensed: isVisuallyCondensed,
             liveView: MeetingLiveViewAffordancePolicy.affordance(
                 isRecording: state == .recording,

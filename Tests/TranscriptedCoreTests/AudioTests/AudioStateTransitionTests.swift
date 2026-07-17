@@ -36,6 +36,37 @@ final class AudioStateTransitionTests: XCTestCase {
         return Audio(paths: paths)
     }
 
+    // MARK: - ScreenCaptureKit recovery epoch coordination
+
+    func testSCKRecoveryEpochOfficialStopInvalidatesRecoveryBeforeLateStart() throws {
+        for checkpoint in ["after cleanup", "after prepare", "before start"] {
+            var state = SCKRecoveryEpochState()
+            state.enableForActiveCapture()
+            let token = try XCTUnwrap(state.begin(), "recovery should begin at \(checkpoint)")
+
+            XCTAssertTrue(state.isCurrent(token))
+            XCTAssertTrue(state.cancel(), "official stop should cancel at \(checkpoint)")
+
+            var didLateStart = false
+            if state.isCurrent(token) {
+                didLateStart = true
+            }
+            XCTAssertFalse(didLateStart, "cancelled recovery must not restart at \(checkpoint)")
+            XCTAssertNil(state.begin(), "official stop should keep recovery disabled at \(checkpoint)")
+        }
+    }
+
+    func testSCKRecoveryEpochInternalCleanupPreservesOnlyItsCurrentToken() throws {
+        var state = SCKRecoveryEpochState()
+        state.enableForActiveCapture()
+        let token = try XCTUnwrap(state.begin())
+
+        XCTAssertFalse(state.cancel(preserving: token))
+        XCTAssertTrue(state.isCurrent(token))
+        XCTAssertTrue(state.finish(token))
+        XCTAssertFalse(state.isCurrent(token))
+    }
+
     // MARK: - updateSystemAudioStatus(fromError:)
 
     func testUpdateSystemAudioStatusForcesUnknownWhenNotRecording() {
@@ -54,6 +85,27 @@ final class AudioStateTransitionTests: XCTestCase {
         audio.updateSystemAudioStatus(fromError: "Switched to default output device")
 
         XCTAssertEqual(audio.systemAudioStatus, .reconnecting)
+    }
+
+    func testUpdateSystemAudioStatusKeepsScreenCaptureRecoveryVisibleUntilCleared() {
+        let audio = makeAudio()
+        audio.isRecording = true
+        audio.systemAudioStatus = .healthy
+
+        audio.updateSystemAudioStatus(
+            fromError: "System audio reconnecting after capture interruption."
+        )
+        XCTAssertEqual(audio.systemAudioStatus, .reconnecting)
+
+        audio.updateSystemAudioStatus(fromError: "transient capture detail")
+        XCTAssertEqual(
+            audio.systemAudioStatus,
+            .reconnecting,
+            "unrelated status text must not clear a backend-owned recovery"
+        )
+
+        audio.updateSystemAudioStatus(fromError: nil)
+        XCTAssertEqual(audio.systemAudioStatus, .healthy)
     }
 
     func testUpdateSystemAudioStatusMarksFailedForUnavailableMessage() {
