@@ -1,13 +1,14 @@
 import Foundation
+@testable import TranscriptedCore
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationKnownSpeaker: Sendable {
-    public let displayName: String
-    public let embedding: [Float]
-    public let callCount: Int
-    public let confidence: Double
+struct SpeakerNamingSimulationKnownSpeaker: Sendable {
+    let displayName: String
+    let embedding: [Float]
+    let callCount: Int
+    let confidence: Double
 
-    public init(
+    init(
         displayName: String,
         embedding: [Float],
         callCount: Int = 6,
@@ -21,19 +22,19 @@ public struct SpeakerNamingSimulationKnownSpeaker: Sendable {
 }
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationSegment: Sendable {
-    public let channel: UtteranceChannel
-    public let diarizerSpeakerId: Int
-    public let truthSpeakerId: String
-    public let expectedDisplayName: String
-    public let text: String
-    public let start: TimeInterval
-    public let duration: TimeInterval
-    public let embedding: [Float]?
-    public let qualityScore: Float
-    public let includeInTranscript: Bool
+struct SpeakerNamingSimulationSegment: Sendable {
+    let channel: UtteranceChannel
+    let diarizerSpeakerId: Int
+    let truthSpeakerId: String
+    let expectedDisplayName: String
+    let text: String
+    let start: TimeInterval
+    let duration: TimeInterval
+    let embedding: [Float]?
+    let qualityScore: Float
+    let includeInTranscript: Bool
 
-    public init(
+    init(
         channel: UtteranceChannel,
         diarizerSpeakerId: Int,
         truthSpeakerId: String,
@@ -59,7 +60,7 @@ public struct SpeakerNamingSimulationSegment: Sendable {
 }
 
 @available(macOS 14.0, *)
-public enum SpeakerNamingSimulationAction: Sendable {
+enum SpeakerNamingSimulationAction: Sendable {
     case name(channel: UtteranceChannel, diarizerSpeakerId: Int, as: String)
     case confirm(channel: UtteranceChannel, diarizerSpeakerId: Int, as: String)
     case correct(channel: UtteranceChannel, diarizerSpeakerId: Int, from: String?, to: String)
@@ -71,24 +72,24 @@ public enum SpeakerNamingSimulationAction: Sendable {
 }
 
 @available(macOS 14.0, *)
-public enum SpeakerNamingSimulationPostAction: Sendable {
+enum SpeakerNamingSimulationPostAction: Sendable {
     case nameDeferred(channel: UtteranceChannel, diarizerSpeakerId: Int, as: String)
     case renameProfile(channel: UtteranceChannel, diarizerSpeakerId: Int, to: String)
     case mergeProfile(channel: UtteranceChannel, diarizerSpeakerId: Int, intoDisplayName: String)
 }
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationMeeting: Sendable {
-    public let id: String
-    public let title: String
-    public let segments: [SpeakerNamingSimulationSegment]
-    public let actions: [SpeakerNamingSimulationAction]
-    public let postActions: [SpeakerNamingSimulationPostAction]
-    public let replacementTargetMeetingId: String?
-    public let pairwiseMergeThreshold: Float?
-    public let recordingDate: Date
+struct SpeakerNamingSimulationMeeting: Sendable {
+    let id: String
+    let title: String
+    let segments: [SpeakerNamingSimulationSegment]
+    let actions: [SpeakerNamingSimulationAction]
+    let postActions: [SpeakerNamingSimulationPostAction]
+    let replacementTargetMeetingId: String?
+    let pairwiseMergeThreshold: Float?
+    let recordingDate: Date
 
-    public init(
+    init(
         id: String,
         title: String,
         segments: [SpeakerNamingSimulationSegment],
@@ -110,13 +111,13 @@ public struct SpeakerNamingSimulationMeeting: Sendable {
 }
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationSuite: Sendable {
-    public let name: String
-    public let knownSpeakers: [SpeakerNamingSimulationKnownSpeaker]
-    public let meetings: [SpeakerNamingSimulationMeeting]
-    public let minimumExactLabelAccuracy: Double
+struct SpeakerNamingSimulationSuite: Sendable {
+    let name: String
+    let knownSpeakers: [SpeakerNamingSimulationKnownSpeaker]
+    let meetings: [SpeakerNamingSimulationMeeting]
+    let minimumExactLabelAccuracy: Double
 
-    public init(
+    init(
         name: String,
         knownSpeakers: [SpeakerNamingSimulationKnownSpeaker] = [],
         meetings: [SpeakerNamingSimulationMeeting],
@@ -130,93 +131,93 @@ public struct SpeakerNamingSimulationSuite: Sendable {
 }
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationConfusionPair: Hashable, Sendable {
-    public let expected: String
-    public let actual: String
-    public let count: Int
+struct SpeakerNamingSimulationConfusionPair: Hashable, Sendable {
+    let expected: String
+    let actual: String
+    let count: Int
 }
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationMergeIndicator: Hashable, Sendable {
-    public let actualLabel: String
-    public let expectedLabels: [String]
-    public let truthSpeakerIds: [String]
+struct SpeakerNamingSimulationMergeIndicator: Hashable, Sendable {
+    let actualLabel: String
+    let expectedLabels: [String]
+    let truthSpeakerIds: [String]
 }
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationSplitIndicator: Hashable, Sendable {
-    public let truthSpeakerId: String
-    public let actualLabels: [String]
+struct SpeakerNamingSimulationSplitIndicator: Hashable, Sendable {
+    let truthSpeakerId: String
+    let actualLabels: [String]
 }
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationDuplicateIdentityIndicator: Hashable, Sendable {
-    public let truthSpeakerId: String
-    public let actualLabel: String
-    public let speakerIds: [String]
-    public let caseIds: [String]
+struct SpeakerNamingSimulationDuplicateIdentityIndicator: Hashable, Sendable {
+    let truthSpeakerId: String
+    let actualLabel: String
+    let speakerIds: [String]
+    let caseIds: [String]
 }
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationCaseReport: Sendable {
-    public let id: String
-    public let title: String
-    public let transcriptURL: URL?
-    public let evaluatedUtterances: Int
-    public let exactMatches: Int
-    public let confusionPairs: [SpeakerNamingSimulationConfusionPair]
-    public let rollbackSucceeded: Bool?
-    public let replacementSucceeded: Bool?
-    public let notes: [String]
+struct SpeakerNamingSimulationCaseReport: Sendable {
+    let id: String
+    let title: String
+    let transcriptURL: URL?
+    let evaluatedUtterances: Int
+    let exactMatches: Int
+    let confusionPairs: [SpeakerNamingSimulationConfusionPair]
+    let rollbackSucceeded: Bool?
+    let replacementSucceeded: Bool?
+    let notes: [String]
 
-    public var exactLabelAccuracy: Double {
+    var exactLabelAccuracy: Double {
         guard evaluatedUtterances > 0 else { return 1.0 }
         return Double(exactMatches) / Double(evaluatedUtterances)
     }
 }
 
 @available(macOS 14.0, *)
-public struct SpeakerNamingSimulationReport: Sendable {
-    public let suiteName: String
-    public let minimumExactLabelAccuracy: Double
-    public let caseReports: [SpeakerNamingSimulationCaseReport]
-    public let totalEvaluatedUtterances: Int
-    public let exactMatches: Int
-    public let confusionPairs: [SpeakerNamingSimulationConfusionPair]
-    public let falseMergeIndicators: [SpeakerNamingSimulationMergeIndicator]
-    public let falseSplitIndicators: [SpeakerNamingSimulationSplitIndicator]
-    public let duplicateIdentityIndicators: [SpeakerNamingSimulationDuplicateIdentityIndicator]
-    public let identityStabilityChecks: Int
-    public let identityStabilitySuccesses: Int
-    public let renamedPropagationChecks: Int
-    public let renamedPropagationSuccesses: Int
-    public let rollbackChecks: Int
-    public let rollbackSuccesses: Int
-    public let replacementChecks: Int
-    public let replacementSuccesses: Int
+struct SpeakerNamingSimulationReport: Sendable {
+    let suiteName: String
+    let minimumExactLabelAccuracy: Double
+    let caseReports: [SpeakerNamingSimulationCaseReport]
+    let totalEvaluatedUtterances: Int
+    let exactMatches: Int
+    let confusionPairs: [SpeakerNamingSimulationConfusionPair]
+    let falseMergeIndicators: [SpeakerNamingSimulationMergeIndicator]
+    let falseSplitIndicators: [SpeakerNamingSimulationSplitIndicator]
+    let duplicateIdentityIndicators: [SpeakerNamingSimulationDuplicateIdentityIndicator]
+    let identityStabilityChecks: Int
+    let identityStabilitySuccesses: Int
+    let renamedPropagationChecks: Int
+    let renamedPropagationSuccesses: Int
+    let rollbackChecks: Int
+    let rollbackSuccesses: Int
+    let replacementChecks: Int
+    let replacementSuccesses: Int
 
-    public var exactLabelAccuracy: Double {
+    var exactLabelAccuracy: Double {
         guard totalEvaluatedUtterances > 0 else { return 1.0 }
         return Double(exactMatches) / Double(totalEvaluatedUtterances)
     }
 
-    public var renamedSpeakerPropagationSucceeded: Bool {
+    var renamedSpeakerPropagationSucceeded: Bool {
         renamedPropagationSuccesses == renamedPropagationChecks
     }
 
-    public var identityStabilitySucceeded: Bool {
+    var identityStabilitySucceeded: Bool {
         identityStabilitySuccesses == identityStabilityChecks
     }
 
-    public var rollbackSucceeded: Bool {
+    var rollbackSucceeded: Bool {
         rollbackSuccesses == rollbackChecks
     }
 
-    public var replacementSucceeded: Bool {
+    var replacementSucceeded: Bool {
         replacementSuccesses == replacementChecks
     }
 
-    public var passed: Bool {
+    var passed: Bool {
         exactLabelAccuracy >= minimumExactLabelAccuracy
             && (minimumExactLabelAccuracy < 1.0 || confusionPairs.isEmpty)
             && falseMergeIndicators.isEmpty
@@ -228,7 +229,7 @@ public struct SpeakerNamingSimulationReport: Sendable {
             && replacementSucceeded
     }
 
-    public var markdown: String {
+    var markdown: String {
         var lines: [String] = []
         lines.append("# Speaker Naming Simulation Report")
         lines.append("")
@@ -287,7 +288,7 @@ public struct SpeakerNamingSimulationReport: Sendable {
         return lines.joined(separator: "\n")
     }
 
-    public func writeMarkdown(to url: URL) throws {
+    func writeMarkdown(to url: URL) throws {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -301,11 +302,11 @@ public struct SpeakerNamingSimulationReport: Sendable {
 }
 
 @available(macOS 14.0, *)
-public final class SpeakerNamingSimulationRunner {
-    public let workingDirectory: URL
+final class SpeakerNamingSimulationRunner {
+    let workingDirectory: URL
     private let fileManager: FileManager
 
-    public init(
+    init(
         workingDirectory: URL,
         fileManager: FileManager = .default
     ) {
@@ -313,7 +314,7 @@ public final class SpeakerNamingSimulationRunner {
         self.fileManager = fileManager
     }
 
-    public func run(_ suite: SpeakerNamingSimulationSuite) throws -> SpeakerNamingSimulationReport {
+    func run(_ suite: SpeakerNamingSimulationSuite) throws -> SpeakerNamingSimulationReport {
         let paths = pathsUnderWorkingDirectory()
         try prepareDirectories(paths)
         let speakerDB = SpeakerDatabase(path: paths.speakerDB.path)
