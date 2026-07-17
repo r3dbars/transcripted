@@ -577,8 +577,8 @@ final class ClipboardRestoringTextPaster {
     }
 
     func cancelPendingClipboardRestore() {
-        discardPasteRetry()
         restorePendingClipboardNow()
+        restoreRetainedClipboardNow()
     }
 
     func discardPasteRetry() {
@@ -928,6 +928,22 @@ final class ClipboardRestoringTextPaster {
               (retained.pasteboard as AnyObject) === (pasteboard as AnyObject),
               pasteboard.changeCount == retained.temporaryChangeCount,
               pasteboard.string(forType: .string) == text else {
+            return
+        }
+        restorePasteboardItems(
+            retained.savedItems,
+            temporaryString: retained.temporaryString,
+            temporaryChangeCount: retained.temporaryChangeCount,
+            to: pasteboard
+        )
+    }
+
+    private func restoreRetainedClipboardNow() {
+        guard let retained = retainedClipboardRestoreForPasteRetry else { return }
+        retainedClipboardRestoreForPasteRetry = nil
+        let pasteboard = retained.pasteboard
+        guard pasteboard.changeCount == retained.temporaryChangeCount,
+              pasteboard.string(forType: .string) == retained.temporaryString else {
             return
         }
         restorePasteboardItems(

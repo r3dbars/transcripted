@@ -1686,6 +1686,46 @@ func testClipboardRestoringTextPaster() async {
         )
     }
 
+    await runSuite("ClipboardRestoringTextPaster.cancelPendingClipboardRestore — restores retry-retained clipboard") {
+        let existingClipboard = "synthetic existing clipboard"
+        let pasteText = "synthetic unconfirmed paste"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: existingClipboard)
+        }
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        let outcome = await MainActor.run {
+            let outcome = paster.paste(
+                pasteText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { false },
+                pasteConfirmationWait: 0
+            )
+            paster.cancelPendingClipboardRestore()
+            return outcome
+        }
+
+        assertEqual(
+            outcome,
+            .copied(
+                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
+                reason: .pasteNotConfirmed
+            ),
+            "the first paste should retain its restore snapshot for Paste Again"
+        )
+        let clipboardAfterCancel = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            clipboardAfterCancel,
+            existingClipboard,
+            "canceling should restore the user's clipboard even after the snapshot moved into retry retention"
+        )
+    }
+
     await runSuite("ClipboardRestoringTextPaster.paste — paste dispatcher failure cancels restore") {
         let pasteText = "synthetic paste fallback"
         let pasteboard = await MainActor.run {
