@@ -18,6 +18,13 @@ enum DictationStoppedAudioRecoveryCommitPolicy {
     ) -> Bool {
         !taskCancelled && isDictating && taskSessionID == currentSessionID
     }
+
+    static func shouldRetainPersistedRecovery(
+        taskSessionID: UUID,
+        preservationSessionID: UUID?
+    ) -> Bool {
+        taskSessionID == preservationSessionID
+    }
 }
 
 enum DictationStoppedAudioRecoveryStore {
