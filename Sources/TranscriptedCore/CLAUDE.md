@@ -4,15 +4,15 @@
 
 `Sources/TranscriptedCore/` is the reusable meeting transcription library embedded in this repo. It is consumed by the app through `Sources/Meeting/`, and it can also be tested as a standalone Swift package through the root `Package.swift`.
 
-## Subsystems (90 Swift files)
+## Subsystems (88 Swift files)
 
-- `Audio/` (22 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
+- `Audio/` (21 files) — mic + system audio capture, imported-audio prep helpers, capture start-state gating, device recovery, Bluetooth-input avoidance for meetings, signal analysis and normalization helpers, real-time AGC, resampling, level metering, process tap, ScreenCaptureKit-backed system-audio capture, backend selection, buffer writing, merge helpers, and privacy-safe pipeline diagnostics snapshots
 - `Logging/` (4 files) — shared app logger (`AppLogger`, subsystem-scoped, os.Logger + JSONL), JSONL file logger (`FileLogger`), log privacy sanitizer, and `LogTailTrimmer` (shared truncate-in-place rotation used by `FileLogger` and by the app target's `AppLogSink`); see `docs/observability.md` for the full sink map, including how this `AppLogger` differs from `Sources/Observability/AppLogSink.swift`
 - `Models/` (5 files) — public data types: `TranscriptionResult`, `DisplayStatus`, `FailedTranscription`, `SpeakerMapping`, and recording-health metadata builders
 - `Pipeline/` (4 files) — transcription orchestration, pipeline runner, and task queue
 - `Protocols/` (7 files) — host-injected seams: `SpeechToTextEngine`, `DiarizationEngine`, `SpeakerStore`, `TranscriptNotifier`, `AudioCaptureEngine`, `StatsStore`, `TranscriptStorage`
 - `Services/` (7 files) — DI container (`AppServices`), model bundle / download management, path indirection, recording validation, diarization, and failed-transcription persistence
-- `Speaker/` (28 files) — speaker DB (`SpeakerDatabase`, instance-based, injected via `AppServices`; no `.shared` singleton), embedding matching / clustering, embedding thresholds and segment re-embedding, clip extraction, naming policy / coordinator, people-review policy, profile merging + provenance, simulation, retroactive transcript updates, negative-exemplar policy/store, write-path policy, and the recognition lifeline: match-outcome store, profile-health demotion, and review prioritization (see `docs/speaker-recognition-metrics.md`)
+- `Speaker/` (27 files) — speaker DB (`SpeakerDatabase`, instance-based, injected via `AppServices`; no `.shared` singleton), embedding matching / clustering, embedding thresholds and segment re-embedding, clip extraction, naming policy / coordinator, people-review policy, profile merging + provenance, retroactive transcript updates, negative-exemplar policy/store, write-path policy, and the recognition lifeline: match-outcome store, profile-health demotion, and review prioritization (see `docs/speaker-recognition-metrics.md`)
 - `Stats/` (4 files) — recording stats database, models, queries, and service
 - `Storage/` (7 files) — transcript save, scanner, formatter, format options, shared frontmatter parsing, retained-recording audio archiving, and `SQLiteHandle` (shared low-level SQLite open/prepare/step wrapper used by `SpeakerDatabase` and `StatsDatabase`)
 - `Utilities/` (2 files) — date formatting and file permission helpers
