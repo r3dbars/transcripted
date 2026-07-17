@@ -9,6 +9,17 @@ struct DictationStoppedAudioRecovery: Equatable, Sendable {
     let createdAt: Date
 }
 
+enum DictationStoppedAudioRecoveryCommitPolicy {
+    static func shouldPersist(
+        taskCancelled: Bool,
+        isDictating: Bool,
+        taskSessionID: UUID,
+        currentSessionID: UUID
+    ) -> Bool {
+        !taskCancelled && isDictating && taskSessionID == currentSessionID
+    }
+}
+
 enum DictationStoppedAudioRecoveryStore {
     static let sampleRate: UInt32 = 16_000
 
@@ -72,9 +83,20 @@ enum DictationStoppedAudioRecoveryStore {
                 sessionID: metadata.sessionID,
                 createdAt: metadata.createdAt
             ))
-            if recoveries.count >= limit { break }
         }
-        return recoveries.sorted { $0.createdAt > $1.createdAt }
+        return mostRecent(recoveries, limit: limit)
+    }
+
+    static func mostRecent(
+        _ recoveries: [DictationStoppedAudioRecovery],
+        limit: Int
+    ) -> [DictationStoppedAudioRecovery] {
+        guard limit > 0 else { return [] }
+        return Array(
+            recoveries
+                .sorted { $0.createdAt > $1.createdAt }
+                .prefix(limit)
+        )
     }
 
     @discardableResult
