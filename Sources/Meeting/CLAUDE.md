@@ -7,7 +7,7 @@
 ## Files
 
 - `FailedMeetingPresentation.swift` — maps `FailedTranscription` into `FailedMeetingItem` view-models with human-readable titles, retained-audio URLs, and retry metadata
-- `FailedMeetingStore.swift` — failed-meeting queue/persistence/retry bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Plain owned object, not an `ObservableObject`; the controller still owns the published `failedMeetings` surface and lends this store callback access for state it doesn't own
+- `FailedMeetingStore.swift` — failed-meeting queue/persistence/retry bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Plain owned object, not an `ObservableObject`; the controller still owns the published `failedMeetings` surface and injects managers plus narrow weak callbacks for readiness, refresh, and diagnostics
 - `TranscriptionQueueCoordinator.swift` — background-transcription queue/dispatch bookkeeping split out of `MeetingSessionController` (audit 2026-07-08 wave 2). Drives the controller's state/display-status transitions via callbacks; job dispatch reaches back into the controller for `taskManager` and live-sidecar bookkeeping
 - `MeetingCaptureHealthTelemetry.swift` — coarse, privacy-safe telemetry for capture-health signals (mic/system audio dropouts, recovery outcomes) surfaced during a recording
 - `MeetingPromptTelemetry.swift` — `MeetingPromptCallTelemetry` and the bucketed funnel-event emission for detected-call/prompt outcomes
@@ -96,7 +96,7 @@
 - `MeetingFailureCopy` is the canonical place for human-facing failed-meeting titles and details. Keep retry messaging centralized there.
 - `MeetingSessionUIPolicy` is the canonical place for deciding whether background meeting work should still surface as an active transcribing/saving state. Speaker review alone should not keep that state visible.
 - `TranscriptionTaskManager` stays single-flight. App-level queueing belongs in `TranscriptionQueueCoordinator` (called by `MeetingSessionController`), not in ad hoc background tasks.
-- Failed-meeting queue/persistence/retry bookkeeping belongs in `FailedMeetingStore`, not scattered back into `MeetingSessionController`. Both extracted objects are plain code-motion splits (audit 2026-07-08 wave 2): they still reach back into the controller via a `controller` callback for state they don't own, and legacy nested-type references (`FailedMeetingItem`, `QueuedTranscriptionJob`, `BackgroundTranscriptionWorkSnapshot`) stay resolvable as typealiases on the controller.
+- Failed-meeting queue/persistence/retry bookkeeping belongs in `FailedMeetingStore`, not scattered back into `MeetingSessionController`. The failed store receives its managers plus narrow weak callbacks and must not regain a controller back-reference. `TranscriptionQueueCoordinator` still reaches back into the controller for queue-owned state transitions. Legacy nested-type references (`FailedMeetingItem`, `QueuedTranscriptionJob`, `BackgroundTranscriptionWorkSnapshot`) stay resolvable as typealiases on the controller.
 - Live PCM handlers installed through `MeetingCaptureBridge` run on capture threads. Keep them real-time safe.
 - Local meeting summaries rewrite the saved transcript after a slow local model run. Always re-read the transcript before writing and fail closed if transcript text changed while generation was in flight. Keep provider-specific setup and metadata explicit so Gemma MLX and Apple Foundation Models summaries remain distinguishable.
 
