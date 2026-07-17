@@ -1879,8 +1879,6 @@ class DictationSessionController: ObservableObject {
         case nil:
             break
         }
-
-        return outcome
     }
 
     private func retargetPasteToCurrentFocus() {
