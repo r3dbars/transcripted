@@ -6,13 +6,17 @@ func testHomeImportAudioAction() {
             contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
             encoding: .utf8
         )) ?? ""
+        let generalSettingsSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Settings/Pages/GeneralSettingsPage.swift"),
+            encoding: .utf8
+        )) ?? ""
         let homeSource = (try? String(
             contentsOf: repoFixtureURL("Sources/UI/Settings/HomeView.swift"),
             encoding: .utf8
         )) ?? ""
 
         assertTrue(
-            settingsSource.contains("title: \"Transcribe audio file\""),
+            generalSettingsSource.contains("title: \"Transcribe audio file\""),
             "general settings should include an audio-file row"
         )
         assertTrue(
@@ -20,12 +24,12 @@ func testHomeImportAudioAction() {
             "general settings import action should call the existing audio import flow"
         )
         assertTrue(
-            settingsSource.contains("title: \"Transcribe audio file\"")
-                && settingsSource.contains("value: \"Choose\""),
+            generalSettingsSource.contains("title: \"Transcribe audio file\"")
+                && generalSettingsSource.contains("value: \"Choose\""),
             "general settings should expose a visible choose-file control"
         )
         assertTrue(
-            settingsSource.contains("help: \"Choose an audio file to transcribe.\""),
+            generalSettingsSource.contains("help: \"Choose an audio file to transcribe.\""),
             "general settings should keep imported-audio help simple"
         )
         assertTrue(
