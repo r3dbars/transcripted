@@ -393,6 +393,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/HomeMeetingRename.swift"
     "Sources/UI/Settings/HomeMeetingSummaryBetaPresentationPolicy.swift"
     "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift"
+    "Sources/UI/Settings/SpeakerProfileMergeSideEffectCoordinator.swift"
     "Sources/UI/Settings/HomeFailedMeetingInlinePresentation.swift"
     "Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift"
     "Sources/UI/Settings/HomeMeetingPreviewFormatter.swift"

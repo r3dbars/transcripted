@@ -6,18 +6,40 @@ import SQLite3
 @available(macOS 14.0, *)
 extension SpeakerDatabase {
 
+    enum ProfileMergeError: Error, LocalizedError {
+        case profileNotFound(sourceId: UUID, targetId: UUID)
+        case invalidEmbeddingState(sourceId: UUID, targetId: UUID)
+
+        var errorDescription: String? {
+            switch self {
+            case .profileNotFound:
+                return "Speaker merge could not find both profiles"
+            case .invalidEmbeddingState:
+                return "Speaker merge found incompatible profile embeddings"
+            }
+        }
+    }
+
     /// Set the display name for a speaker with provenance tracking
     /// - Parameters:
     ///   - id: Speaker profile UUID
     ///   - name: Display name to set
     ///   - source: Where the name came from (NameSource.userManual)
     public func setDisplayName(id: UUID, name: String, source: String = NameSource.userManual) {
+        if isExecutingOnQueue {
+            setDisplayNameImpl(id: id, name: name, source: source)
+            return
+        }
         queue.sync {
             setDisplayNameImpl(id: id, name: name, source: source)
         }
     }
 
     public func restoreProfile(_ profile: SpeakerProfile) {
+        if isExecutingOnQueue {
+            restoreProfileImpl(profile)
+            return
+        }
         queue.sync {
             restoreProfileImpl(profile)
         }
@@ -95,7 +117,7 @@ extension SpeakerDatabase {
 
     /// Increment the dispute count for a speaker (inference disagreed with DB name)
     public func incrementDisputeCount(id: UUID) {
-        queue.sync { [self] in
+        let increment = { [self] in
             guard isDatabaseOpen else { return }
             let sql = "UPDATE speakers SET dispute_count = dispute_count + 1 WHERE id = ?;"
             var statement: OpaquePointer?
@@ -109,11 +131,12 @@ extension SpeakerDatabase {
             }
             sqlite3_finalize(statement)
         }
+        if isExecutingOnQueue { increment() } else { queue.sync(execute: increment) }
     }
 
     /// Reset dispute count (after user manual rename or name confirmed)
     public func resetDisputeCount(id: UUID) {
-        queue.sync { [self] in
+        let reset = { [self] in
             guard isDatabaseOpen else { return }
             let sql = "UPDATE speakers SET dispute_count = 0 WHERE id = ?;"
             var statement: OpaquePointer?
@@ -127,6 +150,7 @@ extension SpeakerDatabase {
             }
             sqlite3_finalize(statement)
         }
+        if isExecutingOnQueue { reset() } else { queue.sync(execute: reset) }
     }
 
     // MARK: - Profile Lookup by Name
@@ -153,18 +177,31 @@ extension SpeakerDatabase {
     /// Blends embeddings weighted by call count, sums call counts, bumps confidence.
     /// Transfers name from source if target has none. Deletes source profile.
     public func mergeProfiles(sourceId: UUID, into targetId: UUID) throws {
+        if isExecutingOnQueue {
+            try mergeProfilesImpl(
+                sourceId: sourceId,
+                into: targetId,
+                transactionAlreadyOpen: sqlite3_get_autocommit(db) == 0
+            )
+            return
+        }
         try queue.sync {
             try mergeProfilesImpl(sourceId: sourceId, into: targetId)
         }
     }
 
-    func mergeProfilesImpl(sourceId: UUID, into targetId: UUID, kind: String = SpeakerMergeKind.explicit) throws {
+    func mergeProfilesImpl(
+        sourceId: UUID,
+        into targetId: UUID,
+        kind: String = SpeakerMergeKind.explicit,
+        transactionAlreadyOpen: Bool = false
+    ) throws {
         guard let source = getSpeakerImpl(id: sourceId),
               let target = getSpeakerImpl(id: targetId) else {
             AppLogger.speakers.warning("Merge failed — profile not found", [
                 "sourceId": "\(sourceId)", "targetId": "\(targetId)"
             ])
-            return
+            throw ProfileMergeError.profileNotFound(sourceId: sourceId, targetId: targetId)
         }
 
         // Blend embeddings weighted by call count (stronger profile dominates)
@@ -177,7 +214,7 @@ extension SpeakerDatabase {
                 "targetDim": "\(target.embedding.count)",
                 "totalCalls": "\(Int(totalCalls))"
             ])
-            return
+            throw ProfileMergeError.invalidEmbeddingState(sourceId: sourceId, targetId: targetId)
         }
 
         let sourceWeight = Float(source.callCount) / totalCalls
@@ -198,8 +235,7 @@ extension SpeakerDatabase {
             ? (source.nameSource ?? NameSource.userManual)
             : target.nameSource
 
-        // Every persistent identity mutation belongs to this one throwing transaction.
-        try throwingTransaction {
+        let performMerge = {
             // Safety net: snapshot both profiles + re-point provenance BEFORE the blend
             // overwrites the target and the source row is deleted, so a wrong merge can
             // be reconstructed into two distinct profiles later. Same transaction → atomic.
@@ -261,11 +297,20 @@ extension SpeakerDatabase {
             try requireDone(deleteStmt, operation: "step merge source delete", expectedChanges: 1)
         }
 
-        AppLogger.speakers.info("Merged profiles", [
-            "source": source.displayName ?? "\(sourceId)",
-            "target": mergedDisplayName ?? "\(targetId)",
-            "newCallCount": "\(newCallCount)"
-        ])
+        if transactionAlreadyOpen {
+            try performMerge()
+        } else {
+            // Every persistent identity mutation belongs to this one throwing transaction.
+            try throwingTransaction(performMerge)
+        }
+
+        if !transactionAlreadyOpen {
+            AppLogger.speakers.info("Merged profiles", [
+                "source": source.displayName ?? "\(sourceId)",
+                "target": mergedDisplayName ?? "\(targetId)",
+                "newCallCount": "\(newCallCount)"
+            ])
+        }
     }
 
     private func deleteIdentityRowsForMerge(table: String, profileId: UUID, operation: String) throws {
@@ -341,12 +386,13 @@ extension SpeakerDatabase {
                     try mergeProfilesImpl(sourceId: absorbed.id, into: keeper.id, kind: SpeakerMergeKind.duplicate)
                 } catch {
                     AppLogger.speakers.error("Duplicate speaker merge failed", ["error": error.localizedDescription])
-                    return
+                    continue
                 }
 
                 mergedIds.insert(absorbed.id)
                 mergeCount += 1
                 AppLogger.speakers.info("Merged duplicate speaker", ["absorbed": absorbed.displayName ?? "unnamed", "keeper": keeper.displayName ?? "unnamed", "similarity": String(format: "%.3f", similarity)])
+                if absorbed.id == speakers[i].id { break }
             }
         }
 
@@ -415,7 +461,7 @@ extension SpeakerDatabase {
                     try mergeProfilesImpl(sourceId: source.id, into: keeper.id, kind: SpeakerMergeKind.byName)
                 } catch {
                     AppLogger.speakers.error("Same-name speaker merge failed", ["error": error.localizedDescription])
-                    return
+                    continue
                 }
                 mergeCount += 1
             }
