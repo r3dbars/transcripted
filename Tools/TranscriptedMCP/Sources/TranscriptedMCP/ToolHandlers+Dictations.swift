@@ -19,7 +19,8 @@ func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex, d
     trackAgentCaptureQueryObserved(
         toolKind: "list",
         captureKind: "dictation",
-        sourceCount: results.count
+        sourceCount: results.count,
+        resultCount: results.count
     )
 
     let json = try JSONEncoder.pretty.encode(results)
@@ -30,7 +31,7 @@ func handleListDictations(params: CallTool.Parameters, index: TranscriptIndex, d
 
 func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
-        return textResult("Missing required parameter: filename", isError: true)
+        return invalidAgentCaptureQueryInputResult("Missing required parameter: filename")
     }
 
     let entryId = params.arguments?["entry_id"]?.stringValue
@@ -39,24 +40,34 @@ func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) thro
     case .valid(let url):
         markdownURL = url
     case .missing:
-        return textResult("Dictation not found: \(filename). Use list_dictations to see available days.", isError: true)
+        return emptyOrMissingAgentCaptureQueryResult(
+            "Dictation not found: \(filename). Use list_dictations to see available days.",
+            isError: true
+        )
     case .invalid:
-        return textResult("Invalid filename: \(filename)", isError: true)
+        return invalidAgentCaptureQueryInputResult("Invalid filename: \(filename)")
     }
 
     guard let day = TranscriptLoader.loadDictationDay(markdownURL) else {
-        return textResult("Dictation not found: \(filename). Use list_dictations to see available days.", isError: true)
+        return emptyOrMissingAgentCaptureQueryResult(
+            "Dictation not found: \(filename). Use list_dictations to see available days.",
+            isError: true
+        )
     }
 
     if let entryId {
         guard let entry = day.entries.first(where: { $0.id == entryId }) else {
-            return textResult("Entry not found: \(entryId). Use recent_context or search_context to inspect entry IDs.", isError: true)
+            return emptyOrMissingAgentCaptureQueryResult(
+                "Entry not found: \(entryId). Use recent_context or search_context to inspect entry IDs.",
+                isError: true
+            )
         }
 
         trackAgentCaptureQueryObserved(
             toolKind: "read",
             captureKind: "dictation",
-            sourceCount: 1
+            sourceCount: 1,
+            resultCount: 1
         )
 
         let result = """
@@ -72,22 +83,28 @@ func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) thro
         return textResult(result)
     }
 
-    trackAgentCaptureQueryObserved(
-        toolKind: "read",
-        captureKind: "dictation",
-        sourceCount: day.entries.count
-    )
-
     let offset = max(0, params.arguments?["offset"]?.intValue ?? 0)
     let limit = params.arguments?["limit"]?.intValue
     let paginationRequested = limit != nil || offset > 0
 
     guard let content = CaptureMarkdown.readBoundedContents(of: markdownURL) else {
         let json = try JSONEncoder.pretty.encode(day)
+        trackAgentCaptureQueryObserved(
+            toolKind: "read",
+            captureKind: "dictation",
+            sourceCount: 1,
+            resultCount: day.entries.count
+        )
         return textResult(String(data: json, encoding: .utf8) ?? "{}")
     }
 
     if !paginationRequested, content.count <= maxUnpaginatedReadCharacters {
+        trackAgentCaptureQueryObserved(
+            toolKind: "read",
+            captureKind: "dictation",
+            sourceCount: 1,
+            resultCount: day.entries.count
+        )
         return textResult(content)
     }
 
@@ -137,5 +154,11 @@ private func dictationDayPageResult(day: AgentDictationDay, filename: String, of
     )
 
     let json = try JSONEncoder.pretty.encode(page)
+    trackAgentCaptureQueryObserved(
+        toolKind: "read",
+        captureKind: "dictation",
+        sourceCount: 1,
+        resultCount: returned
+    )
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }

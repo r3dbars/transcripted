@@ -5,8 +5,9 @@ import TranscriptedCaptureKit
 // MARK: - search
 
 func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
-    guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
-        return textResult("Missing required parameter: query", isError: true)
+    guard let query = params.arguments?["query"]?.stringValue,
+          !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return invalidAgentCaptureQueryInputResult("Missing required parameter: query")
     }
 
     let speaker = params.arguments?["speaker"]?.stringValue
@@ -24,7 +25,8 @@ func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, meetingDi
     trackAgentCaptureQueryObserved(
         toolKind: "search",
         captureKind: "meeting",
-        sourceCount: results.results.count
+        sourceCount: Set(results.results.map(\.filename)).count,
+        resultCount: results.results.count
     )
 
     let json = try JSONEncoder.pretty.encode(results)
@@ -34,8 +36,9 @@ func handleSearch(params: CallTool.Parameters, index: TranscriptIndex, meetingDi
 // MARK: - search_context
 
 func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL], dictationDirs: [URL]) throws -> CallTool.Result {
-    guard let query = params.arguments?["query"]?.stringValue, !query.isEmpty else {
-        return textResult("Missing required parameter: query", isError: true)
+    guard let query = params.arguments?["query"]?.stringValue,
+          !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return invalidAgentCaptureQueryInputResult("Missing required parameter: query")
     }
 
     let kind = parseContextKind(params.arguments?["kind"]?.stringValue)
@@ -64,7 +67,8 @@ func handleSearchContext(params: CallTool.Parameters, index: TranscriptIndex, me
     trackAgentCaptureQueryObserved(
         toolKind: "search",
         captureKind: artifactKind(for: results.results.map(\.kind)),
-        sourceCount: results.results.count
+        sourceCount: Set(results.results.map(\.filename)).count,
+        resultCount: results.results.count
     )
 
     let json = try JSONEncoder.pretty.encode(results)
@@ -89,7 +93,8 @@ func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, me
     trackAgentCaptureQueryObserved(
         toolKind: "recent",
         captureKind: artifactKind(for: result.items.map(\.kind)),
-        sourceCount: result.items.count
+        sourceCount: Set(result.items.map(\.filename)).count,
+        resultCount: result.items.count
     )
 
     let json = try JSONEncoder.pretty.encode(result)
@@ -99,20 +104,24 @@ func handleRecentContext(params: CallTool.Parameters, index: TranscriptIndex, me
 // MARK: - who_is
 
 func handleWhoIs(params: CallTool.Parameters, index: TranscriptIndex) throws -> CallTool.Result {
-    guard let speaker = params.arguments?["speaker"]?.stringValue, !speaker.isEmpty else {
-        return textResult("Missing required parameter: speaker", isError: true)
+    guard let speaker = params.arguments?["speaker"]?.stringValue,
+          !speaker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return invalidAgentCaptureQueryInputResult("Missing required parameter: speaker")
     }
 
     let profile = try index.getPersonProfile(speaker: speaker)
 
     if profile.meetingCount == 0 {
-        return textResult("No meetings found for \"\(speaker)\". Try a different name or use list_meetings to see known speakers.")
+        return emptyOrMissingAgentCaptureQueryResult(
+            "No meetings found for \"\(speaker)\". Try a different name or use list_meetings to see known speakers."
+        )
     }
 
     trackAgentCaptureQueryObserved(
         toolKind: "speaker_lookup",
         captureKind: "meeting",
-        sourceCount: profile.meetingCount
+        sourceCount: profile.meetingCount,
+        resultCount: profile.recentMeetings.count
     )
 
     let json = try JSONEncoder.pretty.encode(profile)

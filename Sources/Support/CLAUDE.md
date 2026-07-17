@@ -63,6 +63,7 @@
 - `PermissionsOnboardingPreferences` is the canonical completion flag for the guided first-run permissions flow. Keep onboarding state out of view-local storage so forced reruns and completion state stay consistent.
 - `TranscriptedStoragePaths` should stay as the canonical path resolver for the app target. `Sources/TranscriptedCore/Services/CoreStoragePaths.swift` is the injected library-side seam.
 - `ClaudeDesktopIntegrationInstaller` owns the `mcpServers` JSON config merge (Claude Desktop and Cursor). Preserve existing MCP servers and back up invalid JSON instead of overwriting blindly.
+- `ClaudeDesktopIntegrationInstaller` also refreshes the helper's owner-only `mcp-observability.plist`; copy only validated app version/channel/revision values and remove the file when anonymous analytics is off or PostHog config is invalid.
 - `AgentMCPConnector` is the seam for connecting more agents. New agents should get a detect/isConnected/connect triple here instead of bespoke UI logic; never rewrite `~/.claude.json` directly — Claude Code's CLI owns that file.
 - `DockVisibilityPreferences` is the canonical storage layer for the General Dock toggle. Keep the key and notification stable so upgrades preserve the setting.
 - `ActivationPolicyController` is the canonical place for the app's force-quit visibility policy. Keep Dock/icon activation-policy switching out of recording controllers and UI views.

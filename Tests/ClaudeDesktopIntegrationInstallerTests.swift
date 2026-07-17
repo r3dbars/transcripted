@@ -713,6 +713,9 @@ func testClaudeDesktopIntegrationInstaller() {
             infoDictionary: [
                 AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
                 AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "1.2.3",
+                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
+                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc123def456",
             ]
         )
 
@@ -730,6 +733,10 @@ func testClaudeDesktopIntegrationInstaller() {
             FileManager.default.fileExists(atPath: helperConfigURL.path),
             "refresh should keep installed-helper analytics config in sync"
         )
+        let helperConfig = helperObservabilityConfig(at: helperConfigURL)
+        assertEqual(helperConfig?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "1.2.3", "refresh should write the current app version")
+        assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildChannelInfoKey], "release", "refresh should write the current build channel")
+        assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "abc123def456", "refresh should write the current build revision")
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — leaves a current helper untouched") {
@@ -758,6 +765,9 @@ func testClaudeDesktopIntegrationInstaller() {
             infoDictionary: [
                 AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
                 AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "1.2.4",
+                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
+                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "def456abc123",
             ]
         )
 
@@ -766,6 +776,58 @@ func testClaudeDesktopIntegrationInstaller() {
             FileManager.default.fileExists(atPath: configURL.path),
             "current installed helper should still refresh analytics config"
         )
+        let helperConfig = helperObservabilityConfig(at: configURL)
+        assertEqual(helperConfig?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "1.2.4", "matching helper refresh should still update app identity")
+        assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "def456abc123", "matching helper refresh should update build identity")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable — writes validated app identity") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperIdentityTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
+            configURL: configURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
+                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "1.1.50",
+                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
+                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abcdef123456",
+            ],
+            analyticsEnabled: true
+        )
+
+        let config = helperObservabilityConfig(at: configURL)
+        assertEqual(config?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "1.1.50", "helper config should carry the real app version")
+        assertEqual(config?[AnalyticsRuntimeConfiguration.buildChannelInfoKey], "release", "helper config should carry the real build channel")
+        assertEqual(config?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "abcdef123456", "helper config should carry the real build revision")
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable — omits unsafe app identity") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperUnsafeIdentityTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
+            configURL: configURL,
+            infoDictionary: [
+                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
+                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "/Users/jane/private",
+                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "customer@example.com",
+                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "phc_secret_token",
+            ],
+            analyticsEnabled: true
+        )
+
+        let config = helperObservabilityConfig(at: configURL)
+        assertEqual(config?[AnalyticsRuntimeConfiguration.apiKeyInfoKey], "phc_current", "valid analytics config should still be written")
+        assertNil(config?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "unsafe app version should be omitted")
+        assertNil(config?[AnalyticsRuntimeConfiguration.buildChannelInfoKey], "unsafe build channel should be omitted")
+        assertNil(config?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "unsafe build revision should be omitted")
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable — removes stale invalid config") {
@@ -1898,4 +1960,12 @@ private func mcpServerNames(inSnippet snippet: String) -> [String] {
 private func transcriptedCommandPath(inSnippet snippet: String) -> String? {
     let transcripted = mcpServers(inSnippet: snippet)?["transcripted"] as? [String: Any]
     return transcripted?["command"] as? String
+}
+
+private func helperObservabilityConfig(at url: URL) -> [String: String]? {
+    guard let data = try? Data(contentsOf: url),
+          let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) else {
+        return nil
+    }
+    return plist as? [String: String]
 }
