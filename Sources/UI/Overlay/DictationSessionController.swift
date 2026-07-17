@@ -940,6 +940,12 @@ class DictationSessionController: ObservableObject {
 
             do {
                 if let recording = await appState.sttRouter.snapshotRecordedSamplesForPersistence() {
+                    guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                        taskCancelled: Task.isCancelled,
+                        isDictating: self.isDictating,
+                        taskSessionID: taskSessionID,
+                        currentSessionID: self.currentDictationSessionID
+                    ) else { return }
                     self.stoppedAudioRecovery = try DictationStoppedAudioRecoveryStore.persist(
                         samples16k: recording.samples16k,
                         sessionID: taskSessionID

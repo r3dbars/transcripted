@@ -78,6 +78,56 @@ func testDictationStoppedAudioRecovery() {
         }
     }
 
+    runSuite("Dictation stopped audio recovery limits after newest-first ordering") {
+        let oldSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let middleSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let newSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+        let recoveries = [
+            DictationStoppedAudioRecovery(url: URL(fileURLWithPath: "/old.wav"), sessionID: oldSessionID, createdAt: Date(timeIntervalSince1970: 1)),
+            DictationStoppedAudioRecovery(url: URL(fileURLWithPath: "/new.wav"), sessionID: newSessionID, createdAt: Date(timeIntervalSince1970: 3)),
+            DictationStoppedAudioRecovery(url: URL(fileURLWithPath: "/middle.wav"), sessionID: middleSessionID, createdAt: Date(timeIntervalSince1970: 2))
+        ]
+
+        let limited = DictationStoppedAudioRecoveryStore.mostRecent(recoveries, limit: 2)
+
+        assertEqual(
+            limited.map(\.sessionID),
+            [newSessionID, middleSessionID],
+            "the limit must select the newest recoveries regardless of enumeration order"
+        )
+    }
+
+    runSuite("Stopped audio persistence rejects cancelled and superseded sessions") {
+        let activeSessionID = UUID()
+        assertTrue(
+            DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                taskCancelled: false,
+                isDictating: true,
+                taskSessionID: activeSessionID,
+                currentSessionID: activeSessionID
+            ),
+            "the current live stop task should persist its recovery checkpoint"
+        )
+        assertFalse(
+            DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                taskCancelled: true,
+                isDictating: true,
+                taskSessionID: activeSessionID,
+                currentSessionID: activeSessionID
+            ),
+            "a cancelled stop task must not persist after detached resampling returns"
+        )
+        assertFalse(
+            DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                taskCancelled: false,
+                isDictating: true,
+                taskSessionID: activeSessionID,
+                currentSessionID: UUID()
+            ),
+            "an old stop task must not mutate a successor session"
+        )
+    }
+
     runSuite("Dictation controller checkpoints audio before waiting for the model") {
         do {
             let source = try String(
@@ -90,6 +140,18 @@ func testDictationStoppedAudioRecovery() {
                 return
             }
             assertTrue(persistRange.lowerBound < modelWaitRange.lowerBound, "durable checkpoint must precede the model failure boundary")
+            guard let snapshotRange = source.range(of: "snapshotRecordedSamplesForPersistence()"),
+                  let commitGuardRange = source.range(
+                    of: "DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(",
+                    range: snapshotRange.upperBound..<persistRange.lowerBound
+                  ) else {
+                assertTrue(false, "controller should revalidate session ownership after snapshot resampling and before persistence")
+                return
+            }
+            assertTrue(
+                snapshotRange.lowerBound < commitGuardRange.lowerBound && commitGuardRange.lowerBound < persistRange.lowerBound,
+                "cancel/session guard must run after the detached snapshot and before recovery persistence"
+            )
             assertTrue(source.contains("transcriptPersisted: saveResult.saved != nil"), "cleanup should be tied to successful transcript persistence")
             assertTrue(source.contains("if emptyReason != .modelFailure"), "model failures should retain recovery audio")
             assertTrue(
