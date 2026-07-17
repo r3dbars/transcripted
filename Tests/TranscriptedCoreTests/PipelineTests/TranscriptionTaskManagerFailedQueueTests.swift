@@ -347,9 +347,34 @@ extension TranscriptionTaskManagerMetadataTests {
             speech.didStart
         }
 
+        XCTAssertTrue(manager.hasPreservableActiveTranscriptionAudio)
+        XCTAssertTrue(
+            manager.hasActiveTranscriptionWorkRequiringQuitConfirmation,
+            "live transcription should require quit confirmation before cancellation"
+        )
         manager.cancelAll()
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "cancelled live mic scratch audio should be deleted")
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "cancelled live system scratch audio should be deleted")
+        XCTAssertEqual(
+            manager.activeTasks.count,
+            1,
+            "a cancelled blocking model call must keep the single-flight gate occupied until it exits"
+        )
+        XCTAssertEqual(manager.activeCount, 1, "queued work must still observe the cancelling pipeline as occupied")
+        XCTAssertEqual(manager.backgroundTaskCount, 1, "background occupancy must clear only after the model call exits")
+        XCTAssertFalse(
+            manager.hasPreservableActiveTranscriptionAudio,
+            "cancelled occupancy must not promise that already-discarded audio can be saved on quit"
+        )
+        XCTAssertFalse(
+            manager.hasActiveTranscriptionWorkRequiringQuitConfirmation,
+            "intentionally cancelled occupancy must not revive the background-work quit prompt"
+        )
+        XCTAssertEqual(
+            manager.preserveActiveTranscriptionsForShutdown(errorMessage: "App quit during cancellation"),
+            0,
+            "cancel then quit must not create a failed entry for audio that was already discarded"
+        )
         speech.release()
 
         try await waitUntil {

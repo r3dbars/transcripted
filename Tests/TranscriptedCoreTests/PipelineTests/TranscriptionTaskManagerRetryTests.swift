@@ -150,8 +150,16 @@ extension TranscriptionTaskManagerMetadataTests {
             speech.didStart
         }
         XCTAssertNotNil(manager.activeTasks[failedId], "retry must register its work in activeTasks")
+        XCTAssertTrue(
+            manager.hasActiveTranscriptionWorkRequiringQuitConfirmation,
+            "an in-flight failed-meeting retry should keep the background-work quit warning enabled"
+        )
 
         manager.cancelAll()
+        XCTAssertFalse(
+            manager.hasActiveTranscriptionWorkRequiringQuitConfirmation,
+            "cancelled retry occupancy should no longer require a quit warning"
+        )
 
         // No release(): the only way the blocked engine can unwind is real task
         // cancellation reaching the in-flight inference.

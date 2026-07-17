@@ -91,6 +91,46 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(message, "Another transcript is already running. Wait for it to finish, then try again.")
     }
 
+    func testSavedAudioRetranscriptionRequiresQuitConfirmationWithoutClaimingScratchOwnership() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Saved audio retry completed.")
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 2.5))
+        )
+        let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: savedAudioDirectory, withIntermediateDirectories: true)
+        let systemURL = savedAudioDirectory.appendingPathComponent("system_audio.wav")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+
+        manager.startSavedAudioRetranscription(
+            micURL: nil,
+            systemURL: systemURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            meetingTitle: "Saved customer call"
+        )
+
+        try await waitUntil {
+            speech.didStart
+        }
+
+        XCTAssertTrue(
+            manager.hasActiveTranscriptionWorkRequiringQuitConfirmation,
+            "retained-audio retranscription should keep the background-work quit warning enabled"
+        )
+        XCTAssertFalse(
+            manager.hasPreservableActiveTranscriptionAudio,
+            "retained source audio must not be misclassified as app-owned scratch audio"
+        )
+
+        manager.cancelAll()
+        try await waitUntil {
+            manager.activeTasks.isEmpty
+        }
+
+        XCTAssertFalse(manager.hasActiveTranscriptionWorkRequiringQuitConfirmation)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path), "cancellation must keep retained source audio")
+    }
+
     func testStartImportedTranscriptionDoesNotDeleteOutOfSandboxFileAfterSuccess() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "Imported meeting artifact."),

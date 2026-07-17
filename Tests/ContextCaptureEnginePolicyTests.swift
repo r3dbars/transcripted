@@ -111,6 +111,25 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
+    runSuite("ContextCaptureEngine delayed modifier — exact key state and ordered delivery") {
+        let source = readContextCaptureEngineSource()
+
+        assertTrue(
+            source.contains("isPhysicallyDown: Self.isExactPhysicalKeyDown(keyCode)"),
+            "delayed modifier activation must check the bound side, not an aggregate modifier family flag"
+        )
+        assertTrue(
+            source.contains("private static func isExactPhysicalKeyDown")
+                && source.contains("CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))"),
+            "the exact-key check should query the bound virtual key state"
+        )
+        assertTrue(
+            source.contains("defer { self.stateLock.unlock() }")
+                && source.contains("self.onShortcut?(action, .press)"),
+            "delayed press ownership and delivery should remain one lock-protected transition"
+        )
+    }
+
     // MARK: - Notification.Name.hotkeysDidChange
     // The engine subscribes to this notification to re-register hotkeys when
     // HotkeyRecorderView writes new bindings. Renaming the notification would

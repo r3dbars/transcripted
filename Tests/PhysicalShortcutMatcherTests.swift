@@ -161,4 +161,51 @@ func testPhysicalShortcutMatcher() {
             "a released push-to-talk key must synthesize release if macOS dropped keyUp while the tap was disabled"
         )
     }
+
+    runSuite("PhysicalShortcutMatcher — delayed modifier press requires current ownership and a held key") {
+        let current = DelayedModifierShortcutPress(
+            generation: 2,
+            keyCode: UInt32(kVK_RightOption),
+            action: .dictationPushToTalk
+        )
+        let stale = DelayedModifierShortcutPress(
+            generation: 1,
+            keyCode: UInt32(kVK_RightOption),
+            action: .dictationPushToTalk
+        )
+
+        assertTrue(
+            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
+                current: current,
+                expected: current,
+                isPhysicallyDown: true
+            ),
+            "the current delayed press may activate while its modifier is still held"
+        )
+        assertFalse(
+            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
+                current: current,
+                expected: stale,
+                isPhysicallyDown: true
+            ),
+            "a cancelled or superseded work item must not consume the current pending press"
+        )
+        assertFalse(
+            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
+                current: current,
+                expected: current,
+                isPhysicallyDown: false
+            ),
+            "a modifier released at the debounce deadline must not start push-to-talk"
+        )
+        let physicallyDownKeyCodes: Set<UInt32> = [UInt32(kVK_Option)]
+        assertFalse(
+            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
+                current: current,
+                expected: current,
+                isPhysicallyDown: physicallyDownKeyCodes.contains(current.keyCode)
+            ),
+            "left Option staying down must not activate a released right-side bound key"
+        )
+    }
 }

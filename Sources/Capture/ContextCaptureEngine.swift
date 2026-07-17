@@ -100,10 +100,10 @@ private final class PhysicalShortcutDetector {
     private var activePushToTalkKeyCode: UInt32?
     private var consumedKeyCodes: Set<UInt32> = []
     private var pendingModifierShortcut: PendingModifierShortcut?
+    private var pendingModifierGeneration: UInt64 = 0
 
     private struct PendingModifierShortcut {
-        let keyCode: UInt32
-        let action: PhysicalShortcutAction
+        let press: DelayedModifierShortcutPress
         let workItem: DispatchWorkItem?
     }
 
@@ -291,12 +291,12 @@ private final class PhysicalShortcutDetector {
             return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
-            if pendingModifierShortcut?.keyCode == keyCode,
+            if pendingModifierShortcut?.press.keyCode == keyCode,
                let pending = pendingModifierShortcut,
-               matchesRelease(for: pending.action, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
+               matchesRelease(for: pending.press.action, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
                 cancelPendingModifierShortcut()
-                if pending.action != .dictationPushToTalk {
-                    onShortcut?(pending.action, .press)
+                if pending.press.action != .dictationPushToTalk {
+                    onShortcut?(pending.press.action, .press)
                 }
                 return nil
             }
@@ -388,20 +388,33 @@ private final class PhysicalShortcutDetector {
 
     private func schedulePendingModifierShortcut(keyCode: UInt32, action: PhysicalShortcutAction) {
         cancelPendingModifierShortcut()
+        pendingModifierGeneration &+= 1
+        let press = DelayedModifierShortcutPress(
+            generation: pendingModifierGeneration,
+            keyCode: keyCode,
+            action: action
+        )
 
         let workItem: DispatchWorkItem?
         if action == .dictationPushToTalk {
             let delayedWorkItem = DispatchWorkItem { [weak self] in
-                guard let self,
-                      self.pendingModifierShortcut?.keyCode == keyCode,
-                      self.pendingModifierShortcut?.action == action else {
-                    return
-                }
+                guard let self else { return }
 
                 self.stateLock.lock()
-                self.pendingModifierShortcut = nil
+                defer { self.stateLock.unlock() }
+                let currentPress = self.pendingModifierShortcut?.press
+                let shouldActivate = PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
+                    current: currentPress,
+                    expected: press,
+                    isPhysicallyDown: Self.isExactPhysicalKeyDown(keyCode)
+                )
+                if currentPress == press {
+                    self.pendingModifierShortcut = nil
+                }
+                guard shouldActivate else { return }
                 self.activePushToTalkKeyCode = keyCode
-                self.stateLock.unlock()
+                // Keep press delivery inside the same lock-protected transition as
+                // ownership. Otherwise a release can enqueue before this press.
                 self.onShortcut?(action, .press)
             }
             workItem = delayedWorkItem
@@ -411,8 +424,7 @@ private final class PhysicalShortcutDetector {
         }
 
         pendingModifierShortcut = PendingModifierShortcut(
-            keyCode: keyCode,
-            action: action,
+            press: press,
             workItem: workItem
         )
     }
@@ -447,6 +459,10 @@ private final class PhysicalShortcutDetector {
         }
 
         return CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
+    }
+
+    private static func isExactPhysicalKeyDown(_ keyCode: UInt32) -> Bool {
+        CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
     }
 }
 
