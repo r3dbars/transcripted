@@ -2224,6 +2224,24 @@ class ParakeetEngine: ObservableObject {
         return (nativeSampleCount, resampled)
     }
 
+    private func consumeRecordedSamples(
+        preparedRecording: RecordedSpeechSamples?
+    ) async -> (nativeSampleCount: Int, samples16k: [Float])? {
+        guard let preparedRecording else {
+            return await drainRecordedSamplesForInference()
+        }
+
+        // The persistence snapshot already resampled this exact stopped
+        // recording. Consume the native buffers without repeating that work.
+        drainPendingSamplesIntoSampleBuffer()
+        sampleBuffer.removeAll(keepingCapacity: true)
+        clearRecoveredRecordingTimeline(keepingCapacity: true)
+        return (
+            nativeSampleCount: preparedRecording.nativeSampleCount,
+            samples16k: preparedRecording.samples16k
+        )
+    }
+
     func snapshotRecordedSamplesForPersistence() async -> RecordedSpeechSamples? {
         drainPendingSamplesIntoSampleBuffer()
 
@@ -2251,7 +2269,10 @@ class ParakeetEngine: ObservableObject {
 
     // MARK: - Transcription
 
-    func drainRecordedSamplesForExternalTranscription(engineName: String) async -> RecordedSpeechSamples? {
+    func drainRecordedSamplesForExternalTranscription(
+        engineName: String,
+        preparedRecording: RecordedSpeechSamples? = nil
+    ) async -> RecordedSpeechSamples? {
         lastEmptyTranscriptionReason = nil
         guard !isTranscribing else {
             EventReporter.shared.capture(
@@ -2265,7 +2286,7 @@ class ParakeetEngine: ObservableObject {
 
         drainPendingSamplesIntoSampleBuffer()
 
-        guard !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
+        guard preparedRecording != nil || !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
             lastEmptyTranscriptionReason = .recordingTooShort
             EventReporter.shared.capture(
                 level: .warning,
@@ -2277,7 +2298,7 @@ class ParakeetEngine: ObservableObject {
         }
 
         isTranscribing = true
-        guard let recorded = await drainRecordedSamplesForInference() else {
+        guard let recorded = await consumeRecordedSamples(preparedRecording: preparedRecording) else {
             finishExternalTranscription()
             return nil
         }
@@ -2391,7 +2412,7 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    func transcribe() async -> String? {
+    func transcribe(preparedRecording: RecordedSpeechSamples? = nil) async -> String? {
         lastEmptyTranscriptionReason = nil
         guard !isTranscribing else {
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_already_active",
@@ -2399,7 +2420,7 @@ class ParakeetEngine: ObservableObject {
             return nil
         }
         drainPendingSamplesIntoSampleBuffer()
-        guard !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
+        guard preparedRecording != nil || !sampleBuffer.isEmpty || !recoveredRecordingTimeline.isEmpty else {
             lastEmptyTranscriptionReason = .recordingTooShort
             EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
                 message: "No audio samples in buffer when transcribe() called")
@@ -2415,7 +2436,7 @@ class ParakeetEngine: ObservableObject {
         isTranscribing = true
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        guard let recorded = await drainRecordedSamplesForInference() else {
+        guard let recorded = await consumeRecordedSamples(preparedRecording: preparedRecording) else {
             finishTranscription()
             return nil
         }

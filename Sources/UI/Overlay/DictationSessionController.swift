@@ -929,6 +929,7 @@ class DictationSessionController: ObservableObject {
         let taskSessionID = currentDictationSessionID
         streamingTask = Task {
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
+            var stoppedRecordingSnapshot: RecordedSpeechSamples?
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
             if appState.sttRouter.isRecording || appState.sttRouter.hasRecoverableRecording {
                 await appState.sttRouter.stopRecording()
@@ -946,12 +947,36 @@ class DictationSessionController: ObservableObject {
                         taskSessionID: taskSessionID,
                         currentSessionID: self.currentDictationSessionID
                     ) else { return }
-                    self.stoppedAudioRecovery = try DictationStoppedAudioRecoveryStore.persist(
-                        samples16k: recording.samples16k,
-                        sessionID: taskSessionID
-                    )
+                    let recovery = try await Task.detached(priority: .userInitiated) {
+                        try DictationStoppedAudioRecoveryStore.persist(
+                            samples16k: recording.samples16k,
+                            sessionID: taskSessionID
+                        )
+                    }.value
+                    guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                        taskCancelled: Task.isCancelled,
+                        isDictating: self.isDictating,
+                        taskSessionID: taskSessionID,
+                        currentSessionID: self.currentDictationSessionID
+                    ) else {
+                        await Task.detached(priority: .utility) {
+                            DictationStoppedAudioRecoveryStore.cleanup(
+                                recovery,
+                                explicitDiscard: true
+                            )
+                        }.value
+                        return
+                    }
+                    self.stoppedAudioRecovery = recovery
+                    stoppedRecordingSnapshot = recording
                 }
             } catch {
+                guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                    taskCancelled: Task.isCancelled,
+                    isDictating: self.isDictating,
+                    taskSessionID: taskSessionID,
+                    currentSessionID: self.currentDictationSessionID
+                ) else { return }
                 appState.logger.log("DICTATION | failed to preserve stopped audio: \(error.localizedDescription)")
                 EventReporter.shared.capture(
                     level: .error,
@@ -1026,7 +1051,9 @@ class DictationSessionController: ObservableObject {
             overlayController.resizePanelToCompact()
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "transcribing")
             stopTiming.transcriptionStartedAt = CFAbsoluteTimeGetCurrent()
-            let voiceText = await appState.sttRouter.transcribe()
+            let voiceText = await appState.sttRouter.transcribe(
+                preparedRecording: stoppedRecordingSnapshot
+            )
             stopTiming.transcribedAt = CFAbsoluteTimeGetCurrent()
             guard !Task.isCancelled,
                   self.isDictating,
