@@ -31,6 +31,10 @@ jobs:
         shell: bash
         run: bash scripts/dev/agent-preflight.sh origin/main
 
+      - name: Test matrix selector
+        shell: bash
+        run: python3 scripts/dev/test-matrix-checks.py --self-test
+
       - name: Shell syntax
         shell: bash
         run: |

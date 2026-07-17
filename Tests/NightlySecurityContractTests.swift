@@ -164,7 +164,10 @@ func testNightlySecurityContract() {
         assertTrue(checker.contains("check_posthog_health_schema"), "nightly checker should pin PostHog health schema to AnalyticsEventPolicy")
         assertTrue(checker.contains("first_value_sources"), "PostHog first-value event checks should inspect each probe source independently")
         assertTrue(checker.contains("posthog-first-value-schema-"), "PostHog first-value drift findings should identify the missing probe source")
-        assertTrue(preflight.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.50.json"), "agent preflight should suggest a strict checker command with deterministic GitHub release metadata")
+        assertTrue(
+            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
+            "agent preflight should execute the matrix that owns the strict checker command"
+        )
         assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.50.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
     }
 
