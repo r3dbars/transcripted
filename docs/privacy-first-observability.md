@@ -131,6 +131,7 @@ allowlist.
 - `dictation_started`
 - `dictation_start_failed`
 - `dictation_completed`
+- `dictation_paste_retry_completed`
 - `dictation_artifact_saved`
 - `dictation_stop_latency_measured`
 - `dictation_cancelled`
@@ -196,6 +197,8 @@ allowlist.
   shape for the saved-meeting -> summary -> return loop
 - live transcript drawer analytics limited to `action_kind`, `surface`,
   `trigger`, and `result`; never live transcript text or meeting context
+- paste retry analytics limited to `result` and a coarse `reason`; never text,
+  capture identifiers, or target-app identifiers
 - local meeting summary analytics limited to `provider`, `summary_action`,
   `setup_ready`, `runtime`, `queue_depth_bucket`, `chunk_count_bucket`,
   `duration_bucket`, `failure_kind`, `result`, and `stage`
