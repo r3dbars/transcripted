@@ -2653,21 +2653,6 @@ class ParakeetEngine: ObservableObject {
         return RecordedSpeechSamples(nativeSampleCount: nativeSampleCount, samples16k: samples16k)
     }
 
-    /// Convert [Float] samples to AVAudioPCMBuffer for StreamingEouAsrManager.
-    private func makePCMBuffer(from samples: [Float]) -> AVAudioPCMBuffer? {
-        guard let format = eouPCMFormat,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))
-        else { return nil }
-        buffer.frameLength = AVAudioFrameCount(samples.count)
-        if let dest = buffer.floatChannelData?[0] {
-            samples.withUnsafeBufferPointer { src in
-                guard let baseAddress = src.baseAddress else { return }
-                dest.update(from: baseAddress, count: samples.count)
-            }
-        }
-        return buffer
-    }
-
     // MARK: - Transcription
 
     func drainRecordedSamplesForExternalTranscription(

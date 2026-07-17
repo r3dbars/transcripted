@@ -762,9 +762,8 @@ func testParakeetStartRecordingFailurePolicy() {
         guard let beginRecovery = watchdog.range(of: "self.startZombieEngineRecovery(failureKind: failureKind)"),
               let markResetStage = watchdog.range(of: "zombieRecoveryState.advance(to: .reset"),
               let markIdle = watchdog.range(of: "isRecording = false", range: markResetStage.upperBound..<watchdog.endIndex),
-              let eouReset = watchdog.range(of: "await eouManager?.reset()", range: markIdle.upperBound..<watchdog.endIndex),
-              let postEOUOwnershipGate = watchdog.range(of: "expectedOwner: recoveryGraphOwner", range: eouReset.upperBound..<watchdog.endIndex),
-              let recreate = watchdog.range(of: "guard await recreateAudioEngineForZombieRecovery(", range: postEOUOwnershipGate.upperBound..<watchdog.endIndex),
+              let ownershipGate = watchdog.range(of: "expectedOwner: recoveryGraphOwner", range: markIdle.upperBound..<watchdog.endIndex),
+              let recreate = watchdog.range(of: "guard await recreateAudioEngineForZombieRecovery(", range: ownershipGate.upperBound..<watchdog.endIndex),
               let settleStage = watchdog.range(of: "zombieRecoveryState.advance(to: .settle"),
               let restartStage = watchdog.range(of: "zombieRecoveryState.advance(to: .restart"),
               let preserveRecovery = watchdog.range(of: "zombieRecoveryStartGeneration = generation"),
@@ -795,9 +794,8 @@ func testParakeetStartRecordingFailurePolicy() {
 
         assertTrue(beginRecovery.lowerBound < markResetStage.lowerBound, "detection should create one generation-gated recovery attempt")
         assertTrue(markResetStage.lowerBound < markIdle.lowerBound, "zombie reset should enter its terminally tracked stage before publishing idle state")
-        assertTrue(markIdle.lowerBound < eouReset.lowerBound, "recording must publish idle before resetting end-of-utterance state")
-        assertTrue(eouReset.lowerBound < postEOUOwnershipGate.lowerBound, "the eou reset suspension must be followed by cancellation and graph ownership validation")
-        assertTrue(postEOUOwnershipGate.lowerBound < recreate.lowerBound, "a cancelled or stale recovery must not enter graph recreation")
+        assertTrue(markIdle.lowerBound < ownershipGate.lowerBound, "recording must publish idle before cancellation and graph ownership validation")
+        assertTrue(ownershipGate.lowerBound < recreate.lowerBound, "a cancelled or stale recovery must not enter graph recreation")
         assertTrue(markIdle.lowerBound < recreate.lowerBound, "recording must be idle before replacing the stale graph")
         assertTrue(recreate.lowerBound < settleStage.lowerBound, "the fresh engine must exist before the route settle delay")
         assertTrue(settleStage.lowerBound < restartStage.lowerBound, "settling must finish before the one restart attempt")
@@ -862,13 +860,22 @@ func testParakeetStartRecordingFailurePolicy() {
             mutation: "audioEngine = AVAudioEngine()",
             helper: "rebuildAudioEngine"
         )
-        assertPostAwaitOwnershipGuard(
-            in: failedStartCleanup,
-            ownerCapture: "let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()",
-            suspension: "await eouManager?.reset()",
-            guardStatement: "guard ownsAudioEngineQueue(failedStartCleanupOwner) else { return }",
-            mutation: "isRecording = false",
-            helper: "resetAfterFailedRecordingStart"
+        guard let failedStartOwner = failedStartCleanup.range(
+            of: "let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()"
+        ), let guardedRelease = failedStartCleanup.range(
+            of: "guard await releaseIdleAudioHardware(",
+            range: failedStartOwner.upperBound..<failedStartCleanup.endIndex
+        ), let guardedRestore = failedStartCleanup.range(
+            of: "await restorePendingSystemInputAfterRecording(",
+            range: guardedRelease.upperBound..<failedStartCleanup.endIndex
+        ) else {
+            assertTrue(false, "resetAfterFailedRecordingStart should bind delayed cleanup to its exact owner")
+            return
+        }
+        assertTrue(
+            failedStartOwner.lowerBound < guardedRelease.lowerBound
+                && guardedRelease.lowerBound < guardedRestore.lowerBound,
+            "resetAfterFailedRecordingStart should restore input only after owner-guarded cleanup succeeds"
         )
         assertPostAwaitOwnershipGuard(
             in: idleCleanup,

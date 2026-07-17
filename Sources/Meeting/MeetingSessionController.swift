@@ -153,7 +153,7 @@ final class MeetingSessionController: ObservableObject {
     let liveTranscriptFeed = LiveMeetingTranscriptFeed()
     let services: AppServices
     let taskManager: TranscriptionTaskManager
-    private let failedManager: FailedTranscriptionManager
+    let failedManager: FailedTranscriptionManager
     let diarization: DiarizationService
     let sttAdapter: MeetingSTTAdapter
     private let speakerDatabase: SpeakerDatabase
