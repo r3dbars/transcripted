@@ -166,9 +166,9 @@ aggregate reliability sizing and should not be expanded to raw device names.
 | `meeting_recording_started` | `trigger` |
 | `meeting_recording_start_failed` | `failure_kind`, `trigger` |
 | `meeting_prompt_shown` | `app_signal`, `calendar_confidence`, `call_state`, `missing_permission`, `prompt_reason`, `provider`, `route_ready`, `source` |
-| `meeting_prompt_choice_made` | `calendar_confidence`, `call_state`, `choice_kind`, `elapsed_bucket`, `prompt_reason`, `provider`, `route_ready`, `source` |
-| `meeting_prompt_dismissed` | prompt fields plus `backoff_kind`, `cooldown_reason` |
-| `meeting_prompt_outcome_recorded` | prompt fields plus `elapsed_bucket`, `outcome_kind`, optional `suppression_reason` |
+| `meeting_prompt_choice_made` | Explicit user choices only (`record`, `dismiss`, `remind_later`) plus `calendar_confidence`, `call_state`, `choice_kind`, `elapsed_bucket`, `prompt_reason`, `provider`, `route_ready`, `source` |
+| `meeting_prompt_dismissed` | Explicit dismissals only; prompt fields plus `backoff_kind`, `cooldown_reason` |
+| `meeting_prompt_outcome_recorded` | One funnel outcome (`dismissed`, `expired`, `reminded_later`, `suppressed`, or a recording/transcript terminal result) plus prompt fields, `elapsed_bucket`, and optional `suppression_reason` |
 | `meeting_prompt_record_selected` | prompt fields |
 | `meeting_prompt_suppressed` | prompt fields plus `capture_activity`, `cooldown_reason`, `suppression_reason` |
 | `meeting_mic_boost_prompt_shown` | `duration_bucket`, `trigger` |
@@ -247,7 +247,7 @@ Prefer a small number of lifecycle events over broad click tracking.
 | `meeting_speaker_review_shown` | A saved meeting has review work surfaced | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `surface` |
 | `meeting_speaker_review_submitted` | User saves or defers speaker review | `review_item_bucket`, `local_voice_bucket`, `remote_voice_bucket`, `match_suggestion_bucket`, `known_people_bucket`, `review_reason`, `completion_kind`, `result`, `updates_submitted_bucket`, `surface` |
 | `settings_feature_discovered` | A high-leverage feature panel is first viewed | `feature_area`, `page_id`, `source` |
-| `workflow_abandoned` | App can confidently infer abandonment without content | `workflow_kind`, `stage`, `reason_kind`, `elapsed_bucket`, `surface`, optional `prior_ready_state` |
+| `workflow_abandoned` | App can confidently infer abandonment without content; invisible suppression, automatic expiry, and remind-later are not abandonment | `workflow_kind`, `stage`, `reason_kind`, `elapsed_bucket`, `surface`, optional `prior_ready_state` |
 
 Do not add generic "button clicked" for every control. Track buttons only when
 they answer a product question: did the user start capture, grant permission,
@@ -272,10 +272,15 @@ HogQL specs behind these dashboard families. Use `--json-only` when
 dashboard-to-product-task loop. It reads aggregate PostHog signal for this
 dashboard plus Activation, Reliability, Feature Adoption, and Release Health,
 then outputs the biggest activation leak, biggest reliability leak, strongest
-adoption signal, under-discovered feature, release regression watch, and top
+adoption signal, under-discovered feature, current release health, and top
 three PR/task candidates. Fixture mode uses
 `Tests/Fixtures/posthog-product-dashboard-summary.json` so CI can verify the
 ranking logic without credentials.
+
+The helper does not infer the public release from observed build rows. Current
+release health remains `UNKNOWN` until the caller supplies the confirmed
+`app_version`, `build_channel`, and `build_revision`; fixture mode cannot apply
+those filters because its other aggregate rows do not carry build identity.
 
 ### Activation Funnel
 
@@ -287,8 +292,9 @@ permission ready -> `dictation_started` / `meeting_recording_started` ->
 -> `agent_capture_query_observed` -> `activation_return_proxy_observed`.
 
 Break out `workflow_abandoned` by `workflow_kind`, `stage`, `reason_kind`, and
-`prior_ready_state` beside the ordered funnel. Treat it as an exit map, not a
-click stream.
+`prior_ready_state` beside the ordered funnel. Treat it as a confident exit map,
+not a click stream; meeting-prompt suppression, expiry, and remind-later stay in
+the prompt outcome funnel instead.
 
 ### Dictation Reliability Funnel
 
@@ -301,9 +307,9 @@ Break down by trigger, delivery, route shape, input/output class,
 
 ### Meeting Reliability Funnel
 
-`meeting_prompt_shown` -> `meeting_prompt_choice_made` ->
-`meeting_prompt_record_selected` -> `meeting_recording_started` ->
-`meeting_prompt_outcome_recorded` -> `meeting_recording_stopped` ->
+`meeting_prompt_shown` -> explicit `meeting_prompt_choice_made` or terminal
+`meeting_prompt_outcome_recorded` -> `meeting_prompt_record_selected` ->
+`meeting_recording_started` -> `meeting_prompt_outcome_recorded` -> `meeting_recording_stopped` ->
 `meeting_transcript_saved` / failed / skipped -> speaker review ->
 summary requested -> summary finished.
 

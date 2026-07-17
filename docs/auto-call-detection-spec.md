@@ -480,11 +480,11 @@ falls back to the normal `dismiss` backoff so an ignored call eventually goes
 quiet. Net: up to 3 offers per call (~t+0, ~t+3.5min, ~t+7min), then silence.
 Explicit × dismissals and remind-soon behave exactly as before.
 
-**Analytics:** no new event names. Expiry reuses `meeting_prompt_dismissed` with
-`backoff_kind`/`cooldown_reason` = `expired_reoffer` and `workflow_abandoned`
-`reason_kind` = `expired`, so dashboards can now separate "user said no" from
-"user never saw it" — the number that tells us whether the prompt surface itself
-needs to be louder.
+**Analytics:** no new event names. Automatic expiry records
+`meeting_prompt_outcome_recorded.outcome_kind = expired`; it is not a user choice,
+dismissal, or abandoned workflow. Explicit dismissals keep
+`meeting_prompt_dismissed` and the conservative abandonment signal, while
+remind-later remains an explicit choice plus `outcome_kind = reminded_later`.
 
 **Coverage:** new `MicActivityMonitorTests` (output attribution + self-exclusion),
 `MeetingPromptHeuristicsTests` (output provider mapping, expiry policy),

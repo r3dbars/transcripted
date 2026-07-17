@@ -1745,13 +1745,18 @@ func testAnalyticsEventPolicy() {
         )
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_choice_made\"", in: appSource),
-            4,
-            "choice telemetry should cover record, dismiss, remind-later, and expiry actions without counting shown inventory"
+            3,
+            "choice telemetry should cover record, dismiss, and remind-later actions; automatic expiry is an outcome, not a user choice"
         )
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: appSource),
-            2,
-            "app-level outcomes should cover ignored expiry and pre-prompt suppression only"
+            4,
+            "app-level outcomes should cover dismiss, expiry, remind-later, and pre-prompt suppression exactly once"
+        )
+        assertEqual(
+            analyticsPolicyOccurrenceCount(of: "ActivationTelemetry.trackWorkflowAbandoned(", in: appSource),
+            1,
+            "only an explicit user dismissal should be classified as prompt abandonment"
         )
         assertEqual(
             analyticsPolicyOccurrenceCount(of: "\"meeting_prompt_outcome_recorded\"", in: meetingSessionSource),
