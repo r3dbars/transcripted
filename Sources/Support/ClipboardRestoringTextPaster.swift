@@ -13,6 +13,7 @@ enum TextPasteCopyReason: Equatable {
     case focusChanged
     case pasteNotConfirmed
     case pasteConfirmationUnavailable
+    case pasteConfirmationUnavailableAutoSendEligible
 }
 
 enum TextPasteOutcome: Equatable {
@@ -53,6 +54,37 @@ enum TextPasteOutcome: Equatable {
 struct ClipboardPasteConfirmationDiagnostic: Equatable {
     let event: String
     let context: [String: String]
+}
+
+enum DictationTargetConfirmationMode: String, Equatable {
+    case textValue = "text_value"
+    case selectionRange = "selection_range"
+    case changeNotification = "change_notification"
+    case clipboardReadOnly = "clipboard_read_only"
+    case none
+
+    static func resolve(
+        outcome: TextPasteOutcome,
+        diagnostic: ClipboardPasteConfirmationDiagnostic?
+    ) -> DictationTargetConfirmationMode {
+        if outcome.copyReason == .pasteConfirmationUnavailableAutoSendEligible {
+            return .clipboardReadOnly
+        }
+
+        guard diagnostic?.event == "dictation_paste_confirmed" else {
+            return .none
+        }
+        switch diagnostic?.context["confirmation_mode"] {
+        case "text_value":
+            return .textValue
+        case "selection_range":
+            return .selectionRange
+        case "target_change_notification":
+            return .changeNotification
+        default:
+            return .none
+        }
+    }
 }
 
 @MainActor
@@ -584,6 +616,7 @@ final class ClipboardRestoringTextPaster {
         },
         pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
         pasteConfirmed: (@MainActor () -> Bool)? = nil,
+        prepareForAutoSend: Bool = false,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
@@ -686,6 +719,25 @@ final class ClipboardRestoringTextPaster {
                 event: "dictation_paste_confirmation_diagnostics",
                 context: diagnostics
             )
+            let clipboardReadAfterDispatch = (temporaryProvider?.firstReadAt ?? 0) >= pasteDispatchedAt
+            let targetStillFrontmost = target != nil && target?.matchesCurrentFrontmostApp() == true
+            if confirmationUnavailable,
+               prepareForAutoSend,
+               clipboardReadAfterDispatch,
+               targetStillFrontmost {
+                scheduleClipboardRestore(
+                    savedItems,
+                    temporaryString: text,
+                    temporaryChangeCount: temporaryChangeCount,
+                    to: pasteboard,
+                    generation: generation,
+                    delay: restoreDelay
+                )
+                return .copied(
+                    "Transcripted sent paste and the selected target read it, but the target exposed no text confirmation.",
+                    reason: .pasteConfirmationUnavailableAutoSendEligible
+                )
+            }
             guard leaveTemporaryClipboardAvailable() else {
                 return .failed("Couldn't keep the dictation copied after paste-back was unconfirmed. The dictation was saved, but paste-back did not run.")
             }
