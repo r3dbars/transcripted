@@ -24,6 +24,19 @@ func textResult(_ text: String, isError: Bool = false) -> CallTool.Result {
     .init(content: [.text(text: text, annotations: nil, _meta: nil)], isError: isError)
 }
 
+func invalidAgentCaptureQueryInputResult(_ text: String) -> CallTool.Result {
+    markAgentCaptureQueryTerminal(.invalidInput)
+    return textResult(text, isError: true)
+}
+
+func emptyOrMissingAgentCaptureQueryResult(
+    _ text: String,
+    isError: Bool = false
+) -> CallTool.Result {
+    markAgentCaptureQueryTerminal(.emptyNotFound, sourceCount: 0, resultCount: 0)
+    return textResult(text, isError: isError)
+}
+
 /// Character budget for read_meeting / read_dictation raw markdown responses.
 /// Anything larger switches to a paginated window even when the caller did not
 /// pass offset/limit, so one 90-minute transcript cannot blow out an agent's
@@ -115,6 +128,7 @@ func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: Tra
     }
 
     let json = try JSONEncoder.pretty.encode(payload)
+    markAgentCaptureQueryTerminal(.emptyNotFound, sourceCount: 0, resultCount: 0)
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
@@ -152,6 +166,113 @@ extension PathSecurity {
         }
 
         return .missing
+    }
+}
+
+private struct AgentCaptureQueryDescriptor {
+    let toolKind: String
+    let captureKind: String
+
+    init?(params: CallTool.Parameters) {
+        switch params.name {
+        case "list_meetings":
+            self.init(toolKind: "list", captureKind: "meeting")
+        case "list_dictations":
+            self.init(toolKind: "list", captureKind: "dictation")
+        case "read_meeting":
+            self.init(toolKind: "read", captureKind: "meeting")
+        case "read_dictation":
+            self.init(toolKind: "read", captureKind: "dictation")
+        case "search":
+            self.init(toolKind: "search", captureKind: "meeting")
+        case "search_context":
+            self.init(toolKind: "search", captureKind: Self.requestedCaptureKind(params))
+        case "recent_context":
+            self.init(toolKind: "recent", captureKind: Self.requestedCaptureKind(params))
+        case "who_is":
+            self.init(toolKind: "speaker_lookup", captureKind: "meeting")
+        case "recap":
+            self.init(toolKind: "recap", captureKind: "meeting")
+        case "list_action_items":
+            self.init(toolKind: "action_items", captureKind: "meeting")
+        case "list_decisions", "decisions":
+            self.init(toolKind: "decisions", captureKind: "meeting")
+        case "digest":
+            self.init(toolKind: "digest", captureKind: "meeting")
+        case "commitments":
+            self.init(toolKind: "commitments", captureKind: "meeting")
+        case "open_questions":
+            self.init(toolKind: "open_questions", captureKind: "meeting")
+        case "search_meetings":
+            self.init(toolKind: "search", captureKind: "meeting")
+        default:
+            return nil
+        }
+    }
+
+    private init(toolKind: String, captureKind: String) {
+        self.toolKind = toolKind
+        self.captureKind = captureKind
+    }
+
+    private static func requestedCaptureKind(_ params: CallTool.Parameters) -> String {
+        switch params.arguments?["kind"]?.stringValue?.lowercased() {
+        case "meeting":
+            return "meeting"
+        case "dictation":
+            return "dictation"
+        default:
+            return "mixed"
+        }
+    }
+}
+
+func withAgentCaptureQueryTelemetry(
+    params: CallTool.Parameters,
+    clock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+    buildIdentity: AgentCaptureQueryBuildIdentity? = nil,
+    operation: () throws -> CallTool.Result
+) rethrows -> CallTool.Result {
+    guard let descriptor = AgentCaptureQueryDescriptor(params: params) else {
+        return try operation()
+    }
+
+    let resolvedBuildIdentity = buildIdentity ?? .resolve()
+    let invocation = AgentCaptureQueryInvocation(
+        toolKind: descriptor.toolKind,
+        captureKind: descriptor.captureKind
+    )
+    let startedAt = clock()
+
+    func emitTerminalObservation() {
+        let elapsed = max(0, clock() - startedAt)
+        let latencyMilliseconds = Int((elapsed * 1_000).rounded())
+        AgentCaptureQueryTelemetryRuntime.recorder.track(
+            AgentCaptureQueryObservation(
+                toolKind: invocation.toolKind,
+                captureKind: invocation.captureKind,
+                result: invocation.result,
+                sourceCount: invocation.sourceCount,
+                resultCount: invocation.resultCount,
+                latencyMilliseconds: latencyMilliseconds,
+                buildIdentity: resolvedBuildIdentity
+            )
+        )
+    }
+
+    return try AgentCaptureQueryTelemetryRuntime.$invocation.withValue(invocation) {
+        do {
+            let result = try operation()
+            if result.isError == true, invocation.result == .success {
+                invocation.recordTerminal(.internalError)
+            }
+            emitTerminalObservation()
+            return result
+        } catch {
+            invocation.recordTerminal(.internalError)
+            emitTerminalObservation()
+            throw error
+        }
     }
 }
 
@@ -595,48 +716,50 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
 
     await server.withMethodHandler(CallTool.self) { params in
         do {
-            switch params.name {
-            case "list_meetings":
-                return try handleListMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "list_dictations":
-                return try handleListDictations(params: params, index: index, dictationDirs: directories.dictationDirs)
-            case "read_meeting":
-                return try handleReadMeeting(params: params, meetingDirs: directories.meetingDirs)
-            case "read_dictation":
-                return try handleReadDictation(params: params, dictationDirs: directories.dictationDirs)
-            case "search":
-                return try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "search_context":
-                return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
-            case "recent_context":
-                return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
-            case "who_is":
-                return try handleWhoIs(params: params, index: index)
-            case "recap":
-                return try handleRecap(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "list_action_items":
-                return try handleListActionItems(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "list_decisions":
-                return try handleListDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "digest":
-                return try handleDigest(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "decisions":
-                return try handleDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "commitments":
-                return try handleCommitments(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "open_questions":
-                return try handleOpenQuestions(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "search_meetings":
-                return try handleSearchMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
-            case "status":
-                return try handleStatus(index: index, directories: directories)
-            case "show_recent_meetings":
-                let count = min(max(params.arguments?["count"]?.intValue ?? TranscriptedUIResources.defaultRecentCount, 1), 15)
-                return try TranscriptedUIResources.showRecentMeetingsResult(
-                    count: count, index: index, directories: directories, serverVersion: TranscriptedMCP.serverVersion
-                )
-            default:
-                return textResult("Unknown tool: \(params.name)", isError: true)
+            return try withAgentCaptureQueryTelemetry(params: params) {
+                switch params.name {
+                case "list_meetings":
+                    return try handleListMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "list_dictations":
+                    return try handleListDictations(params: params, index: index, dictationDirs: directories.dictationDirs)
+                case "read_meeting":
+                    return try handleReadMeeting(params: params, meetingDirs: directories.meetingDirs)
+                case "read_dictation":
+                    return try handleReadDictation(params: params, dictationDirs: directories.dictationDirs)
+                case "search":
+                    return try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "search_context":
+                    return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+                case "recent_context":
+                    return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+                case "who_is":
+                    return try handleWhoIs(params: params, index: index)
+                case "recap":
+                    return try handleRecap(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "list_action_items":
+                    return try handleListActionItems(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "list_decisions":
+                    return try handleListDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "digest":
+                    return try handleDigest(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "decisions":
+                    return try handleDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "commitments":
+                    return try handleCommitments(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "open_questions":
+                    return try handleOpenQuestions(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "search_meetings":
+                    return try handleSearchMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
+                case "status":
+                    return try handleStatus(index: index, directories: directories)
+                case "show_recent_meetings":
+                    let count = min(max(params.arguments?["count"]?.intValue ?? TranscriptedUIResources.defaultRecentCount, 1), 15)
+                    return try TranscriptedUIResources.showRecentMeetingsResult(
+                        count: count, index: index, directories: directories, serverVersion: TranscriptedMCP.serverVersion
+                    )
+                default:
+                    return textResult("Unknown tool: \(params.name)", isError: true)
+                }
             }
         } catch {
             return textResult("Error: \(error.localizedDescription)", isError: true)

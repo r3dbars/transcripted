@@ -31,7 +31,8 @@ func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, mee
     trackAgentCaptureQueryObserved(
         toolKind: "list",
         captureKind: "meeting",
-        sourceCount: results.count
+        sourceCount: results.count,
+        resultCount: results.count
     )
 
     let json = try JSONEncoder.pretty.encode(results)
@@ -56,7 +57,7 @@ func extractDialogueLines(from content: String) -> [String] {
 
 func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -> CallTool.Result {
     guard let filename = params.arguments?["filename"]?.stringValue, !filename.isEmpty else {
-        return textResult("Missing required parameter: filename", isError: true)
+        return invalidAgentCaptureQueryInputResult("Missing required parameter: filename")
     }
 
     let section = params.arguments?["section"]?.stringValue ?? "full"
@@ -69,28 +70,34 @@ func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -
     case .valid(let url):
         mdURL = url
     case .missing:
-        return textResult("Meeting not found: \(filename). Use list_meetings to see available meetings.", isError: true)
+        return emptyOrMissingAgentCaptureQueryResult(
+            "Meeting not found: \(filename). Use list_meetings to see available meetings.",
+            isError: true
+        )
     case .invalid:
-        return textResult("Invalid filename: \(filename)", isError: true)
+        return invalidAgentCaptureQueryInputResult("Invalid filename: \(filename)")
     }
 
     guard let content = CaptureMarkdown.readBoundedContents(of: mdURL) else {
-        return textResult("Meeting not found: \(filename). Use list_meetings to see available meetings.", isError: true)
+        return emptyOrMissingAgentCaptureQueryResult(
+            "Meeting not found: \(filename). Use list_meetings to see available meetings.",
+            isError: true
+        )
     }
 
     let parsed = CaptureMarkdownParser.parseMeeting(from: content)
-
-    trackAgentCaptureQueryObserved(
-        toolKind: "read",
-        captureKind: "meeting",
-        sourceCount: 1
-    )
 
     switch section {
     case "transcript":
         let dialogue = extractDialogueLines(from: content).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         let raw = dialogue.isEmpty ? content : dialogue
         if !paginationRequested, raw.count <= maxUnpaginatedReadCharacters {
+            trackAgentCaptureQueryObserved(
+                toolKind: "read",
+                captureKind: "meeting",
+                sourceCount: 1,
+                resultCount: parsed?.utterances.count ?? (raw.isEmpty ? 0 : 1)
+            )
             return textResult(raw)
         }
         return try meetingTranscriptPageResult(
@@ -111,10 +118,23 @@ func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -
                 result += "\n" + String(content[analyticsRange.lowerBound...])
             }
         }
-        return textResult(result.isEmpty ? content : result)
+        let response = result.isEmpty ? content : result
+        trackAgentCaptureQueryObserved(
+            toolKind: "read",
+            captureKind: "meeting",
+            sourceCount: 1,
+            resultCount: parsed?.speakers.count ?? (response.isEmpty ? 0 : 1)
+        )
+        return textResult(response)
 
     default: // "full"
         if !paginationRequested, content.count <= maxUnpaginatedReadCharacters {
+            trackAgentCaptureQueryObserved(
+                toolKind: "read",
+                captureKind: "meeting",
+                sourceCount: 1,
+                resultCount: parsed?.utterances.count ?? (content.isEmpty ? 0 : 1)
+            )
             return textResult(content)
         }
         return try meetingTranscriptPageResult(
@@ -138,6 +158,12 @@ private func meetingTranscriptPageResult(
     rawFallback: String
 ) throws -> CallTool.Result {
     guard let parsed, !parsed.utterances.isEmpty else {
+        trackAgentCaptureQueryObserved(
+            toolKind: "read",
+            captureKind: "meeting",
+            sourceCount: 1,
+            resultCount: rawFallback.isEmpty ? 0 : 1
+        )
         return textResult(rawFallback)
     }
 
@@ -189,6 +215,12 @@ private func meetingTranscriptPageResult(
     )
 
     let json = try JSONEncoder.pretty.encode(page)
+    trackAgentCaptureQueryObserved(
+        toolKind: "read",
+        captureKind: "meeting",
+        sourceCount: 1,
+        resultCount: returned
+    )
     return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 

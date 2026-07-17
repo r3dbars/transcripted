@@ -74,11 +74,16 @@ func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDir
         meetings: recapParts
     )
 
-    trackAgentCaptureQueryObserved(
-        toolKind: "recap",
-        captureKind: "meeting",
-        sourceCount: recapParts.count
-    )
+    if recapParts.isEmpty {
+        markAgentCaptureQueryTerminal(.emptyNotFound, sourceCount: 0, resultCount: 0)
+    } else {
+        trackAgentCaptureQueryObserved(
+            toolKind: "recap",
+            captureKind: "meeting",
+            sourceCount: recapParts.count,
+            resultCount: recapParts.count
+        )
+    }
 
     let json = try JSONEncoder.pretty.encode(result)
     return textResult(String(data: json, encoding: .utf8) ?? "[]")
@@ -111,7 +116,8 @@ func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, 
     trackAgentCaptureQueryObserved(
         toolKind: "action_items",
         captureKind: "meeting",
-        sourceCount: distinctActionItemSourceCount(in: result.items)
+        sourceCount: distinctActionItemSourceCount(in: result.items),
+        resultCount: result.items.count
     )
 
     let json = try JSONEncoder.pretty.encode(result)
@@ -137,7 +143,8 @@ func handleListDecisions(params: CallTool.Parameters, index: TranscriptIndex, me
     trackAgentCaptureQueryObserved(
         toolKind: "decisions",
         captureKind: "meeting",
-        sourceCount: distinctDecisionSourceCount(in: result.decisions)
+        sourceCount: distinctDecisionSourceCount(in: result.decisions),
+        resultCount: result.decisions.count
     )
 
     let json = try JSONEncoder.pretty.encode(result)
@@ -163,7 +170,8 @@ func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, meetingDi
     trackAgentCaptureQueryObserved(
         toolKind: "digest",
         captureKind: "meeting",
-        sourceCount: result.meetings.count
+        sourceCount: Set(result.meetings.map(\.filename)).count,
+        resultCount: result.meetings.count
     )
 
     let json = try JSONEncoder.pretty.encode(result)

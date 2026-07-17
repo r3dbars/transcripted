@@ -162,7 +162,11 @@ func testAnalyticsEventPolicy() {
         assertEqual(prompt?.allowedProperties ?? Set<String>(), ["action_kind", "agent_target", "artifact_kind", "prompt_kind", "result", "surface"], "agent prompt actions should stay enum-only")
         assertEqual(setup?.allowedProperties ?? Set<String>(), ["agent_target", "prior_status", "result", "setup_kind", "surface"], "setup CTAs should stay enum-only")
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
-        assertEqual(agentQuery?.allowedProperties ?? Set<String>(), ["client_family", "capture_kind", "result", "source_count_bucket", "tool_kind"], "agent query observation should stay enum and bucket only")
+        assertEqual(
+            agentQuery?.allowedProperties ?? Set<String>(),
+            ["app_version", "build_channel", "build_revision", "client_family", "capture_kind", "latency_bucket", "result", "result_count_bucket", "source_count_bucket", "tool_kind"],
+            "agent query observation should stay build-scoped, enum, and bucket only"
+        )
         assertEqual(
             agentQuery?.allowedProperties ?? Set<String>(),
             mcpAgentCaptureQueryAllowedProperties(),

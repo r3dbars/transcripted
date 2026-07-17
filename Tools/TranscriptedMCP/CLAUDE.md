@@ -67,7 +67,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `NameVariants.swift` | Speaker-name fuzzy matching for speaker-aware queries |
 | `PathSecurity.swift` | Guards direct file reads against traversal, symlinks, and out-of-root paths |
 | `FileWatcher.swift` | Watches the local transcript directories and incrementally reindexes changed files |
-| `AgentCaptureQueryTelemetry.swift` | Anonymous bucketed telemetry for agent capture queries |
+| `AgentCaptureQueryTelemetry.swift` | One anonymous, bucketed terminal event for each tracked agent capture query |
 
 ## Test Files
 
@@ -82,7 +82,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `NameVariantsTests.swift` | Name variant matching accuracy |
 | `SummaryRollupTests.swift` | Cross-meeting rollups: action items by owner/status/date, decisions, digest, write-seam idempotency |
 | `ToolHandlersTests.swift` | Handler-level coverage: title hydration, telemetry, status tool payload, self-describing empty results, done-filter error, read pagination windows and size guard |
-| `AgentCaptureQueryTelemetryTests.swift` | Bucketing and payload coverage for agent capture-query telemetry |
+| `AgentCaptureQueryTelemetryTests.swift` | Terminal-result, bucketing, build-identity, and payload coverage for agent capture-query telemetry |
 | `SemanticSearchTests.swift` | Semantic + hybrid search via a deterministic stub provider, graceful fallback, model-change re-embed, vector-math, and RRF fusion |
 | `RecentMeetingsWidgetTests.swift` | Widget-model and builder coverage for the `show_recent_meetings` MCP Apps surface |
 | `AudioDirectoryNamingTests.swift` | Retained-audio directory naming/resolution coverage |
@@ -225,3 +225,5 @@ The in-app Claude Desktop installer copies that helper into:
 - `read_meeting` and `read_dictation` read markdown directly from disk, not from the SQLite index
 - both read tools carry a size guard: raw dumps larger than `maxUnpaginatedReadCharacters` (~30k chars) — or any call passing `offset`/`limit` — come back as a paginated JSON window (`total_utterances`/`total_entries`, `offset`, `returned`, `truncated`, `next_offset`, `hint`) instead of the full markdown; small unpaginated reads stay byte-identical raw markdown, and `entry_id` reads are unaffected
 - source builds can run the server standalone, but shipped app builds bundle the helper for the one-click Claude Desktop installer
+- agent-query `app_version` is the owning Transcripted app version written by the installer, never `TranscriptedMCP.serverVersion`; omit missing app identity rather than inventing it
+- agent-query `source_count_bucket` counts distinct capture files, while `result_count_bucket` counts returned records at the tool's natural response grain
