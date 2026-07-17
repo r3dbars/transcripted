@@ -672,7 +672,8 @@ func testRepoCommandContract() {
         let contents = readRepoTextFile("Sources/TranscriptedCore/Audio/SCKAudioCapture.swift")
         assertTrue(
             contents.contains("SCKCaptureTimeoutError")
-                && contents.contains("timeout: DispatchTimeInterval = callbackTimeout")
+                && contents.contains("private let callbackTimeout: DispatchTimeInterval")
+                && contents.contains("timeout: callbackTimeout")
                 && contents.contains("wait(timeout: .now() + timeout)")
                 && contents.contains("permissionPromptCallbackTimeout")
                 && contents.contains("operation: \"shareable content fetch\"")
@@ -681,7 +682,7 @@ func testRepoCommandContract() {
             "ScreenCaptureKit waits should stay bounded while allowing first-run permission prompts longer than normal callbacks"
         )
         assertTrue(
-            contents.contains("stopStreamAndCleanupIfConfirmed")
+            contents.contains("stopStreamAndCleanupAfterFailedStartIfOwned")
                 && contents.contains("retainStreamReferenceAfterTimedOutStop")
                 && contents.contains("cleanupAfterLateCallback")
                 && contents.contains("running late stop callback cleanup")
@@ -695,6 +696,38 @@ func testRepoCommandContract() {
                 && contents.contains("refusing to prepare new stream because previous stream is still stopping")
                 && contents.contains("refusing to start stream while previous stop is still pending"),
             "ScreenCaptureKit should block new prepare/start attempts while an old timed-out stop callback is still pending"
+        )
+        assertTrue(
+            contents.contains("private static let maxRecoveryAttempts = 1")
+                && contents.contains("recoveryAttempts < Self.maxRecoveryAttempts")
+                && contents.contains("System audio reconnecting after capture interruption.")
+                && contents.contains("ScreenCaptureKit could not restart audio capture."),
+            "ScreenCaptureKit hard stalls should expose one bounded recovery before publishing terminal failure"
+        )
+        assertTrue(
+            contents.contains("stop(preservingRecoveryToken: nil)")
+                && contents.contains("stopSync(preservingRecoveryToken: nil)")
+                && contents.contains("recoveryEpochState.cancel(preserving: recoveryToken)")
+                && contents.contains("transitionToCapturingAndStartWatchdogIfCurrent")
+                && contents.contains("stopSync(preservingRecoveryToken: recoveryToken)"),
+            "official ScreenCaptureKit stops should invalidate recovery while internal cleanup preserves only its token"
+        )
+        assertTrue(
+            sourceOrder(
+                in: contents,
+                needles: [
+                    "at: \"before cleanup\"",
+                    "stopSync(preservingRecoveryToken: recoveryToken)",
+                    "at: \"after cleanup\"",
+                    "at: \"before prepare\"",
+                    "try self.prepare(preservingRecoveryToken: recoveryToken)",
+                    "at: \"after prepare\"",
+                    "at: \"before start\"",
+                    "try self.start(bufferCallback: callback, recoveryToken: recoveryToken)",
+                    "at: \"after start\"",
+                ]
+            ),
+            "ScreenCaptureKit recovery should recheck cancellation around cleanup, prepare, and start"
         )
     }
 
@@ -2741,10 +2774,50 @@ func testRepoCommandContract() {
             "normal stop should switch to transcribing and enqueue the captured audio instead of deleting scratch files"
         )
         assertTrue(
-            stopBlock.contains("guard let systemURL = files.systemURL else")
-                && stopBlock.contains("event: \"meeting_recording_missing_system_audio\"")
-                && stopBlock.contains("systemURL: systemURL"),
-            "a live meeting must not fall back to mic-only transcription when the finished system-audio source is missing"
+            !stopBlock.contains("guard let systemURL = files.systemURL else")
+                && stopBlock.contains("event: \"meeting_recording_missing_system_audio_mic_only\"")
+                && stopBlock.contains("MeetingRecordingFinalizationPolicy")
+                && stopBlock.contains("finalizedHealthInfo.markingSystemAudioMissing()")
+                && stopBlock.contains("systemURL: files.systemURL"),
+            "a meeting with finalized mic audio should use the labeled mic-only pipeline when system audio is missing"
+        )
+        assertTrue(
+            sourceOrder(
+                in: stopBlock,
+                needles: [
+                    "var finalizedHealthInfo = recordingSnapshot.healthInfo",
+                    "finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioMissing()",
+                    "event: \"meeting_recording_stopped\"",
+                    "\"meeting_capture_health_snapshot\"",
+                    "healthInfo: finalizedHealthInfo",
+                ]
+            ),
+            "final file availability must finalize capture health before diagnostics, analytics, and saved frontmatter"
+        )
+        let overlayContents = readRepoTextFile("Sources/UI/Overlay/MeetingOverlayController.swift")
+        assertTrue(
+            overlayContents.contains("exclamationmark.triangle.fill")
+                && overlayContents.contains("session.$systemAudioDegradationWarning")
+                && overlayContents.contains("case .systemAudio:")
+                && overlayContents.contains("acknowledgeSystemAudioDegradationWarning()"),
+            "system-audio degradation should stay visible in the recording pill and offer an explicit persistent warning"
+        )
+        let systemWarningBlock = sourceSlice(
+            overlayContents,
+            from: "private func applySystemAudioDegradationWarning(",
+            to: "private func clearSystemAudioPrompt()"
+        )
+        let inactivityWarningBlock = sourceSlice(
+            overlayContents,
+            from: "private func applyAudioInactivityWarning(",
+            to: "private func applyMicBoostPrompt("
+        )
+        assertTrue(
+            systemWarningBlock.contains("MeetingSystemAudioPromptPolicy.shouldPresentSystemAudioPrompt")
+                && systemWarningBlock.contains("meetingSession?.audioInactivityWarning != nil")
+                && !inactivityWarningBlock.contains("promptKind == .systemAudio")
+                && overlayContents.contains("state == .recording || isPrompting"),
+            "audio inactivity should retain prompt precedence while the system-audio warning stays latched and visible"
         )
         let pipelineContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift")
         assertTrue(

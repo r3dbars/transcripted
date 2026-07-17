@@ -693,7 +693,12 @@ extension Audio {
         }
 
         if let message = errorMessage {
-            if message.contains("Switched to") {
+            let normalizedMessage = message.lowercased()
+            if normalizedMessage.contains("reconnecting") {
+                // ScreenCaptureKit owns the bounded restart and clears this
+                // state by publishing nil after the replacement stream starts.
+                systemAudioStatus = .reconnecting
+            } else if message.contains("Switched to") {
                 // Brief reconnecting state, then back to healthy
                 systemAudioStatus = .reconnecting
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -702,7 +707,7 @@ extension Audio {
                         self.systemAudioStatus = .healthy
                     }
                 }
-            } else if message.contains("unavailable") || message.contains("failed") {
+            } else if normalizedMessage.contains("unavailable") || normalizedMessage.contains("failed") {
                 systemAudioStatus = .failed
                 systemAudioFailed = true
             }

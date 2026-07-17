@@ -49,6 +49,73 @@ final class RecordingHealthInfoOverrideTests: XCTestCase {
                        "overrideSystemAudioStatus = .failed must drive the success rate to 0")
     }
 
+    func testSilentSystemAudioOverrideDegradesCaptureQuality() {
+        let audio = Audio(paths: makePaths())
+        audio.systemAudioStatus = .unknown
+
+        let info = RecordingHealthInfo.from(
+            audio: audio,
+            systemCapture: nil,
+            overrideSystemAudioStatus: .silent
+        )
+
+        XCTAssertEqual(
+            info.captureQuality,
+            .degraded,
+            "prolonged system silence should remain visible in saved health metadata"
+        )
+    }
+
+    func testRecoveredSystemAudioWarningCanLatchDegradedMetadata() {
+        let info = RecordingHealthInfo(
+            captureQuality: .excellent,
+            audioGaps: 0,
+            deviceSwitches: 0,
+            gapDescriptions: []
+        ).markingSystemAudioDegraded()
+
+        XCTAssertEqual(info.captureQuality, .degraded)
+        XCTAssertNil(info.systemAudioMissing)
+    }
+
+    func testMissingSystemAudioDowngradesEveryPriorQualityGrade() {
+        let priorGrades: [RecordingHealthInfo.CaptureQuality] = [
+            .excellent,
+            .good,
+            .fair,
+            .degraded,
+        ]
+
+        for grade in priorGrades {
+            let finalized = RecordingHealthInfo(
+                captureQuality: grade,
+                audioGaps: 1,
+                deviceSwitches: 2,
+                gapDescriptions: ["gap"]
+            ).markingSystemAudioMissing()
+
+            XCTAssertEqual(
+                finalized.captureQuality,
+                .degraded,
+                "a missing final system track must override \(grade.rawValue) before telemetry and frontmatter"
+            )
+            XCTAssertEqual(finalized.systemAudioMissing, true)
+            XCTAssertEqual(finalized.audioGaps, 1)
+            XCTAssertEqual(finalized.deviceSwitches, 2)
+        }
+    }
+
+    func testMicAttenuationFactsSurviveMissingSystemAudioFinalization() {
+        let finalized = RecordingHealthInfo.perfect
+            .markingMicAttenuatedByCallApp(micBoostPrompt: "shown")
+            .markingSystemAudioMissing()
+
+        XCTAssertEqual(finalized.captureQuality, .degraded)
+        XCTAssertEqual(finalized.micAttenuatedByCallApp, true)
+        XCTAssertEqual(finalized.micBoostPrompt, "shown")
+        XCTAssertEqual(finalized.systemAudioMissing, true)
+    }
+
     func testHealthInfoOverrideFallsBackWhenNotFailed() {
         // A healthy override should not override the success rate; default
         // path returns 1.0 when systemCapture is nil and status is healthy.
