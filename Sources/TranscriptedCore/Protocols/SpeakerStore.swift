@@ -34,7 +34,10 @@ public protocol SpeakerStore: Sendable {
     func deleteSpeaker(id: UUID)
 
     /// Merge two speaker profiles (source absorbed into target)
-    func mergeProfiles(sourceId: UUID, into targetId: UUID)
+    func mergeProfiles(sourceId: UUID, into targetId: UUID) throws
+
+    /// Apply an ordered naming mutation batch under one persistence boundary.
+    func performMutationBatch(_ mutations: () throws -> Void) throws
 
     /// Merge profiles that share the same display name
     func mergeProfilesByName()
@@ -76,6 +79,10 @@ public protocol SpeakerStore: Sendable {
 }
 
 public extension SpeakerStore {
+    func performMutationBatch(_ mutations: () throws -> Void) throws {
+        try mutations()
+    }
+
     func mergeDuplicates(protecting protectedIds: Set<UUID>) {
         guard protectedIds.isEmpty else { return }
         mergeDuplicates()

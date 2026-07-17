@@ -6,18 +6,40 @@ import SQLite3
 @available(macOS 14.0, *)
 extension SpeakerDatabase {
 
+    enum ProfileMergeError: Error, LocalizedError {
+        case profileNotFound(sourceId: UUID, targetId: UUID)
+        case invalidEmbeddingState(sourceId: UUID, targetId: UUID)
+
+        var errorDescription: String? {
+            switch self {
+            case .profileNotFound:
+                return "Speaker merge could not find both profiles"
+            case .invalidEmbeddingState:
+                return "Speaker merge found incompatible profile embeddings"
+            }
+        }
+    }
+
     /// Set the display name for a speaker with provenance tracking
     /// - Parameters:
     ///   - id: Speaker profile UUID
     ///   - name: Display name to set
     ///   - source: Where the name came from (NameSource.userManual)
     public func setDisplayName(id: UUID, name: String, source: String = NameSource.userManual) {
+        if isExecutingOnQueue {
+            setDisplayNameImpl(id: id, name: name, source: source)
+            return
+        }
         queue.sync {
             setDisplayNameImpl(id: id, name: name, source: source)
         }
     }
 
     public func restoreProfile(_ profile: SpeakerProfile) {
+        if isExecutingOnQueue {
+            restoreProfileImpl(profile)
+            return
+        }
         queue.sync {
             restoreProfileImpl(profile)
         }
@@ -95,7 +117,7 @@ extension SpeakerDatabase {
 
     /// Increment the dispute count for a speaker (inference disagreed with DB name)
     public func incrementDisputeCount(id: UUID) {
-        queue.sync { [self] in
+        let increment = { [self] in
             guard isDatabaseOpen else { return }
             let sql = "UPDATE speakers SET dispute_count = dispute_count + 1 WHERE id = ?;"
             var statement: OpaquePointer?
@@ -109,11 +131,12 @@ extension SpeakerDatabase {
             }
             sqlite3_finalize(statement)
         }
+        if isExecutingOnQueue { increment() } else { queue.sync(execute: increment) }
     }
 
     /// Reset dispute count (after user manual rename or name confirmed)
     public func resetDisputeCount(id: UUID) {
-        queue.sync { [self] in
+        let reset = { [self] in
             guard isDatabaseOpen else { return }
             let sql = "UPDATE speakers SET dispute_count = 0 WHERE id = ?;"
             var statement: OpaquePointer?
@@ -127,6 +150,7 @@ extension SpeakerDatabase {
             }
             sqlite3_finalize(statement)
         }
+        if isExecutingOnQueue { reset() } else { queue.sync(execute: reset) }
     }
 
     // MARK: - Profile Lookup by Name
@@ -152,19 +176,32 @@ extension SpeakerDatabase {
     /// Merge source profile into target profile.
     /// Blends embeddings weighted by call count, sums call counts, bumps confidence.
     /// Transfers name from source if target has none. Deletes source profile.
-    public func mergeProfiles(sourceId: UUID, into targetId: UUID) {
-        queue.sync {
-            mergeProfilesImpl(sourceId: sourceId, into: targetId)
+    public func mergeProfiles(sourceId: UUID, into targetId: UUID) throws {
+        if isExecutingOnQueue {
+            try mergeProfilesImpl(
+                sourceId: sourceId,
+                into: targetId,
+                transactionAlreadyOpen: sqlite3_get_autocommit(db) == 0
+            )
+            return
+        }
+        try queue.sync {
+            try mergeProfilesImpl(sourceId: sourceId, into: targetId)
         }
     }
 
-    func mergeProfilesImpl(sourceId: UUID, into targetId: UUID, kind: String = SpeakerMergeKind.explicit) {
+    func mergeProfilesImpl(
+        sourceId: UUID,
+        into targetId: UUID,
+        kind: String = SpeakerMergeKind.explicit,
+        transactionAlreadyOpen: Bool = false
+    ) throws {
         guard let source = getSpeakerImpl(id: sourceId),
               let target = getSpeakerImpl(id: targetId) else {
             AppLogger.speakers.warning("Merge failed — profile not found", [
                 "sourceId": "\(sourceId)", "targetId": "\(targetId)"
             ])
-            return
+            throw ProfileMergeError.profileNotFound(sourceId: sourceId, targetId: targetId)
         }
 
         // Blend embeddings weighted by call count (stronger profile dominates)
@@ -177,7 +214,7 @@ extension SpeakerDatabase {
                 "targetDim": "\(target.embedding.count)",
                 "totalCalls": "\(Int(totalCalls))"
             ])
-            return
+            throw ProfileMergeError.invalidEmbeddingState(sourceId: sourceId, targetId: targetId)
         }
 
         let sourceWeight = Float(source.callCount) / totalCalls
@@ -187,74 +224,103 @@ extension SpeakerDatabase {
         }
         let normalized = SpeakerVectorMath.l2Normalize(blended)
 
-        // Transfer name from source if target has none
-        if target.displayName == nil, let name = source.displayName {
-            setDisplayNameImpl(id: targetId, name: name, source: source.nameSource ?? NameSource.userManual)
-        }
-
         // Update target: blended embedding, summed call count, bumped confidence
         let isoFormatter = ISO8601DateFormatter()
         let now = isoFormatter.string(from: Date())
         let newCallCount = target.callCount + source.callCount
         let newConfidence = min(1.0, target.confidence + 0.15)
 
-        // Wrap UPDATE + DELETE in a transaction so a crash between them can't orphan data
-        transaction {
+        let mergedDisplayName = target.displayName ?? source.displayName
+        let mergedNameSource = target.displayName == nil && source.displayName != nil
+            ? (source.nameSource ?? NameSource.userManual)
+            : target.nameSource
+
+        let performMerge = { [self] in
             // Safety net: snapshot both profiles + re-point provenance BEFORE the blend
             // overwrites the target and the source row is deleted, so a wrong merge can
             // be reconstructed into two distinct profiles later. Same transaction → atomic.
-            recordMergeEventImpl(source: source, target: target, kind: kind)
+            try recordMergeEventImpl(source: source, target: target, kind: kind)
 
             let sql = """
-            UPDATE speakers SET embedding = ?, last_seen = ?, call_count = ?, confidence = ?
+            UPDATE speakers
+            SET display_name = ?, name_source = ?, embedding = ?, last_seen = ?, call_count = ?, confidence = ?
             WHERE id = ?;
             """
-            var statement: OpaquePointer?
-            if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-                let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
-                sqlite3_bind_blob(statement, 1, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
-                sqlite3_bind_text(statement, 2, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                sqlite3_bind_int(statement, 3, Int32(newCallCount))
-                sqlite3_bind_double(statement, 4, newConfidence)
-                sqlite3_bind_text(statement, 5, (targetId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                if sqlite3_step(statement) != SQLITE_DONE {
-                    AppLogger.speakers.error("Failed to update target in merge", ["sqlite_error": dbErrorMessage(), "targetId": targetId.uuidString])
-                }
+            let statement = try prepareStatement(sql, operation: "prepare merge target update")
+            defer { sqlite3_finalize(statement) }
+            if let mergedDisplayName {
+                sqlite3_bind_text(statement, 1, (mergedDisplayName as NSString).utf8String, -1, SQLITE_TRANSIENT)
             } else {
-                AppLogger.speakers.error("Failed to prepare merge update", ["sqlite_error": dbErrorMessage()])
+                sqlite3_bind_null(statement, 1)
             }
-            sqlite3_finalize(statement)
+            if let mergedNameSource {
+                sqlite3_bind_text(statement, 2, (mergedNameSource as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            } else {
+                sqlite3_bind_null(statement, 2)
+            }
+            let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
+            sqlite3_bind_blob(statement, 3, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 4, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(statement, 5, Int32(newCallCount))
+            sqlite3_bind_double(statement, 6, newConfidence)
+            sqlite3_bind_text(statement, 7, (targetId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            try requireDone(statement, operation: "step merge target update", expectedChanges: 1)
 
             // Exemplars are a rebuildable cache of gated centroids tied to a specific identity/average.
             // The merge blends a second voice into the target and deletes the source, so drop both
             // sets: the source's would orphan, and the target's no longer match its changed average.
             // They re-accumulate from future confident matches. Un-merge restores neither (both start
             // empty), which degrades to single-average matching — never wrong, just less enriched.
-            deleteExemplarsImpl(profileId: sourceId)
-            deleteExemplarsImpl(profileId: targetId)
+            try deleteIdentityRowsForMerge(
+                table: "speaker_exemplars",
+                profileId: sourceId,
+                operation: "delete source exemplars"
+            )
+            try deleteIdentityRowsForMerge(
+                table: "speaker_exemplars",
+                profileId: targetId,
+                operation: "delete target exemplars"
+            )
             // Negative exemplars are also identity-bound. The source profile is deleted, so its
             // rejected samples must not remain as orphaned voice embeddings in the database.
-            deleteNegativeExemplarsImpl(profileId: sourceId)
+            try deleteIdentityRowsForMerge(
+                table: "speaker_negative_exemplars",
+                profileId: sourceId,
+                operation: "delete source negative exemplars"
+            )
 
             // Delete source profile
             let deleteSql = "DELETE FROM speakers WHERE id = ?;"
-            var deleteStmt: OpaquePointer?
-            if sqlite3_prepare_v2(db, deleteSql, -1, &deleteStmt, nil) == SQLITE_OK {
-                sqlite3_bind_text(deleteStmt, 1, (sourceId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                if sqlite3_step(deleteStmt) != SQLITE_DONE {
-                    AppLogger.speakers.error("Failed to delete source in merge", ["sqlite_error": dbErrorMessage(), "sourceId": sourceId.uuidString])
-                }
-            } else {
-                AppLogger.speakers.error("Failed to prepare merge delete", ["sqlite_error": dbErrorMessage()])
-            }
-            sqlite3_finalize(deleteStmt)
+            let deleteStmt = try prepareStatement(deleteSql, operation: "prepare merge source delete")
+            defer { sqlite3_finalize(deleteStmt) }
+            sqlite3_bind_text(deleteStmt, 1, (sourceId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            try requireDone(deleteStmt, operation: "step merge source delete", expectedChanges: 1)
         }
 
-        AppLogger.speakers.info("Merged profiles", [
-            "source": source.displayName ?? "\(sourceId)",
-            "target": target.displayName ?? "\(targetId)",
-            "newCallCount": "\(newCallCount)"
-        ])
+        if transactionAlreadyOpen {
+            try performMerge()
+        } else {
+            // Every persistent identity mutation belongs to this one throwing transaction.
+            try throwingTransaction(performMerge)
+        }
+
+        if !transactionAlreadyOpen {
+            AppLogger.speakers.info("Merged profiles", [
+                "source": source.displayName ?? "\(sourceId)",
+                "target": mergedDisplayName ?? "\(targetId)",
+                "newCallCount": "\(newCallCount)"
+            ])
+        }
+    }
+
+    private func deleteIdentityRowsForMerge(table: String, profileId: UUID, operation: String) throws {
+        let statement = try prepareStatement(
+            "DELETE FROM \(table) WHERE profile_id = ?;",
+            operation: "prepare \(operation)"
+        )
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, (profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        try requireDone(statement, operation: "step \(operation)")
     }
 
     // MARK: - Duplicate Merging
@@ -316,11 +382,17 @@ extension SpeakerDatabase {
                 }
 
                 // Merge via mergeProfilesImpl (blends embeddings, transfers name, deletes source)
-                mergeProfilesImpl(sourceId: absorbed.id, into: keeper.id, kind: SpeakerMergeKind.duplicate)
+                do {
+                    try mergeProfilesImpl(sourceId: absorbed.id, into: keeper.id, kind: SpeakerMergeKind.duplicate)
+                } catch {
+                    AppLogger.speakers.error("Duplicate speaker merge failed", ["error": error.localizedDescription])
+                    continue
+                }
 
                 mergedIds.insert(absorbed.id)
                 mergeCount += 1
                 AppLogger.speakers.info("Merged duplicate speaker", ["absorbed": absorbed.displayName ?? "unnamed", "keeper": keeper.displayName ?? "unnamed", "similarity": String(format: "%.3f", similarity)])
+                if absorbed.id == speakers[i].id { break }
             }
         }
 
@@ -385,7 +457,12 @@ extension SpeakerDatabase {
             let keeper = sorted[0]
 
             for source in sorted.dropFirst() {
-                mergeProfilesImpl(sourceId: source.id, into: keeper.id, kind: SpeakerMergeKind.byName)
+                do {
+                    try mergeProfilesImpl(sourceId: source.id, into: keeper.id, kind: SpeakerMergeKind.byName)
+                } catch {
+                    AppLogger.speakers.error("Same-name speaker merge failed", ["error": error.localizedDescription])
+                    continue
+                }
                 mergeCount += 1
             }
 
