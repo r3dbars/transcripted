@@ -444,7 +444,10 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
                     generation: startGeneration
                 )
             } else {
-                cleanupStreamReference(stream, generation: startGeneration)
+                cleanupPreparedStreamReferenceIfCurrent(
+                    stream,
+                    generation: startGeneration
+                )
             }
             if !recoveryWasCancelled {
                 publishErrorMessage(error.localizedDescription)
@@ -775,6 +778,27 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         generation: UInt64
     ) {
         cleanupIfCurrent(generation: generation, stream: expectedStream)
+    }
+
+    private func cleanupPreparedStreamReferenceIfCurrent(
+        _ expectedStream: any SCKStreamControlling,
+        generation: UInt64
+    ) {
+        captureStateLock.lock()
+        let didCleanup: Bool
+        if streamPhase == .prepared {
+            didCleanup = clearStreamStateLocked(
+                expectedIdentity: expectedStream.captureIdentity,
+                expectedGeneration: generation
+            )
+        } else {
+            didCleanup = false
+        }
+        captureStateLock.unlock()
+
+        if didCleanup {
+            finishCleanupSideEffects()
+        }
     }
 
     private func stopStreamAndCleanupAfterFailedStartIfOwned(

@@ -98,6 +98,51 @@ private final class ControlledSCKStream: SCKStreamControlling, @unchecked Sendab
 
 @available(macOS 26.0, *)
 final class SCKAudioCaptureInterleavingTests: XCTestCase {
+    func testOverlappingStartCannotDiscardFirstInFlightStream() {
+        let stream = ControlledSCKStream()
+        stream.blocksStartInvocation = true
+        stream.autoCompletesStart = false
+
+        let capture = SCKAudioCapture(
+            callbackTimeout: .milliseconds(250),
+            callbackTimeoutSeconds: 1
+        )
+        capture.installPreparedStreamForTesting(stream)
+
+        let firstStartFinished = expectation(description: "first start completes")
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = try? capture.start(bufferCallback: { _ in })
+            firstStartFinished.fulfill()
+        }
+        XCTAssertEqual(stream.startInvocationEntered.wait(timeout: .now() + 1), .success)
+
+        let secondStartFinished = expectation(description: "overlapping start is rejected")
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try capture.start(bufferCallback: { _ in })
+                XCTFail("overlapping start should be rejected")
+            } catch {}
+            secondStartFinished.fulfill()
+        }
+
+        Thread.sleep(forTimeInterval: 0.02)
+        stream.allowStartInvocationToReturn.signal()
+        wait(for: [secondStartFinished], timeout: 1)
+
+        var state = capture.stateSnapshotForTesting()
+        XCTAssertEqual(state.streamIdentity, stream.captureIdentity)
+        XCTAssertEqual(state.phase, "starting")
+        XCTAssertEqual(stream.stopCallCount, 0)
+
+        stream.completeStart()
+        wait(for: [firstStartFinished], timeout: 1)
+        state = capture.stateSnapshotForTesting()
+        XCTAssertEqual(state.streamIdentity, stream.captureIdentity)
+        XCTAssertEqual(state.phase, "capturing")
+        XCTAssertTrue(state.isCapturing)
+        capture.stopSync()
+    }
+
     func testOfficialStopOwnsStreamWhenStartRequestIsInFlight() {
         let stream = ControlledSCKStream()
         stream.blocksStartInvocation = true
