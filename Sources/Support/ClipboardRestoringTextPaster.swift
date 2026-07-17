@@ -624,6 +624,9 @@ final class ClipboardRestoringTextPaster {
     }
 
     func discardPasteRetry() {
+        // Dismissing "Paste Again" must keep the fresh dictation available for manual
+        // Cmd+V recovery. Full cancellation uses cancelPendingClipboardRestore() to
+        // restore the pre-dictation clipboard instead.
         retainedClipboardRestoreForPasteRetry = nil
     }
 

@@ -1669,6 +1669,14 @@ func testClipboardRestoringTextPaster() async {
             paster.discardPasteRetry()
             return outcome
         }
+        let clipboardAfterDismissal = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            clipboardAfterDismissal,
+            dictationText,
+            "dismissing Paste Again should keep fresh dictation available for manual paste"
+        )
         let retryOutcome = await MainActor.run {
             targetAdapter.confirmsPaste = true
             return paster.retryPaste(
