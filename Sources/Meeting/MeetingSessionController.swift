@@ -48,6 +48,7 @@ final class MeetingSessionController: ObservableObject {
         case audioInactivityPrompt = "audio_inactivity_prompt"
         case audioInactivityTimeout = "audio_inactivity_timeout"
         case audioRouteWarning = "audio_route_warning"
+        case systemAudioWarning = "system_audio_warning"
         case unknown = "unknown"
     }
 
@@ -128,6 +129,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var audioInactivityWarning: MeetingAudioInactivityWarning?
     @Published private(set) var isMicBoostPromptVisible = false
     @Published private(set) var audioRouteWarning: CaptureRouteStabilizationOutcome?
+    @Published private(set) var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
 
     @Published private(set) var failedMeetings: [FailedMeetingItem] = []
     @Published private(set) var warmupStatus: ModelWarmupStatus = .ready {
@@ -528,6 +530,7 @@ final class MeetingSessionController: ObservableObject {
         micBoostPromptOutcome = .notShown
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
+        systemAudioDegradationWarning = nil
         activeRecordingSuggestedTitle = resolvedMeetingTitle
         installSharedDictationMicRelay()
         startLiveCodexSessionIfNeeded(title: resolvedMeetingTitle)
@@ -745,13 +748,12 @@ final class MeetingSessionController: ObservableObject {
         isFinishingRecording = true
         defer { isFinishingRecording = false }
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "stop_requested")
+        let recordingSnapshot = makeRecordingStopSnapshot()
         _ = audioInactivityDetector.stopRecording()
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
         clearActiveRecordingIdentity()
-
-        let recordingSnapshot = makeRecordingStopSnapshot()
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -776,8 +778,12 @@ final class MeetingSessionController: ObservableObject {
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
-        let shouldAwaitFinalLiveCodexTranscript =
-            files.micURL != nil && files.systemURL != nil && !stopResult.didTimeOut
+        let shouldAwaitFinalLiveCodexTranscript = MeetingRecordingFinalizationPolicy
+            .shouldAwaitLiveCodexFinalTranscript(
+                micFilePresent: files.micURL != nil,
+                systemFilePresent: files.systemURL != nil,
+                stopTimedOut: stopResult.didTimeOut
+            )
         finishLiveCodexSessionForActiveRecording(
             status: shouldAwaitFinalLiveCodexTranscript ? .stopped : .failed,
             shouldAwaitFinalTranscript: shouldAwaitFinalLiveCodexTranscript
@@ -791,6 +797,15 @@ final class MeetingSessionController: ObservableObject {
         // reset at the NEXT recording start, so the value is stable through stop.
         let micAttenuatedByCallApp = MeetingCaptureVolumeDiagnostics.isVoiceProcessedUnrecovered(in: stopCaptureDiagnostics)
         stopCaptureDiagnostics["mic_boost_prompt"] = micBoostPromptOutcome.rawValue
+        var finalizedHealthInfo = recordingSnapshot.healthInfo
+        if micAttenuatedByCallApp {
+            finalizedHealthInfo = finalizedHealthInfo.markingMicAttenuatedByCallApp(
+                micBoostPrompt: micBoostPromptOutcome.rawValue
+            )
+        }
+        if files.systemURL == nil {
+            finalizedHealthInfo = finalizedHealthInfo.markingSystemAudioMissing()
+        }
         activeRecordingTrigger = .unknown
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
@@ -804,15 +819,15 @@ final class MeetingSessionController: ObservableObject {
                 "mic_file_present": boolString(files.micURL != nil),
                 "system_file_present": boolString(files.systemURL != nil),
                 "stop_timed_out": boolString(stopResult.didTimeOut),
-                "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
-                "audio_gaps": "\(recordingSnapshot.healthInfo.audioGaps)",
-                "device_switches": "\(recordingSnapshot.healthInfo.deviceSwitches)"
+                "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
+                "audio_gaps": "\(finalizedHealthInfo.audioGaps)",
+                "device_switches": "\(finalizedHealthInfo.deviceSwitches)"
             ],
             uniquingKeysWith: { _, new in new }
         )
 
         DiagnosticsTrail.record(
-            level: recordingSnapshot.systemAudioStatus.isWarning ? .warning : .info,
+            level: recordingSnapshot.systemAudioStatus.isWarning || files.systemURL == nil ? .warning : .info,
             engine: "meeting",
             event: "meeting_recording_stopped",
             message: "Meeting recording stopped",
@@ -822,11 +837,11 @@ final class MeetingSessionController: ObservableObject {
             "meeting_recording_stopped",
             properties: stopCaptureDiagnostics.merging(
                 [
-                    "capture_quality": recordingSnapshot.healthInfo.captureQuality.rawValue,
+                    "capture_quality": finalizedHealthInfo.captureQuality.rawValue,
                     "duration_bucket": AnalyticsReporter.durationBucket(seconds: recordingSnapshot.durationSeconds),
-                    "gap_count_bucket": AnalyticsReporter.countBucket(recordingSnapshot.healthInfo.audioGaps),
+                    "gap_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.audioGaps),
                     "reason": reason.rawValue,
-                    "route_change_count_bucket": AnalyticsReporter.countBucket(recordingSnapshot.healthInfo.deviceSwitches),
+                    "route_change_count_bucket": AnalyticsReporter.countBucket(finalizedHealthInfo.deviceSwitches),
                     "system_stream_present": boolString(files.systemURL != nil),
                     "stop_timed_out": boolString(stopResult.didTimeOut),
                     "trigger": recordingSnapshot.trigger.rawValue,
@@ -839,7 +854,7 @@ final class MeetingSessionController: ObservableObject {
             properties: MeetingCaptureHealthTelemetry.snapshotProperties(
                 .init(
                     captureDiagnostics: stopCaptureDiagnostics,
-                    health: captureHealthFacts(from: recordingSnapshot.healthInfo),
+                    health: captureHealthFacts(from: finalizedHealthInfo),
                     trigger: recordingSnapshot.trigger.rawValue,
                     reason: reason.rawValue,
                     durationSeconds: recordingSnapshot.durationSeconds,
@@ -851,7 +866,7 @@ final class MeetingSessionController: ObservableObject {
         reportCaptureHealthIfNeeded(
             snapshot: recordingSnapshot.pipelineSnapshot,
             captureDiagnostics: stopCaptureDiagnostics,
-            healthInfo: recordingSnapshot.healthInfo,
+            healthInfo: finalizedHealthInfo,
             trigger: recordingSnapshot.trigger,
             reason: reason,
             durationSeconds: recordingSnapshot.durationSeconds,
@@ -937,54 +952,26 @@ final class MeetingSessionController: ObservableObject {
             return
         }
 
-        guard let systemURL = files.systemURL else {
-            let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
-                micAudioURL: micURL,
-                systemAudioURL: nil,
-                errorMessage: "Recording stopped without system audio.",
-                meetingTitle: recordingSnapshot.suggestedTitle,
-                recordingDate: recordingSnapshot.recordingStartedAt
-            )
+        if files.systemURL == nil {
             DiagnosticsTrail.record(
-                level: .error,
+                level: .warning,
                 engine: "meeting",
-                event: "meeting_recording_missing_system_audio",
-                message: "Meeting recording stopped without a system-audio file",
+                event: "meeting_recording_missing_system_audio_mic_only",
+                message: "Meeting recording will continue through the mic-only recovery pipeline",
                 context: baseDiagnosticsContext(
                     extra: [
                         "reason": reason.rawValue,
                         "mic_file_present": boolString(true),
-                        "preserved_for_retry": boolString(preserved)
+                        "partial_output": boolString(true)
                     ]
                 )
             )
-            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "missing_system_audio")
-            state = .error("System audio was missing. Open Transcripted Home to retry the saved meeting.")
-            return
-        }
-
-        // Issue #500: when stop diagnostics classified an unrecovered
-        // voice-processed quiet mic, ride the facts into the saved transcript
-        // frontmatter so Home can surface the enable-for-next-time hint.
-        let healthInfoForSave: RecordingHealthInfo
-        if micAttenuatedByCallApp {
-            let base = recordingSnapshot.healthInfo
-            healthInfoForSave = RecordingHealthInfo(
-                captureQuality: base.captureQuality,
-                audioGaps: base.audioGaps,
-                deviceSwitches: base.deviceSwitches,
-                gapDescriptions: base.gapDescriptions,
-                micAttenuatedByCallApp: true,
-                micBoostPrompt: micBoostPromptOutcome.rawValue
-            )
-        } else {
-            healthInfoForSave = recordingSnapshot.healthInfo
         }
 
         let outcome = transcriptionQueue.enqueueTranscriptionJob(
             micURL: micURL,
-            systemURL: systemURL,
-            healthInfo: healthInfoForSave,
+            systemURL: files.systemURL,
+            healthInfo: finalizedHealthInfo,
             captureDiagnostics: stopCaptureDiagnostics,
             meetingTitle: recordingSnapshot.suggestedTitle,
             recordingDate: recordingSnapshot.recordingStartedAt ?? Date(),
@@ -1026,6 +1013,23 @@ final class MeetingSessionController: ObservableObject {
             context: baseDiagnosticsContext(
                 extra: [
                     "duration_ms": "\(Int(recordingDuration * 1000))"
+                ]
+            )
+        )
+    }
+
+    func acknowledgeSystemAudioDegradationWarning() {
+        guard let warning = systemAudioDegradationWarning,
+              warning.shouldPresentPrompt else { return }
+        systemAudioDegradationWarning = warning.dismissingPrompt()
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_system_audio_warning_acknowledged",
+            message: "System audio degradation warning acknowledged",
+            context: baseDiagnosticsContext(
+                extra: [
+                    "duration_ms": "\(Int(recordingDuration * 1000))",
+                    "warning_phase": warning.phase.diagnosticName
                 ]
             )
         )
@@ -1195,6 +1199,7 @@ final class MeetingSessionController: ObservableObject {
         activeRecordingIdentity = nil
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil
+        systemAudioDegradationWarning = nil
     }
 
     func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
@@ -1877,6 +1882,7 @@ final class MeetingSessionController: ObservableObject {
                     // the recording it offered to fix.
                     self.isMicBoostPromptVisible = false
                     self.audioRouteWarning = nil
+                    self.systemAudioDegradationWarning = nil
                 }
                 self.applyAudioInactivityEvent(event)
             }
@@ -1943,6 +1949,11 @@ final class MeetingSessionController: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] status in
                 guard let self else { return }
+                self.systemAudioDegradationWarning = MeetingSystemAudioDegradationPolicy.next(
+                    current: self.systemAudioDegradationWarning,
+                    status: MeetingSystemAudioStatusCopy.caseValue(for: status),
+                    isRecording: self.isRecording
+                )
                 let level: EventLevel = status.isWarning ? .warning : .info
                 DiagnosticsTrail.record(
                     level: level,
@@ -3086,11 +3097,15 @@ final class MeetingSessionController: ObservableObject {
     private func makeRecordingStopSnapshot() -> RecordingStopSnapshot {
         let systemAudioStatus = capture.systemAudioStatus
         let durationSeconds = recordingDuration
+        let baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
+        let healthInfo = systemAudioDegradationWarning == nil
+            ? baseHealthInfo
+            : baseHealthInfo.markingSystemAudioDegraded()
         return RecordingStopSnapshot(
             trigger: activeRecordingTrigger,
             systemAudioStatus: systemAudioStatus,
             durationSeconds: durationSeconds,
-            healthInfo: capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus),
+            healthInfo: healthInfo,
             pipelineSnapshot: capture.pipelineDiagnosticsSnapshot(
                 overrideSystemAudioStatus: systemAudioStatus
             ),

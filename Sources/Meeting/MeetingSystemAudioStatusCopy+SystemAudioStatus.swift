@@ -9,17 +9,21 @@ import TranscriptedCore
 /// case to the matching Foundation-pure `Case`, so behavior stays identical.
 extension MeetingSystemAudioStatusCopy {
     static func message(for status: SystemAudioStatus) -> String {
+        message(for: caseValue(for: status))
+    }
+
+    static func caseValue(for status: SystemAudioStatus) -> Case {
         switch status {
         case .unknown:
-            return message(for: Case.unknown)
+            return .unknown
         case .healthy:
-            return message(for: Case.healthy)
+            return .healthy
         case .reconnecting:
-            return message(for: Case.reconnecting)
+            return .reconnecting
         case .silent:
-            return message(for: Case.silent)
+            return .silent
         case .failed:
-            return message(for: Case.failed)
+            return .failed
         }
     }
 }

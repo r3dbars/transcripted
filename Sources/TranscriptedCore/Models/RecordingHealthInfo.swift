@@ -54,13 +54,37 @@ public struct RecordingHealthInfo: Sendable {
 
     public func markingSystemAudioMissing() -> RecordingHealthInfo {
         RecordingHealthInfo(
-            captureQuality: captureQuality == .excellent ? .degraded : captureQuality,
+            captureQuality: .degraded,
             audioGaps: audioGaps,
             deviceSwitches: deviceSwitches,
             gapDescriptions: gapDescriptions,
             micAttenuatedByCallApp: micAttenuatedByCallApp,
             micBoostPrompt: micBoostPrompt,
             systemAudioMissing: true
+        )
+    }
+
+    public func markingMicAttenuatedByCallApp(micBoostPrompt: String) -> RecordingHealthInfo {
+        RecordingHealthInfo(
+            captureQuality: captureQuality,
+            audioGaps: audioGaps,
+            deviceSwitches: deviceSwitches,
+            gapDescriptions: gapDescriptions,
+            micAttenuatedByCallApp: true,
+            micBoostPrompt: micBoostPrompt,
+            systemAudioMissing: systemAudioMissing
+        )
+    }
+
+    public func markingSystemAudioDegraded() -> RecordingHealthInfo {
+        RecordingHealthInfo(
+            captureQuality: .degraded,
+            audioGaps: audioGaps,
+            deviceSwitches: deviceSwitches,
+            gapDescriptions: gapDescriptions,
+            micAttenuatedByCallApp: micAttenuatedByCallApp,
+            micBoostPrompt: micBoostPrompt,
+            systemAudioMissing: systemAudioMissing
         )
     }
 
@@ -79,7 +103,9 @@ public struct RecordingHealthInfo: Sendable {
     ) -> RecordingHealthInfo {
         let effectiveSystemAudioStatus = overrideSystemAudioStatus ?? audio.systemAudioStatus
         let successRate: Double = {
-            if audio.systemAudioFailed || effectiveSystemAudioStatus == .failed {
+            if audio.systemAudioFailed
+                || effectiveSystemAudioStatus == .failed
+                || effectiveSystemAudioStatus == .silent {
                 return 0.0
             }
             return systemCapture?.bufferSuccessRate ?? 1.0
