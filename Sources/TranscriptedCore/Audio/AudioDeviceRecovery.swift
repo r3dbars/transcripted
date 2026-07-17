@@ -13,6 +13,35 @@ enum MicCaptureRestartReason {
     case processingChange
 }
 
+enum MicRecoveryReadinessPolicy {
+    static func deliveredNewBuffer(before: Int, after: Int) -> Bool {
+        after > before
+    }
+}
+
+enum MicRecoveryRetryPolicy {
+    static func shouldResetMeetingSelectionBeforeRetry(
+        for reason: MicCaptureRestartReason
+    ) -> Bool {
+        switch reason {
+        case .deviceChange:
+            return true
+        case .processingChange:
+            return false
+        }
+    }
+}
+
+enum MicWatchdogArmingPolicy {
+    static func shouldArm(afterNonemptyBufferCount bufferCount: Int) -> Bool {
+        bufferCount == 1
+    }
+
+    static func shouldArmAfterSuccessfulStart(nonemptyBufferCount: Int) -> Bool {
+        nonemptyBufferCount > 0
+    }
+}
+
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
 /// Runs on background threads — NOT @MainActor.
 extension Audio {
@@ -23,7 +52,7 @@ extension Audio {
         lastBufferTime = CACurrentMediaTime()
         watchdogTimer?.invalidate()
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            guard let self = self, self.isRecording else { return }
+            guard let self = self, self.isRecording, !self.isMicRecovering else { return }
 
             let timeSinceLastBuffer = CACurrentMediaTime() - self.lastBufferTime
 
@@ -89,7 +118,7 @@ extension Audio {
         defer { isMicRecovering = false }
         lastRecoveryTime = Date()
 
-        guard let engine = engine, let inputNode = inputNode else { return }
+        guard let currentEngine = engine, let currentInputNode = inputNode else { return }
 
         // Track device switch for health monitoring. Deliberate processing
         // restarts stay out of deviceSwitchCount so health metadata and
@@ -118,14 +147,15 @@ extension Audio {
                 return
             }
             tearDownInputTapSafely(
-                engine: engine,
-                inputNode: inputNode,
+                engine: currentEngine,
+                inputNode: currentInputNode,
                 operation: "device_recovery_reset"
             )
-            engine.reset()
-            // engine.reset() clears VPIO state on the input node; require re-arm.
-            voiceProcessingEnabled = false
-            self.inputNode = engine.inputNode
+            disarmVoiceProcessing(
+                on: currentInputNode,
+                reason: "device_recovery_replace_graph"
+            )
+            currentEngine.reset()
             didResetGraph = true
         }
         guard didResetGraph else {
@@ -145,50 +175,36 @@ extension Audio {
             return
         }
 
-        // Get new device format
-        guard let newInputNode = self.inputNode else {
-            AppLogger.audioMic.error("Failed to get input node after reset")
-            return
-        }
-
-        // Re-enable VPIO after the HAL settles so setVoiceProcessingEnabled
-        // queries a stable device. Skips silently if VPIO can't engage on the
-        // new device, in which case recordingFormat(for:) falls back to the
-        // hardware format. Then refresh software AGC from the user's selected
-        // mode so raw/off stays raw after device recovery.
+        // A rejected device bind can leave the node half-switched. Rebuild the
+        // graph from scratch, retry once, and validate both device ID and
+        // hardware format before installing another tap.
         let bluetoothInputWasSelected = reason == .deviceChange && meetingInputIsBluetooth()
-        var recordingFormat = withAudioGraphLock {
-            applyMeetingInputDevice(
-                to: newInputNode,
+        let preparedGraph: PreparedMeetingInputGraph
+        do {
+            preparedGraph = try makeReadyMeetingInputGraph(
                 operation: "device_recovery",
+                resetMeetingSelectionBeforeRetry: MicRecoveryRetryPolicy
+                    .shouldResetMeetingSelectionBeforeRetry(for: reason),
+                sessionGeneration: sessionGeneration,
                 routeWasUnstable: bluetoothInputWasSelected
             )
-            armVoiceProcessing(on: newInputNode)
-            refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
-
-            // Read the format the tap will actually deliver (VPIO-aware when
-            // armVoiceProcessing succeeded above, hardware format otherwise).
-            return self.recordingFormat(for: newInputNode)
-        }
-        var recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat)
-        if recordingSnapshot == nil {
-            AppLogger.audioMic.warning("Recovery format invalid after first read, retrying", [
-                "sampleRate": "\(recordingFormat.sampleRate)",
-                "channels": "\(recordingFormat.channelCount)"
+        } catch {
+            AppLogger.audioMic.error("Failed to prepare microphone recovery graph", [
+                "error": error.localizedDescription
             ])
-            Thread.sleep(forTimeInterval: 0.3)
-            recordingFormat = withAudioGraphLock {
-                self.recordingFormat(for: newInputNode)
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.recordingSessionGeneration == sessionGeneration else { return }
+                self.stop()
+                self.error = "Microphone recovery failed. Reconnect your audio device or try quitting and reopening Transcripted."
             }
-            recordingSnapshot = AudioRecordingFormatPolicy.snapshot(recordingFormat)
-        }
-        guard let recordingSnapshot else {
-            AppLogger.audioMic.error("Recovery format remained invalid", [
-                "sampleRate": "\(recordingFormat.sampleRate)",
-                "channels": "\(recordingFormat.channelCount)"
-            ])
             return
         }
+        let engine = preparedGraph.engine
+        let newInputNode = preparedGraph.inputNode
+        let recordingFormat = preparedGraph.recordingFormat
+        let recordingSnapshot = preparedGraph.recordingSnapshot
+        refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
         let oldChannelCount = self.inputChannelCount
         AppLogger.audioMic.info("Rebuilt mic engine on pinned meeting input", ["sampleRate": "\(recordingSnapshot.sampleRate)", "channels": "\(recordingSnapshot.channelCount)"])
 
@@ -264,7 +280,9 @@ extension Audio {
             return
         }
 
-        // Restart engine
+        // Restart engine. `engine.start()` only proves the graph was accepted;
+        // it does not prove the selected microphone can deliver frames.
+        let bufferCountBeforeRestart = micBufferCount
         do {
             try withAudioGraphLock {
                 guard sessionGeneration == recordingSessionGeneration else {
@@ -291,21 +309,25 @@ extension Audio {
                     throw error
                 }
             }
-            lastBufferTime = CACurrentMediaTime() // Reset watchdog
-
-            let transientMessage = reason == .processingChange ? "Mic boost enabled" : "Switched to default mic"
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.error = transientMessage
-
-                // Clear error after 3 seconds (use weak self to prevent retain)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                    guard let self = self else { return }
-                    if self.error == transientMessage {
-                        self.error = nil
-                    }
-                }
+            guard waitForMicBuffer(
+                after: bufferCountBeforeRestart,
+                sessionGeneration: sessionGeneration,
+                timeout: 2.0
+            ) else {
+                throw NSError(
+                    domain: "Audio",
+                    code: 6,
+                    userInfo: [NSLocalizedDescriptionKey: "The microphone restarted but did not deliver audio."]
+                )
             }
+
+            // Recovery notices are status, not errors. `Audio.error` is a
+            // terminal bridge channel and must only carry real failures.
+            AppLogger.audioMic.info(
+                reason == .processingChange
+                    ? "Microphone processing restart confirmed by audio frame"
+                    : "Microphone device recovery confirmed by audio frame"
+            )
 
             // Record the true missing-buffer interval. The watchdog only
             // invokes recovery after buffers have already been absent for a
@@ -336,10 +358,33 @@ extension Audio {
             }
             AppLogger.audioMic.error("Failed to restart engine", ["error": error.localizedDescription])
             DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.error = "Microphone recovery failed. Reconnect your audio device or try quitting and reopening Transcripted."
+                guard let self,
+                      self.recordingSessionGeneration == sessionGeneration else { return }
                 self.stop()
+                self.error = "Microphone recovery failed. Reconnect your audio device or try quitting and reopening Transcripted."
             }
         }
+    }
+
+    private func waitForMicBuffer(
+        after previousBufferCount: Int,
+        sessionGeneration: UInt64,
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = CACurrentMediaTime() + timeout
+        while CACurrentMediaTime() < deadline {
+            guard sessionGeneration == recordingSessionGeneration else { return false }
+            if MicRecoveryReadinessPolicy.deliveredNewBuffer(
+                before: previousBufferCount,
+                after: micBufferCount
+            ) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        return MicRecoveryReadinessPolicy.deliveredNewBuffer(
+            before: previousBufferCount,
+            after: micBufferCount
+        )
     }
 }

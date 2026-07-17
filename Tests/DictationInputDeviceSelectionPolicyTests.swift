@@ -87,6 +87,79 @@ func testDictationInputDeviceSelectionPolicy() {
         )
     }
 
+    runSuite("DictationPersistentInputRuntimePolicy preserves external microphone choices") {
+        assertEqual(
+            DictationPersistentInputRuntimePolicy.action(
+                preferenceEnabled: true,
+                runtimeOwnershipRelinquished: false,
+                defaultInputChanged: true,
+                deviceListChanged: true,
+                currentInputID: "airpods",
+                desiredInputID: "built-in",
+                lastMaintainedInputID: "built-in",
+                lastMaintainedInputIsAvailable: true
+            ),
+            .preserveExternalSelection,
+            "an external change away from Transcripted's available maintained input should relinquish ownership even during profile churn"
+        )
+        assertEqual(
+            DictationPersistentInputRuntimePolicy.action(
+                preferenceEnabled: true,
+                runtimeOwnershipRelinquished: false,
+                defaultInputChanged: true,
+                deviceListChanged: true,
+                currentInputID: "built-in",
+                desiredInputID: "usb",
+                lastMaintainedInputID: "missing-usb",
+                lastMaintainedInputIsAvailable: false
+            ),
+            .reconcile,
+            "a disconnected maintained device should allow normal fallback and reconnect handling"
+        )
+        assertEqual(
+            DictationPersistentInputRuntimePolicy.action(
+                preferenceEnabled: true,
+                runtimeOwnershipRelinquished: false,
+                defaultInputChanged: true,
+                deviceListChanged: false,
+                currentInputID: "built-in",
+                desiredInputID: "built-in",
+                lastMaintainedInputID: "built-in",
+                lastMaintainedInputIsAvailable: true
+            ),
+            .reconcile,
+            "Transcripted's own completed input write should reconcile without relinquishing"
+        )
+        assertEqual(
+            DictationPersistentInputRuntimePolicy.action(
+                preferenceEnabled: true,
+                runtimeOwnershipRelinquished: true,
+                defaultInputChanged: false,
+                deviceListChanged: true,
+                currentInputID: "airpods",
+                desiredInputID: "built-in",
+                lastMaintainedInputID: Optional<String>.none,
+                lastMaintainedInputIsAvailable: false
+            ),
+            .preserveExternalSelection,
+            "unrelated topology churn must not silently reclaim runtime ownership"
+        )
+        assertEqual(
+            DictationPersistentInputRuntimePolicy.action(
+                preferenceEnabled: false,
+                runtimeOwnershipRelinquished: true,
+                defaultInputChanged: true,
+                deviceListChanged: false,
+                currentInputID: "airpods",
+                desiredInputID: "built-in",
+                lastMaintainedInputID: "built-in",
+                lastMaintainedInputIsAvailable: true
+            ),
+            .reconcile,
+            "disabling the preference should still run normal restoration cleanup"
+        )
+    }
+
     runSuite("DictationPreferredInputPolicy uses preferred USB then automatic fallback") {
         let bluetooth = DictationAudioDevice(id: 1, name: "AirPods", transport: .bluetooth, inputChannelCount: 1, uid: "airpods")
         let macMic = DictationAudioDevice(id: 2, name: "MacBook Pro Microphone", transport: .builtIn, inputChannelCount: 1, uid: "mac")
