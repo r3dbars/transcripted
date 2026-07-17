@@ -128,47 +128,65 @@ extension TranscriptionTaskManager {
                 ? Self.planDeferredReview(clips)
                 : nil
 
-            let transcriptUpdates = plannedChanges.resolvedUpdates.filter {
-                Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) > 0
-            }
-            var didFinalizeTranscript = visibleRegularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
-                transcriptURL: resolvedURL,
-                updates: transcriptUpdates,
-                transcriptionResult: transcriptionResult,
-                speakerStore: speakerDB
-            )
+            var didFinalizeTranscript = false
+            TranscriptSaver.serializeTranscriptFileUpdate {
+                guard let originalTranscriptData = try? Data(contentsOf: resolvedURL) else {
+                    AppLogger.speakers.error("Speaker naming could not snapshot the transcript before update")
+                    return
+                }
 
-            if didFinalizeTranscript, let deferredReviewPlan {
-                didFinalizeTranscript = TranscriptSaver.markSpeakerReviewDeferred(
+                let transcriptUpdates = plannedChanges.resolvedUpdates.filter {
+                    Self.visibleTranscriptUtteranceCount(for: $0, in: transcriptionResult) > 0
+                }
+                didFinalizeTranscript = visibleRegularUpdates.isEmpty || TranscriptSaver.updateSpeakerNames(
                     transcriptURL: resolvedURL,
-                    entries: clips,
-                    redirectedSpeakerIdsByKey: deferredReviewPlan.redirectedSpeakerIdsByKey
+                    updates: transcriptUpdates,
+                    transcriptionResult: transcriptionResult,
+                    speakerStore: speakerDB
                 )
-            }
 
-            if didFinalizeTranscript && !collapsedUpdates.isEmpty {
-                didFinalizeTranscript = TranscriptSaver.collapseMicSpeakersToYou(
-                    transcriptURL: resolvedURL,
-                    collapsedUpdates: collapsedUpdates
-                )
-            }
+                if didFinalizeTranscript, let deferredReviewPlan {
+                    didFinalizeTranscript = TranscriptSaver.markSpeakerReviewDeferred(
+                        transcriptURL: resolvedURL,
+                        entries: clips,
+                        redirectedSpeakerIdsByKey: deferredReviewPlan.redirectedSpeakerIdsByKey
+                    )
+                }
 
-            if didFinalizeTranscript && !discardedUpdates.isEmpty {
-                didFinalizeTranscript = TranscriptSaver.discardSpeakerDatabaseLinks(
-                    transcriptURL: resolvedURL,
-                    discardedUpdates: discardedUpdates
-                )
-            }
+                if didFinalizeTranscript && !collapsedUpdates.isEmpty {
+                    didFinalizeTranscript = TranscriptSaver.collapseMicSpeakersToYou(
+                        transcriptURL: resolvedURL,
+                        collapsedUpdates: collapsedUpdates
+                    )
+                }
 
-            if didFinalizeTranscript {
-                do {
-                    try Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
-                    if let deferredReviewPlan {
-                        try Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
+                if didFinalizeTranscript && !discardedUpdates.isEmpty {
+                    didFinalizeTranscript = TranscriptSaver.discardSpeakerDatabaseLinks(
+                        transcriptURL: resolvedURL,
+                        discardedUpdates: discardedUpdates
+                    )
+                }
+
+                if didFinalizeTranscript {
+                    do {
+                        try speakerDB.performMutationBatch {
+                            try Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
+                            if let deferredReviewPlan {
+                                try Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
+                            }
+                        }
+                    } catch {
+                        AppLogger.speakers.error("Speaker naming persistence failed", ["error": error.localizedDescription])
+                        do {
+                            try originalTranscriptData.write(to: resolvedURL, options: .atomic)
+                            FileManager.default.restrictToOwnerOnly(atPath: resolvedURL.path)
+                        } catch {
+                            AppLogger.speakers.error("Speaker naming transcript rollback failed", [
+                                "error": error.localizedDescription
+                            ])
+                        }
+                        didFinalizeTranscript = false
                     }
-                } catch {
-                    AppLogger.speakers.error("Speaker naming persistence failed", ["error": error.localizedDescription])
-                    didFinalizeTranscript = false
                 }
             }
 
