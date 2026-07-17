@@ -40,6 +40,7 @@ final class TranscriptionQueueCoordinator {
         let kind: Kind
         let startTrigger: MeetingSessionController.StartTrigger
         let sttModel: TranscriptionModelChoice
+        let stoppedAudioRecovery: DictationStoppedAudioRecovery?
         let promptTelemetryProperties: [String: String]?
         let promptRecordingStartedAt: Date?
 
@@ -120,6 +121,7 @@ final class TranscriptionQueueCoordinator {
             ),
             startTrigger: startTrigger,
             sttModel: controller.sttRouter.selectedModel,
+            stoppedAudioRecovery: nil,
             promptTelemetryProperties: promptTelemetryProperties,
             promptRecordingStartedAt: promptRecordingStartedAt
         )
@@ -135,7 +137,8 @@ final class TranscriptionQueueCoordinator {
         audioURL: URL,
         suggestedTitle: String,
         recordingDate: Date,
-        startTrigger: MeetingSessionController.StartTrigger
+        startTrigger: MeetingSessionController.StartTrigger,
+        stoppedAudioRecovery: DictationStoppedAudioRecovery? = nil
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
             kind: .imported(
@@ -145,6 +148,7 @@ final class TranscriptionQueueCoordinator {
             ),
             startTrigger: startTrigger,
             sttModel: controller.sttRouter.selectedModel,
+            stoppedAudioRecovery: stoppedAudioRecovery,
             promptTelemetryProperties: nil,
             promptRecordingStartedAt: nil
         )
@@ -298,6 +302,7 @@ final class TranscriptionQueueCoordinator {
         controller.sttAdapter.selectPreparedModel(job.sttModel)
         queuedRuntimeDiagnosticsJobIDs.remove(job.id)
         controller.activeQueuedTranscriptionJobID = job.id
+        controller.activeStoppedAudioRecovery = job.stoppedAudioRecovery
 
         switch job.kind {
         case .recorded(let micURL, let systemURL, let healthInfo, _, let meetingTitle, let recordingDate):

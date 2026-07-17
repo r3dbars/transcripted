@@ -168,6 +168,22 @@ func testDictationStoppedAudioRecovery() {
                 speechSource.contains("consumeRecordedSamples(preparedRecording: preparedRecording)"),
                 "speech inference should consume the prepared snapshot instead of resampling native buffers again"
             )
+            let routerSource = try String(
+                contentsOf: repoFixtureURL("Sources/Speech/STTRouter.swift"),
+                encoding: .utf8
+            )
+            assertTrue(
+                routerSource.contains("lastEmptyTranscriptionReason = .modelFailure"),
+                "external model failures must retain stopped-audio recovery instead of looking like no speech"
+            )
+            let meetingSource = try String(
+                contentsOf: repoFixtureURL("Sources/Meeting/MeetingSessionController.swift"),
+                encoding: .utf8
+            )
+            assertTrue(
+                meetingSource.contains("transcriptPersisted: true"),
+                "a successfully imported restart checkpoint should be retired after its transcript is saved"
+            )
             assertTrue(source.contains("transcriptPersisted: saveResult.saved != nil"), "cleanup should be tied to successful transcript persistence")
             assertTrue(source.contains("if emptyReason != .modelFailure"), "model failures should retain recovery audio")
             assertTrue(

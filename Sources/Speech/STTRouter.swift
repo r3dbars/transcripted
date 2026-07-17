@@ -257,6 +257,7 @@ class STTRouter: ObservableObject {
     ) async -> String? {
         await initialize(model: model)
         guard isModelLoaded(for: model) else {
+            lastEmptyTranscriptionReason = .modelFailure
             EventReporter.shared.capture(
                 level: .error,
                 engine: model.engineName,
@@ -287,6 +288,7 @@ class STTRouter: ObservableObject {
             }
             return text
         } catch {
+            lastEmptyTranscriptionReason = .modelFailure
             EventReporter.shared.capture(
                 level: .error,
                 engine: model.engineName,
