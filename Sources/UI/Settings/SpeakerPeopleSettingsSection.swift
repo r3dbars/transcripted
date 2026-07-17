@@ -329,7 +329,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
             )
-            speakerDatabase.mergeProfiles(sourceId: sourceId, into: targetId)
+            do {
+                try speakerDatabase.mergeProfiles(sourceId: sourceId, into: targetId)
+            } catch {
+                AppLogger.speakers.error("Manual speaker merge failed", ["error": error.localizedDescription])
+                return
+            }
             Self.deleteClips(
                 for: sourceId,
                 preferredClipsDirectory: preferredClipsDirectory,

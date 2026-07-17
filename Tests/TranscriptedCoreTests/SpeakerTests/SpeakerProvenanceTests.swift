@@ -53,7 +53,7 @@ final class SpeakerProvenanceTests: XCTestCase {
         // Profiles are genuinely distinct going in.
         XCTAssertLessThan(cosine(preSource, preTarget), 0.5)
 
-        database.mergeProfiles(sourceId: source.id, into: target.id)
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
 
         // Merge fused them: source is gone, only the keeper remains.
         XCTAssertNil(database.getSpeaker(id: source.id))
@@ -111,7 +111,7 @@ final class SpeakerProvenanceTests: XCTestCase {
         let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 5), existingId: nil)
         let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 6), existingId: nil)
 
-        database.mergeProfiles(sourceId: source.id, into: target.id)
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
 
         let afterMerge = database.contributions(forProfileId: target.id)
         XCTAssertTrue(
@@ -132,9 +132,9 @@ final class SpeakerProvenanceTests: XCTestCase {
         let second = database.addOrUpdateSpeaker(embedding: embedding(axis: 11), existingId: nil)
         let keeper = database.addOrUpdateSpeaker(embedding: embedding(axis: 12), existingId: nil)
 
-        database.mergeProfiles(sourceId: first.id, into: keeper.id)
+        try database.mergeProfiles(sourceId: first.id, into: keeper.id)
         let firstEvent = try XCTUnwrap(database.undoableMerge(forTargetId: keeper.id))
-        database.mergeProfiles(sourceId: second.id, into: keeper.id)
+        try database.mergeProfiles(sourceId: second.id, into: keeper.id)
 
         // The older merge can't be undone while a newer merge still sits on top.
         XCTAssertFalse(database.unmerge(mergeId: firstEvent.id))
@@ -163,7 +163,7 @@ final class SpeakerProvenanceTests: XCTestCase {
         let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 30), existingId: nil)
         let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 31), existingId: nil)
 
-        database.mergeProfiles(sourceId: source.id, into: target.id)
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
 
         // The keeper picks up another recording AFTER the merge.
         _ = database.addOrUpdateSpeaker(embedding: embedding(axis: 31), existingId: target.id)

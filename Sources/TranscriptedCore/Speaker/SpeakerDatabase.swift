@@ -9,6 +9,16 @@ import SQLite3
 @available(macOS 14.0, *)
 public final class SpeakerDatabase: @unchecked Sendable {
 
+    struct SQLiteOperationError: Error, LocalizedError {
+        let operation: String
+        let code: Int32
+        let detail: String
+
+        var errorDescription: String? {
+            "\(operation) failed (SQLite \(code)): \(detail)"
+        }
+    }
+
     var db: OpaquePointer?
     // Thread-safety invariant:
     // - Writes happen only during `init` (single-threaded construction) inside
@@ -191,6 +201,68 @@ public final class SpeakerDatabase: @unchecked Sendable {
             }
             throw error
         }
+    }
+
+    /// Transaction boundary for writes whose caller must know whether persistence succeeded.
+    func throwingTransaction(_ block: () throws -> Void) throws {
+        try executeTransactionControl("BEGIN EXCLUSIVE", operation: "begin speaker transaction")
+
+        do {
+            try block()
+        } catch {
+            rollbackAfterFailure()
+            throw error
+        }
+
+        do {
+            try executeTransactionControl("COMMIT", operation: "commit speaker transaction")
+        } catch {
+            rollbackAfterFailure()
+            throw error
+        }
+    }
+
+    func prepareStatement(_ sql: String, operation: String) throws -> OpaquePointer? {
+        var statement: OpaquePointer?
+        let result = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+        guard result == SQLITE_OK else {
+            sqlite3_finalize(statement)
+            throw sqliteOperationError(operation: operation, code: result)
+        }
+        return statement
+    }
+
+    func requireDone(_ statement: OpaquePointer?, operation: String, expectedChanges: Int32? = nil) throws {
+        let result = sqlite3_step(statement)
+        guard result == SQLITE_DONE else {
+            throw sqliteOperationError(operation: operation, code: result)
+        }
+        if let expectedChanges, sqlite3_changes(db) != expectedChanges {
+            throw SQLiteOperationError(
+                operation: operation,
+                code: SQLITE_NOTFOUND,
+                detail: "expected \(expectedChanges) changed row(s), got \(sqlite3_changes(db))"
+            )
+        }
+    }
+
+    private func executeTransactionControl(_ sql: String, operation: String) throws {
+        let result = sqlite3_exec(db, sql, nil, nil, nil)
+        guard result == SQLITE_OK else {
+            throw sqliteOperationError(operation: operation, code: result)
+        }
+    }
+
+    private func rollbackAfterFailure() {
+        guard sqlite3_get_autocommit(db) == 0 else { return }
+        let result = sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+        if result != SQLITE_OK {
+            AppLogger.speakers.error("Transaction ROLLBACK failed", ["sqlite_error": dbErrorMessage()])
+        }
+    }
+
+    private func sqliteOperationError(operation: String, code: Int32) -> SQLiteOperationError {
+        SQLiteOperationError(operation: operation, code: code, detail: dbErrorMessage())
     }
 
     /// Log and return the sqlite3_errmsg for the current database connection
