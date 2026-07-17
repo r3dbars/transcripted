@@ -885,6 +885,44 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(restoredClipboard, originalClipboard, "cancellation should restore the owned clipboard snapshot")
     }
 
+    await runSuite("ClipboardRestoringTextPaster.discardPasteRetry — restores superseded retry snapshot") {
+        let originalClipboard = "synthetic superseded clipboard"
+        let dictationText = "synthetic superseded retry"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: originalClipboard)
+        }
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let adapter = await MainActor.run {
+            SyntheticPasteTargetAdapter(kind: .browser, appliesPaste: false)
+        }
+
+        await MainActor.run {
+            _ = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    adapter.receivePaste(dictationText, clipboardRead: false)
+                    return true
+                },
+                confirmationSource: { adapter },
+                targetIsFrontmost: { adapter.isFocused },
+                pasteConfirmationWait: 0
+            )
+            paster.discardPasteRetry()
+        }
+
+        let restoredClipboard = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            restoredClipboard,
+            originalClipboard,
+            "superseding Paste Again must restore the owned clipboard snapshot"
+        )
+    }
+
     await runSuite("ClipboardRestoringTextPaster.paste — confirmed target read restores clipboard") {
         if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
             print("    SKIPPED: wall-clock timing proof — scheduler jitter on shared CI runners makes the 30/80ms windows unprovable there; covered by local runs")

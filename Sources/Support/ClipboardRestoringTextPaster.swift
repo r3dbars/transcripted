@@ -601,7 +601,7 @@ final class ClipboardRestoringTextPaster {
     }
 
     func discardPasteRetry() {
-        retainedClipboardRestoreForPasteRetry = nil
+        restoreRetainedClipboardNow()
     }
 
     func restorePendingClipboardNow() {
