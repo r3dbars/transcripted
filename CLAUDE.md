@@ -168,7 +168,7 @@ Treat as reference, not current runtime truth:
 
 Files still over 1500 lines after the 2026-07 god-file splits (measured with `wc -l`). These are dense, high-blast-radius files — read the whole file and the relevant subsystem `CLAUDE.md` before editing; do not casually append another responsibility to any of them:
 
-- `Sources/UI/Settings/TranscriptedSettingsView.swift` (~5.6k) — settings shell, navigation, and page routing for every settings surface; most page bodies have already moved to `Sources/UI/Settings/Pages/` and sibling files, but the shell itself stays huge because it wires all of them together
+- `Sources/UI/Settings/TranscriptedSettingsView.swift` (~4.8k) — settings shell, navigation, state, and page routing for every settings surface; General, Storage, and Beta presentation now live under `Sources/UI/Settings/Pages/`, while the shell keeps their bindings and runtime work
 - `Sources/Meeting/MeetingSessionController.swift` (~3.1k) — the meeting state machine; failed-meeting and queue bookkeeping were split into `FailedMeetingStore.swift`/`TranscriptionQueueCoordinator.swift`, but permission gating, capture start/stop, and transcript-save handoff still live here
 - `Sources/Speech/ParakeetEngine.swift` (~2.8k) — the dictation STT engine; device recovery and model lifecycle already moved to `ParakeetDeviceRecovery.swift`/`ParakeetModelLifecycle.swift`, this file is still the public-API owner and `@MainActor` home for recording state
 - `Sources/UI/Overlay/MeetingOverlayController.swift` (~2.7k) — the non-activating meeting-prompt/recording panel controller; touches capture state, live-transcript drawer, and prompt UI all at once

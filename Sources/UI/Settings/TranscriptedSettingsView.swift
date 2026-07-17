@@ -2323,12 +2323,6 @@ struct TranscriptedSettingsView: View {
         savedMeetingRetranscriptionUnavailableReason == nil
     }
 
-    private var modelCacheBusyHelp: String {
-        modelCacheCleanupInProgress
-            ? "A cache cleanup is already running."
-            : "Wait for the storage scan to finish."
-    }
-
     private var failedMeetingRetryUnavailableReason: String? {
         if sttRouter.isRecording || sttRouter.isTranscribing {
             return "Wait for the current dictation to finish before retrying a failed meeting."
@@ -2386,257 +2380,88 @@ struct TranscriptedSettingsView: View {
     }
 
     private var generalPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            GeneralSettingsHeader()
-
-            GeneralSettingsGroup {
-                GeneralToggleRow(
-                    title: "Launch at login",
-                    isOn: Binding(
-                        get: { launchAtLoginEnabled },
-                        set: { newValue in
-                            updateLaunchAtLogin(newValue)
-                        }
-                    ),
-                    help: launchAtLoginStatus,
-                    info: GeneralInfo(
-                        title: "Launch at login",
-                        message: "When this is on, macOS opens Transcripted after you sign in, so the menu bar app and shortcuts are ready without opening it yourself."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.launch-at-login"
-                )
-
-                GeneralToggleRow(
-                    title: "Show in Dock",
-                    isOn: Binding(
-                        get: { showTranscriptedInDock },
-                        set: { newValue in
-                            showTranscriptedInDock = newValue
-                            trackSettingsToggle("show_in_dock", enabled: newValue, page: .general)
-                            DockVisibilityPreferences.setVisible(newValue)
-                        }
-                    ),
-                    help: showTranscriptedInDock
-                        ? "Transcripted is visible in the Dock."
-                        : "Transcripted only appears in the menu bar.",
-                    info: GeneralInfo(
-                        title: "Show in Dock",
-                        message: "Turn this off if you want Transcripted to stay out of the Dock while idle. Settings and active recordings can still bring the app forward when needed."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.show-in-dock"
-                )
-
-                GeneralToggleRow(
-                    title: "Dictation sounds",
-                    isOn: Binding(
-                        get: { uiSoundsEnabled },
-                        set: { newValue in
-                            uiSoundsEnabled = newValue
-                            trackSettingsToggle("dictation_sounds", enabled: newValue, page: .general)
-                            UISoundPreferences.setEnabled(newValue)
-                        }
-                    ),
-                    help: uiSoundsEnabled
-                        ? "Play sounds when dictation starts and finishes."
-                        : "No dictation sounds.",
-                    info: GeneralInfo(
-                        title: "Dictation sounds",
-                        message: "These short sounds tell you when dictation starts, finishes, or hears no speech. Turn them off if you want Transcripted to stay quiet."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.dictation-sounds"
-                )
-
-                GeneralToggleRow(
-                    title: "Clean up pasted text",
-                    isOn: Binding(
-                        get: { dictationCleanupEnabled },
-                        set: { newValue in
-                            dictationCleanupEnabled = newValue
-                            DictationCleanupPreferences.setEnabled(newValue)
-                            trackSettingsToggle("dictation_cleanup", enabled: newValue, page: .general)
-                        }
-                    ),
-                    help: dictationCleanupEnabled
-                        ? "Remove filler words, repeats, and spacing mistakes before pasting."
-                        : "Paste the raw local transcript.",
-                    info: GeneralInfo(
-                        title: "Clean up pasted text",
-                        message: "Transcripted lightly fixes filler words, repeated words, and spacing before it pastes your dictation. Turn this off when you want the raw transcript."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.cleanup-pasted-text"
-                )
-
-                DictationOverlayModeRow(
-                    selection: Binding(
-                        get: { dictationOverlayMode },
-                        set: { newValue in
-                            dictationOverlayMode = newValue
-                            DictationOverlayPresentationPreferences.setMode(newValue)
-                            trackSettingsAction("change_dictation_overlay_mode", page: .general)
-                        }
-                    )
-                )
-
-                GeneralToggleRow(
-                    title: "Confirm meeting quits",
-                    isOn: Binding(
-                        get: { confirmQuitDuringMeetingEnabled },
-                        set: { newValue in
-                            confirmQuitDuringMeetingEnabled = newValue
-                            trackSettingsToggle("meeting_quit_confirmation", enabled: newValue, page: .general)
-                            QuitConfirmationPreferences.setConfirmQuitDuringActiveMeetingRecording(newValue)
-                        }
-                    ),
-                    help: confirmQuitDuringMeetingEnabled
-                        ? "Ask before stopping a live meeting."
-                        : "Quit immediately and save recoverable audio.",
-                    info: GeneralInfo(
-                        title: "Confirm meeting quits",
-                        message: "When this is on, Transcripted asks before quitting during a live meeting so you do not stop a recording by accident."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.confirm-meeting-quits"
-                )
-
-                GeneralToggleRow(
-                    title: "Auto-detect calls",
-                    isOn: Binding(
-                        get: { autoDetectCallsEnabled },
-                        set: { newValue in
-                            autoDetectCallsEnabled = newValue
-                            trackSettingsToggle("auto_call_detection", enabled: newValue, page: .general)
-                            AutoCallDetectionPreferences.setEnabled(newValue)
-                        }
-                    ),
-                    help: autoDetectCallsEnabled
-                        ? "Offer to record when a call starts, even without a calendar invite."
-                        : "Only detect meetings from your calendar and conferencing apps.",
-                    info: GeneralInfo(
-                        title: "Auto-detect calls",
-                        message: "When this is on, Transcripted notices when an app or browser starts using your microphone, when a conferencing app starts playing call audio (even if you joined muted), or when your camera turns on while a call app is active, and offers to record it. It only checks local device activity on your Mac; nothing about the audio or video ever leaves your device."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.auto-detect-calls"
-                )
-
-                GeneralToggleRow(
-                    title: "Missed-call reminders",
-                    isOn: Binding(
-                        get: { missedCallNudgeEnabled },
-                        set: { newValue in
-                            missedCallNudgeEnabled = newValue
-                            trackSettingsToggle("missed_call_nudge", enabled: newValue, page: .general)
-                            MissedCallNudgePreferences.setEnabled(newValue)
-                        }
-                    ),
-                    help: missedCallNudgeEnabled
-                        ? "Mention when a long call ends without a recording."
-                        : "Stay quiet when calls end without a recording.",
-                    info: GeneralInfo(
-                        title: "Missed-call reminders",
-                        message: "When a detected call lasts ten minutes or more and ends without a Transcripted recording, a small reminder appears so you know the meeting was not captured. It never shows after you decline a recording prompt, and it appears at most a few times a day."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.missed-call-reminders"
-                )
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                GeneralSectionHeading(
-                    title: "System",
-                    info: GeneralInfo(
-                        title: "System",
-                        message: "Model, shortcut, and privacy settings now live here so the sidebar stays simpler."
-                    )
-                )
-
-                GeneralSettingsGroup {
-                    GeneralDisclosureRow(
-                        title: "Transcription model",
-                        value: effectiveTranscriptionModel.title,
-                        isExpanded: $showGeneralModelSettings,
-                        help: showGeneralModelSettings ? "Hide transcription model settings." : "Show transcription model settings.",
-                        automationIdentifier: "transcripted.settings.general.disclosure.transcription-model"
-                    ) {
-                        trackSettingsAction("toggle_model_settings", page: .general)
-                    }
-
-                    if showGeneralModelSettings {
-                        GeneralExpandedContent {
-                            generalModelSettingsEditor
-                        }
-                    }
-
-                    GeneralDisclosureRow(
-                        title: "Keyboard shortcuts",
-                        value: dictationShortcutsEnabled ? "On" : "Off",
-                        isExpanded: $showGeneralShortcutSettings,
-                        help: showGeneralShortcutSettings ? "Hide keyboard shortcut settings." : "Show keyboard shortcut settings.",
-                        automationIdentifier: "transcripted.settings.general.disclosure.keyboard-shortcuts"
-                    ) {
-                        trackSettingsAction("toggle_shortcut_settings", page: .general)
-                    }
-
-                    if showGeneralShortcutSettings {
-                        GeneralExpandedContent {
-                            generalShortcutSettingsEditor
-                        }
-                    }
-
-                    GeneralDisclosureRow(
-                        title: "Privacy",
-                        value: generalPrivacyStatusLine,
-                        isExpanded: $showGeneralPrivacySettings,
-                        help: showGeneralPrivacySettings ? "Hide privacy settings." : "Show privacy settings.",
-                        automationIdentifier: "transcripted.settings.general.disclosure.privacy"
-                    ) {
-                        trackSettingsAction("toggle_privacy_settings", page: .general)
-                    }
-
-                    if showGeneralPrivacySettings {
-                        GeneralExpandedContent {
-                            generalPrivacySettingsEditor
-                        }
-                    }
+        GeneralSettingsPage(
+            launchAtLoginEnabled: Binding(
+                get: { launchAtLoginEnabled },
+                set: { updateLaunchAtLogin($0) }
+            ),
+            launchAtLoginStatus: launchAtLoginStatus,
+            showTranscriptedInDock: Binding(
+                get: { showTranscriptedInDock },
+                set: { newValue in
+                    showTranscriptedInDock = newValue
+                    trackSettingsToggle("show_in_dock", enabled: newValue, page: .general)
+                    DockVisibilityPreferences.setVisible(newValue)
                 }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                GeneralSectionHeading(
-                    title: "Tools",
-                    info: GeneralInfo(
-                        title: "Tools",
-                        message: "These are occasional actions: transcribe an existing audio file, or teach Transcripted corrections for words it hears wrong."
-                    )
-                )
-
-                GeneralSettingsGroup {
-                    GeneralActionRow(
-                        title: "Transcribe audio file",
-                        value: "Choose",
-                        systemImage: "waveform",
-                        help: "Choose an audio file to transcribe.",
-                        automationIdentifier: "transcripted.settings.general.transcribe-audio-file"
-                    ) {
-                        trackSettingsAction("import_recording", page: .general)
-                        actions.importAudioFile()
-                    }
-
-                    GeneralDisclosureRow(
-                        title: "Corrections",
-                        value: customDictionaryStatusLine,
-                        isExpanded: $showGeneralCorrections,
-                        help: showGeneralCorrections ? "Hide correction settings." : "Show correction settings.",
-                        automationIdentifier: "transcripted.settings.general.disclosure.corrections"
-                    ) {
-                        trackSettingsAction("toggle_corrections", page: .general)
-                    }
-
-                    if showGeneralCorrections {
-                        GeneralExpandedContent {
-                            generalCorrectionsEditor
-                        }
-                    }
+            ),
+            uiSoundsEnabled: Binding(
+                get: { uiSoundsEnabled },
+                set: { newValue in
+                    uiSoundsEnabled = newValue
+                    trackSettingsToggle("dictation_sounds", enabled: newValue, page: .general)
+                    UISoundPreferences.setEnabled(newValue)
                 }
-            }
-        }
+            ),
+            dictationCleanupEnabled: Binding(
+                get: { dictationCleanupEnabled },
+                set: { newValue in
+                    dictationCleanupEnabled = newValue
+                    DictationCleanupPreferences.setEnabled(newValue)
+                    trackSettingsToggle("dictation_cleanup", enabled: newValue, page: .general)
+                }
+            ),
+            dictationOverlayMode: Binding(
+                get: { dictationOverlayMode },
+                set: { newValue in
+                    dictationOverlayMode = newValue
+                    DictationOverlayPresentationPreferences.setMode(newValue)
+                    trackSettingsAction("change_dictation_overlay_mode", page: .general)
+                }
+            ),
+            confirmQuitDuringMeetingEnabled: Binding(
+                get: { confirmQuitDuringMeetingEnabled },
+                set: { newValue in
+                    confirmQuitDuringMeetingEnabled = newValue
+                    trackSettingsToggle("meeting_quit_confirmation", enabled: newValue, page: .general)
+                    QuitConfirmationPreferences.setConfirmQuitDuringActiveMeetingRecording(newValue)
+                }
+            ),
+            autoDetectCallsEnabled: Binding(
+                get: { autoDetectCallsEnabled },
+                set: { newValue in
+                    autoDetectCallsEnabled = newValue
+                    trackSettingsToggle("auto_call_detection", enabled: newValue, page: .general)
+                    AutoCallDetectionPreferences.setEnabled(newValue)
+                }
+            ),
+            missedCallNudgeEnabled: Binding(
+                get: { missedCallNudgeEnabled },
+                set: { newValue in
+                    missedCallNudgeEnabled = newValue
+                    trackSettingsToggle("missed_call_nudge", enabled: newValue, page: .general)
+                    MissedCallNudgePreferences.setEnabled(newValue)
+                }
+            ),
+            effectiveTranscriptionModelTitle: effectiveTranscriptionModel.title,
+            dictationShortcutsEnabled: dictationShortcutsEnabled,
+            privacyStatusLine: generalPrivacyStatusLine,
+            customDictionaryStatusLine: customDictionaryStatusLine,
+            showModelSettings: $showGeneralModelSettings,
+            showShortcutSettings: $showGeneralShortcutSettings,
+            showPrivacySettings: $showGeneralPrivacySettings,
+            showCorrections: $showGeneralCorrections,
+            onTrackAction: { actionID in
+                trackSettingsAction(actionID, page: .general)
+            },
+            onImportAudioFile: {
+                trackSettingsAction("import_recording", page: .general)
+                actions.importAudioFile()
+            },
+            modelSettingsEditor: { generalModelSettingsEditor },
+            shortcutSettingsEditor: { generalShortcutSettingsEditor },
+            privacySettingsEditor: { generalPrivacySettingsEditor },
+            correctionsEditor: { generalCorrectionsEditor }
+        )
     }
 
     private var generalPrivacyStatusLine: String {
@@ -3187,282 +3012,65 @@ struct TranscriptedSettingsView: View {
     }
 
     private var storagePage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Storage",
-                summary: "Choose where saved Markdown files live."
-            )
-
-            SettingsSection(
-                title: "Capture Library",
-                detail: "Your meeting and dictation Markdown files."
-            ) {
-                StorageRow(title: "Capture library", url: captureLibraryURL)
-                StorageRow(title: "Meeting captures", url: MeetingStoragePaths.transcriptsFolder)
-                StorageRow(title: "Dictation captures", url: DictationStoragePaths.transcriptsFolder)
-
-                if let unavailableCaptureLibraryPath {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "externaldrive.badge.exclamationmark")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.orange)
-                            .frame(width: 20)
-                        Text("Transcripted can't reach \(unavailableCaptureLibraryPath). It is using the default capture library until that folder is available again or you choose a new one.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                HStack {
-                    SettingsInlineActionButton(title: "Choose Folder", symbolName: "folder") {
-                        trackSettingsAction("choose_capture_library", page: .storage)
-                        chooseCaptureLibrary()
-                    }
-                    .disabled(captureLibraryMigrationInProgress)
-                    .help(captureLibraryMigrationInProgress ? captureLibraryMigrationBusyHelp : "")
-
-                    SettingsInlineActionButton(title: "Reset to Default") {
-                        trackSettingsAction("reset_capture_library", page: .storage)
-                        resetCaptureLibraryToDefault()
-                    }
-                    .disabled(captureLibraryMigrationInProgress)
-                    .help(captureLibraryMigrationInProgress ? captureLibraryMigrationBusyHelp : "")
-                }
-
-                if captureLibraryMigrationInProgress {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text(captureLibraryMigrationStatus ?? "Copying captures...")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else if let captureLibraryMigrationStatus {
-                    Text(captureLibraryMigrationStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    settingsFailureDetailsButton(captureLibraryMigrationStatusDetails)
-                }
-
-                Text("Pick an Obsidian vault or any folder you want agents to read.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        StorageSettingsPage(
+            captureLibraryURL: captureLibraryURL,
+            meetingCapturesURL: MeetingStoragePaths.transcriptsFolder,
+            dictationCapturesURL: DictationStoragePaths.transcriptsFolder,
+            unavailableCaptureLibraryPath: unavailableCaptureLibraryPath,
+            captureLibraryMigrationInProgress: captureLibraryMigrationInProgress,
+            captureLibraryMigrationStatus: captureLibraryMigrationStatus,
+            captureLibraryMigrationStatusDetails: captureLibraryMigrationStatusDetails,
+            captureLibraryChoicePromptBinding: captureLibraryChoicePromptBinding,
+            pendingCaptureLibraryChoice: pendingCaptureLibraryChoice,
+            audioRetentionWindow: Binding(
+                get: { audioRetentionWindow },
+                set: { updateAudioRetentionWindow($0) }
+            ),
+            modelCacheSnapshot: modelCacheSnapshot,
+            modelCacheLoading: modelCacheLoading,
+            modelCacheCleanupInProgress: modelCacheCleanupInProgress,
+            modelCacheCleanupStatus: modelCacheCleanupStatus,
+            modelCacheCleanupStatusDetails: modelCacheCleanupStatusDetails,
+            effectiveTranscriptionModelIsWhisper: effectiveTranscriptionModel.isWhisper,
+            showReclaimableCacheCleanupConfirmation: $showReclaimableCacheCleanupConfirmation,
+            showModelCacheCleanupConfirmation: $showModelCacheCleanupConfirmation,
+            showWhisperCacheCleanupConfirmation: $showWhisperCacheCleanupConfirmation,
+            showSupportFolders: $showSupportFolders,
+            appStateFolder: appStateFolder,
+            cacheFolder: cacheFolder,
+            logsFolder: logsFolder,
+            recordingsFolder: recordingsFolder,
+            onChooseCaptureLibrary: {
+                trackSettingsAction("choose_capture_library", page: .storage)
+                chooseCaptureLibrary()
+            },
+            onResetCaptureLibrary: {
+                trackSettingsAction("reset_capture_library", page: .storage)
+                resetCaptureLibraryToDefault()
+            },
+            onCopyCapturesThenSwitchLibrary: { choice in
+                copyCapturesThenSwitchLibrary(choice)
+            },
+            onSwitchLibraryWithoutCopying: { choice in
+                switchLibraryWithoutCopying(choice)
+            },
+            onRemoveReclaimableModelCaches: {
+                removeReclaimableModelCaches()
+            },
+            onRemoveStaleModelCaches: {
+                removeStaleModelCaches()
+            },
+            onRemoveWhisperModelCache: {
+                removeWhisperModelCache()
+            },
+            onRefreshModelCacheSnapshot: {
+                trackSettingsAction("refresh_model_cache_storage", page: .storage)
+                refreshModelCacheSnapshot()
+            },
+            failureDetailsButton: { details in
+                settingsFailureDetailsButton(details)
             }
-            .alert(
-                "Copy existing captures?",
-                isPresented: captureLibraryChoicePromptBinding,
-                presenting: pendingCaptureLibraryChoice
-            ) { choice in
-                Button(choice.copyButtonTitle) {
-                    copyCapturesThenSwitchLibrary(choice)
-                }
-                .keyboardShortcut(.defaultAction)
-                Button("Just Switch") {
-                    switchLibraryWithoutCopying(choice)
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: { choice in
-                Text("Your current library still has saved meetings or dictations. Copy puts a copy of them in the \(choice.destinationDescription) and never deletes the originals. Just Switch leaves everything in \(choice.currentLibrary.path) - Transcripted and connected agents will only see the \(choice.destinationDescription).")
-            }
-
-            SettingsSection(
-                title: "Audio Storage",
-                detail: "Transcripted keeps transcripts and shrinks retained meeting audio."
-            ) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "waveform.badge.magnifyingglass")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Compress WAV to M4A automatically")
-                            .font(.subheadline.weight(.medium))
-                        Text("After a transcript is saved, Transcripted keeps replay audio in a smaller format and removes the original WAV only after conversion succeeds.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                Picker("Delete audio after", selection: Binding(
-                    get: { audioRetentionWindow },
-                    set: { updateAudioRetentionWindow($0) }
-                )) {
-                    ForEach(AudioRetentionWindow.allCases) { window in
-                        Text(window.title).tag(window)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 320)
-
-                Text(audioRetentionWindow.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("Choosing 7 or 30 days asks before deleting old replay audio.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            SettingsSection(
-                title: "Local Model Storage",
-                detail: "On-device models and optional transcription caches."
-            ) {
-                if modelCacheLoading, modelCacheSnapshot == nil {
-                    ProgressView("Scanning model storage...")
-                        .controlSize(.small)
-                }
-
-                if let snapshot = modelCacheSnapshot {
-                    let includeWhisperInReclaimableCleanup = !effectiveTranscriptionModel.isWhisper
-                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInReclaimableCleanup)
-                    ModelCacheMetricRow(
-                        title: "Known model and cache footprint",
-                        value: snapshot.formattedTotalKnownSize,
-                        detail: "FluidAudio models plus Transcripted's app cache."
-                    )
-                    ModelCacheMetricRow(
-                        title: "Reclaimable cache",
-                        value: snapshot.formattedReclaimableSize(includeWhisper: includeWhisperInReclaimableCleanup),
-                        detail: includeWhisperInReclaimableCleanup
-                            ? "Known stale models plus optional Whisper files."
-                            : "Known stale models. Whisper is preserved while selected."
-                    )
-                    if reclaimableBytes > 0 {
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Reclaimable Cache",
-                            tone: .destructive
-                        ) {
-                            showReclaimableCacheCleanupConfirmation = true
-                        }
-                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
-                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
-                    }
-                    ModelCacheMetricRow(
-                        title: "FluidAudio models",
-                        value: snapshot.formattedFluidAudioModelsSize,
-                        detail: "Parakeet, diarization, and related local model files."
-                    )
-                    ModelCacheMetricRow(
-                        title: "Whisper cache",
-                        value: snapshot.formattedWhisperModelsSize,
-                        detail: "Optional Whisper models stored by Transcripted."
-                    )
-                    if snapshot.whisperModelsBytes > 0 {
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Whisper Cache",
-                            tone: .destructive
-                        ) {
-                            showWhisperCacheCleanupConfirmation = true
-                        }
-                        .disabled(effectiveTranscriptionModel.isWhisper || modelCacheCleanupInProgress || modelCacheLoading)
-                        .help(effectiveTranscriptionModel.isWhisper
-                            ? "Switch back to Parakeet before removing the Whisper cache."
-                            : (modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : ""))
-
-                        if effectiveTranscriptionModel.isWhisper {
-                            Text("Switch back to Parakeet before removing the Whisper cache.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if snapshot.staleFluidAudioModelBytes > 0 {
-                        ModelCacheMetricRow(
-                            title: "Known stale candidates",
-                            value: snapshot.formattedStaleFluidAudioModelSize,
-                            detail: snapshot.staleModelSummary
-                        )
-
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing..." : "Remove Known Stale Models",
-                            tone: .destructive
-                        ) {
-                            showModelCacheCleanupConfirmation = true
-                        }
-                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
-                        .help(modelCacheCleanupInProgress || modelCacheLoading ? modelCacheBusyHelp : "")
-                    } else {
-                        Text("No known stale Parakeet model folders found.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let modelCacheCleanupStatus {
-                        Text(modelCacheCleanupStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        settingsFailureDetailsButton(modelCacheCleanupStatusDetails)
-                    }
-                } else if !modelCacheLoading {
-                    Text("Model storage has not been scanned yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                SettingsInlineActionButton(title: modelCacheLoading ? "Scanning..." : "Refresh Storage Sizes") {
-                    trackSettingsAction("refresh_model_cache_storage", page: .storage)
-                    refreshModelCacheSnapshot()
-                }
-                .disabled(modelCacheLoading)
-                .help(modelCacheLoading ? "Storage sizes are being scanned." : "")
-            }
-            .onAppear {
-                if modelCacheSnapshot == nil, !modelCacheLoading {
-                    refreshModelCacheSnapshot()
-                }
-            }
-            .alert("Remove reclaimable cache?", isPresented: $showReclaimableCacheCleanupConfirmation) {
-                Button("Remove", role: .destructive) {
-                    removeReclaimableModelCaches()
-                }
-                Button("Cancel", role: .cancel) {}
-                    .keyboardShortcut(.defaultAction)
-            } message: {
-                let includeWhisper = !effectiveTranscriptionModel.isWhisper
-                Text(includeWhisper
-                    ? "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. Active Parakeet CoreML stays."
-                    : "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected.")
-            }
-            .alert("Remove stale local models?", isPresented: $showModelCacheCleanupConfirmation) {
-                Button("Remove", role: .destructive) {
-                    removeStaleModelCaches()
-                }
-                Button("Cancel", role: .cancel) {}
-                    .keyboardShortcut(.defaultAction)
-            } message: {
-                Text("Transcripted will remove only known old Parakeet folders: \(modelCacheSnapshot?.staleModelSummary ?? "none"). Active Parakeet CoreML and Whisper caches stay.")
-            }
-            .alert("Remove Whisper cache?", isPresented: $showWhisperCacheCleanupConfirmation) {
-                Button("Remove", role: .destructive) {
-                    removeWhisperModelCache()
-                }
-                Button("Cancel", role: .cancel) {}
-                    .keyboardShortcut(.defaultAction)
-            } message: {
-                Text("Transcripted will remove downloaded Whisper model files. Parakeet stays available, and Whisper can download again later if you choose it.")
-            }
-
-            SettingsSection(
-                title: "Support Folders",
-                detail: "Logs, cache, app state, and temporary audio."
-            ) {
-                DisclosureGroup("Show support folders", isExpanded: $showSupportFolders) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        StorageRow(title: "App state", url: appStateFolder)
-                        StorageRow(title: "App cache", url: cacheFolder)
-                        StorageRow(title: "App logs", url: logsFolder)
-                        StorageRow(title: "Temporary recordings", url: recordingsFolder)
-                    }
-                    .padding(.top, 12)
-                }
-            }
-        }
-        .accessibilityIdentifier("transcripted.settings.page.storage")
+        )
     }
 
     private var connectAgentPage: some View {
@@ -3470,123 +3078,55 @@ struct TranscriptedSettingsView: View {
     }
 
     private var betaPage: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Beta",
-                summary: "Turn on experimental local features when you want to test them."
-            )
-
-            SettingsSection(
-                title: "Experimental Features",
-                detail: "These are off by default. Nothing runs automatically unless you turn it on here."
-            ) {
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsToggleRow(
-                        title: "AI meeting summaries",
-                        detail: localMeetingSummariesEnabled
-                            ? "On. Transcripted may prepare Gemma now; meeting summaries still run only when you choose Run AI summary."
-                            : "Create private meeting summaries on this Mac. Turning this on may download or warm Gemma before your first summary.",
-                        isOn: Binding(
-                            get: { localMeetingSummariesEnabled },
-                            set: { enabled in
-                                localMeetingSummariesEnabled = enabled
-                                LocalMeetingSummaryPreferences.setEnabled(enabled)
-                                trackSettingsToggle("local_ai_meeting_summaries", enabled: enabled, page: .beta)
-                                handleLocalMeetingSummaryToggle(enabled)
-                            }
-                        ),
-                        help: "Opt in to local meeting summaries on Home.",
-                        automationIdentifier: "transcripted.settings.beta.ai-meeting-summaries"
-                    )
-
-                    Picker("Summary provider", selection: Binding(
-                        get: { localMeetingSummaryProvider },
-                        set: { provider in
-                            localMeetingSummaryProviderRawValue = provider.rawValue
-                            LocalMeetingSummaryPreferences.setProvider(provider)
-                            trackSettingsToggle("local_ai_meeting_summary_provider_\(provider.rawValue)", enabled: true, page: .beta)
-                            refreshLocalSummarySetupStatus()
-                            if localMeetingSummariesEnabled {
-                                cancelLocalSummaryJobs()
-                                clearHomeLocalSummaryNotice()
-                                cancelLocalSummaryModelPreparation()
-                                localSummaryModelPreparationStatus = nil
-                                prepareLocalSummaryModelFromBeta()
-                            }
-                        }
-                    )) {
-                        ForEach(LocalMeetingSummaryProvider.allCases, id: \.self) { provider in
-                            Text(provider.title).tag(provider)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(isLocalSummaryModelPreparing)
-                    .help(isLocalSummaryModelPreparing
-                        ? "Finish or cancel the current model setup before switching providers."
-                        : "")
-
-                    Text(localMeetingSummaryProvider.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    betaLocalSummarySetupStatus
+        BetaSettingsPage(
+            localMeetingSummariesEnabled: Binding(
+                get: { localMeetingSummariesEnabled },
+                set: { enabled in
+                    localMeetingSummariesEnabled = enabled
+                    LocalMeetingSummaryPreferences.setEnabled(enabled)
+                    trackSettingsToggle("local_ai_meeting_summaries", enabled: enabled, page: .beta)
+                    handleLocalMeetingSummaryToggle(enabled)
                 }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsToggleRow(
-                        title: "Live meeting sidecar",
-                        detail: betaLiveMeetingCodexEnabled
-                            ? "On. Transcripted prepares a local folder that Codex or Claude Cowork can watch during active meetings."
-                            : "Let Codex or Claude Cowork follow an active meeting through a local sidecar folder.",
-                        isOn: Binding(
-                            get: { betaLiveMeetingCodexEnabled },
-                            set: { enabled in
-                                betaLiveMeetingCodexEnabled = enabled
-                                LiveMeetingCodexPreferences.setEnabled(enabled)
-                                trackSettingsToggle("live_meeting_sidecar", enabled: enabled, page: .beta)
-                                handleBetaLiveMeetingSidecarToggle(enabled)
-                            }
-                        ),
-                        help: "Opt in to the live meeting sidecar workspace.",
-                        automationIdentifier: "transcripted.settings.beta.live-meeting-sidecar"
-                    )
-
-                    betaLiveSidecarSetupStatus
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsToggleRow(
-                        title: "Nemotron streaming model (beta)",
-                        detail: betaNemotronModelEnabled
-                            ? "On. Nemotron appears as a transcription model choice in General settings; its ~600 MB download happens only if you select it."
-                            : "Adds a local streaming transcription model covering 40 languages to the model picker. Parakeet stays the default.",
-                        isOn: Binding(
-                            get: { betaNemotronModelEnabled },
-                            set: { enabled in
-                                betaNemotronModelEnabled = enabled
-                                SpeechModelBetaPreferences.setNemotronBetaEnabled(enabled)
-                                trackSettingsToggle("nemotron_streaming_model", enabled: enabled, page: .beta)
-                            }
-                        ),
-                        help: "Opt in to the Nemotron streaming transcription model.",
-                        automationIdentifier: "transcripted.settings.beta.nemotron-streaming-model"
-                    )
-
-                    if !betaNemotronModelEnabled && preferredTranscriptionModel == .nemotronStreaming {
-                        Text("Nemotron is still your saved preference, but with the beta off Transcripted uses \(TranscriptionModelPreferences.defaultModel.title).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+            ),
+            localMeetingSummaryProvider: Binding(
+                get: { localMeetingSummaryProvider },
+                set: { provider in
+                    localMeetingSummaryProviderRawValue = provider.rawValue
+                    LocalMeetingSummaryPreferences.setProvider(provider)
+                    trackSettingsToggle("local_ai_meeting_summary_provider_\(provider.rawValue)", enabled: true, page: .beta)
+                    refreshLocalSummarySetupStatus()
+                    if localMeetingSummariesEnabled {
+                        cancelLocalSummaryJobs()
+                        clearHomeLocalSummaryNotice()
+                        cancelLocalSummaryModelPreparation()
+                        localSummaryModelPreparationStatus = nil
+                        prepareLocalSummaryModelFromBeta()
                     }
                 }
-            }
-        }
-        .accessibilityIdentifier("transcripted.settings.page.beta")
+            ),
+            isLocalSummaryModelPreparing: isLocalSummaryModelPreparing,
+            liveMeetingSidecarEnabled: Binding(
+                get: { betaLiveMeetingCodexEnabled },
+                set: { enabled in
+                    betaLiveMeetingCodexEnabled = enabled
+                    LiveMeetingCodexPreferences.setEnabled(enabled)
+                    trackSettingsToggle("live_meeting_sidecar", enabled: enabled, page: .beta)
+                    handleBetaLiveMeetingSidecarToggle(enabled)
+                }
+            ),
+            nemotronModelEnabled: Binding(
+                get: { betaNemotronModelEnabled },
+                set: { enabled in
+                    betaNemotronModelEnabled = enabled
+                    SpeechModelBetaPreferences.setNemotronBetaEnabled(enabled)
+                    trackSettingsToggle("nemotron_streaming_model", enabled: enabled, page: .beta)
+                }
+            ),
+            nemotronRemainsPreferred: preferredTranscriptionModel == .nemotronStreaming,
+            fallbackTranscriptionModelTitle: TranscriptionModelPreferences.defaultModel.title,
+            localSummarySetupStatus: { betaLocalSummarySetupStatus },
+            liveSidecarSetupStatus: { betaLiveSidecarSetupStatus }
+        )
     }
 
     private var betaLocalSummarySetupStatus: some View {
@@ -4946,10 +4486,6 @@ struct TranscriptedSettingsView: View {
         )
     }
 
-    private var captureLibraryMigrationBusyHelp: String {
-        "Captures are still being copied to the new folder."
-    }
-
     private func chooseCaptureLibrary() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -5218,36 +4754,6 @@ struct TranscriptedSettingsView: View {
             return .readyToInstall
         }
     }
-}
-
-private struct PendingCaptureLibraryChoice: Equatable {
-    let currentLibrary: URL
-    let newLibrary: URL
-    let preferenceURL: URL?
-    let destinationKind: CaptureLibraryDestinationKind
-
-    var copyButtonTitle: String {
-        switch destinationKind {
-        case .custom:
-            return "Copy to New Folder"
-        case .defaultLibrary:
-            return "Copy to Default Folder"
-        }
-    }
-
-    var destinationDescription: String {
-        switch destinationKind {
-        case .custom:
-            return "new folder"
-        case .defaultLibrary:
-            return "default folder"
-        }
-    }
-}
-
-private enum CaptureLibraryDestinationKind: Equatable {
-    case custom
-    case defaultLibrary
 }
 
 // User-facing copy for the "we can't find this artifact on disk" failures that

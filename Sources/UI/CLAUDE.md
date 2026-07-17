@@ -12,7 +12,7 @@ The directory is grouped by surface so the live UI tree is easier to scan:
 
 Draft-mode UI is not an active product path in this worktree.
 
-## Files (97 Swift files across Overlay/MenuBar/Settings/Shared)
+## Files (99 Swift files across Overlay/MenuBar/Settings/Shared)
 
 ### Overlay/
 
@@ -101,7 +101,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/TypingTimeSavedFormatter.swift` — Foundation-pure formatter for Home's typing-time-saved stat
-- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, People, Support); model, shortcut, and privacy controls are General disclosures
+- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Beta, Dictations, General, People, Storage, Support); model, shortcut, and privacy editors are injected into General disclosures by the shell
 
 This list is not exhaustive for `Settings/` — it has grown past 40 files, several
 of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,
