@@ -329,7 +329,12 @@ final class AudioInitializationTests: XCTestCase {
         audio.micSegments = [MicRecordingSegment(url: oldMicURL)]
         audio.micAudioFileURL = oldMicURL
         audio.systemAudioFileURL = oldSystemURL
-        audio.micAudioFileQueue.sync { audio.micAudioFile = oldMicFile }
+        _ = audio.micAudioFileQueue.sync {
+            audio.micAudioFileOwnership.installSessionWriter(
+                oldMicFile,
+                generation: audio.recordingSessionGeneration
+            )
+        }
         audio.systemAudioFileQueue.sync { audio.systemAudioFile = oldSystemFile }
 
         let lockHeld = expectation(description: "audio graph lock held")
@@ -358,7 +363,12 @@ final class AudioInitializationTests: XCTestCase {
         audio.micSegments = [MicRecordingSegment(url: newMicURL)]
         audio.micAudioFileURL = newMicURL
         audio.systemAudioFileURL = newSystemURL
-        audio.micAudioFileQueue.sync { audio.micAudioFile = newMicFile }
+        _ = audio.micAudioFileQueue.sync {
+            audio.micAudioFileOwnership.installSessionWriter(
+                newMicFile,
+                generation: audio.recordingSessionGeneration
+            )
+        }
         audio.systemAudioFileQueue.sync { audio.systemAudioFile = newSystemFile }
 
         releaseLock.signal()
@@ -371,7 +381,9 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(audio.micAudioFileURL, newMicURL)
         XCTAssertEqual(audio.systemAudioFileURL, newSystemURL)
 
-        let activeMicFile = audio.micAudioFileQueue.sync { audio.micAudioFile }
+        let activeMicFile = audio.micAudioFileQueue.sync {
+            audio.micAudioFileOwnership.writer
+        }
         let activeSystemFile = audio.systemAudioFileQueue.sync { audio.systemAudioFile }
         XCTAssertNotNil(activeMicFile)
         XCTAssertNotNil(activeSystemFile)

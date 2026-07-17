@@ -577,7 +577,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // Audio file recording
     var systemAudioFile: AVAudioFile?
-    var micAudioFile: AVAudioFile?
+    var micAudioFileOwnership = MicWriterOwnership<AVAudioFile>()
     let systemAudioFileQueue = DispatchQueue(label: "SystemAudioFileWrite", qos: .utility)
     let micAudioFileQueue = DispatchQueue(label: "MicAudioFileWrite", qos: .utility)
 
@@ -1328,7 +1328,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let engineRef = self.engine
         let inputNodeRef = self.inputNode
         let systemCaptureRef = self.systemAudioCapture
-        let micAudioFileRef = micAudioFileQueue.sync { self.micAudioFile }
+        let micAudioFileRef = micAudioFileQueue.sync {
+            self.micAudioFileOwnership.takeWriterAndInvalidate(for: stopGeneration)
+        }
         let systemAudioFileRef = systemAudioFileQueue.sync { self.systemAudioFile }
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
@@ -1422,9 +1424,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
             cleanupGroup.enter()
             self.micAudioFileQueue.async { [weak self] in
                 if let self, let micAudioFileRef {
-                    if let currentMicFile = self.micAudioFile, currentMicFile === micAudioFileRef {
-                        self.micAudioFile = nil
-                    }
                     // Close explicitly so the WAV header is finalized here on
                     // the serial queue before cleanupGroup.notify hands the
                     // file to the merger. Waiting for deinit is racy: other
