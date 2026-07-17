@@ -204,6 +204,7 @@ final class MeetingSessionController: ObservableObject {
     var liveCodexFinalTranscriptNeedsQueuedJobID = false
     var liveCodexAwaitedTranscriptionJobID: UUID?
     var activeQueuedTranscriptionJobID: UUID?
+    var activeStoppedAudioRecovery: DictationStoppedAudioRecovery?
 
     var shouldConfirmQuitForActiveCapture: Bool {
         isCaptureSessionActive || isFinishingRecording
@@ -1461,13 +1462,17 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
+        let stoppedAudioRecovery = DictationStoppedAudioRecoveryStore
+            .pendingRecoveries(limit: Int.max)
+            .first { $0.url.standardizedFileURL == sourceURL.standardizedFileURL }
         let outcome: TranscriptionQueueCoordinator.QueueInsertionOutcome
         do {
             outcome = try transcriptionQueue.enqueueImportedAudioJob(
                 audioURL: preparedAudio.copiedAudioURL,
                 suggestedTitle: preparedAudio.suggestedTitle,
                 recordingDate: preparedAudio.recordingDate,
-                startTrigger: .fileImport
+                startTrigger: .fileImport,
+                stoppedAudioRecovery: stoppedAudioRecovery
             )
         } catch {
             let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(
@@ -1573,7 +1578,8 @@ final class MeetingSessionController: ObservableObject {
         taskManager.cancelAll()
         if liveCodexSessionAwaitingFinalTranscript {
             finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
-            activeQueuedTranscriptionJobID = nil
+        activeQueuedTranscriptionJobID = nil
+        activeStoppedAudioRecovery = nil
         }
         state = .ready
         DiagnosticsTrail.record(
@@ -2627,6 +2633,15 @@ final class MeetingSessionController: ObservableObject {
         switch status {
         case .transcriptSaved:
             lastTerminalTranscriptionOutcome = .transcriptSaved
+            if let stoppedAudioRecovery = activeStoppedAudioRecovery {
+                activeStoppedAudioRecovery = nil
+                Task.detached(priority: .utility) {
+                    DictationStoppedAudioRecoveryStore.cleanup(
+                        stoppedAudioRecovery,
+                        transcriptPersisted: true
+                    )
+                }
+            }
             let transcriptionTrigger = activeTranscriptionTrigger
             let promptTelemetryProperties = activeDetectedPromptTranscriptionTelemetryProperties
             let promptRecordingStartedAt = activeDetectedPromptTranscriptionRecordingStartedAt
@@ -2656,6 +2671,8 @@ final class MeetingSessionController: ObservableObject {
             activeTranscriptionCaptureDiagnostics = nil
         case .failed(let message):
             lastTerminalTranscriptionOutcome = .failed(message)
+            // A failed import must retain its original stopped-audio checkpoint.
+            activeStoppedAudioRecovery = nil
             let transcriptionTrigger = activeTranscriptionTrigger
             let diagnosticMessage = taskManager.lastFailureDiagnosticMessage ?? message
             let failureKind = MeetingFailureKind.classify(message: diagnosticMessage)
