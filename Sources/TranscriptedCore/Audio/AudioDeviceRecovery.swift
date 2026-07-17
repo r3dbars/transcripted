@@ -42,6 +42,49 @@ enum MicWatchdogArmingPolicy {
     }
 }
 
+/// Queue-confined ownership for the shared microphone writer. Recovery is a
+/// two-step retire/install operation, so the generation stays claimed while
+/// the old file is closed and the replacement is created. A newer recording
+/// can replace that claim, causing the stale recovery install to fail.
+struct MicWriterOwnership<Writer: AnyObject> {
+    private(set) var writer: Writer?
+    private(set) var generation: UInt64?
+
+    @discardableResult
+    mutating func installSessionWriter(_ writer: Writer, generation: UInt64) -> Writer? {
+        let displacedWriter = self.writer
+        self.writer = writer
+        self.generation = generation
+        return displacedWriter
+    }
+
+    mutating func takeWriterOwned(by generation: UInt64) -> Writer? {
+        guard self.generation == generation, let writer else { return nil }
+        self.writer = nil
+        return writer
+    }
+
+    mutating func installRecoveryWriter(_ writer: Writer, generation: UInt64) -> Bool {
+        guard self.generation == generation, self.writer == nil else { return false }
+        self.writer = writer
+        return true
+    }
+
+    mutating func takeWriterAndInvalidate(for generation: UInt64) -> Writer? {
+        let writer = self.writer
+        self.writer = nil
+        self.generation = generation
+        return writer
+    }
+
+    @discardableResult
+    mutating func removeIfOwned(_ writer: Writer, generation: UInt64) -> Bool {
+        guard self.generation == generation, self.writer === writer else { return false }
+        self.writer = nil
+        return true
+    }
+}
+
 /// Extension handling mic device recovery, watchdog timer, and sleep/wake resilience.
 /// Runs on background threads — NOT @MainActor.
 extension Audio {
@@ -217,13 +260,20 @@ extension Audio {
 
         let channelCountChanged = oldChannelCount != recordingSnapshot.channelCount
         var recoverySegmentURL: URL?
+        var recoveryWriter: AVAudioFile?
+        var recoveryWriterWasInstalled = false
         var shouldKeepRecoverySegment = false
         defer {
             if let recoverySegmentURL, !shouldKeepRecoverySegment {
-                micAudioFileQueue.sync {
-                    if micAudioFile?.url == recoverySegmentURL {
-                        micAudioFile?.close()
-                        micAudioFile = nil
+                if let recoveryWriter {
+                    let shouldCloseWriter = !recoveryWriterWasInstalled || micAudioFileQueue.sync {
+                        micAudioFileOwnership.removeIfOwned(
+                            recoveryWriter,
+                            generation: sessionGeneration
+                        )
+                    }
+                    if shouldCloseWriter {
+                        recoveryWriter.close()
                     }
                 }
                 try? FileManager.default.removeItem(at: recoverySegmentURL)
@@ -241,10 +291,16 @@ extension Audio {
         // Close explicitly so the retiring segment's WAV header is finalized
         // before the merger can ever read it. Even same-rate device switches
         // need a new segment so the missing-buffer interval can be padded.
-        micAudioFileQueue.sync {
-            micAudioFile?.close()
-            micAudioFile = nil
+        guard let retiringWriter = micAudioFileQueue.sync(execute: {
+            micAudioFileOwnership.takeWriterOwned(by: sessionGeneration)
+        }) else {
+            AppLogger.audioMic.info("Skipping recovery because mic writer ownership changed", [
+                "expectedSession": "\(sessionGeneration)",
+                "currentSession": "\(recordingSessionGeneration)"
+            ])
+            return
         }
+        retiringWriter.close()
 
         let captureDir = self.paths.audioCaptures
         try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
@@ -265,7 +321,21 @@ extension Audio {
                 interleaved: monoFormat.isInterleaved
             )
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-            micAudioFileQueue.sync { micAudioFile = newFile }
+            recoveryWriter = newFile
+            let installed = micAudioFileQueue.sync {
+                micAudioFileOwnership.installRecoveryWriter(
+                    newFile,
+                    generation: sessionGeneration
+                )
+            }
+            guard installed else {
+                AppLogger.audioMic.info("Skipping stale recovery writer replacement", [
+                    "expectedSession": "\(sessionGeneration)",
+                    "currentSession": "\(recordingSessionGeneration)"
+                ])
+                return
+            }
+            recoveryWriterWasInstalled = true
             AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
         } catch {
             AppLogger.audioMic.error("Failed to create recovery audio file", ["error": error.localizedDescription])

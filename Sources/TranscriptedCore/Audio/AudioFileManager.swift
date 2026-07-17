@@ -247,12 +247,19 @@ extension Audio {
             }
 
             // Save as mono WAV file
-            micAudioFile = try AVAudioFile(
+            let newMicAudioFile = try AVAudioFile(
                 forWriting: fileURL,
                 settings: monoFormat.settings,
                 commonFormat: monoFormat.commonFormat,
                 interleaved: monoFormat.isInterleaved
             )
+            let displacedMicAudioFile = micAudioFileQueue.sync {
+                micAudioFileOwnership.installSessionWriter(
+                    newMicAudioFile,
+                    generation: sessionGeneration
+                )
+            }
+            displacedMicAudioFile?.close()
             FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
             journalSession = recordingJournal.begin(primaryMicURL: fileURL)
             AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
@@ -367,7 +374,7 @@ extension Audio {
         micAudioFileQueue.async { [weak self] in
             guard let self = self,
                   self.consecutiveMicWriteErrors < self.maxConsecutiveWriteErrors,
-                  let audioFile = self.micAudioFile,
+                  let audioFile = self.micAudioFileOwnership.writer,
                   let monoFormat = self.monoOutputFormat else { return }
 
             do {

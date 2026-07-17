@@ -5,6 +5,8 @@ import XCTest
 @available(macOS 14.0, *)
 final class AudioStateTransitionTests: XCTestCase {
 
+    private final class TestMicWriter {}
+
     private var rootURL: URL!
 
     override func setUp() {
@@ -200,6 +202,42 @@ final class AudioStateTransitionTests: XCTestCase {
         XCTAssertNil(audio.lastRecoveryTime)
         XCTAssertEqual(audio.systemAudioStatus, .healthy)
         XCTAssertNil(audio.systemAudioSilenceStart)
+    }
+
+    func testStaleRecoveryCannotReplaceNewRecordingMicWriter() {
+        var ownership = MicWriterOwnership<TestMicWriter>()
+        let oldWriter = TestMicWriter()
+        let recoveryWriter = TestMicWriter()
+        let newRecordingWriter = TestMicWriter()
+
+        ownership.installSessionWriter(oldWriter, generation: 1)
+        XCTAssertTrue(ownership.takeWriterOwned(by: 1) === oldWriter)
+
+        // Deterministic race: a new recording claims the shared slot after
+        // stale recovery retired its own writer but before it can replace it.
+        ownership.installSessionWriter(newRecordingWriter, generation: 2)
+
+        XCTAssertFalse(ownership.installRecoveryWriter(recoveryWriter, generation: 1))
+        XCTAssertFalse(ownership.removeIfOwned(recoveryWriter, generation: 1))
+        XCTAssertTrue(ownership.writer === newRecordingWriter)
+        XCTAssertEqual(ownership.generation, 2)
+    }
+
+    func testStopInvalidationPreventsStaleRecoveryWriterInstall() {
+        var ownership = MicWriterOwnership<TestMicWriter>()
+        let oldWriter = TestMicWriter()
+        let recoveryWriter = TestMicWriter()
+
+        ownership.installSessionWriter(oldWriter, generation: 7)
+        XCTAssertTrue(ownership.takeWriterOwned(by: 7) === oldWriter)
+
+        // Official stop wins the queue after recovery retires the writer but
+        // before it creates and installs the replacement segment.
+        XCTAssertNil(ownership.takeWriterAndInvalidate(for: 8))
+
+        XCTAssertFalse(ownership.installRecoveryWriter(recoveryWriter, generation: 7))
+        XCTAssertNil(ownership.writer)
+        XCTAssertEqual(ownership.generation, 8)
     }
 
     // MARK: - AudioGap description
