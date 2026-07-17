@@ -66,6 +66,7 @@ class DictationSessionController: ObservableObject {
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
     private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
+    private var stoppedAudioRecoveryPreservationSessionID: UUID?
     private var autoSendRequestDecision = DictationAutoSendRequestDecision.notEvaluated
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
@@ -133,6 +134,7 @@ class DictationSessionController: ObservableObject {
         isDictating = true
         currentDictationSessionID = UUID()
         stoppedAudioRecovery = nil
+        stoppedAudioRecoveryPreservationSessionID = nil
         sessionSourceApp = sourceApp
         sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sessionAnchorRect = anchorRect
@@ -954,12 +956,17 @@ class DictationSessionController: ObservableObject {
                         taskSessionID: taskSessionID,
                         currentSessionID: self.currentDictationSessionID
                     ) else {
-                        await Task.detached(priority: .utility) {
-                            DictationStoppedAudioRecoveryStore.cleanup(
-                                recovery,
-                                explicitDiscard: true
-                            )
-                        }.value
+                        if !DictationStoppedAudioRecoveryCommitPolicy.shouldRetainPersistedRecovery(
+                            taskSessionID: taskSessionID,
+                            preservationSessionID: self.stoppedAudioRecoveryPreservationSessionID
+                        ) {
+                            await Task.detached(priority: .utility) {
+                                DictationStoppedAudioRecoveryStore.cleanup(
+                                    recovery,
+                                    explicitDiscard: true
+                                )
+                            }.value
+                        }
                         return
                     }
                     self.stoppedAudioRecovery = recovery
@@ -1390,6 +1397,9 @@ class DictationSessionController: ObservableObject {
     /// Cancel dictation without pasting
     func cancelDictation(preserveStoppedAudio: Bool = false) {
         guard let (appState, overlayController) = readyState() else { return }
+        if preserveStoppedAudio {
+            stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID
+        }
         cancelActiveTasks(cancelRecording: true)
         if !preserveStoppedAudio {
             discardStoppedAudioRecovery(explicitDiscard: true)

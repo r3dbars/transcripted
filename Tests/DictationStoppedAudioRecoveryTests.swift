@@ -126,6 +126,21 @@ func testDictationStoppedAudioRecovery() {
             ),
             "an old stop task must not mutate a successor session"
         )
+
+        assertTrue(
+            DictationStoppedAudioRecoveryCommitPolicy.shouldRetainPersistedRecovery(
+                taskSessionID: activeSessionID,
+                preservationSessionID: activeSessionID
+            ),
+            "termination cancellation must retain a checkpoint already written for that session"
+        )
+        assertFalse(
+            DictationStoppedAudioRecoveryCommitPolicy.shouldRetainPersistedRecovery(
+                taskSessionID: activeSessionID,
+                preservationSessionID: UUID()
+            ),
+            "a successor session must not retain an old task's checkpoint"
+        )
     }
 
     runSuite("Dictation controller checkpoints audio before waiting for the model") {
@@ -189,6 +204,10 @@ func testDictationStoppedAudioRecovery() {
             assertTrue(
                 source.contains("cancelDictation(preserveStoppedAudio: true)"),
                 "termination timeout must not convert a durable checkpoint into an implicit discard"
+            )
+            assertTrue(
+                source.contains("stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID"),
+                "termination cancellation must mark the active session before cancelling its stop task"
             )
             let appSource = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
             assertTrue(
