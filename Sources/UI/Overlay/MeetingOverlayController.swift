@@ -1723,7 +1723,6 @@ final class MeetingOverlayController: NSObject {
 
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
-        promptCandidate = nil
         promptKind = .systemAudio
         promptSecondsRemaining = 0
         currentPrompt = systemAudioWarningPromptDisplay(warning: warning)
@@ -2656,8 +2655,6 @@ final class MeetingOverlayController: NSObject {
             countdownText: "",
             secondaryTitle: "Keep Recording",
             secondaryAccessibilityLabel: "Acknowledge system audio warning and keep recording",
-            remindTitle: nil,
-            remindAccessibilityLabel: nil,
             primaryTitle: "End & Transcribe",
             primaryAccessibilityLabel: "End and transcribe the meeting"
         )
