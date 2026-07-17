@@ -35,7 +35,7 @@ Draft-mode UI is not an active product path in this worktree.
 - `Overlay/MeetingPillRestPolicy.swift` — rest/bloom policy for the recording pill: when the unattended pill condenses to the dot+timer capsule and when hover renders it full again
 - `Overlay/LiveTranscriptPlainTextRenderer.swift` — Foundation-pure copy renderer for the live transcript drawer
 - `Overlay/MeetingDurationFormatter.swift` — Foundation-pure timer and inactivity-duration formatting for the meeting overlay
-- `Overlay/MeetingOverlayController.swift` — non-activating panel for detected-meeting prompts, model warmup, recording, and transcription status; the recording pill is click-to-toggle for the embedded live transcript drawer (fed by `MeetingSessionController.liveTranscriptFeed`), rests to a compact capsule when unattended, and carries a context menu (transcript toggle, pin, browser view, discard)
+- `Overlay/MeetingOverlayController.swift` — non-activating panel for model warmup, recording/transcription status, in-recording audio warnings, and missed-call nudges; detected-meeting Record/Not now/Remind actions live only in `CapturePillController`; the recording pill is click-to-toggle for the embedded live transcript drawer (fed by `MeetingSessionController.liveTranscriptFeed`), rests to a compact capsule when unattended, and carries a context menu (transcript toggle, pin, browser view, discard)
 
 The overlay area holds both live transient recording surfaces: the compact
 dictation overlay and the meeting prompt / recording overlay.
@@ -95,13 +95,13 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsActions.swift` — struct of callbacks (start dictation, start meeting, import audio, paste, connect agent, check updates, send feedback, copy/send diagnostics) injected into the settings view
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
-- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names
+- `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names; legacy model, shortcut, and privacy cases remain deep-link aliases into General
 - `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, Auto Enter apps, retained-audio playback, and failed meetings
 - `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
 - `Settings/TypingTimeSavedFormatter.swift` — Foundation-pure formatter for Home's typing-time-saved stat
-- `Settings/Pages/` — one file per settings tab-strip page split out of `TranscriptedSettingsView` (About, Dictations, People, Privacy, Support)
+- `Settings/Pages/` — standalone settings pages split out of `TranscriptedSettingsView` (About, Dictations, People, Support); model, shortcut, and privacy controls are General disclosures
 
 This list is not exhaustive for `Settings/` — it has grown past 40 files, several
 of them small extracted presentation/policy helpers (`FailedMeetingRecoveryPresentation.swift`,

@@ -37,7 +37,7 @@ Common commands (thin root wrappers; implementations live under `scripts/entrypo
 ```bash
 bash build-deps.sh                 # build/refresh prebuilt deps under deps-libs/, deps-frameworks/, deps-modules/
 bash build.sh --no-open            # authoritative app build for non-interactive verification
-bash run-tests.sh                  # curated fast tests (manifest-driven)
+bash run-tests.sh                  # convention-discovered root fast tests
 bash run-integration-smoke.sh      # app/core linkage + wake recovery + MicRecordingFileMerger
 bash run-e2e-smoke.sh              # deterministic release-critical artifact smoke (no mic/TCC)
 bash run-live-capture-smoke.sh     # local hardware/TCC smoke (needs mic + System Audio Recording perms)
@@ -50,7 +50,7 @@ bash scripts/dev/agent-preflight.sh  # prints suggested verification map for the
 
 Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multiple rules, run the union):
 
-- Touched `Sources/**/*.swift`, root `Tests/*.swift`, or `Tests/FastTests.manifest` → `bash build.sh --no-open` + `bash run-tests.sh`
+- Touched `Sources/**/*.swift` or root `Tests/*.swift` → `bash build.sh --no-open` + `bash run-tests.sh`
 - Touched `Sources/Meeting/**`, `Sources/TranscriptedCore/**`, or `Tests/Integration/**` → `bash build-deps.sh --force` + `bash build.sh --no-open` + `bash run-tests.sh` + `bash run-integration-smoke.sh`
 - Touched `Tests/E2E/**`, `run-e2e-smoke.sh`, or `scripts/entrypoints/run-e2e-smoke.sh` → `python3 scripts/dev/check-build-source-lists.py` + `bash run-e2e-smoke.sh`
 - Touched the slow-pasteback smoke path (`Tests/E2E/SlowPastebackSmoke.swift`, `Sources/Support/ClipboardRestoringTextPaster.swift`, `Sources/Support/TranscriptedConstants.swift`, `run-slow-pasteback-smoke.sh`) → `python3 scripts/dev/check-build-source-lists.py` + `bash run-slow-pasteback-smoke.sh`
@@ -70,9 +70,9 @@ Verification rules (mirror `.agents/test-matrix.yml`; if a change matches multip
 
 `run-tests.sh` is a custom `swiftc` runner, not XCTest:
 
-- A new root `Tests/*Tests.swift` file is **not** picked up automatically — it must be registered in `Tests/FastTests.manifest` as `<TestFile.swift>:<top-level entry function>`.
+- Root fast tests are discovered automatically by convention: `Tests/FooTests.swift` must expose exactly one top-level `testFoo()` entry function.
 - Moving a source file that the runner compiles directly requires updating the script.
-- The runner fails if the manifest and actual root test files drift.
+- The runner fails before compilation when the convention entry function is missing or duplicated.
 - `Tests/TranscriptedCoreTests/` is a separate SPM target — run via `swift test`, not `run-tests.sh`.
 - `bash run-tests.sh --coverage` writes LLVM coverage under `build/coverage/fast-tests/`.
 
@@ -177,7 +177,7 @@ Files still over 1500 lines after the 2026-07 god-file splits (measured with `wc
 - `Sources/UI/Overlay/DictationSessionController.swift` (~2.2k) — dictation session orchestration
 - `Sources/Meeting/LocalMeetingSummarizer.swift` (~1.9k) — opt-in local AI meeting-summary runners for both providers (Gemma MLX, Apple Foundation Models)
 - `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (~1.7k) — the MCP server's SQLite index; schema DDL already split into `TranscriptIndex+Schema.swift`, this file is still the query/reconcile surface
-- `Sources/TranscriptedCore/Speaker/SpeakerNamingSimulationRunner.swift` (~1.7k) — offline speaker-naming simulation harness
+- `Tests/TranscriptedCoreTests/SpeakerTests/Support/SpeakerNamingSimulationRunner.swift` (~1.7k) — test-only offline speaker-naming simulation harness
 - `Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift` (~1.7k) — the single-flight transcription queue/orchestrator
 - `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (~1.6k) — the speakers settings surface (voice-to-name queue, duplicate suggestions, searchable list)
 

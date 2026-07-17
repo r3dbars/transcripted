@@ -1,7 +1,7 @@
 // EmbeddingClusterer.swift
 // Post-processes diarization speaker segments to fix three failure modes:
 //
-// Supports both Sortformer (streaming) and PyAnnote (offline) pipelines.
+// Operates on model-agnostic diarization segments.
 //
 // 1. Fragmentation: Same speaker split across multiple diarizer IDs.
 //    Fixed by pairwise merge — compare mean embeddings of every speaker pair
@@ -51,7 +51,7 @@ public enum EmbeddingClusterer {
     ///   fragmented speaker clusters. Pass `nil` to skip only the pairwise merge
     ///   phase; small-cluster absorption, same-voice consolidation, and
     ///   DB-informed split still run.
-    ///   Sortformer default: 0.85 (conservative). Offline PyAnnote callers pass
+    ///   The default is 0.85 (conservative). Offline PyAnnote callers pass
     ///   `nil` because VBx already handles the base merge/fragmentation case.
     /// - Parameter consolidationThreshold: Cosine similarity threshold for the
     ///   same-voice consolidation pass that collapses over-segmented large
@@ -97,7 +97,7 @@ public enum EmbeddingClusterer {
     // MARK: - Pairwise Merge
 
     /// Merge speaker clusters whose mean embeddings are highly similar (>= threshold).
-    /// Fixes Sortformer fragmentation where one person gets 2+ speaker IDs.
+    /// Fixes diarization fragmentation where one person gets 2+ speaker IDs.
     ///
     /// Uses union-find for transitive merges: if A≈B and B≈C, all three merge.
     static func pairwiseMerge(
@@ -467,7 +467,7 @@ public enum EmbeddingClusterer {
 
     /// Split clusters that contain 2+ known DB voices.
     ///
-    /// When Sortformer merges different speakers into one cluster,
+    /// When a diarizer merges different speakers into one cluster,
     /// the per-segment embeddings still differ. We match each segment
     /// against known DB profiles to detect and separate mixed clusters.
     static func dbInformedSplit(

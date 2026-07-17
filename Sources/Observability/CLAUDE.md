@@ -29,10 +29,10 @@ anonymous analytics, and Sparkle update plumbing.
 - `WorkflowRecoveryTelemetry.swift` — bucketed analytics for recovery flows (attempted/succeeded/failed) across workflow kind, failure kind, retry source, and artifact-retained outcome
 - `EventFileWritePolicy.swift` — buffering policy for info-level event writes so routine telemetry does not hammer local JSONL files
 - `ObservabilityLogRotation.swift` — rename-based, O(1) rotation for append-only JSONL observability logs once they exceed a size threshold; keeps one rotated generation
-- `ObservabilityTextRedactor.swift` — shared text redactor for support-facing and diagnostic strings before they leave local-only surfaces
+- `ObservabilityTextRedactor.swift` — app-specific adapter over TranscriptedCore's generic `PrivacyTextRedactor`, preserving the existing observability path-boundary profile for support-facing and diagnostic strings
 - `SentryEventPolicy.swift` — explicit allowlist of non-fatal events permitted to reach Sentry
 - `SentryPayloadSanitizer.swift` — strips obvious sensitive values before Sentry sends
-- `PayloadSanitizationCore.swift` — shared `shouldDrop(key:)` + `redactAndCap(_:maxValueLength:)` helpers used by both sanitizers so redaction rules stay in one place while each destination keeps its own length cap and sensitive-key list
+- `PayloadSanitizationCore.swift` — shared `shouldDrop(key:)` + `redactAndCap(_:maxValueLength:)` payload mechanics used by both off-device sanitizers while each destination keeps its own length cap and sensitive-key list
 - `SentryRuntimeConfiguration.swift` — resolves Sentry DSN, environment, release, and dist from `Info.plist` or process environment
 - `SparkleUpdaterController.swift` — live Sparkle update controller used by the menubar app, including update-state telemetry and ready-to-install restart flows
 - `UpdateFailureKind.swift` — canonical Sparkle/update failure taxonomy used to normalize network, appcast, download, signature, install, and busy-session errors for analytics
