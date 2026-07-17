@@ -1187,8 +1187,15 @@ func testAnalyticsEventPolicy() {
         let finished = AnalyticsEventPolicy.policy(forEvent: "dictation_audio_route_recovery_finished")
         let timeout = AnalyticsEventPolicy.policy(forEvent: "dictation_audio_route_recovery_timeout")
 
+        assertEqual(
+            changed?.allowedProperties ?? [],
+            ["default_input_class", "default_output_class", "format_ready", "hfp_suspected", "input_device_class", "output_device_class", "recovering", "route_shape", "sample_flow_started", "selected_input_class", "selection_overrode_default", "selection_reason", "was_recording"],
+            "stable route changes should permit only categorical route and state fields"
+        )
         assertEqual(changed?.allowedProperties.contains("was_recording"), true, "route change should preserve whether an active recording was interrupted")
         assertEqual(changed?.allowedProperties.contains("selected_input_class"), true, "route change should preserve selected input class")
+        assertEqual(changed?.allowedProperties.contains("input_rate_hz"), false, "stable route changes should not expose exact input rates")
+        assertEqual(changed?.allowedProperties.contains("output_rate_hz"), false, "stable route changes should not expose exact output rates")
         assertEqual(finished?.allowedProperties.contains("outcome"), true, "route recovery should preserve success/failure")
         assertEqual(finished?.allowedProperties.contains("recovery_latency_bucket"), true, "route recovery should preserve latency as a bucket")
         assertEqual(timeout?.allowedProperties.contains("hfp_suspected"), true, "route timeout should preserve Bluetooth HFP suspicion only as a boolean")
@@ -1206,6 +1213,36 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["recovery_latency_bucket"], "2_9m", "route recovery latency bucket should survive sanitization")
         assertEqual(sanitized["selected_input_class"], "built_in", "selected input class should survive sanitization")
         assertEqual(sanitized["was_recording"], "true", "recording interruption state should survive sanitization")
+    }
+
+    runSuite("AnalyticsEventPolicy keeps zombie recovery terminal telemetry categorical") {
+        let terminal = AnalyticsEventPolicy.policy(forEvent: "dictation_zombie_recovery_finished")
+
+        assertEqual(
+            terminal?.allowedProperties ?? [],
+            ["failure_kind", "hfp_suspected", "input_device_class", "output_device_class", "result", "route_shape", "stage"],
+            "zombie recovery should expose one categorical terminal payload"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "audio_device": "Private microphone name",
+                "failure_kind": "no_sample_callbacks",
+                "hfp_suspected": "false",
+                "input_device_class": "built_in",
+                "output_device_class": "built_in",
+                "result": "failed",
+                "route_shape": "built_in_input_to_built_in_output",
+                "sample_count": "0",
+                "stage": "restart",
+            ],
+            allowedKeys: terminal?.allowedProperties ?? []
+        )
+
+        assertEqual(sanitized["result"], "failed", "terminal result should survive")
+        assertEqual(sanitized["stage"], "restart", "coarse recovery stage should survive")
+        assertNil(sanitized["audio_device"], "raw device labels must stay out of zombie telemetry")
+        assertNil(sanitized["sample_count"], "exact callback counts must stay out of zombie telemetry")
     }
 
     runSuite("AnalyticsEventPolicy only permits reviewed analytics events") {

@@ -148,6 +148,7 @@ allowlist.
 - `dictation_audio_route_changed`
 - `dictation_audio_route_recovery_finished`
 - `dictation_audio_route_recovery_timeout`
+- `dictation_zombie_recovery_finished`
 - `meeting_recording_started`
 - `meeting_recording_start_failed`
 - `meeting_detected_call_ended`

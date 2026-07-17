@@ -153,6 +153,7 @@ Dictation events also allow coarse route fields: `default_input_class`,
 | `dictation_audio_route_changed` | route fields only |
 | `dictation_audio_route_recovery_finished` | route fields plus `outcome` |
 | `dictation_audio_route_recovery_timeout` | route fields only |
+| `dictation_zombie_recovery_finished` | categorical `failure_kind`, `stage`, `result`, `hfp_suspected`, and route classes/shape only |
 
 ### Meetings
 
