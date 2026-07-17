@@ -414,7 +414,49 @@ private final class FocusedTextChangeObserver {
     }
 }
 
-private struct FocusedTextPasteConfirmation {
+@MainActor
+protocol ClipboardPasteConfirmationSource {
+    var canObservePaste: Bool { get }
+
+    func confirmationMode(
+        _ text: String,
+        clipboardWasRead: Bool,
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> String?
+
+    func diagnosticsContext(
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> [String: String]
+}
+
+@MainActor
+protocol ClipboardPasteTargetAdapter {
+    var confirmationSource: (any ClipboardPasteConfirmationSource)? { get }
+
+    func isFrontmost() -> Bool
+}
+
+@MainActor
+private struct SystemClipboardPasteTargetAdapter: ClipboardPasteTargetAdapter {
+    let target: DictationPasteTarget?
+    let confirmationSource: (any ClipboardPasteConfirmationSource)?
+
+    init(target: DictationPasteTarget?) {
+        self.target = target
+        // Capture AX only after the explicit Accessibility permission guard in
+        // `paste`. The adapter still owns frontmost checks before that point.
+        self.confirmationSource = nil
+    }
+
+    func isFrontmost() -> Bool {
+        target?.matchesCurrentFrontmostApp() != false
+    }
+}
+
+@MainActor
+struct FocusedTextPasteConfirmation: ClipboardPasteConfirmationSource {
     /// Accessibility clients can otherwise block for several seconds when an editor is
     /// briefly busy applying a paste (Notes is a common example). Confirmation is a
     /// best-effort signal and must never stall delivery or the target application.
@@ -630,8 +672,7 @@ final class ClipboardRestoringTextPaster {
             _ = AXIsProcessTrustedWithOptions(options)
         },
         pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
-        pasteConfirmed: (@MainActor () -> Bool)? = nil,
-        targetIsFrontmost: (@MainActor () -> Bool)? = nil,
+        targetAdapter: (any ClipboardPasteTargetAdapter)? = nil,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait
@@ -645,8 +686,7 @@ final class ClipboardRestoringTextPaster {
             accessibilityTrusted: accessibilityTrusted,
             requestAccessibilityTrust: requestAccessibilityTrust,
             pasteDispatcher: pasteDispatcher,
-            pasteConfirmed: pasteConfirmed,
-            targetIsFrontmost: targetIsFrontmost,
+            targetAdapter: targetAdapter,
             prepareForAutoSend: false,
             retainClipboardForPasteRetry: false,
             restoreDelay: restoreDelay,
@@ -666,8 +706,7 @@ final class ClipboardRestoringTextPaster {
             _ = AXIsProcessTrustedWithOptions(options)
         },
         pasteDispatcher: @MainActor () -> Bool = postClipboardPasteShortcut,
-        pasteConfirmed: (@MainActor () -> Bool)? = nil,
-        targetIsFrontmost: (@MainActor () -> Bool)? = nil,
+        targetAdapter: (any ClipboardPasteTargetAdapter)? = nil,
         prepareForAutoSend: Bool = false,
         retainClipboardForPasteRetry: Bool = true,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
@@ -678,9 +717,10 @@ final class ClipboardRestoringTextPaster {
         discardPasteRetry()
         restorePendingClipboardBeforeNewPaste()
 
-        if let target,
-           !target.matchesCurrentFrontmostApp(),
-           !waitForTargetActivation(target, timeout: activationWait) {
+        let pasteTargetAdapter = targetAdapter ?? SystemClipboardPasteTargetAdapter(target: target)
+
+        if !pasteTargetAdapter.isFrontmost(),
+           !waitForTargetActivation(pasteTargetAdapter, timeout: activationWait) {
             copyTextToClipboard(text, to: pasteboard)
             return .copied(
                 "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
@@ -697,7 +737,12 @@ final class ClipboardRestoringTextPaster {
             )
         }
 
-        let accessibilityConfirmation = FocusedTextPasteConfirmation.capture()
+        let accessibilityConfirmation: (any ClipboardPasteConfirmationSource)?
+        if targetAdapter == nil {
+            accessibilityConfirmation = FocusedTextPasteConfirmation.capture()
+        } else {
+            accessibilityConfirmation = pasteTargetAdapter.confirmationSource
+        }
         let savedItems = snapshotPasteboardItems(from: pasteboard)
         guard savedItems.isComplete else {
             return .failed("Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.")
@@ -739,11 +784,8 @@ final class ClipboardRestoringTextPaster {
             )
         }
 
-        let confirmationUnavailable = pasteConfirmed == nil && accessibilityConfirmation?.canObservePaste != true
-        let targetRemainsFrontmost = targetIsFrontmost ?? {
-            target?.matchesCurrentFrontmostApp() != false
-        }
-        let confirmPasteReceived = pasteConfirmed ?? {
+        let confirmationUnavailable = accessibilityConfirmation?.canObservePaste != true
+        let confirmationObserved = {
             if accessibilityConfirmation?.confirmationMode(
                 text,
                 clipboardWasRead: temporaryProvider?.didProvideData == true,
@@ -756,8 +798,8 @@ final class ClipboardRestoringTextPaster {
         }
 
         let pasteConfirmationResult = waitForPasteConfirmation(
-            targetIsFrontmost: targetRemainsFrontmost,
-            pasteConfirmed: confirmPasteReceived,
+            targetAdapter: pasteTargetAdapter,
+            confirmationObserved: confirmationObserved,
             timeout: pasteConfirmationWait
         )
         guard pasteConfirmationResult == .confirmed else {
@@ -822,16 +864,12 @@ final class ClipboardRestoringTextPaster {
         }
 
         let confirmationMode: String
-        if pasteConfirmed != nil {
-            confirmationMode = "injected_confirmation"
-        } else {
-            confirmationMode = accessibilityConfirmation?.confirmationMode(
-                text,
-                clipboardWasRead: temporaryProvider?.didProvideData == true,
-                clipboardReadAt: temporaryProvider?.firstReadAt,
-                pasteDispatchedAt: pasteDispatchedAt
-            ) ?? "unknown"
-        }
+        confirmationMode = accessibilityConfirmation?.confirmationMode(
+            text,
+            clipboardWasRead: temporaryProvider?.didProvideData == true,
+            clipboardReadAt: temporaryProvider?.firstReadAt,
+            pasteDispatchedAt: pasteDispatchedAt
+        ) ?? "unknown"
         lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
             event: "dictation_paste_confirmed",
             context: ["confirmation_mode": confirmationMode]
@@ -1011,7 +1049,10 @@ final class ClipboardRestoringTextPaster {
         }
     }
 
-    private func waitForTargetActivation(_ target: DictationPasteTarget, timeout: TimeInterval) -> Bool {
+    private func waitForTargetActivation(
+        _ targetAdapter: any ClipboardPasteTargetAdapter,
+        timeout: TimeInterval
+    ) -> Bool {
         guard timeout > 0 else { return false }
 
         let start = Date()
@@ -1021,11 +1062,11 @@ final class ClipboardRestoringTextPaster {
             timeout: timeout
         ) {
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
-            if target.matchesCurrentFrontmostApp() {
+            if targetAdapter.isFrontmost() {
                 return true
             }
         }
-        return target.matchesCurrentFrontmostApp()
+        return targetAdapter.isFrontmost()
     }
 
     @discardableResult
@@ -1061,28 +1102,28 @@ final class ClipboardRestoringTextPaster {
     }
 
     private func waitForPasteConfirmation(
-        targetIsFrontmost: @MainActor () -> Bool,
-        pasteConfirmed: @MainActor () -> Bool,
+        targetAdapter: any ClipboardPasteTargetAdapter,
+        confirmationObserved: @MainActor () -> Bool,
         timeout: TimeInterval
     ) -> ClipboardPasteConfirmationWaitResult {
-        guard targetIsFrontmost() else { return .focusChanged }
-        if pasteConfirmed() {
-            return targetIsFrontmost() ? .confirmed : .focusChanged
+        guard targetAdapter.isFrontmost() else { return .focusChanged }
+        if confirmationObserved() {
+            return targetAdapter.isFrontmost() ? .confirmed : .focusChanged
         }
-        guard targetIsFrontmost() else { return .focusChanged }
+        guard targetAdapter.isFrontmost() else { return .focusChanged }
         guard timeout > 0 else { return .unconfirmed }
 
         let start = Date()
         while Date().timeIntervalSince(start) < timeout {
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
-            guard targetIsFrontmost() else { return .focusChanged }
-            if pasteConfirmed() {
-                return targetIsFrontmost() ? .confirmed : .focusChanged
+            guard targetAdapter.isFrontmost() else { return .focusChanged }
+            if confirmationObserved() {
+                return targetAdapter.isFrontmost() ? .confirmed : .focusChanged
             }
         }
-        guard targetIsFrontmost() else { return .focusChanged }
-        let confirmed = pasteConfirmed()
-        guard targetIsFrontmost() else { return .focusChanged }
+        guard targetAdapter.isFrontmost() else { return .focusChanged }
+        let confirmed = confirmationObserved()
+        guard targetAdapter.isFrontmost() else { return .focusChanged }
         return confirmed ? .confirmed : .unconfirmed
     }
 

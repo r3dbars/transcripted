@@ -339,8 +339,7 @@ func testClipboardRestoringTextPaster() async {
                 pasteDispatcher: {
                     dispatchCount += 1
                     return true
-                },
-                pasteConfirmed: { true }
+                }
             )
 
             assertEqual(
@@ -427,18 +426,22 @@ func testClipboardRestoringTextPaster() async {
             let dictationText = "synthetic focus-loss dictation"
             let pasteboard = FakeClipboardPasteboard(initialString: originalClipboard)
             let paster = ClipboardRestoringTextPaster()
-            var targetCheckCount = 0
+            let targetAdapter = DeterministicPastebackTargetAdapter(
+                application: .codex,
+                confirmsPaste: false,
+                frontmostStates: [true, false]
+            )
 
             let outcome = paster.paste(
                 dictationText,
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                targetIsFrontmost: {
-                    targetCheckCount += 1
-                    return targetCheckCount == 1
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
                 },
+                targetAdapter: targetAdapter,
                 pasteConfirmationWait: 0
             )
 
@@ -467,32 +470,25 @@ func testClipboardRestoringTextPaster() async {
             let dictationText = "synthetic bounce dictation"
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedFocusBounceTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
-            guard let target = DictationPasteTarget.capture(
-                sourceApp: NSWorkspace.shared.frontmostApplication
-            ) else {
-                assertTrue(false, "the focus-bounce fixture needs a frontmost app target")
-                return
-            }
-            let frontmostSequence = [true, false, true]
-            var targetCheckCount = 0
+            let targetAdapter = DeterministicPastebackTargetAdapter(
+                application: .codex,
+                confirmsPaste: false,
+                frontmostStates: [true, false, true]
+            )
 
             pasteboard.clearContents()
             pasteboard.setString(originalClipboard, forType: .string)
             let outcome = paster.paste(
                 dictationText,
-                target: target,
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: {
                     _ = pasteboard.string(forType: .string)
+                    targetAdapter.markPasteDispatched()
                     return true
                 },
-                targetIsFrontmost: {
-                    let index = min(targetCheckCount, frontmostSequence.count - 1)
-                    targetCheckCount += 1
-                    return frontmostSequence[index]
-                },
+                targetAdapter: targetAdapter,
                 prepareForAutoSend: true,
                 pasteConfirmationWait: 0.02
             )
@@ -506,7 +502,7 @@ func testClipboardRestoringTextPaster() async {
                 "a true-false-true focus bounce must remain terminal focus-loss friction"
             )
             assertEqual(
-                targetCheckCount,
+                targetAdapter.frontmostCheckCount,
                 2,
                 "the caller must not re-query focus and regain eligibility after the wait reports focus loss"
             )
@@ -851,6 +847,68 @@ func testClipboardRestoringTextPaster() async {
         }
     }
 
+    await runSuite("ClipboardRestoringTextPaster.paste — deterministic Codex, Notes, and browser adapters keep UI truth") {
+        for application in DeterministicPastebackTargetAdapter.Application.allCases {
+            let originalClipboard = "synthetic \(application.rawValue) original"
+            let dictationText = "synthetic \(application.rawValue) dictation"
+            let pasteboard = await MainActor.run {
+                FakeClipboardPasteboard(initialString: originalClipboard)
+            }
+            let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+            let targetAdapter = await MainActor.run {
+                DeterministicPastebackTargetAdapter(application: application)
+            }
+            let outcome = await MainActor.run {
+                paster.paste(
+                    dictationText,
+                    pasteboard: pasteboard,
+                    accessibilityTrusted: { true },
+                    requestAccessibilityTrust: {},
+                    pasteDispatcher: {
+                        targetAdapter.markPasteDispatched()
+                        // Deliberately do not read the provider. Codex and Notes
+                        // prove delivery from AX-observable state alone.
+                        return true
+                    },
+                    targetAdapter: targetAdapter,
+                    restoreDelay: 5_000_000,
+                    fallbackRestoreDelay: 5_000_000,
+                    pasteConfirmationWait: 0
+                )
+            }
+
+            switch application {
+            case .codex, .notes:
+                assertEqual(outcome, .pasted, "\(application.rawValue) AX-observable paste should be confirmed")
+                let observedClipboardWasRead = await MainActor.run {
+                    targetAdapter.observedClipboardWasRead
+                }
+                assertEqual(
+                    observedClipboardWasRead,
+                    false,
+                    "\(application.rawValue) should not need an attributable provider read when AX proves the edit"
+                )
+                await paster.waitForPendingClipboardRestore()
+                let restoredClipboard = await MainActor.run { pasteboard.string(forType: .string) }
+                assertEqual(restoredClipboard, originalClipboard, "\(application.rawValue) should restore the original clipboard")
+            case .browser:
+                assertEqual(
+                    outcome,
+                    .copied(
+                        "Transcripted sent paste, but this target did not expose paste confirmation. The text stays copied.",
+                        reason: .pasteConfirmationUnavailable
+                    ),
+                    "browser targets without AX confirmation must stay neutral and copied"
+                )
+                assertEqual(
+                    pasteboard.string(forType: .string),
+                    dictationText,
+                    "browser fallback should leave the dictation available for manual paste"
+                )
+            }
+        }
+    }
+
     await runSuite("ClipboardRestoringTextPaster.paste — confirmed target read restores clipboard") {
         if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
             print("    SKIPPED: wall-clock timing proof — scheduler jitter on shared CI runners makes the 30/80ms windows unprovable there; covered by local runs")
@@ -861,6 +919,9 @@ func testClipboardRestoringTextPaster() async {
         let pasteboardName = NSPasteboard.Name("TranscriptedDelayedPasteTest-\(UUID().uuidString)")
         let paster = await MainActor.run {
             ClipboardRestoringTextPaster()
+        }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex)
         }
 
         let outcome = await MainActor.run {
@@ -874,9 +935,10 @@ func testClipboardRestoringTextPaster() async {
                 requestAccessibilityTrust: {},
                 pasteDispatcher: {
                     _ = pasteboard.string(forType: .string)
+                    targetAdapter.markPasteDispatched()
                     return true
                 },
-                pasteConfirmed: { true },
+                targetAdapter: targetAdapter,
                 restoreDelay: 20_000_000,
                 fallbackRestoreDelay: 120_000_000,
                 pasteConfirmationWait: 0.2
@@ -1000,6 +1062,9 @@ func testClipboardRestoringTextPaster() async {
         let paster = await MainActor.run {
             ClipboardRestoringTextPaster()
         }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .browser)
+        }
 
         let outcome = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
@@ -1011,6 +1076,7 @@ func testClipboardRestoringTextPaster() async {
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
                 pasteDispatcher: { true },
+                targetAdapter: targetAdapter,
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: TranscriptedConstants.clipboardRestoreFallbackDelay
             )
@@ -1123,6 +1189,9 @@ func testClipboardRestoringTextPaster() async {
         let paster = await MainActor.run {
             ClipboardRestoringTextPaster()
         }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex, confirmsPaste: false)
+        }
 
         let outcome = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
@@ -1135,9 +1204,10 @@ func testClipboardRestoringTextPaster() async {
                 requestAccessibilityTrust: {},
                 pasteDispatcher: {
                     _ = pasteboard.string(forType: .string)
+                    targetAdapter.markPasteDispatched()
                     return true
                 },
-                pasteConfirmed: { false },
+                targetAdapter: targetAdapter,
                 pasteConfirmationWait: 0.05
             )
         }
@@ -1294,6 +1364,9 @@ func testClipboardRestoringTextPaster() async {
         let paster = await MainActor.run {
             ClipboardRestoringTextPaster()
         }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex)
+        }
 
         let outcome = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
@@ -1306,9 +1379,10 @@ func testClipboardRestoringTextPaster() async {
                 requestAccessibilityTrust: {},
                 pasteDispatcher: {
                     _ = pasteboard.string(forType: .string)
+                    targetAdapter.markPasteDispatched()
                     return true
                 },
-                pasteConfirmed: { true },
+                targetAdapter: targetAdapter,
                 fallbackRestoreDelay: 2_000_000
             )
         }
@@ -1332,6 +1406,9 @@ func testClipboardRestoringTextPaster() async {
         let paster = await MainActor.run {
             ClipboardRestoringTextPaster()
         }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex)
+        }
 
         let outcome = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
@@ -1344,9 +1421,10 @@ func testClipboardRestoringTextPaster() async {
                 requestAccessibilityTrust: {},
                 pasteDispatcher: {
                     _ = pasteboard.string(forType: .string)
+                    targetAdapter.markPasteDispatched()
                     return true
                 },
-                pasteConfirmed: { true },
+                targetAdapter: targetAdapter,
                 fallbackRestoreDelay: 5_000_000
             )
         }
@@ -1377,6 +1455,9 @@ func testClipboardRestoringTextPaster() async {
         let paster = await MainActor.run {
             ClipboardRestoringTextPaster()
         }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex)
+        }
 
         let firstOutcome = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
@@ -1389,9 +1470,10 @@ func testClipboardRestoringTextPaster() async {
                 requestAccessibilityTrust: {},
                 pasteDispatcher: {
                     _ = pasteboard.string(forType: .string)
+                    targetAdapter.markPasteDispatched()
                     return true
                 },
-                pasteConfirmed: { true },
+                targetAdapter: targetAdapter,
                 fallbackRestoreDelay: 50_000_000
             )
         }
@@ -1404,9 +1486,10 @@ func testClipboardRestoringTextPaster() async {
                 requestAccessibilityTrust: {},
                 pasteDispatcher: {
                     _ = pasteboard.string(forType: .string)
+                    targetAdapter.markPasteDispatched()
                     return true
                 },
-                pasteConfirmed: { true },
+                targetAdapter: targetAdapter,
                 fallbackRestoreDelay: 5_000_000
             )
         }
@@ -1438,6 +1521,9 @@ func testClipboardRestoringTextPaster() async {
             FakeClipboardPasteboard(initialString: originalClipboard)
         }
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex, confirmsPaste: false)
+        }
 
         let firstOutcome = await MainActor.run {
             paster.paste(
@@ -1445,19 +1531,26 @@ func testClipboardRestoringTextPaster() async {
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { false },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 pasteConfirmationWait: 0
             )
         }
         let retryOutcome = await MainActor.run {
-            paster.retryPaste(
+            targetAdapter.confirmsPaste = true
+            return paster.retryPaste(
                 dictationText,
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { true },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 20_000_000,
                 pasteConfirmationWait: 0
@@ -1492,6 +1585,9 @@ func testClipboardRestoringTextPaster() async {
             FakeClipboardPasteboard(initialString: originalClipboard)
         }
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex, confirmsPaste: false)
+        }
 
         _ = await MainActor.run {
             paster.paste(
@@ -1499,8 +1595,11 @@ func testClipboardRestoringTextPaster() async {
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { false },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 pasteConfirmationWait: 0
             )
         }
@@ -1509,13 +1608,17 @@ func testClipboardRestoringTextPaster() async {
             pasteboard.setString(userCopy, forType: .string)
         }
         let retryOutcome = await MainActor.run {
-            paster.retryPaste(
+            targetAdapter.confirmsPaste = true
+            return paster.retryPaste(
                 dictationText,
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { true },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 20_000_000,
                 pasteConfirmationWait: 0
@@ -1541,6 +1644,9 @@ func testClipboardRestoringTextPaster() async {
             FakeClipboardPasteboard(initialString: originalClipboard)
         }
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex, confirmsPaste: false)
+        }
 
         _ = await MainActor.run {
             let outcome = paster.paste(
@@ -1548,21 +1654,28 @@ func testClipboardRestoringTextPaster() async {
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { false },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 pasteConfirmationWait: 0
             )
             paster.discardPasteRetry()
             return outcome
         }
         let retryOutcome = await MainActor.run {
-            paster.retryPaste(
+            targetAdapter.confirmsPaste = true
+            return paster.retryPaste(
                 dictationText,
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { true },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 20_000_000,
                 pasteConfirmationWait: 0
@@ -1588,6 +1701,9 @@ func testClipboardRestoringTextPaster() async {
             FakeClipboardPasteboard(initialString: originalClipboard)
         }
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex, confirmsPaste: false)
+        }
 
         _ = await MainActor.run {
             paster.paste(
@@ -1595,8 +1711,11 @@ func testClipboardRestoringTextPaster() async {
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { false },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 pasteConfirmationWait: 0
             )
         }
@@ -1606,19 +1725,26 @@ func testClipboardRestoringTextPaster() async {
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { false },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 pasteConfirmationWait: 0
             )
         }
         let laterProgrammaticRetry = await MainActor.run {
-            paster.retryPaste(
+            targetAdapter.confirmsPaste = true
+            return paster.retryPaste(
                 dictationText,
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { true },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 restoreDelay: 5_000_000,
                 fallbackRestoreDelay: 20_000_000,
                 pasteConfirmationWait: 0
@@ -1652,6 +1778,9 @@ func testClipboardRestoringTextPaster() async {
         let paster = await MainActor.run {
             ClipboardRestoringTextPaster()
         }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex)
+        }
 
         let outcome = await MainActor.run {
             let pasteboard = NSPasteboard(name: pasteboardName)
@@ -1664,9 +1793,10 @@ func testClipboardRestoringTextPaster() async {
                 requestAccessibilityTrust: {},
                 pasteDispatcher: {
                     _ = pasteboard.string(forType: .string)
+                    targetAdapter.markPasteDispatched()
                     return true
                 },
-                pasteConfirmed: { true },
+                targetAdapter: targetAdapter,
                 fallbackRestoreDelay: 5_000_000
             )
             paster.cancelPendingClipboardRestore()
@@ -1693,6 +1823,9 @@ func testClipboardRestoringTextPaster() async {
             FakeClipboardPasteboard(initialString: existingClipboard)
         }
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let targetAdapter = await MainActor.run {
+            DeterministicPastebackTargetAdapter(application: .codex, confirmsPaste: false)
+        }
 
         let outcome = await MainActor.run {
             let outcome = paster.paste(
@@ -1700,8 +1833,11 @@ func testClipboardRestoringTextPaster() async {
                 pasteboard: pasteboard,
                 accessibilityTrusted: { true },
                 requestAccessibilityTrust: {},
-                pasteDispatcher: { true },
-                pasteConfirmed: { false },
+                pasteDispatcher: {
+                    targetAdapter.markPasteDispatched()
+                    return true
+                },
+                targetAdapter: targetAdapter,
                 pasteConfirmationWait: 0
             )
             paster.cancelPendingClipboardRestore()
@@ -1800,6 +1936,83 @@ func testClipboardRestoringTextPaster() async {
             pasteboard.string(forType: .string)
         }
         assertNil(clipboardAfterFailure, "failed copied fallback should not restore stale clipboard content")
+    }
+}
+
+@MainActor
+private final class DeterministicPastebackTargetAdapter: ClipboardPasteTargetAdapter, ClipboardPasteConfirmationSource {
+    enum Application: String, CaseIterable {
+        case codex
+        case notes
+        case browser
+    }
+
+    let application: Application
+    var confirmsPaste: Bool
+    private var frontmostStates: [Bool]
+    private(set) var frontmostCheckCount = 0
+    private var pasteWasDispatched = false
+    private(set) var observedClipboardWasRead: Bool?
+
+    init(
+        application: Application,
+        confirmsPaste: Bool = true,
+        frontmostStates: [Bool] = [true]
+    ) {
+        self.application = application
+        self.confirmsPaste = confirmsPaste
+        self.frontmostStates = frontmostStates.isEmpty ? [true] : frontmostStates
+    }
+
+    var confirmationSource: (any ClipboardPasteConfirmationSource)? {
+        application == .browser ? nil : self
+    }
+
+    var canObservePaste: Bool {
+        application != .browser
+    }
+
+    func isFrontmost() -> Bool {
+        let index = min(frontmostCheckCount, frontmostStates.count - 1)
+        frontmostCheckCount += 1
+        return frontmostStates[index]
+    }
+
+    func markPasteDispatched() {
+        pasteWasDispatched = true
+    }
+
+    func confirmationMode(
+        _ text: String,
+        clipboardWasRead: Bool,
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> String? {
+        observedClipboardWasRead = clipboardWasRead
+        guard pasteWasDispatched, confirmsPaste else { return nil }
+        switch application {
+        case .codex:
+            return "text_value"
+        case .notes:
+            // Notes can expose the edited AX value even when its pasteboard
+            // provider read is not attributable to the target.
+            return "text_value"
+        case .browser:
+            return nil
+        }
+    }
+
+    func diagnosticsContext(
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> [String: String] {
+        [
+            "clipboard_read_after_dispatch": "\((clipboardReadAt ?? 0) >= pasteDispatchedAt)",
+            "target_change_after_dispatch": "false",
+            "target_change_observer_available": "false",
+            "target_selection_observable": application == .notes ? "true" : "false",
+            "target_text_observable": application == .codex || application == .notes ? "true" : "false",
+        ]
     }
 }
 
