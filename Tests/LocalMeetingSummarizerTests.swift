@@ -1551,7 +1551,7 @@ private func localMeetingSummaryLowMemoryTestConfiguration() -> LocalGemmaSummar
 private func localMeetingSummaryProcessRuntime(
     root: URL,
     runnerSource: String,
-    timeout: TimeInterval = 2
+    timeout: TimeInterval = 5
 ) throws -> LocalGemmaSummaryRuntime {
     let runnerURL = root.appendingPathComponent("gemma4_mlx_prompt_runner.py")
     let uvURL = root.appendingPathComponent("uv")

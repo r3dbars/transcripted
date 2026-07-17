@@ -156,9 +156,9 @@ If you're changing meeting integration or `TranscriptedCore`, also run:
 bash run-integration-smoke.sh
 ```
 
-`run-tests.sh` is curated rather than discovery-based. If you add a new root
-fast-test file, register it in `Tests/FastTests.manifest`. Update
-`run-tests.sh` only when the compiled source list or runner behavior changes.
+`run-tests.sh` discovers root fast tests by convention. A new
+`Tests/FooTests.swift` file must expose exactly one top-level `testFoo()` entry.
+Update `run-tests.sh` only when the compiled source list or runner behavior changes.
 
 ## Submitting a Pull Request
 

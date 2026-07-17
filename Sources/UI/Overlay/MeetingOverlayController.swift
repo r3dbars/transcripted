@@ -157,7 +157,6 @@ final class MeetingOverlayRootView: NSView {
     private let systemLabel = NSTextField(labelWithString: "System audio")
     private let audioWaveform = DualWaveformHostView(frame: .zero)
     private let recordButton = NSButton()
-    private let remindButton = NSButton()
     private let closeButton = NSButton()
     private let pillBodyView = MeetingPillBodyView(frame: .zero)
     private let transcriptDrawer = MeetingLiveTranscriptDrawerView(frame: .zero)
@@ -168,7 +167,6 @@ final class MeetingOverlayRootView: NSView {
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private let finishTooltip = "Finish and transcribe"
     private let dismissPromptTooltip = "Dismiss meeting prompt"
-    private let remindPromptTooltip = "Remind me soon"
     private let startTooltip = "Start meeting recording"
     private var tooltipPanel: MeetingOverlayTooltipPanel?
     private var tooltipTask: Task<Void, Never>?
@@ -183,7 +181,6 @@ final class MeetingOverlayRootView: NSView {
 
     /// Invoked when the user clicks the close/stop button.
     var onSecondaryAction: (() -> Void)?
-    var onRemindAction: (() -> Void)?
     var onPrimaryAction: (() -> Void)?
     var onLiveViewAction: (() -> Void)?
     var onLiveViewBrowserAction: (() -> Void)?
@@ -282,21 +279,6 @@ final class MeetingOverlayRootView: NSView {
         recordButton.setAccessibilityLabel(startTooltip)
         recordButton.isHidden = true
         addSubview(recordButton)
-
-        remindButton.attributedTitle = buttonTitle("Remind me soon", size: 11, weight: .semibold)
-        remindButton.isBordered = false
-        remindButton.wantsLayer = true
-        remindButton.layer?.cornerRadius = 8
-        remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
-        remindButton.layer?.borderWidth = 0.5
-        remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
-        remindButton.target = self
-        remindButton.action = #selector(handleRemindAction)
-        remindButton.toolTip = nil
-        remindButton.setAccessibilityLabel(remindPromptTooltip)
-        remindButton.setAccessibilityHelp("Dismisses this prompt and asks again in a little bit.")
-        remindButton.isHidden = true
-        addSubview(remindButton)
 
         // The pill body sits above the passive strip content (dot, timer,
         // waveform) and below the real buttons, so clicking anywhere on the
@@ -624,13 +606,10 @@ final class MeetingOverlayRootView: NSView {
         )
 
         let secondaryWidth = max(68, closeButton.fittingSize.width + 18)
-        let showsRemind = !remindButton.isHidden
-        let remindWidth = showsRemind ? max(118, remindButton.fittingSize.width + 18) : 0
         let primaryWidth = max(74, recordButton.fittingSize.width + 18)
         let buttonHeight = MeetingOverlayTokens.promptButtonHeight
         let buttonGap: CGFloat = 8
-        let visibleGapCount: CGFloat = showsRemind ? 2 : 1
-        let totalButtonWidth = secondaryWidth + remindWidth + primaryWidth + buttonGap * visibleGapCount
+        let totalButtonWidth = secondaryWidth + primaryWidth + buttonGap
         let buttonStartX = max(pad, bounds.width - pad - totalButtonWidth)
 
         closeButton.frame = NSRect(
@@ -639,16 +618,6 @@ final class MeetingOverlayRootView: NSView {
             width: secondaryWidth,
             height: buttonHeight
         )
-        if showsRemind {
-            remindButton.frame = NSRect(
-                x: closeButton.frame.maxX + buttonGap,
-                y: 8,
-                width: remindWidth,
-                height: buttonHeight
-            )
-        } else {
-            remindButton.frame = .zero
-        }
         recordButton.frame = NSRect(
             x: bounds.width - pad - primaryWidth,
             y: 8,
@@ -750,7 +719,6 @@ final class MeetingOverlayRootView: NSView {
         micLabel.isHidden = true
         systemLabel.isHidden = true
         recordButton.isHidden = !isPrompting
-        remindButton.isHidden = !isPrompting || prompt?.remindTitle == nil
         if state == .recording {
             applyStripContentFade(wasCondensed: wasCondensed)
         } else {
@@ -804,14 +772,6 @@ final class MeetingOverlayRootView: NSView {
             closeButton.setAccessibilityLabel(prompt?.secondaryAccessibilityLabel ?? dismissPromptTooltip)
             closeButton.setAccessibilityHelp("Dismisses this meeting recording prompt.")
             closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
-            if let remindTitle = prompt?.remindTitle {
-                remindButton.attributedTitle = buttonTitle(remindTitle, size: 11, weight: .semibold)
-                remindButton.setAccessibilityLabel(prompt?.remindAccessibilityLabel ?? remindPromptTooltip)
-                remindButton.setAccessibilityHelp("Dismisses this prompt and asks again in a little bit.")
-            }
-            remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
-            remindButton.layer?.borderWidth = 0.5
-            remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
             recordButton.attributedTitle = primaryButtonTitle(prompt?.primaryTitle ?? "Record")
             recordButton.setAccessibilityLabel(prompt?.primaryAccessibilityLabel ?? startTooltip)
         case .recording:
@@ -1004,15 +964,6 @@ final class MeetingOverlayRootView: NSView {
         closeButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
         closeButton.layer?.borderWidth = 0
         closeButton.layer?.borderColor = nil
-        remindButton.attributedTitle = buttonTitle("Remind me soon", size: 11, weight: .semibold)
-        remindButton.image = nil
-        remindButton.imagePosition = .noImage
-        remindButton.contentTintColor = MeetingOverlayTokens.textPrimary
-        remindButton.toolTip = nil
-        remindButton.layer?.cornerRadius = 8
-        remindButton.layer?.backgroundColor = MeetingOverlayTokens.quietActionBg.cgColor
-        remindButton.layer?.borderWidth = 0.5
-        remindButton.layer?.borderColor = MeetingOverlayTokens.quietActionBorder.cgColor
     }
 
     private func buttonTitle(_ title: String, size: CGFloat, weight: NSFont.Weight) -> NSAttributedString {
@@ -1087,7 +1038,6 @@ final class MeetingOverlayRootView: NSView {
         tooltipTrackingAreas.removeAll()
 
         addTooltipTrackingArea(for: closeButton, text: currentState == .recording ? finishTooltip : dismissPromptTooltip)
-        addTooltipTrackingArea(for: remindButton, text: remindPromptTooltip)
         addTooltipTrackingArea(for: recordButton, text: startTooltip)
         if let stripTooltip = currentLiveViewAffordance?.tooltip, !pillBodyView.isHidden {
             // The body sits underneath the stop button; trim its tooltip
@@ -1125,7 +1075,6 @@ final class MeetingOverlayRootView: NSView {
             parts.append("\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))|\(text)")
         }
         sig(closeButton, currentState == .recording ? finishTooltip : dismissPromptTooltip)
-        sig(remindButton, remindPromptTooltip)
         sig(recordButton, startTooltip)
         if let stripTooltip = currentLiveViewAffordance?.tooltip, !pillBodyView.isHidden {
             var rect = convert(pillBodyView.bounds, from: pillBodyView)
@@ -1240,11 +1189,6 @@ final class MeetingOverlayRootView: NSView {
         onSecondaryAction?()
     }
 
-    @objc private func handleRemindAction() {
-        hideTooltip()
-        onRemindAction?()
-    }
-
     @objc private func handlePrimaryAction() {
         hideTooltip()
         onPrimaryAction?()
@@ -1324,8 +1268,6 @@ enum MeetingOverlayTokens {
     static let dotRecording  = NSColor(calibratedRed: 1.00, green: 0.27, blue: 0.23, alpha: 1.0)
     static let dotSaved      = NSColor.systemGreen
     static let dotError      = NSColor.systemRed
-    static let quietActionBg = NSColor.white.withAlphaComponent(0.08)
-    static let quietActionBorder = NSColor.white.withAlphaComponent(0.14)
     static let quietActionTint = NSColor.white.withAlphaComponent(0.70)
     // Stop is the one strong-colored control on the pill: the action every
     // meeting ends with should never need a second look.
@@ -1361,7 +1303,6 @@ enum MeetingOverlayTokens {
     static let tooltipOffset: CGFloat = 8
     static let tooltipScreenInset: CGFloat = 6
     static let tooltipDelayNanoseconds: UInt64 = 80_000_000
-    static let defaultDetectedMeetingPromptTimeoutSeconds = 30
     static let missedCallNudgeTimeoutSeconds = 30
 }
 
@@ -1393,8 +1334,6 @@ final class MeetingOverlayController: NSObject {
         let countdownText: String
         let secondaryTitle: String
         let secondaryAccessibilityLabel: String
-        let remindTitle: String?
-        let remindAccessibilityLabel: String?
         let primaryTitle: String
         let primaryAccessibilityLabel: String
     }
@@ -1408,7 +1347,6 @@ final class MeetingOverlayController: NSObject {
     private var currentParticipants: [String] = []
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentPrompt: PromptDisplay?
-    private var promptCandidate: MeetingPromptDetector.Candidate?
     private var promptKind: PromptKind?
     private var audioRouteWarningOutcome: CaptureRouteStabilizationOutcome?
     private var promptCountdownTask: Task<Void, Never>?
@@ -1434,7 +1372,6 @@ final class MeetingOverlayController: NSObject {
     private var transcriptPushPending = false
 
     private enum PromptKind {
-        case detectedMeeting
         case audioInactivity
         case micBoost
         case audioRoute
@@ -1457,13 +1394,6 @@ final class MeetingOverlayController: NSObject {
     /// The session controller the overlay reflects and forwards hotkey events to.
     /// Set once by `TranscriptedAppDelegate` during app launch.
     weak var meetingSession: MeetingSessionController?
-    var onPromptRecord: ((MeetingPromptDetector.Candidate) -> Void)?
-    var onPromptDismiss: ((MeetingPromptDetector.Candidate) -> Void)?
-    var onPromptRemindSoon: ((MeetingPromptDetector.Candidate) -> Void)?
-    /// The countdown ran out with nobody clicking anything. Distinct from
-    /// `onPromptDismiss` so an unattended prompt gets the detector's short
-    /// re-offer backoff instead of an explicit-dismissal suppression.
-    var onPromptExpired: ((MeetingPromptDetector.Candidate) -> Void)?
     /// How the missed-call nudge resolved (acknowledged / disabled / expired).
     /// "Disabled" means the user tapped "Don't show again" — the wiring in
     /// `TranscriptedApp` persists the opt-out.
@@ -1493,7 +1423,6 @@ final class MeetingOverlayController: NSObject {
         let rootView = MeetingOverlayRootView(frame: panel.contentView?.bounds ?? frame)
         rootView.autoresizingMask = [.width, .height]
         rootView.onSecondaryAction = { [weak self] in self?.handleSecondaryActionTapped() }
-        rootView.onRemindAction = { [weak self] in self?.handleRemindActionTapped() }
         rootView.onPrimaryAction = { [weak self] in self?.handlePrimaryActionTapped() }
         rootView.onLiveViewAction = { [weak self] in self?.handleLiveViewTapped() }
         rootView.onLiveViewBrowserAction = { [weak self] in self?.handleLiveViewBrowserTapped() }
@@ -1531,45 +1460,12 @@ final class MeetingOverlayController: NSObject {
         }
     }
 
-    @discardableResult
-    func presentDetectedMeetingPrompt(
-        _ candidate: MeetingPromptDetector.Candidate,
-        timeout seconds: Int? = nil
-    ) -> Bool {
-        guard let session = meetingSession else { return false }
-
-        let presentationSnapshot = MeetingPromptPresentationSnapshot(
-            sessionState: MeetingPromptSessionPromptState(session.state),
-            overlayState: MeetingPromptOverlayPromptState(state)
-        )
-        guard MeetingPromptPresentationGate.allowsDetectedMeetingPrompt(presentationSnapshot) else {
-            return false
-        }
-
-        autoHideTask?.cancel()
-        promptCountdownTask?.cancel()
-
-        promptCandidate = candidate
-        promptKind = .detectedMeeting
-        promptSecondsRemaining = max(1, seconds ?? MeetingPromptHeuristics.promptTimeoutSeconds(
-            for: candidate.reason,
-            calendarDefault: MeetingOverlayTokens.defaultDetectedMeetingPromptTimeoutSeconds
-        ))
-        currentPrompt = detectedMeetingPromptDisplay(countdownSeconds: promptSecondsRemaining)
-        state = .prompt
-        showPanel()
-        pushToView()
-        schedulePromptCountdown()
-        return true
-    }
-
     /// The capture pill dismisses before its Record callback returns. Keep a
     /// visible, non-interactive status panel up while the app checks
     /// permissions, models, and the audio route so Record never looks ignored.
     func showDetectedMeetingStartInProgress() {
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
-        promptCandidate = nil
         currentPrompt = nil
         promptKind = nil
         currentWarmupStatus = .init(
@@ -1603,7 +1499,6 @@ final class MeetingOverlayController: NSObject {
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
 
-        promptCandidate = nil
         missedCallPrompt = call
         promptKind = .missedCall
         promptSecondsRemaining = MeetingOverlayTokens.missedCallNudgeTimeoutSeconds
@@ -1743,7 +1638,6 @@ final class MeetingOverlayController: NSObject {
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
 
-        promptCandidate = nil
         promptKind = .audioInactivity
         promptSecondsRemaining = warning.automaticStopAllowed ? max(1, warning.countdownSeconds) : 0
         currentPrompt = audioInactivityPromptDisplay(
@@ -1773,7 +1667,6 @@ final class MeetingOverlayController: NSObject {
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
 
-        promptCandidate = nil
         promptKind = .micBoost
         promptSecondsRemaining = 0
         currentPrompt = micBoostPromptDisplay()
@@ -1799,7 +1692,6 @@ final class MeetingOverlayController: NSObject {
 
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
-        promptCandidate = nil
         promptKind = .audioRoute
         promptSecondsRemaining = 0
         currentPrompt = audioRouteWarningPromptDisplay(outcome: outcome)
@@ -1877,7 +1769,6 @@ final class MeetingOverlayController: NSObject {
             isTranscriptExpanded = false
             state = .preparing
             currentPrompt = nil
-            promptCandidate = nil
             promptKind = nil
             promptCountdownTask?.cancel()
             showPanel()
@@ -1912,7 +1803,6 @@ final class MeetingOverlayController: NSObject {
             isRestingCondensed = false
             state = .recording
             currentPrompt = nil
-            promptCandidate = nil
             promptKind = nil
             promptCountdownTask?.cancel()
             autoHideTask?.cancel()
@@ -1924,7 +1814,6 @@ final class MeetingOverlayController: NSObject {
             isTranscriptExpanded = false
             state = .transcribing
             currentPrompt = nil
-            promptCandidate = nil
             promptKind = nil
             promptCountdownTask?.cancel()
             showPanel()
@@ -1933,7 +1822,6 @@ final class MeetingOverlayController: NSObject {
             isTranscriptExpanded = false
             state = .error(message)
             currentPrompt = nil
-            promptCandidate = nil
             promptKind = nil
             promptCountdownTask?.cancel()
             autoHideTask?.cancel()
@@ -2095,9 +1983,9 @@ final class MeetingOverlayController: NSObject {
             case .missedCall:
                 // "Don't show again" — the wiring persists the opt-out.
                 onMissedCallNudgeResolved?(.disabled)
-                dismissPrompt(notifyDetector: false)
-            case .detectedMeeting, .none:
-                dismissPrompt(notifyDetector: true)
+                dismissPrompt()
+            case .none:
+                dismissPrompt()
             }
         case .recording:
             handleCloseTapped()
@@ -2127,21 +2015,10 @@ final class MeetingOverlayController: NSObject {
             meetingSession?.acceptMicBoostPrompt()
         case .missedCall:
             onMissedCallNudgeResolved?(.acknowledged)
-            dismissPrompt(notifyDetector: false)
-        case .detectedMeeting, .none:
-            guard let candidate = promptCandidate else { return }
-            onPromptRecord?(candidate)
+            dismissPrompt()
+        case .none:
+            break
         }
-    }
-
-    private func handleRemindActionTapped() {
-        guard case .prompt = state, let candidate = promptCandidate else { return }
-        promptCountdownTask?.cancel()
-        onPromptRemindSoon?(candidate)
-        promptCandidate = nil
-        currentPrompt = nil
-        state = .idle
-        hidePanel()
     }
 
     /// Point-of-use live transcript action. With the preference already on
@@ -2496,14 +2373,8 @@ final class MeetingOverlayController: NSObject {
         rootView?.flashTranscriptBrowserOpenFailure()
     }
 
-    private func dismissPrompt(notifyDetector: Bool) {
+    private func dismissPrompt() {
         promptCountdownTask?.cancel()
-
-        if notifyDetector, let candidate = promptCandidate {
-            onPromptDismiss?(candidate)
-        }
-
-        promptCandidate = nil
         missedCallPrompt = nil
         promptKind = nil
         currentPrompt = nil
@@ -2585,8 +2456,8 @@ final class MeetingOverlayController: NSObject {
             if let call = missedCallPrompt {
                 currentPrompt = missedCallPromptDisplay(call: call)
             }
-        case .detectedMeeting, .none:
-            currentPrompt = detectedMeetingPromptDisplay(countdownSeconds: promptSecondsRemaining)
+        case .none:
+            break
         }
     }
 
@@ -2608,32 +2479,10 @@ final class MeetingOverlayController: NSObject {
             }
         case .missedCall:
             onMissedCallNudgeResolved?(.expired)
-            dismissPrompt(notifyDetector: false)
-        case .detectedMeeting, .none:
-            // An unattended countdown is not an explicit "no": route it through
-            // the expiry path (short re-offer while the call evidence persists)
-            // instead of the dismissal backoff that clicking the × takes.
-            if let candidate = promptCandidate, let onPromptExpired {
-                onPromptExpired(candidate)
-                dismissPrompt(notifyDetector: false)
-            } else {
-                dismissPrompt(notifyDetector: true)
-            }
+            dismissPrompt()
+        case .none:
+            dismissPrompt()
         }
-    }
-
-    private func detectedMeetingPromptDisplay(countdownSeconds: Int) -> PromptDisplay {
-        PromptDisplay(
-            title: promptCandidate?.title ?? "Meeting detected",
-            detail: promptCandidate?.detail ?? "Record this meeting?",
-            countdownText: "\(countdownSeconds)s",
-            secondaryTitle: "Not now",
-            secondaryAccessibilityLabel: "Dismiss meeting prompt",
-            remindTitle: "Remind me soon",
-            remindAccessibilityLabel: "Remind me soon",
-            primaryTitle: "Record",
-            primaryAccessibilityLabel: "Start meeting recording"
-        )
     }
 
     private func audioInactivityPromptDisplay(
@@ -2647,8 +2496,6 @@ final class MeetingOverlayController: NSObject {
                 countdownText: "",
                 secondaryTitle: "Keep Recording",
                 secondaryAccessibilityLabel: "Keep recording",
-                remindTitle: nil,
-                remindAccessibilityLabel: nil,
                 primaryTitle: "End & Transcribe",
                 primaryAccessibilityLabel: "End and transcribe meeting"
             )
@@ -2660,8 +2507,6 @@ final class MeetingOverlayController: NSObject {
             countdownText: "Ends in \(max(0, countdownSeconds))s",
             secondaryTitle: "Keep Recording",
             secondaryAccessibilityLabel: "Keep recording",
-            remindTitle: nil,
-            remindAccessibilityLabel: nil,
             primaryTitle: "End & Transcribe",
             primaryAccessibilityLabel: "End and transcribe meeting"
         )
@@ -2686,8 +2531,6 @@ final class MeetingOverlayController: NSObject {
             countdownText: "",
             secondaryTitle: "Keep Recording",
             secondaryAccessibilityLabel: "Keep recording with the current audio input",
-            remindTitle: nil,
-            remindAccessibilityLabel: nil,
             primaryTitle: "End & Transcribe",
             primaryAccessibilityLabel: "End and transcribe meeting"
         )
@@ -2705,8 +2548,6 @@ final class MeetingOverlayController: NSObject {
             countdownText: "",
             secondaryTitle: "Not now",
             secondaryAccessibilityLabel: "Keep software mic boost",
-            remindTitle: nil,
-            remindAccessibilityLabel: nil,
             primaryTitle: "Boost Mic",
             primaryAccessibilityLabel: "Boost microphone with Apple voice processing"
         )
@@ -2726,8 +2567,6 @@ final class MeetingOverlayController: NSObject {
             countdownText: "",
             secondaryTitle: "Don't show again",
             secondaryAccessibilityLabel: "Disable missed-call reminders",
-            remindTitle: nil,
-            remindAccessibilityLabel: nil,
             primaryTitle: "Got It",
             primaryAccessibilityLabel: "Dismiss missed-call reminder"
         )
