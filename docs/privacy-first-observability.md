@@ -172,9 +172,6 @@ allowlist.
 - `local_summary_failed`
 - `local_summary_cancelled`
 - `meeting_transcript_saved`
-- `local_meeting_summary_started`
-- `local_meeting_summary_completed`
-- `local_meeting_summary_failed`
 - `meeting_transcript_failed`
 - `meeting_speaker_auto_recognized`
 - `meeting_speaker_finalization_failed`
@@ -216,6 +213,7 @@ allowlist.
   `source_count_bucket`, `result_count_bucket`, `latency_bucket`, and validated
   owning-app build identity; never
   query text, capture IDs, titles, names, transcript text, paths, or user IDs
+  `duration_bucket`, `failure_kind`, `result`, and `stage`
 - timeline analytics limited to `surface`, `result`, `provider_kind`,
   `permission_state`, `pause_reason`, `card_kind`, `duration_bucket`,
   `count_bucket`, and `return_window_bucket`
@@ -226,6 +224,24 @@ without joining against any sensitive context.
 
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
+
+### Local summary attempt contract
+
+- An accepted attempt emits `local_summary_requested` exactly once.
+- It then emits exactly one terminal: `local_summary_finished`,
+  `local_summary_failed`, or `local_summary_cancelled`.
+- A setup or activity block is a `local_summary_failed` terminal with
+  `result = blocked`; it is not also a generic `workflow_abandoned` event.
+- Stable failure enums come from reviewed Swift error cases and Foundation
+  domain/code buckets. Raw errors, labels, exit details, transcript IDs, titles,
+  paths, prompts, and content never enter the payload.
+- Runtime is a coarse family (`mlx` or `foundation_models`), not an exact model,
+  package, profile, or local path.
+- `local_meeting_summary_*` remains historical query data only. Current builds
+  no longer allowlist or emit those PostHog lifecycle names. Local diagnostic
+  records may retain those labels, but they do not leave the device as analytics.
+- `activation_artifact_action_clicked` and `workflow_recovery_*` answer separate
+  habit/retry questions. Do not add them to canonical attempt or terminal counts.
 
 ## Analytics taxonomy review checklist
 
