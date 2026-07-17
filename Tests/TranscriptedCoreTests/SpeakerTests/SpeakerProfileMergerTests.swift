@@ -184,9 +184,31 @@ final class SpeakerProfileMergerTests: XCTestCase {
             try database.mergeProfiles(sourceId: UUID(), into: firstTarget.id)
         })
 
-        XCTAssertEqual(database.getSpeaker(id: firstSource.id), firstSourceBefore)
-        XCTAssertEqual(database.getSpeaker(id: firstTarget.id), firstTargetBefore)
+        assertProfile(database.getSpeaker(id: firstSource.id), equals: firstSourceBefore)
+        assertProfile(database.getSpeaker(id: firstTarget.id), equals: firstTargetBefore)
         XCTAssertTrue(database.recentUndoableMerges().isEmpty)
+    }
+
+    private func assertProfile(
+        _ actual: SpeakerProfile?,
+        equals expected: SpeakerProfile,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let actual else {
+            XCTFail("Expected speaker profile \(expected.id)", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(actual.id, expected.id, file: file, line: line)
+        XCTAssertEqual(actual.displayName, expected.displayName, file: file, line: line)
+        XCTAssertEqual(actual.nameSource, expected.nameSource, file: file, line: line)
+        XCTAssertEqual(actual.embedding, expected.embedding, file: file, line: line)
+        XCTAssertEqual(actual.exemplars, expected.exemplars, file: file, line: line)
+        XCTAssertEqual(actual.firstSeen, expected.firstSeen, file: file, line: line)
+        XCTAssertEqual(actual.lastSeen, expected.lastSeen, file: file, line: line)
+        XCTAssertEqual(actual.callCount, expected.callCount, file: file, line: line)
+        XCTAssertEqual(actual.confidence, expected.confidence, file: file, line: line)
+        XCTAssertEqual(actual.disputeCount, expected.disputeCount, file: file, line: line)
     }
 
     func testMergeProfilesRollsBackAndThrowsWhenTargetUpdateCannotBePrepared() throws {
