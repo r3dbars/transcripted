@@ -89,9 +89,22 @@ def event_filter(events: tuple[str, ...]) -> str:
 
 
 def app_version_filter(app_version: str | None) -> str:
-    if not app_version:
-        return ""
-    return f"AND properties['app_version'] = {sql_quote(app_version)}"
+    return app_build_filter(app_version=app_version)
+
+
+def app_build_filter(
+    app_version: str | None = None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
+    predicates = []
+    if app_version:
+        predicates.append(f"properties['app_version'] = {sql_quote(app_version)}")
+    if build_channel:
+        predicates.append(f"properties['build_channel'] = {sql_quote(build_channel)}")
+    if build_revision:
+        predicates.append(f"properties['build_revision'] = {sql_quote(build_revision)}")
+    return "\n  ".join(f"AND {predicate}" for predicate in predicates)
 
 
 def version_or_app_version_filter(app_version: str | None) -> str:

@@ -132,7 +132,7 @@ class Finding:
 load_env = posthog.load_env
 sql_quote = posthog.sql_quote
 sql_list = posthog.sql_list
-app_version_filter = posthog.app_version_filter
+app_build_filter = posthog.app_build_filter
 
 
 def posthog_config() -> tuple[str, str, str]:
@@ -147,31 +147,46 @@ def rows_as_dicts(response: dict[str, Any]) -> list[dict[str, Any]]:
     return posthog.rows_as_dicts(response, DISALLOWED_OUTPUT_COLUMNS, ProductTaskReportError)
 
 
-def event_counts_query(days: int, app_version: str | None) -> str:
+def event_counts_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT event, count() AS events, uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(CORE_EVENTS)})
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY event
 ORDER BY event ASC
 """
 
 
-def daily_active_query(days: int, app_version: str | None) -> str:
+def daily_active_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT toDate(timestamp) AS day, uniq(distinct_id) AS active_devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(WORKFLOW_EVENTS)})
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY day
 ORDER BY day ASC
 """
 
 
-def reliability_breakdown_query(days: int, app_version: str | None) -> str:
+def reliability_breakdown_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT
   event,
@@ -182,14 +197,19 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ('dictation_start_failed', 'dictation_no_speech', 'dictation_audio_route_recovery_timeout', 'meeting_recording_start_failed', 'meeting_transcript_failed', 'meeting_transcript_skipped', 'meeting_file_import_failed', 'meeting_speaker_finalization_failed', 'local_summary_failed', 'local_meeting_summary_failed', 'workflow_recovery_failed', 'workflow_recovery_finished')
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY event, failure_kind, trigger
 ORDER BY events DESC
 LIMIT 30
 """
 
 
-def recovery_outcomes_query(days: int, app_version: str | None) -> str:
+def recovery_outcomes_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT
   properties['workflow_kind'] AS workflow_kind,
@@ -202,14 +222,19 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event = 'workflow_recovery_finished'
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY workflow_kind, failure_kind, retry_source, recovery_attempt_bucket, result
 ORDER BY events DESC
 LIMIT 30
 """
 
 
-def abandonment_breakdown_query(days: int, app_version: str | None) -> str:
+def abandonment_breakdown_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT
   properties['workflow_kind'] AS workflow_kind,
@@ -221,14 +246,19 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event = 'workflow_abandoned'
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY workflow_kind, stage, reason_kind, elapsed_bucket
 ORDER BY events DESC
 LIMIT 30
 """
 
 
-def adoption_breakdown_query(days: int, app_version: str | None) -> str:
+def adoption_breakdown_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT
   event,
@@ -247,14 +277,19 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'activation_habit_loop_actioned', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'meeting_live_transcript_drawer_actioned', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened', 'local_summary_requested', 'local_summary_finished', 'local_summary_failed', 'local_summary_cancelled', 'local_meeting_summary_started', 'local_meeting_summary_completed', 'local_meeting_summary_failed')
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY event, surface, artifact_kind, action_kind, agent_target, client_family, tool_kind, capture_kind, source_count_bucket, result, page_id
 ORDER BY devices DESC, events DESC
 LIMIT 50
 """
 
 
-def meeting_prompt_quality_query(days: int, app_version: str | None) -> str:
+def meeting_prompt_quality_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT
   properties['provider'] AS provider,
@@ -275,14 +310,19 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ('meeting_prompt_shown', 'meeting_prompt_choice_made', 'meeting_prompt_record_selected', 'meeting_prompt_outcome_recorded', 'meeting_prompt_dismissed', 'meeting_prompt_suppressed', 'meeting_missed_call_nudge')
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY provider, source, prompt_reason, route_ready, choice_kind, outcome_kind, elapsed_bucket
 ORDER BY shown_events DESC, devices DESC
 LIMIT 50
 """
 
 
-def speaker_trust_query(days: int, app_version: str | None) -> str:
+def speaker_trust_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT
   event,
@@ -297,14 +337,19 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ('meeting_speaker_review_shown', 'meeting_speaker_review_submitted', 'meeting_speaker_match_reviewed', 'meeting_speaker_auto_recognized', 'meeting_speaker_finalization_failed')
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY event, review_action, completion_kind, result, had_suggestion, similarity_bucket, margin_bucket
 ORDER BY events DESC
 LIMIT 50
 """
 
 
-def onboarding_friction_query(days: int, app_version: str | None) -> str:
+def onboarding_friction_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT
   event,
@@ -317,14 +362,19 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ('onboarding_permission_cta_clicked', 'onboarding_permission_status_changed', 'onboarding_primary_cta_clicked', 'product_friction_observed', 'workflow_abandoned')
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY event, step_id, stage, reason_kind, permission_kind
 ORDER BY events DESC
 LIMIT 50
 """
 
 
-def timeline_dayflow_query(days: int, app_version: str | None) -> str:
+def timeline_dayflow_query(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT
   event,
@@ -336,14 +386,19 @@ SELECT
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ('timeline_onboarding_completed', 'timeline_viewed', 'timeline_mode_changed', 'timeline_card_opened', 'timeline_provider_selected', 'timeline_chat_question_asked', 'timeline_batch_completed', 'timeline_batch_failed')
-  {app_version_filter(app_version)}
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY event, provider, mode, result
 ORDER BY events DESC
 LIMIT 50
 """
 
 
-def release_breakdown_query(days: int) -> str:
+def release_breakdown_query(
+    days: int,
+    app_version: str | None = None,
+    build_channel: str | None = None,
+    build_revision: str | None = None,
+) -> str:
     return f"""
 SELECT
   properties['app_version'] AS app_version,
@@ -361,32 +416,40 @@ FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
   AND event IN ({sql_list(CORE_EVENTS)})
   AND properties['app_version'] IS NOT NULL
+  {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY app_version, build_version, build_channel, build_revision
 ORDER BY launch_devices DESC, launch_events DESC, last_seen DESC
 LIMIT 20
 """
 
 
-def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
+def fetch_report_data(
+    days: int,
+    app_version: str | None,
+    build_channel: str | None,
+    build_revision: str | None,
+) -> dict[str, Any]:
     load_env()
     host, project_id, token = posthog_config()
     queries = {
-        "event_counts": event_counts_query(days, app_version),
-        "daily_active": daily_active_query(days, app_version),
-        "reliability_breakdown": reliability_breakdown_query(days, app_version),
-        "recovery_outcomes": recovery_outcomes_query(days, app_version),
-        "abandonment_breakdown": abandonment_breakdown_query(days, app_version),
-        "adoption_breakdown": adoption_breakdown_query(days, app_version),
-        "meeting_prompt_quality": meeting_prompt_quality_query(days, app_version),
-        "speaker_trust": speaker_trust_query(days, app_version),
-        "onboarding_friction": onboarding_friction_query(days, app_version),
-        "timeline_dayflow": timeline_dayflow_query(days, app_version),
-        "release_breakdown": release_breakdown_query(days),
+        "event_counts": event_counts_query(days, app_version, build_channel, build_revision),
+        "daily_active": daily_active_query(days, app_version, build_channel, build_revision),
+        "reliability_breakdown": reliability_breakdown_query(days, app_version, build_channel, build_revision),
+        "recovery_outcomes": recovery_outcomes_query(days, app_version, build_channel, build_revision),
+        "abandonment_breakdown": abandonment_breakdown_query(days, app_version, build_channel, build_revision),
+        "adoption_breakdown": adoption_breakdown_query(days, app_version, build_channel, build_revision),
+        "meeting_prompt_quality": meeting_prompt_quality_query(days, app_version, build_channel, build_revision),
+        "speaker_trust": speaker_trust_query(days, app_version, build_channel, build_revision),
+        "onboarding_friction": onboarding_friction_query(days, app_version, build_channel, build_revision),
+        "timeline_dayflow": timeline_dayflow_query(days, app_version, build_channel, build_revision),
+        "release_breakdown": release_breakdown_query(days, app_version, build_channel, build_revision),
     }
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "window_days": days,
         "app_version": app_version,
+        "build_channel": build_channel,
+        "build_revision": build_revision,
         "source": {
             "kind": "posthog_hogql_aggregate",
             "host": host,
@@ -410,6 +473,8 @@ def load_fixture(path: Path) -> dict[str, Any]:
     data.setdefault("source", {"kind": "fixture", "privacy": "aggregate fixture counts only"})
     data.setdefault("window_days", 30)
     data.setdefault("app_version", None)
+    data.setdefault("build_channel", None)
+    data.setdefault("build_revision", None)
     return data
 
 
@@ -738,20 +803,35 @@ def build_timeline_dayflow(data: dict[str, Any]) -> Finding:
 
 def build_release_watch(data: dict[str, Any]) -> Finding:
     rows = [row for row in data["results"].get("release_breakdown", []) if row.get("app_version")]
+    requested = {
+        "app_version": data.get("app_version"),
+        "build_channel": data.get("build_channel"),
+        "build_revision": data.get("build_revision"),
+    }
+    for key, value in requested.items():
+        if value:
+            rows = [row for row in rows if row.get(key) == value]
+    if not all(requested.values()):
+        return Finding(
+            "Current release health",
+            f"UNKNOWN: exact public-release identity was not supplied; {len(rows)} matching build rows were observed but none is treated as current.",
+            "Pass the confirmed GitHub release app_version, build_channel, and build_revision before making a release-health claim.",
+            "low",
+            0,
+        )
     if not rows:
         return Finding(
-            "Release regression watch",
-            "No app-version rows in this window.",
-            "Keep release-health UNKNOWN until PostHog app_version rows appear.",
+            "Current release health",
+            "No rows matched the requested release identity in this window.",
+            "Keep release health UNKNOWN until PostHog reports the exact version, channel, and revision.",
             "low",
             0,
         )
     watched = max(
         rows,
         key=lambda row: (
-            as_int(row.get("failure_events")) / max(as_int(row.get("launch_devices")), 1),
-            as_int(row.get("failure_events")),
             str(row.get("last_seen") or ""),
+            as_int(row.get("launch_devices")),
         ),
     )
     launches = as_int(watched.get("launch_devices"))
@@ -770,7 +850,7 @@ def build_release_watch(data: dict[str, Any]) -> Finding:
     if str(build_channel).lower() in {"local", "dev", "debug", "main", "nightly"}:
         recommendation = "Treat this as current-main/local telemetry, not shipped-release proof. Keep it separate from shipped app_version rows."
     return Finding(
-        "Release regression watch",
+        "Current release health",
         f"{version} ({build_version}, {build_channel}, {build_revision}): launches={launches}, success_devices={successes}, failure_events={failures}.",
         recommendation,
         "medium" if launches < 10 or failures else "high",
@@ -779,7 +859,7 @@ def build_release_watch(data: dict[str, Any]) -> Finding:
 
 
 def task_priority_score(finding: Finding) -> float:
-    if finding.title == "Release regression watch":
+    if finding.title == "Current release health":
         return min(finding.score / 50, 20)
     if finding.title == "Under-discovered feature":
         return min(finding.score, 20)
@@ -838,6 +918,8 @@ def render_json(data: dict[str, Any], findings: dict[str, Finding]) -> dict[str,
         "generated_at": data["generated_at"],
         "window_days": data["window_days"],
         "app_version": data.get("app_version"),
+        "build_channel": data.get("build_channel"),
+        "build_revision": data.get("build_revision"),
         "source": data.get("source", {}),
         "dashboards": dashboard_lines(data, findings),
         "findings": {
@@ -849,6 +931,7 @@ def render_json(data: dict[str, Any], findings: dict[str, Finding]) -> dict[str,
             "speaker_trust": findings["speaker"].__dict__,
             "onboarding_friction": findings["onboarding"].__dict__,
             "timeline_dayflow": findings["timeline"].__dict__,
+            # Preserve the established machine-readable key for automation consumers.
             "release_regression_watch": findings["release"].__dict__,
         },
         "top_recommended_tasks": [finding.__dict__ for finding in task_candidates(findings)],
@@ -858,11 +941,16 @@ def render_json(data: dict[str, Any], findings: dict[str, Finding]) -> dict[str,
 def render_markdown(data: dict[str, Any], findings: dict[str, Finding]) -> str:
     result = render_json(data, findings)
     tasks = result["top_recommended_tasks"]
+    scope = data.get("app_version") or "all app versions"
+    if data.get("build_channel"):
+        scope += f", channel={data['build_channel']}"
+    if data.get("build_revision"):
+        scope += f", revision={data['build_revision']}"
     lines = [
         "# Transcripted PostHog Product Task Report",
         "",
         f"Generated: {data['generated_at']}",
-        f"Window: last {data['window_days']} days, {data.get('app_version') or 'all app versions'}",
+        f"Window: last {data['window_days']} days, {scope}",
         "",
         "Source: aggregate PostHog signal only. This report writes counts and enum buckets, not user rows, transcript text, audio references, file paths, meeting titles, URLs, or raw payloads.",
         "",
@@ -880,7 +968,7 @@ def render_markdown(data: dict[str, Any], findings: dict[str, Finding]) -> str:
         f"- Speaker trust: {findings['speaker'].metric} {findings['speaker'].recommendation}",
         f"- Onboarding friction: {findings['onboarding'].metric} {findings['onboarding'].recommendation}",
         f"- Timeline Dayflow: {findings['timeline'].metric} {findings['timeline'].recommendation}",
-        f"- Release regression watch: {findings['release'].metric} {findings['release'].recommendation}",
+        f"- Current release health: {findings['release'].metric} {findings['release'].recommendation}",
         "",
         "## Top 3 Recommended PR/Task Candidates",
         "",
@@ -940,7 +1028,7 @@ def run_self_test() -> int:
         "Speaker trust",
         "Onboarding friction",
         "Timeline Dayflow",
-        "Release regression watch",
+        "Current release health",
         "Top 3 Recommended PR/Task Candidates",
     )
     missing = [item for item in required if item not in markdown]
@@ -988,17 +1076,36 @@ def run_self_test() -> int:
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)
             return 1
-    release_query = release_breakdown_query(30)
+    release_query = release_breakdown_query(30, "1.1.50", "release", "release123")
     if "GROUP BY app_version, build_version, build_channel, build_revision" not in release_query:
         print("self-test failed: release breakdown must group by full build identity", file=sys.stderr)
         return 1
+    for expected_filter in (
+        "properties['app_version'] = '1.1.50'",
+        "properties['build_channel'] = 'release'",
+        "properties['build_revision'] = 'release123'",
+    ):
+        if expected_filter not in release_query:
+            print(f"self-test failed: release breakdown missing exact identity filter: {expected_filter}", file=sys.stderr)
+            return 1
     release_rows = data["results"].get("release_breakdown", [])
     if not any(row.get("build_channel") == "release" for row in release_rows) or not any(row.get("build_channel") == "local" for row in release_rows):
         print("self-test failed: release fixture must include shipped and local/current-main build rows", file=sys.stderr)
         return 1
     release_metric = findings["release"].metric
-    if "localmain" not in release_metric:
-        print("self-test failed: release watch must print selected build revision/channel", file=sys.stderr)
+    if "UNKNOWN" not in release_metric or "releaseabc" in release_metric or "localmain" in release_metric:
+        print("self-test failed: release health must stay unknown without a confirmed exact public-build identity", file=sys.stderr)
+        return 1
+    exact_release_data = json.loads(json.dumps(data))
+    exact_release_data["app_version"] = "1.1.47"
+    exact_release_data["build_channel"] = "release"
+    exact_release_data["build_revision"] = "oldrelease"
+    exact_release_metric = build_release_watch(exact_release_data).metric
+    if "oldrelease" not in exact_release_metric or "releaseabc" in exact_release_metric:
+        print("self-test failed: release health did not honor the requested exact build identity", file=sys.stderr)
+        return 1
+    if "release_regression_watch" not in summary["findings"]:
+        print("self-test failed: established release summary JSON key changed", file=sys.stderr)
         return 1
     print("self-test passed")
     return 0
@@ -1007,7 +1114,9 @@ def run_self_test() -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=30, help="Lookback window in days.")
-    parser.add_argument("--app-version", help="Optional app_version filter for non-release queries, e.g. 1.1.48.")
+    parser.add_argument("--app-version", help="Optional exact app_version filter, e.g. 1.1.50.")
+    parser.add_argument("--build-channel", help="Optional exact build_channel filter, normally release for shipped health.")
+    parser.add_argument("--build-revision", help="Optional exact build_revision filter for a published artifact.")
     parser.add_argument("--fixture", type=Path, help="Read aggregate fixture JSON instead of querying PostHog.")
     parser.add_argument("--write-dir", type=Path, help="Directory for product-task-report.md and product-task-report.json.")
     parser.add_argument("--json-only", action="store_true", help="Print the JSON summary instead of Markdown.")
@@ -1023,8 +1132,19 @@ def main() -> int:
     if args.days <= 0:
         print("ERROR: --days must be positive", file=sys.stderr)
         return 2
+    if args.build_revision and not args.app_version:
+        print("ERROR: --build-revision requires --app-version", file=sys.stderr)
+        return 2
+    if args.fixture and (args.app_version or args.build_channel or args.build_revision):
+        print("ERROR: exact-build filters cannot be applied to aggregate fixture rows", file=sys.stderr)
+        return 2
     try:
-        data = load_fixture(args.fixture) if args.fixture else fetch_report_data(args.days, args.app_version)
+        data = load_fixture(args.fixture) if args.fixture else fetch_report_data(
+            args.days,
+            args.app_version,
+            args.build_channel,
+            args.build_revision,
+        )
         findings = analyze(data)
         markdown = render_markdown(data, findings)
         summary = render_json(data, findings)

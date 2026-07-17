@@ -210,13 +210,23 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             let dismissPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
                 let readiness = self.meetingPromptTelemetryReadiness()
+                let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
                 AnalyticsReporter.track(
                     "meeting_prompt_choice_made",
                     properties: MeetingPromptTelemetry.choiceProperties(
                         for: candidate,
                         readiness: readiness,
                         choiceKind: .dismiss,
-                        elapsedSeconds: self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
+                        elapsedSeconds: elapsedSeconds
+                    )
+                )
+                AnalyticsReporter.track(
+                    "meeting_prompt_outcome_recorded",
+                    properties: MeetingPromptTelemetry.outcomeProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        outcomeKind: .dismissed,
+                        elapsedSeconds: elapsedSeconds
                     )
                 )
                 let backoffDecision = self.meetingPromptDetector.dismiss(candidate: candidate)
@@ -245,11 +255,26 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 let readiness = self.meetingPromptTelemetryReadiness()
                 let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
                 AnalyticsReporter.track(
+                    "meeting_prompt_outcome_recorded",
+                    properties: MeetingPromptTelemetry.outcomeProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        outcomeKind: .expired,
+                        elapsedSeconds: elapsedSeconds
+                    )
+                )
+                _ = self.meetingPromptDetector.expire(candidate: candidate)
+            }
+            let remindPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
+                guard let self else { return }
+                let readiness = self.meetingPromptTelemetryReadiness()
+                let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
+                AnalyticsReporter.track(
                     "meeting_prompt_choice_made",
                     properties: MeetingPromptTelemetry.choiceProperties(
                         for: candidate,
                         readiness: readiness,
-                        choiceKind: .expired,
+                        choiceKind: .remindLater,
                         elapsedSeconds: elapsedSeconds
                     )
                 )
@@ -258,61 +283,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     properties: MeetingPromptTelemetry.outcomeProperties(
                         for: candidate,
                         readiness: readiness,
-                        outcomeKind: .ignored,
+                        outcomeKind: .remindedLater,
                         elapsedSeconds: elapsedSeconds
                     )
                 )
-                let backoffDecision = self.meetingPromptDetector.expire(candidate: candidate)
-                AnalyticsReporter.track(
-                    "meeting_prompt_dismissed",
-                    properties: MeetingPromptTelemetry.properties(
-                        for: candidate,
-                        readiness: readiness,
-                        backoffKind: backoffDecision.kind,
-                        signals: self.meetingPromptDetector.currentSignalSnapshot()
-                    )
-                )
-                ActivationTelemetry.trackWorkflowAbandoned(
-                    workflowKind: .meetingPrompt,
-                    stage: "prompt_shown",
-                    reasonKind: .expired,
-                    surface: .meetingOverlay,
-                    priorReadyState: MeetingPromptTelemetry.readyState(
-                        readiness: readiness
-                    )
-                )
-            }
-            let remindPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
-                guard let self else { return }
-                let readiness = self.meetingPromptTelemetryReadiness()
-                AnalyticsReporter.track(
-                    "meeting_prompt_choice_made",
-                    properties: MeetingPromptTelemetry.choiceProperties(
-                        for: candidate,
-                        readiness: readiness,
-                        choiceKind: .remindLater,
-                        elapsedSeconds: self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
-                    )
-                )
-                let backoffDecision = self.meetingPromptDetector.remindSoon(candidate: candidate)
-                AnalyticsReporter.track(
-                    "meeting_prompt_dismissed",
-                    properties: MeetingPromptTelemetry.properties(
-                        for: candidate,
-                        readiness: readiness,
-                        backoffKind: backoffDecision.kind,
-                        signals: self.meetingPromptDetector.currentSignalSnapshot()
-                    )
-                )
-                ActivationTelemetry.trackWorkflowAbandoned(
-                    workflowKind: .meetingPrompt,
-                    stage: "prompt_shown",
-                    reasonKind: .remindedLater,
-                    surface: .meetingOverlay,
-                    priorReadyState: MeetingPromptTelemetry.readyState(
-                        readiness: readiness
-                    )
-                )
+                _ = self.meetingPromptDetector.remindSoon(candidate: candidate)
             }
             capturePillController.onRecord = recordPrompt
             capturePillController.onDismiss = dismissPrompt
@@ -336,15 +311,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         for: suppression,
                         readiness: readiness,
                         signals: self.meetingPromptDetector.currentSignalSnapshot()
-                    )
-                )
-                ActivationTelemetry.trackWorkflowAbandoned(
-                    workflowKind: .meetingPrompt,
-                    stage: "pre_prompt",
-                    reasonKind: .suppressed,
-                    surface: .meetingOverlay,
-                    priorReadyState: MeetingPromptTelemetry.readyState(
-                        readiness: readiness
                     )
                 )
             }

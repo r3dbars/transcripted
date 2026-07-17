@@ -95,7 +95,12 @@ For the normal health lane's product-task loop, run:
 
 ```bash
 python3 scripts/ops/posthog-product-dashboard-summary.py --days 30
+python3 scripts/ops/posthog-product-dashboard-summary.py --days 7 --app-version 1.1.50 --build-channel release --build-revision <revision>
 ```
+
+The first command reports product behavior but leaves current release health
+`UNKNOWN`. Supply all three confirmed public-build fields for a release claim;
+fixture mode intentionally rejects exact-build filters.
 
 `health-probe.sh posthog` runs this helper automatically when credentials are
 present. The report summarizes the five product-learning dashboard families

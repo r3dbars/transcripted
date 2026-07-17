@@ -229,5 +229,20 @@ func testMeetingPromptTelemetry() async {
         assertEqual(suppressed["outcome_kind"], "suppressed", "suppression should be an outcome enum")
         assertEqual(suppressed["suppression_reason"], "own_capture_active", "suppression reason should stay enum-shaped")
         assertEqual(suppressed["elapsed_bucket"], "unknown", "missing anchors should report unknown instead of raw time")
+
+        for (kind, expected) in [
+            (MeetingPromptTelemetry.OutcomeKind.dismissed, "dismissed"),
+            (.expired, "expired"),
+            (.remindedLater, "reminded_later"),
+        ] {
+            let terminal = MeetingPromptTelemetry.outcomeProperties(
+                for: candidate,
+                readiness: readiness,
+                outcomeKind: kind,
+                elapsedSeconds: 4
+            )
+            assertEqual(terminal["outcome_kind"], expected, "prompt terminal decisions should remain distinct")
+            assertEqual(terminal["elapsed_bucket"], "lt_10s", "prompt terminal latency should stay bucketed")
+        }
     }
 }
