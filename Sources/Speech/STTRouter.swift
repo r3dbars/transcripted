@@ -16,7 +16,6 @@ class STTRouter: ObservableObject {
     @Published var isRecording = false
     @Published var isTranscribing = false
     @Published var audioLevel: Float = 0
-    @Published var liveTranscript: String = ""
     @Published var recordingInterrupted = false
     @Published var isRecovering = false
     @Published var inputFormatReady = true
@@ -58,7 +57,6 @@ class STTRouter: ObservableObject {
         parakeetEngine.$isRecording.assign(to: &$isRecording)
         parakeetEngine.$isTranscribing.assign(to: &$isTranscribing)
         parakeetEngine.$audioLevel.assign(to: &$audioLevel)
-        parakeetEngine.$liveTranscript.assign(to: &$liveTranscript)
         parakeetEngine.$recordingInterrupted.assign(to: &$recordingInterrupted)
         parakeetEngine.$isRecovering.assign(to: &$isRecovering)
         parakeetEngine.$inputFormatReady.assign(to: &$inputFormatReady)

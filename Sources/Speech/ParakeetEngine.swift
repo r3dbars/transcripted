@@ -16,7 +16,6 @@ class ParakeetEngine: ObservableObject {
     @Published var isRecording = false
     @Published var isTranscribing = false
     @Published var audioLevel: Float = 0
-    @Published var liveTranscript: String = ""
     @Published var modelDownloadState: ParakeetModelState = .notLoaded
     @Published var recordingInterrupted = false
     @Published var isRecovering = false
@@ -50,19 +49,6 @@ class ParakeetEngine: ObservableObject {
     private var recentAudioEngineRebuildTimestamps: [CFAbsoluteTime] = []
     private var didReportAudioEngineRebuildChurn = false
 
-    // Live streaming text is intentionally disabled — the product focuses on
-    // stable capture and final transcription rather than provisional text.
-    nonisolated let liveDisplayEnabled = false
-    nonisolated(unsafe) var eouManager: StreamingEouAsrManager?
-    var committedStreamText: String = ""
-    // Protected by streamingSamplesLock — accessed from both the audio render thread and MainActor.
-    let streamingSamplesLock = NSLock()
-    var streamingSampleBuffer: [Float] = []
-    // Feed EOU in ~320ms chunks (shift size). The manager buffers internally and processes
-    // when it has a full chunk (10240 samples = 64 mel frames at hop=160).
-    private let eouChunkSamples: Int = 5120
-    // Cached format for makePCMBuffer — always 16kHz mono, no need to recreate per chunk
-    private let eouPCMFormat = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)
     var configChangeObserver: NSObjectProtocol?
     var configChangeDebounceTask: Task<Void, Never>?
     var configRecoveryTask: Task<Void, Never>?
@@ -1073,24 +1059,6 @@ class ParakeetEngine: ObservableObject {
                     }
                 }
 
-                if self.liveDisplayEnabled, let eou = self.eouManager {
-                    let resampled = AudioResampler.resample(monoSamples, from: effectiveSampleRate, to: 16000)
-                    let chunk: [Float]? = self.streamingSamplesLock.withLock {
-                        self.streamingSampleBuffer.append(contentsOf: resampled)
-                        guard self.streamingSampleBuffer.count >= self.eouChunkSamples else { return nil }
-                        let ready = self.streamingSampleBuffer
-                        self.streamingSampleBuffer = []
-                        return ready
-                    }
-                    if let chunk = chunk, let pcm = self.makePCMBuffer(from: chunk) {
-                        Task {
-                            do { _ = try await eou.process(audioBuffer: pcm) }
-                            catch { EventReporter.shared.capture(level: .warning, engine: "parakeet",
-                                event: "eou_process_error", message: error.localizedDescription) }
-                        }
-                    }
-                }
-
                 let truncatedSamples: Int = self.pendingSamplesLock.withLock {
                     self.pendingSamples.append(contentsOf: monoSamples)
                     let maxSamples = ParakeetAudioFormatReadinessPolicy.bufferCapacitySampleCount(
@@ -1331,10 +1299,6 @@ class ParakeetEngine: ObservableObject {
         cancelAudioWatchdog()
         if isRecording {
             preserveCurrentRecordingBuffersForRecovery()
-            streamingSamplesLock.withLock {
-                streamingSampleBuffer.removeAll(keepingCapacity: true)
-            }
-            Task { await eouManager?.reset() }
             await removeRecordingTap()
             isRecording = false
             audioLevel = 0
@@ -1881,14 +1845,6 @@ class ParakeetEngine: ObservableObject {
 
         isRecording = true
         markFormatReadyAndPublish()
-        liveTranscript = ""
-        committedStreamText = ""
-        if liveDisplayEnabled {
-            streamingSamplesLock.withLock {
-                streamingSampleBuffer.removeAll(keepingCapacity: true)
-            }
-            Task { await eouManager?.reset() }
-        }
         AppLogger.transcription.info("PARAKEET | recording started (\(inputDeviceName), \(safeNativeSampleRate())Hz)")
 
         // Watchdog: detect zombie audio engine (running but no usable signal after sleep/wake).
@@ -1913,14 +1869,6 @@ class ParakeetEngine: ObservableObject {
         }
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
-        liveTranscript = ""
-        committedStreamText = ""
-        if liveDisplayEnabled {
-            streamingSamplesLock.withLock {
-                streamingSampleBuffer.removeAll(keepingCapacity: true)
-            }
-            Task { await eouManager?.reset() }
-        }
         sharedMeetingMicRecorder.begin()
         sharedMeetingMicTransition.beginSharedRecording()
         sharedMeetingMicRecording = true
@@ -1938,34 +1886,7 @@ class ParakeetEngine: ObservableObject {
 
     /// Called from MeetingCaptureBridge's off-tap relay queue.
     nonisolated func appendSharedMeetingMicBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let chunk = sharedMeetingMicRecorder.append(buffer), liveDisplayEnabled else { return }
-        let resampled = AudioResampler.resample(chunk.samples, from: chunk.sampleRate, to: 16000)
-        Task { @MainActor [weak self] in
-            self?.consumeSharedMeetingMicLiveDisplaySamples(resampled)
-        }
-    }
-
-    private func consumeSharedMeetingMicLiveDisplaySamples(_ samples: [Float]) {
-        guard sharedMeetingMicRecording, let eou = eouManager else { return }
-        let chunk: [Float]? = streamingSamplesLock.withLock {
-            streamingSampleBuffer.append(contentsOf: samples)
-            guard streamingSampleBuffer.count >= eouChunkSamples else { return nil }
-            let ready = streamingSampleBuffer
-            streamingSampleBuffer = []
-            return ready
-        }
-        guard let chunk, let pcm = makePCMBuffer(from: chunk) else { return }
-        Task {
-            do { _ = try await eou.process(audioBuffer: pcm) }
-            catch {
-                EventReporter.shared.capture(
-                    level: .warning,
-                    engine: "parakeet",
-                    event: "eou_process_error",
-                    message: error.localizedDescription
-                )
-            }
-        }
+        sharedMeetingMicRecorder.append(buffer)
     }
 
     func updateSharedMeetingMicAudioLevel(_ level: Float) {
@@ -2097,9 +2018,6 @@ class ParakeetEngine: ObservableObject {
                     "sample_signal_started": "\(self.didReceiveNonZeroAudioSamples)",
                 ])
 
-            self.streamingSamplesLock.withLock {
-                self.streamingSampleBuffer.removeAll(keepingCapacity: true)
-            }
             self.pendingSamplesLock.withLock {
                 self.pendingSamples.removeAll(keepingCapacity: true)
                 self.didReportPendingSampleTruncation = false
@@ -2110,7 +2028,6 @@ class ParakeetEngine: ObservableObject {
             self.configChangeWasRecording = false
             self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
                 + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
-            await self.eouManager?.reset()
             await self.removeRecordingTap()
             await self.stopAudioEngine()
             self.isEnginePrewarmed = false
@@ -2182,20 +2099,6 @@ class ParakeetEngine: ObservableObject {
         }
         audioGraphGeneration += 1
         cancelAudioWatchdog()
-        if liveDisplayEnabled {
-            let remainingEou: [Float] = streamingSamplesLock.withLock {
-                let remainingEou = streamingSampleBuffer
-                streamingSampleBuffer.removeAll(keepingCapacity: true)
-                return remainingEou
-            }
-            if let eou = eouManager, !remainingEou.isEmpty, let pcm = makePCMBuffer(from: remainingEou) {
-                Task {
-                    do { _ = try await eou.process(audioBuffer: pcm) }
-                    catch { EventReporter.shared.capture(level: .warning, engine: "parakeet",
-                        event: "eou_process_error", message: error.localizedDescription) }
-                }
-            }
-        }
         await removeRecordingTap()
         await stopAudioEngine()
         await restorePendingSystemInputAfterRecording(operation: "stop_recording")
@@ -2207,10 +2110,7 @@ class ParakeetEngine: ObservableObject {
         AppLogger.transcription.info("PARAKEET | recording stopped (\(sampleBuffer.count) samples, \(String(format: "%.1f", Double(sampleBuffer.count) / stopSampleRate))s)")
     }
 
-    // MARK: - EOU Streaming (live display)
-    // Live display is driven by StreamingEouAsrManager fed via the audio tap (see startRecording).
-    // EOU callback in initializeEouModel() updates committedStreamText → liveTranscript.
-    // No explicit start/stop methods needed — tap feeds the manager, reset() clears state.
+    // MARK: - Recorded Audio Buffering
 
     private func drainPendingSamplesIntoSampleBuffer() {
         pendingSamplesLock.withLock {
@@ -2322,21 +2222,6 @@ class ParakeetEngine: ObservableObject {
             )
         }.value
         return (nativeSampleCount, resampled)
-    }
-
-    /// Convert [Float] samples to AVAudioPCMBuffer for StreamingEouAsrManager.
-    private func makePCMBuffer(from samples: [Float]) -> AVAudioPCMBuffer? {
-        guard let format = eouPCMFormat,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))
-        else { return nil }
-        buffer.frameLength = AVAudioFrameCount(samples.count)
-        if let dest = buffer.floatChannelData?[0] {
-            samples.withUnsafeBufferPointer { src in
-                guard let baseAddress = src.baseAddress else { return }
-                dest.update(from: baseAddress, count: samples.count)
-            }
-        }
-        return buffer
     }
 
     // MARK: - Transcription
@@ -2667,7 +2552,7 @@ class ParakeetEngine: ObservableObject {
     // MARK: - Pure-Sample Transcription (for Meeting pipeline)
 
     /// Transcribe pre-resampled 16kHz mono Float32 samples directly, bypassing
-    /// ParakeetEngine's recording lifecycle (audioEngine, sampleBuffer, EOU streaming).
+    /// ParakeetEngine's recording lifecycle and audio buffering.
     ///
     /// Used by `MeetingSTTAdapter` to satisfy Core's `SpeechToTextEngine` protocol:
     /// Core's TranscriptionPipeline owns its own recording (mic + system audio files via
@@ -2771,10 +2656,6 @@ class ParakeetEngine: ObservableObject {
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
-        streamingSamplesLock.withLock {
-            streamingSampleBuffer.removeAll(keepingCapacity: true)
-        }
-        await eouManager?.reset()
         isRecording = false
         isTranscribing = false
         audioLevel = 0
@@ -2783,8 +2664,6 @@ class ParakeetEngine: ObservableObject {
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
-        liveTranscript = ""
-        committedStreamText = ""
         audioGraphGeneration += 1
         let cleanupGeneration = audioGraphGeneration
         await releaseIdleAudioHardware(removeTap: true, expectedGeneration: cleanupGeneration)
@@ -2810,10 +2689,6 @@ class ParakeetEngine: ObservableObject {
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
-        streamingSamplesLock.withLock {
-            streamingSampleBuffer.removeAll(keepingCapacity: true)
-        }
-        Task { await eouManager?.reset() }
         isRecording = false
         isTranscribing = false
         audioStartInProgress = false
@@ -2823,8 +2698,6 @@ class ParakeetEngine: ObservableObject {
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
-        liveTranscript = ""
-        committedStreamText = ""
         schedulePendingSystemInputRestore(operation: "abandon_blocked_recording_start")
         abandonBlockedAudioEngine(reason: reason)
     }
@@ -2848,12 +2721,6 @@ class ParakeetEngine: ObservableObject {
             pendingSamples.removeAll(keepingCapacity: true)
         }
         if isRecording {
-            if liveDisplayEnabled {
-                streamingSamplesLock.withLock {
-                    streamingSampleBuffer.removeAll(keepingCapacity: true)
-                }
-                Task { await eouManager?.reset() }
-            }
             isRecording = false
             audioLevel = 0
         }
@@ -2866,8 +2733,6 @@ class ParakeetEngine: ObservableObject {
         sampleBuffer.removeAll()
         clearRecoveredRecordingTimeline(keepingCapacity: false)
         isTranscribing = false
-        liveTranscript = ""
-        committedStreamText = ""
     }
 
     private func releaseIdleAudioHardware(removeTap: Bool, expectedGeneration: Int? = nil) async {
@@ -2943,6 +2808,5 @@ class ParakeetEngine: ObservableObject {
         ParakeetRetiredAudioEngineStore.shared.retire(audioEngine, reason: "deinit")
         let mgr = asrManager
         Task { await mgr?.cleanup() }
-        eouManager = nil
     }
 }

@@ -151,10 +151,6 @@ extension ParakeetEngine {
                 message: "Parakeet ASR models initialized successfully",
                 context: ["load_source": loadSourceName])
 
-            if liveDisplayEnabled {
-                await initializeEouModel()
-            }
-
         } catch {
             guard !Task.isCancelled, !isShuttingDown else { return }
             modelFilePrefetchTask = nil
@@ -256,85 +252,6 @@ extension ParakeetEngine {
         return true
     }
 
-    /// Load Parakeet EOU 120M for streaming live display.
-    /// Non-fatal — if EOU fails, live transcript stays empty but batch result still works.
-    private func initializeEouModel() async {
-        do {
-            let eou = StreamingEouAsrManager(chunkSize: .ms320, eouDebounceMs: 1280)
-
-            let modelDir: URL
-            if let bundlePath = bundledModelPath(subdirectory: "parakeet-eou-120m-coreml", checkFile: "streaming_encoder.mlmodelc") {
-                AppLogger.transcription.info("PARAKEET EOU | loading from bundle: \(bundlePath.path)")
-                modelDir = bundlePath
-            } else {
-                // Download from HuggingFace (~120MB) and cache locally
-                // DownloadUtils nests inside <directory>/<repo.folderName>/, so we use the parent
-                guard let appSupportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-                    AppLogger.transcription.warning("PARAKEET EOU | application support directory unavailable")
-                    EventReporter.shared.capture(
-                        level: .warning,
-                        engine: "parakeet",
-                        event: "eou_app_support_unavailable",
-                        message: "Application support directory lookup returned no results; cannot resolve EOU model cache"
-                    )
-                    return
-                }
-                let cacheBase = appSupportRoot.appendingPathComponent("FluidAudio/Models", isDirectory: true)
-                let expectedDir = cacheBase.appendingPathComponent("parakeet-eou-streaming/320ms", isDirectory: true)
-                let checkFile = expectedDir.appendingPathComponent("streaming_encoder.mlmodelc")
-                if FileManager.default.fileExists(atPath: checkFile.path) {
-                    AppLogger.transcription.info("PARAKEET EOU | loading from cache: \(expectedDir.path)")
-                    modelDir = expectedDir
-                } else {
-                    AppLogger.transcription.warning("PARAKEET EOU | streaming model download unavailable with current FluidAudio API")
-                    EventReporter.shared.capture(
-                        level: .warning,
-                        engine: "parakeet",
-                        event: "eou_model_unavailable",
-                        message: "Streaming EOU model download is unavailable with the current FluidAudio version"
-                    )
-                    return
-                }
-            }
-            try await eou.loadModels(modelDir: modelDir)
-
-            // Partial callback fires on every chunk with new tokens — live "ghost text" display
-            await eou.setPartialCallback { [weak self] partial in
-                Task { @MainActor [weak self] in
-                    guard let self = self else { return }
-                    let trimmed = partial.trimmingCharacters(in: .whitespaces)
-                    guard !trimmed.isEmpty else { return }
-                    self.liveTranscript = self.committedStreamText.isEmpty
-                        ? trimmed
-                        : self.committedStreamText + " " + trimmed
-                }
-            }
-
-            // EOU callback fires after silence — commits the utterance so partial text resets
-            await eou.setEouCallback { [weak self] transcript in
-                Task { @MainActor [weak self] in
-                    guard let self = self else { return }
-                    let trimmed = transcript.trimmingCharacters(in: .whitespaces)
-                    guard !trimmed.isEmpty else { return }
-                    self.committedStreamText = self.committedStreamText.isEmpty
-                        ? trimmed
-                        : self.committedStreamText + " " + trimmed
-                    self.liveTranscript = self.committedStreamText
-                }
-            }
-
-            eouManager = eou
-            AppLogger.transcription.info("PARAKEET EOU | streaming model ready")
-            EventReporter.shared.capture(level: .info, engine: "parakeet", event: "eou_model_loaded",
-                message: "Parakeet EOU streaming model initialized")
-        } catch {
-            // Non-fatal — live display will just stay empty until batch result arrives
-            AppLogger.transcription.warning("PARAKEET EOU | model load failed (live display disabled): \(error.localizedDescription)")
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "eou_model_failed",
-                message: error.localizedDescription)
-        }
-    }
-
     /// FluidAudio 0.15.x renamed the v3 cache folder from `parakeet-tdt-0.6b-v3-coreml`
     /// to `parakeet-tdt-0.6b-v3` (ModelNames.folderName strips the suffix). Rename a
     /// 0.7.9-era cache in place so existing users keep their ~600MB download; FluidAudio
@@ -381,7 +298,7 @@ extension ParakeetEngine {
         modelFilePrefetchTask = nil
     }
 
-    /// Tear down the loaded ASR/EOU model state. Deferred (instead of an
+    /// Tear down the loaded ASR model state. Deferred (instead of an
     /// immediate `asrManager = nil`) while transcription work is still
     /// in-flight, so an active `AsrManager.transcribe()` call doesn't get its
     /// backing object released out from under it. Called from `cleanup()`.
@@ -394,7 +311,6 @@ extension ParakeetEngine {
             asrManager = nil
         }
         asrManagerReady = false
-        eouManager = nil
         modelDownloadState = .notLoaded
         if cleanupDecision == .cleanupNow {
             Task { await mgr?.cleanup() }
