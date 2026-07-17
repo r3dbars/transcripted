@@ -337,6 +337,7 @@ APP_SOURCES=(
     "Sources/UI/MenuBar/MenuBarHeaderStatusPresentation.swift"
     "Sources/UI/MenuBar/PasteLastDictationFeedback.swift"
     "Sources/Observability/AnalyticsReporter.swift"
+    "Sources/Observability/DictationPasteRetryTelemetry.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"
     "Sources/Observability/ActivationTelemetry.swift"
     "Sources/Observability/FeatureDiscoveryTelemetry.swift"
