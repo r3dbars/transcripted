@@ -451,11 +451,20 @@ final class TranscriptionQueueCoordinator {
         let records = ImportedTranscriptionQueueJournal.load(
             journalDirectory: importedQueueJournalDirectory
         )
-        let failedQueueAudioURLs = Set(
-            controller.failedManager.failedTranscriptions.flatMap { failure in
-                [failure.micAudioURL, failure.systemAudioURL].compactMap { $0?.standardizedFileURL }
+        let failedQueueAudioURLs = controller.failedMeetingStore.failedAudioURLs
+        var recoveredJobIDs = Set(queuedTranscriptionJobs.map(\.id))
+        var recoveredAudioURLs = Set(
+            queuedTranscriptionJobs.compactMap { job -> URL? in
+                guard case .imported(let audioURL, _, _) = job.kind else { return nil }
+                return audioURL.standardizedFileURL
             }
         )
+        if let preparingQueuedTranscriptionJob {
+            recoveredJobIDs.insert(preparingQueuedTranscriptionJob.id)
+            if case .imported(let audioURL, _, _) = preparingQueuedTranscriptionJob.kind {
+                recoveredAudioURLs.insert(audioURL.standardizedFileURL)
+            }
+        }
         var recovered = 0
         for record in records {
             guard let audioURL = ImportedTranscriptionQueueJournal.audioURL(
@@ -469,6 +478,18 @@ final class TranscriptionQueueCoordinator {
                 continue
             }
             if failedQueueAudioURLs.contains(audioURL.standardizedFileURL) {
+                ImportedTranscriptionQueueJournal.remove(
+                    id: record.id,
+                    journalDirectory: importedQueueJournalDirectory
+                )
+                continue
+            }
+            if ImportedTranscriptionQueueJournal.isDuplicate(
+                record: record,
+                audioURL: audioURL,
+                existingJobIDs: recoveredJobIDs,
+                existingAudioURLs: recoveredAudioURLs
+            ) {
                 ImportedTranscriptionQueueJournal.remove(
                     id: record.id,
                     journalDirectory: importedQueueJournalDirectory
@@ -498,6 +519,8 @@ final class TranscriptionQueueCoordinator {
                     promptRecordingStartedAt: nil
                 )
             )
+            recoveredJobIDs.insert(record.id)
+            recoveredAudioURLs.insert(audioURL.standardizedFileURL)
             recovered += 1
         }
         if recovered > 0 {

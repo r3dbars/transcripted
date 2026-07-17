@@ -529,6 +529,39 @@ func testMeetingImportedAudioPreparer() async {
             audioURL,
             "recovery should resolve audio only inside the configured scratch directory"
         )
+        assertTrue(
+            ImportedTranscriptionQueueJournal.isDuplicate(
+                record: recovered[0],
+                audioURL: audioURL,
+                existingJobIDs: [id],
+                existingAudioURLs: []
+            ),
+            "recovery should recognize an already-enqueued journal by job identity"
+        )
+        assertTrue(
+            ImportedTranscriptionQueueJournal.isDuplicate(
+                record: recovered[0],
+                audioURL: audioURL,
+                existingJobIDs: [],
+                existingAudioURLs: [audioURL]
+            ),
+            "recovery should recognize an already-enqueued journal by normalized audio path"
+        )
+        let unsafeRecord = ImportedTranscriptionQueueJournalRecord(
+            id: UUID(),
+            audioFilename: "../outside.wav",
+            suggestedTitle: "Unsafe",
+            recordingDate: recordingDate,
+            enqueuedAt: recordingDate,
+            sttModelRawValue: "parakeet"
+        )
+        assertNil(
+            ImportedTranscriptionQueueJournal.audioURL(
+                for: unsafeRecord,
+                scratchDirectory: scratchURL
+            ),
+            "recovery must reject journal paths that escape app-owned scratch"
+        )
 
         let olderSourceNewerQueueID = UUID()
         let olderSourceNewerQueueAudioURL = scratchURL.appendingPathComponent("older-source-newer-queue.wav")

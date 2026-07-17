@@ -124,6 +124,16 @@ enum ImportedTranscriptionQueueJournal {
         return scratchDirectory.appendingPathComponent(record.audioFilename, isDirectory: false)
     }
 
+    static func isDuplicate(
+        record: ImportedTranscriptionQueueJournalRecord,
+        audioURL: URL,
+        existingJobIDs: Set<UUID>,
+        existingAudioURLs: Set<URL>
+    ) -> Bool {
+        existingJobIDs.contains(record.id)
+            || existingAudioURLs.contains(audioURL.standardizedFileURL)
+    }
+
     private static func journalURL(for id: UUID, in directory: URL) -> URL {
         directory.appendingPathComponent(
             "\(filenamePrefix)\(id.uuidString).\(filenameExtension)",

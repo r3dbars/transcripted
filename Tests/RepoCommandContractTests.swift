@@ -2275,9 +2275,16 @@ func testRepoCommandContract() {
             to: "func removeImportedJournal(for job: QueuedTranscriptionJob)"
         )
         assertTrue(
-            importedRecoveryBlock.contains("controller.failedManager.failedTranscriptions")
+            importedRecoveryBlock.contains("controller.failedMeetingStore.failedAudioURLs")
                 && importedRecoveryBlock.contains("failedQueueAudioURLs.contains(audioURL.standardizedFileURL)"),
-            "relaunch recovery should retire a journal whose audio already has durable failed-queue ownership"
+            "relaunch recovery should use the failed-meeting store boundary and retire a journal whose audio already has durable failed-queue ownership"
+        )
+        assertTrue(
+            importedRecoveryBlock.contains("ImportedTranscriptionQueueJournal.isDuplicate")
+                && importedRecoveryBlock.contains("recoveredJobIDs")
+                && importedRecoveryBlock.contains("recoveredAudioURLs")
+                && importedRecoveryBlock.contains("ImportedTranscriptionQueueJournal.remove"),
+            "relaunch recovery should retire duplicate journals instead of enqueueing the same import twice"
         )
         let importJournalFailureBlock = sourceSlice(
             controllerContents,
