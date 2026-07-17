@@ -2,6 +2,44 @@ import XCTest
 @testable import TranscriptedCore
 
 final class SCKAudioCaptureRecoveryTests: XCTestCase {
+    func testOrdinaryStaleGenerationStartErrorStillPublishes() {
+        XCTAssertTrue(
+            SCKStartErrorPolicy.shouldPublish(
+                AudioCaptureStaleSessionError(),
+                isRecoverySessionCurrent: true
+            )
+        )
+    }
+
+    func testOfficialStopCancellationKeepsStaleStartErrorSilent() {
+        XCTAssertFalse(
+            SCKStartErrorPolicy.shouldPublish(
+                AudioCaptureStaleSessionError(),
+                isRecoverySessionCurrent: false
+            )
+        )
+    }
+
+    func testRepeatedStopPreservesTimedOutStreamCaptureState() {
+        XCTAssertNil(
+            SCKOfficialStopPolicy.captureStateToStop(
+                isCapturing: true,
+                isWaitingForTimedOutStopCallback: true
+            ),
+            "a repeated stop must not clear the retained live-stream state while the first callback is pending"
+        )
+    }
+
+    func testFirstStopTransitionsActiveCapture() {
+        XCTAssertEqual(
+            SCKOfficialStopPolicy.captureStateToStop(
+                isCapturing: true,
+                isWaitingForTimedOutStopCallback: false
+            ),
+            true
+        )
+    }
+
     func testStopBeforeQueuedRecoveryPreventsEveryPhase() throws {
         let gate = SCKRecoverySessionGate()
         let token = gate.beginSession()

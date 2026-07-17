@@ -88,6 +88,22 @@ final class SCKRecoverySessionGate: @unchecked Sendable {
     }
 }
 
+enum SCKOfficialStopPolicy {
+    static func captureStateToStop(
+        isCapturing: Bool,
+        isWaitingForTimedOutStopCallback: Bool
+    ) -> Bool? {
+        guard !isWaitingForTimedOutStopCallback else { return nil }
+        return isCapturing
+    }
+}
+
+enum SCKStartErrorPolicy {
+    static func shouldPublish(_ error: Error, isRecoverySessionCurrent: Bool) -> Bool {
+        isRecoverySessionCurrent || !(error is AudioCaptureStaleSessionError)
+    }
+}
+
 @available(macOS 26.0, *)
 final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngine, SCStreamDelegate, @unchecked Sendable {
     @Published var errorMessage: String?
@@ -319,7 +335,11 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
             } else {
                 cleanupStreamReference(stream)
             }
-            if !(error is AudioCaptureStaleSessionError) {
+            let isRecoverySessionCurrent = (try? recoverySessionGate.check(recoveryToken)) != nil
+            if SCKStartErrorPolicy.shouldPublish(
+                error,
+                isRecoverySessionCurrent: isRecoverySessionCurrent
+            ) {
                 publishErrorMessage(error.localizedDescription)
             }
             throw error
@@ -327,7 +347,10 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     }
 
     func stop() {
-        let wasCapturing = invalidateRecoverySessionAndTransitionToStopped()
+        guard let wasCapturing = invalidateRecoverySessionAndTransitionToStopped() else {
+            AppLogger.audioSystem.warning("SCKAudioCapture: previous stop still pending")
+            return
+        }
         guard let stream = stream else { return }
         let stopGeneration = currentGeneration()
         guard wasCapturing else {
@@ -345,7 +368,10 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
     }
 
     func stopSync() {
-        let wasCapturing = invalidateRecoverySessionAndTransitionToStopped()
+        guard let wasCapturing = invalidateRecoverySessionAndTransitionToStopped() else {
+            AppLogger.audioSystem.warning("SCKAudioCapture: previous stop still pending")
+            return
+        }
         stopCurrentStreamSynchronously(wasCapturing: wasCapturing)
     }
 
@@ -386,10 +412,18 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
         }
     }
 
-    private func invalidateRecoverySessionAndTransitionToStopped() -> Bool {
+    private func invalidateRecoverySessionAndTransitionToStopped() -> Bool? {
         captureStateLock.lock()
         recoverySessionGate.invalidate()
-        let wasCapturing = _isCapturing
+        guard let wasCapturing = SCKOfficialStopPolicy.captureStateToStop(
+            isCapturing: _isCapturing,
+            isWaitingForTimedOutStopCallback: isWaitingForTimedOutStopCallback
+        ) else {
+            isRecovering = false
+            recoveringToken = nil
+            captureStateLock.unlock()
+            return nil
+        }
         _isCapturing = false
         isRecovering = false
         recoveringToken = nil
@@ -484,8 +518,10 @@ final class SCKAudioCapture: NSObject, ObservableObject, SystemAudioCaptureEngin
             return
         }
 
-        setCapturing(true)
+        captureStateLock.lock()
+        _isCapturing = true
         isWaitingForTimedOutStopCallback = true
+        captureStateLock.unlock()
         startWatchdog(generation: currentGeneration())
         AppLogger.audioSystem.warning("SCKAudioCapture: keeping stream reference after stop timeout")
     }
