@@ -36,7 +36,7 @@ final class TranscriptionQueueCoordinator {
             )
         }
 
-        let id = UUID()
+        let id: UUID
         let kind: Kind
         let startTrigger: MeetingSessionController.StartTrigger
         let sttModel: TranscriptionModelChoice
@@ -78,6 +78,8 @@ final class TranscriptionQueueCoordinator {
     var preparingQueuedTranscriptionJob: QueuedTranscriptionJob?
     var queuedTranscriptionStartTask: Task<Void, Never>?
     private var queuedRuntimeDiagnosticsJobIDs: Set<UUID> = []
+    private let importedQueueJournalDirectory: URL
+    private let importedAudioScratchDirectory: URL
 
     var isPreparingQueuedTranscriptionStart: Bool {
         preparingQueuedTranscriptionJob != nil || queuedTranscriptionStartTask != nil
@@ -94,8 +96,14 @@ final class TranscriptionQueueCoordinator {
         canStartQueuedTranscriptionImmediately(snapshot: currentBackgroundTranscriptionWorkSnapshot)
     }
 
-    init(controller: MeetingSessionController) {
+    init(
+        controller: MeetingSessionController,
+        importedQueueJournalDirectory: URL = MeetingStoragePaths.importedTranscriptionQueueFolder,
+        importedAudioScratchDirectory: URL = MeetingStoragePaths.recordingsScratch
+    ) {
         self.controller = controller
+        self.importedQueueJournalDirectory = importedQueueJournalDirectory
+        self.importedAudioScratchDirectory = importedAudioScratchDirectory
     }
 
     func enqueueTranscriptionJob(
@@ -110,6 +118,7 @@ final class TranscriptionQueueCoordinator {
         promptRecordingStartedAt: Date? = nil
     ) -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
+            id: UUID(),
             kind: .recorded(
                 micURL: micURL,
                 systemURL: systemURL,
@@ -136,8 +145,9 @@ final class TranscriptionQueueCoordinator {
         suggestedTitle: String,
         recordingDate: Date,
         startTrigger: MeetingSessionController.StartTrigger
-    ) -> QueueInsertionOutcome {
+    ) throws -> QueueInsertionOutcome {
         let job = QueuedTranscriptionJob(
+            id: UUID(),
             kind: .imported(
                 audioURL: audioURL,
                 suggestedTitle: suggestedTitle,
@@ -149,7 +159,17 @@ final class TranscriptionQueueCoordinator {
             promptRecordingStartedAt: nil
         )
 
-        return enqueue(job)
+        // Persist ownership before any asynchronous model preparation starts.
+        // Otherwise a force quit can lose an accepted immediate-start import.
+        try persistImportedJournal(for: job)
+
+        if canStartQueuedTranscriptionImmediately {
+            startQueuedTranscription(job)
+            return .startedImmediately
+        }
+
+        queuedTranscriptionJobs.append(job)
+        return .queued(position: queuedTranscriptionJobs.count)
     }
 
     private func enqueue(_ job: QueuedTranscriptionJob) -> QueueInsertionOutcome {
@@ -318,6 +338,7 @@ final class TranscriptionQueueCoordinator {
                 meetingTitle: suggestedTitle,
                 recordingDate: recordingDate
             )
+            removeImportedJournal(for: job)
         }
     }
 
@@ -333,9 +354,10 @@ final class TranscriptionQueueCoordinator {
             controller.activeQueuedTranscriptionJobID = nil
         }
 
+        var preserved = false
         switch job.kind {
         case .recorded(let micURL, let systemURL, _, _, let meetingTitle, let recordingDate):
-            controller.failedMeetingStore.preserveFailedMeetingForRetry(
+            preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
                 micAudioURL: micURL,
                 systemAudioURL: systemURL,
                 errorMessage: message,
@@ -343,13 +365,16 @@ final class TranscriptionQueueCoordinator {
                 recordingDate: recordingDate
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
-            controller.failedMeetingStore.preserveFailedMeetingForRetry(
+            preserved = controller.failedMeetingStore.preserveFailedMeetingForRetry(
                 micAudioURL: nil,
                 systemAudioURL: audioURL,
                 errorMessage: message,
                 meetingTitle: suggestedTitle,
                 recordingDate: recordingDate
             )
+        }
+        if preserved {
+            removeImportedJournal(for: job)
         }
         clearQueuedTranscriptionRuntimeDiagnosticsIfOwned(for: job, outcome: "model_recovery_failed")
     }
@@ -421,6 +446,89 @@ final class TranscriptionQueueCoordinator {
         return queuedTranscriptionJobs.removeFirst()
     }
 
+    @discardableResult
+    func recoverImportedAudioJobs() -> Int {
+        let records = ImportedTranscriptionQueueJournal.load(
+            journalDirectory: importedQueueJournalDirectory
+        )
+        let failedQueueAudioURLs = Set(
+            controller.failedManager.failedTranscriptions.flatMap { failure in
+                [failure.micAudioURL, failure.systemAudioURL].compactMap { $0?.standardizedFileURL }
+            }
+        )
+        var recovered = 0
+        for record in records {
+            guard let audioURL = ImportedTranscriptionQueueJournal.audioURL(
+                for: record,
+                scratchDirectory: importedAudioScratchDirectory
+            ) else {
+                ImportedTranscriptionQueueJournal.remove(
+                    id: record.id,
+                    journalDirectory: importedQueueJournalDirectory
+                )
+                continue
+            }
+            if failedQueueAudioURLs.contains(audioURL.standardizedFileURL) {
+                ImportedTranscriptionQueueJournal.remove(
+                    id: record.id,
+                    journalDirectory: importedQueueJournalDirectory
+                )
+                continue
+            }
+            guard FileManager.default.fileExists(atPath: audioURL.path) else {
+                ImportedTranscriptionQueueJournal.remove(
+                    id: record.id,
+                    journalDirectory: importedQueueJournalDirectory
+                )
+                continue
+            }
+            let model = TranscriptionModelChoice(rawValue: record.sttModelRawValue)
+                ?? controller.sttRouter.selectedModel
+            queuedTranscriptionJobs.append(
+                QueuedTranscriptionJob(
+                    id: record.id,
+                    kind: .imported(
+                        audioURL: audioURL,
+                        suggestedTitle: record.suggestedTitle,
+                        recordingDate: record.recordingDate
+                    ),
+                    startTrigger: .fileImport,
+                    sttModel: model,
+                    promptTelemetryProperties: nil,
+                    promptRecordingStartedAt: nil
+                )
+            )
+            recovered += 1
+        }
+        if recovered > 0 {
+            handleBackgroundTranscriptionWorkChanged()
+        }
+        return recovered
+    }
+
+    func removeImportedJournal(for job: QueuedTranscriptionJob) {
+        guard case .imported = job.kind else { return }
+        ImportedTranscriptionQueueJournal.remove(
+            id: job.id,
+            journalDirectory: importedQueueJournalDirectory
+        )
+    }
+
+    private func persistImportedJournal(for job: QueuedTranscriptionJob) throws {
+        guard case .imported(let audioURL, let suggestedTitle, let recordingDate) = job.kind else {
+            return
+        }
+        try ImportedTranscriptionQueueJournal.persist(
+            id: job.id,
+            audioURL: audioURL,
+            suggestedTitle: suggestedTitle,
+            recordingDate: recordingDate,
+            sttModelRawValue: job.sttModel.rawValue,
+            journalDirectory: importedQueueJournalDirectory,
+            scratchDirectory: importedAudioScratchDirectory
+        )
+    }
+
     private func finalizeBackgroundTranscriptionStateIfNeeded() {
         finalizeBackgroundTranscriptionStateIfNeeded(snapshot: currentBackgroundTranscriptionWorkSnapshot)
     }
@@ -477,13 +585,14 @@ final class TranscriptionQueueCoordinator {
                 }
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if controller.failedMeetingStore.preserveFailedMeetingForRetry(
-                    micAudioURL: audioURL,
-                    systemAudioURL: nil,
+                    micAudioURL: nil,
+                    systemAudioURL: audioURL,
                     errorMessage: errorMessage,
                     meetingTitle: suggestedTitle,
                     recordingDate: recordingDate
                 ) {
                     preservedCount += 1
+                    removeImportedJournal(for: job)
                 }
             }
         }

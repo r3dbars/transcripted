@@ -2245,6 +2245,72 @@ func testRepoCommandContract() {
                 && coordinatorContents.contains("preparingQueuedTranscriptionJob?.id == job.id"),
             "model recovery should count as active background work and stale prep tasks must not clear newer queued work"
         )
+        let importedEnqueueBlock = sourceSlice(
+            coordinatorContents,
+            from: "func enqueueImportedAudioJob(",
+            to: "private func enqueue(_ job: QueuedTranscriptionJob)"
+        )
+        assertTrue(
+            importedEnqueueBlock.contains("try persistImportedJournal(for: job)")
+                && importedEnqueueBlock.contains("queuedTranscriptionJobs.append(job)"),
+            "an accepted imported job should be journaled before it becomes crash-volatile queue state"
+        )
+        let journalPersistIndex = importedEnqueueBlock.range(
+            of: "try persistImportedJournal(for: job)"
+        )?.lowerBound ?? importedEnqueueBlock.endIndex
+        let immediateStartCheckIndex = importedEnqueueBlock.range(
+            of: "if canStartQueuedTranscriptionImmediately"
+        )?.lowerBound ?? importedEnqueueBlock.startIndex
+        assertTrue(
+            journalPersistIndex < immediateStartCheckIndex,
+            "an accepted imported job should be journaled before immediate asynchronous transcription starts"
+        )
+        assertTrue(
+            controllerContents.contains("transcriptionQueue.recoverImportedAudioJobs()"),
+            "launch should reconstruct queued imported jobs from their durable journals"
+        )
+        let importedRecoveryBlock = sourceSlice(
+            coordinatorContents,
+            from: "func recoverImportedAudioJobs() -> Int {",
+            to: "func removeImportedJournal(for job: QueuedTranscriptionJob)"
+        )
+        assertTrue(
+            importedRecoveryBlock.contains("controller.failedManager.failedTranscriptions")
+                && importedRecoveryBlock.contains("failedQueueAudioURLs.contains(audioURL.standardizedFileURL)"),
+            "relaunch recovery should retire a journal whose audio already has durable failed-queue ownership"
+        )
+        let importJournalFailureBlock = sourceSlice(
+            controllerContents,
+            from: "let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(",
+            to: "Self.runtimeDiagnosticsRecorder?.clearSession(kind: \"meeting\", outcome: \"import_queue_persist_failed\")"
+        )
+        assertTrue(
+            importJournalFailureBlock.contains("micAudioURL: nil")
+                && importJournalFailureBlock.contains("systemAudioURL: preparedAudio.copiedAudioURL"),
+            "a journal-write fallback should preserve imported audio as the system track used by imported transcription"
+        )
+        assertTrue(
+            importJournalFailureBlock.contains("if !preservedForRelaunch")
+                && importJournalFailureBlock.contains("removeItem(at: preparedAudio.copiedAudioURL)")
+                && importJournalFailureBlock.contains("displayMessage(")
+                && importJournalFailureBlock.contains("preservedForRelaunch: preservedForRelaunch"),
+            "journal failure copy must follow actual failed-queue persistence and remove an unreachable scratch copy"
+        )
+        let shutdownQueuePreservationBlock = sourceSlice(
+            coordinatorContents,
+            from: "func preserveQueuedTranscriptionJobsForShutdown(errorMessage: String) -> Int {",
+            to: "return preservedCount"
+        )
+        let shutdownImportedBlock = sourceSlice(
+            shutdownQueuePreservationBlock,
+            from: "case .imported(let audioURL, let suggestedTitle, let recordingDate):",
+            to: "removeImportedJournal(for: job)"
+        )
+        assertTrue(
+            shutdownImportedBlock.contains("micAudioURL: nil")
+                && shutdownImportedBlock.contains("systemAudioURL: audioURL"),
+            "shutdown should preserve an imported single track with the same channel semantics as normal imported retry"
+        )
         let startQueuedBlock = sourceSlice(
             coordinatorContents,
             from: "private func startQueuedTranscription(_ job: QueuedTranscriptionJob) {",
