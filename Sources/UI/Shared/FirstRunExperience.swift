@@ -29,7 +29,6 @@ enum FirstRunLocalModelState: Equatable {
         analyticsStatus != updated.analyticsStatus
     }
 }
-
 struct FirstRunModelCardState: Equatable {
     enum Tone: Equatable {
         case ready
@@ -96,6 +95,10 @@ enum FirstRunExperience {
         microphoneGranted: Bool
     ) -> Bool {
         microphoneGranted
+    }
+
+    static func onboardingRequiredPermissions() -> [TranscriptedPermissionKind] {
+        [.microphone, .accessibility]
     }
 
     static func onboardingRequiredPermissions(

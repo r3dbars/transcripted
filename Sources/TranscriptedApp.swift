@@ -314,10 +314,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     )
                 )
             }
-            meetingOverlayController.onPromptRecord = recordPrompt
-            meetingOverlayController.onPromptDismiss = dismissPrompt
-            meetingOverlayController.onPromptExpired = expirePrompt
-            meetingOverlayController.onPromptRemindSoon = remindPrompt
             capturePillController.onRecord = recordPrompt
             capturePillController.onDismiss = dismissPrompt
             capturePillController.onExpired = expirePrompt

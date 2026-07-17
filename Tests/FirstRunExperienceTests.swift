@@ -90,6 +90,22 @@ func testFirstRunExperience() {
         )
     }
 
+    runSuite("FirstRunExperience.onboardingPermissions — keeps dictation setup separate from later meeting permissions") {
+        let required = FirstRunExperience.onboardingRequiredPermissions()
+        let optional = FirstRunExperience.onboardingOptionalPermissions()
+
+        assertEqual(
+            required,
+            [.microphone, .accessibility],
+            "first-run onboarding should only require dictation-critical permissions"
+        )
+        assertEqual(
+            optional,
+            [.systemAudioRecording, .calendar],
+            "system audio and calendar should stay in the later optional group"
+        )
+    }
+
     runSuite("FirstRunExperience.onboardingPermissions — optional grants stay optional") {
         assertEqual(
             FirstRunExperience.onboardingOptionalPermissions(),

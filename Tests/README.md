@@ -52,19 +52,17 @@ gates, appcast/update flow, Homebrew, or public download truth.
 
 ## Fast Test Runner
 
-`run-tests.sh` compiles the root fast tests listed in
-`Tests/FastTests.manifest` into `build/tests` and generates a temporary runner
-at build time.
+`run-tests.sh` discovers root `Tests/*Tests.swift` files, derives each entry
+function from its filename, compiles them into `build/tests`, and generates a
+temporary runner at build time.
 
 Important implications:
 
-- adding a root `Tests/*Tests.swift` file is not enough by itself
-- new fast tests must be registered in:
-  - `Tests/FastTests.manifest`
+- `Tests/FooTests.swift` must expose exactly one top-level `testFoo()` entry
 - moving a source file compiled by `run-tests.sh` also requires updating the script
-- `run-tests.sh` now fails if the manifest and the actual root test files drift
+- missing or duplicated convention entry functions fail before compilation
 
-The current compiled fast test set lives in `Tests/FastTests.manifest`.
+The current compiled fast test set is the sorted root `Tests/*Tests.swift` set.
 
 To run a single suite instead of the whole set, pass `--filter`:
 
@@ -80,8 +78,8 @@ substring of either. `--only` is an alias. To see the known entry functions:
 bash run-tests.sh --list
 ```
 
-The runner also fails fast on a manifest entry-function typo and on a stale
-`APP_SOURCES` path, instead of surfacing those as raw swiftc errors.
+The runner also fails fast on a missing/duplicated convention entry function
+and on a stale `APP_SOURCES` path, instead of surfacing raw swiftc errors.
 
 To measure fast-test coverage, run:
 
@@ -89,7 +87,7 @@ To measure fast-test coverage, run:
 bash run-tests.sh --coverage
 ```
 
-This uses the same manifest-driven runner with LLVM coverage instrumentation
+This uses the same convention-driven runner with LLVM coverage instrumentation
 and writes `summary.txt`, `coverage.profdata`, raw `.profraw`, and
 `report.lcov` under `build/coverage/fast-tests/`.
 
