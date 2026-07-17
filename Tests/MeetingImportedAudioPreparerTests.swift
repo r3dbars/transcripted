@@ -512,6 +512,7 @@ func testMeetingImportedAudioPreparer() async {
             audioURL: audioURL,
             suggestedTitle: "Customer Call",
             recordingDate: recordingDate,
+            enqueuedAt: recordingDate.addingTimeInterval(10),
             sttModelRawValue: "parakeet",
             journalDirectory: journalURL,
             scratchDirectory: scratchURL
@@ -529,10 +530,49 @@ func testMeetingImportedAudioPreparer() async {
             "recovery should resolve audio only inside the configured scratch directory"
         )
 
+        let olderSourceNewerQueueID = UUID()
+        let olderSourceNewerQueueAudioURL = scratchURL.appendingPathComponent("older-source-newer-queue.wav")
+        try! Data([4, 5, 6, 7]).write(to: olderSourceNewerQueueAudioURL)
+        try! ImportedTranscriptionQueueJournal.persist(
+            id: olderSourceNewerQueueID,
+            audioURL: olderSourceNewerQueueAudioURL,
+            suggestedTitle: "Older Source Imported Second",
+            recordingDate: recordingDate.addingTimeInterval(-86_400),
+            enqueuedAt: recordingDate.addingTimeInterval(20),
+            sttModelRawValue: "parakeet",
+            journalDirectory: journalURL,
+            scratchDirectory: scratchURL
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).map(\.id),
+            [id, olderSourceNewerQueueID],
+            "relaunch recovery should preserve enqueue FIFO instead of sorting by source recording date"
+        )
+
         ImportedTranscriptionQueueJournal.remove(id: id, journalDirectory: journalURL)
+        ImportedTranscriptionQueueJournal.remove(id: olderSourceNewerQueueID, journalDirectory: journalURL)
         assertTrue(
             ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).isEmpty,
             "the journal should disappear after transcription or durable failed-queue ownership transfers"
+        )
+    }
+
+    runSuite("Imported queue persistence failure copy only claims durable retry ownership when persisted") {
+        assertTrue(
+            ImportedAudioQueuePersistenceFailureCopy.displayMessage(preservedForRelaunch: true)
+                .contains("saved for retry in Home"),
+            "a persisted failed-queue entry should tell the user where to retry after relaunch"
+        )
+        let notPreserved = ImportedAudioQueuePersistenceFailureCopy.displayMessage(
+            preservedForRelaunch: false
+        )
+        assertFalse(
+            notPreserved.localizedCaseInsensitiveContains("saved"),
+            "a failed journal and failed retry entry must not claim that the copied audio is durable"
+        )
+        assertTrue(
+            notPreserved.contains("Import the original file again"),
+            "an unrecoverable copied import should give an honest recovery action"
         )
     }
 }

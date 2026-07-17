@@ -448,12 +448,31 @@ final class TranscriptionQueueCoordinator {
         let records = ImportedTranscriptionQueueJournal.load(
             journalDirectory: importedQueueJournalDirectory
         )
+        let failedQueueAudioURLs = Set(
+            controller.failedManager.failedTranscriptions.flatMap { failure in
+                [failure.micAudioURL, failure.systemAudioURL].compactMap { $0?.standardizedFileURL }
+            }
+        )
         var recovered = 0
         for record in records {
             guard let audioURL = ImportedTranscriptionQueueJournal.audioURL(
                 for: record,
                 scratchDirectory: importedAudioScratchDirectory
-            ), FileManager.default.fileExists(atPath: audioURL.path) else {
+            ) else {
+                ImportedTranscriptionQueueJournal.remove(
+                    id: record.id,
+                    journalDirectory: importedQueueJournalDirectory
+                )
+                continue
+            }
+            if failedQueueAudioURLs.contains(audioURL.standardizedFileURL) {
+                ImportedTranscriptionQueueJournal.remove(
+                    id: record.id,
+                    journalDirectory: importedQueueJournalDirectory
+                )
+                continue
+            }
+            guard FileManager.default.fileExists(atPath: audioURL.path) else {
                 ImportedTranscriptionQueueJournal.remove(
                     id: record.id,
                     journalDirectory: importedQueueJournalDirectory
@@ -563,8 +582,8 @@ final class TranscriptionQueueCoordinator {
                 }
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if controller.failedMeetingStore.preserveFailedMeetingForRetry(
-                    micAudioURL: audioURL,
-                    systemAudioURL: nil,
+                    micAudioURL: nil,
+                    systemAudioURL: audioURL,
                     errorMessage: errorMessage,
                     meetingTitle: suggestedTitle,
                     recordingDate: recordingDate

@@ -1468,13 +1468,18 @@ final class MeetingSessionController: ObservableObject {
                 startTrigger: .fileImport
             )
         } catch {
-            let message = "Transcripted couldn't safely queue that import. The copied audio was preserved for retry."
-            failedMeetingStore.preserveFailedMeetingForRetry(
-                micAudioURL: preparedAudio.copiedAudioURL,
-                systemAudioURL: nil,
-                errorMessage: message,
+            let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(
+                micAudioURL: nil,
+                systemAudioURL: preparedAudio.copiedAudioURL,
+                errorMessage: ImportedAudioQueuePersistenceFailureCopy.retryEntryMessage,
                 meetingTitle: preparedAudio.suggestedTitle,
                 recordingDate: preparedAudio.recordingDate
+            )
+            if !preservedForRelaunch {
+                try? FileManager.default.removeItem(at: preparedAudio.copiedAudioURL)
+            }
+            let message = ImportedAudioQueuePersistenceFailureCopy.displayMessage(
+                preservedForRelaunch: preservedForRelaunch
             )
             state = .error(message)
             displayStatus = .failed(message: message)

@@ -13,11 +13,24 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
     let audioFilename: String
     let suggestedTitle: String
     let recordingDate: Date
+    let enqueuedAt: Date
     let sttModelRawValue: String
 }
 
 enum ImportedTranscriptionQueueJournalError: Error {
     case audioOutsideScratchDirectory
+}
+
+enum ImportedAudioQueuePersistenceFailureCopy {
+    static let retryEntryMessage =
+        "Imported audio was saved after Transcripted couldn't add it to the transcription queue. Finish the transcript from Home."
+
+    static func displayMessage(preservedForRelaunch: Bool) -> String {
+        if preservedForRelaunch {
+            return "Transcripted couldn't safely queue that import. The copied audio was saved for retry in Home."
+        }
+        return "Transcripted couldn't safely queue that import or save a retry entry. Import the original file again."
+    }
 }
 
 enum ImportedTranscriptionQueueJournal {
@@ -29,6 +42,7 @@ enum ImportedTranscriptionQueueJournal {
         audioURL: URL,
         suggestedTitle: String,
         recordingDate: Date,
+        enqueuedAt: Date = Date(),
         sttModelRawValue: String,
         journalDirectory: URL,
         scratchDirectory: URL,
@@ -49,6 +63,7 @@ enum ImportedTranscriptionQueueJournal {
             audioFilename: normalizedAudioURL.lastPathComponent,
             suggestedTitle: suggestedTitle,
             recordingDate: recordingDate,
+            enqueuedAt: enqueuedAt,
             sttModelRawValue: sttModelRawValue
         )
         let data = try JSONEncoder().encode(record)
@@ -84,10 +99,10 @@ enum ImportedTranscriptionQueueJournal {
                 return record
             }
             .sorted { lhs, rhs in
-                if lhs.recordingDate == rhs.recordingDate {
+                if lhs.enqueuedAt == rhs.enqueuedAt {
                     return lhs.id.uuidString < rhs.id.uuidString
                 }
-                return lhs.recordingDate < rhs.recordingDate
+                return lhs.enqueuedAt < rhs.enqueuedAt
             }
     }
 
