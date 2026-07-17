@@ -209,6 +209,26 @@ func testDictationStoppedAudioRecovery() {
                 source.contains("stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID"),
                 "termination cancellation must mark the active session before cancelling its stop task"
             )
+            let terminationSource = source.components(separatedBy: "func finishDictationForTermination() async").last ?? ""
+            guard let preservationRange = terminationSource.range(
+                of: "stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID"
+            ),
+            let checkpointWaitRange = terminationSource.range(
+                of: "await stoppedAudioCheckpointSignal.wait()",
+                range: preservationRange.upperBound..<terminationSource.endIndex
+            ),
+            let preservingCancelRange = terminationSource.range(
+                of: "cancelDictation(preserveStoppedAudio: true)",
+                range: checkpointWaitRange.upperBound..<terminationSource.endIndex
+            ) else {
+                assertTrue(false, "termination must await checkpoint durability before cancelling the stop task")
+                return
+            }
+            assertTrue(
+                preservationRange.lowerBound < checkpointWaitRange.lowerBound
+                    && checkpointWaitRange.lowerBound < preservingCancelRange.lowerBound,
+                "termination must mark, await, then cancel the active stopped-audio session"
+            )
             let appSource = try String(contentsOf: repoFixtureURL("Sources/TranscriptedApp.swift"), encoding: .utf8)
             assertTrue(
                 appSource.contains("sessionController.presentPendingStoppedAudioRecoveryIfNeeded()"),

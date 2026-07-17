@@ -5,6 +5,26 @@ import AppKit
 import AVFoundation
 import Combine
 
+private actor DictationStoppedAudioCheckpointSignal {
+    private var isComplete = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isComplete else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func complete() {
+        guard !isComplete else { return }
+        isComplete = true
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        pendingWaiters.forEach { $0.resume() }
+    }
+}
+
 @MainActor
 class DictationSessionController: ObservableObject {
     enum DictationTrigger: String {
@@ -72,6 +92,7 @@ class DictationSessionController: ObservableObject {
     private var currentDictationSessionID = UUID()
     private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     private var stoppedAudioRecoveryPreservationSessionID: UUID?
+    private var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
     private var autoSendRequestDecision = DictationAutoSendRequestDecision.notEvaluated
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
@@ -140,6 +161,7 @@ class DictationSessionController: ObservableObject {
         currentDictationSessionID = UUID()
         stoppedAudioRecovery = nil
         stoppedAudioRecoveryPreservationSessionID = nil
+        stoppedAudioCheckpointSignal = nil
         sessionSourceApp = sourceApp
         sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sessionAnchorRect = anchorRect
@@ -929,7 +951,12 @@ class DictationSessionController: ObservableObject {
 
         streamingTask?.cancel()
         let taskSessionID = currentDictationSessionID
+        let checkpointSignal = DictationStoppedAudioCheckpointSignal()
+        stoppedAudioCheckpointSignal = checkpointSignal
         streamingTask = Task {
+            defer {
+                Task { await checkpointSignal.complete() }
+            }
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
             var stoppedRecordingSnapshot: RecordedSpeechSamples?
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
@@ -996,6 +1023,8 @@ class DictationSessionController: ObservableObject {
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "audio_persistence_failed")
                 return
             }
+
+            await checkpointSignal.complete()
 
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
@@ -1471,6 +1500,10 @@ class DictationSessionController: ObservableObject {
         }
 
         if isDictating {
+            stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID
+            if let stoppedAudioCheckpointSignal {
+                await stoppedAudioCheckpointSignal.wait()
+            }
             cancelDictation(preserveStoppedAudio: true)
         }
     }
