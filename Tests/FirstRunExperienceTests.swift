@@ -77,6 +77,19 @@ func testFirstRunExperience() {
         )
     }
 
+    runSuite("FirstRunLocalModelState analytics — progress ticks do not duplicate state events") {
+        assertFalse(
+            FirstRunLocalModelState.downloading(progress: 0.1)
+                .shouldTrackAnalyticsTransition(to: .downloading(progress: 0.8)),
+            "download progress should keep updating the UI without emitting duplicate downloading events"
+        )
+        assertTrue(
+            FirstRunLocalModelState.downloading(progress: 1)
+                .shouldTrackAnalyticsTransition(to: .cached),
+            "a real coarse model-state transition should still emit analytics"
+        )
+    }
+
     runSuite("FirstRunExperience.onboardingPermissions — optional grants stay optional") {
         assertEqual(
             FirstRunExperience.onboardingOptionalPermissions(),

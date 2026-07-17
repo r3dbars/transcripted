@@ -7,6 +7,27 @@ enum FirstRunLocalModelState: Equatable {
     case loading
     case ready
     case failed(String)
+
+    var analyticsStatus: String {
+        switch self {
+        case .notLoaded:
+            return "not_loaded"
+        case .downloading:
+            return "downloading"
+        case .cached:
+            return "cached"
+        case .loading:
+            return "loading"
+        case .ready:
+            return "ready"
+        case .failed:
+            return "failed"
+        }
+    }
+
+    func shouldTrackAnalyticsTransition(to updated: FirstRunLocalModelState) -> Bool {
+        analyticsStatus != updated.analyticsStatus
+    }
 }
 
 struct FirstRunModelCardState: Equatable {

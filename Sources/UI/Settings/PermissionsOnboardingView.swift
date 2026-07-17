@@ -539,15 +539,17 @@ struct PermissionsOnboardingView: View {
     private func refreshModelState() {
         let updated = modelStateProvider()
         guard updated != modelState else { return }
+        let previous = modelState
+        modelState = updated
+        guard previous.shouldTrackAnalyticsTransition(to: updated) else { return }
         AnalyticsReporter.track(
             "onboarding_model_state_changed",
             properties: [
-                "from_status": modelState.analyticsStatus,
+                "from_status": previous.analyticsStatus,
                 "step_id": currentStep.kind.analyticsID,
                 "to_status": updated.analyticsStatus,
             ]
         )
-        modelState = updated
     }
 
     private func completeOnboarding() {
@@ -721,25 +723,6 @@ private enum OnboardingStepKind: Hashable {
             return "dictation_test"
         case .ready:
             return "done"
-        }
-    }
-}
-
-private extension FirstRunLocalModelState {
-    var analyticsStatus: String {
-        switch self {
-        case .notLoaded:
-            return "not_loaded"
-        case .downloading:
-            return "downloading"
-        case .cached:
-            return "cached"
-        case .loading:
-            return "loading"
-        case .ready:
-            return "ready"
-        case .failed:
-            return "failed"
         }
     }
 }
