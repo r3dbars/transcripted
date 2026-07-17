@@ -106,26 +106,6 @@ final class CrashReporter {
         previousUncaughtHandler?(exception)
     }
 
-    // `capture(error:)` and `capture(message:)` forwarded arbitrary
-    // error/message text to Sentry gated only by text sanitization, with no
-    // positive event allowlist (unlike `captureObservabilityEvent`). They have
-    // no callers anywhere in the app target, so rather than keep an
-    // allowlist-bypassing path alive we make them inert no-ops. If a real need
-    // for ad-hoc error capture returns, route it through `SentryEventPolicy`
-    // like `captureObservabilityEvent` instead of re-enabling these.
-    @available(*, deprecated, message: "Unused; allowlist-bypassing. Route new error capture through captureObservabilityEvent + SentryEventPolicy.")
-    func capture(error: Error, context: String = "") {
-        _ = error
-        _ = context
-    }
-
-    @available(*, deprecated, message: "Unused; allowlist-bypassing. Route new message capture through captureObservabilityEvent + SentryEventPolicy.")
-    func capture(message: String, level: String = "warning", extra: [String: String] = [:]) {
-        _ = message
-        _ = level
-        _ = extra
-    }
-
     static func setRuntimeDiagnosticsContext(_ context: [String: String]) {
         guard Self.isAvailable, CrashReportingPreferences.isEnabled() else { return }
 

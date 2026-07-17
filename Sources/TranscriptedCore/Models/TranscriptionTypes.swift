@@ -1,6 +1,5 @@
 // TranscriptionTypes.swift
-// Engine-agnostic transcription result types.
-// Engine-agnostic types for local Parakeet + Sortformer transcription pipeline.
+// Engine-agnostic types for the local transcription and diarization pipeline.
 
 import Foundation
 
@@ -9,7 +8,7 @@ public struct TranscriptionUtterance: Sendable {
     public let start: Double           // seconds
     public let end: Double             // seconds
     public let channel: Int            // 0 = mic, 1 = system
-    public let speakerId: Int          // from Sortformer (0 for mic unless multiple mic speakers)
+    public let speakerId: Int          // from diarization (0 for mic unless multiple mic speakers)
     public let persistentSpeakerId: UUID?  // from SpeakerDatabase (nil if not matched)
     public let matchSimilarity: Double?    // cosine similarity from SpeakerDatabase match (nil if new/unmatched)
     public let transcript: String      // text from Parakeet
@@ -195,35 +194,6 @@ public struct IdentifiedSpeaker: Codable, Sendable {
     }
 }
 
-/// Metadata about the transcription engines used
-public struct TranscriptionMetadata {
-    public let transcriptionEngine: String     // "parakeet_local"
-    public let diarizationEngine: String       // "pyannote_offline"
-    public let micWordCount: Int
-    public let systemWordCount: Int
-    public let micSpeakerCount: Int
-    public let systemSpeakerCount: Int
-    public let duration: Double
-
-    public init(
-        transcriptionEngine: String,
-        diarizationEngine: String,
-        micWordCount: Int,
-        systemWordCount: Int,
-        micSpeakerCount: Int,
-        systemSpeakerCount: Int,
-        duration: Double
-    ) {
-        self.transcriptionEngine = transcriptionEngine
-        self.diarizationEngine = diarizationEngine
-        self.micWordCount = micWordCount
-        self.systemWordCount = systemWordCount
-        self.micSpeakerCount = micSpeakerCount
-        self.systemSpeakerCount = systemSpeakerCount
-        self.duration = duration
-    }
-}
-
 // MARK: - Speaker Naming Flow Types
 
 /// Which audio channel a diarized speaker came from.
@@ -298,7 +268,7 @@ public struct SpeakerNamingRequest {
 public struct SpeakerNamingEntry: Identifiable, Sendable {
     public let id: UUID                     // persistent speaker ID from SpeakerDatabase
     public let suggestedProfileId: UUID?    // existing person this row suggests, if any
-    public let diarizerSpeakerId: String    // "0", "1" — from PyAnnote/Sortformer, for transcript string matching
+    public let diarizerSpeakerId: String    // "0", "1" — diarizer ID used for transcript string matching
     public let channel: UtteranceChannel    // .mic (local) vs .system (remote)
     public let clipURL: URL                 // temporary WAV clip for playback
     public let sampleText: String           // representative quote from transcript

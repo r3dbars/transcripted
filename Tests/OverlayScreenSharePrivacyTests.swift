@@ -207,6 +207,15 @@ func testOverlayScreenSharePrivacy() async {
             promptRequest.contains("meetingOverlayController.presentDetectedMeetingPrompt(candidate)"),
             "detected meeting prompts should not reuse the recording overlay prompt surface"
         )
+        let meetingOverlay = overlayPrivacySource("Sources/UI/Overlay/MeetingOverlayController.swift")
+        assertFalse(
+            meetingOverlay.contains("presentDetectedMeetingPrompt")
+                || meetingOverlay.contains("onPromptRecord")
+                || meetingOverlay.contains("onPromptDismiss")
+                || meetingOverlay.contains("onPromptRemindSoon")
+                || meetingOverlay.contains("onPromptExpired"),
+            "the recording overlay should not retain a second detected-meeting prompt implementation"
+        )
     }
 }
 

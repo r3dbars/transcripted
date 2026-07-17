@@ -159,12 +159,15 @@ final class TranscriptionQueueCoordinator {
             promptRecordingStartedAt: nil
         )
 
+        // Persist ownership before any asynchronous model preparation starts.
+        // Otherwise a force quit can lose an accepted immediate-start import.
+        try persistImportedJournal(for: job)
+
         if canStartQueuedTranscriptionImmediately {
             startQueuedTranscription(job)
             return .startedImmediately
         }
 
-        try persistImportedJournal(for: job)
         queuedTranscriptionJobs.append(job)
         return .queued(position: queuedTranscriptionJobs.count)
     }
