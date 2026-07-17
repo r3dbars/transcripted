@@ -984,7 +984,7 @@ public final class SpeakerNamingSimulationRunner {
             ) else {
                 throw SimulationError.updateFailed(transcriptURL.lastPathComponent)
             }
-            applyDatabaseUpdates(regular, classification: classification, speakerDB: speakerDB)
+            try applyDatabaseUpdates(regular, classification: classification, speakerDB: speakerDB)
         }
 
         if !collapsed.isEmpty {
@@ -1114,7 +1114,7 @@ public final class SpeakerNamingSimulationRunner {
         _ updates: [SpeakerNameUpdate],
         classification: Classification,
         speakerDB: SpeakerDatabase
-    ) {
+    ) throws {
         for update in updates {
             let resolvedId = update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId
             let context = classification.context(
@@ -1125,14 +1125,14 @@ public final class SpeakerNamingSimulationRunner {
             switch update.action {
             case .named:
                 if resolvedId != update.persistentSpeakerId {
-                    speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: resolvedId)
+                    try speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: resolvedId)
                 }
                 speakerDB.setDisplayName(id: resolvedId, name: update.newName, source: NameSource.userManual)
                 speakerDB.resetDisputeCount(id: resolvedId)
 
             case .confirmed:
                 if resolvedId != update.persistentSpeakerId {
-                    speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: resolvedId)
+                    try speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: resolvedId)
                 }
                 speakerDB.setDisplayName(id: resolvedId, name: update.newName, source: NameSource.userManual)
                 speakerDB.resetDisputeCount(id: resolvedId)
@@ -1154,7 +1154,7 @@ public final class SpeakerNamingSimulationRunner {
                 speakerDB.resetDisputeCount(id: resolvedId)
 
             case .merged(let targetProfileId):
-                speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetProfileId)
+                try speakerDB.mergeProfiles(sourceId: update.persistentSpeakerId, into: targetProfileId)
                 speakerDB.resetDisputeCount(id: targetProfileId)
 
             case .collapsedToMe, .discardedFromDatabase:
@@ -1229,7 +1229,7 @@ public final class SpeakerNamingSimulationRunner {
                   let target = exactNamedTarget(named: targetName, excluding: sourceId, speakerDB: state.speakerDB) else {
                 return PostActionOutcome(checks: 1, successes: 0, notes: ["missing merge target \(targetName)"])
             }
-            state.speakerDB.mergeProfiles(sourceId: sourceId, into: target.id)
+            try state.speakerDB.mergeProfiles(sourceId: sourceId, into: target.id)
             TranscriptSaver.retroactivelyMergeSpeaker(
                 sourceDbId: sourceId,
                 targetDbId: target.id,
