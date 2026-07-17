@@ -83,6 +83,146 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("DictationSessionController — unconfirmed paste retry stays paste-only") {
+            let source = try! String(
+                contentsOfFile: "Sources/UI/Overlay/DictationSessionController.swift",
+                encoding: .utf8
+            )
+            let pasterSource = try! String(
+                contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
+                encoding: .utf8
+            )
+            let overlaySource = try! String(
+                contentsOfFile: "Sources/UI/Overlay/FloatingOverlayController.swift",
+                encoding: .utf8
+            )
+            assertTrue(
+                source.contains("case .copied(let message, reason: .pasteNotConfirmed):")
+                    && source.contains("actionTitle: \"Paste Again\"")
+                    && source.contains("showSuccessAndDismiss(title: autoSendOutcome.confirmationTitle ?? \"Paste sent\")"),
+                "observable failures should offer Paste Again while confirmation-unavailable targets stay neutral"
+            )
+
+            let retryStart = source.range(of: "private func retryPasteWithoutAutoEnter(")
+            let retryEnd = retryStart.flatMap { start in
+                source.range(
+                    of: "private func recordPasteAttemptOutcome(",
+                    range: start.upperBound..<source.endIndex
+                )
+            }
+            let retryBody: Substring
+            if let retryStart, let retryEnd {
+                retryBody = source[retryStart.lowerBound..<retryEnd.lowerBound]
+            } else {
+                retryBody = ""
+            }
+            assertTrue(
+                retryBody.contains("textPaster.retryPaste("),
+                "Paste Again should use the dedicated clipboard-preserving retry API"
+            )
+            let retryTelemetryCallCount = String(retryBody)
+                .components(separatedBy: "DictationPasteRetryTelemetry.performUserRetry")
+                .count - 1
+            assertEqual(
+                retryTelemetryCallCount,
+                1,
+                "each visible Paste Again action should pass through the one canonical terminal telemetry wrapper"
+            )
+            assertFalse(
+                retryBody.contains("performAutoEnterIfNeeded")
+                    || retryBody.contains("autoSender.send")
+                    || retryBody.contains("persistDictationTranscript")
+                    || retryBody.contains("dictation_completed"),
+                "Paste Again must not submit Auto Enter, save twice, or re-emit dictation_completed"
+            )
+            let pasterRetryStart = pasterSource.range(of: "func retryPaste(")
+            let pasterRetryEnd = pasterRetryStart.flatMap { start in
+                pasterSource.range(
+                    of: "func paste(",
+                    range: start.upperBound..<pasterSource.endIndex
+                )
+            }
+            let pasterRetryBody: Substring
+            if let pasterRetryStart, let pasterRetryEnd {
+                pasterRetryBody = pasterSource[pasterRetryStart.lowerBound..<pasterRetryEnd.lowerBound]
+            } else {
+                pasterRetryBody = ""
+            }
+            assertTrue(
+                pasterRetryBody.contains("prepareForAutoSend: false")
+                    && pasterRetryBody.contains("retainClipboardForPasteRetry: false"),
+                "the dedicated retry API should make Auto Enter and a second retained retry impossible by construction"
+            )
+            assertTrue(
+                source.contains("overlayController?.onActionableMessageDiscarded = { [weak self] in")
+                    && source.contains("self?.textPaster.discardPasteRetry()"),
+                "discarding the visible Paste Again action should clear its retained clipboard snapshot"
+            )
+            assertTrue(
+                overlaySource.contains("private func discardActionableMessageIfNeeded()")
+                    && overlaySource.contains("onActionableMessageDiscarded?()")
+                    && overlaySource.contains("discardActionableMessageIfNeeded()\n        errorMessage = message")
+                    && overlaySource.contains("errorMessage = \"\"\n        discardActionableMessageIfNeeded()\n        hideWithCancelAnimation()"),
+                "dismissing or superseding an actionable overlay message should notify its owner"
+            )
+            assertTrue(
+                source.contains("level: diagnostic.event == \"dictation_paste_confirmed\" ? .info : outcome.diagnosticLevel"),
+                "confirmation diagnostics should be informational only for neutral outcomes"
+            )
+        }
+
+        runSuite("DictationPasteRetryTelemetry — emits one aggregate terminal event per user retry") {
+            let cases: [(name: String, outcome: TextPasteOutcome, properties: [String: String])] = [
+                (
+                    "success",
+                    .pasted,
+                    ["result": "pasted"]
+                ),
+                (
+                    "confirmation unavailable",
+                    .copied("synthetic unavailable detail", reason: .pasteConfirmationUnavailable),
+                    ["reason": "confirmation_unavailable", "result": "copied"]
+                ),
+                (
+                    "focus changed",
+                    .copied("synthetic focus detail", reason: .focusChanged),
+                    ["reason": "focus_changed", "result": "copied"]
+                ),
+                (
+                    "still unconfirmed",
+                    .copied("synthetic unconfirmed detail", reason: .pasteNotConfirmed),
+                    ["reason": "paste_not_confirmed", "result": "copied"]
+                ),
+                (
+                    "failure",
+                    .failed("synthetic private-looking /Users/test/secret.txt"),
+                    ["reason": "clipboard_unavailable", "result": "failed"]
+                ),
+            ]
+
+            for testCase in cases {
+                var retryCount = 0
+                var captures: [(event: String, properties: [String: String])] = []
+                let returnedOutcome = DictationPasteRetryTelemetry.performUserRetry(
+                    track: { event, properties in
+                        captures.append((event, properties))
+                    },
+                    retry: {
+                        retryCount += 1
+                        return testCase.outcome
+                    }
+                )
+
+                assertEqual(returnedOutcome, testCase.outcome, "\(testCase.name) should preserve the actual retry outcome")
+                assertEqual(retryCount, 1, "\(testCase.name) should perform the retry exactly once")
+                assertEqual(captures.count, 1, "\(testCase.name) should emit one terminal event without double emission")
+                if let capture = captures.first {
+                    assertEqual(capture.event, "dictation_paste_retry_completed", "\(testCase.name) should use the canonical retry event")
+                    assertEqual(capture.properties, testCase.properties, "\(testCase.name) should expose only stable aggregate properties")
+                }
+            }
+        }
+
         runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — preserves user clipboard changes") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
@@ -279,6 +419,106 @@ func testClipboardRestoringTextPaster() async {
                 pasteboard.string(forType: .string),
                 dictationText,
                 "unconfirmed lazy clipboard content should be materialized before provider cleanup"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — focus loss is not confirmation-unavailable") {
+            let originalClipboard = "synthetic original clipboard"
+            let dictationText = "synthetic focus-loss dictation"
+            let pasteboard = FakeClipboardPasteboard(initialString: originalClipboard)
+            let paster = ClipboardRestoringTextPaster()
+            var targetCheckCount = 0
+
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                targetIsFrontmost: {
+                    targetCheckCount += 1
+                    return targetCheckCount == 1
+                },
+                pasteConfirmationWait: 0
+            )
+
+            assertEqual(
+                outcome,
+                .copied(
+                    "Focus moved before Transcripted could confirm paste. The text is on your clipboard — press ⌘V.",
+                    reason: .focusChanged
+                ),
+                "losing the target during confirmation should stay visible and count as focus-loss friction"
+            )
+            assertEqual(
+                paster.lastConfirmationDiagnostic?.context["target_still_frontmost"],
+                "false",
+                "focus-loss diagnostics should not be logged as a neutral unobservable target"
+            )
+            assertEqual(
+                pasteboard.string(forType: .string),
+                dictationText,
+                "focus loss should keep the dictation copied for visible manual recovery"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster.paste — a frontmost bounce stays focusChanged") {
+            let originalClipboard = "synthetic bounce original"
+            let dictationText = "synthetic bounce dictation"
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedFocusBounceTest-\(UUID().uuidString)"))
+            let paster = ClipboardRestoringTextPaster()
+            guard let target = DictationPasteTarget.capture(
+                sourceApp: NSWorkspace.shared.frontmostApplication
+            ) else {
+                assertTrue(false, "the focus-bounce fixture needs a frontmost app target")
+                return
+            }
+            let frontmostSequence = [true, false, true]
+            var targetCheckCount = 0
+
+            pasteboard.clearContents()
+            pasteboard.setString(originalClipboard, forType: .string)
+            let outcome = paster.paste(
+                dictationText,
+                target: target,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    _ = pasteboard.string(forType: .string)
+                    return true
+                },
+                targetIsFrontmost: {
+                    let index = min(targetCheckCount, frontmostSequence.count - 1)
+                    targetCheckCount += 1
+                    return frontmostSequence[index]
+                },
+                prepareForAutoSend: true,
+                pasteConfirmationWait: 0.02
+            )
+
+            assertEqual(
+                outcome,
+                .copied(
+                    "Focus moved before Transcripted could confirm paste. The text is on your clipboard — press ⌘V.",
+                    reason: .focusChanged
+                ),
+                "a true-false-true focus bounce must remain terminal focus-loss friction"
+            )
+            assertEqual(
+                targetCheckCount,
+                2,
+                "the caller must not re-query focus and regain eligibility after the wait reports focus loss"
+            )
+            assertEqual(
+                paster.lastConfirmationDiagnostic?.context["target_still_frontmost"],
+                "false",
+                "focus-bounce diagnostics should preserve the observed focus loss"
+            )
+            assertEqual(
+                pasteboard.string(forType: .string),
+                dictationText,
+                "a focus bounce must keep manual recovery visible instead of restoring for Auto Enter"
             )
         }
 
@@ -1188,6 +1428,220 @@ func testClipboardRestoringTextPaster() async {
             restoredClipboard,
             originalClipboard,
             "retry paste should restore the user's original clipboard, not the previous borrowed dictation"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.retryPaste — restores the pre-dictation clipboard") {
+        let originalClipboard = "synthetic original clipboard"
+        let dictationText = "synthetic unconfirmed dictation"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: originalClipboard)
+        }
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        let firstOutcome = await MainActor.run {
+            paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { false },
+                pasteConfirmationWait: 0
+            )
+        }
+        let retryOutcome = await MainActor.run {
+            paster.retryPaste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000,
+                pasteConfirmationWait: 0
+            )
+        }
+
+        assertEqual(
+            firstOutcome,
+            .copied(
+                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
+                reason: .pasteNotConfirmed
+            ),
+            "the explicit retry should only be armed by a genuinely unconfirmed first attempt"
+        )
+        assertEqual(retryOutcome, .pasted, "the explicit retry should report its own confirmed paste")
+        await paster.waitForPendingClipboardRestore()
+        let restoredClipboard = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            restoredClipboard,
+            originalClipboard,
+            "a successful explicit retry should restore the clipboard from before dictation"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.retryPaste — preserves a user copy made before retry") {
+        let originalClipboard = "synthetic original clipboard"
+        let userCopy = "synthetic newer user copy"
+        let dictationText = "synthetic unconfirmed dictation"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: originalClipboard)
+        }
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        _ = await MainActor.run {
+            paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { false },
+                pasteConfirmationWait: 0
+            )
+        }
+        await MainActor.run {
+            pasteboard.clearContents()
+            pasteboard.setString(userCopy, forType: .string)
+        }
+        let retryOutcome = await MainActor.run {
+            paster.retryPaste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000,
+                pasteConfirmationWait: 0
+            )
+        }
+
+        assertEqual(retryOutcome, .pasted, "Paste Again should still work after the user copies something")
+        await paster.waitForPendingClipboardRestore()
+        let restoredClipboard = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            restoredClipboard,
+            userCopy,
+            "Paste Again must preserve the user's newer clipboard instead of restoring stale pre-dictation data"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.discardPasteRetry — dismissal drops the retained snapshot") {
+        let originalClipboard = "synthetic original clipboard"
+        let dictationText = "synthetic dismissed retry dictation"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: originalClipboard)
+        }
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        _ = await MainActor.run {
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { false },
+                pasteConfirmationWait: 0
+            )
+            paster.discardPasteRetry()
+            return outcome
+        }
+        let retryOutcome = await MainActor.run {
+            paster.retryPaste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000,
+                pasteConfirmationWait: 0
+            )
+        }
+
+        assertEqual(retryOutcome, .pasted, "a stale programmatic retry should still paste safely")
+        await paster.waitForPendingClipboardRestore()
+        let clipboardAfterRetry = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            clipboardAfterRetry,
+            dictationText,
+            "after dismissal, retry must not restore clipboard data retained from before dictation"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.retryPaste — an unconfirmed retry does not re-arm") {
+        let originalClipboard = "synthetic original clipboard"
+        let dictationText = "synthetic one-shot retry dictation"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: originalClipboard)
+        }
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+
+        _ = await MainActor.run {
+            paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { false },
+                pasteConfirmationWait: 0
+            )
+        }
+        let unconfirmedRetry = await MainActor.run {
+            paster.retryPaste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { false },
+                pasteConfirmationWait: 0
+            )
+        }
+        let laterProgrammaticRetry = await MainActor.run {
+            paster.retryPaste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { true },
+                pasteConfirmed: { true },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000,
+                pasteConfirmationWait: 0
+            )
+        }
+
+        assertEqual(
+            unconfirmedRetry,
+            .copied(
+                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
+                reason: .pasteNotConfirmed
+            ),
+            "the one visible retry may still end unconfirmed"
+        )
+        assertEqual(laterProgrammaticRetry, .pasted, "a later direct call should remain safe")
+        await paster.waitForPendingClipboardRestore()
+        let clipboardAfterRetry = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            clipboardAfterRetry,
+            dictationText,
+            "an unconfirmed retry must consume, not re-arm, the pre-dictation clipboard snapshot"
         )
     }
 

@@ -1014,6 +1014,29 @@ func testAnalyticsEventPolicy() {
         assertEqual(dictationCompleted?.allowedProperties.contains("sample_flow_started"), true, "dictation completion should preserve whether audio samples ever flowed")
     }
 
+    runSuite("AnalyticsEventPolicy allows one coarse terminal paste retry event") {
+        let retryCompleted = AnalyticsEventPolicy.policy(forEvent: "dictation_paste_retry_completed")
+
+        assertEqual(
+            retryCompleted?.allowedProperties ?? [],
+            ["reason", "result"],
+            "paste retry telemetry should expose only its terminal result and coarse reason"
+        )
+
+        let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+            [
+                "capture_id": "private-capture-id",
+                "message": "private retry details",
+                "reason": "focus_changed",
+                "result": "copied",
+                "source_app_bundle": "com.example.PrivateApp",
+                "transcript": "private dictated words",
+            ],
+            allowedKeys: retryCompleted?.allowedProperties ?? []
+        )
+        assertEqual(sanitized, ["reason": "focus_changed", "result": "copied"], "retry analytics should remain aggregate-only")
+    }
+
     runSuite("AnalyticsEventPolicy allows dictation start failures with coarse attribution") {
         let dictationStartFailed = AnalyticsEventPolicy.policy(forEvent: "dictation_start_failed")
 
