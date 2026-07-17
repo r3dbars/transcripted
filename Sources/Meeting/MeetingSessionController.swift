@@ -1578,9 +1578,9 @@ final class MeetingSessionController: ObservableObject {
         taskManager.cancelAll()
         if liveCodexSessionAwaitingFinalTranscript {
             finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
+        }
         activeQueuedTranscriptionJobID = nil
         activeStoppedAudioRecovery = nil
-        }
         state = .ready
         DiagnosticsTrail.record(
             level: .warning,
