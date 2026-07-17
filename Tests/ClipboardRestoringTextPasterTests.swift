@@ -159,6 +159,10 @@ func testClipboardRestoringTextPaster() async {
                 "discarding the visible Paste Again action should clear its retained clipboard snapshot"
             )
             assertTrue(
+                source.contains("textPaster.cancelPendingClipboardRestore()"),
+                "dictation cancellation should restore both scheduled and Paste Again-retained clipboard state"
+            )
+            assertTrue(
                 overlaySource.contains("private func discardActionableMessageIfNeeded()")
                     && overlaySource.contains("onActionableMessageDiscarded?()")
                     && overlaySource.contains("discardActionableMessageIfNeeded()\n        errorMessage = message")

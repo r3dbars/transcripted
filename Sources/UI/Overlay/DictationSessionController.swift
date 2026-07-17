@@ -1683,7 +1683,7 @@ class DictationSessionController: ObservableObject {
             streamingTask?.cancel()
             streamingTask = nil
         }
-        textPaster.restorePendingClipboardNow()
+        textPaster.cancelPendingClipboardRestore()
         recordingStartRetryTask?.cancel()
         recordingStartRetryTask = nil
         sessionTimeoutTask?.cancel()
