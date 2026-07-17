@@ -24,7 +24,21 @@ struct PhysicalShortcutBinding {
     let binding: PhysicalDictationTriggerBinding
 }
 
+struct DelayedModifierShortcutPress: Equatable {
+    let generation: UInt64
+    let keyCode: UInt32
+    let action: PhysicalShortcutAction
+}
+
 enum PhysicalShortcutMatcher {
+    static func shouldActivateDelayedModifierPress(
+        current: DelayedModifierShortcutPress?,
+        expected: DelayedModifierShortcutPress,
+        isPhysicallyDown: Bool
+    ) -> Bool {
+        current == expected && isPhysicallyDown
+    }
+
     static func shouldSynthesizePushToTalkRelease(
         activeKeyCode: UInt32?,
         isPhysicallyDown: (UInt32) -> Bool

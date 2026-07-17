@@ -211,7 +211,9 @@ final class MeetingSessionController: ObservableObject {
     }
 
     var shouldConfirmQuitForBackgroundTranscription: Bool {
-        hasBackgroundTranscriptionWork
+        taskManager.hasPreservableActiveTranscriptionAudio
+            || transcriptionQueue.isPreparingQueuedTranscriptionStart
+            || !transcriptionQueue.queuedTranscriptionJobs.isEmpty
     }
 
     var shouldBlockDictationForActiveMeetingCapture: Bool {

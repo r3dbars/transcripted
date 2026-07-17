@@ -43,6 +43,10 @@ public class TranscriptionTaskManager: ObservableObject {
     /// (tests, CLI tools) and embedders that prefer their own in-app presentation.
     public let notifier: TranscriptNotifier?
 
+    public var hasPreservableActiveTranscriptionAudio: Bool {
+        activeTaskAudio.values.contains { $0.micURL != nil || $0.systemURL != nil }
+    }
+
     public init(
         failedTranscriptionManager: FailedTranscriptionManager,
         speechToText: any SpeechToTextEngine,
@@ -1334,13 +1338,15 @@ public class TranscriptionTaskManager: ObservableObject {
                 removeManagedCleanupFile(audio.micURL, label: "cancelled live mic scratch")
                 removeManagedCleanupFile(audio.systemURL, label: "cancelled live system scratch")
             }
+            activeTaskAudio.removeValue(forKey: taskId)
             AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])
         }
-        activeTasks.removeAll()
-        activeTaskAudio.removeAll()
+        // Keep cancelled tasks in the occupancy map and counters until their task bodies exit.
+        // CoreML calls are not guaranteed to observe cancellation immediately; clearing
+        // these signals here would let a new pipeline enter the same single-instance models.
+        // Audio ownership is cleared above because cancellation deliberately discarded it;
+        // finishCancelledTaskIfNeeded removes each task from the occupancy map on exit.
         preservedTaskIdsForShutdown.removeAll()
-        activeCount = 0
-        backgroundTaskCount = 0
         publishNonFailureStatus(.idle)
     }
 
