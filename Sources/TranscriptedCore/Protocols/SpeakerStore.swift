@@ -34,7 +34,7 @@ public protocol SpeakerStore: Sendable {
     func deleteSpeaker(id: UUID)
 
     /// Merge two speaker profiles (source absorbed into target)
-    func mergeProfiles(sourceId: UUID, into targetId: UUID)
+    func mergeProfiles(sourceId: UUID, into targetId: UUID) throws
 
     /// Merge profiles that share the same display name
     func mergeProfilesByName()

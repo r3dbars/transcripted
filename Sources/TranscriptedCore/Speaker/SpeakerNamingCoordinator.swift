@@ -164,10 +164,18 @@ extension TranscriptionTaskManager {
             let resolvedURL = finalization.resolvedURL
 
             if didFinalizeTranscript {
-                Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
-                if let deferredReviewPlan {
-                    Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
+                do {
+                    try Self.applyPlannedNamingMutations(plannedChanges.mutations, speakerDB: speakerDB)
+                    if let deferredReviewPlan {
+                        try Self.applyPlannedNamingMutations(deferredReviewPlan.mutations, speakerDB: speakerDB)
+                    }
+                } catch {
+                    AppLogger.speakers.error("Speaker naming persistence failed", ["error": error.localizedDescription])
+                    didFinalizeTranscript = false
                 }
+            }
+
+            if didFinalizeTranscript {
                 speakerDB.recordMatchOutcomes(Self.plannedMatchOutcomes(
                     for: plannedChanges.resolvedUpdates,
                     clipsBySpeakerId: clipsBySpeakerId,
@@ -647,11 +655,11 @@ extension TranscriptionTaskManager {
     nonisolated private static func applyPlannedNamingMutations(
         _ mutations: [PlannedSpeakerMutation],
         speakerDB: any SpeakerStore
-    ) {
+    ) throws {
         for mutation in mutations {
             switch mutation {
             case .merge(let sourceId, let targetId):
-                speakerDB.mergeProfiles(sourceId: sourceId, into: targetId)
+                try speakerDB.mergeProfiles(sourceId: sourceId, into: targetId)
             case .setDisplayName(let id, let name):
                 speakerDB.setDisplayName(id: id, name: name, source: NameSource.userManual)
             case .restoreProfile(let profile):
