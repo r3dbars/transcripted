@@ -2224,6 +2224,31 @@ class ParakeetEngine: ObservableObject {
         return (nativeSampleCount, resampled)
     }
 
+    func snapshotRecordedSamplesForPersistence() async -> RecordedSpeechSamples? {
+        drainPendingSamplesIntoSampleBuffer()
+
+        var segments = recoveredRecordingTimeline.segments
+        if !sampleBuffer.isEmpty {
+            segments.append(RecordedAudioSegment(sampleRate: safeNativeSampleRate(), samples: sampleBuffer))
+        }
+        let nativeSampleCount = segments.reduce(0) { $0 + $1.samples.count }
+        guard nativeSampleCount > 0 else { return nil }
+
+        let samples16k = await Task.detached(priority: .userInitiated) {
+            var combined: [Float] = []
+            combined.reserveCapacity(nativeSampleCount)
+            for segment in segments {
+                combined.append(contentsOf: AudioResampler.resample(
+                    segment.samples,
+                    from: segment.sampleRate,
+                    to: TranscriptedConstants.parakeetSampleRate
+                ))
+            }
+            return combined
+        }.value
+        return RecordedSpeechSamples(nativeSampleCount: nativeSampleCount, samples16k: samples16k)
+    }
+
     // MARK: - Transcription
 
     func drainRecordedSamplesForExternalTranscription(engineName: String) async -> RecordedSpeechSamples? {

@@ -70,6 +70,7 @@ class DictationSessionController: ObservableObject {
     private var sessionStartTime: CFAbsoluteTime = 0
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
+    private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     private var autoSendRequestDecision = DictationAutoSendRequestDecision.notEvaluated
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
@@ -102,6 +103,19 @@ class DictationSessionController: ObservableObject {
             }
     }
 
+    func presentPendingStoppedAudioRecoveryIfNeeded() {
+        guard !isDictating,
+              let overlayController,
+              let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1).first else { return }
+        overlayController.showError(
+            "A stopped dictation recording is available. Use Import Audio from Home to recover its transcript.",
+            actionTitle: "Show Audio",
+            action: {
+                NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
+            }
+        )
+    }
+
     // MARK: - Dictation Mode (Option+Space)
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
@@ -123,6 +137,7 @@ class DictationSessionController: ObservableObject {
         }
         isDictating = true
         currentDictationSessionID = UUID()
+        stoppedAudioRecovery = nil
         sessionSourceApp = sourceApp
         sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sessionAnchorRect = anchorRect
@@ -923,6 +938,27 @@ class DictationSessionController: ObservableObject {
                   self.isDictating,
                   self.currentDictationSessionID == taskSessionID else { return }
 
+            do {
+                if let recording = await appState.sttRouter.snapshotRecordedSamplesForPersistence() {
+                    self.stoppedAudioRecovery = try DictationStoppedAudioRecoveryStore.persist(
+                        samples16k: recording.samples16k,
+                        sessionID: taskSessionID
+                    )
+                }
+            } catch {
+                appState.logger.log("DICTATION | failed to preserve stopped audio: \(error.localizedDescription)")
+                EventReporter.shared.capture(
+                    level: .error,
+                    engine: "dictation",
+                    event: "dictation_stopped_audio_persistence_failed",
+                    message: error.localizedDescription
+                )
+                overlayController.showError("The recording stopped, but its audio couldn't be saved safely. Free some disk space and try again.")
+                self.isDictating = false
+                appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "audio_persistence_failed")
+                return
+            }
+
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
             if !appState.sttRouter.isModelLoaded {
@@ -1040,6 +1076,9 @@ class DictationSessionController: ObservableObject {
                 overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)
                 isDictating = false
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: emptyReason.runtimeOutcome)
+                if emptyReason != .modelFailure {
+                    self.discardStoppedAudioRecovery(explicitDiscard: true)
+                }
                 return
             }
 
@@ -1102,6 +1141,7 @@ class DictationSessionController: ObservableObject {
             )
             let autoSendOutcome = finalization.autoEnterOutcome
             let saveResult = finalization.saveResult
+            self.discardStoppedAudioRecovery(transcriptPersisted: saveResult.saved != nil)
             let saveFailureMessage = saveResult.failureMessage
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             stopTiming.completedAt = CFAbsoluteTimeGetCurrent()
@@ -1253,6 +1293,7 @@ class DictationSessionController: ObservableObject {
     ) {
         lastCompletedText = text
         let saveResult = persistDictationTranscript(text: text, delivery: .savedWithoutPaste)
+        discardStoppedAudioRecovery(transcriptPersisted: saveResult.saved != nil)
         let saveFailureMessage = saveResult.failureMessage
         let wordCount = text.split(whereSeparator: \.isWhitespace).count
         let durationSeconds = CFAbsoluteTimeGetCurrent() - sessionStartTime
@@ -1330,9 +1371,12 @@ class DictationSessionController: ObservableObject {
     }
 
     /// Cancel dictation without pasting
-    func cancelDictation() {
+    func cancelDictation(preserveStoppedAudio: Bool = false) {
         guard let (appState, overlayController) = readyState() else { return }
         cancelActiveTasks(cancelRecording: true)
+        if !preserveStoppedAudio {
+            discardStoppedAudioRecovery(explicitDiscard: true)
+        }
         AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
@@ -1384,7 +1428,7 @@ class DictationSessionController: ObservableObject {
         }
 
         if isDictating {
-            cancelDictation()
+            cancelDictation(preserveStoppedAudio: true)
         }
     }
 
@@ -1958,6 +2002,18 @@ class DictationSessionController: ObservableObject {
         } catch {
             return .failure(recordDictationTranscriptSaveFailed(error))
         }
+    }
+
+    private func discardStoppedAudioRecovery(
+        transcriptPersisted: Bool = false,
+        explicitDiscard: Bool = false
+    ) {
+        guard DictationStoppedAudioRecoveryStore.cleanup(
+            stoppedAudioRecovery,
+            transcriptPersisted: transcriptPersisted,
+            explicitDiscard: explicitDiscard
+        ) else { return }
+        stoppedAudioRecovery = nil
     }
 
     private func startPersistingDictationTranscript(
