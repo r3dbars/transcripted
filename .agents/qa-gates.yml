@@ -18,10 +18,10 @@ test_layers:
   fast_custom_runner:
     command: "bash run-tests.sh"
     proves:
-      - "manifest-registered app policy and persistence tests still pass"
+      - "convention-discovered app policy and persistence tests still pass"
       - "privacy sanitizers, observability policy, speaker policy, storage helpers, and UI policy stay coherent"
     agent_notes:
-      - "Root Tests/*Tests.swift files must be registered in Tests/FastTests.manifest."
+      - "Each root Tests/FooTests.swift file must expose exactly one top-level testFoo() entry."
       - "Use bash run-tests.sh --coverage when the lane needs LLVM fast-test coverage output."
 
   app_build:
@@ -144,7 +144,7 @@ recommended_gates:
       - "bash scripts/ops/transcripted-qa-bench.sh --mode full"
     cannot_be_green_if:
       - "required path-mapped checks were skipped without a clear blocker"
-      - "new root fast tests are missing from Tests/FastTests.manifest"
+      - "new root fast tests are missing or duplicate their convention-derived entry function"
       - "manual-only proof is claimed as automated proof"
 
   nightly:

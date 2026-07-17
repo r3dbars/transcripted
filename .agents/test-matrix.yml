@@ -7,7 +7,7 @@
 rules:
   - paths:
       - "Sources/**/*.swift"
-      - "Tests/*.swift"
+      - "Tests/**/*.swift"
     checks:
       - "bash build.sh --no-open"
       - "bash run-tests.sh"

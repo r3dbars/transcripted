@@ -146,6 +146,26 @@ def self_test(matrix_path: Path) -> None:
         raise AssertionError(f"expected the full verification matrix, found only {len(rules)} rules")
 
     matching_cases = {
+        "Tests/RepoCommandContractTests.swift": {
+            "bash build.sh --no-open",
+            "bash run-tests.sh",
+        },
+        "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift": {
+            "bash build.sh --no-open",
+            "bash run-tests.sh",
+            "scripts/dev/benchmark-home-recent-captures.sh --max-average-load-ms 750 --max-cancellation-ms 100",
+        },
+        "Tests/E2E/TranscriptedE2ESmoke.swift": {
+            "bash build.sh --no-open",
+            "bash run-tests.sh",
+            "bash run-e2e-smoke.sh",
+        },
+        "Tests/E2E/SlowPastebackSmoke.swift": {
+            "bash build.sh --no-open",
+            "bash run-tests.sh",
+            "bash run-e2e-smoke.sh",
+            "bash run-slow-pasteback-smoke.sh",
+        },
         "Sources/Meeting/Nested/Foo.swift": {
             "bash build-deps.sh --force",
             "bash build.sh --no-open",
