@@ -101,7 +101,7 @@ func handleOpenQuestions(params: CallTool.Parameters, index: TranscriptIndex, me
 
 func handleSearchMeetings(params: CallTool.Parameters, index: TranscriptIndex, meetingDirs: [URL]) throws -> CallTool.Result {
     guard let query = params.arguments?["query"]?.stringValue, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        return textResult("Missing required parameter: query", isError: true)
+        return invalidAgentCaptureQueryInputResult("Missing required parameter: query")
     }
 
     let range = parseToolRange(params.arguments?["range"]?.stringValue)
@@ -136,10 +136,10 @@ func handleSearchMeetings(params: CallTool.Parameters, index: TranscriptIndex, m
 }
 
 /// Shared tail for the four receipt-query tools above: wrap receipts in a
-/// CrossMeetingToolResult, fire capture-query telemetry when non-empty, and
-/// encode. `fetchReceipts` returns the already-hydrated receipts (titles
-/// resolved, count already capped) plus whether the underlying query was
-/// truncated by its own limit.
+/// CrossMeetingToolResult, record the terminal telemetry outcome, and encode.
+/// `fetchReceipts` returns the already-hydrated receipts (titles resolved,
+/// count already capped) plus whether the underlying query was truncated by
+/// its own limit.
 private func handleReceiptQuery(
     query: String?,
     range: ParsedToolRange,
@@ -154,11 +154,14 @@ private func handleReceiptQuery(
         truncated: truncated,
         results: receipts
     )
-    if !receipts.isEmpty {
+    if receipts.isEmpty {
+        markAgentCaptureQueryTerminal(.emptyNotFound, sourceCount: 0, resultCount: 0)
+    } else {
         trackAgentCaptureQueryObserved(
             toolKind: toolKind,
             captureKind: "meeting",
-            sourceCount: distinctReceiptSourceCount(in: receipts)
+            sourceCount: distinctReceiptSourceCount(in: receipts),
+            resultCount: receipts.count
         )
     }
     return try encodedToolResult(result)

@@ -64,12 +64,18 @@ automatically and stores its SQLite index in that shared root unless
 
 ## Telemetry
 
-The server can emit one anonymous PostHog event per successful tool call
-(`agent_capture_query_observed`, see `AgentCaptureQueryTelemetry.swift`). The
-payload is bucketed metadata only: query kind, artifact kind, capture-age
-bucket, and source-count bucket. It is validated against an allow-list;
-transcript text, query strings, titles, speaker names, file paths, and audio are
-never sent.
+The server can emit one anonymous PostHog event when each tracked capture query
+finishes (`agent_capture_query_observed`, see
+`AgentCaptureQueryTelemetry.swift`). `result` is one of `success`,
+`empty_not_found`, `invalid_input`, or `internal_error`. The payload is limited
+to coarse allowlisted metadata: client, tool, and capture kinds; latency and
+source- and result-count buckets; the result; and the owning app's validated
+`app_version`, build channel, and revision when available. Build identity is
+omitted when the app did not install it; the helper's own server version is
+never used as an app-version fallback. `source_count_bucket` means distinct
+capture files contributing to the response. `result_count_bucket` means
+returned records at that tool's natural response grain. Transcript text, query strings, capture IDs,
+titles, names, file paths, audio, and user identifiers are never properties.
 
 It is gated twice:
 

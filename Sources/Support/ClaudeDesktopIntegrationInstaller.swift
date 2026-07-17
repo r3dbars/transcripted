@@ -109,6 +109,7 @@ enum ClaudeDesktopIntegrationInstaller {
     static let serverName = "transcripted"
     static let helperBinaryName = "transcripted-mcp"
     static let mcpObservabilityConfigFileName = "mcp-observability.plist"
+    static let appVersionInfoKey = "CFBundleShortVersionString"
 
     static var installedMCPBinaryURL: URL {
         FileManager.default.transcriptedAppSupportDir
@@ -329,11 +330,26 @@ enum ClaudeDesktopIntegrationInstaller {
             at: configURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+        var configuration = [
+            AnalyticsRuntimeConfiguration.apiKeyInfoKey: apiKey,
+            AnalyticsRuntimeConfiguration.hostInfoKey: host,
+        ]
+        if let appVersion = safeAppVersion(infoDictionary?[appVersionInfoKey] as? String) {
+            configuration[appVersionInfoKey] = appVersion
+        }
+        if let buildChannel = safeBuildChannel(
+            infoDictionary?[AnalyticsRuntimeConfiguration.buildChannelInfoKey] as? String
+        ) {
+            configuration[AnalyticsRuntimeConfiguration.buildChannelInfoKey] = buildChannel
+        }
+        if let buildRevision = safeBuildRevision(
+            infoDictionary?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey] as? String
+        ) {
+            configuration[AnalyticsRuntimeConfiguration.buildRevisionInfoKey] = buildRevision
+        }
+
         let data = try PropertyListSerialization.data(
-            fromPropertyList: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: apiKey,
-                AnalyticsRuntimeConfiguration.hostInfoKey: host,
-            ],
+            fromPropertyList: configuration,
             format: .xml,
             options: 0
         )
@@ -344,6 +360,42 @@ enum ClaudeDesktopIntegrationInstaller {
     private static func firstNonEmpty(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func safeAppVersion(_ value: String?) -> String? {
+        guard let value = firstNonEmpty(value),
+              value.count <= 80,
+              value.first?.isNumber == true,
+              value.contains("."),
+              value.allSatisfy(isSafeBuildCharacter) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func safeBuildChannel(_ value: String?) -> String? {
+        guard let value = firstNonEmpty(value),
+              ["beta", "debug", "dev", "local", "nightly", "release", "test"].contains(value) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func safeBuildRevision(_ value: String?) -> String? {
+        guard let value = firstNonEmpty(value),
+              (7...40).contains(value.count),
+              value.allSatisfy({ $0.isHexDigit }) else {
+            return nil
+        }
+        return value
+    }
+
+    private static func isSafeBuildCharacter(_ character: Character) -> Bool {
+        character.isLetter
+            || character.isNumber
+            || character == "."
+            || character == "_"
+            || character == "-"
     }
 
     @discardableResult

@@ -101,14 +101,20 @@ Operational scripts query aggregate counts only:
 | `workflow_recovery_attempted` | `artifact_retained`, `failure_kind`, `recovery_attempt_bucket`, `retry_source`, `surface`, `workflow_kind` |
 | `workflow_recovery_failed` | `artifact_retained`, `elapsed_bucket`, `failure_kind`, `recovery_attempt_bucket`, `result`, `retry_source`, `surface`, `workflow_kind` |
 | `workflow_recovery_finished` | `artifact_retained`, `elapsed_bucket`, `failure_kind`, `recovery_attempt_bucket`, `result`, `retry_source`, `surface`, `workflow_kind` |
-| `agent_capture_query_observed` | `client_family`, `tool_kind`, `capture_kind`, `result`, `source_count_bucket` |
+| `agent_capture_query_observed` | `client_family`, `tool_kind`, `capture_kind`, `result`, `source_count_bucket`, `result_count_bucket`, `latency_bucket`, `app_version`, `build_channel`, `build_revision` |
 
 `agent_capture_query_observed.tool_kind` is a reviewed enum. It includes
 orientation reads (`list`, `recent`), direct artifact reads/searches
 (`read`, `search`, `speaker_lookup`, `recap`), and sourced local-memory rollups
 (`action_items`, `commitments`, `decisions`, `digest`, `open_questions`).
-Together with `source_count_bucket`, it can show that a saved artifact powered
-an agent answer without exporting query text or transcript content.
+`source_count_bucket` counts distinct capture files contributing to a response;
+`result_count_bucket` counts returned records at each tool's natural response
+grain. Together they can show that saved artifacts powered an agent answer
+without exporting query text or transcript content. The event emits
+once per tracked query with `success`, `empty_not_found`, `invalid_input`, or
+`internal_error`; latency and build fields remain bucketed or public build
+metadata only. Missing owning-app identity is omitted rather than replaced by
+the MCP helper's server version.
 
 ### Menu, Settings, Updates
 
@@ -214,9 +220,9 @@ aggregate reliability sizing and should not be expanded to raw device names.
 - General dictation saved-Markdown writes now have `dictation_artifact_saved`;
   it fires only after the daily Markdown file is confirmed on disk. Keep
   `dictation_completed` as completion-volume context, not strict saved-artifact proof.
-- `agent_capture_query_observed` proves successful saved-capture reads,
-  searches, and summary-memory rollups through MCP, but it still cannot judge
-  answer quality.
+- `agent_capture_query_observed` distinguishes successful, empty/not-found,
+  invalid, and internal-error outcomes for saved-capture reads, searches, and
+  summary-memory rollups through MCP, but it still cannot judge answer quality.
 - General dictation completion volume can be larger than saved-artifact volume;
   investigate any sustained gap between `dictation_completed` and
   `dictation_artifact_saved` as a save-proof or telemetry-delivery problem.
@@ -237,7 +243,7 @@ Prefer a small number of lifecycle events over broad click tracking.
 
 | Event | When to fire | Properties |
 | --- | --- | --- |
-| `agent_capture_query_observed` | The local MCP/agent layer observes a privacy-safe query against saved captures or sourced local summary memory | `client_family`, `tool_kind`, `capture_kind`, `result`, `source_count_bucket` |
+| `agent_capture_query_observed` | A tracked local MCP query against saved captures or sourced local summary memory reaches one terminal outcome | `client_family`, `tool_kind`, `capture_kind`, `result`, `source_count_bucket`, `result_count_bucket`, `latency_bucket`, `app_version`, `build_channel`, `build_revision` |
 | `activation_second_artifact_saved` | A device saves its second artifact | `first_artifact_kind`, `second_artifact_kind`, `days_since_first_bucket`, `surface`, `trigger` |
 | `activation_habit_loop_actioned` | A user takes a post-save or daily-return action like Review yesterday, What did I promise, open recent meeting, daily digest viewed/exported, or return after first/second artifact | `action_kind`, `artifact_kind`, `artifact_count_bucket`, `return_window_bucket`, `surface`, `result` |
 | `dictation_artifact_saved` | Any normal dictation Markdown is durably saved and confirmed as an on-disk `.md` artifact | `delivery`, `duration_bucket`, `save_outcome`, `surface`, `trigger`, `word_count_bucket` |
@@ -384,7 +390,7 @@ prove the full saved-artifact -> sourced-agent-answer -> return loop.
 ## Smallest Next Implementation
 
 Keep `agent_capture_query_observed` live and narrow in the read-only MCP/agent
-surface: successful saved-capture reads/searches, sourced summary-memory
-rollups, enum values, source-count buckets, and coarse age/window buckets only.
-The next useful loop is live-proof verification and answer-quality UNKNOWN
-reporting, not richer content capture.
+surface: exactly one terminal result for tracked saved-capture reads/searches
+and sourced summary-memory rollups, plus enum values, latency/source-count
+buckets, and validated owning-app build identity only. The next useful loop is live-proof
+verification and answer-quality UNKNOWN reporting, not richer content capture.

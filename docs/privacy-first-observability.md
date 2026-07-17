@@ -211,6 +211,11 @@ allowlist.
 - local meeting summary analytics limited to `provider`, `summary_action`,
   `setup_ready`, `runtime`, `queue_depth_bucket`, `chunk_count_bucket`,
   `duration_bucket`, `failure_kind`, and `stage`
+- agent capture-query analytics limited to one terminal event with
+  `client_family`, `tool_kind`, `capture_kind`, `result`,
+  `source_count_bucket`, `result_count_bucket`, `latency_bucket`, and validated
+  owning-app build identity; never
+  query text, capture IDs, titles, names, transcript text, paths, or user IDs
 - timeline analytics limited to `surface`, `result`, `provider_kind`,
   `permission_state`, `pause_reason`, `card_kind`, `duration_bucket`,
   `count_bucket`, and `return_window_bucket`
