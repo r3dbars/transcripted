@@ -302,6 +302,7 @@ APP_SOURCES=(
     "Sources/Support/ClipboardRestoringTextPaster.swift"
     "Sources/Accessibility/AccessibilityBridge.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
+    "Sources/Dictation/DictationStoppedAudioRecovery.swift"
     "Sources/Dictation/DictationStoragePaths.swift"
     "Sources/Dictation/DictationStopFinalizationPolicy.swift"
     "Sources/Dictation/DictationTranscriptWriter.swift"

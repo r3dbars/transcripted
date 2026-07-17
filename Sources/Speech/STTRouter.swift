@@ -197,6 +197,10 @@ class STTRouter: ObservableObject {
         await parakeetEngine.stopRecording()
     }
 
+    func snapshotRecordedSamplesForPersistence() async -> RecordedSpeechSamples? {
+        await parakeetEngine.snapshotRecordedSamplesForPersistence()
+    }
+
     func resetAfterFailedRecordingStart() async {
         activeRecordingModel = nil
         await parakeetEngine.resetAfterFailedRecordingStart()
