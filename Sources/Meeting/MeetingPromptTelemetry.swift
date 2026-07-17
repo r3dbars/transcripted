@@ -13,17 +13,18 @@ enum MeetingPromptTelemetry {
         case record
         case dismiss
         case remindLater = "remind_later"
-        case expired
     }
 
     enum OutcomeKind: String {
+        case dismissed
+        case expired
+        case remindedLater = "reminded_later"
         case recordingStarted = "recording_started"
         case recordingStartFailed = "recording_start_failed"
         case transcriptSaved = "transcript_saved"
         case transcriptFailed = "transcript_failed"
         case transcriptSkipped = "transcript_skipped"
         case speakerFinalizationFailed = "speaker_finalization_failed"
-        case ignored
         case suppressed
     }
 

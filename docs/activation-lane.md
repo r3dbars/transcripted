@@ -73,14 +73,19 @@ For the dashboard-to-product-task loop, use:
 
 ```bash
 python3 scripts/ops/posthog-product-dashboard-summary.py --days 30
+python3 scripts/ops/posthog-product-dashboard-summary.py --days 7 --app-version 1.1.50 --build-channel release --build-revision <revision>
 ```
 
 That script reads the five dashboard families (`100 WAU Operating`,
-`Activation`, `Reliability`, `Feature Adoption`, and `Release Health`) and
+`Activation`, `Reliability`, `Feature Adoption`, and exact-build `Release Health`) and
 outputs the biggest activation leak, biggest reliability leak, strongest
-adoption signal, under-discovered feature, release regression watch, and top
+adoption signal, under-discovered feature, current release health, and top
 three PR/task candidates. It has fixture and self-test modes so CI can check
 the ranking logic without PostHog credentials.
+
+Current release health stays `UNKNOWN` unless all three public-build fields are
+provided from confirmed release truth. Fixture mode is aggregate-only and does
+not accept exact-build filters.
 
 ## PostHog Product Context Pack
 

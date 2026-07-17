@@ -86,9 +86,11 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
   - Fixture taxonomy check: `python3 scripts/ops/posthog-dashboard-queries.py --taxonomy-check --observed-fixture Tests/Fixtures/posthog-observed-event-taxonomy.json --json-only`
   - CI/offline proof: `python3 scripts/ops/posthog-dashboard-queries.py --self-test`
   - Machine output for health agents: `python3 scripts/ops/posthog-dashboard-queries.py --family all --json-only`
-- `scripts/ops/posthog-product-dashboard-summary.py` — turn the five PostHog product-learning dashboard families into ranked product tasks, with release-regression watch rows grouped by full build identity
+- `scripts/ops/posthog-product-dashboard-summary.py` — turn the five PostHog product-learning dashboard families into ranked product tasks, with current-release rows scoped by full build identity
   - Usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --days 30`
+  - Exact shipped build: `python3 scripts/ops/posthog-product-dashboard-summary.py --days 7 --app-version 1.1.50 --build-channel release --build-revision <revision>`
   - Fixture usage: `python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json`
+  - Release health stays `UNKNOWN` without all three confirmed public-build fields; fixture mode rejects exact-build filters
   - Writes local Markdown and JSON under `/tmp/transcripted-posthog-product-tasks/<run-id>/`
   - Self-test: `python3 scripts/ops/posthog-product-dashboard-summary.py --self-test`
 - `scripts/ops/daily-audio-reliability-check.sh` — interactive daily audio reliability loop for launch, wake, Bluetooth/device-change, meeting recovery, retry, and stop-race checks
