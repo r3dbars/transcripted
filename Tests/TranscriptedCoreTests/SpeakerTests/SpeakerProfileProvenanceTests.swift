@@ -119,9 +119,9 @@ final class SpeakerProfileProvenanceTests: XCTestCase {
         database.setDisplayName(id: keeper.id, name: "Keeper", source: NameSource.userManual)
         database.setDisplayName(id: third.id, name: "Charlie", source: NameSource.userManual)
 
-        database.mergeProfiles(sourceId: first.id, into: keeper.id)
-        database.mergeProfiles(sourceId: second.id, into: keeper.id)
-        database.mergeProfiles(sourceId: third.id, into: keeper.id)
+        try database.mergeProfiles(sourceId: first.id, into: keeper.id)
+        try database.mergeProfiles(sourceId: second.id, into: keeper.id)
+        try database.mergeProfiles(sourceId: third.id, into: keeper.id)
 
         let all = database.recentUndoableMerges(limit: 25)
         XCTAssertEqual(all.count, 3)
@@ -141,7 +141,7 @@ final class SpeakerProfileProvenanceTests: XCTestCase {
     func testRecentUndoableMergesExcludesUndoneMerges() throws {
         let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 5), existingId: nil)
         let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 6), existingId: nil)
-        database.mergeProfiles(sourceId: source.id, into: target.id)
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
 
         XCTAssertTrue(database.recentUndoableMerges(limit: 25).contains { $0.sourceId == source.id })
         XCTAssertTrue(database.unmergeMostRecent(forTargetId: target.id))
@@ -151,7 +151,7 @@ final class SpeakerProfileProvenanceTests: XCTestCase {
     func testRecentUndoableMergesWithNonPositiveLimitReturnsEmpty() throws {
         let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 7), existingId: nil)
         let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 8), existingId: nil)
-        database.mergeProfiles(sourceId: source.id, into: target.id)
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
 
         XCTAssertTrue(database.recentUndoableMerges(limit: 0).isEmpty)
         XCTAssertTrue(database.recentUndoableMerges(limit: -5).isEmpty)
@@ -189,7 +189,7 @@ final class SpeakerProfileProvenanceTests: XCTestCase {
     func testUnmergeFailsWhenCalledTwiceOnSameEvent() throws {
         let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 50), existingId: nil)
         let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 51), existingId: nil)
-        database.mergeProfiles(sourceId: source.id, into: target.id)
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
         let record = try XCTUnwrap(database.undoableMerge(forTargetId: target.id))
 
         XCTAssertTrue(database.unmerge(mergeId: record.id))
@@ -263,7 +263,7 @@ final class SpeakerProfileProvenanceTests: XCTestCase {
         let source = db1!.addOrUpdateSpeaker(embedding: embedding(axis: 90), existingId: nil)
         let target = db1!.addOrUpdateSpeaker(embedding: embedding(axis: 91), existingId: nil)
         db1!.setDisplayName(id: source.id, name: "Pat", source: NameSource.userManual)
-        db1!.mergeProfiles(sourceId: source.id, into: target.id)
+        try db1!.mergeProfiles(sourceId: source.id, into: target.id)
         let contributionCountBefore = db1!.contributions(forProfileId: target.id).count
         db1 = nil // close the connection before reopening the same file
 
