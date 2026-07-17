@@ -34,7 +34,8 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 
 ## Active helper scripts
 
-- `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks from the agent test matrix
+- `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks selected directly from the agent test matrix
+- `scripts/dev/test-matrix-checks.py` — dependency-free selector that executes `.agents/test-matrix.yml` path rules for preflight
 - `scripts/dev/check-build-source-lists.py` — fast raw-`swiftc` guardrail for app, fast-test, and smoke source-list drift
 - `scripts/dev/check-name-variants-parity.sh` — diffs the byte-for-byte-mirrored nickname table between `Tools/TranscriptedMCP`'s `NameVariants.swift` and `TranscriptedCore`'s `SpeakerProfileMerger.swift`, wired into `.github/workflows/repo-hygiene.yml`
 - `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark; pass `--max-average-load-ms` and `--max-cancellation-ms` to fail on regression

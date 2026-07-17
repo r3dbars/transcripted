@@ -11,9 +11,9 @@ time. Use it with `.agents/test-matrix.yml` and `.agents/qa-gates.yml`.
 
 As of 2026-06-06, the repo has these automated layers:
 
-- `bash run-tests.sh`: manifest-driven fast runner for app-facing logic. The
-  root `Tests/` set has 105 Swift test files and must stay aligned with
-  `Tests/FastTests.manifest`.
+- `bash run-tests.sh`: convention-driven fast runner for app-facing logic.
+  Root `Tests/FooTests.swift` files are sorted automatically and must expose a
+  top-level `testFoo()` entry.
 - `bash build.sh --no-open`: authoritative menubar app build.
 - `swift test`: Swift Package tests for `TranscriptedCore`; currently 33 core
   test files under `Tests/TranscriptedCoreTests/`.

@@ -234,9 +234,9 @@ The riskiest step, so it ships alone.
   meeting transcription can warm it up.
 - Register new model dir in `ModelCacheInventory` so the storage
   settings can report/clean it.
-- Tests: extend `Tests/TranscriptionModelPreferencesTests.swift`, add
-  router-routing fast test, register any new root test file in
-  `Tests/FastTests.manifest` (the runner does not auto-discover).
+- Tests: extend `Tests/TranscriptionModelPreferencesTests.swift`, add a
+  router-routing fast test, and give any new root `Tests/FooTests.swift` file
+  a top-level `testFoo()` entry.
 
 ### Phase 3 — live streaming display
 

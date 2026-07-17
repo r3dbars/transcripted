@@ -10,10 +10,9 @@ doc is the shared vocabulary; the enforceable per-path mapping still lives in
 Pure, deterministic, no hardware. The bulk of the suite.
 
 - Runner: `bash run-tests.sh` (a custom `swiftc` runner, **not** XCTest)
-- Source of truth: `Tests/FastTests.manifest` — one `<File>.swift:<entryFn>`
-  line per test. A new root `Tests/*Tests.swift` file is invisible until it's
-  registered here, and the runner fails if the manifest and the on-disk test
-  files drift.
+- Source of truth: the sorted root `Tests/*Tests.swift` set. `FooTests.swift`
+  must expose exactly one top-level `testFoo()` entry; the runner fails before
+  compilation when that entry is missing or duplicated.
 - Helpers: `Tests/TestHelpers.swift` (`runSuite`, `assertEqual`, `assertTrue`, …)
 - Compiles against a curated `APP_SOURCES` list inside `run-tests.sh`. If a unit
   under test isn't in that list, add it there.
@@ -80,9 +79,9 @@ parser).
 
 ## Adding a test — quick reference
 
-- Pure logic with clean inputs/outputs → Tier 1. Add the file under `Tests/`,
-  register it in `Tests/FastTests.manifest`, and make sure the unit's source is
-  in the `APP_SOURCES` list in `run-tests.sh`.
+- Pure logic with clean inputs/outputs → Tier 1. Add `Tests/FooTests.swift`
+  with a top-level `testFoo()` entry, and make sure the unit's source is in the
+  `APP_SOURCES` list in `run-tests.sh`.
 - Needs files, SQLite, or Core/tool internals → Tier 2 XCTest under the matching
   package's `Tests/` directory. No manifest entry.
 - Needs whole-artifact or hardware coverage → Tier 3 smoke.

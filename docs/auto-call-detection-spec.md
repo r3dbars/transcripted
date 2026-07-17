@@ -288,8 +288,8 @@ calls, so Phase 1 alone is likely enough.
   mic presentation/score), `Sources/TranscriptedApp.swift` (construct/wire/start/stop
   + self-capture closure)
 - **Maybe:** a `Sources/Support` preference + a Settings toggle
-- **Tests:** extend `Tests/MeetingPromptHeuristicsTests.swift`; register any new
-  root test file in `Tests/FastTests.manifest`
+- **Tests:** extend `Tests/MeetingPromptHeuristicsTests.swift`; any new root
+  `Tests/FooTests.swift` file should expose a top-level `testFoo()` entry
 
 ## Testing & verification
 

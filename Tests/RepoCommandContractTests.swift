@@ -359,6 +359,13 @@ func testRepoCommandContract() {
             contents.contains("Unknown option: $arg") && contents.contains("exit 2"),
             "run-tests.sh should reject unknown flags instead of silently ignoring typos"
         )
+        assertTrue(
+            contents.contains("find Tests -maxdepth 1 -name '*Tests.swift'")
+                && contents.contains("entry_function=\"test${base_name}\"")
+                && contents.contains("definition_count")
+                && !contents.contains("FastTests.manifest"),
+            "fast tests should be discovered deterministically from <Name>Tests.swift -> test<Name>() with precise entry validation"
+        )
     }
 
     runSuite("Repo command contract - agent verification stays non-interactive") {
@@ -374,9 +381,9 @@ func testRepoCommandContract() {
             "agent test matrix should use the non-opening build command"
         )
         assertTrue(
-            preflight.contains("add_command \"bash build.sh --no-open\"")
-                && !preflight.contains("add_command \"bash build.sh\""),
-            "agent preflight should suggest the non-opening build command"
+            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml")
+                && !preflight.contains("matches_any"),
+            "agent preflight should execute the canonical matrix instead of copying its command rules"
         )
         assertTrue(
             agents.contains("bash build.sh --no-open")
@@ -446,7 +453,6 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - script edits map to syntax and owned checks") {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
-        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
         let expectedChecks = [
             "bash -n scripts/entrypoints/build-deps.sh",
             "bash build-deps.sh --force",
@@ -464,6 +470,9 @@ func testRepoCommandContract() {
             "python3 -m py_compile scripts/ops/nightly-security-check.py",
             "python3 -m py_compile scripts/ops/release-gate-report.py",
             "python3 scripts/ops/release-gate-report.py --self-test",
+            "python3 -m py_compile scripts/release/bump-release-version.py",
+            "python3 scripts/release/bump-release-version.py --self-test",
+            "python3 scripts/release/bump-release-version.py --version 1.1.49 --dry-run",
             "python3 -m py_compile scripts/release/sentry-release-dry-run.py",
             "python3 scripts/release/sentry-release-dry-run.py --self-test",
             "python3 -m py_compile scripts/ops/build-codex-memory-index.py",
@@ -474,42 +483,27 @@ func testRepoCommandContract() {
 
         for check in expectedChecks {
             assertTrue(matrix.contains(check), "test matrix should include \(check)")
-            assertTrue(preflight.contains(check), "agent preflight should include \(check)")
         }
     }
 
-    runSuite("Repo command contract - agent preflight covers every matrix check") {
-        // The matrix is canonical; preflight mirrors it. This parses every
-        // check string out of the matrix so a rule added there without a
-        // matching preflight rule fails fast instead of silently drifting
-        // (which happened with the slow-pasteback, packaged-app-smoke,
-        // privacy-leak-sweep, and local-summary-fixture rules).
-        let matrix = readRepoTextFile(".agents/test-matrix.yml")
+    runSuite("Repo command contract - agent preflight executes the canonical matrix") {
         let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
-
-        var inChecks = false
-        var matrixChecks: [String] = []
-        for rawLine in matrix.components(separatedBy: "\n") {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            if line == "checks:" { inChecks = true; continue }
-            // Any other key (paths:, notes:, rules:) ends the checks list.
-            if line.hasSuffix(":") || line.hasPrefix("- paths:") { inChecks = false; continue }
-            guard inChecks, line.hasPrefix("- \""), line.hasSuffix("\"") else { continue }
-            let check = String(line.dropFirst(3).dropLast(1))
-            if !matrixChecks.contains(check) { matrixChecks.append(check) }
-        }
-
+        let selector = readRepoTextFile("scripts/dev/test-matrix-checks.py")
         assertTrue(
-            matrixChecks.count >= 30,
-            "matrix check extraction should see the full rule set, got \(matrixChecks.count) — did the matrix format change?"
+            preflight.contains("printf '%s\\n' \"$changed_paths\"")
+                && preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml")
+                && !preflight.contains("matches_any")
+                && !preflight.contains("add_command"),
+            "agent preflight should select checks by executing the matrix once, without a mirrored shell rule tree"
         )
-        for check in matrixChecks {
-            assertTrue(
-                preflight.contains(check),
-                "agent preflight has drifted from .agents/test-matrix.yml: missing \(check)"
-            )
-        }
+        assertTrue(
+            selector.contains("def parse_matrix")
+                && selector.contains("def glob_regex")
+                && selector.contains("def select_checks")
+                && selector.contains("--self-test")
+                && selector.contains("seen: set[str]"),
+            "the dependency-free matrix selector should parse rules, match path globs, deduplicate checks, and self-test representative mappings"
+        )
     }
 
     runSuite("Repo command contract - speaker eval refuses partial corpora by default") {
@@ -611,17 +605,9 @@ func testRepoCommandContract() {
             "Core/package test guidance should rebuild dependency frameworks before app, smoke, or package checks"
         )
 
-        let corePreflightBlock = sourceSlice(
-            preflight,
-            from: "if matches_any \"$path\" \"Package.swift\"",
-            to: "if matches_any \"$path\" \"Tools/TranscriptedCLI/*\""
-        )
         assertTrue(
-            corePreflightBlock.contains("add_command \"bash build-deps.sh --force\"")
-                && corePreflightBlock.contains("add_command \"bash build.sh --no-open\"")
-                && corePreflightBlock.contains("add_command \"bash run-integration-smoke.sh\"")
-                && corePreflightBlock.contains("add_command \"swift test\""),
-            "agent preflight should list the dependency rebuild before Core verification commands"
+            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
+            "agent preflight should source Core verification ordering from the canonical matrix"
         )
     }
 
@@ -1190,12 +1176,6 @@ func testRepoCommandContract() {
             from: "- \"build-beta.sh\"",
             to: "- \"Tools/TranscriptedCLI/**\""
         )
-        let releasePreflightBlock = sourceSlice(
-            preflight,
-            from: "if matches_any \"$path\" \"build-beta.sh\"",
-            to: "if matches_any \"$path\" \"README.md\""
-        )
-
         assertTrue(
             releaseMatrixBlock.contains("bash build-deps.sh --force")
                 && releaseMatrixBlock.contains("bash build.sh --no-open")
@@ -1203,10 +1183,8 @@ func testRepoCommandContract() {
             "release-path matrix checks should rebuild deps before app and packaging smoke"
         )
         assertTrue(
-            releasePreflightBlock.contains("add_command \"bash build-deps.sh --force\"")
-                && releasePreflightBlock.contains("add_command \"bash build.sh --no-open\"")
-                && releasePreflightBlock.contains("add_command \"SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>\""),
-            "agent preflight should suggest dependency rebuilds for release-path edits"
+            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
+            "agent preflight should source release-path dependency ordering from the canonical matrix"
         )
     }
 
@@ -3260,13 +3238,9 @@ func testRepoCommandContract() {
             "test matrix should treat GitHub templates, workflow contract, and preflight script as agent-contract surfaces"
         )
         assertTrue(
-            preflight.contains("\".github/*\"")
-                && preflight.contains("\"WORKFLOW.md\"")
-                && preflight.contains("\"Tools/README.md\"")
-                && preflight.contains("\"scripts/dev/agent-preflight.sh\"")
-                && preflight.contains("ruby -c scripts/ops/agent-todo-runner.rb")
-                && preflight.contains("bash -n scripts/ops/qa-gate-check.sh"),
-            "agent preflight should suggest itself when GitHub templates or workflow docs change"
+            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml")
+                && !preflight.contains("\".github/*\""),
+            "agent preflight should get GitHub and workflow visibility from the canonical matrix"
         )
         assertTrue(
             agentTemplate.contains("does not start the local runner by itself")
@@ -3297,9 +3271,10 @@ func testRepoCommandContract() {
         assertTrue(
             repoHygieneWorkflow.contains("on:\n  pull_request:")
                 && repoHygieneWorkflow.contains("bash scripts/dev/agent-preflight.sh origin/main")
+                && repoHygieneWorkflow.contains("python3 scripts/dev/test-matrix-checks.py --self-test")
                 && repoHygieneWorkflow.contains("find scripts -name '*.rb' -print0 | xargs -0 -n1 ruby -c")
                 && repoHygieneWorkflow.contains("find scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile"),
-            "repo should have a lightweight pull_request hygiene workflow that syntax-checks every script via globs, not a hand-maintained list"
+            "repo should self-test matrix selection and syntax-check every script via globs, not hand-maintained copies"
         )
         assertTrue(
             workflow.contains("symphony-workspaces` folder name is historical")
