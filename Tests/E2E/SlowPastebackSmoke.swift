@@ -103,6 +103,7 @@ struct SlowPastebackSmoke {
     private static func runScenario(_ scenario: SmokeScenario) async -> SmokeResult {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedSlowPasteback-\(scenario.id)-\(UUID().uuidString)"))
         let paster = ClipboardRestoringTextPaster()
+        let targetAdapter = SlowPastebackTargetAdapter()
         let originalClipboard = "synthetic old clipboard \(UUID().uuidString)"
         let freshDictation = "synthetic fresh dictation \(UUID().uuidString)"
         let userCopy = "synthetic user copy \(UUID().uuidString)"
@@ -112,7 +113,6 @@ struct SlowPastebackSmoke {
         let startedAt = Date()
         var targetReadTask: Task<String?, Never>?
         var immediateTargetRead: String?
-        var pasteConfirmed = false
         var userCopyTask: Task<Void, Never>?
         var autoEnterTask: Task<TimeInterval, Never>?
 
@@ -123,15 +123,18 @@ struct SlowPastebackSmoke {
             requestAccessibilityTrust: {},
             pasteDispatcher: {
                 if scenario.dispatcherSucceeds {
+                    targetAdapter.markPasteDispatched()
                     if let readDelay = scenario.readDelay {
                         if readDelay.nanoseconds == 0 {
                             immediateTargetRead = pasteboard.string(forType: .string)
-                            pasteConfirmed = immediateTargetRead == freshDictation
+                            targetAdapter.recordTargetRead()
                         } else {
                             targetReadTask = Task {
                                 try? await Task.sleep(nanoseconds: readDelay.nanoseconds)
                                 return await MainActor.run {
-                                    pasteboard.string(forType: .string)
+                                    let value = pasteboard.string(forType: .string)
+                                    targetAdapter.recordTargetRead()
+                                    return value
                                 }
                             }
                         }
@@ -157,7 +160,7 @@ struct SlowPastebackSmoke {
                 }
                 return scenario.dispatcherSucceeds
             },
-            pasteConfirmed: { pasteConfirmed },
+            targetAdapter: targetAdapter,
             restoreDelay: scenario.restoreDelay.nanoseconds,
             fallbackRestoreDelay: scenario.fallbackDelay.nanoseconds
         )
@@ -190,12 +193,12 @@ struct SlowPastebackSmoke {
             name: NSPasteboard.Name("TranscriptedSlowPasteback-target-change-\(UUID().uuidString)")
         )
         let paster = ClipboardRestoringTextPaster()
+        let targetAdapter = SlowPastebackTargetAdapter()
         let originalClipboard = "synthetic original clipboard \(UUID().uuidString)"
         let freshDictation = "synthetic target-change dictation \(UUID().uuidString)"
         pasteboard.clearContents()
         pasteboard.setString(originalClipboard, forType: .string)
 
-        var pasteDispatchedAt: CFAbsoluteTime = 0
         var clipboardReadAt: CFAbsoluteTime?
         var targetChangedAt: CFAbsoluteTime?
         let outcome = paster.paste(
@@ -204,19 +207,15 @@ struct SlowPastebackSmoke {
             accessibilityTrusted: { true },
             requestAccessibilityTrust: {},
             pasteDispatcher: {
-                pasteDispatchedAt = CFAbsoluteTimeGetCurrent()
                 _ = pasteboard.string(forType: .string)
                 clipboardReadAt = CFAbsoluteTimeGetCurrent()
                 targetChangedAt = clipboardReadAt.map { $0 + 0.02 }
+                targetAdapter.markPasteDispatched()
+                targetAdapter.recordTargetRead(at: clipboardReadAt)
+                targetAdapter.recordTargetChange(at: targetChangedAt)
                 return true
             },
-            pasteConfirmed: {
-                FocusedTextPasteConfirmationPolicy.didObserveTargetChange(
-                    pasteDispatchedAt: pasteDispatchedAt,
-                    clipboardReadAt: clipboardReadAt,
-                    targetChangedAt: targetChangedAt
-                )
-            },
+            targetAdapter: targetAdapter,
             restoreDelay: SmokeDelay.milliseconds(20).nanoseconds,
             fallbackRestoreDelay: SmokeDelay.milliseconds(500).nanoseconds,
             pasteConfirmationWait: 0.2
@@ -256,6 +255,7 @@ struct SlowPastebackSmoke {
     private static func runRetryWhileRestorePendingScenario() async -> SmokeResult {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedSlowPasteback-retry-\(UUID().uuidString)"))
         let paster = ClipboardRestoringTextPaster()
+        let targetAdapter = SlowPastebackTargetAdapter()
         let originalClipboard = "synthetic original clipboard \(UUID().uuidString)"
         let firstDictation = "synthetic first dictation \(UUID().uuidString)"
         let retryDictation = "synthetic retry dictation \(UUID().uuidString)"
@@ -271,10 +271,12 @@ struct SlowPastebackSmoke {
             accessibilityTrusted: { true },
             requestAccessibilityTrust: {},
             pasteDispatcher: {
+                targetAdapter.markPasteDispatched()
                 _ = pasteboard.string(forType: .string)
+                targetAdapter.recordTargetRead()
                 return true
             },
-            pasteConfirmed: { true },
+            targetAdapter: targetAdapter,
             restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
             fallbackRestoreDelay: SmokeDelay.milliseconds(1_000).nanoseconds
         )
@@ -283,7 +285,6 @@ struct SlowPastebackSmoke {
         let retryStartedAt = Date()
         var retryReadTask: Task<String?, Never>?
         var immediateRetryRead: String?
-        var retryPasteConfirmed = false
         var autoEnterTask: Task<TimeInterval, Never>?
         let retryOutcome = paster.paste(
             retryDictation,
@@ -291,14 +292,17 @@ struct SlowPastebackSmoke {
             accessibilityTrusted: { true },
             requestAccessibilityTrust: {},
             pasteDispatcher: {
+                targetAdapter.markPasteDispatched()
                 if readDelay.nanoseconds == 0 {
                     immediateRetryRead = pasteboard.string(forType: .string)
-                    retryPasteConfirmed = immediateRetryRead == retryDictation
+                    targetAdapter.recordTargetRead()
                 } else {
                     retryReadTask = Task {
                         try? await Task.sleep(nanoseconds: readDelay.nanoseconds)
                         return await MainActor.run {
-                            pasteboard.string(forType: .string)
+                            let value = pasteboard.string(forType: .string)
+                            targetAdapter.recordTargetRead()
+                            return value
                         }
                     }
                 }
@@ -311,7 +315,7 @@ struct SlowPastebackSmoke {
                 }
                 return true
             },
-            pasteConfirmed: { retryPasteConfirmed },
+            targetAdapter: targetAdapter,
             restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
             fallbackRestoreDelay: retryFallbackDelay.nanoseconds
         )
@@ -371,6 +375,7 @@ struct SlowPastebackSmoke {
     private static func runCancelPendingRestoreScenario() async -> SmokeResult {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedSlowPasteback-cancel-\(UUID().uuidString)"))
         let paster = ClipboardRestoringTextPaster()
+        let targetAdapter = SlowPastebackTargetAdapter()
         let originalClipboard = "synthetic original clipboard \(UUID().uuidString)"
         let freshDictation = "synthetic cancellation dictation \(UUID().uuidString)"
         let fallbackDelay = SmokeDelay.milliseconds(400)
@@ -384,10 +389,12 @@ struct SlowPastebackSmoke {
             accessibilityTrusted: { true },
             requestAccessibilityTrust: {},
             pasteDispatcher: {
+                targetAdapter.markPasteDispatched()
                 _ = pasteboard.string(forType: .string)
+                targetAdapter.recordTargetRead()
                 return true
             },
-            pasteConfirmed: { true },
+            targetAdapter: targetAdapter,
             restoreDelay: SmokeDelay.milliseconds(120).nanoseconds,
             fallbackRestoreDelay: fallbackDelay.nanoseconds
         )
@@ -457,6 +464,64 @@ struct SlowPastebackSmoke {
         }
         lines.append("")
         try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+@MainActor
+private final class SlowPastebackTargetAdapter: ClipboardPasteTargetAdapter, ClipboardPasteConfirmationSource {
+    private var targetReadAt: CFAbsoluteTime?
+    private var targetChangedAt: CFAbsoluteTime?
+
+    var confirmationSource: (any ClipboardPasteConfirmationSource)? { self }
+
+    var canObservePaste: Bool { true }
+
+    func isFrontmost() -> Bool { true }
+
+    func markPasteDispatched() {
+        targetReadAt = nil
+        targetChangedAt = nil
+    }
+
+    func recordTargetRead(at timestamp: CFAbsoluteTime? = nil) {
+        targetReadAt = timestamp ?? CFAbsoluteTimeGetCurrent()
+    }
+
+    func recordTargetChange(at timestamp: CFAbsoluteTime? = nil) {
+        targetChangedAt = timestamp ?? CFAbsoluteTimeGetCurrent()
+    }
+
+    func confirmationMode(
+        _ text: String,
+        clipboardWasRead: Bool,
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> String? {
+        if FocusedTextPasteConfirmationPolicy.didObserveTargetChange(
+            pasteDispatchedAt: pasteDispatchedAt,
+            clipboardReadAt: targetReadAt ?? clipboardReadAt,
+            targetChangedAt: targetChangedAt
+        ) {
+            return "target_change_notification"
+        }
+        guard let targetReadAt,
+              targetReadAt >= pasteDispatchedAt else {
+            return nil
+        }
+        return "text_value"
+    }
+
+    func diagnosticsContext(
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> [String: String] {
+        [
+            "clipboard_read_after_dispatch": "\((targetReadAt ?? clipboardReadAt ?? 0) >= pasteDispatchedAt)",
+            "target_change_after_dispatch": "\((targetChangedAt ?? 0) >= pasteDispatchedAt)",
+            "target_change_observer_available": "true",
+            "target_selection_observable": "false",
+            "target_text_observable": "true",
+        ]
     }
 }
 

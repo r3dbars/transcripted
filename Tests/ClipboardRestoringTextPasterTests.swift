@@ -900,8 +900,9 @@ func testClipboardRestoringTextPaster() async {
                     ),
                     "browser targets without AX confirmation must stay neutral and copied"
                 )
+                let copiedClipboard = await MainActor.run { pasteboard.string(forType: .string) }
                 assertEqual(
-                    pasteboard.string(forType: .string),
+                    copiedClipboard,
                     dictationText,
                     "browser fallback should leave the dictation available for manual paste"
                 )
