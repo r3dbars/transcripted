@@ -74,6 +74,7 @@ final class WakeRecoveryCoordinator {
         let taskID = UUID()
         let task: Task<(Bool, String?), Never> = Task { @MainActor [weak self] in
             let hotkeyResult = await self?.recoverHotkeysAfterWake() ?? (false, "Wake recovery coordinator deallocated")
+            guard !Task.isCancelled else { return hotkeyResult }
             await self?.waitForRuntimeReadiness()
             return hotkeyResult
         }
@@ -84,7 +85,7 @@ final class WakeRecoveryCoordinator {
         guard wakeRecoveryTaskID == taskID else {
             return WakeRecoveryResult(
                 hotkeysRecovered: hotkeysRecovered,
-                performedRecovery: true,
+                performedRecovery: false,
                 hotkeyError: hotkeyError
             )
         }
@@ -113,6 +114,8 @@ final class WakeRecoveryCoordinator {
 
     private func recoverHotkeysAfterWake() async -> (Bool, String?) {
         for attempt in 1...hotkeyRetryAttempts {
+            guard !Task.isCancelled else { return (false, nil) }
+
             unregisterHotkeys()
             registerHotkeys()
 
@@ -125,6 +128,7 @@ final class WakeRecoveryCoordinator {
 
             guard attempt < hotkeyRetryAttempts else { break }
             await sleep(hotkeyRetryDelay)
+            guard !Task.isCancelled else { return (false, nil) }
         }
 
         return (false, currentHotkeyError())
