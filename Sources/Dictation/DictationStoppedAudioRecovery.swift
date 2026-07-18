@@ -9,6 +9,22 @@ struct DictationStoppedAudioRecovery: Equatable, Sendable {
     let createdAt: Date
 }
 
+struct DictationStoppedAudioRecoveryRetryRegistry {
+    private var recoveries: [UUID: DictationStoppedAudioRecovery] = [:]
+
+    mutating func retain(_ recovery: DictationStoppedAudioRecovery, for failedMeetingID: UUID) {
+        recoveries[failedMeetingID] = recovery
+    }
+
+    func recovery(for failedMeetingID: UUID) -> DictationStoppedAudioRecovery? {
+        recoveries[failedMeetingID]
+    }
+
+    mutating func remove(for failedMeetingID: UUID) -> DictationStoppedAudioRecovery? {
+        recoveries.removeValue(forKey: failedMeetingID)
+    }
+}
+
 enum DictationStoppedAudioRecoveryCommitPolicy {
     static func shouldPersist(
         taskCancelled: Bool,

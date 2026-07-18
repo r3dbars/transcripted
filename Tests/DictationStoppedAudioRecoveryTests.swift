@@ -1,5 +1,38 @@
 import Foundation
 
+func testDictationStoppedAudioRecoveryRetryRegistry() {
+    runSuite("stopped dictation recovery survives a failed retry until success") {
+        let recovery = DictationStoppedAudioRecovery(
+            url: URL(fileURLWithPath: "/tmp/stopped-dictation.wav"),
+            sessionID: UUID(),
+            createdAt: Date()
+        )
+        let failedMeetingID = UUID()
+        var registry = DictationStoppedAudioRecoveryRetryRegistry()
+
+        registry.retain(recovery, for: failedMeetingID)
+        assertEqual(
+            registry.recovery(for: failedMeetingID),
+            recovery,
+            "a failed transcription keeps its stopped-audio recovery for retry"
+        )
+        assertEqual(
+            registry.recovery(for: failedMeetingID),
+            recovery,
+            "a retry failure does not consume the recovery"
+        )
+        assertEqual(
+            registry.remove(for: failedMeetingID),
+            recovery,
+            "a successful retry consumes the recovery for cleanup"
+        )
+        assertTrue(
+            registry.recovery(for: failedMeetingID) == nil,
+            "a successful retry does not leave registry state behind"
+        )
+    }
+}
+
 func testDictationStoppedAudioRecovery() {
     runSuite("Dictation stopped audio recovery writes a valid private WAV") {
         let directory = makeRecoveryTestDirectory("wav")
