@@ -83,6 +83,155 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("DictationSessionController — Paste Again is paste-only and single-owner") {
+            let source = try! String(
+                contentsOfFile: "Sources/UI/Overlay/DictationSessionController.swift",
+                encoding: .utf8
+            )
+            let pasterSource = try! String(
+                contentsOfFile: "Sources/Support/ClipboardRestoringTextPaster.swift",
+                encoding: .utf8
+            )
+            assertTrue(
+                source.contains("case .copied(let message, reason: .pasteNotConfirmed):")
+                    && source.contains("actionTitle: \"Paste Again\""),
+                "observable confirmation failures should offer Paste Again"
+            )
+            assertTrue(
+                pasterSource.contains("prepareForAutoSend: false")
+                    && pasterSource.contains("retainClipboardForPasteRetry: false"),
+                "Paste Again must not submit Auto Enter or arm another retry"
+            )
+            let retryStart = source.range(of: "private func retryPasteWithoutAutoEnter(")
+            let retryEnd = retryStart.flatMap { start in
+                source.range(of: "private func recordPasteAttemptOutcome(", range: start.upperBound..<source.endIndex)
+            }
+            let retryBody = retryStart.flatMap { start -> String? in
+                guard let retryEnd else { return nil }
+                return String(source[start.lowerBound..<retryEnd.lowerBound])
+            } ?? ""
+            assertFalse(retryBody.contains("performAutoEnterIfNeeded"), "Paste Again must not call the Auto Enter path")
+        }
+
+        runSuite("DictationPasteRetryTelemetry — emits one aggregate terminal event") {
+            var captures: [(String, [String: String])] = []
+            var attempts = 0
+            let outcome = DictationPasteRetryTelemetry.performUserRetry(
+                track: { event, properties in captures.append((event, properties)) },
+                retry: {
+                    attempts += 1
+                    return .copied(
+                        "synthetic private path /Users/test/secret.txt",
+                        reason: .pasteNotConfirmed
+                    )
+                }
+            )
+
+            assertEqual(attempts, 1, "retry telemetry should invoke the retry exactly once")
+            assertEqual(captures.count, 1, "retry telemetry should emit one terminal event")
+            assertEqual(captures.first?.0, "dictation_paste_retry_completed", "retry telemetry should use the canonical event")
+            assertEqual(
+                captures.first?.1,
+                ["reason": "paste_not_confirmed", "result": "copied"],
+                "retry telemetry should expose only coarse outcome properties"
+            )
+            assertEqual(
+                outcome,
+                .copied(
+                    "synthetic private path /Users/test/secret.txt",
+                    reason: .pasteNotConfirmed
+                ),
+                "retry telemetry should preserve the actual user-facing outcome"
+            )
+        }
+
+        runSuite("ClipboardRestoringTextPaster production confirmation adapters — Codex, Notes, and browser editors") {
+            let cases: [(SyntheticPasteTargetAdapter.EditorKind, String)] = [
+                (.codex, "text_value"),
+                (.notes, "selection_range"),
+                (.browser, "target_change_notification"),
+            ]
+
+            for (kind, expectedMode) in cases {
+                let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedProductionPasteAdapter-\(UUID().uuidString)"))
+                let paster = ClipboardRestoringTextPaster()
+                let adapter = SyntheticPasteTargetAdapter(kind: kind)
+                let dictationText = "synthetic \(kind.rawValue) dictation"
+
+                pasteboard.clearContents()
+                pasteboard.setString("synthetic original clipboard", forType: .string)
+                let outcome = paster.paste(
+                    dictationText,
+                    pasteboard: pasteboard,
+                    accessibilityTrusted: { true },
+                    requestAccessibilityTrust: {},
+                    pasteDispatcher: {
+                        let clipboardRead = pasteboard.string(forType: .string)
+                        adapter.receivePaste(dictationText, clipboardRead: clipboardRead != nil)
+                        return true
+                    },
+                    confirmationSource: { adapter },
+                    targetIsFrontmost: { adapter.isFocused },
+                    restoreDelay: 5_000_000,
+                    fallbackRestoreDelay: 20_000_000,
+                    pasteConfirmationWait: 0.03
+                )
+
+                assertEqual(outcome, .pasted, "\(kind.rawValue) should confirm through its production adapter")
+                assertEqual(adapter.pasteCount, 1, "\(kind.rawValue) should receive exactly one paste gesture")
+                assertEqual(
+                    paster.lastConfirmationDiagnostic?.context["confirmation_mode"],
+                    expectedMode,
+                    "\(kind.rawValue) should report only its coarse confirmation mode"
+                )
+            }
+        }
+
+        runSuite("ClipboardRestoringTextPaster production adapters — focus loss is sticky") {
+            let kinds: [SyntheticPasteTargetAdapter.EditorKind] = [.codex, .notes, .browser]
+            for kind in kinds {
+                let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedProductionFocusAdapter-\(UUID().uuidString)"))
+                let paster = ClipboardRestoringTextPaster()
+                let adapter = SyntheticPasteTargetAdapter(kind: kind)
+                let dictationText = "synthetic focus loss \(kind.rawValue)"
+                var focusChecks = 0
+
+                pasteboard.clearContents()
+                pasteboard.setString("synthetic focus clipboard", forType: .string)
+                let outcome = paster.paste(
+                    dictationText,
+                    pasteboard: pasteboard,
+                    accessibilityTrusted: { true },
+                    requestAccessibilityTrust: {},
+                    pasteDispatcher: {
+                        adapter.receivePaste(dictationText, clipboardRead: false)
+                        return true
+                    },
+                    confirmationSource: { adapter },
+                    targetIsFrontmost: {
+                        focusChecks += 1
+                        return focusChecks == 1
+                    },
+                    pasteConfirmationWait: 0
+                )
+
+                assertEqual(
+                    outcome,
+                    .copied(
+                        "Focus moved before Transcripted could confirm paste. The text is on your clipboard — press ⌘V.",
+                        reason: .focusChanged
+                    ),
+                    "\(kind.rawValue) focus loss should not become neutral confirmation-unavailable feedback"
+                )
+                assertEqual(adapter.pasteCount, 1, "\(kind.rawValue) focus loss should not duplicate Cmd+V")
+                assertEqual(
+                    pasteboard.string(forType: .string),
+                    dictationText,
+                    "\(kind.rawValue) focus loss should keep text available for manual recovery"
+                )
+            }
+        }
+
         runSuite("ClipboardRestoringTextPaster.restorePasteboardItems — preserves user clipboard changes") {
             let pasteboard = NSPasteboard(name: NSPasteboard.Name("TranscriptedClipboardTest-\(UUID().uuidString)"))
             let paster = ClipboardRestoringTextPaster()
@@ -609,6 +758,169 @@ func testClipboardRestoringTextPaster() async {
                 "paste-back should stop waiting after the activation timeout is exceeded"
             )
         }
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.retryPaste — restores snapshot and cannot auto-submit") {
+        let originalClipboard = "synthetic original clipboard"
+        let dictationText = "synthetic retry dictation"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: originalClipboard)
+        }
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let adapter = await MainActor.run {
+            SyntheticPasteTargetAdapter(kind: .codex, appliesPaste: false)
+        }
+
+        let firstOutcome = await MainActor.run {
+            paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    adapter.receivePaste(dictationText, clipboardRead: false)
+                    return true
+                },
+                confirmationSource: { adapter },
+                targetIsFrontmost: { adapter.isFocused },
+                pasteConfirmationWait: 0
+            )
+        }
+
+        await MainActor.run {
+            adapter.appliesPaste = true
+        }
+        let retryOutcome = await MainActor.run {
+            paster.retryPaste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    adapter.receivePaste(dictationText, clipboardRead: false)
+                    return true
+                },
+                confirmationSource: { adapter },
+                targetIsFrontmost: { adapter.isFocused },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000,
+                pasteConfirmationWait: 0
+            )
+        }
+
+        assertEqual(
+            firstOutcome,
+            .copied(
+                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
+                reason: .pasteNotConfirmed
+            ),
+            "an AX-observable but unchanged editor should offer retry"
+        )
+        assertEqual(retryOutcome, .pasted, "Paste Again should confirm through the real adapter path")
+        let pasteCount = await MainActor.run { adapter.pasteCount }
+        assertEqual(pasteCount, 2, "Paste Again should dispatch exactly one additional paste")
+        await paster.waitForPendingClipboardRestore()
+        let restoredClipboard = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(restoredClipboard, originalClipboard, "Paste Again should restore the pre-dictation clipboard")
+
+        let source = try! String(
+            contentsOfFile: "Sources/UI/Overlay/DictationSessionController.swift",
+            encoding: .utf8
+        )
+        let retryStart = source.range(of: "private func retryPasteWithoutAutoEnter(")
+        let retryEnd = retryStart.flatMap { start in
+            source.range(of: "private func recordPasteAttemptOutcome(", range: start.upperBound..<source.endIndex)
+        }
+        let retryBody = retryStart.flatMap { start -> String? in
+            guard let retryEnd else { return nil }
+            return String(source[start.lowerBound..<retryEnd.lowerBound])
+        } ?? ""
+        assertFalse(retryBody.contains("performAutoEnterIfNeeded"), "Paste Again must not run Auto Enter")
+        assertFalse(retryBody.contains("persistDictationTranscript"), "Paste Again must not save the dictation twice")
+        assertFalse(retryBody.contains("dictation_completed"), "Paste Again must not emit duplicate completion telemetry")
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.cancelPendingClipboardRestore — restores retry snapshot") {
+        let originalClipboard = "synthetic cancel clipboard"
+        let dictationText = "synthetic cancel retry"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: originalClipboard)
+        }
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let adapter = await MainActor.run {
+            SyntheticPasteTargetAdapter(kind: .notes, appliesPaste: false)
+        }
+
+        let outcome = await MainActor.run {
+            let outcome = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    adapter.receivePaste(dictationText, clipboardRead: true)
+                    return true
+                },
+                confirmationSource: { adapter },
+                targetIsFrontmost: { adapter.isFocused },
+                pasteConfirmationWait: 0
+            )
+            paster.cancelPendingClipboardRestore()
+            return outcome
+        }
+
+        assertEqual(
+            outcome,
+            .copied(
+                "Transcripted tried to paste, but could not confirm the target received it. The text stays copied.",
+                reason: .pasteNotConfirmed
+            ),
+            "an unconfirmed retry source should retain ownership until cancellation"
+        )
+        let restoredClipboard = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(restoredClipboard, originalClipboard, "cancellation should restore the owned clipboard snapshot")
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.discardPasteRetry — restores superseded retry snapshot") {
+        let originalClipboard = "synthetic superseded clipboard"
+        let dictationText = "synthetic superseded retry"
+        let pasteboard = await MainActor.run {
+            FakeClipboardPasteboard(initialString: originalClipboard)
+        }
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let adapter = await MainActor.run {
+            SyntheticPasteTargetAdapter(kind: .browser, appliesPaste: false)
+        }
+
+        await MainActor.run {
+            _ = paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    adapter.receivePaste(dictationText, clipboardRead: false)
+                    return true
+                },
+                confirmationSource: { adapter },
+                targetIsFrontmost: { adapter.isFocused },
+                pasteConfirmationWait: 0
+            )
+            paster.discardPasteRetry()
+        }
+
+        let restoredClipboard = await MainActor.run {
+            pasteboard.string(forType: .string)
+        }
+        assertEqual(
+            restoredClipboard,
+            originalClipboard,
+            "superseding Paste Again must restore the owned clipboard snapshot"
+        )
     }
 
     await runSuite("ClipboardRestoringTextPaster.paste — confirmed target read restores clipboard") {
@@ -1306,6 +1618,93 @@ func testClipboardRestoringTextPaster() async {
             pasteboard.string(forType: .string)
         }
         assertNil(clipboardAfterFailure, "failed copied fallback should not restore stale clipboard content")
+    }
+}
+
+@MainActor
+private final class SyntheticPasteTargetAdapter: ClipboardPasteConfirmationSource {
+    enum EditorKind: String {
+        case codex
+        case notes
+        case browser
+    }
+
+    let kind: EditorKind
+    var isFocused = true
+    var appliesPaste: Bool
+    private(set) var pasteCount = 0
+    private let initialText = "synthetic editor before"
+    private var currentText = "synthetic editor before"
+    private let initialSelection = FocusedTextPasteConfirmationPolicy.SelectionRange(location: 12, length: 0)
+    private var currentSelection = FocusedTextPasteConfirmationPolicy.SelectionRange(location: 12, length: 0)
+    private var clipboardWasRead = false
+    private var targetChangedAt: CFAbsoluteTime?
+
+    init(kind: EditorKind, appliesPaste: Bool = true) {
+        self.kind = kind
+        self.appliesPaste = appliesPaste
+    }
+
+    func receivePaste(_ text: String, clipboardRead: Bool) {
+        pasteCount += 1
+        guard appliesPaste, isFocused else { return }
+        clipboardWasRead = clipboardWasRead || clipboardRead
+        switch kind {
+        case .codex:
+            currentText += text
+        case .notes:
+            currentSelection = .init(
+                location: initialSelection.location + text.utf16.count,
+                length: 0
+            )
+        case .browser:
+            targetChangedAt = CFAbsoluteTimeGetCurrent()
+        }
+    }
+
+    var canObservePaste: Bool { true }
+
+    func confirmationMode(
+        _ text: String,
+        clipboardWasRead: Bool,
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> String? {
+        guard isFocused else { return nil }
+        switch kind {
+        case .codex:
+            return FocusedTextPasteConfirmationPolicy.didObservePaste(
+                initialValue: initialText,
+                currentValue: currentText,
+                pastedText: text
+            ) ? "text_value" : nil
+        case .notes:
+            return FocusedTextPasteConfirmationPolicy.didObserveSelectionPaste(
+                initialRange: initialSelection,
+                currentRange: currentSelection,
+                pastedText: text,
+                clipboardWasRead: self.clipboardWasRead || clipboardWasRead
+            ) ? "selection_range" : nil
+        case .browser:
+            return FocusedTextPasteConfirmationPolicy.didObserveTargetChange(
+                pasteDispatchedAt: pasteDispatchedAt,
+                clipboardReadAt: clipboardReadAt,
+                targetChangedAt: targetChangedAt
+            ) ? "target_change_notification" : nil
+        }
+    }
+
+    func diagnosticsContext(
+        clipboardReadAt: CFAbsoluteTime?,
+        pasteDispatchedAt: CFAbsoluteTime
+    ) -> [String: String] {
+        [
+            "clipboard_read_after_dispatch": "\((clipboardReadAt ?? 0) >= pasteDispatchedAt)",
+            "target_change_after_dispatch": "\((targetChangedAt ?? 0) >= pasteDispatchedAt)",
+            "target_change_observer_available": kind == .browser ? "true" : "false",
+            "target_selection_observable": kind == .notes ? "true" : "false",
+            "target_text_observable": kind == .codex ? "true" : "false",
+        ]
     }
 }
 
