@@ -520,6 +520,7 @@ final class TranscriptionQueueCoordinator {
                     ),
                     startTrigger: .fileImport,
                     sttModel: model,
+                    stoppedAudioRecovery: nil,
                     promptTelemetryProperties: nil,
                     promptRecordingStartedAt: nil
                 )
