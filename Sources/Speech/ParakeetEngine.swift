@@ -2190,9 +2190,6 @@ class ParakeetEngine: ObservableObject {
 
         guard zombieRecoveryState.advance(to: .reset, generation: generation) else { return }
         let recoveryGraphOwner = currentAudioGraphOwnerToken()
-        streamingSamplesLock.withLock {
-            streamingSampleBuffer.removeAll(keepingCapacity: true)
-        }
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
             didReportPendingSampleTruncation = false
@@ -2202,7 +2199,6 @@ class ParakeetEngine: ObservableObject {
         configChangeWasRecording = false
         ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
             + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
-        await eouManager?.reset()
 
         // Stop/config-change cancellation takes ownership of graph cleanup. The
         // superseded zombie task must not enter recreation after this suspension.
@@ -2482,20 +2478,6 @@ class ParakeetEngine: ObservableObject {
         audioGraphGeneration += 1
         cancelAudioWatchdog()
         let stopOwner = currentAudioEngineQueueOwnerToken()
-        if liveDisplayEnabled {
-            let remainingEou: [Float] = streamingSamplesLock.withLock {
-                let remainingEou = streamingSampleBuffer
-                streamingSampleBuffer.removeAll(keepingCapacity: true)
-                return remainingEou
-            }
-            if let eou = eouManager, !remainingEou.isEmpty, let pcm = makePCMBuffer(from: remainingEou) {
-                Task {
-                    do { _ = try await eou.process(audioBuffer: pcm) }
-                    catch { EventReporter.shared.capture(level: .warning, engine: "parakeet",
-                        event: "eou_process_error", message: error.localizedDescription) }
-                }
-            }
-        }
         await removeRecordingTap()
         guard ownsAudioEngineQueue(stopOwner) else { return }
         await stopAudioEngine()
@@ -3062,12 +3044,8 @@ class ParakeetEngine: ObservableObject {
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
-        streamingSamplesLock.withLock {
-            streamingSampleBuffer.removeAll(keepingCapacity: true)
-        }
         audioGraphGeneration += 1
         let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()
-        await eouManager?.reset()
         guard ownsAudioEngineQueue(failedStartCleanupOwner) else { return }
         isRecording = false
         isTranscribing = false
@@ -3077,8 +3055,6 @@ class ParakeetEngine: ObservableObject {
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
-        liveTranscript = ""
-        committedStreamText = ""
         guard await releaseIdleAudioHardware(
             removeTap: true,
             expectedGeneration: failedStartCleanupOwner.graphOwner.generation
@@ -3118,8 +3094,6 @@ class ParakeetEngine: ObservableObject {
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
-        liveTranscript = ""
-        committedStreamText = ""
         schedulePendingSystemInputRestore(
             ownedBy: pendingRestoreOwner,
             operation: "abandon_blocked_recording_start"
