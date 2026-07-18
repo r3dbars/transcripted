@@ -43,6 +43,23 @@ public class TranscriptionTaskManager: ObservableObject {
     /// (tests, CLI tools) and embedders that prefer their own in-app presentation.
     public let notifier: TranscriptNotifier?
 
+    public var hasPreservableActiveTranscriptionAudio: Bool {
+        activeTaskAudio.values.contains { $0.micURL != nil || $0.systemURL != nil }
+    }
+
+    /// Active pipeline work that should keep quit confirmation enabled.
+    ///
+    /// Saved-audio retranscriptions and failed-row retries use already-retained
+    /// source files, so they intentionally do not enter `activeTaskAudio`. They
+    /// still need the background-work quit warning while inference is running.
+    /// Conversely, `cancelAll()` leaves non-cooperative model work in
+    /// `activeTasks` for single-flight occupancy, but marks it intentionally
+    /// cancelled after discarding any owned scratch audio. That cancelled
+    /// occupancy must not revive a misleading save-audio prompt.
+    public var hasActiveTranscriptionWorkRequiringQuitConfirmation: Bool {
+        activeTasks.keys.contains { !intentionallyCancelledTaskIds.contains($0) }
+    }
+
     public init(
         failedTranscriptionManager: FailedTranscriptionManager,
         speechToText: any SpeechToTextEngine,
@@ -1334,13 +1351,15 @@ public class TranscriptionTaskManager: ObservableObject {
                 removeManagedCleanupFile(audio.micURL, label: "cancelled live mic scratch")
                 removeManagedCleanupFile(audio.systemURL, label: "cancelled live system scratch")
             }
+            activeTaskAudio.removeValue(forKey: taskId)
             AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])
         }
-        activeTasks.removeAll()
-        activeTaskAudio.removeAll()
+        // Keep cancelled tasks in the occupancy map and counters until their task bodies exit.
+        // CoreML calls are not guaranteed to observe cancellation immediately; clearing
+        // these signals here would let a new pipeline enter the same single-instance models.
+        // Audio ownership is cleared above because cancellation deliberately discarded it;
+        // finishCancelledTaskIfNeeded removes each task from the occupancy map on exit.
         preservedTaskIdsForShutdown.removeAll()
-        activeCount = 0
-        backgroundTaskCount = 0
         publishNonFailureStatus(.idle)
     }
 
