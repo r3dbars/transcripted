@@ -124,3 +124,38 @@ enum DictationPersistentInputRecoveryPolicy {
         return preferenceEnabled ? .adopt : .restore
     }
 }
+
+enum DictationPersistentInputRuntimeAction: Equatable {
+    case reconcile
+    case preserveExternalSelection
+}
+
+/// Decides whether a default-input notification represents an external choice
+/// that the persistent preference must preserve. Device removal remains a
+/// topology recovery; a live device changed away from Transcripted's last
+/// maintained target relinquishes ownership for the rest of the app session.
+enum DictationPersistentInputRuntimePolicy {
+    static func action<ID: Equatable>(
+        preferenceEnabled: Bool,
+        runtimeOwnershipRelinquished: Bool,
+        defaultInputChanged: Bool,
+        deviceListChanged: Bool,
+        currentInputID: ID,
+        desiredInputID: ID,
+        lastMaintainedInputID: ID?,
+        lastMaintainedInputIsAvailable: Bool
+    ) -> DictationPersistentInputRuntimeAction {
+        guard preferenceEnabled else { return .reconcile }
+        guard !runtimeOwnershipRelinquished else { return .preserveExternalSelection }
+        guard defaultInputChanged, currentInputID != desiredInputID else { return .reconcile }
+
+        if let lastMaintainedInputID {
+            guard lastMaintainedInputIsAvailable else { return .reconcile }
+            if lastMaintainedInputID == desiredInputID {
+                return .preserveExternalSelection
+            }
+        }
+
+        return deviceListChanged ? .reconcile : .preserveExternalSelection
+    }
+}
