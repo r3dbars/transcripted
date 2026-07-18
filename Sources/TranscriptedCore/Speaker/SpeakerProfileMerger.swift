@@ -48,6 +48,7 @@ extension SpeakerDatabase {
     func setDisplayNameImpl(id: UUID, name: String, source: String) {
         guard isDatabaseOpen else {
             AppLogger.speakers.error("setDisplayName failed — database not open", ["speakerId": id.uuidString, "name": name])
+            recordMutationFailure(operation: "set display name", code: SQLITE_MISUSE)
             return
         }
         let sql = "UPDATE speakers SET display_name = ?, name_source = ? WHERE id = ?;"
@@ -58,9 +59,11 @@ extension SpeakerDatabase {
             sqlite3_bind_text(statement, 3, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to set display name", ["sqlite_error": dbErrorMessage(), "id": id.uuidString])
+                recordMutationFailure(operation: "set display name", code: sqlite3_errcode(db))
             }
         } else {
             AppLogger.speakers.error("Failed to prepare setDisplayName", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prepare set display name", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
     }
@@ -68,6 +71,7 @@ extension SpeakerDatabase {
     func restoreProfileImpl(_ profile: SpeakerProfile) {
         guard isDatabaseOpen else {
             AppLogger.speakers.error("restoreProfile failed — database not open", ["speakerId": profile.id.uuidString])
+            recordMutationFailure(operation: "restore profile snapshot", code: SQLITE_MISUSE)
             return
         }
 
@@ -108,9 +112,11 @@ extension SpeakerDatabase {
 
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to restore profile snapshot", ["sqlite_error": dbErrorMessage(), "id": profile.id.uuidString])
+                recordMutationFailure(operation: "restore profile snapshot", code: sqlite3_errcode(db))
             }
         } else {
             AppLogger.speakers.error("Failed to prepare restoreProfile", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prepare restore profile", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
     }
@@ -118,16 +124,21 @@ extension SpeakerDatabase {
     /// Increment the dispute count for a speaker (inference disagreed with DB name)
     public func incrementDisputeCount(id: UUID) {
         let increment = { [self] in
-            guard isDatabaseOpen else { return }
+            guard isDatabaseOpen else {
+                recordMutationFailure(operation: "increment dispute count", code: SQLITE_MISUSE)
+                return
+            }
             let sql = "UPDATE speakers SET dispute_count = dispute_count + 1 WHERE id = ?;"
             var statement: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
                 sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to increment dispute count", ["sqlite_error": dbErrorMessage()])
+                    recordMutationFailure(operation: "increment dispute count", code: sqlite3_errcode(db))
                 }
             } else {
                 AppLogger.speakers.error("Failed to prepare incrementDisputeCount", ["sqlite_error": dbErrorMessage()])
+                recordMutationFailure(operation: "prepare increment dispute count", code: sqlite3_errcode(db))
             }
             sqlite3_finalize(statement)
         }
@@ -137,16 +148,21 @@ extension SpeakerDatabase {
     /// Reset dispute count (after user manual rename or name confirmed)
     public func resetDisputeCount(id: UUID) {
         let reset = { [self] in
-            guard isDatabaseOpen else { return }
+            guard isDatabaseOpen else {
+                recordMutationFailure(operation: "reset dispute count", code: SQLITE_MISUSE)
+                return
+            }
             let sql = "UPDATE speakers SET dispute_count = 0 WHERE id = ?;"
             var statement: OpaquePointer?
             if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
                 sqlite3_bind_text(statement, 1, (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to reset dispute count", ["sqlite_error": dbErrorMessage()])
+                    recordMutationFailure(operation: "reset dispute count", code: sqlite3_errcode(db))
                 }
             } else {
                 AppLogger.speakers.error("Failed to prepare resetDisputeCount", ["sqlite_error": dbErrorMessage()])
+                recordMutationFailure(operation: "prepare reset dispute count", code: sqlite3_errcode(db))
             }
             sqlite3_finalize(statement)
         }

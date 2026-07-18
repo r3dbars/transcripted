@@ -3554,8 +3554,8 @@ private final class BlockingSpeakerStore: SpeakerStore, @unchecked Sendable {
         base.deleteSpeaker(id: id)
     }
 
-    func mergeProfiles(sourceId: UUID, into targetId: UUID) {
-        base.mergeProfiles(sourceId: sourceId, into: targetId)
+    func mergeProfiles(sourceId: UUID, into targetId: UUID) throws {
+        try base.mergeProfiles(sourceId: sourceId, into: targetId)
     }
 
     func mergeProfilesByName() {
