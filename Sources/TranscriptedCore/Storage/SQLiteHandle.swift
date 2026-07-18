@@ -1,7 +1,7 @@
 // SQLiteHandle.swift
 // Shared SQLite bootstrap: open, owner-only permission hardening, and pragma
 // configuration. Consolidates boilerplate that was duplicated (with drift) across
-// SpeakerDatabase, StatsDatabase, TimelineDatabase, and RecentMeetingMetadataCache.
+// SpeakerDatabase, StatsDatabase, and RecentMeetingMetadataCache.
 // Schema, queries, and locking stay with each wrapper — this only owns "how do we get
 // an open, correctly-configured `sqlite3*` handle."
 
@@ -29,9 +29,7 @@ public enum SQLiteHandle {
     ///
     /// `onPragmaFailure` is invoked once per failing pragma with `(name, detail)`. If it
     /// throws, pragma application stops at that pragma (fail-fast callers); if it returns
-    /// normally, the remaining pragmas are still attempted (log-and-continue callers). This
-    /// mirrors the two behaviors that existed pre-extraction: TimelineDatabase aborted on
-    /// the first failing pragma, while SpeakerDatabase/StatsDatabase logged and continued.
+    /// normally, the remaining pragmas are still attempted (log-and-continue callers).
     ///
     /// Returns nil if `sqlite3_open` itself fails, in which case `onOpenFailure` receives
     /// the sqlite error message.

@@ -48,10 +48,6 @@ RELEVANT_EVENTS = (
     "meeting_speaker_match_reviewed",
     "meeting_speaker_auto_recognized",
     "meeting_speaker_finalization_failed",
-    "timeline_onboarding_completed",
-    "timeline_viewed",
-    "timeline_card_opened",
-    "timeline_chat_question_asked",
 )
 
 WORKFLOW_EVENTS = (
@@ -493,25 +489,6 @@ LIMIT 40
 """
 
 
-def timeline_dayflow_query(days: int, app_version: str | None) -> str:
-    return f"""
-SELECT
-  event,
-  properties['provider'] AS provider,
-  properties['mode'] AS mode,
-  properties['result'] AS result,
-  count() AS events,
-  uniq(distinct_id) AS devices
-FROM events
-WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('timeline_onboarding_completed', 'timeline_viewed', 'timeline_mode_changed', 'timeline_card_opened', 'timeline_provider_selected', 'timeline_chat_question_asked', 'timeline_batch_completed', 'timeline_batch_failed')
-  {app_version_filter(app_version)}
-GROUP BY event, provider, mode, result
-ORDER BY events DESC
-LIMIT 40
-"""
-
-
 def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
     load_env()
     host, project_id, token = posthog_config()
@@ -531,7 +508,6 @@ def fetch_report_data(days: int, app_version: str | None) -> dict[str, Any]:
         "meeting_prompt_quality": meeting_prompt_quality_query(days, app_version),
         "speaker_trust": speaker_trust_query(days, app_version),
         "retry_recovery": recovery_query(days, app_version),
-        "timeline_dayflow": timeline_dayflow_query(days, app_version),
     }
 
     results = {
@@ -813,11 +789,6 @@ def render_report(data: dict[str, Any]) -> str:
             data["results"].get("retry_recovery", []),
             ["event", "workflow_kind", "failure_kind", "retry_source", "artifact_retained", "result", "events", "devices"],
         ),
-        render_top_rows(
-            "Timeline Dayflow",
-            data["results"].get("timeline_dayflow", []),
-            ["event", "provider", "mode", "result", "events", "devices"],
-        ),
         "## Data Limitations",
         "",
         "\n".join(f"- {item}" for item in limitations),
@@ -904,7 +875,6 @@ def run_self_test() -> int:
             "meeting_prompt_quality": [],
             "speaker_trust": [],
             "retry_recovery": [],
-            "timeline_dayflow": [],
         },
     }
     report = render_report(sample)
@@ -970,7 +940,6 @@ def run_self_test() -> int:
         meeting_prompt_quality_query(30, None),
         speaker_trust_query(30, None),
         recovery_query(30, None),
-        timeline_dayflow_query(30, None),
     ):
         if "SELECT *" in query.upper():
             print("self-test failed: query uses SELECT *", file=sys.stderr)

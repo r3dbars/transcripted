@@ -75,10 +75,6 @@ CORE_EVENTS = (
     "local_meeting_summary_failed",
     "meeting_saved_audio_retranscription_requested",
     "meeting_live_transcript_drawer_actioned",
-    "timeline_onboarding_completed",
-    "timeline_viewed",
-    "timeline_card_opened",
-    "timeline_chat_question_asked",
 )
 
 WORKFLOW_EVENTS = (
@@ -276,7 +272,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'activation_habit_loop_actioned', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'meeting_live_transcript_drawer_actioned', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'timeline_viewed', 'timeline_card_opened', 'local_summary_requested', 'local_summary_finished', 'local_summary_failed', 'local_summary_cancelled', 'local_meeting_summary_started', 'local_meeting_summary_completed', 'local_meeting_summary_failed')
+  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'activation_habit_loop_actioned', 'onboarding_agent_cta_clicked', 'settings_page_viewed', 'settings_action_clicked', 'meeting_prompt_record_selected', 'meeting_file_imported', 'meeting_saved_audio_retranscription_requested', 'meeting_live_transcript_drawer_actioned', 'activation_second_artifact_saved', 'agent_capture_query_observed', 'local_summary_requested', 'local_summary_finished', 'local_summary_failed', 'local_summary_cancelled', 'local_meeting_summary_started', 'local_meeting_summary_completed', 'local_meeting_summary_failed')
   {app_build_filter(app_version, build_channel, build_revision)}
 GROUP BY event, surface, artifact_kind, action_kind, agent_target, client_family, tool_kind, capture_kind, source_count_bucket, result, page_id
 ORDER BY devices DESC, events DESC
@@ -369,30 +365,6 @@ LIMIT 50
 """
 
 
-def timeline_dayflow_query(
-    days: int,
-    app_version: str | None,
-    build_channel: str | None = None,
-    build_revision: str | None = None,
-) -> str:
-    return f"""
-SELECT
-  event,
-  properties['provider'] AS provider,
-  properties['mode'] AS mode,
-  properties['result'] AS result,
-  count() AS events,
-  uniq(distinct_id) AS devices
-FROM events
-WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('timeline_onboarding_completed', 'timeline_viewed', 'timeline_mode_changed', 'timeline_card_opened', 'timeline_provider_selected', 'timeline_chat_question_asked', 'timeline_batch_completed', 'timeline_batch_failed')
-  {app_build_filter(app_version, build_channel, build_revision)}
-GROUP BY event, provider, mode, result
-ORDER BY events DESC
-LIMIT 50
-"""
-
-
 def release_breakdown_query(
     days: int,
     app_version: str | None = None,
@@ -441,7 +413,6 @@ def fetch_report_data(
         "meeting_prompt_quality": meeting_prompt_quality_query(days, app_version, build_channel, build_revision),
         "speaker_trust": speaker_trust_query(days, app_version, build_channel, build_revision),
         "onboarding_friction": onboarding_friction_query(days, app_version, build_channel, build_revision),
-        "timeline_dayflow": timeline_dayflow_query(days, app_version, build_channel, build_revision),
         "release_breakdown": release_breakdown_query(days, app_version, build_channel, build_revision),
     }
     return {
@@ -779,28 +750,6 @@ def build_onboarding_friction(data: dict[str, Any]) -> Finding:
     )
 
 
-def build_timeline_dayflow(data: dict[str, Any]) -> Finding:
-    rows = data["results"].get("timeline_dayflow", [])
-    events = sum(as_int(row.get("events")) for row in rows)
-    devices = sum(as_int(row.get("devices")) for row in rows)
-    if events <= 0:
-        return Finding(
-            "Timeline Dayflow",
-            "No timeline/dayflow analytics rows in this window.",
-            "Keep timeline/dayflow UNKNOWN; do not fold planned timeline assumptions into shipped product health.",
-            "low",
-            0,
-        )
-    top = max(rows, key=lambda row: (as_int(row.get("events")), as_int(row.get("devices"))))
-    return Finding(
-        "Timeline Dayflow",
-        f"{events} events across up to {devices} aggregate device-buckets; top={top.get('event')}.",
-        "Use timeline rows as their own adoption read, separate from meeting/dictation release health.",
-        "medium",
-        float(events),
-    )
-
-
 def build_release_watch(data: dict[str, Any]) -> Finding:
     rows = [row for row in data["results"].get("release_breakdown", []) if row.get("app_version")]
     requested = {
@@ -895,7 +844,6 @@ def dashboard_lines(data: dict[str, Any], findings: dict[str, Finding]) -> list[
         f"- Speaker Trust: {findings['speaker'].metric}",
         f"- Retry Recovery: {reliability.metric}",
         f"- Onboarding Friction: {findings['onboarding'].metric}",
-        f"- Timeline Dayflow: {findings['timeline'].metric}",
         f"- Habit Loop: first_artifact={devices.get('activation_first_artifact_saved', 0)}, second_artifact={devices.get('activation_second_artifact_saved', 0)}, agent_payoff={devices.get('agent_capture_query_observed', 0)}, return_or_habit={max(devices.get('activation_return_proxy_observed', 0), devices.get('activation_habit_loop_actioned', 0))}.",
         f"- Release Health: {release.metric}",
         f"- Core event volume: launches={events.get('app_launched', 0)}, dictations_completed={events.get('dictation_completed', 0)}, meetings_saved={events.get('meeting_transcript_saved', 0)}.",
@@ -911,7 +859,6 @@ def render_json(data: dict[str, Any], findings: dict[str, Finding]) -> dict[str,
         findings["prompt"],
         findings["speaker"],
         findings["onboarding"],
-        findings["timeline"],
         findings["release"],
     ]
     return {
@@ -930,7 +877,6 @@ def render_json(data: dict[str, Any], findings: dict[str, Finding]) -> dict[str,
             "meeting_prompt_quality": findings["prompt"].__dict__,
             "speaker_trust": findings["speaker"].__dict__,
             "onboarding_friction": findings["onboarding"].__dict__,
-            "timeline_dayflow": findings["timeline"].__dict__,
             # Preserve the established machine-readable key for automation consumers.
             "release_regression_watch": findings["release"].__dict__,
         },
@@ -967,7 +913,6 @@ def render_markdown(data: dict[str, Any], findings: dict[str, Finding]) -> str:
         f"- Under-discovered feature: {findings['under'].metric} {findings['under'].recommendation}",
         f"- Speaker trust: {findings['speaker'].metric} {findings['speaker'].recommendation}",
         f"- Onboarding friction: {findings['onboarding'].metric} {findings['onboarding'].recommendation}",
-        f"- Timeline Dayflow: {findings['timeline'].metric} {findings['timeline'].recommendation}",
         f"- Current release health: {findings['release'].metric} {findings['release'].recommendation}",
         "",
         "## Top 3 Recommended PR/Task Candidates",
@@ -995,7 +940,6 @@ def analyze(data: dict[str, Any]) -> dict[str, Finding]:
         "prompt": build_prompt_quality(data),
         "speaker": build_speaker_trust(data),
         "onboarding": build_onboarding_friction(data),
-        "timeline": build_timeline_dayflow(data),
         "release": build_release_watch(data),
     }
 
@@ -1027,7 +971,6 @@ def run_self_test() -> int:
         "Under-discovered feature",
         "Speaker trust",
         "Onboarding friction",
-        "Timeline Dayflow",
         "Current release health",
         "Top 3 Recommended PR/Task Candidates",
     )
@@ -1070,7 +1013,6 @@ def run_self_test() -> int:
         meeting_prompt_quality_query(30, None),
         speaker_trust_query(30, None),
         onboarding_friction_query(30, None),
-        timeline_dayflow_query(30, None),
         release_breakdown_query(30),
     ):
         if "SELECT *" in query.upper():
