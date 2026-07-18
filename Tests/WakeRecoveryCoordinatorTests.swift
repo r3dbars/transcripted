@@ -287,10 +287,51 @@ func testWakeRecoveryCoordinator() async {
         assertTrue(firstResult.hotkeysRecovered, "released cancelled recovery should still finish cleanly")
         assertTrue(secondResult.hotkeysRecovered, "replacement recovery should finish cleanly")
         assertTrue(thirdResult.hotkeysRecovered, "joined recovery should observe the replacement result")
-        assertTrue(firstResult.performedRecovery, "original task still owned its work before cancellation")
+        assertFalse(firstResult.performedRecovery, "cancelled recovery should not report a stale completion")
         assertTrue(secondResult.performedRecovery, "replacement task should perform the new recovery")
         assertFalse(thirdResult.performedRecovery, "follow-up wake should join the replacement task instead of starting a third recovery")
         let registerCalls = await MainActor.run { hotkeys.registerCalls }
         assertEqual(registerCalls, 2, "stale completion should not clear the active recovery task")
+    }
+
+    await runSuite("WakeRecoveryCoordinator.cancel — stops retries and runtime readiness") {
+        let hotkeys = await MainActor.run { HotkeyScript(scriptedErrors: ["busy", nil]) }
+        let readinessCalls = await MainActor.run { CountBox() }
+        let sleepStarted = AsyncSignal()
+        let sleepContinue = AsyncSignal()
+
+        let coordinator = await MainActor.run {
+            WakeRecoveryCoordinator(
+                hotkeyRetryAttempts: 3,
+                hotkeyRetryDelay: 1,
+                unregisterHotkeys: { hotkeys.unregister() },
+                registerHotkeys: { hotkeys.register() },
+                currentHotkeyError: { hotkeys.currentError },
+                waitForRuntimeReadiness: {
+                    await MainActor.run { readinessCalls.increment() }
+                },
+                sleep: { _ in
+                    await sleepStarted.open()
+                    await sleepContinue.wait()
+                }
+            )
+        }
+
+        let task = Task { await coordinator.handleSystemWake() }
+        await sleepStarted.wait()
+
+        await MainActor.run { coordinator.cancel() }
+        await sleepContinue.open()
+
+        let result = await task.value
+        let registerCalls = await MainActor.run { hotkeys.registerCalls }
+        let unregisterCalls = await MainActor.run { hotkeys.unregisterCalls }
+        let readinessCount = await MainActor.run { readinessCalls.count }
+
+        assertFalse(result.hotkeysRecovered, "cancelled recovery should not report hotkey success")
+        assertFalse(result.performedRecovery, "cancelled recovery should not report a stale completion")
+        assertEqual(registerCalls, 1, "cancelled recovery should not retry hotkey registration")
+        assertEqual(unregisterCalls, 1, "cancelled recovery should not retry hotkey cleanup")
+        assertEqual(readinessCount, 0, "cancelled recovery should not restart runtime readiness")
     }
 }
