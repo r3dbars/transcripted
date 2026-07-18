@@ -145,6 +145,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
         // Set up the floating overlay panel (pure AppKit — no NSHostingView)
         overlayController.setup(sttRouter: appState.sttRouter)
+        sessionController.presentPendingStoppedAudioRecoveryIfNeeded()
 
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
         if #available(macOS 14.0, *) {

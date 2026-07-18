@@ -5,6 +5,26 @@ import AppKit
 import AVFoundation
 import Combine
 
+private actor DictationStoppedAudioCheckpointSignal {
+    private var isComplete = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isComplete else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func complete() {
+        guard !isComplete else { return }
+        isComplete = true
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        pendingWaiters.forEach { $0.resume() }
+    }
+}
+
 @MainActor
 class DictationSessionController: ObservableObject {
     enum DictationTrigger: String {
@@ -70,6 +90,9 @@ class DictationSessionController: ObservableObject {
     private var sessionStartTime: CFAbsoluteTime = 0
     private var currentDictationTrigger: DictationTrigger = .unknown
     private var currentDictationSessionID = UUID()
+    private var stoppedAudioRecovery: DictationStoppedAudioRecovery?
+    private var stoppedAudioRecoveryPreservationSessionID: UUID?
+    private var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
     private var autoSendRequestDecision = DictationAutoSendRequestDecision.notEvaluated
 
     /// Max duration for a listening session before auto-cancel (5 minutes).
@@ -102,6 +125,19 @@ class DictationSessionController: ObservableObject {
             }
     }
 
+    func presentPendingStoppedAudioRecoveryIfNeeded() {
+        guard !isDictating,
+              let overlayController,
+              let recovery = DictationStoppedAudioRecoveryStore.pendingRecoveries(limit: 1).first else { return }
+        overlayController.showError(
+            "A stopped dictation recording is available. Use Import Audio from Home to recover its transcript.",
+            actionTitle: "Show Audio",
+            action: {
+                NSWorkspace.shared.activateFileViewerSelecting([recovery.url])
+            }
+        )
+    }
+
     // MARK: - Dictation Mode (Option+Space)
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
@@ -123,6 +159,9 @@ class DictationSessionController: ObservableObject {
         }
         isDictating = true
         currentDictationSessionID = UUID()
+        stoppedAudioRecovery = nil
+        stoppedAudioRecoveryPreservationSessionID = nil
+        stoppedAudioCheckpointSignal = nil
         sessionSourceApp = sourceApp
         sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sessionAnchorRect = anchorRect
@@ -912,8 +951,14 @@ class DictationSessionController: ObservableObject {
 
         streamingTask?.cancel()
         let taskSessionID = currentDictationSessionID
+        let checkpointSignal = DictationStoppedAudioCheckpointSignal()
+        stoppedAudioCheckpointSignal = checkpointSignal
         streamingTask = Task {
+            defer {
+                Task { await checkpointSignal.complete() }
+            }
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
+            var stoppedRecordingSnapshot: RecordedSpeechSamples?
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
             if appState.sttRouter.isRecording || appState.sttRouter.hasRecoverableRecording {
                 await appState.sttRouter.stopRecording()
@@ -922,6 +967,64 @@ class DictationSessionController: ObservableObject {
             guard !Task.isCancelled,
                   self.isDictating,
                   self.currentDictationSessionID == taskSessionID else { return }
+
+            do {
+                if let recording = await appState.sttRouter.snapshotRecordedSamplesForPersistence() {
+                    guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                        taskCancelled: Task.isCancelled,
+                        isDictating: self.isDictating,
+                        taskSessionID: taskSessionID,
+                        currentSessionID: self.currentDictationSessionID
+                    ) else { return }
+                    let recovery = try await Task.detached(priority: .userInitiated) {
+                        try DictationStoppedAudioRecoveryStore.persist(
+                            samples16k: recording.samples16k,
+                            sessionID: taskSessionID
+                        )
+                    }.value
+                    guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                        taskCancelled: Task.isCancelled,
+                        isDictating: self.isDictating,
+                        taskSessionID: taskSessionID,
+                        currentSessionID: self.currentDictationSessionID
+                    ) else {
+                        if !DictationStoppedAudioRecoveryCommitPolicy.shouldRetainPersistedRecovery(
+                            taskSessionID: taskSessionID,
+                            preservationSessionID: self.stoppedAudioRecoveryPreservationSessionID
+                        ) {
+                            await Task.detached(priority: .utility) {
+                                DictationStoppedAudioRecoveryStore.cleanup(
+                                    recovery,
+                                    explicitDiscard: true
+                                )
+                            }.value
+                        }
+                        return
+                    }
+                    self.stoppedAudioRecovery = recovery
+                    stoppedRecordingSnapshot = recording
+                }
+            } catch {
+                guard DictationStoppedAudioRecoveryCommitPolicy.shouldPersist(
+                    taskCancelled: Task.isCancelled,
+                    isDictating: self.isDictating,
+                    taskSessionID: taskSessionID,
+                    currentSessionID: self.currentDictationSessionID
+                ) else { return }
+                appState.logger.log("DICTATION | failed to preserve stopped audio: \(error.localizedDescription)")
+                EventReporter.shared.capture(
+                    level: .error,
+                    engine: "dictation",
+                    event: "dictation_stopped_audio_persistence_failed",
+                    message: error.localizedDescription
+                )
+                overlayController.showError("The recording stopped, but its audio couldn't be saved safely. Free some disk space and try again.")
+                self.isDictating = false
+                appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "audio_persistence_failed")
+                return
+            }
+
+            await checkpointSignal.complete()
 
             // Surface model warmup honestly instead of calling it "Transcribing"
             // before the local dictation model is actually ready.
@@ -984,7 +1087,9 @@ class DictationSessionController: ObservableObject {
             overlayController.resizePanelToCompact()
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "transcribing")
             stopTiming.transcriptionStartedAt = CFAbsoluteTimeGetCurrent()
-            let voiceText = await appState.sttRouter.transcribe()
+            let voiceText = await appState.sttRouter.transcribe(
+                preparedRecording: stoppedRecordingSnapshot
+            )
             stopTiming.transcribedAt = CFAbsoluteTimeGetCurrent()
             guard !Task.isCancelled,
                   self.isDictating,
@@ -1040,6 +1145,9 @@ class DictationSessionController: ObservableObject {
                 overlayController.showNoSpeechAndDismiss(trigger: currentDictationTrigger.rawValue, reason: emptyReason)
                 isDictating = false
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: emptyReason.runtimeOutcome)
+                if emptyReason != .modelFailure {
+                    self.discardStoppedAudioRecovery(explicitDiscard: true)
+                }
                 return
             }
 
@@ -1102,6 +1210,7 @@ class DictationSessionController: ObservableObject {
             )
             let autoSendOutcome = finalization.autoEnterOutcome
             let saveResult = finalization.saveResult
+            self.discardStoppedAudioRecovery(transcriptPersisted: saveResult.saved != nil)
             let saveFailureMessage = saveResult.failureMessage
             let wordCount = text.split(whereSeparator: \.isWhitespace).count
             stopTiming.completedAt = CFAbsoluteTimeGetCurrent()
@@ -1253,6 +1362,7 @@ class DictationSessionController: ObservableObject {
     ) {
         lastCompletedText = text
         let saveResult = persistDictationTranscript(text: text, delivery: .savedWithoutPaste)
+        discardStoppedAudioRecovery(transcriptPersisted: saveResult.saved != nil)
         let saveFailureMessage = saveResult.failureMessage
         let wordCount = text.split(whereSeparator: \.isWhitespace).count
         let durationSeconds = CFAbsoluteTimeGetCurrent() - sessionStartTime
@@ -1330,9 +1440,15 @@ class DictationSessionController: ObservableObject {
     }
 
     /// Cancel dictation without pasting
-    func cancelDictation() {
+    func cancelDictation(preserveStoppedAudio: Bool = false) {
         guard let (appState, overlayController) = readyState() else { return }
+        if preserveStoppedAudio {
+            stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID
+        }
         cancelActiveTasks(cancelRecording: true)
+        if !preserveStoppedAudio {
+            discardStoppedAudioRecovery(explicitDiscard: true)
+        }
         AppSoundPlayer.shared.play(.dictationCancelled)
         overlayController.hideWithCancelAnimation()
         isDictating = false
@@ -1384,7 +1500,11 @@ class DictationSessionController: ObservableObject {
         }
 
         if isDictating {
-            cancelDictation()
+            stoppedAudioRecoveryPreservationSessionID = currentDictationSessionID
+            if let stoppedAudioCheckpointSignal {
+                await stoppedAudioCheckpointSignal.wait()
+            }
+            cancelDictation(preserveStoppedAudio: true)
         }
     }
 
@@ -1958,6 +2078,18 @@ class DictationSessionController: ObservableObject {
         } catch {
             return .failure(recordDictationTranscriptSaveFailed(error))
         }
+    }
+
+    private func discardStoppedAudioRecovery(
+        transcriptPersisted: Bool = false,
+        explicitDiscard: Bool = false
+    ) {
+        guard DictationStoppedAudioRecoveryStore.cleanup(
+            stoppedAudioRecovery,
+            transcriptPersisted: transcriptPersisted,
+            explicitDiscard: explicitDiscard
+        ) else { return }
+        stoppedAudioRecovery = nil
     }
 
     private func startPersistingDictationTranscript(

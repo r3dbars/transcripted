@@ -33,6 +33,8 @@ final class FailedMeetingStore {
     private let canRetry: () -> Bool
     private let prepareModelsForRetry: () async -> Bool
     private let markRetryStarted: () -> Void
+    private let prepareStoppedAudioRecoveryForRetry: (UUID) -> Void
+    private let discardStoppedAudioRecoveryForRetry: (UUID) -> Void
     private let publishRefresh: () -> Void
     private let diagnosticsContext: ([String: String]) -> [String: String]
 
@@ -46,6 +48,8 @@ final class FailedMeetingStore {
         canRetry: @escaping () -> Bool,
         prepareModelsForRetry: @escaping () async -> Bool,
         markRetryStarted: @escaping () -> Void,
+        prepareStoppedAudioRecoveryForRetry: @escaping (UUID) -> Void,
+        discardStoppedAudioRecoveryForRetry: @escaping (UUID) -> Void,
         publishRefresh: @escaping () -> Void,
         diagnosticsContext: @escaping ([String: String]) -> [String: String]
     ) {
@@ -54,6 +58,8 @@ final class FailedMeetingStore {
         self.canRetry = canRetry
         self.prepareModelsForRetry = prepareModelsForRetry
         self.markRetryStarted = markRetryStarted
+        self.prepareStoppedAudioRecoveryForRetry = prepareStoppedAudioRecoveryForRetry
+        self.discardStoppedAudioRecoveryForRetry = discardStoppedAudioRecoveryForRetry
         self.publishRefresh = publishRefresh
         self.diagnosticsContext = diagnosticsContext
     }
@@ -79,6 +85,7 @@ final class FailedMeetingStore {
         failedAudioCompressionTask?.cancel()
         retryingFailedMeetingIDs.insert(id)
         markRetryStarted()
+        prepareStoppedAudioRecoveryForRetry(id)
         publishRefresh()
         let retryStartedAt = CFAbsoluteTimeGetCurrent()
         WorkflowRecoveryTelemetry.attempted(
@@ -144,6 +151,9 @@ final class FailedMeetingStore {
     func deleteFailedMeeting(id: UUID) -> Bool {
         retryingFailedMeetingIDs.remove(id)
         let didDelete = failedManager.deleteFailedTranscription(id: id)
+        if didDelete {
+            discardStoppedAudioRecoveryForRetry(id)
+        }
         publishRefresh()
         return didDelete || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
     }
