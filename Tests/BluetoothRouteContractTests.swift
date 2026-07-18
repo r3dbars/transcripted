@@ -364,9 +364,10 @@ func testBluetoothRouteContract() {
         }
         let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
 
-        guard let loadSelection = snapshotBody.range(of: "let selection = await Task.detached"),
-              let detachedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
+        guard let loadSelection = snapshotBody.range(of: "let selection = await Self.systemInputWorkCoordinator.run"),
+              let serializedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
               let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
+              let serializedSystemInputOverride = snapshotBody.range(of: "let systemInputOverrideError = await Self.systemInputWorkCoordinator.run"),
               let systemInputOverride = snapshotBody.range(of: "Self.applyPreferredSystemInputDevice(for: selection)"),
               let applyOverride = snapshotBody.range(of: "Self.applyPreferredDictationInputDevice(selection, to: inputNode)"),
               let outputFormatRead = snapshotBody.range(of: "inputNode.outputFormat(forBus: 0)"),
@@ -375,9 +376,10 @@ func testBluetoothRouteContract() {
             return
         }
 
-        assertTrue(loadSelection.lowerBound < detachedSelectionLookup.lowerBound, "selection should be loaded through detached CoreAudio lookup")
-        assertTrue(detachedSelectionLookup.lowerBound < avoidDefaultRead.lowerBound, "selection should be loaded before the no-default-read guard")
-        assertTrue(avoidDefaultRead.lowerBound < systemInputOverride.lowerBound, "override guard should be set before changing system input")
+        assertTrue(loadSelection.lowerBound < serializedSelectionLookup.lowerBound, "selection should be serialized with system-input restore work")
+        assertTrue(serializedSelectionLookup.lowerBound < avoidDefaultRead.lowerBound, "selection should be loaded before the no-default-read guard")
+        assertTrue(avoidDefaultRead.lowerBound < serializedSystemInputOverride.lowerBound, "override guard should be set before changing system input")
+        assertTrue(serializedSystemInputOverride.lowerBound < systemInputOverride.lowerBound, "system input apply should use the shared serial coordinator")
         assertTrue(systemInputOverride.lowerBound < applyOverride.lowerBound, "system input should move off AirPods before touching the input node")
         assertTrue(applyOverride.lowerBound < outputFormatRead.lowerBound, "forced input override should happen before output format reads")
         assertTrue(applyOverride.lowerBound < inputFormatRead.lowerBound, "forced input override should happen before hardware input format reads")
@@ -402,13 +404,27 @@ func testBluetoothRouteContract() {
         let stopBody = String(source[stopStart.lowerBound..<stopEnd.lowerBound])
 
         assertTrue(
-            snapshotBody.contains("pendingSystemInputRestore = restoreTarget"),
-            "start_recording should remember the prior system input when it temporarily moves AirPods input to built-in"
+            snapshotBody.contains("pendingSystemInputRestore.replace(")
+                && snapshotBody.contains("ownedBy: systemInputOverrideOwner"),
+            "start_recording should remember the prior system input under the exact audio-graph owner"
         )
         assertTrue(
             snapshotBody.contains("operation: \"\\(operation)_system_input_stale_recovery\""),
             "superseded recovery snapshots should restore the temporary system input before throwing cancellation"
         )
+        assertTrue(
+            snapshotBody.contains("func restoreSystemInputAfterOwnershipLoss(stage: String) async")
+                && snapshotBody.contains("pendingSystemInputRestore.clear(ownedBy: systemInputOverrideOwner)")
+                && snapshotBody.contains("guard systemInputOverrideError == nil, let systemInputRestoreTarget else { return }")
+                && snapshotBody.contains("await restoreSystemInputIfStillTemporary("),
+            "only a successful stale override should restore its captured system-input target"
+        )
+        for stage in ["override", "snapshot_failure", "snapshot_success"] {
+            assertTrue(
+                snapshotBody.contains("await restoreSystemInputAfterOwnershipLoss(stage: \"\(stage)\")"),
+                "\(stage) ownership loss must restore the route before throwing"
+            )
+        }
         assertTrue(
             startBody.contains("func failAudioStart() async -> Bool"),
             "failed starts should share one bounded-retry path"
@@ -418,28 +434,37 @@ func testBluetoothRouteContract() {
             "retryable start failures should keep the temporary built-in input stable instead of restoring and reapplying it"
         )
         assertTrue(
-            stopBody.contains("await restorePendingSystemInputAfterRecording(operation: \"stop_recording\")"),
-            "normal stop should restore the prior system input if Transcripted still owns the temporary input"
+            stopBody.contains("operation: \"stop_recording\"")
+                && stopBody.contains("ownedBy: pendingRestoreOwner"),
+            "normal stop should restore the prior system input only for its captured owner"
         )
         assertTrue(
-            stopBody.contains("await restorePendingSystemInputAfterRecording(operation: \"stop_recording_idle\")"),
-            "canceled or interrupted start paths should not leave the temporary system input behind"
+            stopBody.contains("operation: \"stop_recording_idle\"")
+                && stopBody.contains("ownedBy: pendingRestoreOwner"),
+            "canceled or interrupted start paths should restore only their captured temporary input"
         )
         assertTrue(
-            cleanupBody.contains("schedulePendingSystemInputRestore(operation: \"cancel\")"),
-            "explicit cancellation should restore the temporary system input even though cancel() is synchronous"
+            cleanupBody.contains("schedulePendingSystemInputRestore(ownedBy: pendingRestoreOwner, operation: \"cancel\")"),
+            "explicit cancellation should restore its owned temporary input even though cancel() is synchronous"
         )
         assertTrue(
-            cleanupBody.contains("schedulePendingSystemInputRestore(operation: \"cleanup\")"),
-            "quit cleanup should restore the temporary system input even though cleanup() is synchronous"
+            cleanupBody.contains("schedulePendingSystemInputRestore(ownedBy: pendingRestoreOwner, operation: \"cleanup\")"),
+            "quit cleanup should restore its owned temporary input even though cleanup() is synchronous"
         )
         assertTrue(
-            cleanupBody.contains("schedulePendingSystemInputRestore(operation: \"abandon_blocked_recording_start\")"),
-            "blocked-start abandonment should restore the temporary system input"
+            source.contains("let restoreError = await Self.systemInputWorkCoordinator.run")
+                && source.contains("Self.systemInputWorkCoordinator.schedule"),
+            "awaited and scheduled restores should share the replacement start's serial route coordinator"
         )
         assertTrue(
-            cleanupBody.contains("await restorePendingSystemInputAfterRecording(operation: \"reset_after_failed_recording_start\")"),
-            "final failed-start cleanup should restore the temporary system input after retries are exhausted"
+            cleanupBody.contains("operation: \"abandon_blocked_recording_start\"")
+                && cleanupBody.contains("ownedBy: pendingRestoreOwner"),
+            "blocked-start abandonment should restore only the temporary input owned by that start"
+        )
+        assertTrue(
+            cleanupBody.contains("operation: \"reset_after_failed_recording_start\"")
+                && cleanupBody.contains("ownedBy: pendingRestoreOwner"),
+            "final failed-start cleanup should restore its owned temporary input after retries are exhausted"
         )
         assertTrue(
             source.contains("DictationPersistentInputPreferences.setTemporaryRecoveryMarker(recoveryMarker)"),
@@ -456,7 +481,7 @@ func testBluetoothRouteContract() {
         // (codebase audit 2026-07-08 wave 2).
         let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetDeviceRecovery.swift")
         guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
-              let handlerEnd = source.range(of: "private func recordRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
+              let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the audio config-change handler")
             return
         }
@@ -470,6 +495,31 @@ func testBluetoothRouteContract() {
             startupGuard.lowerBound < generationBump.lowerBound,
             "recording startup should own route validation before config recovery can rebuild the graph"
         )
+    }
+
+    runSuite("Bluetooth route contract - route telemetry commits only after debounce without gating recovery") {
+        let source = readBluetoothRouteContractFile("Sources/Speech/ParakeetDeviceRecovery.swift")
+        guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
+              let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex),
+              let reporterEnd = source.range(of: "// MARK: - Recovery execution", range: handlerEnd.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the route debounce and reporter bodies")
+            return
+        }
+        let handler = String(source[handlerStart.lowerBound..<handlerEnd.lowerBound])
+        let reporter = String(source[handlerEnd.lowerBound..<reporterEnd.lowerBound])
+
+        guard let debounceSleep = handler.range(of: "Task.sleep(nanoseconds: TranscriptedConstants.audioConfigChangeDebounceDelay)"),
+              let stableReport = handler.range(of: "recordStableRouteChangeAnalytics("),
+              let recovery = handler.range(of: "self.attemptDeviceRecovery()") else {
+            assertTrue(false, "debounced route handling should report and then continue recovery")
+            return
+        }
+
+        assertTrue(debounceSleep.lowerBound < stableReport.lowerBound, "route analytics must wait until the config-change burst settles")
+        assertTrue(stableReport.lowerBound < recovery.lowerBound, "the stable-route lookup should be scheduled without gating the unconditional recovery call")
+        assertTrue(reporter.contains("commitPendingRoute()"), "analytics should require a genuinely new categorical route")
+        assertTrue(reporter.contains("dictation_audio_route_changed"), "a stable transition should keep the existing product event")
+        assertFalse(handler.contains("AnalyticsReporter.track("), "raw config notifications must not emit analytics before debounce")
     }
 
     runSuite("Bluetooth route contract - persistent input follows reconnects and restores on shutdown") {
