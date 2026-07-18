@@ -169,18 +169,19 @@ extension SpeakerDatabase {
     /// Snapshot both profiles, re-point the source's provenance onto the target, and
     /// drop a merge marker — all on the open connection so the caller can run it inside
     /// the same transaction as the embedding blend + source delete. Must be called on
-    /// `queue`, inside a transaction. Returns the new merge-event id (nil on failure).
+    /// `queue`, inside a transaction. Returns the new merge-event id.
     @discardableResult
-    func recordMergeEventImpl(source: SpeakerProfile, target: SpeakerProfile, kind: String) -> UUID? {
-        guard isDatabaseOpen else { return nil }
+    func recordMergeEventImpl(source: SpeakerProfile, target: SpeakerProfile, kind: String) throws -> UUID {
+        guard isDatabaseOpen else {
+            throw SQLiteOperationError(operation: "record merge event", code: SQLITE_MISUSE, detail: "database not open")
+        }
         guard let sourceSnapshot = Self.encodeProfileSnapshot(source),
               let targetSnapshot = Self.encodeProfileSnapshot(target) else {
-            AppLogger.speakers.error("Failed to encode merge snapshot — skipping provenance", ["sourceId": source.id.uuidString])
-            return nil
+            throw SQLiteOperationError(operation: "encode merge snapshots", code: SQLITE_ERROR, detail: "snapshot encoding failed")
         }
 
         let eventId = UUID()
-        let movedIds = provenanceIdsImpl(forProfileId: source.id)
+        let movedIds = try provenanceIdsForMergeImpl(forProfileId: source.id)
         let movedIdsJSON = (try? JSONEncoder().encode(movedIds.map { $0.uuidString }))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         let now = ISO8601DateFormatter().string(from: Date())
@@ -190,12 +191,8 @@ extension SpeakerDatabase {
             (id, target_id, source_id, kind, source_snapshot, target_snapshot, moved_provenance_ids, merged_at, undone_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL);
         """
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, insertEvent, -1, &statement, nil) == SQLITE_OK else {
-            AppLogger.speakers.error("Failed to prepare merge-event insert", ["sqlite_error": dbErrorMessage()])
-            sqlite3_finalize(statement)
-            return nil
-        }
+        let statement = try prepareStatement(insertEvent, operation: "prepare merge-event insert")
+        defer { sqlite3_finalize(statement) }
         sqlite3_bind_text(statement, 1, (eventId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 2, (target.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 3, (source.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
@@ -204,40 +201,56 @@ extension SpeakerDatabase {
         sqlite3_bind_text(statement, 6, (targetSnapshot as NSString).utf8String, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 7, (movedIdsJSON as NSString).utf8String, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 8, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
-        if sqlite3_step(statement) != SQLITE_DONE {
-            AppLogger.speakers.error("Failed to insert merge event", ["sqlite_error": dbErrorMessage()])
-            sqlite3_finalize(statement)
-            return nil
-        }
-        sqlite3_finalize(statement)
+        try requireDone(statement, operation: "step merge-event insert", expectedChanges: 1)
 
         // Re-point the absorbed profile's provenance onto the keeper.
-        execBind(
+        let rePointStmt = try prepareStatement(
             "UPDATE speaker_provenance SET profile_id = ? WHERE profile_id = ?;",
-            [target.id.uuidString, source.id.uuidString],
-            label: "re-point provenance"
+            operation: "prepare re-point merge provenance"
         )
+        defer { sqlite3_finalize(rePointStmt) }
+        sqlite3_bind_text(rePointStmt, 1, (target.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(rePointStmt, 2, (source.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        try requireDone(rePointStmt, operation: "step re-point merge provenance")
 
         // Marker row so the keeper's history shows what fused in.
         let marker = """
         INSERT INTO speaker_provenance (id, profile_id, kind, embedding, source_profile_id, merge_event_id, recorded_at)
         VALUES (?, ?, ?, NULL, ?, ?, ?);
         """
-        var markerStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, marker, -1, &markerStmt, nil) == SQLITE_OK {
-            sqlite3_bind_text(markerStmt, 1, (UUID().uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(markerStmt, 2, (target.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(markerStmt, 3, (SpeakerProvenanceKind.merge as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(markerStmt, 4, (source.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(markerStmt, 5, (eventId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(markerStmt, 6, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            if sqlite3_step(markerStmt) != SQLITE_DONE {
-                AppLogger.speakers.error("Failed to insert merge marker", ["sqlite_error": dbErrorMessage()])
-            }
-        }
-        sqlite3_finalize(markerStmt)
+        let markerStmt = try prepareStatement(marker, operation: "prepare merge marker insert")
+        defer { sqlite3_finalize(markerStmt) }
+        sqlite3_bind_text(markerStmt, 1, (UUID().uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(markerStmt, 2, (target.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(markerStmt, 3, (SpeakerProvenanceKind.merge as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(markerStmt, 4, (source.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(markerStmt, 5, (eventId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(markerStmt, 6, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        try requireDone(markerStmt, operation: "step merge marker insert", expectedChanges: 1)
 
         return eventId
+    }
+
+    private func provenanceIdsForMergeImpl(forProfileId profileId: UUID) throws -> [UUID] {
+        let statement = try prepareStatement(
+            "SELECT id FROM speaker_provenance WHERE profile_id = ?;",
+            operation: "prepare merge provenance lookup"
+        )
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, (profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+
+        var ids: [UUID] = []
+        while true {
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE { return ids }
+            guard result == SQLITE_ROW else {
+                throw SQLiteOperationError(operation: "step merge provenance lookup", code: result, detail: dbErrorMessage())
+            }
+            if let value = sqlite3_column_text(statement, 0).map(String.init(cString:)),
+               let id = UUID(uuidString: value) {
+                ids.append(id)
+            }
+        }
     }
 
     // MARK: - Public queries

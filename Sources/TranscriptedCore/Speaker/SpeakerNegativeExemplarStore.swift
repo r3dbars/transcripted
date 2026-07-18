@@ -38,6 +38,10 @@ extension SpeakerDatabase {
     /// comparisons at match time are consistent. No-ops on an empty embedding.
     public func recordNegativeExemplar(profileId: UUID, embedding: [Float]) {
         guard !embedding.isEmpty else { return }
+        if isExecutingOnQueue {
+            recordNegativeExemplarImpl(profileId: profileId, embedding: embedding)
+            return
+        }
         queue.sync { recordNegativeExemplarImpl(profileId: profileId, embedding: embedding) }
     }
 
@@ -46,6 +50,7 @@ extension SpeakerDatabase {
             AppLogger.speakers.error("recordNegativeExemplar skipped — database not open", [
                 "profileId": profileId.uuidString
             ])
+            recordMutationFailure(operation: "record negative exemplar", code: SQLITE_MISUSE)
             return
         }
 
@@ -59,6 +64,7 @@ extension SpeakerDatabase {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             AppLogger.speakers.error("Failed to prepare recordNegativeExemplar", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prepare record negative exemplar", code: sqlite3_errcode(db))
             return
         }
         let embeddingData = normalized.withUnsafeBufferPointer { Data(buffer: $0) }
@@ -71,6 +77,7 @@ extension SpeakerDatabase {
                 "sqlite_error": dbErrorMessage(),
                 "profileId": profileId.uuidString
             ])
+            recordMutationFailure(operation: "insert negative exemplar", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
 
@@ -92,6 +99,7 @@ extension SpeakerDatabase {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             AppLogger.speakers.error("Failed to prepare pruneNegativeExemplars", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prepare prune negative exemplars", code: sqlite3_errcode(db))
             return
         }
         sqlite3_bind_text(statement, 1, (profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
@@ -99,6 +107,7 @@ extension SpeakerDatabase {
         sqlite3_bind_int(statement, 3, Int32(Self.negativeExemplarRetentionPerProfile))
         if sqlite3_step(statement) != SQLITE_DONE {
             AppLogger.speakers.error("Failed to prune negative exemplars", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prune negative exemplars", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
     }

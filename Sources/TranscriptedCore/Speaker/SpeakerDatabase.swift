@@ -9,6 +9,16 @@ import SQLite3
 @available(macOS 14.0, *)
 public final class SpeakerDatabase: @unchecked Sendable {
 
+    struct SQLiteOperationError: Error, LocalizedError {
+        let operation: String
+        let code: Int32
+        let detail: String
+
+        var errorDescription: String? {
+            "\(operation) failed (SQLite \(code)): \(detail)"
+        }
+    }
+
     var db: OpaquePointer?
     // Thread-safety invariant:
     // - Writes happen only during `init` (single-threaded construction) inside
@@ -19,14 +29,24 @@ public final class SpeakerDatabase: @unchecked Sendable {
     //   even though this field is a plain `var Bool`.
     // If a new caller reads this outside the queue, add a queue.sync hop.
     var isDatabaseOpen = false
+    // Set by best-effort legacy write helpers when they are used inside
+    // performMutationBatch. The batch promotes the failure to a thrown error so
+    // its caller can roll back related transcript changes.
+    var pendingMutationError: SQLiteOperationError?
     let dbPath: URL
     let queue = DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)
+    private let queueSpecificKey = DispatchSpecificKey<UInt8>()
+
+    var isExecutingOnQueue: Bool {
+        DispatchQueue.getSpecific(key: queueSpecificKey) != nil
+    }
 
     /// Public initializer that accepts a custom SQLite path.
     /// Used by tests and by callers that want to store the database outside the default
     /// `CoreStoragePaths.default` layout (e.g. a host app redirecting to its own data dir).
     public init(path: String) {
         dbPath = URL(fileURLWithPath: path)
+        queue.setSpecific(key: queueSpecificKey, value: 1)
         try? FileManager.default.createDirectory(
             at: dbPath.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -193,6 +213,99 @@ public final class SpeakerDatabase: @unchecked Sendable {
         }
     }
 
+    /// Transaction boundary for writes whose caller must know whether persistence succeeded.
+    func throwingTransaction(_ block: () throws -> Void) throws {
+        try executeTransactionControl("BEGIN EXCLUSIVE", operation: "begin speaker transaction")
+
+        do {
+            try block()
+        } catch {
+            rollbackAfterFailure()
+            throw error
+        }
+
+        do {
+            try executeTransactionControl("COMMIT", operation: "commit speaker transaction")
+        } catch {
+            rollbackAfterFailure()
+            throw error
+        }
+    }
+
+    public func performMutationBatch(_ mutations: () throws -> Void) throws {
+        if isExecutingOnQueue {
+            pendingMutationError = nil
+            defer { pendingMutationError = nil }
+            try mutations()
+            if let pendingMutationError {
+                throw pendingMutationError
+            }
+            return
+        }
+        try queue.sync {
+            pendingMutationError = nil
+            defer { pendingMutationError = nil }
+            try throwingTransaction {
+                try mutations()
+                if let pendingMutationError {
+                    throw pendingMutationError
+                }
+            }
+        }
+    }
+
+    func recordMutationFailure(operation: String, code: Int32) {
+        guard pendingMutationError == nil else { return }
+        pendingMutationError = SQLiteOperationError(
+            operation: operation,
+            code: code,
+            detail: dbErrorMessage()
+        )
+    }
+
+    func prepareStatement(_ sql: String, operation: String) throws -> OpaquePointer? {
+        var statement: OpaquePointer?
+        let result = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
+        guard result == SQLITE_OK else {
+            sqlite3_finalize(statement)
+            throw sqliteOperationError(operation: operation, code: result)
+        }
+        return statement
+    }
+
+    func requireDone(_ statement: OpaquePointer?, operation: String, expectedChanges: Int32? = nil) throws {
+        let result = sqlite3_step(statement)
+        guard result == SQLITE_DONE else {
+            throw sqliteOperationError(operation: operation, code: result)
+        }
+        if let expectedChanges, sqlite3_changes(db) != expectedChanges {
+            throw SQLiteOperationError(
+                operation: operation,
+                code: SQLITE_NOTFOUND,
+                detail: "expected \(expectedChanges) changed row(s), got \(sqlite3_changes(db))"
+            )
+        }
+    }
+
+    private func executeTransactionControl(_ sql: String, operation: String) throws {
+        let result = sqlite3_exec(db, sql, nil, nil, nil)
+        guard result == SQLITE_OK else {
+            throw sqliteOperationError(operation: operation, code: result)
+        }
+    }
+
+    private func rollbackAfterFailure() {
+        guard sqlite3_get_autocommit(db) == 0 else { return }
+        let result = sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+        if result != SQLITE_OK {
+            AppLogger.speakers.error("Transaction ROLLBACK failed", ["sqlite_error": dbErrorMessage()])
+        }
+    }
+
+    private func sqliteOperationError(operation: String, code: Int32) -> SQLiteOperationError {
+        SQLiteOperationError(operation: operation, code: code, detail: dbErrorMessage())
+    }
+
     /// Log and return the sqlite3_errmsg for the current database connection
     func dbErrorMessage() -> String {
         if let db = db {
@@ -226,6 +339,9 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// call-count / last-seen (records the appearance without contaminating the identity).
     /// New-speaker inserts ignore `blendAlpha`. See `SpeakerWritePathPolicy`.
     public func addOrUpdateSpeaker(embedding: [Float], existingId: UUID?, blendAlpha: Float) -> SpeakerProfile {
+        if isExecutingOnQueue {
+            return addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId, blendAlpha: blendAlpha)
+        }
         return queue.sync {
             addOrUpdateSpeakerImpl(embedding: embedding, existingId: existingId, blendAlpha: blendAlpha)
         }
@@ -234,6 +350,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
     private func addOrUpdateSpeakerImpl(embedding: [Float], existingId: UUID?, blendAlpha: Float) -> SpeakerProfile {
         guard isDatabaseOpen else {
             AppLogger.speakers.error("CRITICAL: addOrUpdateSpeaker returning in-memory-only profile — database not open, speaker will NOT be persisted", ["existingId": existingId?.uuidString ?? "new"])
+            recordMutationFailure(operation: "add or update speaker", code: SQLITE_MISUSE)
             return SpeakerProfile(id: existingId ?? UUID(), displayName: nil, nameSource: nil, embedding: embedding, firstSeen: Date(), lastSeen: Date(), callCount: 1, confidence: 0.5, disputeCount: 0)
         }
 
@@ -279,11 +396,13 @@ public final class SpeakerDatabase: @unchecked Sendable {
                 sqlite3_bind_text(statement, 4, (existingId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to update speaker embedding", ["sqlite_error": dbErrorMessage(), "id": existingId.uuidString])
+                    recordMutationFailure(operation: "update speaker embedding", code: sqlite3_errcode(db))
                 } else {
                     sqlSucceeded = true
                 }
             } else {
                 AppLogger.speakers.error("Failed to prepare update speaker", ["sqlite_error": dbErrorMessage()])
+                recordMutationFailure(operation: "prepare update speaker", code: sqlite3_errcode(db))
             }
             sqlite3_finalize(statement)
 
@@ -341,11 +460,13 @@ public final class SpeakerDatabase: @unchecked Sendable {
             sqlite3_bind_text(statement, 4, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to insert new speaker", ["sqlite_error": dbErrorMessage(), "id": newId.uuidString])
+                recordMutationFailure(operation: "insert new speaker", code: sqlite3_errcode(db))
             } else {
                 sqlSucceeded = true
             }
         } else {
             AppLogger.speakers.error("Failed to prepare insert speaker", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prepare insert speaker", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
 

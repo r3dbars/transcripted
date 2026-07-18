@@ -1,6 +1,7 @@
 import XCTest
 import Combine
 import FluidAudio
+import SQLite3
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -2121,6 +2122,122 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     @MainActor
+    func testHandleNamingCompleteRestoresTranscriptWhenDatabaseMergeFails() async throws {
+        let harness = try makeHarness()
+        let transcriptId = UUID()
+        let source = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        let target = harness.speakerDB.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.26, count: 256),
+            existingId: nil
+        )
+        harness.speakerDB.setDisplayName(id: target.id, name: "Sarah Graham", source: NameSource.userManual)
+
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Merge_Rollback.md")
+        let micURL = harness.paths.audioCaptures.appendingPathComponent("merge-rollback-mic.wav")
+        let systemURL = harness.paths.audioCaptures.appendingPathComponent("merge-rollback-system.wav")
+        let clipURL = harness.paths.speakerClips.appendingPathComponent("merge-rollback-clip.wav")
+        let speakers = [
+            MarkdownSpeaker(
+                id: "1",
+                persistentSpeakerId: source.id,
+                name: "Speaker 1",
+                confidence: "unknown",
+                source: "db_pending"
+            )
+        ]
+        let utterances = [
+            MarkdownUtterance(
+                timestamp: "00:01",
+                source: "System",
+                label: "Speaker 1",
+                text: "Thanks for joining."
+            )
+        ]
+        let originalTranscript = sampleTranscript(
+            transcriptId: transcriptId,
+            speakers: speakers,
+            utterances: utterances,
+            breakdownEntries: [
+                BreakdownEntry(name: "Speaker 1", utterances: 1, wordCount: 3, duration: "00:03")
+            ]
+        )
+        try originalTranscript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        try Data().write(to: micURL)
+        try Data().write(to: systemURL)
+        try Data().write(to: clipURL)
+
+        let authorizerResult = harness.speakerDB.queue.sync {
+            sqlite3_set_authorizer(harness.speakerDB.db, { _, action, tableName, _, _, _ in
+                guard action == SQLITE_UPDATE,
+                      let tableName,
+                      String(cString: tableName) == "speakers" else {
+                    return SQLITE_OK
+                }
+                return SQLITE_DENY
+            }, nil)
+        }
+        XCTAssertEqual(authorizerResult, SQLITE_OK)
+        defer {
+            _ = harness.speakerDB.queue.sync {
+                sqlite3_set_authorizer(harness.speakerDB.db, nil, nil)
+            }
+        }
+
+        harness.manager.speakerNamingRequest = SpeakerNamingRequest(
+            speakers: [],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            systemAudioURL: systemURL,
+            micAudioURL: micURL,
+            onComplete: { _ in }
+        )
+        harness.manager.handleNamingComplete(
+            updates: [
+                SpeakerNameUpdate(
+                    persistentSpeakerId: source.id,
+                    diarizerSpeakerId: "1",
+                    newName: "Sarah Graham",
+                    previousName: nil,
+                    action: .named
+                )
+            ],
+            transcriptURL: transcriptURL,
+            transcriptId: transcriptId,
+            transcriptionResult: sampleTranscriptionResult(speakers: speakers, utterances: utterances),
+            micURL: micURL,
+            systemURL: systemURL,
+            clips: [
+                SpeakerNamingEntry(
+                    id: source.id,
+                    diarizerSpeakerId: "1",
+                    clipURL: clipURL,
+                    sampleText: "Thanks for joining.",
+                    currentName: nil,
+                    matchSimilarity: nil,
+                    needsNaming: true,
+                    needsConfirmation: false,
+                    sessionEmbedding: [Float](repeating: 0.25, count: 256)
+                )
+            ]
+        )
+
+        try await waitUntil {
+            if case .failed(message: "Failed to finalize speaker names") = harness.manager.displayStatus,
+               harness.manager.speakerNamingRequest == nil {
+                return true
+            }
+            return false
+        }
+
+        XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), originalTranscript)
+        XCTAssertNotNil(harness.speakerDB.getSpeaker(id: source.id))
+        XCTAssertNotNil(harness.speakerDB.getSpeaker(id: target.id))
+    }
+
+    @MainActor
     func testHandleNamingCompleteResolvesRenamedTranscriptByStableId() async throws {
         let harness = try makeHarness()
         let transcriptId = UUID()
@@ -3437,8 +3554,8 @@ private final class BlockingSpeakerStore: SpeakerStore, @unchecked Sendable {
         base.deleteSpeaker(id: id)
     }
 
-    func mergeProfiles(sourceId: UUID, into targetId: UUID) {
-        base.mergeProfiles(sourceId: sourceId, into: targetId)
+    func mergeProfiles(sourceId: UUID, into targetId: UUID) throws {
+        try base.mergeProfiles(sourceId: sourceId, into: targetId)
     }
 
     func mergeProfilesByName() {
