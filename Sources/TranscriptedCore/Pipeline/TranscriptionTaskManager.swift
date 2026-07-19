@@ -25,6 +25,7 @@ public class TranscriptionTaskManager: ObservableObject {
     private var savedTranscriptTaskIdsByURL: [URL: UUID] = [:]
     var activeTasks: [UUID: Task<Void, Never>] = [:]
     private var activeTaskAudio: [UUID: (micURL: URL?, systemURL: URL?, meetingTitle: String?, recordingDate: Date?)] = [:]
+    private var importedTranscriptionTerminalHandlers: [UUID: @MainActor @Sendable () -> Void] = [:]
     private var preservedTaskIdsForShutdown: Set<UUID> = []
     private var intentionallyCancelledTaskIds: Set<UUID> = []
     private var committedTranscriptTaskIds: Set<UUID> = []
@@ -326,11 +327,13 @@ public class TranscriptionTaskManager: ObservableObject {
         audioURL: URL,
         outputFolder: URL,
         meetingTitle: String? = nil,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        onTerminal: (@MainActor @Sendable () -> Void)? = nil
     ) {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
             removeRecordingFile(audioURL, label: "rejected imported recording")
+            onTerminal?()
             publishFailure(
                 displayMessage: "Another transcript is already running. Wait for it to finish, then import the file again.",
                 diagnosticMessage: "Transcription already in progress"
@@ -343,6 +346,7 @@ public class TranscriptionTaskManager: ObservableObject {
         if let audioDuration = audioDuration(url: audioURL), audioDuration < minDuration {
             AppLogger.pipeline.info("Imported recording too short, skipping transcription", ["duration": String(format: "%.1fs", audioDuration)])
             removeRecordingFile(audioURL, label: "short imported recording")
+            onTerminal?()
             publishFailure(
                 displayMessage: "That audio file is too short to transcribe. Choose audio that is at least two seconds long.",
                 diagnosticMessage: "Recording too short"
@@ -360,6 +364,9 @@ public class TranscriptionTaskManager: ObservableObject {
             meetingTitle: meetingTitle,
             recordingDate: recordingDate
         )
+        if let onTerminal {
+            importedTranscriptionTerminalHandlers[taskId] = onTerminal
+        }
         publishNonFailureStatus(.gettingReady)
 
         AppLogger.pipeline.info("Starting imported transcription task", [
@@ -1278,6 +1285,7 @@ public class TranscriptionTaskManager: ObservableObject {
     // MARK: - Task Completion & Cleanup
 
     func handleTaskCompletion(taskId: UUID) {
+        importedTranscriptionTerminalHandlers.removeValue(forKey: taskId)?()
         activeTasks.removeValue(forKey: taskId)
         activeTaskAudio.removeValue(forKey: taskId)
         preservedTaskIdsForShutdown.remove(taskId)
@@ -1303,6 +1311,10 @@ public class TranscriptionTaskManager: ObservableObject {
 
     func markTaskTranscriptCommitted(taskId: UUID) {
         committedTranscriptTaskIds.insert(taskId)
+        // An imported queue journal is no longer needed once the transcript's
+        // durable side effects commit. Keep it through inference so a crash
+        // before this point can recover the scratch audio on the next launch.
+        importedTranscriptionTerminalHandlers.removeValue(forKey: taskId)?()
         // Transcript is durably on disk — the crash-recovery journal for this
         // recording's scratch audio is no longer needed.
         if let micURL = activeTaskAudio[taskId]?.micURL {
@@ -1331,6 +1343,7 @@ public class TranscriptionTaskManager: ObservableObject {
             activeCount = max(0, activeCount - 1)
             backgroundTaskCount = max(0, backgroundTaskCount - 1)
         }
+        importedTranscriptionTerminalHandlers.removeValue(forKey: taskId)?()
         if activeCount == 0 {
             publishNonFailureStatus(.idle)
         }

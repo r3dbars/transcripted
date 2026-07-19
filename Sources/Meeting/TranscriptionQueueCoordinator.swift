@@ -341,9 +341,11 @@ final class TranscriptionQueueCoordinator {
                 audioURL: audioURL,
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 meetingTitle: suggestedTitle,
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                onTerminal: { [weak self] in
+                    self?.removeImportedJournal(for: job)
+                }
             )
-            removeImportedJournal(for: job)
         }
     }
 

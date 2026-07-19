@@ -63,6 +63,34 @@ extension TranscriptionTaskManagerMetadataTests {
         speech.release()
     }
 
+    func testImportedTranscriptionTerminalHandlerWaitsForTranscriptCommit() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Imported terminal handoff.")
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments())
+        )
+        let copiedImportURL = tempDirectory
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("imported-terminal-handoff.wav")
+        try writeMonoWAV(to: copiedImportURL, duration: 2.5)
+
+        var didReachTerminal = false
+        manager.startImportedTranscription(
+            audioURL: copiedImportURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            onTerminal: { didReachTerminal = true }
+        )
+
+        try await waitUntil { speech.didStart }
+        XCTAssertFalse(didReachTerminal, "the import must remain recoverable while inference is running")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: copiedImportURL.path))
+
+        speech.release()
+        try await waitUntil {
+            didReachTerminal && manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+        }
+    }
+
     func testStartSavedAudioRetranscriptionDoesNotDeleteSourceWhenRejectedForActiveTask() throws {
         let manager = makeManager()
         let savedAudioDirectory = tempDirectory.appendingPathComponent("saved-meeting-audio", isDirectory: true)
