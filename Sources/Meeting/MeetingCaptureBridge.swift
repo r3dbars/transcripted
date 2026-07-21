@@ -50,8 +50,9 @@ final class MeetingCaptureBridge: ObservableObject {
     private let completionAttempt = MeetingCaptureAttempt<CaptureStopResult>()
     private let startAttempt = MeetingCaptureAttempt<Bool>()
     let micPCMRelay = MeetingMicPCMRelay()
-    private var timedOutStopCompletionHandler: ((CaptureStopResult) -> Void)?
-    private var isAwaitingTimedOutStopCompletion = false
+    private var timedOutStopCompletionHandlers: [UInt64: (CaptureStopResult) -> Void] = [:]
+    private var timedOutStopGenerations: Set<UInt64> = []
+    private var expectedStopGeneration: UInt64?
 
     init(audio: Audio? = nil) {
         self.audio = audio ?? Audio(
@@ -84,8 +85,7 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Start a new recording session. Returns immediately; the session remains
     /// active until `stopAndAwaitFiles()` is called.
     func startRecording() async -> Bool {
-        isAwaitingTimedOutStopCompletion = false
-        timedOutStopCompletionHandler = nil
+        expectedStopGeneration = nil
         completionAttempt.reset()?.resume(returning: currentStopResult())
         if audio.isRecording { return true }
 
@@ -138,8 +138,8 @@ final class MeetingCaptureBridge: ObservableObject {
         )
 
         return await withCheckedContinuation { continuation in
-            isAwaitingTimedOutStopCompletion = false
-            timedOutStopCompletionHandler = nil
+            let stopGeneration = audio.currentRecordingSessionGeneration &+ 1
+            expectedStopGeneration = stopGeneration
             let attemptID = completionAttempt.begin(continuation)
             audio.stop()
 
@@ -162,8 +162,10 @@ final class MeetingCaptureBridge: ObservableObject {
                         uniquingKeysWith: { _, new in new }
                     )
                 )
-                self.isAwaitingTimedOutStopCompletion = true
-                self.timedOutStopCompletionHandler = onTimedOutCompletion
+                self.timedOutStopGenerations.insert(stopGeneration)
+                if let onTimedOutCompletion {
+                    self.timedOutStopCompletionHandlers[stopGeneration] = onTimedOutCompletion
+                }
                 continuation.resume(returning: self.currentStopResult(didTimeOut: true))
             })
         }
@@ -223,7 +225,7 @@ final class MeetingCaptureBridge: ObservableObject {
     }
 
     private func wireCallbacks() {
-        audio.onRecordingComplete = { [weak self] micURL, systemURL in
+        audio.onRecordingCompleteWithGeneration = { [weak self] generation, micURL, systemURL in
             // This closure fires on whichever queue Core's Audio dispatches from.
             // Hop to main and resume the continuation exactly once.
             Task { @MainActor [weak self] in
@@ -233,24 +235,32 @@ final class MeetingCaptureBridge: ObservableObject {
                     systemURL: systemURL,
                     didTimeOut: false
                 )
-                if let continuation = self.completionAttempt.reset() {
-                    self.isAwaitingTimedOutStopCompletion = false
-                    self.timedOutStopCompletionHandler = nil
+
+                switch MeetingCaptureCompletionPolicy.disposition(
+                    completionGeneration: generation,
+                    expectedStopGeneration: self.expectedStopGeneration,
+                    timedOutStopGenerations: self.timedOutStopGenerations,
+                    currentAudioGeneration: self.audio.currentRecordingSessionGeneration
+                ) {
+                case .expectedStop:
+                    guard let continuation = self.completionAttempt.reset() else { return }
+                    self.expectedStopGeneration = nil
                     continuation.resume(returning: result)
-                    return
-                }
-
-                if self.isAwaitingTimedOutStopCompletion {
-                    self.isAwaitingTimedOutStopCompletion = false
-                    let handler = self.timedOutStopCompletionHandler
-                    self.timedOutStopCompletionHandler = nil
+                case .lateTimedOutStop:
+                    guard self.timedOutStopGenerations.remove(generation) != nil else { return }
+                    let handler = self.timedOutStopCompletionHandlers.removeValue(forKey: generation)
                     handler?(result)
+                case .unexpectedCurrentStop:
+                    self.onUnexpectedRecordingComplete?(result)
+                case .stale:
                     return
                 }
-
-                self.onUnexpectedRecordingComplete?(result)
             }
         }
+
+        // Keep the legacy callback unset on this bridge. Core still exposes it
+        // for older embedders, but this host needs the generation to reject a
+        // completion from a previous timed-out recording.
 
         // Capture-lifecycle cues used to live inside Core (NSSound("Tink") on
         // start, NSSound("Pop") on stop). Core no longer depends on AppKit for

@@ -819,6 +819,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // Callback for when recording completes
     public var onRecordingComplete: ((URL?, URL?) -> Void)?
+    /// Generation-tagged completion callback used by hosts that can overlap a
+    /// timed-out stop with a newer recording. The legacy callback remains for
+    /// embedders that do not need stale-session filtering.
+    public var onRecordingCompleteWithGeneration: ((UInt64, URL?, URL?) -> Void)?
+
+    /// Monotonic capture-session generation visible to host lifecycle bridges.
+    /// It changes synchronously at each start/stop boundary.
+    public var currentRecordingSessionGeneration: UInt64 {
+        recordingSessionGeneration
+    }
 
     // Callback for when recording starts (used for pre-loading models)
     public var onRecordingStart: (() -> Void)?
@@ -1696,6 +1706,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                             "currentGeneration": "\(self.recordingSessionGeneration)"
                         ])
                     }
+                    self.onRecordingCompleteWithGeneration?(stopGeneration, finalMicURL, finalSystemURL)
                     self.onRecordingComplete?(finalMicURL, finalSystemURL)
                 }
             }

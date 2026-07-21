@@ -46,6 +46,37 @@ final class MeetingCaptureAttempt<Output> {
     }
 }
 
+enum MeetingCaptureCompletionDisposition: Equatable {
+    case expectedStop
+    case lateTimedOutStop
+    case unexpectedCurrentStop
+    case stale
+}
+
+enum MeetingCaptureCompletionPolicy {
+    static func disposition(
+        completionGeneration: UInt64,
+        expectedStopGeneration: UInt64?,
+        timedOutStopGenerations: Set<UInt64>,
+        currentAudioGeneration: UInt64
+    ) -> MeetingCaptureCompletionDisposition {
+        if timedOutStopGenerations.contains(completionGeneration) {
+            return .lateTimedOutStop
+        }
+
+        if let expectedStopGeneration,
+           expectedStopGeneration == completionGeneration {
+            return .expectedStop
+        }
+
+        if currentAudioGeneration == completionGeneration {
+            return .unexpectedCurrentStop
+        }
+
+        return .stale
+    }
+}
+
 enum MeetingCaptureVolumeDiagnostics {
     private static let changeThreshold = 0.02
     private static let quietMicRawPeakThreshold = 0.05
