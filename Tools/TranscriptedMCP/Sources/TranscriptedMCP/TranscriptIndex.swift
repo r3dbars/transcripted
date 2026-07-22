@@ -105,11 +105,23 @@ final class TranscriptIndex: @unchecked Sendable {
 
     // MARK: - Reconciliation
 
-    func reconcile(meetingsDir: URL, dictationsDir: URL) throws {
-        try reconcile(meetingDirs: [meetingsDir], dictationDirs: [dictationsDir])
+    func reconcile(
+        meetingsDir: URL,
+        dictationsDir: URL,
+        updateEmbeddings: Bool = true
+    ) throws {
+        try reconcile(
+            meetingDirs: [meetingsDir],
+            dictationDirs: [dictationsDir],
+            updateEmbeddings: updateEmbeddings
+        )
     }
 
-    func reconcile(meetingDirs: [URL], dictationDirs: [URL]) throws {
+    func reconcile(
+        meetingDirs: [URL],
+        dictationDirs: [URL],
+        updateEmbeddings: Bool = true
+    ) throws {
         try queue.sync {
             var seenPaths: Set<String> = []
             var diskMap: [String: ContextArtifactFile] = [:]
@@ -148,6 +160,12 @@ final class TranscriptIndex: @unchecked Sendable {
 
         // Best-effort: embed any newly indexed rows. Never fails the reconcile —
         // lexical search must keep working even if embedding hits a snag.
+        if updateEmbeddings {
+            reconcileEmbeddings()
+        }
+    }
+
+    func reconcileEmbeddings() {
         embeddingStore?.reconcileEmbeddings()
     }
 
@@ -1695,5 +1713,26 @@ final class TranscriptIndex: @unchecked Sendable {
 
     private func dbError() -> String {
         sqlDBError(db)
+    }
+}
+
+/// Keeps the stdio attach path bounded by making the lexical index available
+/// first. Semantic vectors are additive and can finish after the client has
+/// connected without changing any read-only tool contract.
+enum MCPStartupIndexing {
+    static func prepareForAttach(
+        index: TranscriptIndex,
+        meetingDirs: [URL],
+        dictationDirs: [URL]
+    ) throws {
+        try index.reconcile(
+            meetingDirs: meetingDirs,
+            dictationDirs: dictationDirs,
+            updateEmbeddings: false
+        )
+    }
+
+    static func completeAfterAttach(index: TranscriptIndex) {
+        index.reconcileEmbeddings()
     }
 }

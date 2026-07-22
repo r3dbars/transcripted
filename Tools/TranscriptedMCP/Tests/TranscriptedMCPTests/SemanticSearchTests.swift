@@ -50,6 +50,28 @@ private struct UnavailableEmbeddingProvider: EmbeddingProvider {
     func embed(_ text: String) -> [Float]? { nil }
 }
 
+private final class CountingEmbeddingProvider: EmbeddingProvider, @unchecked Sendable {
+    let modelID = "counting.v1"
+    let dimension = 3
+    let isAvailable = true
+
+    private let lock = NSLock()
+    private var requestCount = 0
+
+    var requests: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return requestCount
+    }
+
+    func embed(_ text: String) -> [Float]? {
+        lock.lock()
+        requestCount += 1
+        lock.unlock()
+        return text.isEmpty ? nil : [1, 0, 0]
+    }
+}
+
 final class SemanticSearchTests: XCTestCase {
     var tempDir: URL!
 
@@ -183,6 +205,36 @@ final class SemanticSearchTests: XCTestCase {
 
         let hybrid = try index.searchUtterances(query: "cost", speaker: nil, dateFrom: nil, dateTo: nil, mode: .hybrid)
         XCTAssertEqual(hybrid.results.count, 1)
+    }
+
+    func testStartupMakesLexicalIndexAvailableBeforeEmbeddingWork() throws {
+        let provider = CountingEmbeddingProvider()
+        let index = try makeIndex(provider)
+        try writeFixture(makeFixtureJSON(utterances: [
+            ("system_0", 0.0, 5.0, "The product roadmap is ready"),
+        ]), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+
+        try MCPStartupIndexing.prepareForAttach(
+            index: index,
+            meetingDirs: [tempDir],
+            dictationDirs: [tempDir]
+        )
+
+        XCTAssertEqual(provider.requests, 0, "attach preparation must not wait for semantic vectors")
+        XCTAssertEqual(
+            try index.searchUtterances(
+                query: "roadmap",
+                speaker: nil,
+                dateFrom: nil,
+                dateTo: nil,
+                mode: .lexical
+            ).results.count,
+            1,
+            "lexical tools should be usable as soon as the client attaches"
+        )
+
+        MCPStartupIndexing.completeAfterAttach(index: index)
+        XCTAssertGreaterThan(provider.requests, 0, "semantic vectors should still be populated after attach")
     }
 
     // MARK: - Re-embedding on model change

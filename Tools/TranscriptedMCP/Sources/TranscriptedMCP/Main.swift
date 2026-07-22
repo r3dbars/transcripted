@@ -48,7 +48,11 @@ struct TranscriptedMCP {
                 log("Semantic search unavailable on this host; using lexical search only")
             }
             index = try TranscriptIndex(indexDir: directories.indexDir, embeddingProvider: embeddingProvider)
-            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+            try MCPStartupIndexing.prepareForAttach(
+                index: index,
+                meetingDirs: directories.meetingDirs,
+                dictationDirs: directories.dictationDirs
+            )
         } catch {
             log("Failed to initialize index: \(error.localizedDescription)")
             throw error
@@ -80,11 +84,15 @@ struct TranscriptedMCP {
             server: server, index: index, directories: directories, serverVersion: serverVersion
         )
 
-        log("MCP server ready, waiting for connections")
-
         // Start stdio transport
         let transport = StdioTransport()
         try await server.start(transport: transport)
+        log("MCP server ready, waiting for connections")
+
+        Task.detached(priority: .utility) {
+            MCPStartupIndexing.completeAfterAttach(index: index)
+        }
+
         await server.waitUntilCompleted()
 
         watchers.forEach { $0.stop() }
