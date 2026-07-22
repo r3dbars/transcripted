@@ -106,6 +106,41 @@ final class StatsDatabaseTests: XCTestCase {
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: databaseURL.path + suffix))
         }
     }
+
+    func testRecordingWriteFailureRollsBackDailyActivityUpdate() {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedCoreStatsTests-\(UUID().uuidString).sqlite")
+        let database = StatsDatabase(path: databaseURL.path)
+        let authorizerResult = database.queue.sync {
+            sqlite3_set_authorizer(database.db, { _, action, tableName, _, _, _ in
+                guard action == SQLITE_INSERT,
+                      let tableName,
+                      String(cString: tableName) == "recordings" else {
+                    return SQLITE_OK
+                }
+                return SQLITE_DENY
+            }, nil)
+        }
+        XCTAssertEqual(authorizerResult, SQLITE_OK)
+        defer {
+            _ = database.queue.sync { sqlite3_set_authorizer(database.db, nil, nil) }
+            for suffix in ["", "-shm", "-wal"] {
+                try? FileManager.default.removeItem(at: URL(fileURLWithPath: databaseURL.path + suffix))
+            }
+        }
+
+        database.recordSession(RecordingMetadata(
+            id: "denied-recording",
+            date: Calendar(identifier: .gregorian).date(
+                from: DateComponents(year: 2026, month: 4, day: 8, hour: 9, minute: 0)
+            )!,
+            durationSeconds: 120
+        ))
+        database.queue.sync {}
+
+        XCTAssertTrue(database.getAllRecordings().isEmpty)
+        XCTAssertNil(dailyActivity(at: databaseURL, date: "2026-04-08"))
+    }
 }
 
 private struct DailyActivity: Equatable {
