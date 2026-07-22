@@ -1725,6 +1725,7 @@ enum MCPStartupIndexing {
         meetingDirs: [URL],
         dictationDirs: [URL]
     ) throws {
+        index.embeddingStore?.deferSemanticSearchUntilReconciled()
         try index.reconcile(
             meetingDirs: meetingDirs,
             dictationDirs: dictationDirs,
@@ -1733,6 +1734,7 @@ enum MCPStartupIndexing {
     }
 
     static func completeAfterAttach(index: TranscriptIndex) {
+        defer { index.embeddingStore?.finishDeferredStartupReconciliation() }
         index.reconcileEmbeddings()
     }
 }

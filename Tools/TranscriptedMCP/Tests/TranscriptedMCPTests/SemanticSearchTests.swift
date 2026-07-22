@@ -72,6 +72,20 @@ private final class CountingEmbeddingProvider: EmbeddingProvider, @unchecked Sen
     }
 }
 
+private final class BlockingEmbeddingProvider: EmbeddingProvider, @unchecked Sendable {
+    let modelID = "blocking.v1"
+    let dimension = 3
+    let isAvailable = true
+    let started = DispatchSemaphore(value: 0)
+    let resume = DispatchSemaphore(value: 0)
+
+    func embed(_ text: String) -> [Float]? {
+        started.signal()
+        _ = resume.wait(timeout: .now() + 5)
+        return text.isEmpty ? nil : [1, 0, 0]
+    }
+}
+
 final class SemanticSearchTests: XCTestCase {
     var tempDir: URL!
 
@@ -232,9 +246,64 @@ final class SemanticSearchTests: XCTestCase {
             1,
             "lexical tools should be usable as soon as the client attaches"
         )
+        XCTAssertEqual(
+            try index.searchUtterances(
+                query: "roadmap",
+                speaker: nil,
+                dateFrom: nil,
+                dateTo: nil,
+                mode: .hybrid
+            ).results.count,
+            1,
+            "default hybrid search should fall back to lexical while startup embeddings are pending"
+        )
+        XCTAssertEqual(provider.requests, 0, "hybrid search must not queue behind startup embeddings")
 
         MCPStartupIndexing.completeAfterAttach(index: index)
         XCTAssertGreaterThan(provider.requests, 0, "semantic vectors should still be populated after attach")
+        XCTAssertTrue(index.embeddingStore?.isAvailable == true)
+    }
+
+    func testStartupEmbeddingComputationDoesNotHoldLexicalWriteLock() throws {
+        let provider = BlockingEmbeddingProvider()
+        let index = try makeIndex(provider)
+        try writeFixture(makeFixtureJSON(utterances: [
+            ("system_0", 0.0, 5.0, "The product roadmap is ready"),
+        ]), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try MCPStartupIndexing.prepareForAttach(
+            index: index,
+            meetingDirs: [tempDir],
+            dictationDirs: [tempDir]
+        )
+
+        let completed = expectation(description: "semantic reconciliation completed")
+        DispatchQueue.global(qos: .utility).async {
+            MCPStartupIndexing.completeAfterAttach(index: index)
+            completed.fulfill()
+        }
+        XCTAssertEqual(provider.started.wait(timeout: .now() + 2), .success)
+
+        try writeFixture(makeFixtureJSON(utterances: [
+            ("system_0", 0.0, 5.0, "A new capture arrived"),
+        ]), filename: "Call_2026-03-30_10-00-00", to: tempDir)
+        XCTAssertNoThrow(try index.reconcile(
+            meetingDirs: [tempDir],
+            dictationDirs: [tempDir],
+            updateEmbeddings: false
+        ))
+        XCTAssertEqual(
+            try index.searchUtterances(
+                query: "capture",
+                speaker: nil,
+                dateFrom: nil,
+                dateTo: nil,
+                mode: .lexical
+            ).results.count,
+            1
+        )
+
+        provider.resume.signal()
+        wait(for: [completed], timeout: 5)
     }
 
     // MARK: - Re-embedding on model change
