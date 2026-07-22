@@ -178,7 +178,7 @@ final class TranscriptIndex: @unchecked Sendable {
                 return resolvedURL.path == basePath
                     || resolvedURL.path.hasPrefix(basePath + "/")
             }) else {
-                log("Skipping index update outside watched roots: \(url.path)")
+                log("Skipping index update outside watched roots")
                 return
             }
 
@@ -194,7 +194,7 @@ final class TranscriptIndex: @unchecked Sendable {
                 case .missing:
                     continue
                 case .invalid:
-                    log("Skipping invalid or unsafe file change: \(root.appendingPathComponent(requestedName).path)")
+                    log("Skipping invalid or unsafe file change")
                     continue
                 }
             }
@@ -283,7 +283,7 @@ final class TranscriptIndex: @unchecked Sendable {
 
         try execOrThrow("COMMIT")
         committed = true
-        log("Indexed: \(filename) (\(transcript.utterances.count) utterances)")
+        log("Indexed meeting (utterance_count_bucket=\(MCPLogPrivacy.countBucket(transcript.utterances.count)))")
     }
 
     /// Parse the meeting's structured summary (inline transcript summary, then a
@@ -376,7 +376,7 @@ final class TranscriptIndex: @unchecked Sendable {
 
         try execOrThrow("COMMIT")
         committed = true
-        log("Indexed dictation day: \(filename) (\(day.entries.count) entries)")
+        log("Indexed dictation day (entry_count_bucket=\(MCPLogPrivacy.countBucket(day.entries.count)))")
     }
 
     private func reindex(file url: URL, filename: String, kind: ContextArtifactKind) throws {

@@ -167,7 +167,9 @@ final class EmbeddingStore: @unchecked Sendable {
             sqlite3_finalize(stmt)
         }
         sqlite3_exec(db, "COMMIT", nil, nil, nil)
-        if inserted > 0 { log("Embedded \(inserted) rows") }
+        if inserted > 0 {
+            log("Embedded semantic rows (count_bucket=\(MCPLogPrivacy.countBucket(inserted)))")
+        }
     }
 
     // MARK: - Semantic search
@@ -384,7 +386,7 @@ final class EmbeddingStore: @unchecked Sendable {
 
     private func execLocked(_ sql: String) {
         if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
-            log("Vector store SQL failed: \(dbErrorLocked()) for: \(sql)")
+            log("Vector store SQL operation failed")
         }
     }
 
