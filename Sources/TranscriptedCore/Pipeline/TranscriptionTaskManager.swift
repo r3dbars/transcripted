@@ -881,7 +881,8 @@ public class TranscriptionTaskManager: ObservableObject {
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
             retainedAudio: retainedAudio,
             hasOriginalMic: originalMicURL != nil,
-            failedSystemURL: failedSystemURL
+            failedSystemURL: failedSystemURL,
+            taskId: taskId
         )
         guard let failedMicURL = retainedAudio?.micURL ?? originalMicURL ?? placeholderMicURL else {
             AppLogger.pipeline.error("Failed transcription was not queued because no microphone track or placeholder is available")
@@ -1273,7 +1274,8 @@ public class TranscriptionTaskManager: ObservableObject {
     private func makeSilentMicPlaceholderIfNeeded(
         retainedAudio: RetainedRecordingAudio?,
         hasOriginalMic: Bool,
-        failedSystemURL: URL?
+        failedSystemURL: URL?,
+        taskId: UUID
     ) -> URL? {
         guard !hasOriginalMic,
               let failedSystemURL else {
@@ -1282,7 +1284,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
         let placeholderDirectory = retainedAudio?.directory ?? failedSystemURL.deletingLastPathComponent()
         let placeholderURL = placeholderDirectory
-            .appendingPathComponent("microphone_placeholder")
+            .appendingPathComponent("microphone_placeholder_\(taskId.uuidString)")
             .appendingPathExtension("wav")
         do {
             try FileManager.default.createDirectory(
@@ -1878,7 +1880,8 @@ public class TranscriptionTaskManager: ObservableObject {
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
             retainedAudio: retainedAudio,
             hasOriginalMic: micURL != nil,
-            failedSystemURL: retainedAudio.systemURL ?? systemURL
+            failedSystemURL: retainedAudio.systemURL ?? systemURL,
+            taskId: taskId
         )
         guard let updatedMicURL = retainedAudio.micURL ?? micURL ?? placeholderMicURL else {
             removeRetainedFailedAudio(retainedAudio)

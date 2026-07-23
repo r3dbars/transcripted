@@ -221,6 +221,55 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "finalized timeout system scratch should be removed after archive")
     }
 
+    func testDeletingOneSystemOnlyTimeoutKeepsOtherRowRetryableAfterReload() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let firstSystemURL = scratchDirectory.appendingPathComponent("first-timeout-system.wav")
+        let secondSystemURL = scratchDirectory.appendingPathComponent("second-timeout-system.wav")
+        let firstID = UUID()
+        let secondID = UUID()
+        try writeMonoWAV(to: firstSystemURL, duration: 2.5)
+        try writeMonoWAV(to: secondSystemURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: nil,
+            systemAudioURL: firstSystemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: firstID,
+            archiveAudio: false
+        ))
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: nil,
+            systemAudioURL: secondSystemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: secondID,
+            archiveAudio: false
+        ))
+
+        let first = try XCTUnwrap(
+            manager.failedTranscriptionManager.failedTranscriptions.first { $0.id == firstID }
+        )
+        let second = try XCTUnwrap(
+            manager.failedTranscriptionManager.failedTranscriptions.first { $0.id == secondID }
+        )
+        XCTAssertNotEqual(first.micAudioURL, second.micAudioURL)
+
+        XCTAssertTrue(manager.failedTranscriptionManager.deleteFailedTranscription(id: firstID))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.micAudioURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstSystemURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.micAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondSystemURL.path))
+
+        let reloaded = makeManager()
+        let remaining = try XCTUnwrap(reloaded.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(reloaded.failedTranscriptionManager.failedTranscriptions.count, 1)
+        XCTAssertEqual(remaining.id, secondID)
+        XCTAssertEqual(remaining.micAudioURL, second.micAudioURL)
+        XCTAssertEqual(remaining.systemAudioURL, secondSystemURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: remaining.micAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondSystemURL.path))
+    }
+
     func testLateStopTimeoutFinalizationWithoutRetainedArchiveUpdatesFailedQueueOnly() throws {
         let manager = makeManager()
         let scratchDirectory = tempDirectory.appendingPathComponent("audio")
