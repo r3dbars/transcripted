@@ -409,8 +409,13 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
     func testRecoveryWaitsThroughRepeatedFreshWrites() async throws {
         let (manager, paths) = makeManager()
+        let livenessWindow: TimeInterval = 0.08
         let micURL = paths.audioCaptures.appendingPathComponent("meeting_repeated_write_mic.wav")
         try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(livenessWindow)],
+            ofItemAtPath: micURL.path
+        )
         let journalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: micURL.lastPathComponent,
@@ -419,20 +424,57 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             state: .stopping
         )
 
-        let recoveryTask = Task {
-            await manager.recoverOrphanedRecordings(
-                in: paths.audioCaptures,
-                livenessWindow: 0.08,
-                waitForRecentJournals: true
-            )
+        var passCount = 0
+        manager.orphanedRecordingRecoveryPassObserver = {
+            passCount += 1
+            guard passCount == 1 else { return }
+            do {
+                try FileManager.default.setAttributes(
+                    [.modificationDate: Date()],
+                    ofItemAtPath: micURL.path
+                )
+            } catch {
+                XCTFail("Could not refresh recovery fixture: \(type(of: error))")
+            }
         }
-        try await Task.sleep(for: .seconds(0.05))
-        try FileManager.default.setAttributes(
-            [.modificationDate: Date()],
-            ofItemAtPath: micURL.path
-        )
 
-        let recovered = await recoveryTask.value
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: livenessWindow,
+            waitForRecentJournals: true
+        )
+        manager.orphanedRecordingRecoveryPassObserver = nil
+
+        XCTAssertGreaterThanOrEqual(passCount, 2)
+        XCTAssertEqual(recovered, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+    }
+
+    func testRecoveryDeadlineStartsWhenOwnerTaskRuns() async throws {
+        let (manager, paths) = makeManager()
+        let micURL = paths.audioCaptures.appendingPathComponent("meeting_delayed_owner_mic.wav")
+        try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
+        try backdate(micURL)
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: micURL.lastPathComponent,
+            segments: [.init(filename: micURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            state: .stopping
+        )
+        manager.orphanedRecordingRecoveryTaskCreatedObserver = {
+            // This runs synchronously on the MainActor before the stored owner
+            // can start. It deterministically exceeds the old 20 ms budget.
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+        manager.orphanedRecordingRecoveryTaskCreatedObserver = nil
 
         XCTAssertEqual(recovered, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))

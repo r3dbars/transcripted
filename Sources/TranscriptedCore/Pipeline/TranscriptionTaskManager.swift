@@ -47,6 +47,8 @@ public class TranscriptionTaskManager: ObservableObject {
     private let cleanupDirectories: [URL]
     private var orphanedRecordingRecoveryTask: Task<Int, Never>?
     private var orphanedRecordingRecoveryRequestGeneration: UInt64 = 0
+    /// Deterministic task-start delay point for recovery scheduler tests.
+    var orphanedRecordingRecoveryTaskCreatedObserver: (() -> Void)?
     /// Deterministic pause point for recovery interleaving tests.
     var orphanedRecordingRecoveryPassObserver: (() -> Void)?
 
@@ -1038,11 +1040,14 @@ public class TranscriptionTaskManager: ObservableObject {
         // One monotonic deadline belongs to the single-flight owner. Joined
         // requests can ask it to rescan, but cannot extend its lifetime.
         let maximumWaitInterval = max(0.02, (livenessWindow * 2) + 0.02)
-        let waitDeadline = ContinuousClock.now.advanced(
-            by: .seconds(maximumWaitInterval)
-        )
         let recoveryTask = Task { [weak self] in
             guard let self else { return 0 }
+            // Start the budget when the stored owner actually begins running.
+            // A busy MainActor must not consume the entire recovery window
+            // before the first directory scan has even started.
+            let waitDeadline = ContinuousClock.now.advanced(
+                by: .seconds(maximumWaitInterval)
+            )
             var totalRecovered = 0
             while ContinuousClock.now < waitDeadline {
                 let ownerRequestGeneration = self.orphanedRecordingRecoveryRequestGeneration
@@ -1060,6 +1065,7 @@ public class TranscriptionTaskManager: ObservableObject {
             return totalRecovered
         }
         orphanedRecordingRecoveryTask = recoveryTask
+        orphanedRecordingRecoveryTaskCreatedObserver?()
         return await recoveryTask.value
     }
 
