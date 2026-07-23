@@ -42,6 +42,7 @@ final class FailedMeetingStore {
     private var timedOutFinalizationHandoff = TimedOutFailedMeetingFinalizationHandoff()
     private var failedAudioCompressionTask: Task<Void, Never>?
     private var failedAudioCompressionNeedsReschedule = false
+    private var timedOutJournalRecoveryTask: Task<Void, Never>?
 
     init(
         taskManager: TranscriptionTaskManager,
@@ -146,9 +147,20 @@ final class FailedMeetingStore {
     @discardableResult
     func dismissFailedMeeting(id: UUID) -> Bool {
         retryingFailedMeetingIDs.remove(id)
+        let dismissedFailure = failedManager.failedTranscriptions.first(where: { $0.id == id })
         let didDismiss = failedManager.removeFailedTranscription(id: id)
+        let isAbsent = !failedManager.failedTranscriptions.contains(where: { $0.id == id })
+        if didDismiss || isAbsent {
+            if let dismissedFailure {
+                taskManager.discardFinalizedFailedTranscriptionAudio(
+                    micAudioURL: dismissedFailure.micAudioURL,
+                    systemAudioURL: dismissedFailure.systemAudioURL
+                )
+            }
+            finishTimedOutFinalizationWithDiscard(id: id)
+        }
         publishRefresh()
-        return didDismiss || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
+        return didDismiss || isAbsent
     }
 
     @discardableResult
@@ -202,6 +214,9 @@ final class FailedMeetingStore {
             promoteTimedOutFailedMeetingAudio(id: taskId, result: finalizedResult)
         } else {
             publishRefresh()
+        }
+        if let ownedAudioURL = persistenceAudio.micURL ?? persistenceAudio.systemURL {
+            scheduleTimedOutJournalRecovery(in: ownedAudioURL.deletingLastPathComponent())
         }
         return true
     }
@@ -330,13 +345,27 @@ final class FailedMeetingStore {
         )
     }
 
+    private func scheduleTimedOutJournalRecovery(in scratchDirectory: URL) {
+        timedOutJournalRecoveryTask?.cancel()
+        let taskManager = self.taskManager
+        timedOutJournalRecoveryTask = Task {
+            _ = await taskManager.recoverOrphanedRecordings(in: scratchDirectory)
+        }
+    }
+
     /// Recomputes the presented failed-meeting list. Called from the
     /// controller's `refreshFailedMeetings(_:)`, which assigns the result to
     /// its own `@Published var failedMeetings` (kept on the controller —
     /// this store never touches the published surface directly).
     func refreshFailedMeetings(_ updatedFailedTranscriptions: [FailedTranscription]? = nil) -> [FailedMeetingItem] {
         let failedTranscriptions = updatedFailedTranscriptions ?? failedManager.failedTranscriptions
-        retryingFailedMeetingIDs.formIntersection(Set(failedTranscriptions.map(\.id)))
+        let persistedIDs = Set(failedTranscriptions.map(\.id))
+        let removedTimedOutIDs = timedOutFinalizationHandoff.persistedOwnershipIDs
+            .subtracting(persistedIDs)
+        for id in removedTimedOutIDs {
+            finishTimedOutFinalizationWithDiscard(id: id)
+        }
+        retryingFailedMeetingIDs.formIntersection(persistedIDs)
 
         let items = failedTranscriptions
             .sorted(by: { $0.timestamp > $1.timestamp })

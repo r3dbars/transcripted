@@ -124,6 +124,29 @@ func testTimedOutFailedMeetingFinalization() {
         assertEqual(handoff.terminalOwnershipCount, 0)
     }
 
+    runSuite("Timed-out ownership detects a row removed by another Core completion seam") {
+        var handoff = TimedOutFailedMeetingFinalizationHandoff()
+        let failedID = UUID()
+        assertNil(handoff.failedMeetingDidPersist(id: failedID))
+        assertTrue(handoff.persistedOwnershipIDs.contains(failedID))
+
+        let lateResult = CaptureStopResult(
+            micURL: URL(fileURLWithPath: "/tmp/core-removed-mic_merged.wav"),
+            systemURL: nil,
+            didTimeOut: false
+        )
+        if case .discard = handoff.receive(
+            lateResult,
+            for: failedID,
+            failedMeetingIsPersisted: false
+        ) {
+            // The persisted row disappeared before the callback reached Home.
+        } else {
+            assertionFailure("a Core-side row removal must make its late callback cleanup-only")
+        }
+        assertFalse(handoff.persistedOwnershipIDs.contains(failedID))
+    }
+
     runSuite("Timed-out persistence failure leaves late audio to journal recovery") {
         var handoff = TimedOutFailedMeetingFinalizationHandoff()
         let failedID = UUID()

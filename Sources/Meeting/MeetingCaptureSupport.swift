@@ -21,44 +21,83 @@ enum TimedOutFailedMeetingFinalizationAction {
 }
 
 struct TimedOutFailedMeetingFinalizationHandoff {
-    private enum TerminalOwnership {
-        case discardAudio
-        case journalRecovery
+    private enum State {
+        case awaitingCallback
+        case bufferedBeforePersistence(CaptureStopResult)
+        case bufferedForPromotion(CaptureStopResult)
+        case discardOnCallback
+        case journalOwned
     }
 
     private static let ownershipCapacity = 4
-    private var bufferedResults: [UUID: CaptureStopResult] = [:]
-    private var trackedIDs: Set<UUID> = []
-    private var trackedOrder: [UUID] = []
-    private var terminalOwnership: [UUID: TerminalOwnership] = [:]
-    private var terminalOrder: [UUID] = []
+    private var states: [UUID: State] = [:]
+    private var order: [UUID] = []
 
-    var bufferedResultCount: Int { bufferedResults.count }
-    var terminalOwnershipCount: Int { terminalOwnership.count }
+    var bufferedResultCount: Int {
+        states.values.reduce(into: 0) { count, state in
+            if case .bufferedBeforePersistence = state { count += 1 }
+            if case .bufferedForPromotion = state { count += 1 }
+        }
+    }
+    var persistedOwnershipIDs: Set<UUID> {
+        Set(states.compactMap { id, state in
+            switch state {
+            case .awaitingCallback, .bufferedForPromotion:
+                return id
+            case .bufferedBeforePersistence, .discardOnCallback, .journalOwned:
+                return nil
+            }
+        })
+    }
+    var terminalOwnershipCount: Int {
+        states.values.reduce(into: 0) { count, state in
+            if case .discardOnCallback = state { count += 1 }
+            if case .journalOwned = state { count += 1 }
+        }
+    }
 
     mutating func receive(
         _ result: CaptureStopResult,
         for id: UUID,
         failedMeetingIsPersisted: Bool
     ) -> TimedOutFailedMeetingFinalizationAction {
-        if let ownership = terminalOwnership.removeValue(forKey: id) {
-            terminalOrder.removeAll { $0 == id }
-            switch ownership {
-            case .discardAudio:
+        if let state = states[id] {
+            switch state {
+            case .discardOnCallback:
+                remove(id)
                 return .discard(result)
-            case .journalRecovery:
+            case .journalOwned:
+                remove(id)
                 return .journalOwned
+            case .awaitingCallback where !failedMeetingIsPersisted:
+                remove(id)
+                return .discard(result)
+            case .awaitingCallback, .bufferedBeforePersistence, .bufferedForPromotion:
+                break
             }
         }
 
-        bufferedResults[id] = result
-        track(id)
+        store(
+            failedMeetingIsPersisted
+                ? .bufferedForPromotion(result)
+                : .bufferedBeforePersistence(result),
+            for: id
+        )
         return failedMeetingIsPersisted ? .promote(result) : .buffered
     }
 
     mutating func failedMeetingDidPersist(id: UUID) -> CaptureStopResult? {
-        track(id)
-        return bufferedResults[id]
+        if case .bufferedBeforePersistence(let result) = states[id] {
+            store(.bufferedForPromotion(result), for: id)
+            return result
+        }
+        if case .bufferedForPromotion(let result) = states[id] {
+            return result
+        }
+        if states[id] == nil {
+            store(.awaitingCallback, for: id)
+        }
+        return nil
     }
 
     func audioForPersistence(
@@ -66,7 +105,13 @@ struct TimedOutFailedMeetingFinalizationHandoff {
         provisionalMicURL: URL?,
         provisionalSystemURL: URL?
     ) -> (micURL: URL?, systemURL: URL?) {
-        let finalizedResult = bufferedResults[id]
+        let finalizedResult: CaptureStopResult?
+        switch states[id] {
+        case .bufferedBeforePersistence(let result), .bufferedForPromotion(let result):
+            finalizedResult = result
+        default:
+            finalizedResult = nil
+        }
         return (
             micURL: provisionalMicURL ?? finalizedResult?.micURL,
             systemURL: provisionalSystemURL ?? finalizedResult?.systemURL
@@ -74,58 +119,50 @@ struct TimedOutFailedMeetingFinalizationHandoff {
     }
 
     mutating func markDeliverySucceeded(id: UUID) {
-        bufferedResults.removeValue(forKey: id)
-        stopTracking(id)
+        remove(id)
     }
 
     mutating func markPersistenceFailed(id: UUID) {
         // There is no row that can consume this in-memory result. The existing
         // recording journal remains the durable recovery owner across launch.
-        let callbackAlreadyArrived = bufferedResults.removeValue(forKey: id) != nil
-        stopTracking(id)
-        if !callbackAlreadyArrived {
-            registerTerminalOwnership(.journalRecovery, for: id)
+        switch states[id] {
+        case .bufferedBeforePersistence, .bufferedForPromotion:
+            remove(id)
+        case .awaitingCallback, nil:
+            store(.journalOwned, for: id)
+        case .discardOnCallback, .journalOwned:
+            break
         }
     }
 
     mutating func markTerminalDiscard(id: UUID) -> CaptureStopResult? {
-        guard trackedIDs.contains(id) || bufferedResults[id] != nil else { return nil }
-        let bufferedResult = bufferedResults.removeValue(forKey: id)
-        stopTracking(id)
-        if bufferedResult == nil {
-            registerTerminalOwnership(.discardAudio, for: id)
+        switch states[id] {
+        case .bufferedBeforePersistence(let result), .bufferedForPromotion(let result):
+            remove(id)
+            return result
+        case .awaitingCallback:
+            store(.discardOnCallback, for: id)
+        case .discardOnCallback, .journalOwned, nil:
+            break
         }
-        return bufferedResult
+        return nil
     }
 
-    private mutating func track(_ id: UUID) {
-        guard trackedIDs.insert(id).inserted else { return }
-        trackedOrder.append(id)
-        while trackedOrder.count > Self.ownershipCapacity {
-            let evictedID = trackedOrder.removeFirst()
-            trackedIDs.remove(evictedID)
+    private mutating func store(_ state: State, for id: UUID) {
+        if states.updateValue(state, forKey: id) == nil {
+            order.append(id)
+        }
+        while order.count > Self.ownershipCapacity {
+            let evictedID = order.removeFirst()
             // The bridge keeps at most two late callbacks alive, so an older
-            // failed promotion can no longer be delivered. Its journal remains
-            // the durable owner; do not retain the URL tuple indefinitely.
-            bufferedResults.removeValue(forKey: evictedID)
+            // handoff can no longer be delivered. Its journal remains durable.
+            states.removeValue(forKey: evictedID)
         }
     }
 
-    private mutating func stopTracking(_ id: UUID) {
-        trackedIDs.remove(id)
-        trackedOrder.removeAll { $0 == id }
-    }
-
-    private mutating func registerTerminalOwnership(
-        _ ownership: TerminalOwnership,
-        for id: UUID
-    ) {
-        if terminalOwnership.updateValue(ownership, forKey: id) == nil {
-            terminalOrder.append(id)
-        }
-        while terminalOrder.count > Self.ownershipCapacity {
-            terminalOwnership.removeValue(forKey: terminalOrder.removeFirst())
-        }
+    private mutating func remove(_ id: UUID) {
+        states.removeValue(forKey: id)
+        order.removeAll { $0 == id }
     }
 }
 

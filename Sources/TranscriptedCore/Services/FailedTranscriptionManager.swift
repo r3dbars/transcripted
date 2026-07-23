@@ -523,14 +523,11 @@ public class FailedTranscriptionManager: ObservableObject {
             return false
         }
 
-        MeetingRecordingJournalStore.removeJournal(forMicAudioURL: failed.micAudioURL)
-
-        // Delete audio files independently so one failure does not hide the other.
-        removeAudioFile(failed.micAudioURL, label: "mic audio")
-
-        if let systemURL = failed.systemAudioURL {
-            removeAudioFile(systemURL, label: "system audio")
-        }
+        MeetingRecordingJournalStore.discardRecordingArtifacts(
+            micAudioURL: failed.micAudioURL,
+            systemAudioURL: failed.systemAudioURL,
+            allowedRoots: allowedAudioRoots
+        )
         removeEmptyAudioArchiveDirectoryIfNeeded(containing: failed.micAudioURL)
         if let systemURL = failed.systemAudioURL {
             removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
@@ -584,10 +581,11 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         for failure in oldFailures {
-            removeAudioFile(failure.micAudioURL, label: "old failure mic audio")
-            if let systemURL = failure.systemAudioURL {
-                removeAudioFile(systemURL, label: "old failure system audio")
-            }
+            MeetingRecordingJournalStore.discardRecordingArtifacts(
+                micAudioURL: failure.micAudioURL,
+                systemAudioURL: failure.systemAudioURL,
+                allowedRoots: allowedAudioRoots
+            )
             removeEmptyAudioArchiveDirectoryIfNeeded(containing: failure.micAudioURL)
             if let systemURL = failure.systemAudioURL {
                 removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
@@ -595,32 +593,6 @@ public class FailedTranscriptionManager: ObservableObject {
         }
 
         AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "\(oldFailures.count)", "olderThanDays": "\(days)"])
-    }
-
-    private func removeAudioFile(_ url: URL, label: String) {
-        // Security: re-check containment at deletion time so a mutated in-memory entry cannot
-        // redirect cleanup to arbitrary files outside Transcripted-managed audio directories.
-        guard isSafeAudioURL(url) else {
-            AppLogger.pipeline.error("Refused to delete out-of-sandbox audio file", [
-                "label": label,
-                "path": url.path
-            ])
-            return
-        }
-
-        do {
-            try FileManager.default.removeItem(at: url)
-            AppLogger.pipeline.info("Deleted audio file", [
-                "label": label,
-                "file": url.lastPathComponent
-            ])
-        } catch {
-            AppLogger.pipeline.warning("Failed to delete audio file", [
-                "label": label,
-                "file": url.lastPathComponent,
-                "error": error.localizedDescription
-            ])
-        }
     }
 
     private func removeEmptyAudioArchiveDirectoryIfNeeded(containing url: URL) {

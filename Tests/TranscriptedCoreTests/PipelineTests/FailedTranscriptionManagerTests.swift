@@ -194,6 +194,116 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertTrue(persisted.isEmpty)
     }
 
+    func testDeleteFailedTranscriptionRemovesEveryJournalOwnedScratchSegment() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let primaryURL = paths.audioCaptures.appendingPathComponent("timeout-mic.wav")
+        let recoveryURL = paths.audioCaptures.appendingPathComponent("timeout-recovery.wav")
+        let systemURL = paths.audioCaptures.appendingPathComponent("timeout-system.wav")
+        let journalURL = paths.audioCaptures.appendingPathComponent("timeout-mic.recording.json")
+        for url in [primaryURL, recoveryURL, systemURL] {
+            FileManager.default.createFile(atPath: url.path, contents: Data("owned".utf8))
+        }
+        let journal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        let session = journal.begin(primaryMicURL: primaryURL)
+        journal.recordSegments([
+            MicRecordingSegment(url: primaryURL),
+            MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.1),
+        ], session: session)
+        journal.recordSystemAudio(systemURL, session: session)
+        journal.markStopping(session: session)
+        journal.flush()
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedID,
+            micAudioURL: primaryURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+
+        XCTAssertTrue(manager.deleteFailedTranscription(id: failedID))
+
+        for url in [primaryURL, recoveryURL, systemURL, journalURL] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
+    func testOldFailureCleanupConsumesRetainedJournalInventory() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let primaryURL = paths.audioCaptures.appendingPathComponent("old-timeout-mic.wav")
+        let recoveryURL = paths.audioCaptures.appendingPathComponent("old-timeout-recovery.wav")
+        let journalURL = paths.audioCaptures.appendingPathComponent("old-timeout-mic.recording.json")
+        for url in [primaryURL, recoveryURL] {
+            FileManager.default.createFile(atPath: url.path, contents: Data("owned".utf8))
+        }
+        let journal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        let session = journal.begin(primaryMicURL: primaryURL)
+        journal.recordSegments([
+            MicRecordingSegment(url: primaryURL),
+            MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.1),
+        ], session: session)
+        journal.markStopping(session: session)
+        journal.flush()
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedID,
+            micAudioURL: primaryURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+        manager.failedTranscriptions[0] = FailedTranscription(
+            id: failedID,
+            timestamp: Date(timeIntervalSinceNow: -10 * 24 * 60 * 60),
+            micAudioURL: primaryURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        )
+
+        manager.cleanupOldFailedTranscriptions(olderThanDays: 7)
+
+        XCTAssertTrue(manager.failedTranscriptions.isEmpty)
+        for url in [primaryURL, recoveryURL, journalURL] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
+    func testDeleteRechecksJournalContainmentForMutatedInMemoryEntry() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let safeMicURL = paths.audioCaptures.appendingPathComponent("safe-mic.wav")
+        FileManager.default.createFile(atPath: safeMicURL.path, contents: Data("safe".utf8))
+        let outsideDirectory = testRoot.appendingPathComponent("outside", isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+        let outsideMicURL = outsideDirectory.appendingPathComponent("private-mic.wav")
+        let outsideJournalURL = outsideDirectory.appendingPathComponent("private-mic.recording.json")
+        FileManager.default.createFile(atPath: outsideMicURL.path, contents: Data("private".utf8))
+        FileManager.default.createFile(atPath: outsideJournalURL.path, contents: Data("private".utf8))
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedID,
+            micAudioURL: safeMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        ))
+        manager.failedTranscriptions[0] = FailedTranscription(
+            id: failedID,
+            micAudioURL: outsideMicURL,
+            systemAudioURL: nil,
+            errorMessage: "Tampered in-memory path"
+        )
+
+        XCTAssertTrue(manager.deleteFailedTranscription(id: failedID))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideMicURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideJournalURL.path))
+    }
+
     func testDeleteFailedTranscriptionRollsBackWhenPersistenceFails() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

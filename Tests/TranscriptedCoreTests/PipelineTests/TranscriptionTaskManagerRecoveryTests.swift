@@ -67,7 +67,11 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             startedAt: Date()
         )
 
-        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 120,
+            retryRecentOnce: false
+        )
 
         XCTAssertEqual(recovered, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
@@ -160,6 +164,46 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let entry = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertEqual(entry.id, failedID)
         XCTAssertEqual(entry.micAudioURL.lastPathComponent, "meeting_timeout_mic_merged.wav")
+    }
+
+    func testRecoveryRescansFreshTimeoutJournalAfterLivenessWindow() async throws {
+        let (manager, paths) = makeManager()
+        let primaryURL = paths.audioCaptures.appendingPathComponent("meeting_fresh_mic.wav")
+        let recoveryURL = paths.audioCaptures.appendingPathComponent("meeting_fresh_recovery.wav")
+        let failedID = UUID()
+        try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
+        try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: primaryURL.lastPathComponent,
+            segments: [
+                .init(filename: primaryURL.lastPathComponent, gapBefore: 0),
+                .init(filename: recoveryURL.lastPathComponent, gapBefore: 0.1),
+            ],
+            startedAt: Date(),
+            state: .stopping
+        )
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: primaryURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedID,
+            archiveAudio: false,
+            clearRecordingJournalAfterPersistence: false
+        ))
+
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0.02,
+            retryRecentOnce: true
+        )
+
+        XCTAssertEqual(recovered, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+        let entry = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(entry.id, failedID)
+        XCTAssertEqual(entry.micAudioURL.lastPathComponent, "meeting_fresh_mic_merged.wav")
     }
 
     func testLateJournalWriteAfterRecoveryHandoffDoesNotDuplicateFailedEntry() async throws {

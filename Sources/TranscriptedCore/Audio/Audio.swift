@@ -830,10 +830,24 @@ public class Audio: ObservableObject, @unchecked Sendable {
         recordingSessionGeneration
     }
 
-    /// Explicit discard reached a durable user decision outside Core. Remove
-    /// the matching recovery journal so launch recovery cannot resurrect it.
-    public func clearRecordingJournal(forMicAudioURL micURL: URL) {
-        MeetingRecordingJournalStore.removeJournal(forMicAudioURL: micURL)
+    /// Explicit discard owns the current journal's complete segment inventory,
+    /// including the no-callback case where the returned URL tuple is empty.
+    public func discardCurrentRecordingArtifacts(micAudioURL: URL?, systemAudioURL: URL?) {
+        recordingJournal.discardCurrentRecordingArtifacts(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            allowedRoot: paths.audioCaptures
+        )
+    }
+
+    /// A late generation-tagged callback has no access to the current journal;
+    /// delete only its validated finalized files and matching on-disk journal.
+    public func discardFinalizedRecordingArtifacts(micAudioURL: URL?, systemAudioURL: URL?) {
+        MeetingRecordingJournalStore.discardRecordingArtifacts(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            allowedRoots: [paths.audioCaptures]
+        )
     }
 
     // Callback for when recording starts (used for pre-loading models)

@@ -53,6 +53,71 @@ final class MeetingRecordingJournalTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
     }
 
+    func testCurrentTerminalDiscardRemovesEveryJournalOwnedSegmentWithoutCallbackURLs() throws {
+        let audioDirectory = temporaryDirectory.appendingPathComponent("audio", isDirectory: true)
+        try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+        let paths = CoreStoragePaths(
+            transcripts: temporaryDirectory.appendingPathComponent("transcripts", isDirectory: true),
+            speakerDB: temporaryDirectory.appendingPathComponent("speakers.sqlite"),
+            statsDB: temporaryDirectory.appendingPathComponent("stats.sqlite"),
+            failedQueue: temporaryDirectory.appendingPathComponent("failed_transcriptions.json"),
+            speakerClips: temporaryDirectory.appendingPathComponent("speaker_clips", isDirectory: true),
+            audioCaptures: audioDirectory,
+            logs: temporaryDirectory.appendingPathComponent("logs", isDirectory: true)
+        )
+        let primaryURL = audioDirectory.appendingPathComponent("terminal_mic.wav")
+        let recoveryURL = audioDirectory.appendingPathComponent("terminal_mic_recovery.wav")
+        let systemURL = audioDirectory.appendingPathComponent("terminal_system.wav")
+        let journalURL = audioDirectory.appendingPathComponent("terminal_mic.recording.json")
+        for url in [primaryURL, recoveryURL, systemURL] {
+            FileManager.default.createFile(atPath: url.path, contents: Data("owned".utf8))
+        }
+
+        let audio = Audio(paths: paths)
+        let session = audio.recordingJournal.begin(primaryMicURL: primaryURL)
+        audio.recordingJournal.recordSegments([
+            MicRecordingSegment(url: primaryURL),
+            MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.1),
+        ], session: session)
+        audio.recordingJournal.recordSystemAudio(systemURL, session: session)
+        audio.recordingJournal.markStopping(session: session)
+        audio.recordingJournal.flush()
+
+        audio.discardCurrentRecordingArtifacts(micAudioURL: nil, systemAudioURL: nil)
+
+        for url in [primaryURL, recoveryURL, systemURL, journalURL] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
+    func testFinalizedTerminalDiscardRejectsOutOfRootAudioAndJournal() throws {
+        let audioDirectory = temporaryDirectory.appendingPathComponent("audio", isDirectory: true)
+        let outsideDirectory = temporaryDirectory.appendingPathComponent("outside", isDirectory: true)
+        try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+        let paths = CoreStoragePaths(
+            transcripts: temporaryDirectory.appendingPathComponent("transcripts", isDirectory: true),
+            speakerDB: temporaryDirectory.appendingPathComponent("speakers.sqlite"),
+            statsDB: temporaryDirectory.appendingPathComponent("stats.sqlite"),
+            failedQueue: temporaryDirectory.appendingPathComponent("failed_transcriptions.json"),
+            speakerClips: temporaryDirectory.appendingPathComponent("speaker_clips", isDirectory: true),
+            audioCaptures: audioDirectory,
+            logs: temporaryDirectory.appendingPathComponent("logs", isDirectory: true)
+        )
+        let outsideMicURL = outsideDirectory.appendingPathComponent("private_mic.wav")
+        let outsideJournalURL = outsideDirectory.appendingPathComponent("private_mic.recording.json")
+        FileManager.default.createFile(atPath: outsideMicURL.path, contents: Data("private".utf8))
+        FileManager.default.createFile(atPath: outsideJournalURL.path, contents: Data("private".utf8))
+
+        Audio(paths: paths).discardFinalizedRecordingArtifacts(
+            micAudioURL: outsideMicURL,
+            systemAudioURL: nil
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideMicURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideJournalURL.path))
+    }
+
     func testLateFinalizeFromPreviousSessionLeavesNewJournalUntouched() throws {
         let store = MeetingRecordingJournalStore(directory: temporaryDirectory)
         let micA = temporaryDirectory.appendingPathComponent("meeting_A_mic.wav")
@@ -95,7 +160,10 @@ final class MeetingRecordingJournalTests: XCTestCase {
         // Durable handoff (failed-queue entry persisted, or transcript saved)
         // removes the file through the static helper, which has no access to
         // this store instance's in-memory state.
-        MeetingRecordingJournalStore.removeJournal(forMicAudioURL: micURL)
+        MeetingRecordingJournalStore.removeJournal(
+            forMicAudioURL: micURL,
+            allowedRoots: [temporaryDirectory]
+        )
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
 
         // A late write from the same session must drop, not re-create the file.
@@ -129,7 +197,10 @@ final class MeetingRecordingJournalTests: XCTestCase {
         let session = audio.recordingJournal.begin(primaryMicURL: micURL)
         audio.recordingJournal.markFinalized(finalMicURL: micURL, session: session)
         audio.recordingJournal.flush()
-        MeetingRecordingJournalStore.removeJournal(forMicAudioURL: micURL)
+        MeetingRecordingJournalStore.removeJournal(
+            forMicAudioURL: micURL,
+            allowedRoots: [paths.audioCaptures]
+        )
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
 
         // A failed start (e.g. bridge start timeout) calls stop() without an
@@ -166,7 +237,8 @@ final class MeetingRecordingJournalTests: XCTestCase {
 
         // The durable handoff often sees the merged file, not the original.
         MeetingRecordingJournalStore.removeJournal(
-            forMicAudioURL: temporaryDirectory.appendingPathComponent("meeting_2026_mic_merged.wav")
+            forMicAudioURL: temporaryDirectory.appendingPathComponent("meeting_2026_mic_merged.wav"),
+            allowedRoots: [temporaryDirectory]
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
     }
@@ -176,7 +248,8 @@ final class MeetingRecordingJournalTests: XCTestCase {
         FileManager.default.createFile(atPath: journalURL.path, contents: Data())
 
         MeetingRecordingJournalStore.removeJournal(
-            forMicAudioURL: temporaryDirectory.appendingPathComponent("meeting_2026_mic.wav")
+            forMicAudioURL: temporaryDirectory.appendingPathComponent("meeting_2026_mic.wav"),
+            allowedRoots: [temporaryDirectory]
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
     }

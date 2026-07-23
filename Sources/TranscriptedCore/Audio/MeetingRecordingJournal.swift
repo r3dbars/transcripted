@@ -123,6 +123,29 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         }
     }
 
+    /// Applies an explicit terminal decision to the current recording. The
+    /// in-memory journal is the only complete inventory when stop never calls
+    /// back, so snapshot it before deleting every owned segment and the journal.
+    func discardCurrentRecordingArtifacts(
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        allowedRoot: URL
+    ) {
+        let snapshot = queue.sync {
+            let snapshot = (journalURL: self.journalURL, journal: self.journal)
+            self.journal = nil
+            self.journalURL = nil
+            self.activeSession = nil
+            return snapshot
+        }
+        Self.discardRecordingArtifacts(
+            journalURL: snapshot.journalURL,
+            journal: snapshot.journal,
+            additionalAudioURLs: [micAudioURL, systemAudioURL].compactMap { $0 },
+            allowedRoots: [allowedRoot]
+        )
+    }
+
     /// Blocks until queued writes have hit disk. Test seam.
     func flush() {
         queue.sync {}
@@ -189,18 +212,113 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         return try? decoder.decode(MeetingRecordingJournal.self, from: data)
     }
 
-    /// Removes the journal matching a meeting's mic audio file, tolerating the
-    /// `_merged` rename the segment merger applies.
-    static func removeJournal(forMicAudioURL micURL: URL) {
+    static func hasJournal(forMicAudioURL micURL: URL) -> Bool {
+        journalURLs(forMicAudioURL: micURL).contains {
+            FileManager.default.fileExists(atPath: $0.path)
+        }
+    }
+
+    /// Deletes a terminal recording's complete journal-owned inventory. The
+    /// supplied URLs are useful after a merge, while the journal contributes
+    /// every pre-merge recovery segment when completion never arrives.
+    static func discardRecordingArtifacts(
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        allowedRoots: [URL]
+    ) {
+        let canonicalRoots = allowedRoots.map { canonicalURL($0) }
+        let safeMicURL = micAudioURL.flatMap { url in
+            isContained(url, in: canonicalRoots) ? url : nil
+        }
+        let journalCandidates = safeMicURL.map { journalURLs(forMicAudioURL: $0) } ?? []
+        let journalURL = journalCandidates.first { candidate in
+            isContained(candidate, in: canonicalRoots)
+                && FileManager.default.fileExists(atPath: candidate.path)
+        }
+        discardRecordingArtifacts(
+            journalURL: journalURL,
+            journal: journalURL.flatMap(load(at:)),
+            additionalAudioURLs: [micAudioURL, systemAudioURL].compactMap { $0 },
+            allowedRoots: canonicalRoots
+        )
+    }
+
+    private static func discardRecordingArtifacts(
+        journalURL: URL?,
+        journal: MeetingRecordingJournal?,
+        additionalAudioURLs: [URL],
+        allowedRoots: [URL]
+    ) {
+        let canonicalRoots = allowedRoots.map { canonicalURL($0) }
+        var audioURLs = Set(additionalAudioURLs.filter { isContained($0, in: canonicalRoots) })
+
+        if let journalURL,
+           isContained(journalURL, in: canonicalRoots),
+           let journal {
+            let directory = journalURL.deletingLastPathComponent()
+            let filenames = [
+                journal.primaryMicFilename,
+                journal.systemAudioFilename,
+                journal.finalMicFilename,
+            ].compactMap { $0 } + journal.micSegments.map(\.filename)
+            for filename in filenames where isSafeFilename(filename) {
+                let url = directory.appendingPathComponent(filename)
+                if isContained(url, in: canonicalRoots) {
+                    audioURLs.insert(url)
+                }
+            }
+            if let primaryFilename = journal.primaryMicFilename,
+               isSafeFilename(primaryFilename) {
+                let primaryStem = (primaryFilename as NSString).deletingPathExtension
+                let mergedURL = directory.appendingPathComponent(primaryStem + "_merged.wav")
+                if isContained(mergedURL, in: canonicalRoots) {
+                    audioURLs.insert(mergedURL)
+                }
+            }
+        }
+
+        for url in audioURLs {
+            try? FileManager.default.removeItem(at: url)
+        }
+        if let journalURL, isContained(journalURL, in: canonicalRoots) {
+            try? FileManager.default.removeItem(at: journalURL)
+        }
+    }
+
+    private static func journalURLs(forMicAudioURL micURL: URL) -> [URL] {
         let directory = micURL.deletingLastPathComponent()
         let stem = micURL.deletingPathExtension().lastPathComponent
-        var candidates = [stem]
+        var stems = [stem]
         if stem.hasSuffix("_merged") {
-            candidates.append(String(stem.dropLast("_merged".count)))
+            stems.append(String(stem.dropLast("_merged".count)))
         }
-        for candidate in candidates {
-            let journalURL = directory.appendingPathComponent(candidate + filenameSuffix)
-            if FileManager.default.fileExists(atPath: journalURL.path) {
+        return stems.map { directory.appendingPathComponent($0 + filenameSuffix) }
+    }
+
+    private static func isSafeFilename(_ filename: String) -> Bool {
+        !filename.isEmpty && !filename.contains("/") && !filename.contains("..")
+    }
+
+    private static func isContained(_ url: URL, in canonicalRoots: [URL]) -> Bool {
+        let path = canonicalURL(url).path
+        return canonicalRoots.contains { root in
+            let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
+            return path.hasPrefix(rootPath)
+        }
+    }
+
+    private static func canonicalURL(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
+    /// Removes the journal matching a meeting's mic audio file, tolerating the
+    /// `_merged` rename the segment merger applies.
+    static func removeJournal(forMicAudioURL micURL: URL, allowedRoots: [URL]) {
+        let canonicalRoots = allowedRoots.map { canonicalURL($0) }
+        guard isContained(micURL, in: canonicalRoots) else { return }
+        for journalURL in journalURLs(forMicAudioURL: micURL) {
+            if isContained(journalURL, in: canonicalRoots),
+               FileManager.default.fileExists(atPath: journalURL.path) {
                 try? FileManager.default.removeItem(at: journalURL)
                 AppLogger.audio.debug("Removed recording journal after durable handoff", [
                     "file": journalURL.lastPathComponent

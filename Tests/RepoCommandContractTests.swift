@@ -2492,6 +2492,7 @@ func testRepoCommandContract() {
         // moved to FailedMeetingStore.swift (audit 2026-07-08 wave 2, W2-B).
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let storeContents = readRepoTextFile("Sources/Meeting/FailedMeetingStore.swift")
+        let taskManagerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
         let timeoutBlock = sourceSlice(
             controllerContents,
             from: "if stopResult.didTimeOut {",
@@ -2517,8 +2518,13 @@ func testRepoCommandContract() {
         assertTrue(
             timeoutPreserveBlock.contains("archiveAudio: false")
                 && timeoutPreserveBlock.contains("clearRecordingJournalAfterPersistence: false")
-                && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.audioForPersistence("),
-            "stop timeouts should keep scratch audio and its recovery journal while callback-first URLs create the durable row"
+                && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.audioForPersistence(")
+                && timeoutPreserveBlock.contains("scheduleTimedOutJournalRecovery(in:"),
+            "stop timeouts should keep scratch audio, then schedule journal recovery while callback-first URLs create the durable row"
+        )
+        assertTrue(
+            taskManagerContents.contains("MeetingRecordingJournalStore.hasJournal(forMicAudioURL: failed.micAudioURL)"),
+            "retry must wait until the retained journal's full segment inventory has been reconciled"
         )
         assertTrue(
             controllerContents.contains("refreshTimedOutFailedMeetingAudio(")
@@ -2541,7 +2547,26 @@ func testRepoCommandContract() {
         assertTrue(
             storeContents.contains("finishTimedOutFinalizationWithDiscard(id: id)")
                 && storeContents.contains("discardFinalizedFailedTranscriptionAudio("),
-            "delete and completed retry should turn any late finalization into bounded cleanup-only ownership"
+            "dismiss, delete, and completed retry should turn any late finalization into bounded cleanup-only ownership"
+        )
+        let dismissFailedMeetingBlock = sourceSlice(
+            storeContents,
+            from: "func dismissFailedMeeting(id: UUID) -> Bool {",
+            to: "func deleteFailedMeeting(id: UUID) -> Bool {"
+        )
+        assertTrue(
+            dismissFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
+            "a no-audio timeout dismissal should clean up a callback that finalizes after its row is removed"
+        )
+        let refreshFailedMeetingBlock = sourceSlice(
+            storeContents,
+            from: "func refreshFailedMeetings(",
+            to: "private func scheduleFailedAudioCompression("
+        )
+        assertTrue(
+            refreshFailedMeetingBlock.contains("timedOutFinalizationHandoff.persistedOwnershipIDs")
+                && refreshFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
+            "Core-side retry and speaker-finalization row removals should reach the canonical timeout cleanup seam"
         )
         assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),
@@ -2860,9 +2885,9 @@ func testRepoCommandContract() {
         )
         assertTrue(
             discardBlock.contains("stopAndAwaitFiles { [weak self] lateResult in")
-                && discardBlock.contains("discardFinalizedStopResult(lateResult)")
-                && bridgeContents.contains("audio.clearRecordingJournal(forMicAudioURL: micURL)"),
-            "an explicit discard timeout should also remove late finalized audio and its recovery journal"
+                && discardBlock.contains("audio.discardFinalizedRecordingArtifacts(")
+                && discardBlock.contains("audio.discardCurrentRecordingArtifacts("),
+            "explicit discard should consume the current journal inventory and safely clean any later finalized callback"
         )
     }
 
