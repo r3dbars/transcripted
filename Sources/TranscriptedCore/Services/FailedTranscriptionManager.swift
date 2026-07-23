@@ -424,6 +424,36 @@ public class FailedTranscriptionManager: ObservableObject {
         return didPersist
     }
 
+    /// Reuses the same safe merged-sibling reconciliation as launch recovery
+    /// before Retry treats a missing provisional segment as permanent loss.
+    /// This closes the short window after a full-fidelity merge deletes its
+    /// source segments but before the app-level late-completion handoff updates
+    /// the failed row.
+    public func healMissingAudioReferencesForRetry(id: UUID) -> FailedTranscription? {
+        guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
+            return nil
+        }
+
+        let existing = failedTranscriptions[index]
+        let reconciliation = reconcileAudioReferences(of: existing)
+        guard reconciliation.didHeal,
+              !reconciliation.hasUnavailableAudio,
+              let healed = reconciliation.entry else {
+            return existing
+        }
+
+        failedTranscriptions[index] = healed
+        let didPersist = saveFailedTranscriptions()
+        if !didPersist {
+            failedTranscriptions[index] = existing
+        }
+        AppLogger.pipeline.info("Reconciled failed transcription audio before retry", [
+            "id": id.uuidString,
+            "persisted": "\(didPersist)"
+        ])
+        return didPersist ? healed : existing
+    }
+
     /// Removes a failed transcription from the queue.
     @discardableResult
     public func removeFailedTranscription(id: UUID) -> Bool {

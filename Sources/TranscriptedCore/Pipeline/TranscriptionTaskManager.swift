@@ -1124,7 +1124,7 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        guard let failed = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
+        guard var failed = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
             AppLogger.pipeline.error("Failed transcription not found", ["failedId": "\(failedId)"])
             return false
         }
@@ -1132,6 +1132,11 @@ public class TranscriptionTaskManager: ObservableObject {
         guard failed.isRetryable else {
             AppLogger.pipeline.info("Skipping retry — failure is permanent", ["failedId": "\(failedId)", "error": failed.errorMessage])
             return false
+        }
+
+        if !failed.audioFilesExist(),
+           let reconciled = failedTranscriptionManager.healMissingAudioReferencesForRetry(id: failedId) {
+            failed = reconciled
         }
 
         guard failed.audioFilesExist() else {

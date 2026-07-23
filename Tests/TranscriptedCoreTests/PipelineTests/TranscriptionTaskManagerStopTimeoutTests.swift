@@ -275,6 +275,38 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: retainedAudioDirectory.path), "missing queue entry should not create retained audio")
     }
 
+    func testRetryHealsMergedSiblingBeforeRemovingMissingTimeoutRow() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered finalized meeting.")
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let deletedSegmentURL = scratchDirectory.appendingPathComponent("retry-window-mic.wav")
+        let mergedMicURL = scratchDirectory.appendingPathComponent("retry-window-mic_merged.wav")
+        let failedId = UUID()
+        try writeMonoWAV(to: mergedMicURL, duration: 2.5)
+
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: deletedSegmentURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedId,
+            meetingTitle: "Finalization Retry Window",
+            archiveAudio: false
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: deletedSegmentURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: mergedMicURL.path))
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedId,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        )
+
+        XCTAssertTrue(didRetry, "Retry should heal to the safe merged sibling instead of deleting the failed row")
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(manager.displayStatus, .transcriptSaved)
+        XCTAssertEqual(manager.lastSavedTitle, "Finalization Retry Window")
+    }
+
     func testLateStopTimeoutFinalizationRollsBackRetainedArchiveWhenPersistenceFails() throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
