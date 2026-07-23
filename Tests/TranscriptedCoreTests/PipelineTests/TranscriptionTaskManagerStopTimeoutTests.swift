@@ -252,6 +252,8 @@ extension TranscriptionTaskManagerMetadataTests {
         let second = try XCTUnwrap(
             manager.failedTranscriptionManager.failedTranscriptions.first { $0.id == secondID }
         )
+        XCTAssertEqual(first.micAudioURL.lastPathComponent, "microphone_placeholder_\(firstID.uuidString).wav")
+        XCTAssertEqual(second.micAudioURL.lastPathComponent, "microphone_placeholder_\(secondID.uuidString).wav")
         XCTAssertNotEqual(first.micAudioURL, second.micAudioURL)
 
         XCTAssertTrue(manager.failedTranscriptionManager.deleteFailedTranscription(id: firstID))

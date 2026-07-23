@@ -241,7 +241,7 @@ extension TranscriptionTaskManagerMetadataTests {
 
         XCTAssertTrue(didQueue)
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
-        XCTAssertTrue(failed.micAudioURL.lastPathComponent.contains("microphone_placeholder"))
+        XCTAssertEqual(failed.micAudioURL.lastPathComponent, "microphone_placeholder.wav")
         XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
         XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
         XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))

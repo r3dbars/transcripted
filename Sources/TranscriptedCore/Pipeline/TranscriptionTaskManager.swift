@@ -1283,8 +1283,11 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         let placeholderDirectory = retainedAudio?.directory ?? failedSystemURL.deletingLastPathComponent()
+        let placeholderStem = retainedAudio == nil
+            ? "microphone_placeholder_\(taskId.uuidString)"
+            : "microphone_placeholder"
         let placeholderURL = placeholderDirectory
-            .appendingPathComponent("microphone_placeholder_\(taskId.uuidString)")
+            .appendingPathComponent(placeholderStem)
             .appendingPathExtension("wav")
         do {
             try FileManager.default.createDirectory(
