@@ -6,6 +6,17 @@ import SQLite3
 @available(macOS 14.0, *)
 public final class StatsDatabase {
 
+    private enum DatabaseWriteError: Error, CustomStringConvertible {
+        case sqlite(operation: String, message: String)
+
+        var description: String {
+            switch self {
+            case let .sqlite(operation, message):
+                return "SQLite \(operation) failed: \(message)"
+            }
+        }
+    }
+
     public static let shared = StatsDatabase()
 
     var db: OpaquePointer?
@@ -129,22 +140,51 @@ public final class StatsDatabase {
     }
 
     /// Execute multiple writes atomically — if the app crashes mid-block, all changes are rolled back.
-    func transaction(_ block: () throws -> Void) rethrows {
-        // Security: check sqlite3_exec return values so transaction failures don't silently
-        // leave the database in an inconsistent state (missing BEGIN/COMMIT/ROLLBACK).
-        if sqlite3_exec(db, "BEGIN EXCLUSIVE", nil, nil, nil) != SQLITE_OK {
-            AppLogger.stats.error("Transaction BEGIN EXCLUSIVE failed", ["sqlite_error": dbErrorMessage()])
+    func transaction(_ block: () throws -> Void) throws {
+        guard sqlite3_exec(db, "BEGIN EXCLUSIVE", nil, nil, nil) == SQLITE_OK else {
+            let message = dbErrorMessage()
+            AppLogger.stats.error("Transaction BEGIN EXCLUSIVE failed", ["sqlite_error": message])
+            throw DatabaseWriteError.sqlite(operation: "BEGIN EXCLUSIVE", message: message)
         }
+
         do {
             try block()
-            if sqlite3_exec(db, "COMMIT", nil, nil, nil) != SQLITE_OK {
-                AppLogger.stats.error("Transaction COMMIT failed", ["sqlite_error": dbErrorMessage()])
+            guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+                let message = dbErrorMessage()
+                AppLogger.stats.error("Transaction COMMIT failed", ["sqlite_error": message])
+                throw DatabaseWriteError.sqlite(operation: "COMMIT", message: message)
             }
         } catch {
-            if sqlite3_exec(db, "ROLLBACK", nil, nil, nil) != SQLITE_OK {
-                AppLogger.stats.error("Transaction ROLLBACK failed", ["sqlite_error": dbErrorMessage()])
-            }
+            rollbackAfterFailure()
             throw error
+        }
+    }
+
+    private func rollbackAfterFailure() {
+        guard let activeDB = db, sqlite3_get_autocommit(activeDB) == 0 else {
+            return
+        }
+        guard sqlite3_exec(activeDB, "ROLLBACK", nil, nil, nil) != SQLITE_OK else {
+            return
+        }
+
+        let rollbackError = dbErrorMessage()
+        AppLogger.stats.error("Transaction ROLLBACK failed", ["sqlite_error": rollbackError])
+
+        // Some SQLite failures roll back automatically. Quarantine only when SQLite confirms
+        // this handle still owns an open transaction; reusing it could expose partial state or
+        // make every later BEGIN fail. Closing the handle discards the uncommitted transaction.
+        guard sqlite3_get_autocommit(activeDB) == 0 else {
+            return
+        }
+        db = nil
+        isDatabaseOpen = false
+        let closeResult = sqlite3_close_v2(activeDB)
+        if closeResult != SQLITE_OK {
+            AppLogger.stats.error(
+                "Failed to close quarantined stats database connection",
+                ["sqlite_result": "\(closeResult)"]
+            )
         }
     }
 
@@ -219,28 +259,36 @@ public final class StatsDatabase {
             return
         }
 
-        // Wrap INSERT + daily activity update in a transaction so both succeed or neither does
-        transaction {
-            let existing = recordingMetadataImpl(id: metadata.id)
-                ?? recordingMetadataImpl(transcriptPath: metadata.transcriptPath)
-            let storedMetadata = RecordingMetadata(
-                id: existing?.id ?? metadata.id,
-                date: metadata.date,
-                durationSeconds: metadata.durationSeconds,
-                wordCount: metadata.wordCount,
-                speakerCount: metadata.speakerCount,
-                processingTimeMs: metadata.processingTimeMs,
-                transcriptPath: metadata.transcriptPath,
-                title: metadata.title
-            )
-            let sql = """
-            INSERT OR REPLACE INTO recordings (id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """
+        // Wrap INSERT + daily activity update in a transaction so both succeed or neither does.
+        do {
+            try transaction {
+                let existing = try recordingMetadataImpl(id: metadata.id)
+                    ?? recordingMetadataImpl(transcriptPath: metadata.transcriptPath)
+                let storedMetadata = RecordingMetadata(
+                    id: existing?.id ?? metadata.id,
+                    date: metadata.date,
+                    durationSeconds: metadata.durationSeconds,
+                    wordCount: metadata.wordCount,
+                    speakerCount: metadata.speakerCount,
+                    processingTimeMs: metadata.processingTimeMs,
+                    transcriptPath: metadata.transcriptPath,
+                    title: metadata.title
+                )
+                let sql = """
+                INSERT OR REPLACE INTO recordings (id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """
 
-            var statement: OpaquePointer?
+                var statement: OpaquePointer?
+                guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+                      let statement else {
+                    throw DatabaseWriteError.sqlite(
+                        operation: "prepare recordSession insert",
+                        message: dbErrorMessage()
+                    )
+                }
+                defer { sqlite3_finalize(statement) }
 
-            if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
                 let dateFormatter = DateFormatter()
                 dateFormatter.locale = Locale(identifier: "en_US_POSIX")
                 dateFormatter.dateFormat = "yyyy-MM-dd"
@@ -265,21 +313,22 @@ public final class StatsDatabase {
                 sqlite3_bind_text(statement, 9, ((storedMetadata.title ?? "") as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 sqlite3_bind_text(statement, 10, (createdAt as NSString).utf8String, -1, SQLITE_TRANSIENT)
 
-                if sqlite3_step(statement) != SQLITE_DONE {
-                    AppLogger.stats.error("Failed to insert recording", ["sqlite_error": dbErrorMessage()])
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw DatabaseWriteError.sqlite(
+                        operation: "insert recording",
+                        message: dbErrorMessage()
+                    )
                 }
-            } else {
-                AppLogger.stats.error("Failed to prepare recordSession insert", ["sqlite_error": dbErrorMessage()])
+
+                // Update daily activity (inside same transaction)
+                try updateDailyActivityForSessionChange(from: existing, to: storedMetadata)
             }
-
-            sqlite3_finalize(statement)
-
-            // Update daily activity (inside same transaction)
-            updateDailyActivityForSessionChange(from: existing, to: storedMetadata)
+        } catch {
+            AppLogger.stats.error("recordSession transaction failed", ["error": String(describing: error)])
         }
     }
 
-    private func recordingMetadataImpl(id: String) -> RecordingMetadata? {
+    private func recordingMetadataImpl(id: String) throws -> RecordingMetadata? {
         let sql = """
         SELECT id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title
         FROM recordings
@@ -288,19 +337,28 @@ public final class StatsDatabase {
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            AppLogger.stats.error("Failed to prepare recording lookup", ["sqlite_error": dbErrorMessage()])
-            return nil
+            throw DatabaseWriteError.sqlite(
+                operation: "prepare recording lookup",
+                message: dbErrorMessage()
+            )
         }
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, (id as NSString).utf8String, -1, SQLITE_TRANSIENT)
-        guard sqlite3_step(statement) == SQLITE_ROW else {
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW:
+            return recordingMetadataFromRow(statement)
+        case SQLITE_DONE:
             return nil
+        default:
+            throw DatabaseWriteError.sqlite(
+                operation: "step recording lookup",
+                message: dbErrorMessage()
+            )
         }
-        return recordingMetadataFromRow(statement)
     }
 
-    private func recordingMetadataImpl(transcriptPath: String?) -> RecordingMetadata? {
+    private func recordingMetadataImpl(transcriptPath: String?) throws -> RecordingMetadata? {
         guard let transcriptPath, !transcriptPath.isEmpty else {
             return nil
         }
@@ -313,16 +371,25 @@ public final class StatsDatabase {
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            AppLogger.stats.error("Failed to prepare recording path lookup", ["sqlite_error": dbErrorMessage()])
-            return nil
+            throw DatabaseWriteError.sqlite(
+                operation: "prepare recording path lookup",
+                message: dbErrorMessage()
+            )
         }
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, (transcriptPath as NSString).utf8String, -1, SQLITE_TRANSIENT)
-        guard sqlite3_step(statement) == SQLITE_ROW else {
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW:
+            return recordingMetadataFromRow(statement)
+        case SQLITE_DONE:
             return nil
+        default:
+            throw DatabaseWriteError.sqlite(
+                operation: "step recording path lookup",
+                message: dbErrorMessage()
+            )
         }
-        return recordingMetadataFromRow(statement)
     }
 
     /// Get all recordings (thread-safe, sync)
@@ -421,9 +488,9 @@ public final class StatsDatabase {
     private func updateDailyActivityForSessionChange(
         from existing: RecordingMetadata?,
         to metadata: RecordingMetadata
-    ) {
+    ) throws {
         guard let existing else {
-            updateDailyActivityImpl(
+            try updateDailyActivityImpl(
                 for: metadata.date,
                 recordingCountDelta: 1,
                 durationDelta: metadata.durationSeconds
@@ -432,18 +499,18 @@ public final class StatsDatabase {
         }
 
         if dailyActivityDateString(for: existing.date) == dailyActivityDateString(for: metadata.date) {
-            updateDailyActivityImpl(
+            try updateDailyActivityImpl(
                 for: metadata.date,
                 recordingCountDelta: 0,
                 durationDelta: metadata.durationSeconds - existing.durationSeconds
             )
         } else {
-            updateDailyActivityImpl(
+            try updateDailyActivityImpl(
                 for: existing.date,
                 recordingCountDelta: -1,
                 durationDelta: -existing.durationSeconds
             )
-            updateDailyActivityImpl(
+            try updateDailyActivityImpl(
                 for: metadata.date,
                 recordingCountDelta: 1,
                 durationDelta: metadata.durationSeconds
@@ -451,7 +518,7 @@ public final class StatsDatabase {
         }
     }
 
-    func updateDailyActivityImpl(for date: Date, recordingCountDelta: Int, durationDelta: Int) {
+    func updateDailyActivityImpl(for date: Date, recordingCountDelta: Int, durationDelta: Int) throws {
         guard recordingCountDelta != 0 || durationDelta != 0 else { return }
 
         let dateFormatter = DateFormatter()
@@ -470,21 +537,27 @@ public final class StatsDatabase {
 
         var statement: OpaquePointer?
 
-        if sqlite3_prepare_v2(db, updateSQL, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (dateStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_int(statement, 2, Int32(recordingCountDelta))
-            sqlite3_bind_int(statement, 3, Int32(durationDelta))
-            sqlite3_bind_int(statement, 4, Int32(recordingCountDelta))
-            sqlite3_bind_int(statement, 5, Int32(durationDelta))
-
-            if sqlite3_step(statement) != SQLITE_DONE {
-                AppLogger.stats.error("Failed to update daily activity", ["sqlite_error": dbErrorMessage()])
-            }
-        } else {
-            AppLogger.stats.error("Failed to prepare updateDailyActivity", ["sqlite_error": dbErrorMessage()])
+        guard sqlite3_prepare_v2(db, updateSQL, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw DatabaseWriteError.sqlite(
+                operation: "prepare daily activity update",
+                message: dbErrorMessage()
+            )
         }
+        defer { sqlite3_finalize(statement) }
 
-        sqlite3_finalize(statement)
+        sqlite3_bind_text(statement, 1, (dateStr as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 2, Int32(recordingCountDelta))
+        sqlite3_bind_int(statement, 3, Int32(durationDelta))
+        sqlite3_bind_int(statement, 4, Int32(recordingCountDelta))
+        sqlite3_bind_int(statement, 5, Int32(durationDelta))
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw DatabaseWriteError.sqlite(
+                operation: "update daily activity",
+                message: dbErrorMessage()
+            )
+        }
     }
 
     private func dailyActivityDateString(for date: Date) -> String {

@@ -3368,8 +3368,9 @@ func testRepoCommandContract() {
         let statsContents = readRepoTextFile("Sources/TranscriptedCore/Stats/StatsDatabase.swift")
 
         assertTrue(
-            statsContents.contains("let existing = recordingMetadataImpl(id: metadata.id)\n                ?? recordingMetadataImpl(transcriptPath: metadata.transcriptPath)")
-                && statsContents.contains("updateDailyActivityForSessionChange(from: existing, to: storedMetadata)"),
+            statsContents.contains("let existing = try recordingMetadataImpl(id: metadata.id)")
+                && statsContents.contains("recordingMetadataImpl(transcriptPath: metadata.transcriptPath)")
+                && statsContents.contains("try updateDailyActivityForSessionChange(from: existing, to: storedMetadata)"),
             "stats recording should detect same-ID and same-path replacements before updating daily totals"
         )
         assertTrue(
