@@ -141,6 +141,54 @@ final class StatsDatabaseTests: XCTestCase {
         XCTAssertTrue(database.getAllRecordings().isEmpty)
         XCTAssertNil(dailyActivity(at: databaseURL, date: "2026-04-08"))
     }
+
+    func testRecordingLookupErrorAbortsReplacement() {
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedCoreStatsTests-\(UUID().uuidString).sqlite")
+        let database = StatsDatabase(path: databaseURL.path)
+        let date = Calendar(identifier: .gregorian).date(
+            from: DateComponents(year: 2026, month: 4, day: 9, hour: 9, minute: 0)
+        )!
+        defer {
+            _ = database.queue.sync { sqlite3_set_authorizer(database.db, nil, nil) }
+            for suffix in ["", "-shm", "-wal"] {
+                try? FileManager.default.removeItem(at: URL(fileURLWithPath: databaseURL.path + suffix))
+            }
+        }
+
+        database.recordSession(RecordingMetadata(
+            id: "lookup-error",
+            date: date,
+            durationSeconds: 60
+        ))
+        database.queue.sync {}
+
+        let authorizerResult = database.queue.sync {
+            sqlite3_set_authorizer(database.db, { _, action, tableName, _, _, _ in
+                guard action == SQLITE_READ,
+                      let tableName,
+                      String(cString: tableName) == "recordings" else {
+                    return SQLITE_OK
+                }
+                return SQLITE_DENY
+            }, nil)
+        }
+        XCTAssertEqual(authorizerResult, SQLITE_OK)
+
+        database.recordSession(RecordingMetadata(
+            id: "lookup-error",
+            date: date,
+            durationSeconds: 95
+        ))
+        database.queue.sync {}
+        _ = database.queue.sync { sqlite3_set_authorizer(database.db, nil, nil) }
+
+        XCTAssertEqual(database.getAllRecordings().map(\.durationSeconds), [60])
+        XCTAssertEqual(
+            dailyActivity(at: databaseURL, date: "2026-04-09"),
+            DailyActivity(count: 1, duration: 60)
+        )
+    }
 }
 
 private struct DailyActivity: Equatable {

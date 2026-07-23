@@ -236,7 +236,7 @@ public final class StatsDatabase {
         // Wrap INSERT + daily activity update in a transaction so both succeed or neither does.
         do {
             try transaction {
-                let existing = recordingMetadataImpl(id: metadata.id)
+                let existing = try recordingMetadataImpl(id: metadata.id)
                     ?? recordingMetadataImpl(transcriptPath: metadata.transcriptPath)
                 let storedMetadata = RecordingMetadata(
                     id: existing?.id ?? metadata.id,
@@ -302,7 +302,7 @@ public final class StatsDatabase {
         }
     }
 
-    private func recordingMetadataImpl(id: String) -> RecordingMetadata? {
+    private func recordingMetadataImpl(id: String) throws -> RecordingMetadata? {
         let sql = """
         SELECT id, date, time, duration_seconds, word_count, speaker_count, processing_time_ms, transcript_path, title
         FROM recordings
@@ -311,19 +311,28 @@ public final class StatsDatabase {
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            AppLogger.stats.error("Failed to prepare recording lookup", ["sqlite_error": dbErrorMessage()])
-            return nil
+            throw DatabaseWriteError.sqlite(
+                operation: "prepare recording lookup",
+                message: dbErrorMessage()
+            )
         }
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, (id as NSString).utf8String, -1, SQLITE_TRANSIENT)
-        guard sqlite3_step(statement) == SQLITE_ROW else {
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW:
+            return recordingMetadataFromRow(statement)
+        case SQLITE_DONE:
             return nil
+        default:
+            throw DatabaseWriteError.sqlite(
+                operation: "step recording lookup",
+                message: dbErrorMessage()
+            )
         }
-        return recordingMetadataFromRow(statement)
     }
 
-    private func recordingMetadataImpl(transcriptPath: String?) -> RecordingMetadata? {
+    private func recordingMetadataImpl(transcriptPath: String?) throws -> RecordingMetadata? {
         guard let transcriptPath, !transcriptPath.isEmpty else {
             return nil
         }
@@ -336,16 +345,25 @@ public final class StatsDatabase {
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            AppLogger.stats.error("Failed to prepare recording path lookup", ["sqlite_error": dbErrorMessage()])
-            return nil
+            throw DatabaseWriteError.sqlite(
+                operation: "prepare recording path lookup",
+                message: dbErrorMessage()
+            )
         }
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, (transcriptPath as NSString).utf8String, -1, SQLITE_TRANSIENT)
-        guard sqlite3_step(statement) == SQLITE_ROW else {
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW:
+            return recordingMetadataFromRow(statement)
+        case SQLITE_DONE:
             return nil
+        default:
+            throw DatabaseWriteError.sqlite(
+                operation: "step recording path lookup",
+                message: dbErrorMessage()
+            )
         }
-        return recordingMetadataFromRow(statement)
     }
 
     /// Get all recordings (thread-safe, sync)
