@@ -324,10 +324,14 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         } ?? false
         if hasMicJournal { return true }
         guard let systemAudioURL else { return false }
-        return !journalURLs(
+        let lookup = systemJournalLookup(
             forSystemAudioURL: systemAudioURL,
             canonicalRoots: canonicalRoots
-        ).isEmpty
+        )
+        // A journal that cannot be safely inspected may still own mic
+        // segments absent from the failed row. Treat uncertain ownership as
+        // durable so bounded callback fallback cannot discard around it.
+        return lookup.hasUnverifiableCandidate || !lookup.matchingURLs.isEmpty
     }
 
     /// Deletes a terminal recording's complete journal-owned inventory. The
@@ -358,10 +362,15 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         }
         let systemJournalCandidates: [URL]
         if existingJournalCandidates.isEmpty, let safeSystemURL {
-            systemJournalCandidates = journalURLs(
+            let lookup = systemJournalLookup(
                 forSystemAudioURL: safeSystemURL,
                 canonicalRoots: canonicalRoots
             )
+            // An unsafe or unreadable system-keyed candidate may name audio
+            // the failed row cannot see. Keep the row, marker, and files
+            // instead of reporting a partial terminal deletion as complete.
+            guard !lookup.hasUnverifiableCandidate else { return false }
+            systemJournalCandidates = lookup.matchingURLs
             // A system filename must identify exactly one recording. Never
             // guess across ambiguous journals during terminal deletion.
             guard systemJournalCandidates.count <= 1 else { return false }
@@ -490,19 +499,32 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         return stems.map { directory.appendingPathComponent($0 + filenameSuffix) }
     }
 
-    private static func journalURLs(
+    private struct SystemJournalLookup {
+        var matchingURLs: [URL] = []
+        var hasUnverifiableCandidate = false
+    }
+
+    private static func systemJournalLookup(
         forSystemAudioURL systemAudioURL: URL,
         canonicalRoots: [URL]
-    ) -> [URL] {
+    ) -> SystemJournalLookup {
         guard isContained(systemAudioURL, in: canonicalRoots),
               isSafeFilename(systemAudioURL.lastPathComponent) else {
-            return []
+            return SystemJournalLookup()
         }
-        return journalURLs(in: systemAudioURL.deletingLastPathComponent()).filter { candidate in
-            isContained(candidate, in: canonicalRoots)
-                && !isSymbolicLink(at: candidate)
-                && load(at: candidate)?.systemAudioFilename == systemAudioURL.lastPathComponent
+        var lookup = SystemJournalLookup()
+        for candidate in journalURLs(in: systemAudioURL.deletingLastPathComponent()) {
+            guard isContained(candidate, in: canonicalRoots),
+                  !isSymbolicLink(at: candidate),
+                  let journal = load(at: candidate) else {
+                lookup.hasUnverifiableCandidate = true
+                continue
+            }
+            if journal.systemAudioFilename == systemAudioURL.lastPathComponent {
+                lookup.matchingURLs.append(candidate)
+            }
         }
+        return lookup
     }
 
     private static func isSafeFilename(_ filename: String) -> Bool {
