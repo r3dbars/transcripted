@@ -15,6 +15,8 @@ func testParakeetAudioOwnershipSourceContract() {
               let startFailureEnd = source.range(of: "/// Tracks rebuild frequency", range: startFailureStart.upperBound..<source.endIndex),
               let rebuildStart = source.range(of: "func rebuildAudioEngine(reason: String) async"),
               let rebuildEnd = source.range(of: "func abandonBlockedAudioEngine", range: rebuildStart.upperBound..<source.endIndex),
+              let zombieResetStart = source.range(of: "private func recreateAudioEngineForZombieRecovery("),
+              let zombieResetEnd = source.range(of: "func currentAudioGraphOwnerToken()", range: zombieResetStart.upperBound..<source.endIndex),
               let failedStartCleanupStart = source.range(of: "func resetAfterFailedRecordingStart() async"),
               let failedStartCleanupEnd = source.range(of: "func abandonBlockedRecordingStart", range: failedStartCleanupStart.upperBound..<source.endIndex),
               let idleCleanupStart = source.range(of: "private func releaseIdleAudioHardware("),
@@ -26,6 +28,7 @@ func testParakeetAudioOwnershipSourceContract() {
         let removeTap = String(source[removeTapStart.lowerBound..<removeTapEnd.lowerBound])
         let startFailure = String(source[startFailureStart.lowerBound..<startFailureEnd.lowerBound])
         let rebuild = String(source[rebuildStart.lowerBound..<rebuildEnd.lowerBound])
+        let zombieReset = String(source[zombieResetStart.lowerBound..<zombieResetEnd.lowerBound])
         let failedStartCleanup = String(source[failedStartCleanupStart.lowerBound..<failedStartCleanupEnd.lowerBound])
         let idleCleanup = String(source[idleCleanupStart.lowerBound..<idleCleanupEnd.lowerBound])
 
@@ -73,15 +76,14 @@ func testParakeetAudioOwnershipSourceContract() {
             helper: "rebuildAudioEngine"
         )
         assertTrue(
-            rebuild.contains(
-                """
-                if rebuildOwner.matchesEngine(audioEngine), !isShuttingDown {
-                                installAudioEngineConfigObserverIfNeeded()
-                            }
-                            return nil
-                """
-            ),
-            "a generation-only rebuild cancellation should restore the current engine's configuration observer"
+            rebuild.contains("defer {\n            restoreAudioEngineConfigObserverIfCurrent(rebuildOwner)\n        }")
+                && rebuild.contains("removeAudioEngineConfigObserver()\n        audioEngine = AVAudioEngine()"),
+            "rebuild should restore a stale same-engine observer and clear it before binding a replacement"
+        )
+        assertTrue(
+            zombieReset.contains("defer {\n            restoreAudioEngineConfigObserverIfCurrent(resetOwner)\n        }")
+                && zombieReset.contains("removeAudioEngineConfigObserver()\n        audioEngine = AVAudioEngine()"),
+            "zombie reset should restore observers on every stale exit and rebind successful replacements"
         )
         assertTrue(
             failedStartCleanup.contains("let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()")

@@ -1623,21 +1623,18 @@ class ParakeetEngine: ObservableObject {
         audioGraphGeneration += 1
         let rebuildOwner = currentAudioGraphOwnerToken()
         removeAudioEngineConfigObserver()
+        defer {
+            restoreAudioEngineConfigObserverIfCurrent(rebuildOwner)
+        }
         let retiredEngine = audioEngine
         await runAudioEngineWork { audioEngine in
             Self.safelyRemoveInputTap(on: audioEngine)
             audioEngine.reset()
         }
-        guard ownsAudioGraph(rebuildOwner) else {
-            // A stop may invalidate only the logical generation while leaving
-            // this engine current. Restore the observer removed above so later
-            // route changes are still detected. A replacement engine owns its
-            // own observer installation.
-            if rebuildOwner.matchesEngine(audioEngine), !isShuttingDown {
-                installAudioEngineConfigObserverIfNeeded()
-            }
-            return nil
-        }
+        guard ownsAudioGraph(rebuildOwner) else { return nil }
+        // A stale overlapping rebuild may have restored an observer for the
+        // engine being retired. Clear it before binding the replacement.
+        removeAudioEngineConfigObserver()
         audioEngine = AVAudioEngine()
         ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: reason)
         inputTapInstalled = false
@@ -2626,6 +2623,9 @@ class ParakeetEngine: ObservableObject {
         let resetOwner = currentAudioGraphOwnerToken()
         let resetQueueOwner = currentAudioEngineQueueOwnerToken()
         removeAudioEngineConfigObserver()
+        defer {
+            restoreAudioEngineConfigObserverIfCurrent(resetOwner)
+        }
         let retiredEngine = audioEngine
         audioEngineWorkOwnership.begin(owner: resetQueueOwner, phase: .zombieReset)
 
@@ -2666,6 +2666,7 @@ class ParakeetEngine: ObservableObject {
         didReceiveAudioSamples = false
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
+        removeAudioEngineConfigObserver()
         audioEngine = AVAudioEngine()
         ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: "zombie_engine_recovery")
         if !isShuttingDown {

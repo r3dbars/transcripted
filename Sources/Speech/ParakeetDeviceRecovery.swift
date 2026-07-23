@@ -40,6 +40,13 @@ extension ParakeetEngine {
         configChangeObserver = nil
     }
 
+    func restoreAudioEngineConfigObserverIfCurrent(
+        _ owner: ParakeetAudioGraphOwnerToken
+    ) {
+        guard owner.matchesEngine(audioEngine), !isShuttingDown else { return }
+        installAudioEngineConfigObserverIfNeeded()
+    }
+
     func installInputDeviceChangeListenerIfNeeded() {
         guard inputDeviceChangeListener == nil else { return }
 
