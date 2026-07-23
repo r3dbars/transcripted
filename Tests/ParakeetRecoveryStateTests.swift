@@ -206,6 +206,50 @@ func testParakeetRecoveryState() async {
         assertTrue(state.isStale(generation: staleGeneration), "reset should supersede in-flight recovery tasks")
     }
 
+    runSuite("ParakeetRecoveryState.cancelRecovery — stop cancels only its matching recovery") {
+        var state = ParakeetRecoveryState()
+        let recoveryGeneration = state.beginConfigChange()
+
+        assertTrue(
+            state.cancelRecovery(generation: recoveryGeneration),
+            "the stop that observed the current recovery should consume it"
+        )
+        assertTrue(state.canStartRecording, "cancelling recovery should unblock the next recording start")
+        assertTrue(
+            state.isStale(generation: recoveryGeneration),
+            "the suspended cleanup must become stale before it can resume"
+        )
+    }
+
+    runSuite("ParakeetRecoveryState.cancelRecovery — stale cleanup preserves a successor owner") {
+        var state = ParakeetRecoveryState()
+        let staleGeneration = state.beginConfigChange()
+        let successorGeneration = state.beginConfigChange()
+
+        assertFalse(
+            state.cancelRecovery(generation: staleGeneration),
+            "a cleanup from the retired generation must not cancel its successor"
+        )
+        assertTrue(state.isRecovering, "the successor recovery should remain active")
+        assertFalse(state.canStartRecording, "the successor must still gate recording starts")
+        assertTrue(
+            state.finishRecovery(success: true, generation: successorGeneration),
+            "the successor should retain the right to finish"
+        )
+    }
+
+    runSuite("ParakeetRecoveryState.cancelRecovery — late timeout cannot poison a cancelled stop") {
+        var state = ParakeetRecoveryState()
+        let recoveryGeneration = state.beginConfigChange()
+
+        assertTrue(state.cancelRecovery(generation: recoveryGeneration), "matching stop should cancel recovery")
+        assertFalse(
+            state.timeoutRecovery(generation: recoveryGeneration),
+            "the old timeout must not make the next start unready"
+        )
+        assertTrue(state.canStartRecording, "a cancelled timeout should leave the next start available")
+    }
+
     runSuite("ParakeetRouteTransitionDebounceState emits one stable categorical transition") {
         let builtIn = categoricalRoute(input: "built_in", output: "built_in", shape: "built_in_to_built_in")
         let bluetooth = categoricalRoute(input: "bluetooth", output: "bluetooth", shape: "bluetooth_to_bluetooth")

@@ -949,6 +949,46 @@ func testParakeetStartRecordingFailurePolicy() {
         assertFalse(invalidationWindow.contains("await "), "the stale zombie task must not resume between graph invalidation and cancellation")
     }
 
+    runSuite("ParakeetEngine stop consumes matching config recovery before suspended cleanup resumes") {
+        let engineSource = readParakeetEngineSource()
+        let recoverySource = readParakeetDeviceRecoverySource()
+        guard let stopStart = engineSource.range(of: "func stopRecording() async"),
+              let stopEnd = engineSource.range(
+                of: "// MARK: - Recorded Audio Buffering",
+                range: stopStart.upperBound..<engineSource.endIndex
+              ),
+              let handlerStart = recoverySource.range(of: "private func handleAudioConfigChange() async"),
+              let handlerEnd = recoverySource.range(
+                of: "private func recordStableRouteChangeAnalytics",
+                range: handlerStart.upperBound..<recoverySource.endIndex
+              ) else {
+            assertTrue(false, "test should find stop and config-recovery bodies")
+            return
+        }
+
+        let stopBody = String(engineSource[stopStart.lowerBound..<stopEnd.lowerBound])
+        let handlerBody = String(recoverySource[handlerStart.lowerBound..<handlerEnd.lowerBound])
+        guard let generationCapture = stopBody.range(of: "let configRecoveryGeneration = recoveryState.isRecovering"),
+              let graphInvalidation = stopBody.range(of: "audioGraphGeneration += 1", range: generationCapture.upperBound..<stopBody.endIndex),
+              let cancelRecovery = stopBody.range(
+                of: "cancelConfigRecoveryIfCurrent(generation: configRecoveryGeneration)",
+                range: graphInvalidation.upperBound..<stopBody.endIndex
+              ),
+              let stopAwait = stopBody.range(of: "await removeRecordingTap()", range: cancelRecovery.upperBound..<stopBody.endIndex) else {
+            assertTrue(false, "active stop should synchronously invalidate and cancel config recovery before audio cleanup")
+            return
+        }
+
+        let stopCancellationWindow = String(stopBody[generationCapture.lowerBound..<cancelRecovery.upperBound])
+        assertTrue(graphInvalidation.lowerBound < cancelRecovery.lowerBound, "stop must retire the audio graph before cancelling its recovery")
+        assertTrue(cancelRecovery.lowerBound < stopAwait.lowerBound, "stop must cancel recovery before suspended HAL cleanup")
+        assertFalse(stopCancellationWindow.contains("await "), "recovery cancellation must be atomic on MainActor")
+        assertTrue(
+            handlerBody.contains("cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)"),
+            "every stale config-cleanup exit should consume only its matching recovery generation"
+        )
+    }
+
     runSuite("ParakeetEngine preserves recovered dictation audio for stop and wake recovery") {
         let source = readParakeetEngineSource()
         guard let wakeStart = source.range(of: "private func handleSystemWake()"),

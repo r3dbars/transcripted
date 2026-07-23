@@ -146,16 +146,28 @@ extension ParakeetEngine {
         if isRecording {
             preserveCurrentRecordingBuffersForRecovery()
             await removeRecordingTap()
-            guard ownsAudioEngineQueue(configCleanupOwner) else { return }
+            guard ownsAudioEngineQueue(configCleanupOwner) else {
+                cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
+                return
+            }
             isRecording = false
             audioLevel = 0
         }
 
         await stopAudioEngine()
-        guard ownsAudioEngineQueue(configCleanupOwner) else { return }
+        guard ownsAudioEngineQueue(configCleanupOwner) else {
+            cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
+            return
+        }
         isEnginePrewarmed = false
-        guard let rebuiltOwner = await rebuildAudioEngine(reason: "configuration_change"),
-              ownsAudioGraph(rebuiltOwner) else { return }
+        guard let rebuiltOwner = await rebuildAudioEngine(reason: "configuration_change") else {
+            cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
+            return
+        }
+        guard ownsAudioGraph(rebuiltOwner) else {
+            cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
+            return
+        }
 
         // Cancel any in-flight recovery — the latest device change wins.
         // Bluetooth disconnect/reconnect fires multiple notifications over
@@ -579,5 +591,16 @@ extension ParakeetEngine {
     func cancelConfigRecoveryTimeout() {
         configRecoveryTimeoutTask?.cancel()
         configRecoveryTimeoutTask = nil
+    }
+
+    func cancelConfigRecoveryIfCurrent(generation: UInt64) {
+        guard recoveryState.cancelRecovery(generation: generation) else { return }
+        configChangeDebounceTask?.cancel()
+        configChangeDebounceTask = nil
+        configRecoveryTask?.cancel()
+        configRecoveryTask = nil
+        cancelConfigRecoveryTimeout()
+        configChangeWasRecording = false
+        publishRecoveryState()
     }
 }

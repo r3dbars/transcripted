@@ -2853,8 +2853,14 @@ class ParakeetEngine: ObservableObject {
             )
             return
         }
+        let configRecoveryGeneration = recoveryState.isRecovering
+            ? recoveryState.generation
+            : nil
         audioGraphGeneration += 1
         cancelAudioWatchdog()
+        if let configRecoveryGeneration {
+            cancelConfigRecoveryIfCurrent(generation: configRecoveryGeneration)
+        }
         let stopOwner = currentAudioEngineQueueOwnerToken()
         await removeRecordingTap()
         var stillOwnsStopGraph = ownsAudioEngineQueue(stopOwner)
