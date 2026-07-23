@@ -112,6 +112,11 @@ extension ParakeetEngine {
         if audioStartInProgress {
             return
         }
+        // A route notification that arrives while user stop is suspended must
+        // not inherit the old recording bit and later restart the microphone.
+        if audioStopInProgress {
+            return
+        }
         if CFAbsoluteTimeGetCurrent() < ignoreInputSelectionConfigChangesUntil {
             return
         }

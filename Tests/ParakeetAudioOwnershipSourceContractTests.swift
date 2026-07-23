@@ -241,7 +241,8 @@ func testParakeetAudioOwnershipSourceContract() {
             recording.contains("isEngineWorkCurrent: snapshotWorkIsCurrent"),
             "queued or late snapshot work should observe cancellation before touching the retired engine"
         )
-        guard let idleStopStart = source.range(of: "if audioStartInProgress {"),
+        guard let stopStart = source.range(of: "func stopRecording() async"),
+              let idleStopStart = source.range(of: "if audioStartInProgress {", range: stopStart.upperBound..<source.endIndex),
               let idleStopEnd = source.range(
                 of: "await restorePendingSystemInputAfterRecording(",
                 range: idleStopStart.upperBound..<source.endIndex
@@ -249,16 +250,13 @@ func testParakeetAudioOwnershipSourceContract() {
             assertTrue(false, "test should find idle stop cancellation")
             return
         }
+        let stopBeforeIdle = String(source[stopStart.lowerBound..<idleStopStart.lowerBound])
         let idleStop = String(source[idleStopStart.lowerBound..<idleStopEnd.lowerBound])
-        guard let cancelTimedStart = idleStop.range(of: "cancelAudioWatchdog()"),
-              let cancelAdmission = idleStop.range(of: "audioStartAdmission.cancel()") else {
+        guard stopBeforeIdle.contains("cancelAudioWatchdog()"),
+              idleStop.contains("audioStartAdmission.cancel()") else {
             assertTrue(false, "idle stop should cancel timed start work and admission")
             return
         }
-        assertTrue(
-            cancelTimedStart.lowerBound < cancelAdmission.lowerBound,
-            "idle stop must retire blocked engine work before releasing start admission"
-        )
         assertTrue(
             abandon.contains("let retiredQueue = audioEngineQueue")
                 && abandon.contains("retiredQueue.async")
@@ -304,5 +302,82 @@ func testParakeetAudioOwnershipSourceContract() {
                 && drain.contains("systemInputReconciliationTask = nil"),
             "reconciliation requests should drain through one coalescing MainActor task"
         )
+    }
+
+    runSuite("ParakeetEngine stop consumes matching config recovery before any suspension") {
+        let engineSource = readParakeetEngineSource()
+        let recoverySource = readParakeetDeviceRecoverySource()
+        guard let stopStart = engineSource.range(of: "func stopRecording() async"),
+              let stopEnd = engineSource.range(
+                of: "// MARK: - Recorded Audio Buffering",
+                range: stopStart.upperBound..<engineSource.endIndex
+              ),
+              let handlerStart = recoverySource.range(of: "private func handleAudioConfigChange() async"),
+              let handlerEnd = recoverySource.range(
+                of: "private func recordStableRouteChangeAnalytics",
+                range: handlerStart.upperBound..<recoverySource.endIndex
+              ) else {
+            assertTrue(false, "test should find stop and config-recovery bodies")
+            return
+        }
+
+        let stopBody = String(engineSource[stopStart.lowerBound..<stopEnd.lowerBound])
+        let handlerBody = String(recoverySource[handlerStart.lowerBound..<handlerEnd.lowerBound])
+        guard let generationCapture = stopBody.range(of: "let configRecoveryGeneration = recoveryState.isRecovering"),
+              let graphInvalidation = stopBody.range(of: "audioGraphGeneration += 1", range: generationCapture.upperBound..<stopBody.endIndex),
+              let cancelRecovery = stopBody.range(
+                of: "cancelConfigRecoveryIfCurrent(generation: configRecoveryGeneration)",
+                range: graphInvalidation.upperBound..<stopBody.endIndex
+              ),
+              let recordingBranch = stopBody.range(of: "guard isRecording else", range: cancelRecovery.upperBound..<stopBody.endIndex),
+              let firstStopAwait = stopBody.range(of: "await ", range: cancelRecovery.upperBound..<stopBody.endIndex) else {
+            assertTrue(false, "stop should synchronously invalidate and cancel config recovery before choosing active or idle cleanup")
+            return
+        }
+
+        let stopCancellationWindow = String(stopBody[generationCapture.lowerBound..<cancelRecovery.upperBound])
+        assertTrue(graphInvalidation.lowerBound < cancelRecovery.lowerBound, "stop must retire the audio graph before cancelling its recovery")
+        assertTrue(cancelRecovery.lowerBound < recordingBranch.lowerBound, "idle and active stop must share the same recovery cancellation")
+        assertTrue(cancelRecovery.lowerBound < firstStopAwait.lowerBound, "stop must cancel recovery before suspended HAL cleanup")
+        assertFalse(stopCancellationWindow.contains("await "), "recovery cancellation must be atomic on MainActor")
+        assertEqual(
+            handlerBody.components(separatedBy: "cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)").count - 1,
+            4,
+            "all four stale config-cleanup exits should consume only their matching recovery generation"
+        )
+    }
+
+    runSuite("ParakeetEngine config change cannot restart recording after stop begins") {
+        let engineSource = readParakeetEngineSource()
+        let recoverySource = readParakeetDeviceRecoverySource()
+        guard let stopStart = engineSource.range(of: "func stopRecording() async"),
+              let stopEnd = engineSource.range(
+                of: "// MARK: - Recorded Audio Buffering",
+                range: stopStart.upperBound..<engineSource.endIndex
+              ),
+              let handlerStart = recoverySource.range(of: "private func handleAudioConfigChange() async"),
+              let handlerEnd = recoverySource.range(
+                of: "private func recordStableRouteChangeAnalytics",
+                range: handlerStart.upperBound..<recoverySource.endIndex
+              ) else {
+            assertTrue(false, "test should find stop and config-recovery bodies")
+            return
+        }
+
+        let stopBody = String(engineSource[stopStart.lowerBound..<stopEnd.lowerBound])
+        let handlerBody = String(recoverySource[handlerStart.lowerBound..<handlerEnd.lowerBound])
+        guard let beginStop = stopBody.range(of: "audioStopInProgress = true"),
+              let firstStopAwait = stopBody.range(of: "await ", range: beginStop.upperBound..<stopBody.endIndex),
+              let rejectDuringStop = handlerBody.range(of: "if audioStopInProgress"),
+              let graphInvalidation = handlerBody.range(of: "audioGraphGeneration += 1", range: rejectDuringStop.upperBound..<handlerBody.endIndex),
+              let inheritRecording = handlerBody.range(of: "if isRecording", range: graphInvalidation.upperBound..<handlerBody.endIndex) else {
+            assertTrue(false, "stop should publish its intent before awaits and config recovery should reject it before graph mutation")
+            return
+        }
+
+        assertTrue(beginStop.lowerBound < firstStopAwait.lowerBound, "stop intent must be visible throughout every suspension")
+        assertTrue(rejectDuringStop.lowerBound < graphInvalidation.lowerBound, "route change must not steal graph ownership during stop")
+        assertTrue(rejectDuringStop.lowerBound < inheritRecording.lowerBound, "route change must not inherit the stopped session for restart")
+        assertTrue(stopBody.contains("defer { audioStopInProgress = false }"), "stop intent should clear on every return path")
     }
 }

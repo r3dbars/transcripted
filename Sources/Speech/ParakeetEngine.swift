@@ -44,6 +44,7 @@ class ParakeetEngine: ObservableObject {
     var audioGraphGeneration = 0
     private var audioStartAdmission = ParakeetAudioStartAdmissionState()
     var audioStartInProgress: Bool { audioStartAdmission.isInProgress }
+    var audioStopInProgress = false
     private var inputTapInstalled = false
     var sharedMeetingMicRecording = false
     private nonisolated let sharedMeetingMicRecorder = SharedMeetingMicRecorder()
@@ -2804,6 +2805,19 @@ class ParakeetEngine: ObservableObject {
             return
         }
 
+        guard !audioStopInProgress else { return }
+        audioStopInProgress = true
+        defer { audioStopInProgress = false }
+
+        let configRecoveryGeneration = recoveryState.isRecovering
+            ? recoveryState.generation
+            : nil
+        audioGraphGeneration += 1
+        cancelAudioWatchdog()
+        if let configRecoveryGeneration {
+            cancelConfigRecoveryIfCurrent(generation: configRecoveryGeneration)
+        }
+
         let pendingRestoreOwner = pendingSystemInputRestore.owner
         guard isRecording else {
             // Genuinely preserved/recovered audio (e.g. real pre-sleep audio held
@@ -2822,9 +2836,7 @@ class ParakeetEngine: ObservableObject {
             // nothing preserved worth keeping. Treat a user stop in that window
             // as cancellation of the pending restart.
             if zombieRecoveryRestartPending {
-                audioGraphGeneration += 1
                 let stopGraphGeneration = audioGraphGeneration
-                cancelAudioWatchdog()
                 audioStartAdmission.cancel()
                 clearRecoveredRecordingTimeline(keepingCapacity: true)
                 await releaseIdleAudioHardware(
@@ -2841,9 +2853,7 @@ class ParakeetEngine: ObservableObject {
                 // A normal start can be blocked inside CoreAudio just like a
                 // zombie restart. Claim its exact timed-work lease and replace
                 // both resources before allowing the next start to enqueue.
-                cancelAudioWatchdog()
                 audioStartAdmission.cancel()
-                audioGraphGeneration += 1
             } else {
                 clearRecoveredRecordingTimeline(keepingCapacity: true)
             }
@@ -2852,14 +2862,6 @@ class ParakeetEngine: ObservableObject {
                 operation: "stop_recording_idle"
             )
             return
-        }
-        let configRecoveryGeneration = recoveryState.isRecovering
-            ? recoveryState.generation
-            : nil
-        audioGraphGeneration += 1
-        cancelAudioWatchdog()
-        if let configRecoveryGeneration {
-            cancelConfigRecoveryIfCurrent(generation: configRecoveryGeneration)
         }
         let stopOwner = currentAudioEngineQueueOwnerToken()
         await removeRecordingTap()
