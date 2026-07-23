@@ -221,29 +221,45 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "finalized timeout system scratch should be removed after archive")
     }
 
-    func testDeletingOneSystemOnlyTimeoutKeepsOtherRowRetryableAfterReload() throws {
+    func testDeletingOneSystemOnlyTimeoutKeepsOtherRowRetryableAfterReload() async throws {
         let manager = makeManager()
         let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let firstMissingMicURL = scratchDirectory.appendingPathComponent("first-timeout-mic.wav")
+        let secondMissingMicURL = scratchDirectory.appendingPathComponent("second-timeout-mic.wav")
         let firstSystemURL = scratchDirectory.appendingPathComponent("first-timeout-system.wav")
         let secondSystemURL = scratchDirectory.appendingPathComponent("second-timeout-system.wav")
+        let firstJournalURL = scratchDirectory.appendingPathComponent("first-timeout-mic.recording.json")
+        let secondJournalURL = scratchDirectory.appendingPathComponent("second-timeout-mic.recording.json")
         let firstID = UUID()
         let secondID = UUID()
         try writeMonoWAV(to: firstSystemURL, duration: 2.5)
         try writeMonoWAV(to: secondSystemURL, duration: 2.5)
+        for (missingMicURL, systemURL) in [
+            (firstMissingMicURL, firstSystemURL),
+            (secondMissingMicURL, secondSystemURL),
+        ] {
+            let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
+            let session = journal.begin(primaryMicURL: missingMicURL)
+            journal.recordSystemAudio(systemURL, session: session)
+            journal.markFinalized(finalMicURL: nil, session: session)
+            journal.flush()
+        }
 
         XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: nil,
             systemAudioURL: firstSystemURL,
             errorMessage: "Recording stop timed out before audio files were finalized.",
             taskId: firstID,
-            archiveAudio: false
+            archiveAudio: false,
+            clearRecordingJournalAfterPersistence: false
         ))
         XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: nil,
             systemAudioURL: secondSystemURL,
             errorMessage: "Recording stop timed out before audio files were finalized.",
             taskId: secondID,
-            archiveAudio: false
+            archiveAudio: false,
+            clearRecordingJournalAfterPersistence: false
         ))
 
         let first = try XCTUnwrap(
@@ -255,14 +271,29 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(first.micAudioURL.lastPathComponent, "microphone_placeholder_\(firstID.uuidString).wav")
         XCTAssertEqual(second.micAudioURL.lastPathComponent, "microphone_placeholder_\(secondID.uuidString).wav")
         XCTAssertNotEqual(first.micAudioURL, second.micAudioURL)
+        XCTAssertEqual(
+            MeetingRecordingJournalStore.load(at: firstJournalURL)?.systemAudioFilename,
+            firstSystemURL.lastPathComponent
+        )
+        XCTAssertEqual(
+            MeetingRecordingJournalStore.load(at: secondJournalURL)?.systemAudioFilename,
+            secondSystemURL.lastPathComponent
+        )
 
         XCTAssertTrue(manager.failedTranscriptionManager.deleteFailedTranscription(id: firstID))
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.micAudioURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: firstSystemURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstJournalURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.micAudioURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: secondSystemURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondJournalURL.path))
 
         let reloaded = makeManager()
+        _ = await reloaded.recoverOrphanedRecordings(
+            in: scratchDirectory,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
         let remaining = try XCTUnwrap(reloaded.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertEqual(reloaded.failedTranscriptionManager.failedTranscriptions.count, 1)
         XCTAssertEqual(remaining.id, secondID)
@@ -551,6 +582,54 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
+    func testTerminalLateFinalizationAfterRowDeletionRemovesRecreatedMergedAudio() throws {
+        let manager = makeManager()
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let primaryURL = scratchDirectory.appendingPathComponent("deleted-timeout-mic.wav")
+        let recoveryURL = scratchDirectory.appendingPathComponent("deleted-timeout-recovery.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("deleted-timeout-system.wav")
+        let mergedURL = scratchDirectory.appendingPathComponent("deleted-timeout-mic_merged.wav")
+        let journalURL = scratchDirectory.appendingPathComponent(
+            "deleted-timeout-mic" + MeetingRecordingJournalStore.filenameSuffix
+        )
+        for url in [primaryURL, recoveryURL, systemURL] {
+            try writeMonoWAV(to: url, duration: 2.5)
+        }
+        let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
+        let session = journal.begin(primaryMicURL: primaryURL)
+        journal.recordSegments([
+            MicRecordingSegment(url: primaryURL),
+            MicRecordingSegment(url: recoveryURL, gapBeforeDuration: 0.1),
+        ], session: session)
+        journal.recordSystemAudio(systemURL, session: session)
+        journal.markStopping(session: session)
+        journal.flush()
+
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: primaryURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedID,
+            archiveAudio: false,
+            clearRecordingJournalAfterPersistence: false
+        ))
+        XCTAssertTrue(manager.failedTranscriptionManager.deleteFailedTranscription(id: failedID))
+
+        // Model a merger that was already in flight when deletion removed the
+        // failed row and its journal-owned segment inventory.
+        try writeMonoWAV(to: mergedURL, duration: 2.5)
+        manager.discardFinalizedFailedTranscriptionAudio(
+            micAudioURL: mergedURL,
+            systemAudioURL: systemURL
+        )
+
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        for url in [primaryURL, recoveryURL, systemURL, mergedURL, journalURL] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
     }
 
     func testTerminalLateFinalizationDiscardRejectsOutOfCleanupRootJournal() throws {

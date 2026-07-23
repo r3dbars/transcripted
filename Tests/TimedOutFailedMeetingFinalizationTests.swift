@@ -118,6 +118,7 @@ func testTimedOutFailedMeetingFinalization() {
 
     runSuite("Timed-out terminal ownership discards late audio after row removal") {
         var handoff = TimedOutFailedMeetingFinalizationHandoff()
+        var registry = TimedOutStopCompletionRegistry()
         let failedID = UUID()
         let lateResult = CaptureStopResult(
             micURL: URL(fileURLWithPath: "/tmp/terminal-mic_merged.wav"),
@@ -127,9 +128,20 @@ func testTimedOutFailedMeetingFinalization() {
 
         assertNil(handoff.failedMeetingDidPersist(id: failedID))
         assertNil(handoff.markTerminalDiscard(id: failedID))
+        registry.register(
+            generation: 8,
+            owner: .failedMeeting(failedID)
+        ) { _ in
+            assertionFailure("expiry must release the row-specific closure")
+        }
+        assertTrue(registry.expire(generation: 8))
+        guard case .failedMeeting(let expiredID) = registry.takeExpiredOwner(for: 8) else {
+            assertionFailure("expiry must retain closure-free failed-row identity")
+            return
+        }
         if case .discard(let discarded) = handoff.receive(
             lateResult,
-            for: failedID,
+            for: expiredID,
             failedMeetingIsPersisted: false
         ) {
             assertEqual(discarded.micURL, lateResult.micURL)
@@ -213,7 +225,11 @@ func testTimedOutFailedMeetingFinalization() {
         var registry = TimedOutStopCompletionRegistry()
         var deliveredGeneration: UInt64?
 
-        registry.register(generation: 12) { _ in deliveredGeneration = 12 }
+        let failedID = UUID()
+        registry.register(
+            generation: 12,
+            owner: .failedMeeting(failedID)
+        ) { _ in deliveredGeneration = 12 }
         registry.prune(olderThan: 12)
         assertTrue(registry.generations.contains(12), "the immediately preceding stop stays owned across the next start")
         assertEqual(registry.handlerCount, 1)
@@ -226,6 +242,11 @@ func testTimedOutFailedMeetingFinalization() {
             registry.isExpired(12),
             "a callback after pruning must still route through closure-free journal recovery"
         )
+        assertEqual(
+            registry.takeExpiredOwner(for: 12),
+            .failedMeeting(failedID),
+            "pruning must preserve value-only failed-row identity"
+        )
 
         let handler = registry.takeHandler(for: 14)
         handler?(CaptureStopResult(micURL: nil, systemURL: nil, didTimeOut: false))
@@ -236,7 +257,7 @@ func testTimedOutFailedMeetingFinalization() {
 
     runSuite("Timed-out completion ownership expires without a later recording") {
         var registry = TimedOutStopCompletionRegistry()
-        registry.register(generation: 22) { _ in
+        registry.register(generation: 22, owner: .discard) { _ in
             assertionFailure("an expired per-stop closure must never be delivered")
         }
 
@@ -244,6 +265,24 @@ func testTimedOutFailedMeetingFinalization() {
         assertTrue(registry.generations.isEmpty)
         assertEqual(registry.handlerCount, 0, "expiry must release the retained closure")
         assertTrue(registry.isExpired(22), "a closure-free tombstone must route a very late completion to journal recovery")
+        assertEqual(
+            registry.takeExpiredOwner(for: 22),
+            .discard,
+            "expiry must retain explicit cleanup disposition without retaining a closure"
+        )
         assertFalse(registry.expire(generation: 22), "expiry must be idempotent")
+    }
+
+    runSuite("Timed-out completion owner tombstones stay bounded") {
+        var registry = TimedOutStopCompletionRegistry()
+        for generation in 1...6 {
+            registry.register(generation: UInt64(generation), owner: .discard, handler: nil)
+            assertTrue(registry.expire(generation: UInt64(generation)))
+        }
+
+        assertEqual(registry.handlerCount, 0)
+        assertEqual(registry.expiredOwnerCount, 4)
+        assertNil(registry.takeExpiredOwner(for: 1))
+        assertEqual(registry.takeExpiredOwner(for: 6), .discard)
     }
 }

@@ -321,6 +321,9 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         let safeMicURL = micAudioURL.flatMap { url in
             isContained(url, in: canonicalRoots) ? url : nil
         }
+        let safeSystemURL = systemAudioURL.flatMap { url in
+            isContained(url, in: canonicalRoots) ? url : nil
+        }
         let journalCandidates = safeMicURL.map { journalURLs(forMicAudioURL: $0) } ?? []
         let existingJournalCandidates = journalCandidates.filter { candidate in
             isContained(candidate, in: canonicalRoots)
@@ -331,7 +334,24 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         guard !existingJournalCandidates.contains(where: { isSymbolicLink(at: $0) }) else {
             return false
         }
-        let journalURL = existingJournalCandidates.first
+        let systemJournalCandidates: [URL]
+        if existingJournalCandidates.isEmpty,
+           let safeSystemURL,
+           isSafeFilename(safeSystemURL.lastPathComponent) {
+            systemJournalCandidates = journalURLs(
+                in: safeSystemURL.deletingLastPathComponent()
+            ).filter { candidate in
+                isContained(candidate, in: canonicalRoots)
+                    && !isSymbolicLink(at: candidate)
+                    && load(at: candidate)?.systemAudioFilename == safeSystemURL.lastPathComponent
+            }
+            // A system filename must identify exactly one recording. Never
+            // guess across ambiguous journals during terminal deletion.
+            guard systemJournalCandidates.count <= 1 else { return false }
+        } else {
+            systemJournalCandidates = []
+        }
+        let journalURL = existingJournalCandidates.first ?? systemJournalCandidates.first
         return discardRecordingArtifacts(
             journalURL: journalURL,
             journal: journalURL.flatMap(load(at:)),
@@ -348,7 +368,14 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     ) -> Bool {
         let canonicalRoots = allowedRoots.map { canonicalURL($0) }
         let safeAdditionalAudioURLs = additionalAudioURLs.filter { isContained($0, in: canonicalRoots) }
-        var audioURLs = Set(safeAdditionalAudioURLs)
+        var audioURLs: [URL] = []
+        var canonicalAudioPaths: Set<String> = []
+        func appendIfUnique(_ url: URL) {
+            if canonicalAudioPaths.insert(canonicalURL(url).path).inserted {
+                audioURLs.append(url)
+            }
+        }
+        safeAdditionalAudioURLs.forEach(appendIfUnique)
 
         // An unreadable journal may contain segment paths that the failed row
         // does not know about. Keep every artifact and the visible queue row
@@ -369,7 +396,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             for filename in filenames where isSafeFilename(filename) {
                 let url = directory.appendingPathComponent(filename)
                 if isContained(url, in: canonicalRoots) {
-                    audioURLs.insert(url)
+                    appendIfUnique(url)
                 }
             }
             if let primaryFilename = journal.primaryMicFilename,
@@ -377,7 +404,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
                 let primaryStem = (primaryFilename as NSString).deletingPathExtension
                 let mergedURL = directory.appendingPathComponent(primaryStem + "_merged.wav")
                 if isContained(mergedURL, in: canonicalRoots) {
-                    audioURLs.insert(mergedURL)
+                    appendIfUnique(mergedURL)
                 }
             }
         }
@@ -387,13 +414,16 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         // with at least its canonical mic still present.
         let safeMicURL = safeAdditionalAudioURLs.first
         let safeSystemURL = safeAdditionalAudioURLs.dropFirst().first
+        let safeMicPath = safeMicURL.map { canonicalURL($0).path }
+        let safeSystemPath = safeSystemURL.map { canonicalURL($0).path }
         var orderedAudioURLs = audioURLs.filter { url in
-            url != safeMicURL && url != safeSystemURL
+            let path = canonicalURL(url).path
+            return path != safeMicPath && path != safeSystemPath
         }.sorted { $0.path < $1.path }
-        if let safeSystemURL, audioURLs.contains(safeSystemURL) {
+        if let safeSystemURL, canonicalAudioPaths.contains(canonicalURL(safeSystemURL).path) {
             orderedAudioURLs.append(safeSystemURL)
         }
-        if let safeMicURL, audioURLs.contains(safeMicURL) {
+        if let safeMicURL, canonicalAudioPaths.contains(canonicalURL(safeMicURL).path) {
             orderedAudioURLs.append(safeMicURL)
         }
         let fileManager = FileManager.default

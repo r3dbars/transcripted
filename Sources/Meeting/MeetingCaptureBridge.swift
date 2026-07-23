@@ -41,7 +41,7 @@ final class MeetingCaptureBridge: ObservableObject {
     var onUnexpectedRecordingComplete: ((CaptureStopResult) -> Void)?
     /// One stable recovery seam for completions that arrive after their
     /// per-stop closure's bounded retention window.
-    var onExpiredTimedOutRecordingComplete: ((CaptureStopResult) -> Void)?
+    var onExpiredTimedOutRecordingComplete: ((UUID?, CaptureStopResult) -> Void)?
 
     // MARK: - Underlying capture
 
@@ -143,6 +143,7 @@ final class MeetingCaptureBridge: ObservableObject {
     /// fully patched, so the caller should treat the audio as failed-but-
     /// recoverable rather than enqueuing it for transcription directly.
     func stopAndAwaitFiles(
+        timedOutOwner: TimedOutStopCompletionOwner? = nil,
         onTimedOutCompletion: ((CaptureStopResult) -> Void)? = nil
     ) async -> CaptureStopResult {
         guard audio.isRecording else {
@@ -180,6 +181,7 @@ final class MeetingCaptureBridge: ObservableObject {
                 self.expectedStopGeneration = nil
                 self.timedOutStopCompletions.register(
                     generation: stopGeneration,
+                    owner: timedOutOwner,
                     handler: onTimedOutCompletion
                 )
                 self.scheduleTimedOutStopCompletionExpiry(generation: stopGeneration)
@@ -191,7 +193,7 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Stop the current recording, wait for file handles to close, then remove
     /// the just-captured scratch audio instead of handing it to transcription.
     func stopAndDiscardFiles() async -> CaptureStopResult {
-        let result = await stopAndAwaitFiles { [weak self] lateResult in
+        let result = await stopAndAwaitFiles(timedOutOwner: .discard) { [weak self] lateResult in
             self?.audio.discardFinalizedRecordingArtifacts(
                 micAudioURL: lateResult.micURL,
                 systemAudioURL: lateResult.systemURL
@@ -262,7 +264,17 @@ final class MeetingCaptureBridge: ObservableObject {
                 )
 
                 if self.timedOutStopCompletions.isExpired(generation) {
-                    self.onExpiredTimedOutRecordingComplete?(result)
+                    switch self.timedOutStopCompletions.takeExpiredOwner(for: generation) {
+                    case .failedMeeting(let id):
+                        self.onExpiredTimedOutRecordingComplete?(id, result)
+                    case .discard:
+                        self.audio.discardFinalizedRecordingArtifacts(
+                            micAudioURL: result.micURL,
+                            systemAudioURL: result.systemURL
+                        )
+                    case nil:
+                        self.onExpiredTimedOutRecordingComplete?(nil, result)
+                    }
                     return
                 }
 

@@ -74,6 +74,47 @@ extension FailedTranscriptionManagerTests {
         }
     }
 
+    func testSystemOnlyDeleteFailsClosedWhenJournalIdentityIsAmbiguous() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let placeholderURL = paths.audioCaptures.appendingPathComponent("system-only-placeholder.wav")
+        let systemURL = paths.audioCaptures.appendingPathComponent("shared-system.wav")
+        FileManager.default.createFile(atPath: placeholderURL.path, contents: Data("placeholder".utf8))
+        FileManager.default.createFile(atPath: systemURL.path, contents: Data("system".utf8))
+        var journalURLs: [URL] = []
+        for index in 1...2 {
+            let missingMicURL = paths.audioCaptures.appendingPathComponent("missing-mic-\(index).wav")
+            let journalURL = paths.audioCaptures.appendingPathComponent("missing-mic-\(index).recording.json")
+            let journal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+            let session = journal.begin(primaryMicURL: missingMicURL)
+            journal.recordSystemAudio(systemURL, session: session)
+            journal.markFinalized(finalMicURL: nil, session: session)
+            journal.flush()
+            journalURLs.append(journalURL)
+        }
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedID,
+            micAudioURL: placeholderURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+
+        XCTAssertFalse(manager.deleteFailedTranscription(id: failedID))
+        XCTAssertEqual(manager.failedTranscriptions.map(\.id), [failedID])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: placeholderURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertTrue(journalURLs.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+
+        let reloaded = FailedTranscriptionManager(paths: paths)
+        XCTAssertEqual(reloaded.failedTranscriptions.map(\.id), [failedID])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: placeholderURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertTrue(journalURLs.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    }
+
     func testOldFailureCleanupConsumesRetainedJournalInventory() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

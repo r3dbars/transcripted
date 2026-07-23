@@ -352,8 +352,15 @@ final class MeetingSessionController: ObservableObject {
         capture.onUnexpectedRecordingComplete = { [weak self] result in
             self?.handleUnexpectedCaptureStop(result)
         }
-        capture.onExpiredTimedOutRecordingComplete = { [weak self] result in
-            self?.failedMeetingStore.recoverExpiredTimedOutMeetingAudio(result)
+        capture.onExpiredTimedOutRecordingComplete = { [weak self] failedMeetingID, result in
+            if let failedMeetingID {
+                self?.failedMeetingStore.refreshTimedOutFailedMeetingAudio(
+                    id: failedMeetingID,
+                    result: result
+                )
+            } else {
+                self?.failedMeetingStore.recoverExpiredTimedOutMeetingAudio(result)
+            }
         }
 
         wireSubscriptions()
@@ -772,7 +779,9 @@ final class MeetingSessionController: ObservableObject {
         )
 
         let stopTimeoutFailedTaskId = UUID()
-        let stopResult = await capture.stopAndAwaitFiles { [weak self] lateResult in
+        let stopResult = await capture.stopAndAwaitFiles(
+            timedOutOwner: .failedMeeting(stopTimeoutFailedTaskId)
+        ) { [weak self] lateResult in
             self?.failedMeetingStore.refreshTimedOutFailedMeetingAudio(
                 id: stopTimeoutFailedTaskId,
                 result: lateResult
@@ -1613,7 +1622,9 @@ final class MeetingSessionController: ObservableObject {
             clearActiveRecordingIdentity()
 
             let shutdownFailedTaskId = UUID()
-            let files = await capture.stopAndAwaitFiles { [weak self] lateResult in
+            let files = await capture.stopAndAwaitFiles(
+                timedOutOwner: .failedMeeting(shutdownFailedTaskId)
+            ) { [weak self] lateResult in
                 self?.failedMeetingStore.refreshTimedOutFailedMeetingAudio(
                     id: shutdownFailedTaskId,
                     result: lateResult

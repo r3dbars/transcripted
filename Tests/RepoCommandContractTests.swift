@@ -2444,8 +2444,9 @@ func testRepoCommandContract() {
         assertTrue(
             bridgeContents.contains("TranscriptedConstants.meetingMaximumStopTimeout")
                 && bridgeContents.contains("timedOutStopCompletions.expire(generation: generation)")
-                && bridgeContents.contains("onExpiredTimedOutRecordingComplete?(result)"),
-            "a never-completing timed-out stop should release its closure on a fixed deadline and keep very late audio recoverable"
+                && bridgeContents.contains("takeExpiredOwner(for: generation)")
+                && bridgeContents.contains("onExpiredTimedOutRecordingComplete?(id, result)"),
+            "a never-completing timed-out stop should release its closure on a fixed deadline while retaining bounded value-only ownership"
         )
     }
 
@@ -2806,7 +2807,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             terminationBlock.contains("let shutdownFailedTaskId = UUID()")
-                && terminationBlock.contains("capture.stopAndAwaitFiles {")
+                && terminationBlock.contains("timedOutOwner: .failedMeeting(shutdownFailedTaskId)")
                 && terminationBlock.contains("refreshTimedOutFailedMeetingAudio("),
             "shutdown stop timeouts should keep the same late-finalization repair path as normal meeting stops"
         )
@@ -2909,7 +2910,7 @@ func testRepoCommandContract() {
             to: "func armVoiceProcessingForActiveRecording()"
         )
         assertTrue(
-            discardBlock.contains("stopAndAwaitFiles { [weak self] lateResult in")
+            discardBlock.contains("stopAndAwaitFiles(timedOutOwner: .discard) { [weak self] lateResult in")
                 && discardBlock.contains("audio.discardFinalizedRecordingArtifacts(")
                 && discardBlock.contains("audio.discardCurrentRecordingArtifacts("),
             "explicit discard should consume the current journal inventory and safely clean any later finalized callback"

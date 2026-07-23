@@ -10,6 +10,14 @@ struct CaptureStopResult {
     let didTimeOut: Bool
 }
 
+/// Closure-free identity retained after a timed-out stop callback expires.
+/// The bridge bounds these values separately from callback closures so a late
+/// completion can still honor a failed-row delete or an explicit discard.
+enum TimedOutStopCompletionOwner: Equatable {
+    case failedMeeting(UUID)
+    case discard
+}
+
 /// Orders late stop finalization against failed-row persistence. Audio's
 /// recording journal keeps owning unfinished segments until finalization; the
 /// failed row and merged-sibling reconciliation own the retryable result.
@@ -195,29 +203,47 @@ struct TimedOutFailedMeetingFinalizationHandoff {
 /// still be delivered, then prunes older stops whose journal/failed row owns
 /// recovery. This prevents never-completing stops from accumulating closures.
 struct TimedOutStopCompletionRegistry {
+    private static let expiredOwnerCapacity = 4
     private(set) var generations: Set<UInt64> = []
     private var handlers: [UInt64: (CaptureStopResult) -> Void] = [:]
+    private var owners: [UInt64: TimedOutStopCompletionOwner] = [:]
+    private var expiredOwners: [UInt64: TimedOutStopCompletionOwner] = [:]
+    private var expiredOwnerOrder: [UInt64] = []
     private(set) var latestExpiredGeneration: UInt64?
 
     var handlerCount: Int { handlers.count }
+    var expiredOwnerCount: Int { expiredOwners.count }
 
     mutating func register(
         generation: UInt64,
+        owner: TimedOutStopCompletionOwner? = nil,
         handler: ((CaptureStopResult) -> Void)?
     ) {
         generations.insert(generation)
         handlers[generation] = handler
+        owners[generation] = owner
+        expiredOwners.removeValue(forKey: generation)
+        expiredOwnerOrder.removeAll { $0 == generation }
     }
 
     mutating func takeHandler(for generation: UInt64) -> ((CaptureStopResult) -> Void)? {
         guard generations.remove(generation) != nil else { return nil }
+        owners.removeValue(forKey: generation)
         return handlers.removeValue(forKey: generation)
+    }
+
+    mutating func takeExpiredOwner(for generation: UInt64) -> TimedOutStopCompletionOwner? {
+        expiredOwnerOrder.removeAll { $0 == generation }
+        return expiredOwners.removeValue(forKey: generation)
     }
 
     @discardableResult
     mutating func expire(generation: UInt64) -> Bool {
         guard generations.remove(generation) != nil else { return false }
         handlers.removeValue(forKey: generation)
+        if let owner = owners.removeValue(forKey: generation) {
+            storeExpiredOwner(owner, for: generation)
+        }
         latestExpiredGeneration = max(latestExpiredGeneration ?? 0, generation)
         return true
     }
@@ -234,6 +260,9 @@ struct TimedOutStopCompletionRegistry {
         generations.subtract(staleGenerations)
         for generation in staleGenerations {
             handlers.removeValue(forKey: generation)
+            if let owner = owners.removeValue(forKey: generation) {
+                storeExpiredOwner(owner, for: generation)
+            }
         }
         if let latestPrunedGeneration = staleGenerations.max() {
             latestExpiredGeneration = max(
@@ -242,6 +271,18 @@ struct TimedOutStopCompletionRegistry {
             )
         }
         return Set(staleGenerations)
+    }
+
+    private mutating func storeExpiredOwner(
+        _ owner: TimedOutStopCompletionOwner,
+        for generation: UInt64
+    ) {
+        if expiredOwners.updateValue(owner, forKey: generation) == nil {
+            expiredOwnerOrder.append(generation)
+        }
+        while expiredOwnerOrder.count > Self.expiredOwnerCapacity {
+            expiredOwners.removeValue(forKey: expiredOwnerOrder.removeFirst())
+        }
     }
 }
 
