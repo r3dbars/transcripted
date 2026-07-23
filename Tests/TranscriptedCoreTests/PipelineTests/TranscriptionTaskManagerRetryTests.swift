@@ -7,6 +7,49 @@ import FluidAudio
 @available(macOS 14.0, *)
 @MainActor
 extension TranscriptionTaskManagerMetadataTests {
+    func testRetryRejectsReadableAudioAfterDeletionCleanupFailed() async throws {
+        let speech = MetadataStubSpeechToTextEngine(transcript: "Must not publish.")
+        let manager = makeManager(speechToText: speech)
+        let audioDirectory = tempDirectory.appendingPathComponent("audio", isDirectory: true)
+        let micURL = audioDirectory.appendingPathComponent("pending-delete-mic.wav")
+        let systemURL = audioDirectory.appendingPathComponent("pending-delete-system.wav")
+        try writeMonoWAV(to: micURL, duration: 2.5)
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Original failure"
+        ))
+        let failedID = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first?.id)
+
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: audioDirectory.path
+            )
+        }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o500],
+            ofItemAtPath: audioDirectory.path
+        )
+        XCTAssertFalse(manager.failedTranscriptionManager.deleteFailedTranscription(id: failedID))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: audioDirectory.path
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedID,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        )
+
+        XCTAssertFalse(didRetry)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.map(\.id), [failedID])
+        XCTAssertNil(manager.lastSavedTranscriptURL)
+    }
+
     func testRetryFailedTranscriptionSuccessCreatesMarkdownAndClearsFailedQueue() async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "Recovered meeting artifact.")

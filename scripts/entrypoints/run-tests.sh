@@ -320,7 +320,6 @@ APP_SOURCES=(
     "Sources/Meeting/SustainedActivityConfirmer.swift"
     "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingAudioStorageManager.swift"
-    "Sources/Meeting/MeetingRecordingCleanup.swift"
     "Sources/Meeting/MeetingImportedAudioPreparer.swift"
     "Sources/Meeting/MeetingImportPreparationFailureCopy.swift"
     "Sources/Meeting/MeetingSessionUIPolicy.swift"
