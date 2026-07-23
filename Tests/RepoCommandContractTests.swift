@@ -2416,6 +2416,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - bridge uses scaled meeting stop timeout") {
         let bridgeContents = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let stopBlock = sourceSlice(
             bridgeContents,
             from: "func stopAndAwaitFiles(",
@@ -2438,15 +2439,22 @@ func testRepoCommandContract() {
         )
         assertTrue(
             bridgeContents.contains("timedOutStopCompletions.prune(")
-                && bridgeContents.contains("olderThan: audio.currentRecordingSessionGeneration"),
-            "a never-completing timed-out stop should release older generations and closures on a later recording start"
+                && bridgeContents.contains("olderThan: audio.currentRecordingSessionGeneration")
+                && bridgeContents.contains("audio.abandonRecordingJournalFinalization("),
+            "a never-completing timed-out stop should release older callbacks and transfer journal ownership on a later recording start"
         )
         assertTrue(
             bridgeContents.contains("TranscriptedConstants.meetingMaximumStopTimeout")
                 && bridgeContents.contains("timedOutStopCompletions.expire(generation: generation)")
                 && bridgeContents.contains("timedOutStopCompletions.resolve(generation: generation)")
-                && bridgeContents.contains("onExpiredTimedOutRecordingComplete?(id, result)"),
-            "a never-completing timed-out stop should release its closure on a fixed deadline while retaining bounded value-only ownership"
+                && bridgeContents.contains("onExpiredTimedOutRecordingComplete?(id, result)")
+                && bridgeContents.contains("onRecordingJournalFinalizationAbandoned?()"),
+            "a never-completing stop should bound callbacks and transfer its journal to canonical recovery"
+        )
+        assertTrue(
+            controllerContents.contains("capture.onRecordingJournalFinalizationAbandoned =")
+                && controllerContents.contains("await taskManager.recoverOrphanedRecordings(in: scratchDirectory)"),
+            "abandoning a never-completing finalizer should immediately rescan its durable journal"
         )
     }
 
@@ -2601,9 +2609,8 @@ func testRepoCommandContract() {
         )
         assertTrue(
             refreshFailedMeetingBlock.contains("timedOutFinalizationHandoff.persistedOwnershipIDs")
-                && refreshFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)")
-                && refreshFailedMeetingBlock.contains("hasRecordingJournal: taskManager.hasRecordingJournal("),
-            "Core-side row removals should reach canonical cleanup, while journal ownership keeps the UI destructive"
+                && refreshFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
+            "Core-side row removals should reach the canonical timeout cleanup seam"
         )
         assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),

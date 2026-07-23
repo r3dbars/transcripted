@@ -160,6 +160,18 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         }
     }
 
+    /// The host's bounded late-completion window expired without a callback.
+    /// Transfer the unchanged journal to recovery and invalidate this session
+    /// so a much later finalizer cannot race or overwrite recovered ownership.
+    func abandonFinalization(session: MeetingRecordingJournalSession) {
+        queue.async {
+            session.releaseLiveOwnership()
+            if self.activeSession == session {
+                self.activeSession = nil
+            }
+        }
+    }
+
     /// The meeting reached a durable state elsewhere; the journal's job is done.
     func clear() {
         queue.async {

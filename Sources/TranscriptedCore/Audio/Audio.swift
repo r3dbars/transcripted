@@ -248,6 +248,42 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _journalSession = nil
         return session
     }
+    private var stoppingJournalSessions: [UInt64: MeetingRecordingJournalSession] = [:]
+    private let stoppingJournalSessionsLock = NSLock()
+
+    private func retainStoppingJournalSession(
+        _ session: MeetingRecordingJournalSession,
+        generation: UInt64
+    ) {
+        stoppingJournalSessionsLock.lock()
+        stoppingJournalSessions[generation] = session
+        stoppingJournalSessionsLock.unlock()
+    }
+
+    private func takeStoppingJournalSession(
+        generation: UInt64
+    ) -> MeetingRecordingJournalSession? {
+        stoppingJournalSessionsLock.lock()
+        defer { stoppingJournalSessionsLock.unlock() }
+        return stoppingJournalSessions.removeValue(forKey: generation)
+    }
+
+    /// The host no longer retains a completion callback for this stopped
+    /// generation. Atomically invalidate its journal session before releasing
+    /// the live claim so recovery becomes the only remaining writer.
+    @discardableResult
+    public func abandonRecordingJournalFinalization(
+        forStopGeneration generation: UInt64
+    ) -> Bool {
+        stoppingJournalSessionsLock.lock()
+        guard let session = stoppingJournalSessions.removeValue(forKey: generation) else {
+            stoppingJournalSessionsLock.unlock()
+            return false
+        }
+        recordingJournal.abandonFinalization(session: session)
+        stoppingJournalSessionsLock.unlock()
+        return true
+    }
 
     // MARK: - Recording Health Tracking (Phase 1: Sleep/Wake + Gap Logging)
 
@@ -1611,6 +1647,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // drops both writes, so a previous meeting's already-handed-off
         // journal cannot be resurrected into the next launch's recovery scan.
         let journalSession = takeJournalSession()
+        if let journalSession {
+            retainStoppingJournalSession(journalSession, generation: stopGeneration)
+        }
         recordingJournal.markStopping(session: journalSession)
 
         // Update UI state immediately so the meeting widget unfreezes
@@ -1714,7 +1753,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
             cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
                 guard let self else { return }
                 let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegmentsSnapshot)
-                self.recordingJournal.markFinalized(finalMicURL: finalMicURL, session: journalSession)
+                let finalizationSession = self.takeStoppingJournalSession(
+                    generation: stopGeneration
+                )
+                self.recordingJournal.markFinalized(
+                    finalMicURL: finalMicURL,
+                    session: finalizationSession
+                )
                 DispatchQueue.main.async {
                     if self.recordingSessionGeneration == stopGeneration {
                         self.originalMicAudioFileURL = nil

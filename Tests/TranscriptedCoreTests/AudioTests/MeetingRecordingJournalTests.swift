@@ -53,6 +53,30 @@ final class MeetingRecordingJournalTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
     }
 
+    func testAbandonedFinalizerTransfersJournalToRecoveryAndDropsLateWrite() throws {
+        let store = MeetingRecordingJournalStore(directory: temporaryDirectory)
+        let micURL = temporaryDirectory.appendingPathComponent("meeting_abandoned_mic.wav")
+        let journalURL = temporaryDirectory.appendingPathComponent("meeting_abandoned_mic.recording.json")
+        let session = store.begin(primaryMicURL: micURL)
+        store.markStopping(session: session)
+        store.flush()
+        XCTAssertTrue(MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: journalURL))
+
+        store.abandonFinalization(session: session)
+        store.flush()
+
+        XCTAssertFalse(MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: journalURL))
+        XCTAssertEqual(MeetingRecordingJournalStore.load(at: journalURL)?.state, .stopping)
+
+        store.markFinalized(
+            finalMicURL: temporaryDirectory.appendingPathComponent("meeting_abandoned_mic_merged.wav"),
+            session: session
+        )
+        store.flush()
+        XCTAssertEqual(MeetingRecordingJournalStore.load(at: journalURL)?.state, .stopping)
+        XCTAssertNil(MeetingRecordingJournalStore.load(at: journalURL)?.finalMicFilename)
+    }
+
     func testCurrentTerminalDiscardRemovesEveryJournalOwnedSegmentWithoutCallbackURLs() throws {
         let audioDirectory = temporaryDirectory.appendingPathComponent("audio", isDirectory: true)
         try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)

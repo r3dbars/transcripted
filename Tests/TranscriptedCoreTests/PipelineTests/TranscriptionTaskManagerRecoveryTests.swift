@@ -621,8 +621,45 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
     }
 
+    func testRecoveryDoesNotResurrectRowDeletedAfterCandidateSnapshot() async throws {
+        let (manager, paths) = makeManager()
+        let micURL = paths.audioCaptures.appendingPathComponent("meeting_deleted_during_recovery_mic.wav")
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: micURL.lastPathComponent,
+            segments: [.init(filename: micURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            state: .stopping
+        )
+        try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
+        try backdate(micURL)
+        let failedID = UUID()
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            id: failedID,
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+        manager.orphanedRecordingRecoveryPassObserver = {
+            manager.orphanedRecordingRecoveryPassObserver = nil
+            XCTAssertTrue(manager.failedTranscriptionManager.deleteFailedTranscription(id: failedID))
+        }
+
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+
+        XCTAssertEqual(recovered, 0)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
     func testJoinedRecoveryRequestForcesPassAfterEarlierSnapshot() async throws {
         let (manager, paths) = makeManager()
+        let livenessWindow: TimeInterval = 5
         var joinedRecoveryTask: Task<Int, Never>?
         manager.orphanedRecordingRecoveryPassObserver = { [self] in
             manager.orphanedRecordingRecoveryPassObserver = nil
@@ -640,7 +677,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
                 joinedRecoveryTask = Task {
                     await manager.recoverOrphanedRecordings(
                         in: paths.audioCaptures,
-                        livenessWindow: 0,
+                        livenessWindow: livenessWindow,
                         waitForRecentJournals: false
                     )
                 }
@@ -651,7 +688,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
         let firstResult = await manager.recoverOrphanedRecordings(
             in: paths.audioCaptures,
-            livenessWindow: 0,
+            livenessWindow: livenessWindow,
             waitForRecentJournals: false
         )
         let joinedTask = try XCTUnwrap(joinedRecoveryTask)

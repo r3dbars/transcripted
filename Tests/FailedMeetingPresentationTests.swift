@@ -224,8 +224,8 @@ func testFailedMeetingPresentation() {
             "partial retained audio should not enable the retry action"
         )
         assertTrue(
-            source.contains("deletionRemovesAudio: !availableAudioURLs.isEmpty || hasRecordingJournal"),
-            "journal-owned audio should keep clear actions destructive even before a row URL is usable"
+            source.contains("deletionRemovesAudio: true"),
+            "every failed row should keep clear actions destructive while referenced audio may return"
         )
     }
 
@@ -260,7 +260,7 @@ func testFailedMeetingPresentation() {
         assertTrue(
             homeSource.contains("title: item.deletionRemovesAudio ? \"Delete failed meeting\" : \"Dismiss\"")
                 && homeSource.contains("hasRetainedAudioFiles: item.deletionRemovesAudio"),
-            "failed rows should label journal-owned cleanup as destructive without exposing an unusable reveal action"
+            "failed rows should label cleanup as destructive without exposing an unusable reveal action"
         )
 
         let settingsSource = (try? String(
@@ -270,16 +270,7 @@ func testFailedMeetingPresentation() {
         assertTrue(
             settingsSource.contains("if item.deletionRemovesAudio")
                 && settingsSource.contains("reasonKind: item.deletionRemovesAudio ? .deleted : .dismissed"),
-            "Home should confirm and report journal-owned cleanup as deletion, not dismissal"
-        )
-
-        let storeSource = (try? String(
-            contentsOf: repoFixtureURL("Sources/Meeting/FailedMeetingStore.swift"),
-            encoding: .utf8
-        )) ?? ""
-        assertTrue(
-            storeSource.contains("hasRecordingJournal: taskManager.hasRecordingJournal("),
-            "the failed-meeting presentation should derive destructive ownership from the canonical journal seam"
+            "Home should confirm and report every failed-row cleanup as deletion, not dismissal"
         )
     }
 

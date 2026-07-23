@@ -4,8 +4,7 @@ import TranscriptedCore
 enum FailedMeetingPresentation {
     static func item(
         from failed: FailedTranscription,
-        isRetrying: Bool,
-        hasRecordingJournal: Bool
+        isRetrying: Bool
     ) -> MeetingSessionController.FailedMeetingItem {
         let failureKind = MeetingFailureKind.classify(message: failed.errorMessage)
         let availableAudioURLs = audioURLs(for: failed)
@@ -26,7 +25,7 @@ enum FailedMeetingPresentation {
             isRetryable: failed.isRetryable,
             isRetrying: isRetrying,
             hasAudioFiles: hasRetryableAudioFiles,
-            deletionRemovesAudio: !availableAudioURLs.isEmpty || hasRecordingJournal,
+            deletionRemovesAudio: true,
             audioURLs: availableAudioURLs
         )
     }

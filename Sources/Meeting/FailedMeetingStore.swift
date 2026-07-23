@@ -446,11 +446,7 @@ final class FailedMeetingStore {
             .map { failed in
                 FailedMeetingPresentation.item(
                     from: failed,
-                    isRetrying: retryingFailedMeetingIDs.contains(failed.id),
-                    hasRecordingJournal: taskManager.hasRecordingJournal(
-                        micAudioURL: failed.micAudioURL,
-                        systemAudioURL: failed.systemAudioURL
-                    )
+                    isRetrying: retryingFailedMeetingIDs.contains(failed.id)
                 )
             }
         scheduleFailedAudioCompression(for: failedTranscriptions)

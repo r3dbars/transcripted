@@ -362,6 +362,14 @@ final class MeetingSessionController: ObservableObject {
                 self?.failedMeetingStore.recoverExpiredTimedOutMeetingAudio(result)
             }
         }
+        capture.onRecordingJournalFinalizationAbandoned = { [weak self] in
+            guard let self else { return }
+            let taskManager = self.taskManager
+            let scratchDirectory = self.storagePaths.audioCaptures
+            Task {
+                await taskManager.recoverOrphanedRecordings(in: scratchDirectory)
+            }
+        }
 
         wireSubscriptions()
         transcriptionQueue.recoverImportedAudioJobs()

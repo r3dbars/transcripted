@@ -42,6 +42,9 @@ final class MeetingCaptureBridge: ObservableObject {
     /// One stable recovery seam for completions that arrive after their
     /// per-stop closure's bounded retention window.
     var onExpiredTimedOutRecordingComplete: ((UUID?, CaptureStopResult) -> Void)?
+    /// A stop never completed within the bounded callback window. Core has
+    /// transferred its journal from the live finalizer to recovery ownership.
+    var onRecordingJournalFinalizationAbandoned: (() -> Void)?
 
     // MARK: - Underlying capture
 
@@ -100,8 +103,15 @@ final class MeetingCaptureBridge: ObservableObject {
         let prunedGenerations = timedOutStopCompletions.prune(
             olderThan: audio.currentRecordingSessionGeneration
         )
+        var abandonedJournalFinalization = false
         for generation in prunedGenerations {
             timedOutStopCompletionExpiryTasks.removeValue(forKey: generation)?.cancel()
+            abandonedJournalFinalization = audio.abandonRecordingJournalFinalization(
+                forStopGeneration: generation
+            ) || abandonedJournalFinalization
+        }
+        if abandonedJournalFinalization {
+            onRecordingJournalFinalizationAbandoned?()
         }
 
         errorMessage = nil
@@ -396,6 +406,11 @@ final class MeetingCaptureBridge: ObservableObject {
             }
             guard let self else { return }
             _ = self.timedOutStopCompletions.expire(generation: generation)
+            if self.audio.abandonRecordingJournalFinalization(
+                forStopGeneration: generation
+            ) {
+                self.onRecordingJournalFinalizationAbandoned?()
+            }
             self.timedOutStopCompletionExpiryTasks.removeValue(forKey: generation)
         }
     }

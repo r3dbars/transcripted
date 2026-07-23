@@ -1091,12 +1091,27 @@ public class TranscriptionTaskManager: ObservableObject {
                             systemAudioURL: systemURL ?? existingFailure.systemAudioURL
                         )
                     } else {
-                        didPersist = await addFailedTranscriptionRetainingAvailableAudioAfterArchive(
+                        let availableAudioURLs = [micURL, systemURL].compactMap { $0 }
+                        guard MeetingRecordingJournalStore.load(at: candidate.journalURL) != nil,
+                              availableAudioURLs.contains(where: {
+                                  FileManager.default.fileExists(atPath: $0.path)
+                              }) else {
+                            AppLogger.pipeline.info("Skipped stale recording recovery candidate after ownership changed", [
+                                "journal": candidate.journalURL.lastPathComponent
+                            ])
+                            continue
+                        }
+                        // Persist the new owner before starting any detached
+                        // archive work. A user deletion can run while archive
+                        // copying is suspended; updateFailedTranscriptionAudio
+                        // then rolls that copy back instead of resurrecting the row.
+                        didPersist = addFailedTranscriptionRetainingAvailableAudio(
                             micAudioURL: micURL,
                             systemAudioURL: systemURL,
                             errorMessage: "Recording was interrupted before it could be saved. The recovered audio is ready to transcribe.",
                             recordingDate: startedAt,
-                            archiveAudio: true
+                            archiveAudio: true,
+                            clearRecordingJournalAfterPersistence: false
                         )
                     }
                     if didPersist {
