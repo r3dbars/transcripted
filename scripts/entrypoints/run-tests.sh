@@ -296,6 +296,7 @@ APP_SOURCES=(
     "Sources/Speech/DictationReadinessWaitPolicy.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
     "Sources/Speech/ParakeetPrewarmPolicy.swift"
+    "Sources/Speech/ParakeetAudioGraphOwnership.swift"
     "Sources/Speech/ParakeetRecoveryState.swift"
     "Sources/Speech/ParakeetStartRecordingFailurePolicy.swift"
     "Sources/Speech/ParakeetShortAudioGate.swift"
