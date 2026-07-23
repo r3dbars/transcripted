@@ -538,11 +538,12 @@ final class TranscriptIndex: @unchecked Sendable {
         // Semantic / hybrid routing. Falls through to lexical when no vector store
         // is available, so these modes degrade gracefully rather than returning
         // nothing. The lexical branch below is unchanged.
-        if mode != .lexical, let store = embeddingStore, store.isAvailable {
-            let semantic = store.semanticSearchUtterances(
+        if mode != .lexical,
+           let store = embeddingStore,
+           let semantic = store.semanticSearchUtterancesIfAvailable(
                 query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo,
                 maxMeetings: maxMeetings, snippetsPerMeeting: snippetsPerMeeting
-            )
+           ) {
             if mode == .semantic { return semantic }
             let lexical = try searchUtterances(
                 query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo,
@@ -899,10 +900,11 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     func searchDictationEntries(query: String, dateFrom: String?, dateTo: String?, maxItems: Int = 10, mode: SearchMode = .lexical) throws -> [ContextSearchGroup] {
-        if mode != .lexical, let store = embeddingStore, store.isAvailable {
-            let semantic = store.semanticSearchDictationEntries(
+        if mode != .lexical,
+           let store = embeddingStore,
+           let semantic = store.semanticSearchDictationEntriesIfAvailable(
                 query: query, dateFrom: dateFrom, dateTo: dateTo, maxItems: maxItems
-            )
+           ) {
             if mode == .semantic { return semantic }
             let lexical = try searchDictationEntries(
                 query: query, dateFrom: dateFrom, dateTo: dateTo, maxItems: maxItems, mode: .lexical

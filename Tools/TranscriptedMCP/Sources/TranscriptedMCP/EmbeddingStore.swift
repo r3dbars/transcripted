@@ -16,9 +16,10 @@ import SQLite3
 final class EmbeddingStore: @unchecked Sendable {
     private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "com.transcripted.mcp.vectors", qos: .utility)
-    private let availabilityLock = NSLock()
+    private let admissionCondition = NSCondition()
     private var deferredStartupReconciliation = false
-    private var activeReconciliations = 0
+    private var reconciliationActive = false
+    private var activeSemanticSearches = 0
     private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let provider: EmbeddingProvider
     private let dbPath: URL
@@ -35,9 +36,9 @@ final class EmbeddingStore: @unchecked Sendable {
     private let maxCandidateRows = 50_000
 
     var isAvailable: Bool {
-        availabilityLock.withLock {
-            provider.isAvailable && !deferredStartupReconciliation && activeReconciliations == 0
-        }
+        admissionCondition.lock()
+        defer { admissionCondition.unlock() }
+        return provider.isAvailable && !deferredStartupReconciliation && !reconciliationActive
     }
 
     init(dbPath: URL, provider: EmbeddingProvider) throws {
@@ -88,15 +89,15 @@ final class EmbeddingStore: @unchecked Sendable {
     // MARK: - Embedding reconciliation
 
     func deferSemanticSearchUntilReconciled() {
-        availabilityLock.withLock {
-            deferredStartupReconciliation = true
-        }
+        admissionCondition.lock()
+        deferredStartupReconciliation = true
+        admissionCondition.unlock()
     }
 
     func finishDeferredStartupReconciliation() {
-        availabilityLock.withLock {
-            deferredStartupReconciliation = false
-        }
+        admissionCondition.lock()
+        deferredStartupReconciliation = false
+        admissionCondition.unlock()
     }
 
     /// Embed any indexed rows that don't yet have a vector, drop orphaned
@@ -104,13 +105,22 @@ final class EmbeddingStore: @unchecked Sendable {
     /// call after every lexical reconcile; it only does work for new/changed rows.
     func reconcileEmbeddings() {
         guard provider.isAvailable else { return }
-        availabilityLock.withLock {
-            activeReconciliations += 1
+
+        admissionCondition.lock()
+        while reconciliationActive {
+            admissionCondition.wait()
         }
+        reconciliationActive = true
+        while activeSemanticSearches > 0 {
+            admissionCondition.wait()
+        }
+        admissionCondition.unlock()
+
         defer {
-            availabilityLock.withLock {
-                activeReconciliations -= 1
-            }
+            admissionCondition.lock()
+            reconciliationActive = false
+            admissionCondition.broadcast()
+            admissionCondition.unlock()
         }
         queue.sync {
             invalidateOnModelChangeLocked()
@@ -211,15 +221,57 @@ final class EmbeddingStore: @unchecked Sendable {
 
     // MARK: - Semantic search
 
-    /// Cosine-ranked meeting utterance search, grouped per meeting (same shape as
-    /// the lexical path). Returns empty when the query can't be embedded.
-    func semanticSearchUtterances(
+    private func withSemanticSearchAdmission<T>(_ body: () -> T) -> T? {
+        admissionCondition.lock()
+        guard provider.isAvailable,
+              !deferredStartupReconciliation,
+              !reconciliationActive else {
+            admissionCondition.unlock()
+            return nil
+        }
+        activeSemanticSearches += 1
+        admissionCondition.unlock()
+
+        defer {
+            admissionCondition.lock()
+            activeSemanticSearches -= 1
+            if activeSemanticSearches == 0 {
+                admissionCondition.broadcast()
+            }
+            admissionCondition.unlock()
+        }
+        return body()
+    }
+
+    func semanticSearchUtterancesIfAvailable(
         query: String,
         speaker: String?,
         dateFrom: String?,
         dateTo: String?,
         maxMeetings: Int = 10,
         snippetsPerMeeting: Int = 3
+    ) -> GroupedSearchResult? {
+        withSemanticSearchAdmission {
+            semanticSearchUtterances(
+                query: query,
+                speaker: speaker,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                maxMeetings: maxMeetings,
+                snippetsPerMeeting: snippetsPerMeeting
+            )
+        }
+    }
+
+    /// Cosine-ranked meeting utterance search, grouped per meeting (same shape as
+    /// the lexical path). Returns empty when the query can't be embedded.
+    private func semanticSearchUtterances(
+        query: String,
+        speaker: String?,
+        dateFrom: String?,
+        dateTo: String?,
+        maxMeetings: Int,
+        snippetsPerMeeting: Int
     ) -> GroupedSearchResult {
         guard let qvec = provider.embed(query) else {
             return GroupedSearchResult(results: [], totalMeetingsMatched: 0, truncated: false)
@@ -336,13 +388,29 @@ final class EmbeddingStore: @unchecked Sendable {
         }
     }
 
-    /// Cosine-ranked dictation entry search, one snippet per entry (same shape as
-    /// the lexical path). Returns empty when the query can't be embedded.
-    func semanticSearchDictationEntries(
+    func semanticSearchDictationEntriesIfAvailable(
         query: String,
         dateFrom: String?,
         dateTo: String?,
         maxItems: Int = 10
+    ) -> [ContextSearchGroup]? {
+        withSemanticSearchAdmission {
+            semanticSearchDictationEntries(
+                query: query,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                maxItems: maxItems
+            )
+        }
+    }
+
+    /// Cosine-ranked dictation entry search, one snippet per entry (same shape as
+    /// the lexical path). Returns empty when the query can't be embedded.
+    private func semanticSearchDictationEntries(
+        query: String,
+        dateFrom: String?,
+        dateTo: String?,
+        maxItems: Int
     ) -> [ContextSearchGroup] {
         guard let qvec = provider.embed(query) else { return [] }
 

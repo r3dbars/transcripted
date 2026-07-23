@@ -86,6 +86,47 @@ private final class BlockingEmbeddingProvider: EmbeddingProvider, @unchecked Sen
     }
 }
 
+private final class AdmissionRaceEmbeddingProvider: EmbeddingProvider, @unchecked Sendable {
+    let modelID = "admission-race.v1"
+    let dimension = 3
+    let isAvailable = true
+    let queryStarted = DispatchSemaphore(value: 0)
+    let resumeQuery = DispatchSemaphore(value: 0)
+    let reconciliationStarted = DispatchSemaphore(value: 0)
+    let resumeReconciliation = DispatchSemaphore(value: 0)
+
+    func embed(_ text: String) -> [Float]? {
+        switch text {
+        case "querygate":
+            queryStarted.signal()
+            _ = resumeQuery.wait(timeout: .now() + 5)
+        case "backfill gate":
+            reconciliationStarted.signal()
+            _ = resumeReconciliation.wait(timeout: .now() + 5)
+        default:
+            break
+        }
+        return text.isEmpty ? nil : [1, 0, 0]
+    }
+}
+
+private final class LockedValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: Value?
+
+    var value: Value? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func set(_ value: Value) {
+        lock.lock()
+        storage = value
+        lock.unlock()
+    }
+}
+
 final class SemanticSearchTests: XCTestCase {
     var tempDir: URL!
 
@@ -304,6 +345,103 @@ final class SemanticSearchTests: XCTestCase {
 
         provider.resume.signal()
         wait(for: [completed], timeout: 5)
+    }
+
+    func testSemanticAdmissionAndReconciliationAreAtomic() throws {
+        let provider = AdmissionRaceEmbeddingProvider()
+        let index = try makeIndex(provider)
+
+        try MCPStartupIndexing.prepareForAttach(
+            index: index,
+            meetingDirs: [tempDir],
+            dictationDirs: [tempDir]
+        )
+        MCPStartupIndexing.completeAfterAttach(index: index)
+
+        try writeFixture(makeFixtureJSON(utterances: [
+            ("system_0", 0.0, 5.0, "querygate existing capture"),
+        ]), filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let queryResultCount = LockedValue<Int>()
+        let queryCompleted = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let count = try? index.searchUtterances(
+                query: "querygate",
+                speaker: nil,
+                dateFrom: nil,
+                dateTo: nil,
+                mode: .hybrid
+            ).results.count
+            queryResultCount.set(count ?? -1)
+            queryCompleted.signal()
+        }
+        XCTAssertEqual(provider.queryStarted.wait(timeout: .now() + 2), .success)
+
+        try writeFixture(makeFixtureJSON(utterances: [
+            ("system_0", 0.0, 5.0, "backfill gate"),
+        ]), filename: "Call_2026-03-30_10-00-00", to: tempDir)
+        try index.reconcile(
+            meetingDirs: [tempDir],
+            dictationDirs: [tempDir],
+            updateEmbeddings: false
+        )
+
+        let reconciliationCompleted = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            index.reconcileEmbeddings()
+            reconciliationCompleted.signal()
+        }
+
+        let reconciliationEnteredBeforeQueryFinished =
+            provider.reconciliationStarted.wait(timeout: .now() + 0.5) == .success
+        provider.resumeQuery.signal()
+        let queryFinishedWithoutReleasingReconciliation =
+            queryCompleted.wait(timeout: .now() + 1) == .success
+
+        if !reconciliationEnteredBeforeQueryFinished {
+            XCTAssertEqual(provider.reconciliationStarted.wait(timeout: .now() + 2), .success)
+        }
+
+        let fallbackResultCount = LockedValue<Int>()
+        let fallbackCompleted = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let count = try? index.searchUtterances(
+                query: "capture",
+                speaker: nil,
+                dateFrom: nil,
+                dateTo: nil,
+                mode: .hybrid
+            ).results.count
+            fallbackResultCount.set(count ?? -1)
+            fallbackCompleted.signal()
+        }
+        let fallbackFinishedWithoutReleasingReconciliation =
+            fallbackCompleted.wait(timeout: .now() + 1) == .success
+
+        provider.resumeReconciliation.signal()
+        if !queryFinishedWithoutReleasingReconciliation {
+            _ = queryCompleted.wait(timeout: .now() + 2)
+        }
+        if !fallbackFinishedWithoutReleasingReconciliation {
+            _ = fallbackCompleted.wait(timeout: .now() + 2)
+        }
+        XCTAssertEqual(reconciliationCompleted.wait(timeout: .now() + 2), .success)
+
+        XCTAssertFalse(
+            reconciliationEnteredBeforeQueryFinished,
+            "reconciliation must wait for an atomically admitted semantic query"
+        )
+        XCTAssertTrue(
+            queryFinishedWithoutReleasingReconciliation,
+            "an admitted hybrid query must not queue behind later reconciliation"
+        )
+        XCTAssertEqual(queryResultCount.value, 1)
+        XCTAssertTrue(
+            fallbackFinishedWithoutReleasingReconciliation,
+            "hybrid search must fall back immediately while reconciliation owns the store"
+        )
+        XCTAssertEqual(fallbackResultCount.value, 1)
     }
 
     // MARK: - Re-embedding on model change
