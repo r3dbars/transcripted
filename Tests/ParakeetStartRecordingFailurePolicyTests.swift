@@ -893,7 +893,7 @@ func testParakeetStartRecordingFailurePolicy() {
               let releaseHardware = stopBody.range(of: "await releaseIdleAudioHardware(", range: pendingBranch.upperBound..<stopBody.endIndex),
               let returnFromBranch = stopBody.range(of: "return", range: pendingBranch.upperBound..<stopBody.endIndex),
               let claimBlockedQueue = cancelBody.range(of: "audioEngineWorkOwnership.claimPendingWorkForSuccessor("),
-              let classifyBlockedQueue = cancelBody.range(of: "let reason = blockedLease.phase", range: claimBlockedQueue.upperBound..<cancelBody.endIndex),
+              let classifyBlockedQueue = cancelBody.range(of: "switch blockedLease.phase", range: claimBlockedQueue.upperBound..<cancelBody.endIndex),
               let recoveryStartReason = cancelBody.range(of: "\"audio_engine_start_cancelled\"", range: classifyBlockedQueue.upperBound..<cancelBody.endIndex),
               let replaceBlockedQueue = cancelBody.range(of: "abandonBlockedAudioEngine(reason: reason)", range: recoveryStartReason.upperBound..<cancelBody.endIndex),
               let cancelTerminal = cancelBody.range(of: "zombieRecoveryState.cancelActiveAttempt()", range: replaceBlockedQueue.upperBound..<cancelBody.endIndex) else {

@@ -92,7 +92,7 @@ class ParakeetEngine: ObservableObject {
     private var audioWatchdogTask: Task<Void, Never>?
     private var zombieRecoveryTask: Task<Void, Never>?
     private var zombieRecoveryState = ParakeetZombieRecoveryState()
-    private let audioEngineWorkOwnership = ParakeetTimedAudioEngineWorkOwnership()
+    let audioEngineWorkOwnership = ParakeetTimedAudioEngineWorkOwnership()
     private var audioStartCancellationState: ParakeetAudioStartCancellationState?
     private var zombieRecoveryStartGeneration: UInt64?
     private var zombieRecoveryRestartPending: Bool { zombieRecoveryState.isActive }
@@ -3615,9 +3615,15 @@ class ParakeetEngine: ObservableObject {
             // Cancellation may advance logical ownership before this method
             // runs. If reset or start work still owns these exact resources,
             // replace both before successor cleanup can enqueue.
-            let reason = blockedLease.phase == .zombieReset
-                ? "zombie_engine_reset_cancelled"
-                : "audio_engine_start_cancelled"
+            let reason: String
+            switch blockedLease.phase {
+            case .zombieReset:
+                reason = "zombie_engine_reset_cancelled"
+            case .audioStart:
+                reason = "audio_engine_start_cancelled"
+            case .deviceRecoverySnapshot:
+                reason = "device_recovery_snapshot_cancelled"
+            }
             if blockedLease.phase == .audioStart {
                 audioStartAdmission.finish(owner: blockedLease.owner)
             }

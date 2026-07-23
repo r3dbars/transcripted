@@ -79,6 +79,7 @@ struct ParakeetAudioStartAdmissionState: Equatable {
 enum ParakeetTimedAudioEngineWorkPhase: String, Equatable, Sendable {
     case zombieReset
     case audioStart
+    case deviceRecoverySnapshot
 }
 
 struct ParakeetTimedAudioEngineWorkLease: Equatable, Sendable {

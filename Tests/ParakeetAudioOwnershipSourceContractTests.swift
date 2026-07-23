@@ -380,4 +380,62 @@ func testParakeetAudioOwnershipSourceContract() {
         assertTrue(rejectDuringStop.lowerBound < inheritRecording.lowerBound, "route change must not inherit the stopped session for restart")
         assertTrue(stopBody.contains("defer { audioStopInProgress = false }"), "stop intent should clear on every return path")
     }
+
+    runSuite("ParakeetEngine config-recovery snapshots are claimable by stop") {
+        let source = readParakeetDeviceRecoverySource()
+        guard let recoveryStart = source.range(of: "private func attemptDeviceRecovery()"),
+              let recoveryEnd = source.range(
+                of: "private func scheduleConfigRecoveryTimeout",
+                range: recoveryStart.upperBound..<source.endIndex
+              ) else {
+            assertTrue(false, "test should find config-recovery execution")
+            return
+        }
+        let recovery = String(source[recoveryStart.lowerBound..<recoveryEnd.lowerBound])
+
+        assertTrue(
+            recovery.contains("audioEngineWorkOwnership.begin(\n                        owner: snapshotOwner,\n                        phase: .deviceRecoverySnapshot")
+                && recovery.contains("isEngineWorkCurrent: { [audioEngineWorkOwnership] in")
+                && recovery.contains("audioEngineWorkOwnership.isActive(\n                                    owner: snapshotOwner,\n                                    phase: .deviceRecoverySnapshot")
+                && recovery.components(separatedBy: "audioEngineWorkOwnership.finish(").count - 1 == 2,
+            "each recovery snapshot should publish one exact lease that stop can claim and every exit finishes"
+        )
+    }
+
+    runSuite("Parakeet config-recovery lease preserves a successor owner") {
+        let ownership = ParakeetTimedAudioEngineWorkOwnership()
+        let blockedEngine = NSObject()
+        let blockedQueue = NSObject()
+        let blockedOwner = ParakeetAudioEngineQueueOwnerToken(
+            generation: 1,
+            engine: blockedEngine,
+            queue: blockedQueue
+        )
+        ownership.begin(owner: blockedOwner, phase: .deviceRecoverySnapshot)
+
+        let claimed = ownership.claimPendingWorkForSuccessor(
+            currentEngine: blockedEngine,
+            currentQueue: blockedQueue
+        )
+        assertEqual(
+            claimed,
+            ParakeetTimedAudioEngineWorkLease(owner: blockedOwner, phase: .deviceRecoverySnapshot),
+            "stop should claim the exact blocked recovery snapshot"
+        )
+
+        let successorOwner = ParakeetAudioEngineQueueOwnerToken(
+            generation: 2,
+            engine: NSObject(),
+            queue: NSObject()
+        )
+        ownership.begin(owner: successorOwner, phase: .deviceRecoverySnapshot)
+        assertFalse(
+            ownership.finish(owner: blockedOwner, phase: .deviceRecoverySnapshot),
+            "late completion from the retired queue must not clear successor work"
+        )
+        assertTrue(
+            ownership.finish(owner: successorOwner, phase: .deviceRecoverySnapshot),
+            "the successor should retain and finish its own lease"
+        )
+    }
 }

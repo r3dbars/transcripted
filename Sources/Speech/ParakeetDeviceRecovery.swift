@@ -315,11 +315,37 @@ extension ParakeetEngine {
                 var readySnapshot: ParakeetAudioInputSnapshot?
                 while readySnapshot == nil {
                     recoveryAttempt += 1
-                    lastSnapshotOwner = self.currentAudioEngineQueueOwnerToken()
-                    let snapshot = try await self.audioInputSnapshot(
-                        operation: recoveryAttempt == 1 ? "device_recovery" : "device_recovery_retry",
-                        recoveryGeneration: myGeneration
+                    let snapshotOwner = self.currentAudioEngineQueueOwnerToken()
+                    lastSnapshotOwner = snapshotOwner
+                    self.audioEngineWorkOwnership.begin(
+                        owner: snapshotOwner,
+                        phase: .deviceRecoverySnapshot
                     )
+                    let snapshot: ParakeetAudioInputSnapshot
+                    do {
+                        snapshot = try await self.audioInputSnapshot(
+                            operation: recoveryAttempt == 1 ? "device_recovery" : "device_recovery_retry",
+                            recoveryGeneration: myGeneration,
+                            isEngineWorkCurrent: { [audioEngineWorkOwnership] in
+                                audioEngineWorkOwnership.isActive(
+                                    owner: snapshotOwner,
+                                    phase: .deviceRecoverySnapshot
+                                )
+                            }
+                        )
+                        guard self.audioEngineWorkOwnership.finish(
+                            owner: snapshotOwner,
+                            phase: .deviceRecoverySnapshot
+                        ) else {
+                            throw CancellationError()
+                        }
+                    } catch {
+                        self.audioEngineWorkOwnership.finish(
+                            owner: snapshotOwner,
+                            phase: .deviceRecoverySnapshot
+                        )
+                        throw error
+                    }
                     let readiness = self.audioFormatReadiness(
                         outputFormat: snapshot.outputFormat,
                         hwFormat: snapshot.hwFormat,
