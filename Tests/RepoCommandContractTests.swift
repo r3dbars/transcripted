@@ -2519,8 +2519,8 @@ func testRepoCommandContract() {
             timeoutPreserveBlock.contains("archiveAudio: false")
                 && timeoutPreserveBlock.contains("clearRecordingJournalAfterPersistence: false")
                 && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.audioForPersistence(")
-                && timeoutPreserveBlock.contains("scheduleTimedOutJournalRecovery(in:"),
-            "stop timeouts should keep scratch audio, then schedule journal recovery while callback-first URLs create the durable row"
+                && timeoutPreserveBlock.components(separatedBy: "scheduleTimedOutJournalRecovery(in:").count >= 3,
+            "stop timeouts should schedule journal recovery after either durable persistence or persistence failure"
         )
         assertTrue(
             taskManagerContents.contains("MeetingRecordingJournalStore.hasJournal(forMicAudioURL: failed.micAudioURL)"),
@@ -2541,8 +2541,21 @@ func testRepoCommandContract() {
                 && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.failedMeetingDidPersist(")
                 && refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
                 && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
-                && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL"),
-            "late finalization should buffer both callback orders and reuse the failed queue mic placeholder"
+                && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL")
+                && refreshTimedOutAudioBlock.contains("case .journalOwned:")
+                && refreshTimedOutAudioBlock.contains("scheduleTimedOutJournalRecovery(in: ownedAudioURL.deletingLastPathComponent())"),
+            "late finalization should buffer both callback orders, reuse the failed queue mic placeholder, and recover an empty-snapshot journal in-process"
+        )
+        let journalRecoveryScheduleBlock = sourceSlice(
+            storeContents,
+            from: "private func scheduleTimedOutJournalRecovery(",
+            to: "func refreshFailedMeetings("
+        )
+        assertTrue(
+            journalRecoveryScheduleBlock.contains("pendingTimedOutJournalRecoveryDirectory = scratchDirectory")
+                && journalRecoveryScheduleBlock.contains("guard timedOutJournalRecoveryTask == nil else { return }")
+                && !journalRecoveryScheduleBlock.contains("timedOutJournalRecoveryTask?.cancel()"),
+            "timeout journal recovery should retain one bounded waiter and coalesce later requests"
         )
         assertTrue(
             storeContents.contains("finishTimedOutFinalizationWithDiscard(id: id)")
@@ -2555,8 +2568,9 @@ func testRepoCommandContract() {
             to: "func deleteFailedMeeting(id: UUID) -> Bool {"
         )
         assertTrue(
-            dismissFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
-            "a no-audio timeout dismissal should clean up a callback that finalizes after its row is removed"
+            dismissFailedMeetingBlock.contains("failedManager.deleteFailedTranscription(id: id)")
+                && dismissFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
+            "dismiss should use the manager's scratch-and-archive cleanup roots before owning a late callback"
         )
         let refreshFailedMeetingBlock = sourceSlice(
             storeContents,

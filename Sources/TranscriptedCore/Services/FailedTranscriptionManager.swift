@@ -6,16 +6,25 @@ import Combine
 public class FailedTranscriptionManager: ObservableObject {
     public enum AudioReferenceHealingError: Error {
         case audioRootUnavailable
+        case deletionPending
         case persistenceFailed
     }
 
     @Published public var failedTranscriptions: [FailedTranscription] = []
 
+    static let pendingDeletionFilename = "pending_failed_transcription_deletions.json"
+
+    private struct PendingDeletion: Codable, Equatable {
+        let id: UUID
+    }
+
     private let storageURL: URL
+    private let pendingDeletionURL: URL
     private let allowedAudioRoots: [URL]
     private let audioArchiveRoot: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private var pendingDeletions: [PendingDeletion] = []
 
     public init(paths: CoreStoragePaths = .default) {
         // Ensure the parent folder exists before first save; the load pass tolerates a missing file.
@@ -31,6 +40,8 @@ public class FailedTranscriptionManager: ObservableObject {
             ])
         }
         self.storageURL = paths.failedQueue
+        self.pendingDeletionURL = paths.failedQueue.deletingLastPathComponent()
+            .appendingPathComponent(Self.pendingDeletionFilename)
         self.audioArchiveRoot = Self.canonicalDirectoryURL(
             paths.transcripts.appendingPathComponent("audio", isDirectory: true)
         )
@@ -46,14 +57,16 @@ public class FailedTranscriptionManager: ObservableObject {
 
         // Load existing failed transcriptions. User-visible failed meetings stay
         // queued until the user retries, deletes, or the age-based cleanup runs.
-        loadFailedTranscriptions()
+        let failedQueueDidDecode = loadFailedTranscriptions()
+        loadPendingDeletions()
+        resumePendingDeletions(failedQueueDidDecode: failedQueueDidDecode)
     }
 
     /// Loads failed transcriptions from disk
-    private func loadFailedTranscriptions() {
+    private func loadFailedTranscriptions() -> Bool {
         guard FileManager.default.fileExists(atPath: storageURL.path) else {
             AppLogger.pipeline.debug("No existing failed transcriptions file")
-            return
+            return false
         }
 
         do {
@@ -125,6 +138,7 @@ public class FailedTranscriptionManager: ObservableObject {
             }
 
             AppLogger.pipeline.info("Loaded failed transcriptions", ["count": "\(failedTranscriptions.count)"])
+            return true
         } catch {
             // Backup corrupt file before it gets overwritten on next save
             let backupURL = storageURL.deletingLastPathComponent().appendingPathComponent("failed_transcriptions_backup.json")
@@ -138,6 +152,7 @@ public class FailedTranscriptionManager: ObservableObject {
                 ])
             }
             AppLogger.pipeline.error("Corrupt failed transcriptions file, backed up", ["error": "\(error)"])
+            return false
         }
     }
 
@@ -330,16 +345,105 @@ public class FailedTranscriptionManager: ObservableObject {
 
     /// Saves failed transcriptions to disk
     @discardableResult
-    private func saveFailedTranscriptions() -> Bool {
+    private func saveFailedTranscriptions(_ entries: [FailedTranscription]? = nil) -> Bool {
+        let entriesToPersist = entries ?? failedTranscriptions
         do {
-            let data = try encoder.encode(failedTranscriptions)
+            let data = try encoder.encode(entriesToPersist)
             try data.write(to: storageURL, options: .atomic)
             FileManager.default.restrictToOwnerOnly(atPath: storageURL.path)
-            AppLogger.pipeline.info("Saved failed transcriptions", ["count": "\(failedTranscriptions.count)"])
+            AppLogger.pipeline.info("Saved failed transcriptions", ["count": "\(entriesToPersist.count)"])
             return true
         } catch {
             AppLogger.pipeline.error("Error saving failed transcriptions", ["error": "\(error)"])
             return false
+        }
+    }
+
+    private func loadPendingDeletions() {
+        guard FileManager.default.fileExists(atPath: pendingDeletionURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: pendingDeletionURL)
+            pendingDeletions = try decoder.decode([PendingDeletion].self, from: data)
+        } catch {
+            AppLogger.pipeline.error("Could not load pending failed transcription deletions", [
+                "errorType": "\(type(of: error))"
+            ])
+        }
+    }
+
+    private func savePendingDeletions() -> Bool {
+        do {
+            if pendingDeletions.isEmpty {
+                if FileManager.default.fileExists(atPath: pendingDeletionURL.path) {
+                    try MeetingRecordingJournalStore.unlinkFileOnly(at: pendingDeletionURL)
+                }
+            } else {
+                let data = try encoder.encode(pendingDeletions)
+                try data.write(to: pendingDeletionURL, options: .atomic)
+                FileManager.default.restrictToOwnerOnly(atPath: pendingDeletionURL.path)
+            }
+            return true
+        } catch {
+            AppLogger.pipeline.error("Could not persist pending failed transcription deletions", [
+                "errorType": "\(type(of: error))"
+            ])
+            return false
+        }
+    }
+
+    private func registerPendingDeletion(for failed: FailedTranscription) -> Bool {
+        guard !pendingDeletions.contains(where: { $0.id == failed.id }) else { return true }
+        let pending = PendingDeletion(id: failed.id)
+        pendingDeletions.append(pending)
+        guard savePendingDeletions() else {
+            pendingDeletions.removeAll { $0.id == failed.id }
+            return false
+        }
+        return true
+    }
+
+    private func completePendingDeletion(id: UUID) {
+        let previous = pendingDeletions
+        pendingDeletions.removeAll { $0.id == id }
+        if !savePendingDeletions() {
+            pendingDeletions = previous
+        }
+    }
+
+    private func resumePendingDeletions(failedQueueDidDecode: Bool) {
+        for pending in pendingDeletions {
+            // The sidecar is durable intent, not an authority for paths. Resolve
+            // the already validated queue row by ID so a modified marker cannot
+            // redirect deletion elsewhere inside the broad managed audio roots.
+            guard let failed = failedTranscriptions.first(where: { $0.id == pending.id }) else {
+                // Absence is terminal only when the canonical queue decoded.
+                // A missing/corrupt queue may be recoverable from its backup;
+                // retain deletion intent rather than orphaning its audio.
+                if failedQueueDidDecode {
+                    completePendingDeletion(id: pending.id)
+                }
+                continue
+            }
+            let referencedAudioURLs = [failed.micAudioURL, failed.systemAudioURL].compactMap { $0 }
+            guard referencedAudioURLs.allSatisfy({
+                isSafeAudioURL($0) && isContainingAudioRootReachable(for: $0)
+            }) else {
+                // A missing path under an offline capture/archive root is not a
+                // completed deletion. Keep the row and marker until the volume
+                // returns, then retry from the canonical row.
+                continue
+            }
+            let didDiscard = MeetingRecordingJournalStore.discardRecordingArtifacts(
+                micAudioURL: failed.micAudioURL,
+                systemAudioURL: failed.systemAudioURL,
+                allowedRoots: allowedAudioRoots
+            )
+            guard didDiscard else { continue }
+
+            let retainedEntries = failedTranscriptions.filter { $0.id != pending.id }
+            guard saveFailedTranscriptions(retainedEntries) else { continue }
+            failedTranscriptions = retainedEntries
+            completePendingDeletion(id: pending.id)
         }
     }
 
@@ -393,6 +497,16 @@ public class FailedTranscriptionManager: ObservableObject {
         micAudioURL: URL,
         systemAudioURL: URL?
     ) -> Bool {
+        // Once durable deletion intent exists, keep the canonical row stable.
+        // Late stop finalization remains owned by its journal (which includes
+        // merged segments), while archive/compression callers roll back their
+        // newly created output when this update returns false.
+        guard !pendingDeletions.contains(where: { $0.id == id }) else {
+            AppLogger.pipeline.warning("Rejected failed transcription audio update while deletion is pending", [
+                "id": id.uuidString
+            ])
+            return false
+        }
         guard isSafeAudioURL(micAudioURL), systemAudioURL.map(isSafeAudioURL) ?? true else {
             AppLogger.pipeline.error("Rejected failed transcription audio update with out-of-sandbox path", [
                 "id": id.uuidString,
@@ -438,6 +552,9 @@ public class FailedTranscriptionManager: ObservableObject {
         guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
             return nil
         }
+        guard !pendingDeletions.contains(where: { $0.id == id }) else {
+            throw AudioReferenceHealingError.deletionPending
+        }
 
         let existing = failedTranscriptions[index]
         let reconciliation = reconcileAudioReferences(of: existing)
@@ -465,14 +582,24 @@ public class FailedTranscriptionManager: ObservableObject {
     /// Removes a failed transcription from the queue.
     @discardableResult
     public func removeFailedTranscription(id: UUID) -> Bool {
+        // A durable delete owns the terminal transition. An alternate metadata
+        // completion must not erase the canonical row before pending cleanup
+        // resolves its journal/audio inventory on a later launch.
+        guard !pendingDeletions.contains(where: { $0.id == id }) else {
+            return false
+        }
         guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
             return false
         }
 
-        let removed = failedTranscriptions.remove(at: index)
-        let didPersist = saveFailedTranscriptions()
-        if !didPersist {
-            failedTranscriptions.insert(removed, at: index)
+        var updatedEntries = failedTranscriptions
+        updatedEntries.remove(at: index)
+        let didPersist = saveFailedTranscriptions(updatedEntries)
+        if didPersist {
+            // Publish absence only after the candidate queue is durable. A
+            // transient remove/rollback would otherwise look terminal to the
+            // meeting finalization owner and could discard late audio.
+            failedTranscriptions = updatedEntries
         }
 
         AppLogger.pipeline.info("Removed failed transcription", [
@@ -515,19 +642,34 @@ public class FailedTranscriptionManager: ObservableObject {
     /// Removes a failed transcription and deletes its audio files.
     @discardableResult
     public func deleteFailedTranscription(id: UUID) -> Bool {
-        guard let failed = failedTranscriptions.first(where: { $0.id == id }) else {
+        guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
             return false
         }
+        let failed = failedTranscriptions[index]
+        var retainedEntries = failedTranscriptions
+        retainedEntries.remove(at: index)
 
-        guard removeFailedTranscription(id: id) else {
-            return false
-        }
+        // Persist deletion intent before touching audio. If cleanup is denied,
+        // the visible row stays put; if queue persistence later fails after
+        // cleanup, the marker finishes metadata removal on the next launch.
+        guard registerPendingDeletion(for: failed) else { return false }
 
-        MeetingRecordingJournalStore.discardRecordingArtifacts(
+        let didDiscard = MeetingRecordingJournalStore.discardRecordingArtifacts(
             micAudioURL: failed.micAudioURL,
             systemAudioURL: failed.systemAudioURL,
             allowedRoots: allowedAudioRoots
         )
+        guard didDiscard else { return false }
+
+        let didPersistRemoval = saveFailedTranscriptions(retainedEntries)
+        failedTranscriptions = retainedEntries
+        if didPersistRemoval {
+            completePendingDeletion(id: id)
+        } else {
+            AppLogger.pipeline.warning("Deferred failed transcription metadata removal to pending deletion recovery", [
+                "id": id.uuidString
+            ])
+        }
         removeEmptyAudioArchiveDirectoryIfNeeded(containing: failed.micAudioURL)
         if let systemURL = failed.systemAudioURL {
             removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
@@ -559,40 +701,21 @@ public class FailedTranscriptionManager: ObservableObject {
         // Nil-coalesce: date arithmetic rarely returns nil, but force unwrap would crash on edge cases
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
 
-        let oldFailures = failedTranscriptions.filter { $0.timestamp < cutoffDate }
-        guard !oldFailures.isEmpty else {
+        let oldFailureIDs = failedTranscriptions
+            .filter { $0.timestamp < cutoffDate }
+            .map(\.id)
+        guard !oldFailureIDs.isEmpty else {
             AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "0", "olderThanDays": "\(days)"])
             return
         }
 
-        // Persist the entry removal before touching audio files. Deleting
-        // audio first means a crash in between leaves entries pointing at
-        // missing files, which the load filter then drops silently.
-        let removedIds = Set(oldFailures.map { $0.id })
-        let previousEntries = failedTranscriptions
-        failedTranscriptions.removeAll { removedIds.contains($0.id) }
-        guard saveFailedTranscriptions() else {
-            failedTranscriptions = previousEntries
-            AppLogger.pipeline.error("Skipped old failed transcription cleanup because removal did not persist", [
-                "count": "\(oldFailures.count)",
-                "olderThanDays": "\(days)"
-            ])
-            return
-        }
-
-        for failure in oldFailures {
-            MeetingRecordingJournalStore.discardRecordingArtifacts(
-                micAudioURL: failure.micAudioURL,
-                systemAudioURL: failure.systemAudioURL,
-                allowedRoots: allowedAudioRoots
-            )
-            removeEmptyAudioArchiveDirectoryIfNeeded(containing: failure.micAudioURL)
-            if let systemURL = failure.systemAudioURL {
-                removeEmptyAudioArchiveDirectoryIfNeeded(containing: systemURL)
+        let removedCount = oldFailureIDs.reduce(into: 0) { count, id in
+            if deleteFailedTranscription(id: id) {
+                count += 1
             }
         }
 
-        AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "\(oldFailures.count)", "olderThanDays": "\(days)"])
+        AppLogger.pipeline.info("Cleaned up old failed transcriptions", ["count": "\(removedCount)", "olderThanDays": "\(days)"])
     }
 
     private func removeEmptyAudioArchiveDirectoryIfNeeded(containing url: URL) {

@@ -484,7 +484,13 @@ extension TranscriptionTaskManagerMetadataTests {
         let journalURL = scratchDirectory.appendingPathComponent(
             "terminal-mic" + MeetingRecordingJournalStore.filenameSuffix
         )
-        try Data("{}".utf8).write(to: journalURL)
+        let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
+        let session = journal.begin(
+            primaryMicURL: scratchDirectory.appendingPathComponent("terminal-mic.wav")
+        )
+        journal.recordSystemAudio(systemURL, session: session)
+        journal.markFinalized(finalMicURL: micURL, session: session)
+        journal.flush()
 
         manager.discardFinalizedFailedTranscriptionAudio(
             micAudioURL: micURL,

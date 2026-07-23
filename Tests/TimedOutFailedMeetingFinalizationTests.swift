@@ -4,8 +4,13 @@ func testTimedOutFailedMeetingFinalization() {
     runSuite("Timed-out finalization buffers callback-first delivery until the row persists") {
         var handoff = TimedOutFailedMeetingFinalizationHandoff()
         let failedID = UUID()
-        let deletedSegmentURL = URL(fileURLWithPath: "/tmp/meeting-mic.wav")
-        let finalizedMicURL = URL(fileURLWithPath: "/tmp/meeting-mic_merged.wav")
+        let testDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TimedOutFinalization-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: testDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: testDirectory) }
+        let deletedSegmentURL = testDirectory.appendingPathComponent("meeting-mic.wav")
+        let finalizedMicURL = testDirectory.appendingPathComponent("meeting-mic_merged.wav")
+        FileManager.default.createFile(atPath: finalizedMicURL.path, contents: Data("finalized".utf8))
         let result = CaptureStopResult(
             micURL: finalizedMicURL,
             systemURL: nil,
@@ -35,6 +40,16 @@ func testTimedOutFailedMeetingFinalization() {
             persistenceAudio.micURL,
             finalizedMicURL,
             "callback-first finalization must supply the durable row when the timeout snapshot is empty"
+        )
+        let persistenceAudioWithDeletedSegment = handoff.audioForPersistence(
+            id: failedID,
+            provisionalMicURL: deletedSegmentURL,
+            provisionalSystemURL: nil
+        )
+        assertEqual(
+            persistenceAudioWithDeletedSegment.micURL,
+            finalizedMicURL,
+            "callback-first finalization must replace a deleted provisional segment with usable finalized audio"
         )
 
         handoff.markDeliverySucceeded(id: failedID)

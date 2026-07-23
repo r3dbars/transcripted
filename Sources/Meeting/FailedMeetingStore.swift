@@ -43,6 +43,7 @@ final class FailedMeetingStore {
     private var failedAudioCompressionTask: Task<Void, Never>?
     private var failedAudioCompressionNeedsReschedule = false
     private var timedOutJournalRecoveryTask: Task<Void, Never>?
+    private var pendingTimedOutJournalRecoveryDirectory: URL?
 
     init(
         taskManager: TranscriptionTaskManager,
@@ -147,16 +148,9 @@ final class FailedMeetingStore {
     @discardableResult
     func dismissFailedMeeting(id: UUID) -> Bool {
         retryingFailedMeetingIDs.remove(id)
-        let dismissedFailure = failedManager.failedTranscriptions.first(where: { $0.id == id })
-        let didDismiss = failedManager.removeFailedTranscription(id: id)
+        let didDismiss = failedManager.deleteFailedTranscription(id: id)
         let isAbsent = !failedManager.failedTranscriptions.contains(where: { $0.id == id })
         if didDismiss || isAbsent {
-            if let dismissedFailure {
-                taskManager.discardFinalizedFailedTranscriptionAudio(
-                    micAudioURL: dismissedFailure.micAudioURL,
-                    systemAudioURL: dismissedFailure.systemAudioURL
-                )
-            }
             finishTimedOutFinalizationWithDiscard(id: id)
         }
         publishRefresh()
@@ -207,6 +201,9 @@ final class FailedMeetingStore {
         )
         guard preserved else {
             timedOutFinalizationHandoff.markPersistenceFailed(id: taskId)
+            if let ownedAudioURL = persistenceAudio.micURL ?? persistenceAudio.systemURL {
+                scheduleTimedOutJournalRecovery(in: ownedAudioURL.deletingLastPathComponent())
+            }
             return false
         }
 
@@ -273,6 +270,9 @@ final class FailedMeetingStore {
         case .discard(let terminalResult):
             discardFinalizedTimedOutAudio(terminalResult)
         case .journalOwned:
+            if let ownedAudioURL = result.micURL ?? result.systemURL {
+                scheduleTimedOutJournalRecovery(in: ownedAudioURL.deletingLastPathComponent())
+            }
             return
         }
     }
@@ -346,10 +346,17 @@ final class FailedMeetingStore {
     }
 
     private func scheduleTimedOutJournalRecovery(in scratchDirectory: URL) {
-        timedOutJournalRecoveryTask?.cancel()
+        pendingTimedOutJournalRecoveryDirectory = scratchDirectory
+        guard timedOutJournalRecoveryTask == nil else { return }
+        pendingTimedOutJournalRecoveryDirectory = nil
         let taskManager = self.taskManager
-        timedOutJournalRecoveryTask = Task {
+        timedOutJournalRecoveryTask = Task { [weak self] in
             _ = await taskManager.recoverOrphanedRecordings(in: scratchDirectory)
+            guard let self else { return }
+            self.timedOutJournalRecoveryTask = nil
+            if let pendingDirectory = self.pendingTimedOutJournalRecoveryDirectory {
+                self.scheduleTimedOutJournalRecovery(in: pendingDirectory)
+            }
         }
     }
 

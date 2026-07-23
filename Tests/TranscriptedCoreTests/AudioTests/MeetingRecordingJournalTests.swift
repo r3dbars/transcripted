@@ -118,6 +118,47 @@ final class MeetingRecordingJournalTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: outsideJournalURL.path))
     }
 
+    func testTerminalDiscardRejectsDirectoryAudioWithoutRecursiveDeletion() throws {
+        let directoryAudioURL = temporaryDirectory.appendingPathComponent("meeting.wav", isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryAudioURL, withIntermediateDirectories: true)
+        let childURL = directoryAudioURL.appendingPathComponent("keep.txt")
+        FileManager.default.createFile(atPath: childURL.path, contents: Data("keep".utf8))
+
+        XCTAssertFalse(MeetingRecordingJournalStore.discardRecordingArtifacts(
+            micAudioURL: directoryAudioURL,
+            systemAudioURL: nil,
+            allowedRoots: [temporaryDirectory]
+        ))
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directoryAudioURL.path, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: childURL.path))
+    }
+
+    func testTerminalDiscardRejectsSameRootSymlinkedJournal() throws {
+        let micA = temporaryDirectory.appendingPathComponent("meeting-a.wav")
+        let micB = temporaryDirectory.appendingPathComponent("meeting-b.wav")
+        FileManager.default.createFile(atPath: micA.path, contents: Data("a".utf8))
+        FileManager.default.createFile(atPath: micB.path, contents: Data("b".utf8))
+
+        let storeB = MeetingRecordingJournalStore(directory: temporaryDirectory)
+        storeB.begin(primaryMicURL: micB)
+        storeB.flush()
+        let journalB = temporaryDirectory.appendingPathComponent("meeting-b.recording.json")
+        let journalA = temporaryDirectory.appendingPathComponent("meeting-a.recording.json")
+        try FileManager.default.createSymbolicLink(at: journalA, withDestinationURL: journalB)
+
+        XCTAssertFalse(MeetingRecordingJournalStore.discardRecordingArtifacts(
+            micAudioURL: micA,
+            systemAudioURL: nil,
+            allowedRoots: [temporaryDirectory]
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micA.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micB.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalA.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalB.path))
+    }
+
     func testLateFinalizeFromPreviousSessionLeavesNewJournalUntouched() throws {
         let store = MeetingRecordingJournalStore(directory: temporaryDirectory)
         let micA = temporaryDirectory.appendingPathComponent("meeting_A_mic.wav")

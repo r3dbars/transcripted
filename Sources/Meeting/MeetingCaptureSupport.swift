@@ -113,9 +113,33 @@ struct TimedOutFailedMeetingFinalizationHandoff {
             finalizedResult = nil
         }
         return (
-            micURL: provisionalMicURL ?? finalizedResult?.micURL,
-            systemURL: provisionalSystemURL ?? finalizedResult?.systemURL
+            micURL: preferredPersistenceURL(
+                provisional: provisionalMicURL,
+                finalized: finalizedResult?.micURL
+            ),
+            systemURL: preferredPersistenceURL(
+                provisional: provisionalSystemURL,
+                finalized: finalizedResult?.systemURL
+            )
         )
+    }
+
+    private func preferredPersistenceURL(provisional: URL?, finalized: URL?) -> URL? {
+        var isDirectory: ObjCBool = false
+        if let provisional,
+           FileManager.default.fileExists(atPath: provisional.path, isDirectory: &isDirectory),
+           !isDirectory.boolValue {
+            return provisional
+        }
+        isDirectory = false
+        if let finalized,
+           FileManager.default.fileExists(atPath: finalized.path, isDirectory: &isDirectory),
+           !isDirectory.boolValue {
+            return finalized
+        }
+        // Preserve the original timeout snapshot when neither candidate is on
+        // disk yet; the recording journal remains the durable recovery owner.
+        return provisional ?? finalized
     }
 
     mutating func markDeliverySucceeded(id: UUID) {

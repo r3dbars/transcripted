@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// On-disk record of an in-progress meeting recording, kept next to the audio
 /// in the recordings scratch directory.
@@ -115,7 +116,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     func clear() {
         queue.async {
             if let url = self.journalURL {
-                try? FileManager.default.removeItem(at: url)
+                try? Self.unlinkFileOnly(at: url)
             }
             self.journal = nil
             self.journalURL = nil
@@ -126,11 +127,12 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     /// Applies an explicit terminal decision to the current recording. The
     /// in-memory journal is the only complete inventory when stop never calls
     /// back, so snapshot it before deleting every owned segment and the journal.
+    @discardableResult
     func discardCurrentRecordingArtifacts(
         micAudioURL: URL?,
         systemAudioURL: URL?,
         allowedRoot: URL
-    ) {
+    ) -> Bool {
         let snapshot = queue.sync {
             let snapshot = (journalURL: self.journalURL, journal: self.journal)
             self.journal = nil
@@ -138,7 +140,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             self.activeSession = nil
             return snapshot
         }
-        Self.discardRecordingArtifacts(
+        return Self.discardRecordingArtifacts(
             journalURL: snapshot.journalURL,
             journal: snapshot.journal,
             additionalAudioURLs: [micAudioURL, systemAudioURL].compactMap { $0 },
@@ -221,21 +223,28 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     /// Deletes a terminal recording's complete journal-owned inventory. The
     /// supplied URLs are useful after a merge, while the journal contributes
     /// every pre-merge recovery segment when completion never arrives.
+    @discardableResult
     static func discardRecordingArtifacts(
         micAudioURL: URL?,
         systemAudioURL: URL?,
         allowedRoots: [URL]
-    ) {
+    ) -> Bool {
         let canonicalRoots = allowedRoots.map { canonicalURL($0) }
         let safeMicURL = micAudioURL.flatMap { url in
             isContained(url, in: canonicalRoots) ? url : nil
         }
         let journalCandidates = safeMicURL.map { journalURLs(forMicAudioURL: $0) } ?? []
-        let journalURL = journalCandidates.first { candidate in
+        let existingJournalCandidates = journalCandidates.filter { candidate in
             isContained(candidate, in: canonicalRoots)
                 && FileManager.default.fileExists(atPath: candidate.path)
         }
-        discardRecordingArtifacts(
+        // Never load inventory through a symlink: even a same-root link could
+        // redirect one recording's terminal cleanup to another journal.
+        guard !existingJournalCandidates.contains(where: { isSymbolicLink(at: $0) }) else {
+            return false
+        }
+        let journalURL = existingJournalCandidates.first
+        return discardRecordingArtifacts(
             journalURL: journalURL,
             journal: journalURL.flatMap(load(at:)),
             additionalAudioURLs: [micAudioURL, systemAudioURL].compactMap { $0 },
@@ -248,9 +257,17 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         journal: MeetingRecordingJournal?,
         additionalAudioURLs: [URL],
         allowedRoots: [URL]
-    ) {
+    ) -> Bool {
         let canonicalRoots = allowedRoots.map { canonicalURL($0) }
-        var audioURLs = Set(additionalAudioURLs.filter { isContained($0, in: canonicalRoots) })
+        let safeAdditionalAudioURLs = additionalAudioURLs.filter { isContained($0, in: canonicalRoots) }
+        var audioURLs = Set(safeAdditionalAudioURLs)
+
+        // An unreadable journal may contain segment paths that the failed row
+        // does not know about. Keep every artifact and the visible queue row
+        // rather than claiming terminal cleanup was complete.
+        if journalURL != nil, journal == nil {
+            return false
+        }
 
         if let journalURL,
            isContained(journalURL, in: canonicalRoots),
@@ -277,12 +294,55 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             }
         }
 
-        for url in audioURLs {
-            try? FileManager.default.removeItem(at: url)
+        // Remove unreferenced recovery segments first and the row's primary
+        // mic last. If an unlink fails, the caller can restore/keep the row
+        // with at least its canonical mic still present.
+        let safeMicURL = safeAdditionalAudioURLs.first
+        let safeSystemURL = safeAdditionalAudioURLs.dropFirst().first
+        var orderedAudioURLs = audioURLs.filter { url in
+            url != safeMicURL && url != safeSystemURL
+        }.sorted { $0.path < $1.path }
+        if let safeSystemURL, audioURLs.contains(safeSystemURL) {
+            orderedAudioURLs.append(safeSystemURL)
+        }
+        if let safeMicURL, audioURLs.contains(safeMicURL) {
+            orderedAudioURLs.append(safeMicURL)
+        }
+        let fileManager = FileManager.default
+        let existingAudioURLs = orderedAudioURLs.filter { fileManager.fileExists(atPath: $0.path) }
+        guard existingAudioURLs.allSatisfy({
+            isNonDirectoryArtifact(at: $0)
+                && fileManager.isDeletableFile(atPath: $0.path)
+        }) else {
+            return false
+        }
+        for url in existingAudioURLs {
+            do {
+                // POSIX unlink is intentionally non-recursive. If a checked
+                // file is swapped for a directory, cleanup fails closed rather
+                // than recursively erasing user data under that directory.
+                try unlinkFileOnly(at: url)
+            } catch {
+                AppLogger.audio.warning("Failed to discard terminal recording artifact", [
+                    "file": url.lastPathComponent,
+                    "errorType": "\(type(of: error))"
+                ])
+                return false
+            }
         }
         if let journalURL, isContained(journalURL, in: canonicalRoots) {
-            try? FileManager.default.removeItem(at: journalURL)
+            do {
+                try unlinkFileOnly(at: journalURL)
+            } catch {
+                // All owned audio is already gone, so this empty marker cannot
+                // resurrect a meeting. Leave it for the stale-journal scan.
+                AppLogger.audio.warning("Left empty terminal recording journal for stale cleanup", [
+                    "file": journalURL.lastPathComponent,
+                    "errorType": "\(type(of: error))"
+                ])
+            }
         }
+        return true
     }
 
     private static func journalURLs(forMicAudioURL micURL: URL) -> [URL] {
@@ -311,6 +371,56 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         url.standardizedFileURL.resolvingSymlinksInPath()
     }
 
+    private static func isSymbolicLink(at url: URL) -> Bool {
+        artifactMode(at: url).map { ($0 & S_IFMT) == S_IFLNK } ?? false
+    }
+
+    private static func isNonDirectoryArtifact(at url: URL) -> Bool {
+        artifactMode(at: url).map { ($0 & S_IFMT) != S_IFDIR } ?? false
+    }
+
+    private static func artifactMode(at url: URL) -> mode_t? {
+        var status = stat()
+        let result = url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return Int32(-1) }
+            return Darwin.lstat(path, &status)
+        }
+        return result == 0 ? status.st_mode : nil
+    }
+
+    /// Removes one filesystem entry without ever recursing into a directory.
+    /// Shared by journal recovery and the failed-deletion sidecar so every
+    /// artifact owner has the same file-only terminal primitive.
+    static func unlinkFileOnly(at url: URL) throws {
+        let result = url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return Int32(-1) }
+            return Darwin.unlink(path)
+        }
+        guard result == 0 else {
+            let errorCode = errno
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errorCode))
+        }
+    }
+
+    @discardableResult
+    static func removeJournalArtifact(at journalURL: URL, allowedRoots: [URL]) -> Bool {
+        let canonicalRoots = allowedRoots.map { canonicalURL($0) }
+        guard isContained(journalURL, in: canonicalRoots),
+              isNonDirectoryArtifact(at: journalURL) else {
+            return false
+        }
+        do {
+            try unlinkFileOnly(at: journalURL)
+            return true
+        } catch {
+            AppLogger.audio.warning("Failed to remove recording journal artifact", [
+                "file": journalURL.lastPathComponent,
+                "errorType": "\(type(of: error))"
+            ])
+            return false
+        }
+    }
+
     /// Removes the journal matching a meeting's mic audio file, tolerating the
     /// `_merged` rename the segment merger applies.
     static func removeJournal(forMicAudioURL micURL: URL, allowedRoots: [URL]) {
@@ -319,7 +429,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         for journalURL in journalURLs(forMicAudioURL: micURL) {
             if isContained(journalURL, in: canonicalRoots),
                FileManager.default.fileExists(atPath: journalURL.path) {
-                try? FileManager.default.removeItem(at: journalURL)
+                try? unlinkFileOnly(at: journalURL)
                 AppLogger.audio.debug("Removed recording journal after durable handoff", [
                     "file": journalURL.lastPathComponent
                 ])

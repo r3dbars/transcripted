@@ -70,7 +70,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let recovered = await manager.recoverOrphanedRecordings(
             in: paths.audioCaptures,
             livenessWindow: 120,
-            retryRecentOnce: false
+            waitForRecentJournals: false
         )
 
         XCTAssertEqual(recovered, 0)
@@ -93,6 +93,24 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
         XCTAssertEqual(recovered, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+    }
+
+    func testStaleJournalDirectoryIsNeverRecursivelyRemoved() async throws {
+        let (manager, paths) = makeManager()
+        let journalDirectory = paths.audioCaptures
+            .appendingPathComponent("directory.recording.json", isDirectory: true)
+        try FileManager.default.createDirectory(at: journalDirectory, withIntermediateDirectories: true)
+        let sentinelURL = journalDirectory.appendingPathComponent("keep.txt")
+        FileManager.default.createFile(atPath: sentinelURL.path, contents: Data("keep".utf8))
+
+        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+
+        XCTAssertEqual(recovered, 0)
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalDirectory.path, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sentinelURL.path))
         XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
     }
 
@@ -195,7 +213,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let recovered = await manager.recoverOrphanedRecordings(
             in: paths.audioCaptures,
             livenessWindow: 0.02,
-            retryRecentOnce: true
+            waitForRecentJournals: true
         )
 
         XCTAssertEqual(recovered, 1)
@@ -204,6 +222,102 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let entry = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertEqual(entry.id, failedID)
         XCTAssertEqual(entry.micAudioURL.lastPathComponent, "meeting_fresh_mic_merged.wav")
+    }
+
+    func testRecoveryWaitsThroughRepeatedFreshWrites() async throws {
+        let (manager, paths) = makeManager()
+        let micURL = paths.audioCaptures.appendingPathComponent("meeting_repeated_write_mic.wav")
+        try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: micURL.lastPathComponent,
+            segments: [.init(filename: micURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(),
+            state: .stopping
+        )
+
+        let recoveryTask = Task {
+            await manager.recoverOrphanedRecordings(
+                in: paths.audioCaptures,
+                livenessWindow: 0.08,
+                waitForRecentJournals: true
+            )
+        }
+        try await Task.sleep(for: .seconds(0.05))
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date()],
+            ofItemAtPath: micURL.path
+        )
+
+        let recovered = await recoveryTask.value
+
+        XCTAssertEqual(recovered, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+    }
+
+    func testConcurrentRecoveryCallsShareOneJournalOwner() async throws {
+        let (manager, paths) = makeManager()
+        let micURL = paths.audioCaptures.appendingPathComponent("meeting_single_flight_mic.wav")
+        try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
+        try backdate(micURL)
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: micURL.lastPathComponent,
+            segments: [.init(filename: micURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            state: .stopping
+        )
+
+        async let first = manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+        async let second = manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+        let results = await [first, second]
+
+        XCTAssertEqual(results, [1, 1])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+    }
+
+    func testJoinedRecoveryRequestForcesPassAfterEarlierSnapshot() async throws {
+        let (manager, paths) = makeManager()
+        var joinedRecoveryTask: Task<Int, Never>?
+        manager.orphanedRecordingRecoveryPassObserver = { [self] in
+            manager.orphanedRecordingRecoveryPassObserver = nil
+            do {
+                let micURL = paths.audioCaptures.appendingPathComponent("meeting_joined_request_mic.wav")
+                try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
+                try backdate(micURL)
+                _ = try writeJournal(
+                    in: paths.audioCaptures,
+                    primaryMicFilename: micURL.lastPathComponent,
+                    segments: [.init(filename: micURL.lastPathComponent, gapBefore: 0)],
+                    startedAt: Date(timeIntervalSince1970: 1_000),
+                    state: .stopping
+                )
+                joinedRecoveryTask = Task {
+                    await manager.recoverOrphanedRecordings(
+                        in: paths.audioCaptures,
+                        livenessWindow: 0,
+                        waitForRecentJournals: false
+                    )
+                }
+            } catch {
+                XCTFail("Could not create joined recovery fixture: \(type(of: error))")
+            }
+        }
+
+        let firstResult = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+        let joinedTask = try XCTUnwrap(joinedRecoveryTask)
+        let joinedResult = await joinedTask.value
+
+        XCTAssertEqual(firstResult, 1)
+        XCTAssertEqual(joinedResult, 1)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+        XCTAssertTrue(MeetingRecordingJournalStore.journalURLs(in: paths.audioCaptures).isEmpty)
     }
 
     func testLateJournalWriteAfterRecoveryHandoffDoesNotDuplicateFailedEntry() async throws {
@@ -243,6 +357,85 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             manager.failedTranscriptionManager.failedTranscriptions.count, 1,
             "a resurrected journal would re-recover the same audio into a duplicate failed-queue entry"
         )
+    }
+
+    func testRejectsSymlinkedJournalAudioOutsideManagedScratch() async throws {
+        let (manager, paths) = makeManager()
+        let outsideURL = tempDirectory.appendingPathComponent("outside.wav")
+        try writeMonoWAV(to: outsideURL, sampleRate: 48_000, samples: Array(repeating: 0.5, count: 4_800))
+        try corruptHeaderSizes(at: outsideURL)
+        try backdate(outsideURL)
+        let outsideBytes = try Data(contentsOf: outsideURL)
+
+        let symlinkURL = paths.audioCaptures.appendingPathComponent("meeting_symlink_mic.wav")
+        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: outsideURL)
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: symlinkURL.lastPathComponent,
+            segments: [.init(filename: symlinkURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+
+        XCTAssertEqual(recovered, 0)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: outsideURL), outsideBytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
+    func testRejectsSymlinkedJournalAudioToAnotherManagedRecording() async throws {
+        let (manager, paths) = makeManager()
+        let otherRecordingURL = paths.audioCaptures.appendingPathComponent("other-recording.wav")
+        try writeMonoWAV(
+            to: otherRecordingURL,
+            sampleRate: 48_000,
+            samples: Array(repeating: 0.5, count: 4_800)
+        )
+        try backdate(otherRecordingURL)
+        let originalBytes = try Data(contentsOf: otherRecordingURL)
+
+        let symlinkURL = paths.audioCaptures.appendingPathComponent("meeting_alias_mic.wav")
+        try FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: otherRecordingURL)
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: symlinkURL.lastPathComponent,
+            segments: [.init(filename: symlinkURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+
+        XCTAssertEqual(recovered, 0)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: otherRecordingURL), originalBytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: otherRecordingURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
+    func testRejectsRecoveryDirectoryOutsideManagedStorage() async throws {
+        let (manager, _) = makeManager()
+        let unmanagedDirectory = tempDirectory.appendingPathComponent("unmanaged", isDirectory: true)
+        try FileManager.default.createDirectory(at: unmanagedDirectory, withIntermediateDirectories: true)
+        let micURL = unmanagedDirectory.appendingPathComponent("meeting_unmanaged_mic.wav")
+        try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.5, count: 4_800))
+        try corruptHeaderSizes(at: micURL)
+        try backdate(micURL)
+        let originalBytes = try Data(contentsOf: micURL)
+        let journalURL = try writeJournal(
+            in: unmanagedDirectory,
+            primaryMicFilename: micURL.lastPathComponent,
+            segments: [.init(filename: micURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        let recovered = await manager.recoverOrphanedRecordings(in: unmanagedDirectory)
+
+        XCTAssertEqual(recovered, 0)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: micURL), originalBytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
     }
 
     // MARK: - Fixtures
