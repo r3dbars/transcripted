@@ -12,90 +12,6 @@ struct PreparedImportedMeetingAudio: Sendable {
     let recordingDate: Date
 }
 
-enum ImportedTranscriptionQueueJournalPhase: String, Codable, Equatable, Sendable {
-    case queued
-    case active
-    case transcriptCommitted
-}
-
-struct ImportedTranscriptionQueueJournalOwner: Codable, Equatable, Sendable {
-    let processIdentifier: Int32
-    let claimedAt: Date
-}
-
-struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
-    let id: UUID
-    let audioFilename: String
-    let recordingDate: Date
-    let enqueuedAt: Date
-    let sttModelRawValue: String
-    var phase: ImportedTranscriptionQueueJournalPhase
-    var owner: ImportedTranscriptionQueueJournalOwner?
-
-    init(
-        id: UUID,
-        audioFilename: String,
-        recordingDate: Date,
-        enqueuedAt: Date,
-        sttModelRawValue: String,
-        phase: ImportedTranscriptionQueueJournalPhase = .queued,
-        owner: ImportedTranscriptionQueueJournalOwner? = nil
-    ) {
-        self.id = id
-        self.audioFilename = audioFilename
-        self.recordingDate = recordingDate
-        self.enqueuedAt = enqueuedAt
-        self.sttModelRawValue = sttModelRawValue
-        self.phase = phase
-        self.owner = owner
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case audioFilename
-        case recordingDate
-        case enqueuedAt
-        case sttModelRawValue
-        case phase
-        case owner
-    }
-
-    init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        id = try values.decode(UUID.self, forKey: .id)
-        audioFilename = try values.decode(String.self, forKey: .audioFilename)
-        recordingDate = try values.decode(Date.self, forKey: .recordingDate)
-        enqueuedAt = try values.decode(Date.self, forKey: .enqueuedAt)
-        sttModelRawValue = try values.decode(String.self, forKey: .sttModelRawValue)
-        phase = try values.decodeIfPresent(
-            ImportedTranscriptionQueueJournalPhase.self,
-            forKey: .phase
-        ) ?? .queued
-        owner = try values.decodeIfPresent(
-            ImportedTranscriptionQueueJournalOwner.self,
-            forKey: .owner
-        )
-    }
-}
-
-enum ImportedTranscriptionQueueJournalError: Error {
-    case audioOutsideScratchDirectory
-    case claimFailed
-    case journalMissing
-}
-
-enum ImportedAudioQueuePersistenceFailureCopy {
-    static let retryEntryMessage =
-        "Imported audio was saved after Transcripted couldn't add it to the transcription queue. Finish the transcript from Home."
-
-    static func displayMessage(preservedForRelaunch: Bool) -> String {
-        if preservedForRelaunch {
-            return "Transcripted couldn't safely queue that import. The copied audio was saved for retry in Home."
-        }
-        return "Transcripted couldn't safely queue that import or save a retry entry. Import the original file again."
-    }
-}
-
 enum ImportedTranscriptionQueueJournal {
     private static let filenamePrefix = "import-job-"
     private static let filenameExtension = "json"
@@ -283,7 +199,7 @@ enum ImportedTranscriptionQueueJournal {
                 }
                 record = loaded
             }
-            if record.phase != .transcriptCommitted {
+            if record.phase == .queued || record.phase == .active {
                 record.phase = .active
             }
             record.owner = ImportedTranscriptionQueueJournalOwner(
@@ -345,7 +261,15 @@ enum ImportedTranscriptionQueueJournal {
         phase: ImportedTranscriptionQueueJournalPhase,
         stableTranscriptExists: Bool
     ) -> Bool {
-        phase == .transcriptCommitted || stableTranscriptExists
+        phase == .transcriptCommitted
+            || phase == .scratchCleanupPending
+            || stableTranscriptExists
+    }
+
+    static func shouldCleanRecoveredScratch(
+        phase: ImportedTranscriptionQueueJournalPhase
+    ) -> Bool {
+        phase == .scratchCleanupPending
     }
 
     private static func journalURL(for id: UUID, in directory: URL) -> URL {
@@ -485,12 +409,39 @@ final class ImportedTranscriptionQueueJournalSession: ImportedTranscriptionRecov
     func transcriptCommitConfirmed() {
         stateLock.withLock {
             guard lockDescriptor >= 0 else { return }
-            record.phase = .transcriptCommitted
-            try? ImportedTranscriptionQueueJournal.write(
-                record,
-                journalDirectory: journalDirectory,
-                fileManager: fileManager
-            )
+            guard record.phase != .scratchCleanupPending else { return }
+            var updatedRecord = record
+            updatedRecord.phase = .transcriptCommitted
+            do {
+                try ImportedTranscriptionQueueJournal.write(
+                    updatedRecord,
+                    journalDirectory: journalDirectory,
+                    fileManager: fileManager
+                )
+                record = updatedRecord
+            } catch {
+                return
+            }
+        }
+    }
+
+    func prepareForScratchCleanup() -> Bool {
+        stateLock.withLock {
+            guard lockDescriptor >= 0 else { return false }
+            guard record.phase != .scratchCleanupPending else { return true }
+            var updatedRecord = record
+            updatedRecord.phase = .scratchCleanupPending
+            do {
+                try ImportedTranscriptionQueueJournal.write(
+                    updatedRecord,
+                    journalDirectory: journalDirectory,
+                    fileManager: fileManager
+                )
+                record = updatedRecord
+                return true
+            } catch {
+                return false
+            }
         }
     }
 

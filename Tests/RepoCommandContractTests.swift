@@ -2325,8 +2325,9 @@ func testRepoCommandContract() {
             importedRecoveryBlock.contains("recoveryAudioStatus(")
                 && importedRecoveryBlock.contains("guard audioStatus == .regularFile")
                 && coordinatorContents.contains("TranscriptSaver.existingTranscriptURLs(")
-                && importedRecoveryBlock.contains("hasCommittedTranscript("),
-            "relaunch recovery should reject unsafe scratch inputs and finish either transcript crash boundary idempotently"
+                && importedRecoveryBlock.contains("hasCommittedTranscript(")
+                && importedRecoveryBlock.contains("shouldCleanRecoveredScratch("),
+            "relaunch recovery should reject unsafe inputs, recognize transcript commit, and only finish explicitly authorized scratch cleanup"
         )
         let importJournalFailureBlock = sourceSlice(
             controllerContents,
@@ -2858,6 +2859,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             cancelBlock.contains("if reason == .userRequested")
+                && cancelBlock.contains("prepareImportedScratchCleanup(for: job)")
                 && cancelBlock.contains("try FileManager.default.removeItem(at: audioURL)")
                 && cancelBlock.contains("confirmImportedScratchCleanup(for: job)")
                 && cancelBlock.contains("Imported audio saved before cancellation"),

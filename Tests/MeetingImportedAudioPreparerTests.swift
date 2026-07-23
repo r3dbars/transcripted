@@ -677,10 +677,33 @@ func testMeetingImportedAudioPreparer() async {
         )
         owner = nil
 
-        let cleanupOwner = try! ImportedTranscriptionQueueJournal.claim(id: id, journalDirectory: journalURL)
+        var cleanupOwner = try! ImportedTranscriptionQueueJournal.claim(id: id, journalDirectory: journalURL)
         assertEqual(cleanupOwner?.phase, .transcriptCommitted, "relaunch should preserve the committed cleanup phase")
+        assertFalse(
+            ImportedTranscriptionQueueJournal.shouldCleanRecoveredScratch(phase: cleanupOwner?.phase ?? .active),
+            "transcript commit alone must not delete audio intentionally retained after an archive failure"
+        )
+        assertTrue(
+            cleanupOwner?.prepareForScratchCleanup() == true,
+            "cleanup intent should become durable before scratch deletion"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).first?.phase,
+            .scratchCleanupPending,
+            "cleanup authorization should survive a crash before file removal"
+        )
+        cleanupOwner = nil
+        let resumedCleanupOwner = try! ImportedTranscriptionQueueJournal.claim(
+            id: id,
+            journalDirectory: journalURL
+        )
+        assertEqual(
+            resumedCleanupOwner?.phase,
+            .scratchCleanupPending,
+            "a new process should resume the authorized cleanup phase without replaying transcription"
+        )
         try! FileManager.default.removeItem(at: audioURL)
-        cleanupOwner?.scratchCleanupConfirmed()
+        resumedCleanupOwner?.scratchCleanupConfirmed()
         assertTrue(
             ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).isEmpty,
             "the committed journal should retire only after scratch is gone"
@@ -708,6 +731,14 @@ func testMeetingImportedAudioPreparer() async {
                 stableTranscriptExists: false
             ),
             "recovery should only replay when neither commit proof exists"
+        )
+        assertFalse(
+            ImportedTranscriptionQueueJournal.shouldCleanRecoveredScratch(phase: .transcriptCommitted),
+            "recovery should preserve scratch until cleanup is explicitly authorized"
+        )
+        assertTrue(
+            ImportedTranscriptionQueueJournal.shouldCleanRecoveredScratch(phase: .scratchCleanupPending),
+            "recovery should finish an authorized cleanup idempotently"
         )
     }
 

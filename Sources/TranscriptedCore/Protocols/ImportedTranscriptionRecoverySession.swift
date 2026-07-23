@@ -13,6 +13,11 @@ public protocol ImportedTranscriptionRecoverySession: AnyObject, Sendable {
     /// the recovery record.
     func transcriptCommitConfirmed()
 
+    /// Durably records that scratch may now be deleted. Returns false when the
+    /// recovery record could not be advanced, in which case callers must retain
+    /// the audio.
+    func prepareForScratchCleanup() -> Bool
+
     /// The app-owned scratch entry is gone (or was already absent).
     func scratchCleanupConfirmed()
 

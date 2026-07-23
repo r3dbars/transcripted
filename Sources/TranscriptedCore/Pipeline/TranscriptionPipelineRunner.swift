@@ -812,11 +812,16 @@ extension TranscriptionTaskManager {
         // committed, so a late cancellation cannot delete transcript + retained
         // audio after scratch files are gone.
         if shouldRemoveScratchAudio, sourceFailedTranscriptionId == nil {
-            let removedMic = removeManagedCleanupFile(micURL, label: "completed mic scratch")
-            let removedSystem = removeManagedCleanupFile(systemURL, label: "completed system scratch")
-            if removedMic && removedSystem {
-                await MainActor.run {
-                    self.confirmImportedTranscriptionScratchCleanup(taskId: taskId)
+            let cleanupPrepared = await MainActor.run {
+                self.prepareImportedTranscriptionScratchCleanup(taskId: taskId)
+            }
+            if cleanupPrepared {
+                let removedMic = removeManagedCleanupFile(micURL, label: "completed mic scratch")
+                let removedSystem = removeManagedCleanupFile(systemURL, label: "completed system scratch")
+                if removedMic && removedSystem {
+                    await MainActor.run {
+                        self.confirmImportedTranscriptionScratchCleanup(taskId: taskId)
+                    }
                 }
             }
         }

@@ -9,6 +9,7 @@ private final class ImportedRecoverySessionSpy: ImportedTranscriptionRecoverySes
 
     private let lock = NSLock()
     private var transcriptCommits = 0
+    private var scratchCleanupPreparations = 0
     private var scratchCleanups = 0
     private var failedQueueHandoffs = 0
 
@@ -17,11 +18,17 @@ private final class ImportedRecoverySessionSpy: ImportedTranscriptionRecoverySes
     }
 
     var transcriptCommitCount: Int { lock.withLock { transcriptCommits } }
+    var scratchCleanupPreparationCount: Int { lock.withLock { scratchCleanupPreparations } }
     var scratchCleanupCount: Int { lock.withLock { scratchCleanups } }
     var failedQueueHandoffCount: Int { lock.withLock { failedQueueHandoffs } }
 
     func transcriptCommitConfirmed() {
         lock.withLock { transcriptCommits += 1 }
+    }
+
+    func prepareForScratchCleanup() -> Bool {
+        lock.withLock { scratchCleanupPreparations += 1 }
+        return true
     }
 
     func scratchCleanupConfirmed() {
@@ -120,6 +127,7 @@ extension TranscriptionTaskManagerMetadataTests {
 
         try await waitUntil { speech.didStart }
         XCTAssertEqual(recoverySession.transcriptCommitCount, 0)
+        XCTAssertEqual(recoverySession.scratchCleanupPreparationCount, 0)
         XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: copiedImportURL.path))
 
@@ -133,13 +141,49 @@ extension TranscriptionTaskManagerMetadataTests {
         let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
         let frontmatter = try XCTUnwrap(try TranscriptFrontmatter.readValues(from: transcriptURL))
         XCTAssertEqual(TranscriptFrontmatter.captureID(in: frontmatter), taskId)
+        XCTAssertEqual(recoverySession.scratchCleanupPreparationCount, 0)
         XCTAssertEqual(recoverySession.scratchCleanupCount, 0, "speaker review still owns scratch audio")
 
         XCTAssertTrue(manager.deferPendingSpeakerNamingReview(reason: "test cleanup"))
         try await waitUntil {
             recoverySession.scratchCleanupCount == 1
         }
+        XCTAssertEqual(recoverySession.scratchCleanupPreparationCount, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: copiedImportURL.path))
+    }
+
+    func testImportedArchiveFailureDoesNotAuthorizeRecoveryCleanup() async throws {
+        let blockedArchiveParent = tempDirectory.appendingPathComponent("blocked-retained-audio")
+        try Data([0]).write(to: blockedArchiveParent)
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Synthetic imported archive failure."),
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments()),
+            retainedAudioDirectory: blockedArchiveParent.appendingPathComponent("audio")
+        )
+        let copiedImportURL = tempDirectory
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("archive-failure.wav")
+        try writeMonoWAV(to: copiedImportURL, duration: 2.5)
+        let taskId = UUID()
+        let recoverySession = ImportedRecoverySessionSpy(jobID: taskId)
+
+        manager.startImportedTranscription(
+            taskId: taskId,
+            audioURL: copiedImportURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            recoverySession: recoverySession
+        )
+
+        try await waitUntil {
+            recoverySession.transcriptCommitCount == 1 && manager.activeTasks.isEmpty
+        }
+
+        XCTAssertEqual(recoverySession.scratchCleanupPreparationCount, 0)
+        XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: copiedImportURL.path),
+            "archive failure must retain the only audio copy"
+        )
     }
 
     func testFailedShutdownHandoffKeepsImportedRecoverySession() async throws {
@@ -171,6 +215,7 @@ extension TranscriptionTaskManagerMetadataTests {
             0
         )
         XCTAssertEqual(recoverySession.failedQueueHandoffCount, 0)
+        XCTAssertEqual(recoverySession.scratchCleanupPreparationCount, 0)
         XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: copiedImportURL.path))
         speech.release()

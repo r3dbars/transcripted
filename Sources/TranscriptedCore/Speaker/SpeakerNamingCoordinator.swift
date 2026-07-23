@@ -351,10 +351,12 @@ extension TranscriptionTaskManager {
 
     private func cleanupSpeakerNamingRequest(_ request: SpeakerNamingRequest) {
         if request.shouldRemoveTemporaryAudioOnCleanup {
-            let removedMic = removeManagedCleanupFile(request.micAudioURL, label: "pending mic audio")
-            let removedSystem = removeManagedCleanupFile(request.systemAudioURL, label: "pending system audio")
-            if removedMic && removedSystem {
-                request.importedRecoverySession?.scratchCleanupConfirmed()
+            if request.importedRecoverySession?.prepareForScratchCleanup() != false {
+                let removedMic = removeManagedCleanupFile(request.micAudioURL, label: "pending mic audio")
+                let removedSystem = removeManagedCleanupFile(request.systemAudioURL, label: "pending system audio")
+                if removedMic && removedSystem {
+                    request.importedRecoverySession?.scratchCleanupConfirmed()
+                }
             }
         }
         cleanupSpeakerClips(request.speakers)
@@ -402,6 +404,7 @@ extension TranscriptionTaskManager {
     ) {
         cleanupSpeakerClips(clips)
         guard shouldRemoveTemporaryAudio else { return }
+        guard importedRecoverySession?.prepareForScratchCleanup() != false else { return }
         let removedMic = removeManagedCleanupFile(micURL, label: "mic audio")
         let removedSystem = removeManagedCleanupFile(systemURL, label: "system audio")
         if removedMic && removedSystem {

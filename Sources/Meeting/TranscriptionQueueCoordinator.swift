@@ -537,6 +537,11 @@ final class TranscriptionQueueCoordinator {
                 if stableTranscriptExists {
                     recoverySession.transcriptCommitConfirmed()
                 }
+                guard ImportedTranscriptionQueueJournal.shouldCleanRecoveredScratch(
+                    phase: recoverySession.phase
+                ) else {
+                    continue
+                }
                 if removeRecoveredImportedScratchFile(audioURL) {
                     recoverySession.scratchCleanupConfirmed()
                 }
@@ -569,6 +574,10 @@ final class TranscriptionQueueCoordinator {
             handleBackgroundTranscriptionWorkChanged()
         }
         return recovered
+    }
+
+    func prepareImportedScratchCleanup(for job: QueuedTranscriptionJob) -> Bool {
+        job.importedRecoverySession?.prepareForScratchCleanup() ?? true
     }
 
     func confirmImportedScratchCleanup(for job: QueuedTranscriptionJob) {

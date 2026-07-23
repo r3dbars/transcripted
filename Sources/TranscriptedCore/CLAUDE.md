@@ -23,7 +23,7 @@
 - `ModelBundleProvider` — lets hosts override where offline model bundles are resolved
 - `AppServices` — DI container over protocol-typed STT / diarization / speaker-store dependencies
 - `TranscriptionTaskManager` — host-facing queue and orchestration surface, including imported-audio jobs and optional local-speaker mic diarization when the app asks for it
-- `ImportedTranscriptionRecoverySession` — keeps app-owned imported-audio recovery alive across Core transcript commit and deferred speaker-review scratch cleanup without an untyped terminal callback or a parallel ownership map
+- `ImportedTranscriptionRecoverySession` — keeps app-owned imported-audio recovery alive across Core transcript commit and deferred speaker-review scratch cleanup. Core must durably prepare cleanup before deleting scratch, and reports completion only after deletion, without an untyped terminal callback or parallel ownership map
 - `TranscriptNotifier` — optional callback channel for transcript-saved / failure notifications
 
 These seams exist specifically so the app can embed the library without adopting the old standalone Transcripted app assumptions.

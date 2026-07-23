@@ -1560,6 +1560,9 @@ final class MeetingSessionController: ObservableObject {
                 )
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
+                    guard transcriptionQueue.prepareImportedScratchCleanup(for: job) else {
+                        continue
+                    }
                     do {
                         try FileManager.default.removeItem(at: audioURL)
                         transcriptionQueue.confirmImportedScratchCleanup(for: job)
