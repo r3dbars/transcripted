@@ -334,7 +334,7 @@ func testParakeetAudioGraphOwnership() async {
         )
     }
 
-    runSuite("Parakeet ordinary-start cancellation replaces blocked work before a successor") {
+    runSuite("Parakeet ordinary-start cancellation replaces a blocked pre-tap snapshot") {
         let blockedEngine = NSObject()
         let blockedQueue = DispatchQueue(label: "test.parakeet.blocked-ordinary-start")
         let blockedOwner = ParakeetAudioEngineQueueOwnerToken(
@@ -349,7 +349,7 @@ func testParakeetAudioGraphOwnership() async {
             engine: blockedEngine,
             queue: blockedQueue
         )
-        assertTrue(startAdmission.begin(owner: blockedOwner), "the normal start should own admission")
+        assertTrue(startAdmission.begin(owner: blockedOwner), "the normal start should own admission before its snapshot")
         ownership.begin(owner: blockedOwner, phase: .audioStart)
 
         let blockedStartEntered = DispatchSemaphore(value: 0)
@@ -369,7 +369,7 @@ func testParakeetAudioGraphOwnership() async {
         }
         assertTrue(
             blockedStartEntered.wait(timeout: .now() + 1) == .success,
-            "ordinary install/start work should be in flight before stop"
+            "ordinary pre-tap snapshot work should be in flight before stop"
         )
 
         // Production stop advances logical generation before the timed-out
@@ -462,6 +462,29 @@ func testParakeetAudioGraphOwnership() async {
             replacementRestore,
             "replacement-route",
             "only the exact newer generation+engine owner may consume its route restore"
+        )
+    }
+
+    await runSuite("Parakeet matching restore survives unrelated graph ownership loss") {
+        let retiredEngine = NSObject()
+        let replacementEngine = NSObject()
+        let cleanupOwner = ParakeetAudioGraphOwnerToken(generation: 43, engine: retiredEngine)
+        let replacementOwner = ParakeetAudioGraphOwnerToken(generation: 44, engine: replacementEngine)
+        let pendingState = ParakeetPendingRestoreInterleavingHarness()
+
+        await pendingState.replace("previous-route", ownedBy: cleanupOwner)
+        assertFalse(
+            cleanupOwner.matches(generation: 44, engine: replacementEngine),
+            "the cleanup should observe that audio graph ownership changed"
+        )
+        assertNil(
+            await pendingState.value(ownedBy: replacementOwner),
+            "unrelated graph replacement should not silently re-own the old restore target"
+        )
+        assertEqual(
+            await pendingState.take(ownedBy: cleanupOwner),
+            "previous-route",
+            "cleanup should still consume its exact owner-bound restore after graph loss"
         )
     }
 

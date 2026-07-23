@@ -1097,7 +1097,8 @@ class ParakeetEngine: ObservableObject {
     func audioInputSnapshot(
         operation: String,
         recoveryGeneration: UInt64? = nil,
-        allowsBuiltInBluetoothFallback: Bool = true
+        allowsBuiltInBluetoothFallback: Bool = true,
+        isEngineWorkCurrent: (() -> Bool)? = nil
     ) async throws -> ParakeetAudioInputSnapshot {
         let operationOwner = currentAudioEngineQueueOwnerToken()
         let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
@@ -1246,7 +1247,10 @@ class ParakeetEngine: ObservableObject {
             engineWasRunning: Bool
         )
         do {
-            snapshotResult = try await runTimedAudioEngineWork(operation: "\(operation)_snapshot") { audioEngine in
+            snapshotResult = try await runTimedAudioEngineWork(
+                operation: "\(operation)_snapshot",
+                isWorkCurrent: isEngineWorkCurrent
+            ) { audioEngine in
                 let inputNode = audioEngine.inputNode
                 let selectionApplication = Self.applyPreferredDictationInputDevice(selection, to: inputNode)
                 return (
@@ -1314,7 +1318,10 @@ class ParakeetEngine: ObservableObject {
         }
 
         let settledSnapshotStartedAt = CFAbsoluteTimeGetCurrent()
-        let settledSnapshotResult = try await runTimedAudioEngineWork(operation: "\(operation)_settled_snapshot") { audioEngine in
+        let settledSnapshotResult = try await runTimedAudioEngineWork(
+            operation: "\(operation)_settled_snapshot",
+            isWorkCurrent: isEngineWorkCurrent
+        ) { audioEngine in
             let inputNode = audioEngine.inputNode
             return (
                 outputFormat: Self.audioFormatSummary(inputNode.outputFormat(forBus: 0)),
@@ -1992,13 +1999,35 @@ class ParakeetEngine: ObservableObject {
                 return await failAudioStart()
             }
 
+            // The format reads below use the same serial engine queue as tap
+            // installation. Lease them before the first suspension so stop can
+            // retire a blocked snapshot instead of stranding the next start.
+            let snapshotCancellationState = ParakeetAudioStartCancellationState()
+            audioStartCancellationState?.cancel()
+            audioStartCancellationState = snapshotCancellationState
+            audioEngineWorkOwnership.begin(owner: attemptOwner, phase: .audioStart)
+            let snapshotWorkIsCurrent: () -> Bool = { [audioEngineWorkOwnership] in
+                snapshotCancellationState.canRunWork
+                    && audioEngineWorkOwnership.isActive(owner: attemptOwner, phase: .audioStart)
+            }
+            func finishSnapshotLease() {
+                snapshotCancellationState.cancel()
+                audioEngineWorkOwnership.finish(owner: attemptOwner, phase: .audioStart)
+                if audioStartCancellationState === snapshotCancellationState {
+                    audioStartCancellationState = nil
+                }
+            }
+
             let snapshot: ParakeetAudioInputSnapshot
             do {
                 snapshot = try await audioInputSnapshot(
                     operation: "start_recording",
-                    allowsBuiltInBluetoothFallback: !isRecoveryAttempt
+                    allowsBuiltInBluetoothFallback: !isRecoveryAttempt,
+                    isEngineWorkCurrent: snapshotWorkIsCurrent
                 )
+                finishSnapshotLease()
             } catch {
+                finishSnapshotLease()
                 guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
                 let audioEngineTimedOut = error is ParakeetAudioEngineWorkError
                 let operationTimedOut = audioEngineTimedOut
@@ -2809,14 +2838,16 @@ class ParakeetEngine: ObservableObject {
         cancelAudioWatchdog()
         let stopOwner = currentAudioEngineQueueOwnerToken()
         await removeRecordingTap()
-        guard ownsAudioEngineQueue(stopOwner) else { return }
-        await stopAudioEngine()
-        guard ownsAudioEngineQueue(stopOwner) else { return }
+        var stillOwnsStopGraph = ownsAudioEngineQueue(stopOwner)
+        if stillOwnsStopGraph {
+            await stopAudioEngine()
+            stillOwnsStopGraph = ownsAudioEngineQueue(stopOwner)
+        }
         await restorePendingSystemInputAfterRecording(
             ownedBy: pendingRestoreOwner,
             operation: "stop_recording"
         )
-        guard ownsAudioEngineQueue(stopOwner) else { return }
+        guard stillOwnsStopGraph, ownsAudioEngineQueue(stopOwner) else { return }
         isEnginePrewarmed = false
         drainPendingSamplesIntoSampleBuffer()
         isRecording = false
@@ -3431,10 +3462,10 @@ class ParakeetEngine: ObservableObject {
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         sampleBuffer.removeAll(keepingCapacity: true)
         clearRecoveredRecordingTimeline(keepingCapacity: true)
-        guard await releaseIdleAudioHardware(
+        _ = await releaseIdleAudioHardware(
             removeTap: true,
             expectedGeneration: failedStartCleanupOwner.graphOwner.generation
-        ) != nil else { return }
+        )
         await restorePendingSystemInputAfterRecording(
             ownedBy: pendingRestoreOwner,
             operation: "reset_after_failed_recording_start"

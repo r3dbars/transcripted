@@ -58,6 +58,18 @@ func testParakeetAudioOwnershipSourceContract() {
                 && failedStartCleanup.contains("guard ownsAudioEngineQueue(failedStartCleanupOwner) else { return }"),
             "resetAfterFailedRecordingStart should retain exact cleanup ownership without obsolete streaming work"
         )
+        guard let failedRelease = failedStartCleanup.range(of: "_ = await releaseIdleAudioHardware("),
+              let failedRestore = failedStartCleanup.range(
+                of: "await restorePendingSystemInputAfterRecording(",
+                range: failedRelease.upperBound..<failedStartCleanup.endIndex
+              ) else {
+            assertTrue(false, "failed-start cleanup should restore its captured system-input owner after graph release")
+            return
+        }
+        assertTrue(
+            failedRelease.lowerBound < failedRestore.lowerBound,
+            "graph ownership loss must not skip the independent owner-bound input restore"
+        )
         assertPostAwaitOwnershipGuard(
             in: idleCleanup,
             ownerCapture: "let idleCleanupOwner = currentAudioEngineQueueOwnerToken()",
@@ -79,6 +91,33 @@ func testParakeetAudioOwnershipSourceContract() {
         assertTrue(
             stopSuspension.lowerBound < postStopGuard.lowerBound && postStopGuard.lowerBound < clearPrewarm.lowerBound,
             "releaseIdleAudioHardware must preserve a newer owner's prewarm state after delayed stop completion"
+        )
+
+        guard let stopRecordingStart = source.range(of: "func stopRecording() async"),
+              let stopRecordingEnd = source.range(
+                of: "// MARK: - Recorded Audio Buffering",
+                range: stopRecordingStart.upperBound..<source.endIndex
+              ) else {
+            assertTrue(false, "test should find stopRecording")
+            return
+        }
+        let stopRecording = String(source[stopRecordingStart.lowerBound..<stopRecordingEnd.lowerBound])
+        guard let stopEngine = stopRecording.range(of: "await stopAudioEngine()"),
+              let restoreInput = stopRecording.range(
+                of: "await restorePendingSystemInputAfterRecording(",
+                range: stopEngine.upperBound..<stopRecording.endIndex
+              ),
+              let finalOwnershipGuard = stopRecording.range(
+                of: "guard stillOwnsStopGraph, ownsAudioEngineQueue(stopOwner) else { return }",
+                range: restoreInput.upperBound..<stopRecording.endIndex
+              ) else {
+            assertTrue(false, "normal stop should restore its captured input owner before its final graph guard")
+            return
+        }
+        assertTrue(
+            stopEngine.lowerBound < restoreInput.lowerBound
+                && restoreInput.lowerBound < finalOwnershipGuard.lowerBound,
+            "graph loss during stop must not bypass matching system-input restoration"
         )
     }
 
@@ -120,6 +159,40 @@ func testParakeetAudioOwnershipSourceContract() {
             source.contains("let startCancellationState = ParakeetAudioStartCancellationState()")
                 && source.contains("audioEngineWorkOwnership.begin(owner: attemptOwner, phase: .audioStart)"),
             "normal and recovery starts should share the same replaceable timed-work lease"
+        )
+        guard let recordingStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
+              let recordingEnd = source.range(
+                of: "/// Begin dictation by borrowing",
+                range: recordingStart.upperBound..<source.endIndex
+              ) else {
+            assertTrue(false, "test should find the recording start body")
+            return
+        }
+        let recording = String(source[recordingStart.lowerBound..<recordingEnd.lowerBound])
+        guard let snapshotState = recording.range(of: "let snapshotCancellationState = ParakeetAudioStartCancellationState()"),
+              let snapshotLease = recording.range(
+                of: "audioEngineWorkOwnership.begin(owner: attemptOwner, phase: .audioStart)",
+                range: snapshotState.upperBound..<recording.endIndex
+              ),
+              let snapshotRead = recording.range(
+                of: "snapshot = try await audioInputSnapshot(",
+                range: snapshotLease.upperBound..<recording.endIndex
+              ),
+              let finishSnapshotLease = recording.range(
+                of: "finishSnapshotLease()",
+                range: snapshotRead.upperBound..<recording.endIndex
+              ) else {
+            assertTrue(false, "the start snapshot should be inside a replaceable lease")
+            return
+        }
+        assertTrue(
+            snapshotLease.lowerBound < snapshotRead.lowerBound
+                && snapshotRead.lowerBound < finishSnapshotLease.lowerBound,
+            "the lease must cover pre-tap format reads so stop can replace a blocked queue"
+        )
+        assertTrue(
+            recording.contains("isEngineWorkCurrent: snapshotWorkIsCurrent"),
+            "queued or late snapshot work should observe cancellation before touching the retired engine"
         )
         guard let idleStopStart = source.range(of: "if audioStartInProgress {"),
               let idleStopEnd = source.range(
