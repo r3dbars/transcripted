@@ -6,6 +6,8 @@ struct TranscriptedMCP {
     static let serverVersion = "1.0.0"
 
     static func main() async throws {
+        let startupStartedAt = ProcessInfo.processInfo.systemUptime
+
         if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-h") {
             print(Self.helpText)
             return
@@ -24,15 +26,16 @@ struct TranscriptedMCP {
         let directories = TranscriptedDataDirectories.resolve()
 
         log("Starting transcripted-mcp v\(serverVersion)")
-        log("Meetings directories: \(directories.meetingDirs.map(\.path).joined(separator: ", "))")
-        log("Dictations directories: \(directories.dictationDirs.map(\.path).joined(separator: ", "))")
-        log("Index directory: \(directories.indexDir.path)")
 
+        var createdDirectoryCount = 0
         for directory in directories.watchedDirectories + [directories.indexDir] {
             if !FileManager.default.fileExists(atPath: directory.path) {
-                log("Creating missing directory: \(directory.path)")
                 try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                createdDirectoryCount += 1
             }
+        }
+        if createdDirectoryCount > 0 {
+            log("Created missing MCP data directories (count_bucket=\(MCPLogPrivacy.countBucket(createdDirectoryCount)))")
         }
 
         // Create and populate index
@@ -48,9 +51,17 @@ struct TranscriptedMCP {
                 log("Semantic search unavailable on this host; using lexical search only")
             }
             index = try TranscriptIndex(indexDir: directories.indexDir, embeddingProvider: embeddingProvider)
-            try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
+            try MCPStartupIndexing.prepareForAttach(
+                index: index,
+                meetingDirs: directories.meetingDirs,
+                dictationDirs: directories.dictationDirs
+            )
+            log(MCPStartupDiagnostics.message(
+                phase: .lexicalIndexReady,
+                elapsedSeconds: ProcessInfo.processInfo.systemUptime - startupStartedAt
+            ))
         } catch {
-            log("Failed to initialize index: \(error.localizedDescription)")
+            log("MCP startup failed during lexical index preparation")
             throw error
         }
 
@@ -59,7 +70,7 @@ struct TranscriptedMCP {
                 do {
                     try index.reconcile(meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs)
                 } catch {
-                    log("Failed to reconcile watched directories: \(error.localizedDescription)")
+                    log("Failed to reconcile the watched capture index")
                 }
             }
         }
@@ -80,11 +91,26 @@ struct TranscriptedMCP {
             server: server, index: index, directories: directories, serverVersion: serverVersion
         )
 
-        log("MCP server ready, waiting for connections")
-
         // Start stdio transport
         let transport = StdioTransport()
         try await server.start(transport: transport)
+        log(MCPStartupDiagnostics.message(
+            phase: .transportReady,
+            elapsedSeconds: ProcessInfo.processInfo.systemUptime - startupStartedAt
+        ))
+
+        if index.embeddingStore != nil {
+            Task.detached(priority: .utility) {
+                let semanticStartedAt = ProcessInfo.processInfo.systemUptime
+                log(MCPStartupDiagnostics.message(phase: .semanticIndexStarted, elapsedSeconds: 0))
+                MCPStartupIndexing.completeAfterAttach(index: index)
+                log(MCPStartupDiagnostics.message(
+                    phase: .semanticIndexReady,
+                    elapsedSeconds: ProcessInfo.processInfo.systemUptime - semanticStartedAt
+                ))
+            }
+        }
+
         await server.waitUntilCompleted()
 
         watchers.forEach { $0.stop() }

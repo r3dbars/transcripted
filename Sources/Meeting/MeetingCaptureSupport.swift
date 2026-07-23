@@ -4,10 +4,332 @@ import Foundation
 /// `Audio.onRecordingComplete` within `meetingStopTimeout`, so the WAV files
 /// at the returned URLs may not be fully finalized — the controller should
 /// route the audio to the failed queue rather than enqueuing for transcription.
+enum CaptureStopFinalizationOwner: Equatable {
+    case audioFinalizer
+    case recordingJournalRecovery
+}
+
 struct CaptureStopResult {
     let micURL: URL?
     let systemURL: URL?
     let didTimeOut: Bool
+    let finalizationOwner: CaptureStopFinalizationOwner
+
+    init(
+        micURL: URL?,
+        systemURL: URL?,
+        didTimeOut: Bool,
+        finalizationOwner: CaptureStopFinalizationOwner = .audioFinalizer
+    ) {
+        self.micURL = micURL
+        self.systemURL = systemURL
+        self.didTimeOut = didTimeOut
+        self.finalizationOwner = finalizationOwner
+    }
+}
+
+/// Closure-free identity retained after a timed-out stop callback expires.
+/// The bridge bounds these values separately from callback closures so a late
+/// completion can still honor a failed-row delete or an explicit discard.
+enum TimedOutStopCompletionOwner: Equatable {
+    case failedMeeting(UUID)
+    case discard
+}
+
+enum ExpiredTimedOutCompletionFallback: Equatable {
+    case recoverJournal
+    case discardFinalizedAudio
+
+    static func action(hasMatchingJournal: Bool) -> Self {
+        hasMatchingJournal ? .recoverJournal : .discardFinalizedAudio
+    }
+}
+
+/// Orders late stop finalization against failed-row persistence. Audio's
+/// recording journal keeps owning unfinished segments until finalization; the
+/// failed row and merged-sibling reconciliation own the retryable result.
+enum TimedOutFailedMeetingFinalizationAction {
+    case buffered
+    case promote(CaptureStopResult)
+    case discard(CaptureStopResult)
+    case journalOwned
+}
+
+struct TimedOutFailedMeetingFinalizationHandoff {
+    private enum State {
+        case awaitingCallback
+        case bufferedBeforePersistence(CaptureStopResult)
+        case bufferedForPromotion(CaptureStopResult)
+        case discardOnCallback
+        case journalOwned
+    }
+
+    private static let ownershipCapacity = 4
+    private var states: [UUID: State] = [:]
+    private var order: [UUID] = []
+
+    var bufferedResultCount: Int {
+        states.values.reduce(into: 0) { count, state in
+            if case .bufferedBeforePersistence = state { count += 1 }
+            if case .bufferedForPromotion = state { count += 1 }
+        }
+    }
+    var persistedOwnershipIDs: Set<UUID> {
+        Set(states.compactMap { id, state in
+            switch state {
+            case .awaitingCallback, .bufferedForPromotion:
+                return id
+            case .bufferedBeforePersistence, .discardOnCallback, .journalOwned:
+                return nil
+            }
+        })
+    }
+    var terminalOwnershipCount: Int {
+        states.values.reduce(into: 0) { count, state in
+            if case .discardOnCallback = state { count += 1 }
+            if case .journalOwned = state { count += 1 }
+        }
+    }
+    func hasOwnership(of id: UUID) -> Bool { states[id] != nil }
+
+    mutating func receive(
+        _ result: CaptureStopResult,
+        for id: UUID,
+        failedMeetingIsPersisted: Bool
+    ) -> TimedOutFailedMeetingFinalizationAction {
+        if let state = states[id] {
+            switch state {
+            case .discardOnCallback:
+                remove(id)
+                return .discard(result)
+            case .journalOwned:
+                remove(id)
+                return .journalOwned
+            case .awaitingCallback where !failedMeetingIsPersisted:
+                remove(id)
+                return .discard(result)
+            case .awaitingCallback, .bufferedBeforePersistence, .bufferedForPromotion:
+                break
+            }
+        }
+
+        if result.finalizationOwner == .recordingJournalRecovery {
+            if failedMeetingIsPersisted {
+                remove(id)
+            } else {
+                store(.journalOwned, for: id)
+            }
+            return .journalOwned
+        }
+
+        store(
+            failedMeetingIsPersisted
+                ? .bufferedForPromotion(result)
+                : .bufferedBeforePersistence(result),
+            for: id
+        )
+        return failedMeetingIsPersisted ? .promote(result) : .buffered
+    }
+
+    mutating func failedMeetingDidPersist(id: UUID) -> CaptureStopResult? {
+        if case .journalOwned = states[id] {
+            remove(id)
+            return nil
+        }
+        if case .bufferedBeforePersistence(let result) = states[id] {
+            store(.bufferedForPromotion(result), for: id)
+            return result
+        }
+        if case .bufferedForPromotion(let result) = states[id] {
+            return result
+        }
+        if states[id] == nil {
+            store(.awaitingCallback, for: id)
+        }
+        return nil
+    }
+
+    func audioForPersistence(
+        id: UUID,
+        provisionalMicURL: URL?,
+        provisionalSystemURL: URL?
+    ) -> (micURL: URL?, systemURL: URL?) {
+        let finalizedResult: CaptureStopResult?
+        switch states[id] {
+        case .bufferedBeforePersistence(let result), .bufferedForPromotion(let result):
+            finalizedResult = result
+        default:
+            finalizedResult = nil
+        }
+        return (
+            micURL: preferredPersistenceURL(
+                provisional: provisionalMicURL,
+                finalized: finalizedResult?.micURL
+            ),
+            systemURL: preferredPersistenceURL(
+                provisional: provisionalSystemURL,
+                finalized: finalizedResult?.systemURL
+            )
+        )
+    }
+
+    private func preferredPersistenceURL(provisional: URL?, finalized: URL?) -> URL? {
+        var isDirectory: ObjCBool = false
+        if let provisional,
+           FileManager.default.fileExists(atPath: provisional.path, isDirectory: &isDirectory),
+           !isDirectory.boolValue {
+            return provisional
+        }
+        isDirectory = false
+        if let finalized,
+           FileManager.default.fileExists(atPath: finalized.path, isDirectory: &isDirectory),
+           !isDirectory.boolValue {
+            return finalized
+        }
+        // Preserve the original timeout snapshot when neither candidate is on
+        // disk yet; the recording journal remains the durable recovery owner.
+        return provisional ?? finalized
+    }
+
+    mutating func markDeliverySucceeded(id: UUID) {
+        remove(id)
+    }
+
+    mutating func markPersistenceFailed(id: UUID) {
+        // There is no row that can consume this in-memory result. The existing
+        // recording journal remains the durable recovery owner across launch.
+        switch states[id] {
+        case .bufferedBeforePersistence, .bufferedForPromotion:
+            remove(id)
+        case .awaitingCallback, nil:
+            store(.journalOwned, for: id)
+        case .journalOwned:
+            remove(id)
+        case .discardOnCallback:
+            break
+        }
+    }
+
+    mutating func markTerminalDiscard(id: UUID) -> CaptureStopResult? {
+        switch states[id] {
+        case .bufferedBeforePersistence(let result), .bufferedForPromotion(let result):
+            remove(id)
+            return result
+        case .awaitingCallback:
+            store(.discardOnCallback, for: id)
+        case .discardOnCallback, .journalOwned, nil:
+            break
+        }
+        return nil
+    }
+
+    private mutating func store(_ state: State, for id: UUID) {
+        if states.updateValue(state, forKey: id) == nil {
+            order.append(id)
+        }
+        while order.count > Self.ownershipCapacity {
+            let evictedID = order.removeFirst()
+            // The bridge keeps at most two late callbacks alive, so an older
+            // handoff can no longer be delivered. Its journal remains durable.
+            states.removeValue(forKey: evictedID)
+        }
+    }
+
+    private mutating func remove(_ id: UUID) {
+        states.removeValue(forKey: id)
+        order.removeAll { $0 == id }
+    }
+}
+
+/// Owns callbacks for stops that timed out but may still finalize. A new
+/// recording retains the immediately preceding stop so its late completion can
+/// still be delivered, then prunes older stops whose journal/failed row owns
+/// recovery. This prevents never-completing stops from accumulating closures.
+enum TimedOutStopCompletionResolution {
+    case pending(((CaptureStopResult) -> Void)?)
+    case expired(TimedOutStopCompletionOwner?)
+    case unowned
+}
+
+struct TimedOutStopCompletionRegistry {
+    private struct PendingCompletion {
+        let owner: TimedOutStopCompletionOwner?
+        let handler: ((CaptureStopResult) -> Void)?
+    }
+
+    private struct Tombstone {
+        let generation: UInt64
+        let owner: TimedOutStopCompletionOwner
+    }
+
+    private static let tombstoneCapacity = 4
+    private var pending: [UInt64: PendingCompletion] = [:]
+    private var tombstones: [Tombstone] = []
+    private var latestExpiredGeneration: UInt64?
+
+    var generations: Set<UInt64> { Set(pending.keys) }
+    var handlerCount: Int { pending.values.filter { $0.handler != nil }.count }
+    var expiredOwnerCount: Int { tombstones.count }
+
+    mutating func register(
+        generation: UInt64,
+        owner: TimedOutStopCompletionOwner? = nil,
+        handler: ((CaptureStopResult) -> Void)?
+    ) {
+        pending[generation] = PendingCompletion(owner: owner, handler: handler)
+        tombstones.removeAll { $0.generation == generation }
+    }
+
+    mutating func resolve(generation: UInt64) -> TimedOutStopCompletionResolution {
+        if let completion = pending.removeValue(forKey: generation) {
+            return .pending(completion.handler)
+        }
+        if let index = tombstones.firstIndex(where: { $0.generation == generation }) {
+            return .expired(tombstones.remove(at: index).owner)
+        }
+        if let latestExpiredGeneration, generation <= latestExpiredGeneration {
+            return .expired(nil)
+        }
+        return .unowned
+    }
+
+    @discardableResult
+    mutating func expire(generation: UInt64) -> Bool {
+        guard let completion = pending.removeValue(forKey: generation) else { return false }
+        if let owner = completion.owner {
+            storeTombstone(owner, for: generation)
+        }
+        latestExpiredGeneration = max(latestExpiredGeneration ?? 0, generation)
+        return true
+    }
+
+    @discardableResult
+    mutating func prune(olderThan latestCompletedStopGeneration: UInt64) -> Set<UInt64> {
+        let staleGenerations = pending.keys.filter { $0 < latestCompletedStopGeneration }
+        for generation in staleGenerations {
+            if let owner = pending.removeValue(forKey: generation)?.owner {
+                storeTombstone(owner, for: generation)
+            }
+        }
+        if let latestPrunedGeneration = staleGenerations.max() {
+            latestExpiredGeneration = max(
+                latestExpiredGeneration ?? 0,
+                latestPrunedGeneration
+            )
+        }
+        return Set(staleGenerations)
+    }
+
+    private mutating func storeTombstone(
+        _ owner: TimedOutStopCompletionOwner,
+        for generation: UInt64
+    ) {
+        tombstones.removeAll { $0.generation == generation }
+        tombstones.append(Tombstone(generation: generation, owner: owner))
+        while tombstones.count > Self.tombstoneCapacity {
+            tombstones.removeFirst()
+        }
+    }
 }
 
 final class MeetingCaptureAttempt<Output> {
@@ -43,6 +365,31 @@ final class MeetingCaptureAttempt<Output> {
     func resetIfCurrent(_ attemptID: UUID) -> CheckedContinuation<Output, Never>? {
         guard self.attemptID == attemptID else { return nil }
         return reset()
+    }
+}
+
+enum MeetingCaptureCompletionDisposition: Equatable {
+    case expectedStop
+    case unexpectedCurrentStop
+    case stale
+}
+
+enum MeetingCaptureCompletionPolicy {
+    static func disposition(
+        completionGeneration: UInt64,
+        expectedStopGeneration: UInt64?,
+        currentAudioGeneration: UInt64
+    ) -> MeetingCaptureCompletionDisposition {
+        if let expectedStopGeneration,
+           expectedStopGeneration == completionGeneration {
+            return .expectedStop
+        }
+
+        if currentAudioGeneration == completionGeneration {
+            return .unexpectedCurrentStop
+        }
+
+        return .stale
     }
 }
 

@@ -169,6 +169,29 @@ func testSentryEventPolicy() {
         assertNil(tags["transcript_text"], "transcript text should stay out of Sentry tags")
     }
 
+    runSuite("SentryEventPolicy keeps zombie recovery stage and result categorical") {
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "parakeet",
+            event: "zombie_engine_recovery_failed",
+            context: [
+                "audio_device": "Private microphone name",
+                "failure_kind": "no_sample_callbacks",
+                "input_device_class": "built_in",
+                "output_device_class": "bluetooth",
+                "result": "failed",
+                "route_shape": "built_in_input_to_bluetooth_output",
+                "sample_count": "0",
+                "stage": "restart",
+            ]
+        )
+
+        assertEqual(tags["failure_kind"], "no_sample_callbacks", "zombie trigger should be queryable")
+        assertEqual(tags["result"], "failed", "terminal recovery result should be queryable")
+        assertEqual(tags["stage"], "restart", "terminal recovery stage should be queryable")
+        assertNil(tags["audio_device"], "raw device labels must stay out of Sentry")
+        assertNil(tags["sample_count"], "exact callback counts must stay out of Sentry")
+    }
+
     runSuite("SentryEventPolicy diagnosticTags keeps meeting failure triage searchable") {
         let tags = SentryEventPolicy.diagnosticTags(
             forEngine: "meeting",

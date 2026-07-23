@@ -35,11 +35,11 @@ When `TRANSCRIPTED_DATA_DIR` points at a shared root with `meetings/` and
 that mode the SQLite index also defaults to the shared root unless
 `TRANSCRIPTED_INDEX_DIR` is set.
 
-## Package Layout (37 Swift files)
+## Package Layout (38 Swift files)
 
 - `Package.swift` — Swift package manifest for the standalone MCP server
 - `Sources/TranscriptedMCP/` — 23 source files for server startup, directory resolution, path validation, indexing, telemetry, semantic search, tool handlers (split by tool family), and the MCP Apps widget surface
-- `Tests/TranscriptedMCPTests/` — 14 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, tool handlers, markdown loading, logging, telemetry, name variants, semantic search, the recent-meetings widget, audio-directory naming, frontmatter corpus parity, and shared fixtures
+- `Tests/TranscriptedMCPTests/` — 15 test files for directory resolution, index lifecycle, structured-summary indexing, summary rollups, tool handlers, markdown loading, logging, telemetry, name variants, semantic search, process startup, the recent-meetings widget, audio-directory naming, frontmatter corpus parity, and shared fixtures
 
 ## File Index
 
@@ -84,6 +84,7 @@ that mode the SQLite index also defaults to the shared root unless
 | `ToolHandlersTests.swift` | Handler-level coverage: title hydration, telemetry, status tool payload, self-describing empty results, done-filter error, read pagination windows and size guard |
 | `AgentCaptureQueryTelemetryTests.swift` | Terminal-result, bucketing, build-identity, and payload coverage for agent capture-query telemetry |
 | `SemanticSearchTests.swift` | Semantic + hybrid search via a deterministic stub provider, graceful fallback, model-change re-embed, vector-math, and RRF fusion |
+| `ProcessStartupTests.swift` | Launches the built executable and verifies a real MCP `initialize` round trip over stdio |
 | `RecentMeetingsWidgetTests.swift` | Widget-model and builder coverage for the `show_recent_meetings` MCP Apps surface |
 | `AudioDirectoryNamingTests.swift` | Retained-audio directory naming/resolution coverage |
 | `TestHelpers.swift` | Shared fixture builders for sample transcripts and temp directories |

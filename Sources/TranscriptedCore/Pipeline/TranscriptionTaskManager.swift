@@ -45,6 +45,10 @@ public class TranscriptionTaskManager: ObservableObject {
     private let retainedAudioDirectoryProvider: (() -> URL?)?
     private let transcriptFormatOptionsProvider: (() -> TranscriptFormatOptions)?
     private let cleanupDirectories: [URL]
+    private var orphanedRecordingRecoveryTask: Task<Int, Never>?
+    private var orphanedRecordingRecoveryRequestGeneration: UInt64 = 0
+    /// Deterministic pause point for recovery interleaving tests.
+    var orphanedRecordingRecoveryPassObserver: (() -> Void)?
 
     /// Embedder-supplied notifier for transcript-saved and failure events. Optional — when
     /// `nil`, notification hooks become no-ops, which keeps Core usable from headless contexts
@@ -814,17 +818,31 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
+        let fileManager = FileManager.default
+        let liveMicAudioURL = fileManager.fileExists(atPath: micAudioURL.path) ? micAudioURL : nil
+        let liveSystemAudioURL = systemAudioURL.flatMap { url in
+            fileManager.fileExists(atPath: url.path) ? url : nil
+        }
+        guard liveMicAudioURL != nil || liveSystemAudioURL != nil else {
+            return fileManager.fileExists(atPath: existingFailure.micAudioURL.path)
+        }
+        let promotedMicAudioURL = liveMicAudioURL ?? existingFailure.micAudioURL
         let retryIsUsingOriginalAudio = activeTasks[id] != nil
-        let promotedSystemAudioURL = systemAudioURL ?? existingFailure.systemAudioURL
+        let promotedSystemAudioURL = liveSystemAudioURL ?? existingFailure.systemAudioURL
         let didPersist = failedTranscriptionManager.updateFailedTranscriptionAudio(
             id: id,
-            micAudioURL: micAudioURL,
+            micAudioURL: promotedMicAudioURL,
             systemAudioURL: promotedSystemAudioURL
         )
         guard didPersist else { return false }
 
+        MeetingRecordingJournalStore.removeJournal(
+            forMicAudioURL: promotedMicAudioURL,
+            allowedRoots: cleanupDirectories
+        )
+
         scheduleFailedRecordingAudioArchive(
-            micURL: micAudioURL,
+            micURL: promotedMicAudioURL,
             systemURL: promotedSystemAudioURL,
             taskId: id,
             removeOriginalsAfterArchive: !retryIsUsingOriginalAudio,
@@ -839,6 +857,33 @@ public class TranscriptionTaskManager: ObservableObject {
         return true
     }
 
+    /// A terminal user action or completed retry owns a late finalization only
+    /// to clean it up. Reuse Core's canonical scratch containment checks and
+    /// clear the matching crash-recovery journal before removing the files.
+    public func discardFinalizedFailedTranscriptionAudio(
+        micAudioURL: URL?,
+        systemAudioURL: URL?
+    ) {
+        MeetingRecordingJournalStore.discardRecordingArtifacts(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            allowedRoots: cleanupDirectories
+        )
+    }
+
+    /// Checks whether the crash-recovery journal still durably owns a late
+    /// callback whose bounded app-side identity has already been evicted.
+    public func hasRecordingJournal(
+        micAudioURL: URL?,
+        systemAudioURL: URL?
+    ) -> Bool {
+        MeetingRecordingJournalStore.hasRecordingJournal(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            allowedRoots: cleanupDirectories
+        )
+    }
+
     @discardableResult
     public func addFailedTranscriptionRetainingAvailableAudio(
         micAudioURL: URL?,
@@ -847,7 +892,8 @@ public class TranscriptionTaskManager: ObservableObject {
         taskId: UUID = UUID(),
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
-        archiveAudio: Bool = true
+        archiveAudio: Bool = true,
+        clearRecordingJournalAfterPersistence: Bool = true
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -864,7 +910,8 @@ public class TranscriptionTaskManager: ObservableObject {
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            removeOriginalsAfterArchive: false
+            removeOriginalsAfterArchive: false,
+            clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence
         )
         if didPersist, archiveAudio {
             scheduleFailedRecordingAudioArchive(
@@ -888,13 +935,15 @@ public class TranscriptionTaskManager: ObservableObject {
         errorMessage: String,
         meetingTitle: String?,
         recordingDate: Date?,
-        removeOriginalsAfterArchive: Bool
+        removeOriginalsAfterArchive: Bool,
+        clearRecordingJournalAfterPersistence: Bool = true
     ) -> Bool {
         let failedSystemURL = retainedAudio?.systemURL ?? originalSystemURL
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
             retainedAudio: retainedAudio,
             hasOriginalMic: originalMicURL != nil,
-            failedSystemURL: failedSystemURL
+            failedSystemURL: failedSystemURL,
+            taskId: taskId
         )
         guard let failedMicURL = retainedAudio?.micURL ?? originalMicURL ?? placeholderMicURL else {
             AppLogger.pipeline.error("Failed transcription was not queued because no microphone track or placeholder is available")
@@ -916,10 +965,14 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        // The failed-queue entry is durable — the crash-recovery journal next
-        // to the original scratch audio is no longer needed.
-        if let originalMicURL {
-            MeetingRecordingJournalStore.removeJournal(forMicAudioURL: originalMicURL)
+        // A normal failed row owns all of its audio after persistence. A timed-
+        // out multi-segment stop keeps the journal until late finalization so a
+        // crash cannot lose segment filenames that are not represented by the row.
+        if clearRecordingJournalAfterPersistence, let originalMicURL {
+            MeetingRecordingJournalStore.removeJournal(
+                forMicAudioURL: originalMicURL,
+                allowedRoots: cleanupDirectories
+            )
         }
 
         guard removeOriginalsAfterArchive else { return true }
@@ -941,8 +994,13 @@ public class TranscriptionTaskManager: ObservableObject {
     private struct OrphanedRecordingCandidate: Sendable {
         enum Disposition: Sendable {
             case stale(reason: String)
-            case skip(reason: String)
-            case recover(micURL: URL?, systemURL: URL?, startedAt: Date)
+            case skip(reason: String, retryAfter: TimeInterval?)
+            case recover(
+                micURL: URL?,
+                systemURL: URL?,
+                originalMicURL: URL?,
+                startedAt: Date
+            )
         }
         let journalURL: URL
         let disposition: Disposition
@@ -959,64 +1017,237 @@ public class TranscriptionTaskManager: ObservableObject {
     /// whose preservation code never ran (crash, force-kill, power loss).
     @discardableResult
     public func recoverOrphanedRecordings(in scratchDirectory: URL) async -> Int {
-        let candidates = await Task.detached(priority: .utility) {
-            Self.collectOrphanedRecordingCandidates(in: scratchDirectory)
-        }.value
-
-        var recovered = 0
-        for candidate in candidates {
-            switch candidate.disposition {
-            case .skip(let reason):
-                AppLogger.pipeline.info("Left recording journal in place", [
-                    "file": candidate.journalURL.lastPathComponent,
-                    "reason": reason
-                ])
-            case .stale(let reason):
-                try? FileManager.default.removeItem(at: candidate.journalURL)
-                AppLogger.pipeline.info("Removed stale recording journal", [
-                    "file": candidate.journalURL.lastPathComponent,
-                    "reason": reason
-                ])
-            case .recover(let micURL, let systemURL, let startedAt):
-                let didPersist = await addFailedTranscriptionRetainingAvailableAudioAfterArchive(
-                    micAudioURL: micURL,
-                    systemAudioURL: systemURL,
-                    errorMessage: "Recording was interrupted before it could be saved. The recovered audio is ready to transcribe.",
-                    recordingDate: startedAt,
-                    archiveAudio: true
-                )
-                if didPersist {
-                    try? FileManager.default.removeItem(at: candidate.journalURL)
-                    recovered += 1
-                    AppLogger.pipeline.info("Recovered orphaned recording into failed queue", [
-                        "journal": candidate.journalURL.lastPathComponent,
-                        "hasMic": "\(micURL != nil)",
-                        "hasSystem": "\(systemURL != nil)"
-                    ])
-                }
-            }
-        }
-        if !candidates.isEmpty {
-            AppLogger.pipeline.info("Recording journal scan finished", [
-                "journals": "\(candidates.count)",
-                "recovered": "\(recovered)"
-            ])
-        }
-        return recovered
+        await recoverOrphanedRecordings(
+            in: scratchDirectory,
+            livenessWindow: Self.orphanedRecordingLivenessWindow,
+            waitForRecentJournals: true
+        )
     }
 
-    nonisolated private static func collectOrphanedRecordingCandidates(in directory: URL) -> [OrphanedRecordingCandidate] {
-        MeetingRecordingJournalStore.journalURLs(in: directory).compactMap {
-            inspectOrphanedRecordingJournal(at: $0, directory: directory)
+    @discardableResult
+    func recoverOrphanedRecordings(
+        in scratchDirectory: URL,
+        livenessWindow: TimeInterval,
+        waitForRecentJournals: Bool
+    ) async -> Int {
+        orphanedRecordingRecoveryRequestGeneration &+= 1
+        if let activeRecovery = orphanedRecordingRecoveryTask {
+            return await activeRecovery.value
+        }
+
+        // One monotonic deadline belongs to the single-flight owner. Joined
+        // requests can ask it to rescan, but cannot extend its lifetime.
+        let maximumWaitInterval = max(0.02, (livenessWindow * 2) + 0.02)
+        let waitDeadline = ContinuousClock.now.advanced(
+            by: .seconds(maximumWaitInterval)
+        )
+        let recoveryTask = Task { [weak self] in
+            guard let self else { return 0 }
+            var totalRecovered = 0
+            while ContinuousClock.now < waitDeadline {
+                let ownerRequestGeneration = self.orphanedRecordingRecoveryRequestGeneration
+                totalRecovered += await self.performOrphanedRecordingRecovery(
+                    in: scratchDirectory,
+                    livenessWindow: livenessWindow,
+                    waitForRecentJournals: waitForRecentJournals,
+                    waitDeadline: waitDeadline
+                )
+                if self.orphanedRecordingRecoveryRequestGeneration == ownerRequestGeneration {
+                    break
+                }
+            }
+            self.orphanedRecordingRecoveryTask = nil
+            return totalRecovered
+        }
+        orphanedRecordingRecoveryTask = recoveryTask
+        return await recoveryTask.value
+    }
+
+    private func performOrphanedRecordingRecovery(
+        in scratchDirectory: URL,
+        livenessWindow: TimeInterval,
+        waitForRecentJournals: Bool,
+        waitDeadline: ContinuousClock.Instant
+    ) async -> Int {
+        let canonicalScratchDirectory = Self.canonicalDirectoryURL(scratchDirectory)
+        guard cleanupDirectories.contains(where: { root in
+            canonicalScratchDirectory == root
+                || Self.isFile(canonicalScratchDirectory, containedIn: root)
+        }) else {
+            AppLogger.pipeline.warning("Refused recording journal recovery outside managed storage")
+            return 0
+        }
+        var totalRecovered = 0
+        while !Task.isCancelled {
+            let passRequestGeneration = orphanedRecordingRecoveryRequestGeneration
+            let candidates = await Task.detached(priority: .utility) {
+                Self.collectOrphanedRecordingCandidates(
+                    in: canonicalScratchDirectory,
+                    now: Date(),
+                    livenessWindow: livenessWindow
+                )
+            }.value
+            orphanedRecordingRecoveryPassObserver?()
+            await Task.yield()
+
+            var passRecovered = 0
+            var retryAfter: TimeInterval?
+            for candidate in candidates {
+                switch candidate.disposition {
+                case .skip(let reason, let candidateRetryAfter):
+                    if let candidateRetryAfter {
+                        retryAfter = min(retryAfter ?? candidateRetryAfter, candidateRetryAfter)
+                    }
+                    AppLogger.pipeline.info("Left recording journal in place", [
+                        "file": candidate.journalURL.lastPathComponent,
+                        "reason": reason
+                    ])
+                case .stale(let reason):
+                    let didRemoveJournal = MeetingRecordingJournalStore.removeJournalArtifact(
+                        at: candidate.journalURL,
+                        allowedRoots: [canonicalScratchDirectory]
+                    )
+                    AppLogger.pipeline.info(didRemoveJournal
+                        ? "Removed stale recording journal"
+                        : "Left stale recording journal in place", [
+                        "file": candidate.journalURL.lastPathComponent,
+                        "reason": reason
+                    ])
+                case .recover(let micURL, let systemURL, let originalMicURL, let startedAt):
+                    let existingFailure = failedTranscriptionManager.failedTranscriptions.first { failure in
+                        failure.micAudioURL.standardizedFileURL == originalMicURL?.standardizedFileURL
+                            || failure.micAudioURL.standardizedFileURL == micURL?.standardizedFileURL
+                            || (systemURL.map {
+                                failure.systemAudioURL?.standardizedFileURL == $0.standardizedFileURL
+                            } == true)
+                    }
+                    let didPersist: Bool
+                    if let existingFailure {
+                        let recoveredMicURL = micURL ?? existingFailure.micAudioURL
+                        didPersist = promoteFinalizedFailedTranscriptionAudio(
+                            id: existingFailure.id,
+                            micAudioURL: recoveredMicURL,
+                            systemAudioURL: systemURL ?? existingFailure.systemAudioURL
+                        )
+                    } else {
+                        let availableAudioURLs = [micURL, systemURL].compactMap { $0 }
+                        guard MeetingRecordingJournalStore.load(at: candidate.journalURL) != nil,
+                              availableAudioURLs.contains(where: {
+                                  FileManager.default.fileExists(atPath: $0.path)
+                              }) else {
+                            AppLogger.pipeline.info("Skipped stale recording recovery candidate after ownership changed", [
+                                "journal": candidate.journalURL.lastPathComponent
+                            ])
+                            continue
+                        }
+                        // Persist the new owner before starting any detached
+                        // archive work. A user deletion can run while archive
+                        // copying is suspended; updateFailedTranscriptionAudio
+                        // then rolls that copy back instead of resurrecting the row.
+                        didPersist = addFailedTranscriptionRetainingAvailableAudio(
+                            micAudioURL: micURL,
+                            systemAudioURL: systemURL,
+                            errorMessage: "Recording was interrupted before it could be saved. The recovered audio is ready to transcribe.",
+                            recordingDate: startedAt,
+                            archiveAudio: true,
+                            clearRecordingJournalAfterPersistence: false
+                        )
+                    }
+                    if didPersist {
+                        _ = MeetingRecordingJournalStore.removeJournalArtifact(
+                            at: candidate.journalURL,
+                            allowedRoots: [canonicalScratchDirectory]
+                        )
+                        passRecovered += 1
+                        AppLogger.pipeline.info("Recovered orphaned recording into failed queue", [
+                            "journal": candidate.journalURL.lastPathComponent,
+                            "hasMic": "\(micURL != nil)",
+                            "hasSystem": "\(systemURL != nil)"
+                        ])
+                    }
+                }
+            }
+            totalRecovered += passRecovered
+            if !candidates.isEmpty {
+                AppLogger.pipeline.info("Recording journal scan finished", [
+                    "journals": "\(candidates.count)",
+                    "recovered": "\(passRecovered)"
+                ])
+            }
+
+            if orphanedRecordingRecoveryRequestGeneration != passRequestGeneration {
+                guard ContinuousClock.now < waitDeadline else { return totalRecovered }
+                continue
+            }
+
+            guard waitForRecentJournals, let retryAfter else {
+                return totalRecovered
+            }
+            do {
+                // A restored or tampered file can carry an mtime far in the
+                // future. Keep that candidate deferred, but never let it pin
+                // the single recovery owner (and every joined request) for an
+                // unbounded interval before the next scan.
+                let maximumRetryInterval = max(0.01, livenessWindow + 0.01)
+                let boundedRetryInterval = min(
+                    max(0.01, retryAfter + 0.01),
+                    maximumRetryInterval
+                )
+                let now = ContinuousClock.now
+                guard now < waitDeadline else { return totalRecovered }
+                try await Task.sleep(for: min(
+                    .seconds(boundedRetryInterval),
+                    now.duration(to: waitDeadline)
+                ))
+            } catch {
+                return totalRecovered
+            }
+        }
+        return totalRecovered
+    }
+
+    nonisolated private static func collectOrphanedRecordingCandidates(
+        in directory: URL,
+        now: Date,
+        livenessWindow: TimeInterval
+    ) -> [OrphanedRecordingCandidate] {
+        let canonicalDirectory = canonicalDirectoryURL(directory)
+        return MeetingRecordingJournalStore.journalURLs(in: canonicalDirectory).compactMap {
+            guard !isSymbolicLink($0),
+                  isFile($0, containedIn: canonicalDirectory) else { return nil }
+            return inspectOrphanedRecordingJournal(
+                at: $0,
+                directory: canonicalDirectory,
+                now: now,
+                livenessWindow: livenessWindow
+            )
         }
     }
 
     nonisolated private static func inspectOrphanedRecordingJournal(
         at journalURL: URL,
-        directory: URL
+        directory: URL,
+        now: Date,
+        livenessWindow: TimeInterval
     ) -> OrphanedRecordingCandidate? {
+        guard !MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: journalURL) else {
+            return OrphanedRecordingCandidate(
+                journalURL: journalURL,
+                disposition: .skip(
+                    reason: "owned by live finalizer",
+                    retryAfter: max(0.01, min(1, livenessWindow))
+                )
+            )
+        }
         guard let journal = MeetingRecordingJournalStore.load(at: journalURL) else {
-            return OrphanedRecordingCandidate(journalURL: journalURL, disposition: .stale(reason: "unreadable journal"))
+            // An unreadable journal may still be the only inventory of mic
+            // segments absent from a system-only failed row. Preserve it as
+            // durable ownership evidence; deleting it could let a later
+            // pending-deletion replay report success while private audio stays.
+            return OrphanedRecordingCandidate(
+                journalURL: journalURL,
+                disposition: .skip(reason: "unreadable journal", retryAfter: nil)
+            )
         }
 
         // Journals store bare filenames; resolve them inside the scratch
@@ -1025,10 +1256,23 @@ public class TranscriptionTaskManager: ObservableObject {
         func resolve(_ filename: String?) -> URL? {
             guard let filename, !filename.isEmpty,
                   !filename.contains("/"), !filename.contains("..") else { return nil }
-            let url = directory.appendingPathComponent(filename)
+            let candidate = directory.appendingPathComponent(filename)
+            guard !isSymbolicLink(candidate) else { return nil }
+            let url = canonicalURL(candidate)
+            guard isFile(url, containedIn: directory) else { return nil }
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
 
+        func identityURL(_ filename: String?) -> URL? {
+            guard let filename, !filename.isEmpty,
+                  !filename.contains("/"), !filename.contains("..") else { return nil }
+            let candidate = directory.appendingPathComponent(filename)
+            guard !isSymbolicLink(candidate) else { return nil }
+            let url = canonicalURL(candidate)
+            return isFile(url, containedIn: directory) ? url : nil
+        }
+
+        let originalMicURL = identityURL(journal.primaryMicFilename)
         let primaryURL = resolve(journal.primaryMicFilename)
         let segmentRecords = journal.micSegments.compactMap { record -> MicRecordingSegment? in
             guard let url = resolve(record.filename) else { return nil }
@@ -1045,13 +1289,30 @@ public class TranscriptionTaskManager: ObservableObject {
         guard !allAudio.isEmpty else {
             return OrphanedRecordingCandidate(journalURL: journalURL, disposition: .stale(reason: "no audio files remain"))
         }
+        if systemURL == nil,
+           allAudio.allSatisfy({ $0.lastPathComponent.contains("microphone_placeholder") }) {
+            return OrphanedRecordingCandidate(
+                journalURL: journalURL,
+                disposition: .stale(reason: "only a silent placeholder remains")
+            )
+        }
 
-        let liveCutoff = Date().addingTimeInterval(-orphanedRecordingLivenessWindow)
-        for url in allAudio {
+        let liveCutoff = now.addingTimeInterval(-livenessWindow)
+        let recentModification = allAudio.compactMap { url -> Date? in
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-            if let modified = attributes?[.modificationDate] as? Date, modified > liveCutoff {
-                return OrphanedRecordingCandidate(journalURL: journalURL, disposition: .skip(reason: "audio recently written"))
-            }
+            return attributes?[.modificationDate] as? Date
+        }.filter { $0 > liveCutoff }.max()
+        if let recentModification {
+            return OrphanedRecordingCandidate(
+                journalURL: journalURL,
+                disposition: .skip(
+                    reason: "audio recently written",
+                    retryAfter: max(
+                        0,
+                        recentModification.addingTimeInterval(livenessWindow).timeIntervalSince(now)
+                    )
+                )
+            )
         }
 
         // Crash-orphaned WAVs read as zero-length until their headers are repaired.
@@ -1079,7 +1340,12 @@ public class TranscriptionTaskManager: ObservableObject {
         }
         return OrphanedRecordingCandidate(
             journalURL: journalURL,
-            disposition: .recover(micURL: micURL, systemURL: systemURL, startedAt: journal.startedAt)
+            disposition: .recover(
+                micURL: micURL,
+                systemURL: systemURL,
+                originalMicURL: originalMicURL,
+                startedAt: journal.startedAt
+            )
         )
     }
 
@@ -1101,7 +1367,8 @@ public class TranscriptionTaskManager: ObservableObject {
     private func makeSilentMicPlaceholderIfNeeded(
         retainedAudio: RetainedRecordingAudio?,
         hasOriginalMic: Bool,
-        failedSystemURL: URL?
+        failedSystemURL: URL?,
+        taskId: UUID
     ) -> URL? {
         guard !hasOriginalMic,
               let failedSystemURL else {
@@ -1109,8 +1376,11 @@ public class TranscriptionTaskManager: ObservableObject {
         }
 
         let placeholderDirectory = retainedAudio?.directory ?? failedSystemURL.deletingLastPathComponent()
+        let placeholderStem = retainedAudio == nil
+            ? "microphone_placeholder_\(taskId.uuidString)"
+            : "microphone_placeholder"
         let placeholderURL = placeholderDirectory
-            .appendingPathComponent("microphone_placeholder")
+            .appendingPathComponent(placeholderStem)
             .appendingPathExtension("wav")
         do {
             try FileManager.default.createDirectory(
@@ -1163,14 +1433,45 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        guard let failed = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
+        guard var failed = failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failedId }) else {
             AppLogger.pipeline.error("Failed transcription not found", ["failedId": "\(failedId)"])
+            return false
+        }
+
+        guard !failedTranscriptionManager.hasPendingDeletion(id: failedId) else {
+            AppLogger.pipeline.info("Skipping retry — deletion is pending", [
+                "failedId": failedId.uuidString
+            ])
             return false
         }
 
         guard failed.isRetryable else {
             AppLogger.pipeline.info("Skipping retry — failure is permanent", ["failedId": "\(failedId)", "error": failed.errorMessage])
             return false
+        }
+
+        if hasRecordingJournal(
+            micAudioURL: failed.micAudioURL,
+            systemAudioURL: failed.systemAudioURL
+        ) {
+            AppLogger.pipeline.info("Deferring retry while recording journal still owns recovery segments", [
+                "failedId": failedId.uuidString
+            ])
+            return false
+        }
+
+        if !failed.audioFilesExist() {
+            do {
+                if let reconciled = try failedTranscriptionManager.healMissingAudioReferencesForRetry(id: failedId) {
+                    failed = reconciled
+                }
+            } catch {
+                AppLogger.pipeline.error("Failed to persist healed audio references before retry", [
+                    "failedId": "\(failedId)",
+                    "errorType": "\(type(of: error))"
+                ])
+                return false
+            }
         }
 
         guard failed.audioFilesExist() else {
@@ -1346,7 +1647,10 @@ public class TranscriptionTaskManager: ObservableObject {
         // The imported journal remains through scratch cleanup. The separate
         // live-recording journal can retire once the transcript is durable.
         if let micURL = activeTaskAudio[taskId]?.micURL {
-            MeetingRecordingJournalStore.removeJournal(forMicAudioURL: micURL)
+            MeetingRecordingJournalStore.removeJournal(
+                forMicAudioURL: micURL,
+                allowedRoots: cleanupDirectories
+            )
         }
     }
 
@@ -1637,6 +1941,10 @@ public class TranscriptionTaskManager: ObservableObject {
         canonicalURL(url)
     }
 
+    nonisolated private static func isSymbolicLink(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+    }
+
     nonisolated private static func isFile(_ fileURL: URL, containedIn directoryURL: URL) -> Bool {
         let filePath = canonicalURL(fileURL).path
         let directoryPath = canonicalDirectoryURL(directoryURL).path
@@ -1715,7 +2023,8 @@ public class TranscriptionTaskManager: ObservableObject {
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
             retainedAudio: retainedAudio,
             hasOriginalMic: micURL != nil,
-            failedSystemURL: retainedAudio.systemURL ?? systemURL
+            failedSystemURL: retainedAudio.systemURL ?? systemURL,
+            taskId: taskId
         )
         guard let updatedMicURL = retainedAudio.micURL ?? micURL ?? placeholderMicURL else {
             removeRetainedFailedAudio(retainedAudio)
