@@ -33,7 +33,7 @@ class ParakeetEngine: ObservableObject {
 
     var audioEngine = AVAudioEngine()
     private var audioEngineQueue = ParakeetEngine.makeAudioEngineQueue()
-    private static let systemInputWorkCoordinator = ParakeetSerialSystemInputWorkCoordinator(
+    private static let systemInputWorkCoordinator = ParakeetReplaceableSystemInputWorkCoordinator(
         label: "com.transcripted.parakeet.system-input"
     )
     var audioGraphGeneration = 0
@@ -190,6 +190,15 @@ class ParakeetEngine: ObservableObject {
                 return nil
             }
             try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(previousInput)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    nonisolated private static func applySystemInputDevice(_ input: AudioDeviceID) -> String? {
+        do {
+            try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(input)
             return nil
         } catch {
             return error.localizedDescription
@@ -759,22 +768,41 @@ class ParakeetEngine: ObservableObject {
     ) async {
         ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
             + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
-        let restoreError = await Self.systemInputWorkCoordinator.run {
-            Self.restoreSystemInputDeviceIfStillTemporary(
-                temporaryInput: temporaryInput,
-                previousInput: previousInput
+        let restoreTarget = ParakeetSystemInputRestoreTarget(
+            temporaryInput: temporaryInput,
+            previousInput: previousInput
+        )
+        let restoreError: String?
+        do {
+            restoreError = try await Self.systemInputWorkCoordinator.run(
+                operation: operation,
+                timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
+                cleanupAfterLateCompletion: { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        await self?.reconcileSystemInputAfterLateCompletion(
+                            attemptedTarget: restoreTarget,
+                            clearMarkerWhenRestored: true
+                        )
+                    }
+                }
+            ) {
+                Self.restoreSystemInputDeviceIfStillTemporary(
+                    temporaryInput: temporaryInput,
+                    previousInput: previousInput
+                )
+            }
+        } catch {
+            reportSystemInputRestoreFailure(operation: operation, failureKind: "timeout")
+            await reconcileSystemInputAfterLateCompletion(
+                attemptedTarget: restoreTarget,
+                clearMarkerWhenRestored: false
             )
+            return
         }
-        if let restoreError {
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
-                event: "dictation_system_input_restore_failed",
-                message: "Failed to restore system input after dictation route override",
-                context: [
-                    "operation": operation,
-                    "error": restoreError,
-                ]
+        if restoreError != nil {
+            reportSystemInputRestoreFailure(
+                operation: operation,
+                failureKind: "core_audio_error"
             )
         } else {
             if !pendingSystemInputRestore.hasPendingValue {
@@ -796,6 +824,86 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
+    private func reportSystemInputRestoreFailure(
+        operation: String,
+        failureKind: String
+    ) {
+        EventReporter.shared.capture(
+            level: .warning,
+            engine: "parakeet",
+            event: "dictation_system_input_restore_failed",
+            message: "Failed to restore system input after dictation route override",
+            context: [
+                "operation": operation,
+                "failure_kind": failureKind,
+            ]
+        )
+    }
+
+    /// A timed-out CoreAudio write can finish after its queue has been retired.
+    /// Re-apply the latest owner intent, or restore the attempted route when no
+    /// successor exists, so late completion converges on current MainActor state.
+    private func reconcileSystemInputAfterLateCompletion(
+        attemptedTarget: ParakeetSystemInputRestoreTarget,
+        clearMarkerWhenRestored: Bool
+    ) async {
+        for _ in 0..<TranscriptedConstants.systemInputReconciliationAttempts {
+            if let successorOwner = pendingSystemInputRestore.owner,
+               let successorTarget = pendingSystemInputRestore.value(ownedBy: successorOwner) {
+                do {
+                    _ = try await Self.systemInputWorkCoordinator.run(
+                        operation: "late_completion_successor_reconcile",
+                        timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
+                        cleanupAfterLateCompletion: { [weak self] _ in
+                            Task { @MainActor [weak self] in
+                                await self?.reconcileSystemInputAfterLateCompletion(
+                                    attemptedTarget: attemptedTarget,
+                                    clearMarkerWhenRestored: true
+                                )
+                            }
+                        }
+                    ) {
+                        Self.applySystemInputDevice(successorTarget.temporaryInput)
+                    }
+                } catch {
+                    continue
+                }
+                if pendingSystemInputRestore.owner == successorOwner {
+                    return
+                }
+                continue
+            }
+
+            do {
+                _ = try await Self.systemInputWorkCoordinator.run(
+                    operation: "late_completion_restore_reconcile",
+                    timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
+                    cleanupAfterLateCompletion: { [weak self] _ in
+                        Task { @MainActor [weak self] in
+                            await self?.reconcileSystemInputAfterLateCompletion(
+                                attemptedTarget: attemptedTarget,
+                                clearMarkerWhenRestored: true
+                            )
+                        }
+                    }
+                ) {
+                    Self.restoreSystemInputDeviceIfStillTemporary(
+                        temporaryInput: attemptedTarget.temporaryInput,
+                        previousInput: attemptedTarget.previousInput
+                    )
+                }
+            } catch {
+                continue
+            }
+            if !pendingSystemInputRestore.hasPendingValue {
+                if clearMarkerWhenRestored {
+                    DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
+                }
+                return
+            }
+        }
+    }
+
     private func schedulePendingSystemInputRestore(
         ownedBy owner: ParakeetAudioGraphOwnerToken?,
         operation: String
@@ -804,28 +912,48 @@ class ParakeetEngine: ObservableObject {
               let restoreTarget = pendingSystemInputRestore.take(ownedBy: owner) else { return }
         ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()
             + TranscriptedConstants.selfInducedConfigChangeIgnoreWindow
-        Self.systemInputWorkCoordinator.schedule { [weak self] in
+        Self.systemInputWorkCoordinator.schedule(
+            operation: operation,
+            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
+            cleanupAfterLateCompletion: { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    await self?.reconcileSystemInputAfterLateCompletion(
+                        attemptedTarget: restoreTarget,
+                        clearMarkerWhenRestored: true
+                    )
+                }
+            },
+            completion: { [weak self] (result: Result<String?, Error>) in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    switch result {
+                    case .failure:
+                        self.reportSystemInputRestoreFailure(
+                            operation: operation,
+                            failureKind: "timeout"
+                        )
+                        await self.reconcileSystemInputAfterLateCompletion(
+                            attemptedTarget: restoreTarget,
+                            clearMarkerWhenRestored: false
+                        )
+                    case .success(let restoreError):
+                        if restoreError != nil {
+                            self.reportSystemInputRestoreFailure(
+                                operation: operation,
+                                failureKind: "core_audio_error"
+                            )
+                        } else if !self.pendingSystemInputRestore.hasPendingValue {
+                            DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
+                        }
+                    }
+                }
+            }
+        ) {
             let restoreError = Self.restoreSystemInputDeviceIfStillTemporary(
                 temporaryInput: restoreTarget.temporaryInput,
                 previousInput: restoreTarget.previousInput
             )
-            Task { @MainActor [weak self] in
-                if let restoreError {
-                    EventReporter.shared.capture(
-                        level: .warning,
-                        engine: "parakeet",
-                        event: "dictation_system_input_restore_failed",
-                        message: "Failed to restore system input after dictation route override",
-                        context: [
-                            "operation": operation,
-                            "error": restoreError,
-                        ]
-                    )
-                } else {
-                    guard let self, !self.pendingSystemInputRestore.hasPendingValue else { return }
-                    DictationPersistentInputPreferences.setTemporaryRecoveryMarker(nil)
-                }
-            }
+            return restoreError
         }
     }
 
@@ -837,7 +965,10 @@ class ParakeetEngine: ObservableObject {
         let operationOwner = currentAudioEngineQueueOwnerToken()
         let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
         let selectionStartedAt = CFAbsoluteTimeGetCurrent()
-        let selection = await Self.systemInputWorkCoordinator.run {
+        let selection = try await Self.systemInputWorkCoordinator.run(
+            operation: "\(operation)_selection",
+            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
+        ) {
             Self.loadDictationInputDeviceSelection(
                 allowsBuiltInBluetoothFallback: allowsBuiltInBluetoothFallback
             )
@@ -878,23 +1009,59 @@ class ParakeetEngine: ObservableObject {
                 previousInput: selection.defaultInput.id
             )
         }
-        if shouldRestoreSystemInputOnStop, let systemInputRestoreTarget {
+        if let systemInputRestoreTarget {
             pendingSystemInputRestore.replace(
                 systemInputRestoreTarget,
                 ownedBy: systemInputOverrideOwner
             )
         }
         let systemInputOverrideStartedAt = CFAbsoluteTimeGetCurrent()
-        let systemInputOverrideError = await Self.systemInputWorkCoordinator.run {
-            Self.applyPreferredSystemInputDevice(for: selection)
+        let systemInputOverrideError: String?
+        do {
+            systemInputOverrideError = try await Self.systemInputWorkCoordinator.run(
+                operation: "\(operation)_system_input_apply",
+                timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout,
+                cleanupAfterLateCompletion: { [weak self] _ in
+                    guard let systemInputRestoreTarget else { return }
+                    Task { @MainActor [weak self] in
+                        await self?.reconcileSystemInputAfterLateCompletion(
+                            attemptedTarget: systemInputRestoreTarget,
+                            clearMarkerWhenRestored: true
+                        )
+                    }
+                }
+            ) {
+                Self.applyPreferredSystemInputDevice(for: selection)
+            }
+        } catch {
+            if let restoreTarget = pendingSystemInputRestore.take(ownedBy: systemInputOverrideOwner) {
+                await reconcileSystemInputAfterLateCompletion(
+                    attemptedTarget: restoreTarget,
+                    clearMarkerWhenRestored: false
+                )
+            }
+            throw error
         }
         func restoreSystemInputAfterOwnershipLoss(stage: String) async {
-            pendingSystemInputRestore.clear(ownedBy: systemInputOverrideOwner)
-            guard systemInputOverrideError == nil, let systemInputRestoreTarget else { return }
+            guard systemInputOverrideError == nil,
+                  let systemInputRestoreTarget = pendingSystemInputRestore.take(
+                    ownedBy: systemInputOverrideOwner
+                  ) else { return }
             await restoreSystemInputIfStillTemporary(
                 temporaryInput: systemInputRestoreTarget.temporaryInput,
                 previousInput: systemInputRestoreTarget.previousInput,
                 operation: "\(operation)_system_input_stale_\(stage)"
+            )
+        }
+        func restoreSystemInputAfterNonRecordingUse(operation restoreOperation: String) async {
+            guard !shouldRestoreSystemInputOnStop,
+                  let systemInputRestoreTarget = pendingSystemInputRestore.take(
+                    ownedBy: systemInputOverrideOwner
+                  ) else { return }
+            await restoreSystemInputIfStillTemporary(
+                temporaryInput: systemInputRestoreTarget.temporaryInput,
+                previousInput: systemInputRestoreTarget.previousInput,
+                operation: restoreOperation
             )
         }
         guard ownsAudioEngineQueue(operationOwner) else {
@@ -929,13 +1096,9 @@ class ParakeetEngine: ObservableObject {
         }
 
         if let recoveryGeneration, recoveryState.isStale(generation: recoveryGeneration) {
-            if !shouldRestoreSystemInputOnStop, let systemInputRestoreTarget {
-                await restoreSystemInputIfStillTemporary(
-                    temporaryInput: systemInputRestoreTarget.temporaryInput,
-                    previousInput: systemInputRestoreTarget.previousInput,
-                    operation: "\(operation)_system_input_stale_recovery"
-                )
-            }
+            await restoreSystemInputAfterNonRecordingUse(
+                operation: "\(operation)_system_input_stale_recovery"
+            )
             throw CancellationError()
         }
         let snapshotReadStartedAt = CFAbsoluteTimeGetCurrent()
@@ -961,26 +1124,18 @@ class ParakeetEngine: ObservableObject {
                 await restoreSystemInputAfterOwnershipLoss(stage: "snapshot_failure")
                 throw CancellationError()
             }
-            if !shouldRestoreSystemInputOnStop, let systemInputRestoreTarget {
-                await restoreSystemInputIfStillTemporary(
-                    temporaryInput: systemInputRestoreTarget.temporaryInput,
-                    previousInput: systemInputRestoreTarget.previousInput,
-                    operation: "\(operation)_system_input_failed"
-                )
-            }
+            await restoreSystemInputAfterNonRecordingUse(
+                operation: "\(operation)_system_input_failed"
+            )
             throw error
         }
         guard ownsAudioEngineQueue(operationOwner) else {
             await restoreSystemInputAfterOwnershipLoss(stage: "snapshot_success")
             throw CancellationError()
         }
-        if !shouldRestoreSystemInputOnStop, let systemInputRestoreTarget {
-            await restoreSystemInputIfStillTemporary(
-                temporaryInput: systemInputRestoreTarget.temporaryInput,
-                previousInput: systemInputRestoreTarget.previousInput,
-                operation: "\(operation)_system_input"
-            )
-        }
+        await restoreSystemInputAfterNonRecordingUse(
+            operation: "\(operation)_system_input"
+        )
         stageTimings["audio_input_snapshot_read_ms"] = Self.elapsedMilliseconds(since: snapshotReadStartedAt)
         stageTimings["audio_input_total_ms"] = Self.elapsedMilliseconds(since: snapshotStartedAt)
         let snapshot = ParakeetAudioInputSnapshot(
@@ -1686,7 +1841,9 @@ class ParakeetEngine: ObservableObject {
                 )
             } catch {
                 guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
-                let operationTimedOut = error is ParakeetAudioEngineWorkError
+                let audioEngineTimedOut = error is ParakeetAudioEngineWorkError
+                let operationTimedOut = audioEngineTimedOut
+                    || error is ParakeetSystemInputWorkError
                 EventReporter.shared.capture(
                     level: operationTimedOut ? .error : .warning,
                     engine: "parakeet",
@@ -1700,7 +1857,7 @@ class ParakeetEngine: ObservableObject {
                         "error": error.localizedDescription
                     ]
                 )
-                if operationTimedOut {
+                if audioEngineTimedOut {
                     guard abandonBlockedAudioEngine(
                         reason: "audio_format_read_timeout",
                         expectedOwner: attemptOwner

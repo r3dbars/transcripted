@@ -126,27 +126,106 @@ final class ParakeetTimedAudioEngineWorkOwnership: @unchecked Sendable {
     }
 }
 
-/// Serializes system-input selection, apply, and restore work. A replacement
-/// recording therefore observes and applies its route only after any restore
-/// already taken by an older graph owner has completed.
-final class ParakeetSerialSystemInputWorkCoordinator: @unchecked Sendable {
-    private let queue: DispatchQueue
+enum ParakeetSystemInputWorkError: LocalizedError, Equatable {
+    case timedOut(operation: String, timeoutMs: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .timedOut(let operation, let timeoutMs):
+            return "System input \(operation) timed out after \(timeoutMs)ms"
+        }
+    }
+}
+
+/// Serializes system-input work until an operation exceeds its budget. A timed
+/// out queue is retired immediately so later starts are not denied by one stuck
+/// HAL call. Work already executing may still finish; callers reconcile that
+/// late side effect through `cleanupAfterLateCompletion`.
+final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
+    private let lock = NSLock()
+    private let label: String
+    private var queue: DispatchQueue
+    private var generation: UInt64 = 0
 
     init(label: String) {
-        queue = DispatchQueue(label: label, qos: .utility)
+        self.label = label
+        queue = DispatchQueue(label: "\(label).0", qos: .utility)
     }
 
-    func run<T>(_ work: @escaping () -> T) async -> T {
-        await withCheckedContinuation { continuation in
-            queue.async {
-                continuation.resume(returning: work())
-            }
+    func run<T>(
+        operation: String,
+        timeoutNanoseconds: UInt64,
+        cleanupAfterLateCompletion: ((T) -> Void)? = nil,
+        _ work: @escaping () -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            schedule(
+                operation: operation,
+                timeoutNanoseconds: timeoutNanoseconds,
+                cleanupAfterLateCompletion: cleanupAfterLateCompletion,
+                completion: { continuation.resume(with: $0) },
+                work
+            )
         }
     }
 
-    func schedule(_ work: @escaping () -> Void) {
-        queue.async {
-            work()
+    func schedule<T>(
+        operation: String,
+        timeoutNanoseconds: UInt64,
+        cleanupAfterLateCompletion: ((T) -> Void)? = nil,
+        completion: @escaping (Result<T, Error>) -> Void,
+        _ work: @escaping () -> T
+    ) {
+        let lease = lock.withLock { (queue, generation) }
+        let completionLock = NSLock()
+        var didComplete = false
+        let timeoutMs = Int(timeoutNanoseconds / 1_000_000)
+
+        lease.0.async {
+            let shouldRun = completionLock.withLock { !didComplete }
+            guard shouldRun else { return }
+
+            let value = work()
+            let completedBeforeTimeout = completionLock.withLock {
+                guard !didComplete else { return false }
+                didComplete = true
+                return true
+            }
+
+            if completedBeforeTimeout {
+                completion(.success(value))
+            } else {
+                cleanupAfterLateCompletion?(value)
+            }
+        }
+
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(
+            deadline: .now() + .nanoseconds(Int(timeoutNanoseconds))
+        ) { [weak self] in
+            let timedOut = completionLock.withLock {
+                guard !didComplete else { return false }
+                didComplete = true
+                return true
+            }
+            guard timedOut, let self else { return }
+
+            self.replaceQueue(ifGeneration: lease.1)
+            completion(
+                .failure(
+                    ParakeetSystemInputWorkError.timedOut(
+                        operation: operation,
+                        timeoutMs: timeoutMs
+                    )
+                )
+            )
+        }
+    }
+
+    private func replaceQueue(ifGeneration expectedGeneration: UInt64) {
+        lock.withLock {
+            guard generation == expectedGeneration else { return }
+            generation &+= 1
+            queue = DispatchQueue(label: "\(label).\(generation)", qos: .utility)
         }
     }
 }

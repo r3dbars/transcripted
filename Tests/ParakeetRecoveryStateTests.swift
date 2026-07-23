@@ -616,14 +616,11 @@ func testParakeetRecoveryState() async {
         )
     }
 
-    await runSuite("Parakeet pending restore preserves a same-input replacement after take") {
+    await runSuite("Parakeet stale cleanup cannot restore after a same-input successor takes ownership") {
         let engine = NSObject()
         let oldOwner = ParakeetAudioGraphOwnerToken(generation: 45, engine: engine)
         let replacementOwner = ParakeetAudioGraphOwnerToken(generation: 46, engine: engine)
         let pendingState = ParakeetPendingRestoreInterleavingHarness()
-        let coordinator = ParakeetSerialSystemInputWorkCoordinator(
-            label: "test.parakeet.system-input-interleaving"
-        )
         let temporaryInput = "built-in-input"
         let previousInput = "bluetooth-input"
         let route = ParakeetSystemInputRouteTestState(
@@ -632,72 +629,90 @@ func testParakeetRecoveryState() async {
         )
 
         await pendingState.replace(previousInput, ownedBy: oldOwner)
-        guard let takenRestore = await pendingState.take(ownedBy: oldOwner) else {
-            assertTrue(false, "the old owner should take its pending restore before suspension")
-            return
-        }
-
-        let oldRestoreEntered = ParakeetAsyncInterleavingGate()
-        let releaseOldRestore = DispatchSemaphore(value: 0)
-        let oldRestore = Task {
-            await coordinator.run {
-                Task { await oldRestoreEntered.open() }
-                _ = releaseOldRestore.wait(timeout: .now() + 2)
-                route.restoreIfStillTemporary(
-                    temporaryInput: temporaryInput,
-                    previousInput: takenRestore
-                )
-            }
-            if !(await pendingState.hasPendingValue()) {
-                route.clearRecoveryMarker()
-            }
-        }
-
-        await oldRestoreEntered.wait()
-
         await pendingState.replace(previousInput, ownedBy: replacementOwner)
-        let replacementStartScheduled = ParakeetAsyncInterleavingGate()
-        let replacementSelectionRan = ParakeetAsyncInterleavingGate()
-        let replacementStart = Task {
-            await replacementStartScheduled.open()
-            let selectedFromRoute = await coordinator.run {
-                Task { await replacementSelectionRan.open() }
-                return route.currentRoute()
-            }
-            await coordinator.run {
-                route.applyReplacementInput(temporaryInput)
-            }
-            return selectedFromRoute
+        if let staleRestore = await pendingState.take(ownedBy: oldOwner) {
+            route.restoreIfStillTemporary(
+                temporaryInput: temporaryInput,
+                previousInput: staleRestore
+            )
         }
 
-        await replacementStartScheduled.wait()
-        assertFalse(
-            await replacementSelectionRan.opened(),
-            "replacement route selection must queue behind the already-taken restore"
-        )
-
-        releaseOldRestore.signal()
-        await oldRestore.value
-        let replacementSelection = await replacementStart.value
-
-        assertEqual(
-            replacementSelection,
-            previousInput,
-            "replacement selection should run after the old restore completes"
-        )
         assertEqual(
             route.currentRoute(),
             temporaryInput,
-            "old restore completion must not leave the replacement on the prior route"
+            "stale cleanup must not undo a successor that selected the same temporary input"
         )
         assertTrue(
             route.recoveryMarkerIsSet(),
-            "old restore completion must not clear the replacement owner's recovery marker"
+            "stale cleanup must not clear the replacement owner's recovery marker"
         )
         assertEqual(
             await pendingState.value(ownedBy: replacementOwner),
             previousInput,
-            "old completion must leave the replacement owner's pending restore intact"
+            "only the matching successor owner may consume its restore target"
+        )
+    }
+
+    await runSuite("Parakeet system-input timeout replaces the blocked queue and reconciles late writes") {
+        let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
+            label: "test.parakeet.replaceable-system-input"
+        )
+        let temporaryInput = "built-in-input"
+        let previousInput = "bluetooth-input"
+        let route = ParakeetSystemInputRouteTestState(
+            route: temporaryInput,
+            recoveryMarkerIsSet: true
+        )
+        let blockedWorkEntered = ParakeetAsyncInterleavingGate()
+        let releaseBlockedWork = DispatchSemaphore(value: 0)
+        let lateCompletionReconciled = ParakeetAsyncInterleavingGate()
+
+        let blockedWork = Task {
+            do {
+                try await coordinator.run(
+                    operation: "blocked_restore",
+                    timeoutNanoseconds: 20_000_000,
+                    cleanupAfterLateCompletion: { _ in
+                        route.applyReplacementInput(temporaryInput)
+                        Task { await lateCompletionReconciled.open() }
+                    }
+                ) {
+                    Task { await blockedWorkEntered.open() }
+                    _ = releaseBlockedWork.wait(timeout: .now() + 2)
+                    route.restoreIfStillTemporary(
+                        temporaryInput: temporaryInput,
+                        previousInput: previousInput
+                    )
+                }
+                return false
+            } catch is ParakeetSystemInputWorkError {
+                return true
+            } catch {
+                return false
+            }
+        }
+
+        await blockedWorkEntered.wait()
+        assertTrue(await blockedWork.value, "the blocked operation should hit its deterministic timeout")
+
+        let successorCompleted = (try? await coordinator.run(
+            operation: "successor_apply",
+            timeoutNanoseconds: 500_000_000
+        ) {
+            route.applyReplacementInput(temporaryInput)
+            return true
+        }) ?? false
+        assertTrue(
+            successorCompleted,
+            "a successor must run on the replacement queue before old HAL work returns"
+        )
+
+        releaseBlockedWork.signal()
+        await lateCompletionReconciled.wait()
+        assertEqual(
+            route.currentRoute(),
+            temporaryInput,
+            "late stale restore must converge back to the successor route"
         )
     }
 
@@ -732,7 +747,7 @@ func testParakeetRecoveryState() async {
                     engine: successorEngine,
                     queue: successorQueue
                 )
-                let coordinator = ParakeetSerialSystemInputWorkCoordinator(
+                let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
                     label: "test.parakeet.stale-system-input.\(ownershipLoss.rawValue).\(suspensionPoint.rawValue)"
                 )
                 let route = ParakeetSystemInputRouteTestState(
@@ -743,13 +758,19 @@ func testParakeetRecoveryState() async {
                 let releaseOverride = DispatchSemaphore(value: 0)
 
                 let staleSnapshot = Task {
-                    await coordinator.run {
+                    try? await coordinator.run(
+                        operation: "test_override",
+                        timeoutNanoseconds: 3_000_000_000
+                    ) {
                         route.applyReplacementInput("built-in-input")
                         Task { await overrideEntered.open() }
                         _ = releaseOverride.wait(timeout: .now() + 2)
                     }
                     guard oldOwner == successorOwner else {
-                        await coordinator.run {
+                        try? await coordinator.run(
+                            operation: "test_restore",
+                            timeoutNanoseconds: 3_000_000_000
+                        ) {
                             route.restoreIfStillTemporary(
                                 temporaryInput: "built-in-input",
                                 previousInput: "airpods-input"

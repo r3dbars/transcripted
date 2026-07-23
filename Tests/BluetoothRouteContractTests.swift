@@ -364,10 +364,10 @@ func testBluetoothRouteContract() {
         }
         let snapshotBody = String(source[snapshotStart.lowerBound..<snapshotEnd.lowerBound])
 
-        guard let loadSelection = snapshotBody.range(of: "let selection = await Self.systemInputWorkCoordinator.run"),
+        guard let loadSelection = snapshotBody.range(of: "let selection = try await Self.systemInputWorkCoordinator.run"),
               let serializedSelectionLookup = snapshotBody.range(of: "Self.loadDictationInputDeviceSelection"),
               let avoidDefaultRead = snapshotBody.range(of: "Avoid touching the current default input before the override is applied."),
-              let serializedSystemInputOverride = snapshotBody.range(of: "let systemInputOverrideError = await Self.systemInputWorkCoordinator.run"),
+              let serializedSystemInputOverride = snapshotBody.range(of: "systemInputOverrideError = try await Self.systemInputWorkCoordinator.run"),
               let systemInputOverride = snapshotBody.range(of: "Self.applyPreferredSystemInputDevice(for: selection)"),
               let applyOverride = snapshotBody.range(of: "Self.applyPreferredDictationInputDevice(selection, to: inputNode)"),
               let outputFormatRead = snapshotBody.range(of: "inputNode.outputFormat(forBus: 0)"),
@@ -414,10 +414,10 @@ func testBluetoothRouteContract() {
         )
         assertTrue(
             snapshotBody.contains("func restoreSystemInputAfterOwnershipLoss(stage: String) async")
-                && snapshotBody.contains("pendingSystemInputRestore.clear(ownedBy: systemInputOverrideOwner)")
-                && snapshotBody.contains("guard systemInputOverrideError == nil, let systemInputRestoreTarget else { return }")
+                && snapshotBody.contains("let systemInputRestoreTarget = pendingSystemInputRestore.take(")
+                && snapshotBody.contains("ownedBy: systemInputOverrideOwner")
                 && snapshotBody.contains("await restoreSystemInputIfStillTemporary("),
-            "only a successful stale override should restore its captured system-input target"
+            "stale cleanup should restore only after consuming its matching system-input owner lease"
         )
         for stage in ["override", "snapshot_failure", "snapshot_success"] {
             assertTrue(
@@ -452,9 +452,11 @@ func testBluetoothRouteContract() {
             "quit cleanup should restore its owned temporary input even though cleanup() is synchronous"
         )
         assertTrue(
-            source.contains("let restoreError = await Self.systemInputWorkCoordinator.run")
-                && source.contains("Self.systemInputWorkCoordinator.schedule"),
-            "awaited and scheduled restores should share the replacement start's serial route coordinator"
+            source.contains("restoreError = try await Self.systemInputWorkCoordinator.run")
+                && source.contains("Self.systemInputWorkCoordinator.schedule(")
+                && source.contains("timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout")
+                && source.contains("reconcileSystemInputAfterLateCompletion"),
+            "awaited and scheduled restores should use bounded replaceable work with late-write reconciliation"
         )
         assertTrue(
             cleanupBody.contains("operation: \"abandon_blocked_recording_start\"")
