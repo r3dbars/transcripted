@@ -1007,6 +1007,14 @@ public class TranscriptionTaskManager: ObservableObject {
             AppLogger.pipeline.warning("Refused recording journal recovery outside managed storage")
             return 0
         }
+        // A live writer can keep refreshing a file forever, and a restored or
+        // tampered file can have an mtime far in the future. Give this owner a
+        // finite wait budget; a later explicit recovery request can rescan any
+        // journal that is still live when the budget expires.
+        let maximumWaitInterval = max(0.02, (livenessWindow * 2) + 0.02)
+        let waitDeadline = ContinuousClock.now.advanced(
+            by: .seconds(maximumWaitInterval)
+        )
         var totalRecovered = 0
         while !Task.isCancelled {
             let passRequestGeneration = orphanedRecordingRecoveryRequestGeneration
@@ -1106,7 +1114,12 @@ public class TranscriptionTaskManager: ObservableObject {
                     max(0.01, retryAfter + 0.01),
                     maximumRetryInterval
                 )
-                try await Task.sleep(for: .seconds(boundedRetryInterval))
+                let now = ContinuousClock.now
+                guard now < waitDeadline else { return totalRecovered }
+                try await Task.sleep(for: min(
+                    .seconds(boundedRetryInterval),
+                    now.duration(to: waitDeadline)
+                ))
             } catch {
                 return totalRecovered
             }

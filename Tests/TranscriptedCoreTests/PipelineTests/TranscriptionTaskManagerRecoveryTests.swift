@@ -256,7 +256,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
     }
 
-    func testFutureDatedAudioCannotPinRecoveryOwnerBeforeLaterJournalScan() async throws {
+    func testFutureDatedAudioCannotPinRecoveryOwnerOrBlockLaterJournalScan() async throws {
         let (manager, paths) = makeManager()
         let livenessWindow: TimeInterval = 0.02
         let futureMicURL = paths.audioCaptures.appendingPathComponent("meeting_future_mic.wav")
@@ -265,7 +265,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             [.modificationDate: Date().addingTimeInterval(1)],
             ofItemAtPath: futureMicURL.path
         )
-        _ = try writeJournal(
+        let futureJournalURL = try writeJournal(
             in: paths.audioCaptures,
             primaryMicFilename: futureMicURL.lastPathComponent,
             segments: [.init(filename: futureMicURL.lastPathComponent, gapBefore: 0)],
@@ -298,26 +298,19 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             }
         }
 
-        let recoveryTask = Task {
-            await manager.recoverOrphanedRecordings(
-                in: paths.audioCaptures,
-                livenessWindow: livenessWindow,
-                waitForRecentJournals: true
-            )
-        }
-        try await Task.sleep(for: .seconds(0.15))
-
-        XCTAssertGreaterThanOrEqual(passCount, 2)
-        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(laterJournalURL).path))
-
-        // Let the original candidate become eligible so the owner can finish.
-        try backdate(futureMicURL)
-        let recovered = await recoveryTask.value
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: livenessWindow,
+            waitForRecentJournals: true
+        )
         manager.orphanedRecordingRecoveryPassObserver = nil
 
-        XCTAssertEqual(recovered, 2)
-        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 2)
+        XCTAssertGreaterThanOrEqual(passCount, 2)
+        XCTAssertEqual(recovered, 1)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(laterJournalURL).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: futureMicURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: futureJournalURL.path))
     }
 
     func testConcurrentRecoveryCallsShareOneJournalOwner() async throws {
