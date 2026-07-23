@@ -779,22 +779,31 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
+        let fileManager = FileManager.default
+        let liveMicAudioURL = fileManager.fileExists(atPath: micAudioURL.path) ? micAudioURL : nil
+        let liveSystemAudioURL = systemAudioURL.flatMap { url in
+            fileManager.fileExists(atPath: url.path) ? url : nil
+        }
+        guard liveMicAudioURL != nil || liveSystemAudioURL != nil else {
+            return fileManager.fileExists(atPath: existingFailure.micAudioURL.path)
+        }
+        let promotedMicAudioURL = liveMicAudioURL ?? existingFailure.micAudioURL
         let retryIsUsingOriginalAudio = activeTasks[id] != nil
-        let promotedSystemAudioURL = systemAudioURL ?? existingFailure.systemAudioURL
+        let promotedSystemAudioURL = liveSystemAudioURL ?? existingFailure.systemAudioURL
         let didPersist = failedTranscriptionManager.updateFailedTranscriptionAudio(
             id: id,
-            micAudioURL: micAudioURL,
+            micAudioURL: promotedMicAudioURL,
             systemAudioURL: promotedSystemAudioURL
         )
         guard didPersist else { return false }
 
         MeetingRecordingJournalStore.removeJournal(
-            forMicAudioURL: micAudioURL,
+            forMicAudioURL: promotedMicAudioURL,
             allowedRoots: cleanupDirectories
         )
 
         scheduleFailedRecordingAudioArchive(
-            micURL: micAudioURL,
+            micURL: promotedMicAudioURL,
             systemURL: promotedSystemAudioURL,
             taskId: id,
             removeOriginalsAfterArchive: !retryIsUsingOriginalAudio,

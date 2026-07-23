@@ -184,6 +184,60 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertEqual(entry.micAudioURL.lastPathComponent, "meeting_timeout_mic_merged.wav")
     }
 
+    func testLateCallbackAfterRecoveryKeepsArchivedAudioPaths() async throws {
+        let retainedAudioDirectory = tempDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("audio", isDirectory: true)
+        let (manager, paths) = makeManager(retainedAudioDirectory: retainedAudioDirectory)
+        let primaryURL = paths.audioCaptures.appendingPathComponent("meeting_late_mic.wav")
+        let recoveryURL = paths.audioCaptures.appendingPathComponent("meeting_late_recovery.wav")
+        let lateCallbackURL = paths.audioCaptures.appendingPathComponent("meeting_late_mic_merged.wav")
+        let failedID = UUID()
+        try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
+        try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
+        try backdate(primaryURL)
+        try backdate(recoveryURL)
+
+        _ = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: primaryURL.lastPathComponent,
+            segments: [
+                .init(filename: primaryURL.lastPathComponent, gapBefore: 0),
+                .init(filename: recoveryURL.lastPathComponent, gapBefore: 0.1)
+            ],
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            state: .stopping
+        )
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: primaryURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedID,
+            archiveAudio: false,
+            clearRecordingJournalAfterPersistence: false
+        ))
+
+        let recoveredCount = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+        XCTAssertEqual(recoveredCount, 1)
+        let recovered = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertTrue(recovered.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recovered.micAudioURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: lateCallbackURL.path))
+
+        XCTAssertTrue(manager.promoteFinalizedFailedTranscriptionAudio(
+            id: failedID,
+            micAudioURL: lateCallbackURL,
+            systemAudioURL: nil
+        ))
+
+        let afterLateCallback = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(afterLateCallback.micAudioURL, recovered.micAudioURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: afterLateCallback.micAudioURL.path))
+        let reloaded = FailedTranscriptionManager(paths: paths)
+        XCTAssertEqual(reloaded.failedTranscriptions.first?.micAudioURL, recovered.micAudioURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recovered.micAudioURL.path))
+    }
+
     func testRecoveryRescansFreshTimeoutJournalAfterLivenessWindow() async throws {
         let (manager, paths) = makeManager()
         let primaryURL = paths.audioCaptures.appendingPathComponent("meeting_fresh_mic.wav")
@@ -600,7 +654,9 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private func makeManager() -> (TranscriptionTaskManager, CoreStoragePaths) {
+    private func makeManager(
+        retainedAudioDirectory: URL? = nil
+    ) -> (TranscriptionTaskManager, CoreStoragePaths) {
         let paths = CoreStoragePaths(
             transcripts: tempDirectory.appendingPathComponent("transcripts"),
             speakerDB: tempDirectory.appendingPathComponent("speakers.sqlite"),
@@ -619,7 +675,8 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             diarization: RecoveryStubDiarizationEngine(),
             speakerStore: SpeakerDatabase(path: paths.speakerDB.path),
             speakerClipsDirectory: paths.speakerClips,
-            cleanupDirectories: [paths.audioCaptures, paths.speakerClips]
+            cleanupDirectories: [paths.audioCaptures, paths.speakerClips],
+            retainedAudioDirectory: retainedAudioDirectory
         )
         return (manager, paths)
     }
