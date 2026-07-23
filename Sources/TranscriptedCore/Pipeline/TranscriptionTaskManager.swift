@@ -1389,7 +1389,10 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        if MeetingRecordingJournalStore.hasJournal(forMicAudioURL: failed.micAudioURL) {
+        if hasRecordingJournal(
+            micAudioURL: failed.micAudioURL,
+            systemAudioURL: failed.systemAudioURL
+        ) {
             AppLogger.pipeline.info("Deferring retry while recording journal still owns recovery segments", [
                 "failedId": failedId.uuidString
             ])

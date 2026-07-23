@@ -494,6 +494,48 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
     }
 
+    func testRetryWaitsWhileSystemKeyedJournalStillOwnsMissingMic() async throws {
+        let manager = makeManager(
+            speechToText: MetadataStubSpeechToTextEngine(transcript: "Should not run yet.")
+        )
+        let scratchDirectory = tempDirectory.appendingPathComponent("audio")
+        let missingMicURL = scratchDirectory.appendingPathComponent("system-only-mic.wav")
+        let systemURL = scratchDirectory.appendingPathComponent("system-only-system.wav")
+        let journalURL = scratchDirectory.appendingPathComponent("system-only-mic.recording.json")
+        try writeMonoWAV(to: systemURL, duration: 2.5)
+        let journal = MeetingRecordingJournalStore(directory: scratchDirectory)
+        let session = journal.begin(primaryMicURL: missingMicURL)
+        journal.recordSystemAudio(systemURL, session: session)
+        journal.markStopping(session: session)
+        journal.flush()
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: nil,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedID,
+            archiveAudio: false,
+            clearRecordingJournalAfterPersistence: false
+        ))
+        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertNotEqual(failed.micAudioURL, missingMicURL)
+        XCTAssertTrue(manager.hasRecordingJournal(
+            micAudioURL: failed.micAudioURL,
+            systemAudioURL: failed.systemAudioURL
+        ))
+
+        let didRetry = await manager.retryFailedTranscription(
+            failedId: failedID,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        )
+
+        XCTAssertFalse(didRetry)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.map(\.id), [failedID])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
     func testLateStopTimeoutFinalizationRollsBackRetainedArchiveWhenPersistenceFails() throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
