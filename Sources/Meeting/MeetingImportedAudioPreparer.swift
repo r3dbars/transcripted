@@ -1,11 +1,26 @@
 import Foundation
 import AVFoundation
+import Darwin
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 import UniformTypeIdentifiers
 
 struct PreparedImportedMeetingAudio: Sendable {
     let copiedAudioURL: URL
     let suggestedTitle: String
     let recordingDate: Date
+}
+
+enum ImportedTranscriptionQueueJournalPhase: String, Codable, Equatable, Sendable {
+    case queued
+    case active
+    case transcriptCommitted
+}
+
+struct ImportedTranscriptionQueueJournalOwner: Codable, Equatable, Sendable {
+    let processIdentifier: Int32
+    let claimedAt: Date
 }
 
 struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
@@ -15,10 +30,63 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
     let recordingDate: Date
     let enqueuedAt: Date
     let sttModelRawValue: String
+    var phase: ImportedTranscriptionQueueJournalPhase
+    var owner: ImportedTranscriptionQueueJournalOwner?
+
+    init(
+        id: UUID,
+        audioFilename: String,
+        suggestedTitle: String,
+        recordingDate: Date,
+        enqueuedAt: Date,
+        sttModelRawValue: String,
+        phase: ImportedTranscriptionQueueJournalPhase = .queued,
+        owner: ImportedTranscriptionQueueJournalOwner? = nil
+    ) {
+        self.id = id
+        self.audioFilename = audioFilename
+        self.suggestedTitle = suggestedTitle
+        self.recordingDate = recordingDate
+        self.enqueuedAt = enqueuedAt
+        self.sttModelRawValue = sttModelRawValue
+        self.phase = phase
+        self.owner = owner
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case audioFilename
+        case suggestedTitle
+        case recordingDate
+        case enqueuedAt
+        case sttModelRawValue
+        case phase
+        case owner
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        audioFilename = try values.decode(String.self, forKey: .audioFilename)
+        suggestedTitle = try values.decode(String.self, forKey: .suggestedTitle)
+        recordingDate = try values.decode(Date.self, forKey: .recordingDate)
+        enqueuedAt = try values.decode(Date.self, forKey: .enqueuedAt)
+        sttModelRawValue = try values.decode(String.self, forKey: .sttModelRawValue)
+        phase = try values.decodeIfPresent(
+            ImportedTranscriptionQueueJournalPhase.self,
+            forKey: .phase
+        ) ?? .queued
+        owner = try values.decodeIfPresent(
+            ImportedTranscriptionQueueJournalOwner.self,
+            forKey: .owner
+        )
+    }
 }
 
 enum ImportedTranscriptionQueueJournalError: Error {
     case audioOutsideScratchDirectory
+    case claimFailed
+    case journalMissing
 }
 
 enum ImportedAudioQueuePersistenceFailureCopy {
@@ -36,6 +104,13 @@ enum ImportedAudioQueuePersistenceFailureCopy {
 enum ImportedTranscriptionQueueJournal {
     private static let filenamePrefix = "import-job-"
     private static let filenameExtension = "json"
+    private static let lockFilenameExtension = "lock"
+
+    enum RecoveryAudioStatus: Equatable {
+        case regularFile
+        case missing
+        case unsafeEntry
+    }
 
     static func persist(
         id: UUID,
@@ -66,10 +141,7 @@ enum ImportedTranscriptionQueueJournal {
             enqueuedAt: enqueuedAt,
             sttModelRawValue: sttModelRawValue
         )
-        let data = try JSONEncoder().encode(record)
-        let destination = journalURL(for: id, in: journalDirectory)
-        try data.write(to: destination, options: [.atomic])
-        fileManager.restrictFileToOwnerOnly(at: destination)
+        try write(record, journalDirectory: journalDirectory, fileManager: fileManager)
     }
 
     static func load(
@@ -114,6 +186,64 @@ enum ImportedTranscriptionQueueJournal {
         try? fileManager.removeItem(at: journalURL(for: id, in: journalDirectory))
     }
 
+    /// Claims one journal with an advisory lock held for the lifetime of the
+    /// returned session. A second process receives `nil`; a crashed owner loses
+    /// the kernel lock automatically and the next process can recover the work.
+    static func claim(
+        id: UUID,
+        journalDirectory: URL,
+        processIdentifier: Int32 = getpid(),
+        claimedAt: Date = Date(),
+        fileManager: FileManager = .default
+    ) throws -> ImportedTranscriptionQueueJournalSession? {
+        fileManager.ensurePrivateDirectory(
+            at: journalDirectory,
+            context: "imported transcription queue journal"
+        )
+        let lockURL = lockURL(for: id, in: journalDirectory)
+        let descriptor = Darwin.open(
+            lockURL.path,
+            O_CREAT | O_RDWR | O_CLOEXEC,
+            S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else {
+            throw ImportedTranscriptionQueueJournalError.claimFailed
+        }
+
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            Darwin.close(descriptor)
+            if errno == EWOULDBLOCK || errno == EAGAIN {
+                return nil
+            }
+            throw ImportedTranscriptionQueueJournalError.claimFailed
+        }
+
+        do {
+            guard var record = load(id: id, journalDirectory: journalDirectory, fileManager: fileManager) else {
+                throw ImportedTranscriptionQueueJournalError.journalMissing
+            }
+            if record.phase != .transcriptCommitted {
+                record.phase = .active
+            }
+            record.owner = ImportedTranscriptionQueueJournalOwner(
+                processIdentifier: processIdentifier,
+                claimedAt: claimedAt
+            )
+            try write(record, journalDirectory: journalDirectory, fileManager: fileManager)
+            fileManager.restrictFileToOwnerOnly(at: lockURL)
+            return ImportedTranscriptionQueueJournalSession(
+                record: record,
+                journalDirectory: journalDirectory,
+                lockDescriptor: descriptor,
+                fileManager: fileManager
+            )
+        } catch {
+            flock(descriptor, LOCK_UN)
+            Darwin.close(descriptor)
+            throw error
+        }
+    }
+
     static func audioURL(
         for record: ImportedTranscriptionQueueJournalRecord,
         scratchDirectory: URL
@@ -122,6 +252,22 @@ enum ImportedTranscriptionQueueJournal {
               URL(fileURLWithPath: record.audioFilename).lastPathComponent == record.audioFilename
         else { return nil }
         return scratchDirectory.appendingPathComponent(record.audioFilename, isDirectory: false)
+    }
+
+    static func recoveryAudioStatus(
+        at audioURL: URL,
+        scratchDirectory: URL
+    ) -> RecoveryAudioStatus {
+        let normalizedURL = audioURL.standardizedFileURL
+        guard normalizedURL.deletingLastPathComponent() == scratchDirectory.standardizedFileURL else {
+            return .unsafeEntry
+        }
+
+        var fileStatus = stat()
+        guard lstat(normalizedURL.path, &fileStatus) == 0 else {
+            return errno == ENOENT ? .missing : .unsafeEntry
+        }
+        return (fileStatus.st_mode & S_IFMT) == S_IFREG ? .regularFile : .unsafeEntry
     }
 
     static func isDuplicate(
@@ -139,6 +285,118 @@ enum ImportedTranscriptionQueueJournal {
             "\(filenamePrefix)\(id.uuidString).\(filenameExtension)",
             isDirectory: false
         )
+    }
+
+    private static func lockURL(for id: UUID, in directory: URL) -> URL {
+        directory.appendingPathComponent(
+            "\(filenamePrefix)\(id.uuidString).\(lockFilenameExtension)",
+            isDirectory: false
+        )
+    }
+
+    fileprivate static func load(
+        id: UUID,
+        journalDirectory: URL,
+        fileManager: FileManager
+    ) -> ImportedTranscriptionQueueJournalRecord? {
+        let url = journalURL(for: id, in: journalDirectory)
+        guard let data = try? Data(contentsOf: url),
+              let record = try? JSONDecoder().decode(
+                  ImportedTranscriptionQueueJournalRecord.self,
+                  from: data
+              ),
+              record.id == id,
+              !record.audioFilename.isEmpty,
+              URL(fileURLWithPath: record.audioFilename).lastPathComponent == record.audioFilename
+        else { return nil }
+        return record
+    }
+
+    fileprivate static func write(
+        _ record: ImportedTranscriptionQueueJournalRecord,
+        journalDirectory: URL,
+        fileManager: FileManager
+    ) throws {
+        let data = try JSONEncoder().encode(record)
+        let destination = journalURL(for: record.id, in: journalDirectory)
+        try data.write(to: destination, options: [.atomic])
+        fileManager.restrictFileToOwnerOnly(at: destination)
+    }
+}
+
+final class ImportedTranscriptionQueueJournalSession: ImportedTranscriptionRecoverySession, @unchecked Sendable {
+    let jobID: UUID
+
+    private let journalDirectory: URL
+    private let fileManager: FileManager
+    private let stateLock = NSLock()
+    private var record: ImportedTranscriptionQueueJournalRecord
+    private var lockDescriptor: Int32
+
+    fileprivate init(
+        record: ImportedTranscriptionQueueJournalRecord,
+        journalDirectory: URL,
+        lockDescriptor: Int32,
+        fileManager: FileManager
+    ) {
+        jobID = record.id
+        self.record = record
+        self.journalDirectory = journalDirectory
+        self.lockDescriptor = lockDescriptor
+        self.fileManager = fileManager
+    }
+
+    deinit {
+        releaseLock()
+    }
+
+    func transcriptCommitConfirmed() {
+        stateLock.withLock {
+            guard lockDescriptor >= 0 else { return }
+            record.phase = .transcriptCommitted
+            try? ImportedTranscriptionQueueJournal.write(
+                record,
+                journalDirectory: journalDirectory,
+                fileManager: fileManager
+            )
+        }
+    }
+
+    func scratchCleanupConfirmed() {
+        finish()
+    }
+
+    func failedQueueHandoffConfirmed() {
+        finish()
+    }
+
+    var phase: ImportedTranscriptionQueueJournalPhase {
+        stateLock.withLock { record.phase }
+    }
+
+    private func finish() {
+        stateLock.withLock {
+            guard lockDescriptor >= 0 else { return }
+            ImportedTranscriptionQueueJournal.remove(
+                id: jobID,
+                journalDirectory: journalDirectory,
+                fileManager: fileManager
+            )
+            releaseLockWhileStateLocked()
+        }
+    }
+
+    private func releaseLock() {
+        stateLock.withLock {
+            releaseLockWhileStateLocked()
+        }
+    }
+
+    private func releaseLockWhileStateLocked() {
+        guard lockDescriptor >= 0 else { return }
+        flock(lockDescriptor, LOCK_UN)
+        Darwin.close(lockDescriptor)
+        lockDescriptor = -1
     }
 }
 

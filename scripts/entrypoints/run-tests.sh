@@ -249,6 +249,7 @@ $test_entries
 EOF
 
 APP_SOURCES=(
+    "Sources/TranscriptedCore/Protocols/ImportedTranscriptionRecoverySession.swift"
     "Sources/Support/ActivationPolicyController.swift"
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
