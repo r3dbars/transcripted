@@ -413,7 +413,10 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         let micURL = paths.audioCaptures.appendingPathComponent("meeting_repeated_write_mic.wav")
         try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
         try FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(livenessWindow)],
+            // Keep the first snapshot fresh even if the owner task is heavily
+            // delayed. The pass hook below supplies the repeated write at the
+            // exact recovery boundary under test.
+            [.modificationDate: Date().addingTimeInterval(60)],
             ofItemAtPath: micURL.path
         )
         let journalURL = try writeJournal(
