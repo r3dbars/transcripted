@@ -959,6 +959,9 @@ class DictationSessionController: ObservableObject {
             }
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
             var stoppedRecordingSnapshot: RecordedSpeechSamples?
+            guard !Task.isCancelled,
+                  self.isDictating,
+                  self.currentDictationSessionID == taskSessionID else { return }
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
             // The accepted stop request owns cancellation even if recovery
             // publishes a brief idle state before this task begins. The engine's
