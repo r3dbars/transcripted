@@ -285,18 +285,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Claims this generation's finalizer before it mutates any recording
     /// files. If recovery already took ownership, leave every segment and
     /// merged artifact untouched for that canonical recovery path.
-    func finalizeStoppedMicRecording(
-        primaryURL: URL?,
-        segments: [MicRecordingSegment],
-        generation: UInt64
-    ) -> URL? {
-        finalizeStoppedMicRecordingResult(
-            primaryURL: primaryURL,
-            segments: segments,
-            generation: generation
-        ).micURL
-    }
-
     func finalizeStoppedMicRecordingResult(
         primaryURL: URL?,
         segments: [MicRecordingSegment],
