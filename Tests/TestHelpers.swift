@@ -83,9 +83,98 @@ func runSuite(_ name: String, _ block: () async -> Void) async {
     await block()
 }
 
+actor ParakeetAsyncInterleavingGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func opened() -> Bool {
+        isOpen
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        for waiter in pendingWaiters {
+            waiter.resume()
+        }
+    }
+}
+
 func repoFixtureURL(_ relativePath: String) -> URL {
     URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         .appendingPathComponent(relativePath)
+}
+
+func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String {
+    readSourceFixture(
+        "Sources/Speech/ParakeetEngine.swift",
+        description: "ParakeetEngine.swift",
+        file: file,
+        line: line
+    )
+}
+
+func readParakeetDeviceRecoverySource(file: String = #file, line: Int = #line) -> String {
+    readSourceFixture(
+        "Sources/Speech/ParakeetDeviceRecovery.swift",
+        description: "ParakeetDeviceRecovery.swift",
+        file: file,
+        line: line
+    )
+}
+
+func assertPostAwaitOwnershipGuard(
+    in body: String,
+    ownerCapture: String,
+    suspension: String,
+    guardStatement: String,
+    mutation: String,
+    helper: String,
+    file: String = #file,
+    line: Int = #line
+) {
+    guard let capture = body.range(of: ownerCapture),
+          let awaitPoint = body.range(of: suspension, range: capture.upperBound..<body.endIndex),
+          let ownershipGuard = body.range(of: guardStatement, range: awaitPoint.upperBound..<body.endIndex),
+          let sharedMutation = body.range(of: mutation, range: ownershipGuard.upperBound..<body.endIndex) else {
+        assertTrue(false, "\(helper) should guard delayed completion before shared-state mutation", file: file, line: line)
+        return
+    }
+    assertTrue(
+        capture.lowerBound < awaitPoint.lowerBound
+            && awaitPoint.lowerBound < ownershipGuard.lowerBound
+            && ownershipGuard.lowerBound < sharedMutation.lowerBound,
+        "\(helper) should capture owner, await work, revalidate owner, then mutate shared state",
+        file: file,
+        line: line
+    )
+}
+
+private func readSourceFixture(
+    _ relativePath: String,
+    description: String,
+    file: String,
+    line: Int
+) -> String {
+    let url = repoFixtureURL(relativePath)
+    do {
+        return try String(contentsOf: url, encoding: .utf8)
+    } catch {
+        totalTests += 1
+        failedTests += 1
+        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+        print("  FAIL [\(loc)] could not read \(description): \(error)")
+        return ""
+    }
 }
 
 func loadJSONFixture<T: Decodable>(_ relativePath: String, as type: T.Type = T.self, file: String = #file, line: Int = #line) -> T {

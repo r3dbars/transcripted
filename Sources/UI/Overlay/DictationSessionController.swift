@@ -959,10 +959,14 @@ class DictationSessionController: ObservableObject {
             }
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
             var stoppedRecordingSnapshot: RecordedSpeechSamples?
+            guard !Task.isCancelled,
+                  self.isDictating,
+                  self.currentDictationSessionID == taskSessionID else { return }
             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "stop_requested")
-            if appState.sttRouter.isRecording || appState.sttRouter.hasRecoverableRecording {
-                await appState.sttRouter.stopRecording()
-            }
+            // The accepted stop request owns cancellation even if recovery
+            // publishes a brief idle state before this task begins. The engine's
+            // idle stop path invalidates any pending recovery restart.
+            await appState.sttRouter.stopRecording()
             stopTiming.micStoppedAt = CFAbsoluteTimeGetCurrent()
             guard !Task.isCancelled,
                   self.isDictating,

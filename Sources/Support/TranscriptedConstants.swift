@@ -135,6 +135,11 @@ enum TranscriptedConstants {
     /// worker before Transcripted treats the graph as blocked and rebuilds it.
     static let audioStartOperationTimeout: UInt64 = 1_500_000_000  // 1.5 seconds
 
+    /// Max time selection, apply, or restore may occupy the serialized system-
+    /// input worker before later starts move to a replacement queue.
+    static let systemInputOperationTimeout: UInt64 = 1_500_000_000  // 1.5 seconds
+    static let systemInputReconciliationAttempts = 2
+
     /// Total budget for dictation to wait on engine readiness after a device change.
     /// Sized to cover slower USB/Bluetooth CoreAudio graph rebuilds without trapping
     /// users indefinitely; the overlay remains cancellable during this window.

@@ -1,28 +1,9 @@
 // ParakeetStartRecordingFailurePolicyTests.swift
 //
-// Two kinds of coverage live in this file; they are NOT the same strength of proof:
-//
-// REAL BEHAVIORAL COVERAGE (compiled): every `runSuite` from the top of the file
-// down through the CoreAudio-error mapping suites exercises Foundation-pure decision
-// types that are actually compiled into the fast-test runner —
-// ParakeetStartRecordingFailurePolicy, ParakeetDeviceRecoveryFailurePolicy /
-// ReadinessPolicy / TimeoutPolicy, ParakeetAudioEngineRetirementPolicy,
-// ParakeetASRManagerCleanupPolicy, ParakeetASRInferenceActivityState,
-// ParakeetAudioFormatReadinessPolicy, ParakeetInputOverrideSettlePolicy, and
-// ParakeetTapSampleRatePolicy. These run the real logic and assert real outputs.
-//
-// IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the final two suites
-// ("zombie watchdog marks recording idle before graph reset" and "stopRecording
-// cancels pending zombie restart while idle") read Sources/Speech/ParakeetEngine.swift
-// as TEXT and grep for relative ordering of statements. ParakeetEngine's teardown is
-// CoreAudio/Carbon-wired and is NOT compiled into this Foundation-only runner, so these
-// greps pin source structure, not runtime behavior. They guard REAL invariants that
-// caused real AirPods / zombie-recording bugs (mark recording idle before touching
-// CoreAudio; gate the zombie retry on the pending-restart flag so a user stop can cancel
-// it). They are intentionally kept as source-text contracts rather than a runtime seam:
-// extracting a seam would restructure real-time CoreAudio teardown control flow, which is
-// too risky to refactor for testability. If you move/rename these functions or reorder
-// their statements, update both the source and these greps together.
+// Pure policy suites compile and execute real decision logic. The final recovery
+// suites pin ordering in CoreAudio-wired source that cannot enter this fast runner;
+// they are structural contracts, not runtime audio proof. Delayed-cleanup ownership
+// has its own focused source-contract file beside this one.
 
 import Foundation
 
@@ -748,34 +729,70 @@ func testParakeetStartRecordingFailurePolicy() {
         )
     }
 
-    runSuite("ParakeetEngine zombie watchdog marks recording idle before graph reset") {
+    runSuite("ParakeetEngine zombie watchdog uses a bounded fresh-engine recovery") {
         let source = readParakeetEngineSource()
         guard let watchdogStart = source.range(of: "private func startAudioWatchdog()"),
-              let watchdogEnd = source.range(of: "func stopRecording()", range: watchdogStart.upperBound..<source.endIndex) else {
+              let watchdogEnd = source.range(of: "func stopRecording()", range: watchdogStart.upperBound..<source.endIndex),
+              let recordingStart = source.range(of: "func startRecording(isRecoveryAttempt: Bool = false) async -> Bool"),
+              let recordingEnd = source.range(of: "/// Begin dictation by borrowing", range: recordingStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find the zombie watchdog body")
             return
         }
         let watchdog = String(source[watchdogStart.lowerBound..<watchdogEnd.lowerBound])
-        guard let markRestartPending = watchdog.range(of: "self.zombieRecoveryRestartPending = true"),
-              let markIdle = watchdog.range(of: "self.isRecording = false"),
-              let clearRestartFlag = watchdog.range(of: "self.configChangeWasRecording = false"),
-              let suppressConfigChanges = watchdog.range(of: "self.ignoreInputSelectionConfigChangesUntil = CFAbsoluteTimeGetCurrent()"),
-              let pendingRestartGuard = watchdog.range(of: "self.zombieRecoveryRestartPending else"),
-              let clearPendingBeforeRetry = watchdog.range(of: "self.zombieRecoveryRestartPending = false", range: pendingRestartGuard.upperBound..<watchdog.endIndex),
-              let retryStart = watchdog.range(of: "await self.startRecording(isRecoveryAttempt: true)"),
-              let removeTap = watchdog.range(of: "await self.removeRecordingTap()"),
-              let stopEngine = watchdog.range(of: "await self.stopAudioEngine()") else {
-            assertTrue(false, "zombie watchdog should mark internal reset state before touching CoreAudio")
+        let recordingBody = String(source[recordingStart.lowerBound..<recordingEnd.lowerBound])
+        guard let beginRecovery = watchdog.range(of: "self.startZombieEngineRecovery(failureKind: failureKind)"),
+              let markResetStage = watchdog.range(of: "zombieRecoveryState.advance(to: .reset"),
+              let markIdle = watchdog.range(of: "isRecording = false", range: markResetStage.upperBound..<watchdog.endIndex),
+              let postIdleOwnershipGate = watchdog.range(of: "expectedOwner: recoveryGraphOwner", range: markIdle.upperBound..<watchdog.endIndex),
+              let recreate = watchdog.range(of: "guard await recreateAudioEngineForZombieRecovery(", range: postIdleOwnershipGate.upperBound..<watchdog.endIndex),
+              let settleStage = watchdog.range(of: "zombieRecoveryState.advance(to: .settle"),
+              let restartStage = watchdog.range(of: "zombieRecoveryState.advance(to: .restart"),
+              let preserveRecovery = watchdog.range(of: "zombieRecoveryStartGeneration = generation"),
+              let retryStart = watchdog.range(of: "await startRecording(isRecoveryAttempt: true)"),
+              let recreationStart = watchdog.range(of: "private func recreateAudioEngineForZombieRecovery("),
+              let recreationEnd = watchdog.range(of: "func currentAudioGraphOwnerToken()", range: recreationStart.upperBound..<watchdog.endIndex) else {
+            assertTrue(false, "zombie watchdog should use the bounded fresh-engine recovery path")
+            return
+        }
+        let recreationBody = String(watchdog[recreationStart.lowerBound..<recreationEnd.lowerBound])
+        guard let entryOwnershipGate = recreationBody.range(of: "expectedOwner: expectedOwner"),
+              let trackRebuild = recreationBody.range(of: "trackAudioEngineRebuildChurn(reason: \"zombie_engine_recovery\")"),
+              let beginTimedOwnership = recreationBody.range(of: "audioEngineWorkOwnership.begin(owner: resetQueueOwner, phase: .zombieReset)"),
+              let timedReset = recreationBody.range(of: "runTimedAudioEngineWork(operation: \"zombie_engine_reset\")"),
+              let finishTimedOwnership = recreationBody.range(of: "audioEngineWorkOwnership.finish(", range: timedReset.upperBound..<recreationBody.endIndex),
+              let timeoutOwnershipGate = recreationBody.range(of: "expectedOwner: resetOwner", range: timedReset.upperBound..<recreationBody.endIndex),
+              let abandonBlocked = recreationBody.range(of: "reason: \"zombie_engine_reset_timeout\"", range: timeoutOwnershipGate.upperBound..<recreationBody.endIndex),
+              let abandonQueueOwner = recreationBody.range(of: "expectedOwner: resetQueueOwner", range: abandonBlocked.upperBound..<recreationBody.endIndex),
+              let successOwnershipGate = recreationBody.range(of: "expectedOwner: resetOwner", range: abandonBlocked.upperBound..<recreationBody.endIndex),
+              let firstSharedFlagMutation = recreationBody.range(of: "inputTapInstalled = false", range: successOwnershipGate.upperBound..<recreationBody.endIndex),
+              let freshEngine = recreationBody.range(of: "audioEngine = AVAudioEngine()", range: firstSharedFlagMutation.upperBound..<recreationBody.endIndex),
+              let beginRestartOwnership = recordingBody.range(of: "phase: .audioStart"),
+              let timedRestart = recordingBody.range(of: "try await installTapAndStartEngine", range: beginRestartOwnership.upperBound..<recordingBody.endIndex),
+              let finishRestartOwnership = recordingBody.range(of: "phase: .audioStart", range: timedRestart.upperBound..<recordingBody.endIndex) else {
+            assertTrue(false, "zombie graph recreation should guard entry, timeout, and successful completion")
             return
         }
 
-        assertTrue(markRestartPending.lowerBound < markIdle.lowerBound, "zombie reset should mark the recovery restart window before publishing idle state")
-        assertTrue(markIdle.lowerBound < removeTap.lowerBound, "zombie reset should stop being treated as active recording before tap removal can post config changes")
-        assertTrue(markIdle.lowerBound < stopEngine.lowerBound, "zombie reset should stop being treated as active recording before engine stop can post config changes")
-        assertTrue(clearRestartFlag.lowerBound < removeTap.lowerBound, "zombie reset should not leave the device-change restart flag armed")
-        assertTrue(suppressConfigChanges.lowerBound < removeTap.lowerBound, "zombie reset should suppress self-induced config changes before graph teardown")
-        assertTrue(pendingRestartGuard.lowerBound < retryStart.lowerBound, "zombie retry should be gated by the pending restart flag so user stop can cancel it")
-        assertTrue(clearPendingBeforeRetry.lowerBound < retryStart.lowerBound, "zombie retry should clear pending restart state before attempting the recovery start")
+        assertTrue(beginRecovery.lowerBound < markResetStage.lowerBound, "detection should create one generation-gated recovery attempt")
+        assertTrue(markResetStage.lowerBound < markIdle.lowerBound, "zombie reset should enter its terminally tracked stage before publishing idle state")
+        assertTrue(markIdle.lowerBound < postIdleOwnershipGate.lowerBound, "publishing idle must be followed by cancellation and graph ownership validation")
+        assertTrue(postIdleOwnershipGate.lowerBound < recreate.lowerBound, "a cancelled or stale recovery must not enter graph recreation")
+        assertTrue(markIdle.lowerBound < recreate.lowerBound, "recording must be idle before replacing the stale graph")
+        assertTrue(recreate.lowerBound < settleStage.lowerBound, "the fresh engine must exist before the route settle delay")
+        assertTrue(settleStage.lowerBound < restartStage.lowerBound, "settling must finish before the one restart attempt")
+        assertTrue(restartStage.lowerBound < preserveRecovery.lowerBound, "restart telemetry should advance before entering the normal start path")
+        assertTrue(preserveRecovery.lowerBound < retryStart.lowerBound, "the normal start path must know not to cancel its owning recovery task")
+        assertTrue(entryOwnershipGate.lowerBound < trackRebuild.lowerBound, "recreation must validate exact ownership before any shared-state mutation")
+        assertTrue(beginTimedOwnership.lowerBound < timedReset.lowerBound, "timed reset must publish engine+queue ownership before it can suspend")
+        assertTrue(timedReset.lowerBound < finishTimedOwnership.lowerBound, "actual reset completion must retire only its exact timed-work owner")
+        assertTrue(timedReset.lowerBound < timeoutOwnershipGate.lowerBound, "timed reset completion must revalidate exact ownership")
+        assertTrue(timeoutOwnershipGate.lowerBound < abandonBlocked.lowerBound, "a stale timeout must not abandon a newer graph owner")
+        assertTrue(abandonBlocked.lowerBound < abandonQueueOwner.lowerBound, "timeout abandonment must include the exact serial queue owner")
+        assertTrue(abandonBlocked.lowerBound < successOwnershipGate.lowerBound, "the successful-completion branch needs its own ownership validation")
+        assertTrue(successOwnershipGate.lowerBound < firstSharedFlagMutation.lowerBound, "stale reset completion must not clear tap, prewarm, or sample flags")
+        assertTrue(firstSharedFlagMutation.lowerBound < freshEngine.lowerBound, "fresh engine assignment should follow guarded reset-state cleanup")
+        assertTrue(beginRestartOwnership.lowerBound < timedRestart.lowerBound, "recovery restart must lease its exact engine and queue before install/start can block")
+        assertTrue(timedRestart.lowerBound < finishRestartOwnership.lowerBound, "recovery restart completion must finish only its exact lease")
     }
 
     runSuite("ParakeetEngine device-change rewarm abandons the wedged queue instead of re-queuing on it") {
@@ -806,7 +823,8 @@ func testParakeetStartRecordingFailurePolicy() {
         guard let catchClause = recovery.range(of: "} catch {"),
               let blockedProbe = recovery.range(of: "error is ParakeetAudioEngineWorkError", range: catchClause.upperBound..<recovery.endIndex),
               let strategySwitch = recovery.range(of: "ParakeetDeviceRecoveryFailurePolicy.rebuildStrategy(", range: catchClause.upperBound..<recovery.endIndex),
-              let abandonCase = recovery.range(of: "self.abandonBlockedAudioEngine(reason: \"device_change_rewarm_failed\")", range: catchClause.upperBound..<recovery.endIndex),
+              let abandonCase = recovery.range(of: "reason: \"device_change_rewarm_failed\"", range: catchClause.upperBound..<recovery.endIndex),
+              let expectedQueueOwner = recovery.range(of: "expectedOwner: lastSnapshotOwner", range: abandonCase.upperBound..<recovery.endIndex),
               let queuedRebuildCase = recovery.range(of: "await self.rebuildAudioEngine(reason: \"device_change_rewarm_failed\")", range: catchClause.upperBound..<recovery.endIndex) else {
             assertTrue(false, "rewarm catch must branch the graph recovery on whether the engine queue is blocked")
             return
@@ -814,6 +832,7 @@ func testParakeetStartRecordingFailurePolicy() {
 
         assertTrue(blockedProbe.lowerBound < strategySwitch.lowerBound, "rewarm catch should detect a wedged engine queue before choosing a rebuild strategy")
         assertTrue(strategySwitch.lowerBound < abandonCase.lowerBound, "rewarm catch should route through the rebuild-strategy policy before abandoning the graph")
+        assertTrue(abandonCase.lowerBound < expectedQueueOwner.lowerBound, "blocked rewarm must abandon only its captured engine+queue owner")
         assertTrue(strategySwitch.lowerBound < queuedRebuildCase.lowerBound, "the in-place rebuild must also sit behind the rebuild-strategy switch, not run unconditionally")
 
         // The blocked-queue rebuild MUST be the synchronous abandon path. An
@@ -855,29 +874,80 @@ func testParakeetStartRecordingFailurePolicy() {
     runSuite("ParakeetEngine stopRecording cancels pending zombie restart while idle") {
         let source = readParakeetEngineSource()
         guard let stopStart = source.range(of: "func stopRecording()"),
-              let stopEnd = source.range(of: "// MARK: - Recorded Audio Buffering", range: stopStart.upperBound..<source.endIndex),
-              let cancelStart = source.range(of: "func cancelAudioWatchdog()") else {
+              let stopEnd = source.range(of: "// MARK: - EOU Streaming", range: stopStart.upperBound..<source.endIndex)
+                  ?? source.range(of: "// MARK: - Recorded Audio Buffering", range: stopStart.upperBound..<source.endIndex),
+              let startHelperStart = source.range(of: "private func cancelAudioWatchdogForRecordingStart()"),
+              let cancelStart = source.range(of: "private func cancelZombieEngineRecovery()", range: startHelperStart.upperBound..<source.endIndex),
+              let publicCancelStart = source.range(of: "func cancelAudioWatchdog()", range: cancelStart.upperBound..<source.endIndex) else {
             assertTrue(false, "test should find stopRecording and watchdog cancellation bodies")
             return
         }
         let stopBody = String(source[stopStart.lowerBound..<stopEnd.lowerBound])
+        let startHelperBody = String(source[startHelperStart.lowerBound..<cancelStart.lowerBound])
         let cancelBody = String(source[cancelStart.lowerBound..<source.endIndex])
         guard let pendingBranch = stopBody.range(of: "if zombieRecoveryRestartPending"),
-              let graphBump = stopBody.range(of: "audioGraphGeneration += 1", range: pendingBranch.upperBound..<stopBody.endIndex),
-              let cancelWatchdog = stopBody.range(of: "cancelAudioWatchdog()", range: pendingBranch.upperBound..<stopBody.endIndex),
+              let graphBump = stopBody.range(of: "audioGraphGeneration += 1"),
+              let cancelWatchdog = stopBody.range(of: "cancelAudioWatchdog()", range: graphBump.upperBound..<stopBody.endIndex),
+              let stopOwner = stopBody.range(of: "let stopGraphGeneration = audioGraphGeneration", range: pendingBranch.upperBound..<stopBody.endIndex),
               let clearTimeline = stopBody.range(of: "clearRecoveredRecordingTimeline(keepingCapacity: true)", range: pendingBranch.upperBound..<stopBody.endIndex),
-              let returnFromBranch = stopBody.range(of: "return", range: pendingBranch.upperBound..<stopBody.endIndex) else {
+              let releaseHardware = stopBody.range(of: "await releaseIdleAudioHardware(", range: pendingBranch.upperBound..<stopBody.endIndex),
+              let returnFromBranch = stopBody.range(of: "return", range: pendingBranch.upperBound..<stopBody.endIndex),
+              let claimBlockedQueue = cancelBody.range(of: "audioEngineWorkOwnership.claimPendingWorkForSuccessor("),
+              let classifyBlockedQueue = cancelBody.range(of: "switch blockedLease.phase", range: claimBlockedQueue.upperBound..<cancelBody.endIndex),
+              let recoveryStartReason = cancelBody.range(of: "\"audio_engine_start_cancelled\"", range: classifyBlockedQueue.upperBound..<cancelBody.endIndex),
+              let replaceBlockedQueue = cancelBody.range(of: "abandonBlockedAudioEngine(reason: reason)", range: recoveryStartReason.upperBound..<cancelBody.endIndex),
+              let cancelTerminal = cancelBody.range(of: "zombieRecoveryState.cancelActiveAttempt()", range: replaceBlockedQueue.upperBound..<cancelBody.endIndex) else {
             assertTrue(false, "inactive stopRecording should cancel pending zombie recovery restart")
             return
         }
 
         assertTrue(graphBump.lowerBound < cancelWatchdog.lowerBound, "canceling a pending zombie restart should invalidate in-flight audio starts")
+        assertTrue(cancelWatchdog.lowerBound < pendingBranch.lowerBound, "all idle stop branches should share synchronous watchdog cancellation")
+        assertTrue(pendingBranch.lowerBound < stopOwner.lowerBound, "pending zombie stop should capture the already-invalidated graph generation")
+        let stopInvalidationWindow = String(stopBody[graphBump.lowerBound..<cancelWatchdog.upperBound])
+        assertFalse(stopInvalidationWindow.contains("await "), "stop should invalidate graph ownership and cancel the recovery in one actor turn")
         assertTrue(cancelWatchdog.lowerBound < returnFromBranch.lowerBound, "stopRecording should cancel the watchdog before returning from pending zombie restart")
         assertTrue(clearTimeline.lowerBound < returnFromBranch.lowerBound, "stopRecording should clear recovered timeline before returning from pending zombie restart")
+        assertTrue(cancelWatchdog.lowerBound < releaseHardware.lowerBound, "stop should own old-graph teardown after cancelling zombie recreation")
+        assertTrue(claimBlockedQueue.lowerBound < classifyBlockedQueue.lowerBound, "cancellation should classify the exact blocked recovery phase")
+        assertTrue(classifyBlockedQueue.lowerBound < replaceBlockedQueue.lowerBound, "cancellation must synchronously claim and replace a still-blocked engine queue")
+        assertTrue(replaceBlockedQueue.lowerBound < cancelTerminal.lowerBound, "blocked queue replacement must finish before cancellation publishes its terminal result")
+        let blockedQueueReplacement = String(cancelBody[claimBlockedQueue.lowerBound..<cancelTerminal.lowerBound])
+        assertFalse(blockedQueueReplacement.contains("await "), "successor queue replacement must happen in one MainActor turn")
         assertTrue(
-            cancelBody.contains("zombieRecoveryRestartPending = false"),
-            "shared watchdog cancellation should clear pending zombie restart state"
+            cancelBody.contains("zombieRecoveryTask?.cancel()")
+                && cancelBody.contains("zombieRecoveryState.cancelActiveAttempt()"),
+            "shared watchdog cancellation should cancel the task and consume its one terminal state"
         )
+        assertTrue(
+            startHelperBody.contains("zombieRecoveryState.canContinue(generation: zombieRecoveryStartGeneration)")
+                && publicCancelStart.lowerBound > cancelStart.lowerBound,
+            "normal recording starts should use the helper that preserves only their owning zombie recovery"
+        )
+        assertTrue(
+            source.contains("guard !zombieRecoveryState.isActive else { return }")
+                && source.contains("reportZombieEngineRecoveryTerminal(terminal)"),
+            "duplicate detector callbacks should not replace an active attempt, and every terminal path should share one reporter"
+        )
+    }
+
+    runSuite("ParakeetEngine config changes invalidate zombie ownership before cancellation can suspend") {
+        let source = readParakeetDeviceRecoverySource()
+        guard let handlerStart = source.range(of: "private func handleAudioConfigChange() async"),
+              let handlerEnd = source.range(of: "private func recordStableRouteChangeAnalytics", range: handlerStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find the audio config-change handler")
+            return
+        }
+        let handler = String(source[handlerStart.lowerBound..<handlerEnd.lowerBound])
+        guard let graphBump = handler.range(of: "audioGraphGeneration += 1"),
+              let cancelRecovery = handler.range(of: "cancelAudioWatchdog()", range: graphBump.upperBound..<handler.endIndex) else {
+            assertTrue(false, "config changes should invalidate and cancel an in-flight zombie recovery")
+            return
+        }
+
+        let invalidationWindow = String(handler[graphBump.lowerBound..<cancelRecovery.upperBound])
+        assertTrue(graphBump.lowerBound < cancelRecovery.lowerBound, "config change must invalidate the graph owner before cancelling zombie recovery")
+        assertFalse(invalidationWindow.contains("await "), "the stale zombie task must not resume between graph invalidation and cancellation")
     }
 
     runSuite("ParakeetEngine preserves recovered dictation audio for stop and wake recovery") {
@@ -913,33 +983,5 @@ func testParakeetStartRecordingFailurePolicy() {
             source.contains("var hasRecoverableRecording: Bool"),
             "the router/UI need a public engine signal for recovered dictation audio"
         )
-    }
-}
-
-private func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String {
-    let url = repoFixtureURL("Sources/Speech/ParakeetEngine.swift")
-    do {
-        return try String(contentsOf: url, encoding: .utf8)
-    } catch {
-        totalTests += 1
-        failedTests += 1
-        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] could not read ParakeetEngine.swift: \(error)")
-        return ""
-    }
-}
-
-/// Device-change detection/recovery lives in ParakeetDeviceRecovery.swift
-/// (codebase audit 2026-07-08 wave 2), split out of ParakeetEngine.swift.
-private func readParakeetDeviceRecoverySource(file: String = #file, line: Int = #line) -> String {
-    let url = repoFixtureURL("Sources/Speech/ParakeetDeviceRecovery.swift")
-    do {
-        return try String(contentsOf: url, encoding: .utf8)
-    } catch {
-        totalTests += 1
-        failedTests += 1
-        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] could not read ParakeetDeviceRecovery.swift: \(error)")
-        return ""
     }
 }
