@@ -539,20 +539,29 @@ final class TranscriptionQueueCoordinator {
             }
 
             let stableTranscriptExists = existingTranscriptsByID[record.id] != nil
-            if ImportedTranscriptionQueueJournal.hasCommittedTranscript(
+            switch ImportedTranscriptionQueueJournal.recoveryAction(
                 phase: recoverySession.phase,
                 stableTranscriptExists: stableTranscriptExists
             ) {
+            case .replayTranscription:
+                break
+            case .cleanScratch:
+                if removeRecoveredImportedScratchFile(audioURL) {
+                    recoverySession.scratchCleanupConfirmed()
+                }
+                continue
+            case .handOffScratch:
                 if stableTranscriptExists {
                     recoverySession.transcriptCommitConfirmed()
                 }
-                guard ImportedTranscriptionQueueJournal.shouldCleanRecoveredScratch(
-                    phase: recoverySession.phase
-                ) else {
-                    continue
-                }
-                if removeRecoveredImportedScratchFile(audioURL) {
-                    recoverySession.scratchCleanupConfirmed()
+                if controller.failedMeetingStore.preserveFailedMeetingForRetry(
+                    micAudioURL: nil,
+                    systemAudioURL: audioURL,
+                    errorMessage: "The transcript was saved. Imported audio was preserved because recovery could not confirm scratch cleanup.",
+                    meetingTitle: "Imported audio",
+                    recordingDate: record.recordingDate
+                ) {
+                    recoverySession.failedQueueHandoffConfirmed()
                 }
                 continue
             }

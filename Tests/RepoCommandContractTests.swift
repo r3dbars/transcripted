@@ -2335,9 +2335,11 @@ func testRepoCommandContract() {
             importedRecoveryBlock.contains("recoveryAudioStatus(")
                 && importedRecoveryBlock.contains("guard audioStatus == .regularFile")
                 && coordinatorContents.contains("TranscriptSaver.existingTranscriptURLs(")
-                && importedRecoveryBlock.contains("hasCommittedTranscript(")
-                && importedRecoveryBlock.contains("shouldCleanRecoveredScratch("),
-            "relaunch recovery should reject unsafe inputs, recognize transcript commit, and only finish explicitly authorized scratch cleanup"
+                && importedRecoveryBlock.contains("recoveryAction(")
+                && importedRecoveryBlock.contains("case .cleanScratch:")
+                && importedRecoveryBlock.contains("case .handOffScratch:")
+                && importedRecoveryBlock.contains("preserveFailedMeetingForRetry("),
+            "relaunch recovery should reject unsafe inputs and resolve every state through replay, authorized cleanup, or durable visible handoff"
         )
         let importJournalFailureBlock = sourceSlice(
             controllerContents,

@@ -7,6 +7,12 @@ enum ImportedTranscriptionQueueJournalPhase: String, Codable, Equatable, Sendabl
     case scratchCleanupPending
 }
 
+enum ImportedTranscriptionQueueJournalRecoveryAction: Equatable {
+    case replayTranscription
+    case cleanScratch
+    case handOffScratch
+}
+
 struct ImportedTranscriptionQueueJournalOwner: Codable, Equatable, Sendable {
     let processIdentifier: Int32
     let claimedAt: Date

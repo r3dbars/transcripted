@@ -684,9 +684,13 @@ func testMeetingImportedAudioPreparer() async {
 
         var cleanupOwner = try! ImportedTranscriptionQueueJournal.claim(id: id, journalDirectory: journalURL)
         assertEqual(cleanupOwner?.phase, .transcriptCommitted, "relaunch should preserve the committed cleanup phase")
-        assertFalse(
-            ImportedTranscriptionQueueJournal.shouldCleanRecoveredScratch(phase: cleanupOwner?.phase ?? .active),
-            "transcript commit alone must not delete audio intentionally retained after an archive failure"
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
+                phase: cleanupOwner?.phase ?? .active,
+                stableTranscriptExists: false
+            ),
+            .handOffScratch,
+            "transcript commit alone must hand off audio intentionally retained after an archive failure"
         )
         assertTrue(
             cleanupOwner?.prepareForScratchCleanup() == true,
@@ -715,34 +719,37 @@ func testMeetingImportedAudioPreparer() async {
         )
     }
 
-    runSuite("Imported transcription recovery recognizes both transcript crash boundaries") {
-        assertTrue(
-            ImportedTranscriptionQueueJournal.hasCommittedTranscript(
+    runSuite("Imported transcription recovery resolves both transcript crash boundaries") {
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
                 phase: .active,
                 stableTranscriptExists: true
             ),
-            "a stable transcript identity must make recovery idempotent after the Markdown write but before the phase marker"
+            .handOffScratch,
+            "a stable transcript identity must hand off uncertain scratch after the Markdown write but before the phase marker"
         )
-        assertTrue(
-            ImportedTranscriptionQueueJournal.hasCommittedTranscript(
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
                 phase: .transcriptCommitted,
                 stableTranscriptExists: false
             ),
-            "the durable phase must resume cleanup after the marker but before scratch removal"
+            .handOffScratch,
+            "a committed record without cleanup authorization must receive durable visible ownership"
         )
-        assertFalse(
-            ImportedTranscriptionQueueJournal.hasCommittedTranscript(
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
                 phase: .active,
                 stableTranscriptExists: false
             ),
-            "recovery should only replay when neither commit proof exists"
+            .replayTranscription,
+            "recovery should replay only when neither commit proof exists"
         )
-        assertFalse(
-            ImportedTranscriptionQueueJournal.shouldCleanRecoveredScratch(phase: .transcriptCommitted),
-            "recovery should preserve scratch until cleanup is explicitly authorized"
-        )
-        assertTrue(
-            ImportedTranscriptionQueueJournal.shouldCleanRecoveredScratch(phase: .scratchCleanupPending),
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
+                phase: .scratchCleanupPending,
+                stableTranscriptExists: false
+            ),
+            .cleanScratch,
             "recovery should finish an authorized cleanup idempotently"
         )
     }

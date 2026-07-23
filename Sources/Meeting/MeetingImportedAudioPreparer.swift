@@ -215,6 +215,7 @@ enum ImportedTranscriptionQueueJournal {
                 fileManager: fileManager
             )
         } catch {
+            unlink(lockURL.path)
             flock(descriptor, LOCK_UN)
             Darwin.close(descriptor)
             throw error
@@ -257,19 +258,17 @@ enum ImportedTranscriptionQueueJournal {
             || existingAudioURLs.contains(audioURL.standardizedFileURL)
     }
 
-    static func hasCommittedTranscript(
+    static func recoveryAction(
         phase: ImportedTranscriptionQueueJournalPhase,
         stableTranscriptExists: Bool
-    ) -> Bool {
-        phase == .transcriptCommitted
-            || phase == .scratchCleanupPending
-            || stableTranscriptExists
-    }
-
-    static func shouldCleanRecoveredScratch(
-        phase: ImportedTranscriptionQueueJournalPhase
-    ) -> Bool {
-        phase == .scratchCleanupPending
+    ) -> ImportedTranscriptionQueueJournalRecoveryAction {
+        if phase == .scratchCleanupPending {
+            return .cleanScratch
+        }
+        if phase == .transcriptCommitted || stableTranscriptExists {
+            return .handOffScratch
+        }
+        return .replayTranscription
     }
 
     private static func journalURL(for id: UUID, in directory: URL) -> URL {
