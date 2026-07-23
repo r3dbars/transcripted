@@ -1,28 +1,9 @@
 // ParakeetStartRecordingFailurePolicyTests.swift
 //
-// Two kinds of coverage live in this file; they are NOT the same strength of proof:
-//
-// REAL BEHAVIORAL COVERAGE (compiled): every `runSuite` from the top of the file
-// down through the CoreAudio-error mapping suites exercises Foundation-pure decision
-// types that are actually compiled into the fast-test runner —
-// ParakeetStartRecordingFailurePolicy, ParakeetDeviceRecoveryFailurePolicy /
-// ReadinessPolicy / TimeoutPolicy, ParakeetAudioEngineRetirementPolicy,
-// ParakeetASRManagerCleanupPolicy, ParakeetASRInferenceActivityState,
-// ParakeetAudioFormatReadinessPolicy, ParakeetInputOverrideSettlePolicy, and
-// ParakeetTapSampleRatePolicy. These run the real logic and assert real outputs.
-//
-// IMPLEMENTATION-PINNING STRUCTURAL CONTRACTS (NOT compiled): the final two suites
-// ("zombie watchdog marks recording idle before graph reset" and "stopRecording
-// cancels pending zombie restart while idle") read Sources/Speech/ParakeetEngine.swift
-// as TEXT and grep for relative ordering of statements. ParakeetEngine's teardown is
-// CoreAudio/Carbon-wired and is NOT compiled into this Foundation-only runner, so these
-// greps pin source structure, not runtime behavior. They guard REAL invariants that
-// caused real AirPods / zombie-recording bugs (mark recording idle before touching
-// CoreAudio; gate the zombie retry on the pending-restart flag so a user stop can cancel
-// it). They are intentionally kept as source-text contracts rather than a runtime seam:
-// extracting a seam would restructure real-time CoreAudio teardown control flow, which is
-// too risky to refactor for testability. If you move/rename these functions or reorder
-// their statements, update both the source and these greps together.
+// Pure policy suites compile and execute real decision logic. The final recovery
+// suites pin ordering in CoreAudio-wired source that cannot enter this fast runner;
+// they are structural contracts, not runtime audio proof. Delayed-cleanup ownership
+// has its own focused source-contract file beside this one.
 
 import Foundation
 
@@ -814,81 +795,6 @@ func testParakeetStartRecordingFailurePolicy() {
         assertTrue(timedRestart.lowerBound < finishRestartOwnership.lowerBound, "recovery restart completion must finish only its exact lease")
     }
 
-    runSuite("ParakeetEngine delayed cleanup mutates only its exact graph owner") {
-        let source = readParakeetEngineSource()
-        guard let removeTapStart = source.range(of: "func removeRecordingTap(force: Bool = false) async"),
-              let removeTapEnd = source.range(of: "/// Share the user-consented", range: removeTapStart.upperBound..<source.endIndex),
-              let startFailureStart = source.range(of: "private func resetAudioGraphAfterStartFailure("),
-              let startFailureEnd = source.range(of: "/// Tracks rebuild frequency", range: startFailureStart.upperBound..<source.endIndex),
-              let rebuildStart = source.range(of: "func rebuildAudioEngine(reason: String) async"),
-              let rebuildEnd = source.range(of: "func abandonBlockedAudioEngine", range: rebuildStart.upperBound..<source.endIndex),
-              let failedStartCleanupStart = source.range(of: "func resetAfterFailedRecordingStart() async"),
-              let failedStartCleanupEnd = source.range(of: "func abandonBlockedRecordingStart", range: failedStartCleanupStart.upperBound..<source.endIndex),
-              let idleCleanupStart = source.range(of: "private func releaseIdleAudioHardware("),
-              let idleCleanupEnd = source.range(of: "private func cancelAudioWatchdogForRecordingStart()", range: idleCleanupStart.upperBound..<source.endIndex) else {
-            assertTrue(false, "test should find the delayed audio cleanup helpers")
-            return
-        }
-
-        let removeTap = String(source[removeTapStart.lowerBound..<removeTapEnd.lowerBound])
-        let startFailure = String(source[startFailureStart.lowerBound..<startFailureEnd.lowerBound])
-        let rebuild = String(source[rebuildStart.lowerBound..<rebuildEnd.lowerBound])
-        let failedStartCleanup = String(source[failedStartCleanupStart.lowerBound..<failedStartCleanupEnd.lowerBound])
-        let idleCleanup = String(source[idleCleanupStart.lowerBound..<idleCleanupEnd.lowerBound])
-
-        assertPostAwaitOwnershipGuard(
-            in: removeTap,
-            ownerCapture: "let tapOwner = currentAudioGraphOwnerToken()",
-            suspension: "await runAudioEngineWork",
-            guardStatement: "guard ownsAudioGraph(tapOwner) else { return }",
-            mutation: "inputTapInstalled = false",
-            helper: "removeRecordingTap"
-        )
-        assertPostAwaitOwnershipGuard(
-            in: startFailure,
-            ownerCapture: "let resetOwner = currentAudioGraphOwnerToken()",
-            suspension: "await runAudioEngineWork",
-            guardStatement: "guard ownsAudioGraph(resetOwner) else { return nil }",
-            mutation: "inputTapInstalled = false",
-            helper: "resetAudioGraphAfterStartFailure"
-        )
-        assertPostAwaitOwnershipGuard(
-            in: rebuild,
-            ownerCapture: "let rebuildOwner = currentAudioGraphOwnerToken()",
-            suspension: "await runAudioEngineWork",
-            guardStatement: "guard ownsAudioGraph(rebuildOwner) else { return nil }",
-            mutation: "audioEngine = AVAudioEngine()",
-            helper: "rebuildAudioEngine"
-        )
-        assertTrue(
-            failedStartCleanup.contains("let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()")
-                && failedStartCleanup.contains("guard ownsAudioEngineQueue(failedStartCleanupOwner) else { return }"),
-            "resetAfterFailedRecordingStart should retain exact cleanup ownership without obsolete streaming work"
-        )
-        assertPostAwaitOwnershipGuard(
-            in: idleCleanup,
-            ownerCapture: "let idleCleanupOwner = currentAudioEngineQueueOwnerToken()",
-            suspension: "await removeRecordingTap(force: true)",
-            guardStatement: "guard ownsAudioEngineQueue(idleCleanupOwner) else { return nil }",
-            mutation: "await stopAudioEngine()",
-            helper: "releaseIdleAudioHardware remove-tap completion"
-        )
-
-        guard let stopSuspension = idleCleanup.range(of: "await stopAudioEngine()"),
-              let postStopGuard = idleCleanup.range(
-                of: "guard ownsAudioEngineQueue(idleCleanupOwner) else { return nil }",
-                range: stopSuspension.upperBound..<idleCleanup.endIndex
-              ),
-              let clearPrewarm = idleCleanup.range(of: "isEnginePrewarmed = false", range: postStopGuard.upperBound..<idleCleanup.endIndex) else {
-            assertTrue(false, "releaseIdleAudioHardware should revalidate ownership after stopping the engine")
-            return
-        }
-        assertTrue(
-            stopSuspension.lowerBound < postStopGuard.lowerBound && postStopGuard.lowerBound < clearPrewarm.lowerBound,
-            "releaseIdleAudioHardware must preserve a newer owner's prewarm state after delayed stop completion"
-        )
-    }
-
     runSuite("ParakeetEngine device-change rewarm abandons the wedged queue instead of re-queuing on it") {
         // Simulates a route change mid-stream: handleAudioConfigChange tears down
         // and schedules attemptDeviceRecovery; if the recovery snapshot times out
@@ -1076,60 +982,5 @@ func testParakeetStartRecordingFailurePolicy() {
             source.contains("var hasRecoverableRecording: Bool"),
             "the router/UI need a public engine signal for recovered dictation audio"
         )
-    }
-}
-
-private func readParakeetEngineSource(file: String = #file, line: Int = #line) -> String {
-    let url = repoFixtureURL("Sources/Speech/ParakeetEngine.swift")
-    do {
-        return try String(contentsOf: url, encoding: .utf8)
-    } catch {
-        totalTests += 1
-        failedTests += 1
-        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] could not read ParakeetEngine.swift: \(error)")
-        return ""
-    }
-}
-
-private func assertPostAwaitOwnershipGuard(
-    in body: String,
-    ownerCapture: String,
-    suspension: String,
-    guardStatement: String,
-    mutation: String,
-    helper: String,
-    file: String = #file,
-    line: Int = #line
-) {
-    guard let capture = body.range(of: ownerCapture),
-          let awaitPoint = body.range(of: suspension, range: capture.upperBound..<body.endIndex),
-          let ownershipGuard = body.range(of: guardStatement, range: awaitPoint.upperBound..<body.endIndex),
-          let sharedMutation = body.range(of: mutation, range: ownershipGuard.upperBound..<body.endIndex) else {
-        assertTrue(false, "\(helper) should guard delayed completion before shared-state mutation", file: file, line: line)
-        return
-    }
-    assertTrue(
-        capture.lowerBound < awaitPoint.lowerBound
-            && awaitPoint.lowerBound < ownershipGuard.lowerBound
-            && ownershipGuard.lowerBound < sharedMutation.lowerBound,
-        "\(helper) should capture owner, await work, revalidate owner, then mutate shared state",
-        file: file,
-        line: line
-    )
-}
-
-/// Device-change detection/recovery lives in ParakeetDeviceRecovery.swift
-/// (codebase audit 2026-07-08 wave 2), split out of ParakeetEngine.swift.
-private func readParakeetDeviceRecoverySource(file: String = #file, line: Int = #line) -> String {
-    let url = repoFixtureURL("Sources/Speech/ParakeetDeviceRecovery.swift")
-    do {
-        return try String(contentsOf: url, encoding: .utf8)
-    } catch {
-        totalTests += 1
-        failedTests += 1
-        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        print("  FAIL [\(loc)] could not read ParakeetDeviceRecovery.swift: \(error)")
-        return ""
     }
 }
