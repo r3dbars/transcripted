@@ -366,8 +366,8 @@ func testParakeetAudioOwnershipSourceContract() {
 
         let stopBody = String(engineSource[stopStart.lowerBound..<stopEnd.lowerBound])
         let handlerBody = String(recoverySource[handlerStart.lowerBound..<handlerEnd.lowerBound])
-        guard let beginStop = stopBody.range(of: "audioStopInProgress = true"),
-              let firstStopAwait = stopBody.range(of: "await ", range: beginStop.upperBound..<stopBody.endIndex),
+        guard let publishStop = stopBody.range(of: "audioStopTask = stopTask"),
+              let awaitStop = stopBody.range(of: "await stopTask.value", range: publishStop.upperBound..<stopBody.endIndex),
               let rejectDuringStop = handlerBody.range(of: "if audioStopInProgress"),
               let graphInvalidation = handlerBody.range(of: "audioGraphGeneration += 1", range: rejectDuringStop.upperBound..<handlerBody.endIndex),
               let inheritRecording = handlerBody.range(of: "if isRecording", range: graphInvalidation.upperBound..<handlerBody.endIndex) else {
@@ -375,10 +375,37 @@ func testParakeetAudioOwnershipSourceContract() {
             return
         }
 
-        assertTrue(beginStop.lowerBound < firstStopAwait.lowerBound, "stop intent must be visible throughout every suspension")
+        assertTrue(publishStop.lowerBound < awaitStop.lowerBound, "stop intent must be visible throughout its lifecycle execution")
         assertTrue(rejectDuringStop.lowerBound < graphInvalidation.lowerBound, "route change must not steal graph ownership during stop")
         assertTrue(rejectDuringStop.lowerBound < inheritRecording.lowerBound, "route change must not inherit the stopped session for restart")
-        assertTrue(stopBody.contains("defer { audioStopInProgress = false }"), "stop intent should clear on every return path")
+        assertTrue(stopBody.contains("audioStopTask = nil"), "stop intent should clear only after lifecycle completion")
+    }
+
+    runSuite("ParakeetEngine duplicate stops await one buffer drain") {
+        let source = readParakeetEngineSource()
+        guard let stopStart = source.range(of: "func stopRecording() async"),
+              let stopEnd = source.range(
+                of: "// MARK: - Recorded Audio Buffering",
+                range: stopStart.upperBound..<source.endIndex
+              ) else {
+            assertTrue(false, "test should find stop lifecycle")
+            return
+        }
+        let stop = String(source[stopStart.lowerBound..<stopEnd.lowerBound])
+        guard let existingTask = stop.range(of: "if let audioStopTask"),
+              let awaitExisting = stop.range(of: "await audioStopTask.value", range: existingTask.upperBound..<stop.endIndex),
+              let createTask = stop.range(of: "let stopTask = Task", range: awaitExisting.upperBound..<stop.endIndex),
+              let publishTask = stop.range(of: "audioStopTask = stopTask", range: createTask.upperBound..<stop.endIndex),
+              let awaitCreated = stop.range(of: "await stopTask.value", range: publishTask.upperBound..<stop.endIndex),
+              let clearTask = stop.range(of: "audioStopTask = nil", range: awaitCreated.upperBound..<stop.endIndex) else {
+            assertTrue(false, "duplicate stop should join one published lifecycle task")
+            return
+        }
+
+        assertTrue(existingTask.lowerBound < awaitExisting.lowerBound, "a duplicate stop must await the existing buffer drain")
+        assertTrue(awaitExisting.lowerBound < createTask.lowerBound, "only the first caller may create stop work")
+        assertTrue(publishTask.lowerBound < awaitCreated.lowerBound, "the stop task must be discoverable before its creator suspends")
+        assertTrue(awaitCreated.lowerBound < clearTask.lowerBound, "the stop remains in progress until tap removal and buffer drain complete")
     }
 
     runSuite("ParakeetEngine config-recovery snapshots are claimable by stop") {
@@ -402,40 +429,4 @@ func testParakeetAudioOwnershipSourceContract() {
         )
     }
 
-    runSuite("Parakeet config-recovery lease preserves a successor owner") {
-        let ownership = ParakeetTimedAudioEngineWorkOwnership()
-        let blockedEngine = NSObject()
-        let blockedQueue = NSObject()
-        let blockedOwner = ParakeetAudioEngineQueueOwnerToken(
-            generation: 1,
-            engine: blockedEngine,
-            queue: blockedQueue
-        )
-        ownership.begin(owner: blockedOwner, phase: .deviceRecoverySnapshot)
-
-        let claimed = ownership.claimPendingWorkForSuccessor(
-            currentEngine: blockedEngine,
-            currentQueue: blockedQueue
-        )
-        assertEqual(
-            claimed,
-            ParakeetTimedAudioEngineWorkLease(owner: blockedOwner, phase: .deviceRecoverySnapshot),
-            "stop should claim the exact blocked recovery snapshot"
-        )
-
-        let successorOwner = ParakeetAudioEngineQueueOwnerToken(
-            generation: 2,
-            engine: NSObject(),
-            queue: NSObject()
-        )
-        ownership.begin(owner: successorOwner, phase: .deviceRecoverySnapshot)
-        assertFalse(
-            ownership.finish(owner: blockedOwner, phase: .deviceRecoverySnapshot),
-            "late completion from the retired queue must not clear successor work"
-        )
-        assertTrue(
-            ownership.finish(owner: successorOwner, phase: .deviceRecoverySnapshot),
-            "the successor should retain and finish its own lease"
-        )
-    }
 }

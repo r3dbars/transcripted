@@ -848,6 +848,43 @@ func testParakeetAudioGraphOwnership() async {
         assertFalse(committedRecording.canDeliverSamples, "a later user stop should silence committed callbacks immediately")
     }
 
+    runSuite("Parakeet config-recovery lease preserves a successor owner") {
+        let ownership = ParakeetTimedAudioEngineWorkOwnership()
+        let blockedEngine = NSObject()
+        let blockedQueue = NSObject()
+        let blockedOwner = ParakeetAudioEngineQueueOwnerToken(
+            generation: 1,
+            engine: blockedEngine,
+            queue: blockedQueue
+        )
+        ownership.begin(owner: blockedOwner, phase: .deviceRecoverySnapshot)
+
+        let claimed = ownership.claimPendingWorkForSuccessor(
+            currentEngine: blockedEngine,
+            currentQueue: blockedQueue
+        )
+        assertEqual(
+            claimed,
+            ParakeetTimedAudioEngineWorkLease(owner: blockedOwner, phase: .deviceRecoverySnapshot),
+            "stop should claim the exact blocked recovery snapshot"
+        )
+
+        let successorOwner = ParakeetAudioEngineQueueOwnerToken(
+            generation: 2,
+            engine: NSObject(),
+            queue: NSObject()
+        )
+        ownership.begin(owner: successorOwner, phase: .deviceRecoverySnapshot)
+        assertFalse(
+            ownership.finish(owner: blockedOwner, phase: .deviceRecoverySnapshot),
+            "late completion from the retired queue must not clear successor work"
+        )
+        assertTrue(
+            ownership.finish(owner: successorOwner, phase: .deviceRecoverySnapshot),
+            "the successor should retain and finish its own lease"
+        )
+    }
+
 }
 private actor ParakeetPendingRestoreInterleavingHarness {
     private var state = ParakeetOwnerBoundPendingState<String>()

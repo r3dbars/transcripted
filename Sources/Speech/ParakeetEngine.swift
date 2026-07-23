@@ -44,7 +44,8 @@ class ParakeetEngine: ObservableObject {
     var audioGraphGeneration = 0
     private var audioStartAdmission = ParakeetAudioStartAdmissionState()
     var audioStartInProgress: Bool { audioStartAdmission.isInProgress }
-    var audioStopInProgress = false
+    var audioStopTask: Task<Void, Never>?
+    var audioStopInProgress: Bool { audioStopTask != nil }
     private var inputTapInstalled = false
     var sharedMeetingMicRecording = false
     private nonisolated let sharedMeetingMicRecorder = SharedMeetingMicRecorder()
@@ -2791,6 +2792,20 @@ class ParakeetEngine: ObservableObject {
     }
 
     func stopRecording() async {
+        if let audioStopTask {
+            await audioStopTask.value
+            return
+        }
+        let stopTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performStopRecording()
+        }
+        audioStopTask = stopTask
+        await stopTask.value
+        audioStopTask = nil
+    }
+
+    private func performStopRecording() async {
         if sharedMeetingMicRecording || sharedMeetingMicTransition.isResumeInProgress {
             sharedMeetingMicTransition.invalidate()
         }
@@ -2804,10 +2819,6 @@ class ParakeetEngine: ObservableObject {
             )
             return
         }
-
-        guard !audioStopInProgress else { return }
-        audioStopInProgress = true
-        defer { audioStopInProgress = false }
 
         let configRecoveryGeneration = recoveryState.isRecovering
             ? recoveryState.generation
