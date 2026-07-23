@@ -11,22 +11,54 @@ struct CaptureStopResult {
 }
 
 /// Orders late stop finalization against failed-row persistence. Audio's
-/// existing recording journal owns crash recovery until the failed row exists;
-/// after that, Core's persisted row and merged-sibling reconciliation own it.
+/// recording journal keeps owning unfinished segments until finalization; the
+/// failed row and merged-sibling reconciliation own the retryable result.
+enum TimedOutFailedMeetingFinalizationAction {
+    case buffered
+    case promote(CaptureStopResult)
+    case discard(CaptureStopResult)
+    case journalOwned
+}
+
 struct TimedOutFailedMeetingFinalizationHandoff {
+    private enum TerminalOwnership {
+        case discardAudio
+        case journalRecovery
+    }
+
+    private static let ownershipCapacity = 4
     private var bufferedResults: [UUID: CaptureStopResult] = [:]
+    private var trackedIDs: Set<UUID> = []
+    private var trackedOrder: [UUID] = []
+    private var terminalOwnership: [UUID: TerminalOwnership] = [:]
+    private var terminalOrder: [UUID] = []
+
+    var bufferedResultCount: Int { bufferedResults.count }
+    var terminalOwnershipCount: Int { terminalOwnership.count }
 
     mutating func receive(
         _ result: CaptureStopResult,
         for id: UUID,
         failedMeetingIsPersisted: Bool
-    ) -> CaptureStopResult? {
+    ) -> TimedOutFailedMeetingFinalizationAction {
+        if let ownership = terminalOwnership.removeValue(forKey: id) {
+            terminalOrder.removeAll { $0 == id }
+            switch ownership {
+            case .discardAudio:
+                return .discard(result)
+            case .journalRecovery:
+                return .journalOwned
+            }
+        }
+
         bufferedResults[id] = result
-        return failedMeetingIsPersisted ? result : nil
+        track(id)
+        return failedMeetingIsPersisted ? .promote(result) : .buffered
     }
 
-    func failedMeetingDidPersist(id: UUID) -> CaptureStopResult? {
-        bufferedResults[id]
+    mutating func failedMeetingDidPersist(id: UUID) -> CaptureStopResult? {
+        track(id)
+        return bufferedResults[id]
     }
 
     func audioForPersistence(
@@ -43,6 +75,57 @@ struct TimedOutFailedMeetingFinalizationHandoff {
 
     mutating func markDeliverySucceeded(id: UUID) {
         bufferedResults.removeValue(forKey: id)
+        stopTracking(id)
+    }
+
+    mutating func markPersistenceFailed(id: UUID) {
+        // There is no row that can consume this in-memory result. The existing
+        // recording journal remains the durable recovery owner across launch.
+        let callbackAlreadyArrived = bufferedResults.removeValue(forKey: id) != nil
+        stopTracking(id)
+        if !callbackAlreadyArrived {
+            registerTerminalOwnership(.journalRecovery, for: id)
+        }
+    }
+
+    mutating func markTerminalDiscard(id: UUID) -> CaptureStopResult? {
+        guard trackedIDs.contains(id) || bufferedResults[id] != nil else { return nil }
+        let bufferedResult = bufferedResults.removeValue(forKey: id)
+        stopTracking(id)
+        if bufferedResult == nil {
+            registerTerminalOwnership(.discardAudio, for: id)
+        }
+        return bufferedResult
+    }
+
+    private mutating func track(_ id: UUID) {
+        guard trackedIDs.insert(id).inserted else { return }
+        trackedOrder.append(id)
+        while trackedOrder.count > Self.ownershipCapacity {
+            let evictedID = trackedOrder.removeFirst()
+            trackedIDs.remove(evictedID)
+            // The bridge keeps at most two late callbacks alive, so an older
+            // failed promotion can no longer be delivered. Its journal remains
+            // the durable owner; do not retain the URL tuple indefinitely.
+            bufferedResults.removeValue(forKey: evictedID)
+        }
+    }
+
+    private mutating func stopTracking(_ id: UUID) {
+        trackedIDs.remove(id)
+        trackedOrder.removeAll { $0 == id }
+    }
+
+    private mutating func registerTerminalOwnership(
+        _ ownership: TerminalOwnership,
+        for id: UUID
+    ) {
+        if terminalOwnership.updateValue(ownership, forKey: id) == nil {
+            terminalOrder.append(id)
+        }
+        while terminalOrder.count > Self.ownershipCapacity {
+            terminalOwnership.removeValue(forKey: terminalOrder.removeFirst())
+        }
     }
 }
 

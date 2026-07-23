@@ -126,6 +126,9 @@ final class FailedMeetingStore {
                 outputFolder: MeetingStoragePaths.transcriptsFolder
             )
             self.retryingFailedMeetingIDs.remove(id)
+            if !self.failedManager.failedTranscriptions.contains(where: { $0.id == id }) {
+                self.finishTimedOutFinalizationWithDiscard(id: id)
+            }
             self.publishRefresh()
             WorkflowRecoveryTelemetry.finished(
                 workflowKind: "meeting_transcription",
@@ -152,11 +155,15 @@ final class FailedMeetingStore {
     func deleteFailedMeeting(id: UUID) -> Bool {
         retryingFailedMeetingIDs.remove(id)
         let didDelete = failedManager.deleteFailedTranscription(id: id)
+        let isAbsent = !failedManager.failedTranscriptions.contains(where: { $0.id == id })
+        if didDelete || isAbsent {
+            finishTimedOutFinalizationWithDiscard(id: id)
+        }
         if didDelete {
             discardStoppedAudioRecoveryForRetry(id)
         }
         publishRefresh()
-        return didDelete || !failedManager.failedTranscriptions.contains(where: { $0.id == id })
+        return didDelete || isAbsent
     }
 
     @discardableResult
@@ -183,9 +190,13 @@ final class FailedMeetingStore {
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            archiveAudio: false
+            archiveAudio: false,
+            clearRecordingJournalAfterPersistence: false
         )
-        guard preserved else { return false }
+        guard preserved else {
+            timedOutFinalizationHandoff.markPersistenceFailed(id: taskId)
+            return false
+        }
 
         if let finalizedResult = timedOutFinalizationHandoff.failedMeetingDidPersist(id: taskId) {
             promoteTimedOutFailedMeetingAudio(id: taskId, result: finalizedResult)
@@ -223,11 +234,13 @@ final class FailedMeetingStore {
     func refreshTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
         let failedMeetingIsPersisted = failedManager.failedTranscriptions
             .contains(where: { $0.id == id })
-        guard let deliverableResult = timedOutFinalizationHandoff.receive(
+        let action = timedOutFinalizationHandoff.receive(
             result,
             for: id,
             failedMeetingIsPersisted: failedMeetingIsPersisted
-        ) else {
+        )
+        switch action {
+        case .buffered:
             DiagnosticsTrail.record(
                 level: .info,
                 engine: "meeting",
@@ -240,9 +253,13 @@ final class FailedMeetingStore {
                 ])
             )
             return
+        case .promote(let deliverableResult):
+            promoteTimedOutFailedMeetingAudio(id: id, result: deliverableResult)
+        case .discard(let terminalResult):
+            discardFinalizedTimedOutAudio(terminalResult)
+        case .journalOwned:
+            return
         }
-
-        promoteTimedOutFailedMeetingAudio(id: id, result: deliverableResult)
     }
 
     private func persistFailedMeetingForRetry(
@@ -252,7 +269,8 @@ final class FailedMeetingStore {
         errorMessage: String,
         meetingTitle: String?,
         recordingDate: Date?,
-        archiveAudio: Bool
+        archiveAudio: Bool,
+        clearRecordingJournalAfterPersistence: Bool = true
     ) -> Bool {
         taskManager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micAudioURL,
@@ -261,7 +279,8 @@ final class FailedMeetingStore {
             taskId: taskId,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            archiveAudio: archiveAudio
+            archiveAudio: archiveAudio,
+            clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence
         )
     }
 
@@ -295,6 +314,20 @@ final class FailedMeetingStore {
             timedOutFinalizationHandoff.markDeliverySucceeded(id: id)
             publishRefresh()
         }
+    }
+
+    private func finishTimedOutFinalizationWithDiscard(id: UUID) {
+        guard let bufferedResult = timedOutFinalizationHandoff.markTerminalDiscard(id: id) else {
+            return
+        }
+        discardFinalizedTimedOutAudio(bufferedResult)
+    }
+
+    private func discardFinalizedTimedOutAudio(_ result: CaptureStopResult) {
+        taskManager.discardFinalizedFailedTranscriptionAudio(
+            micAudioURL: result.micURL,
+            systemAudioURL: result.systemURL
+        )
     }
 
     /// Recomputes the presented failed-meeting list. Called from the

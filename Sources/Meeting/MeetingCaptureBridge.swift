@@ -182,8 +182,10 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Stop the current recording, wait for file handles to close, then remove
     /// the just-captured scratch audio instead of handing it to transcription.
     func stopAndDiscardFiles() async -> CaptureStopResult {
-        let result = await stopAndAwaitFiles()
-        MeetingRecordingCleanup.discardFiles(micURL: result.micURL, systemURL: result.systemURL)
+        let result = await stopAndAwaitFiles { [weak self] lateResult in
+            self?.discardFinalizedStopResult(lateResult)
+        }
+        discardFinalizedStopResult(result)
         audio.micAudioFileURL = nil
         audio.systemAudioFileURL = nil
         return result
@@ -342,6 +344,16 @@ final class MeetingCaptureBridge: ObservableObject {
             micURL: audio.micAudioFileURL,
             systemURL: audio.systemAudioFileURL,
             didTimeOut: didTimeOut
+        )
+    }
+
+    private func discardFinalizedStopResult(_ result: CaptureStopResult) {
+        if let micURL = result.micURL {
+            audio.clearRecordingJournal(forMicAudioURL: micURL)
+        }
+        MeetingRecordingCleanup.discardFiles(
+            micURL: result.micURL,
+            systemURL: result.systemURL
         )
     }
 

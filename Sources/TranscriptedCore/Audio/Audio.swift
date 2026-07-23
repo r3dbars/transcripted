@@ -830,6 +830,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
         recordingSessionGeneration
     }
 
+    /// Explicit discard reached a durable user decision outside Core. Remove
+    /// the matching recovery journal so launch recovery cannot resurrect it.
+    public func clearRecordingJournal(forMicAudioURL micURL: URL) {
+        MeetingRecordingJournalStore.removeJournal(forMicAudioURL: micURL)
+    }
+
     // Callback for when recording starts (used for pre-loading models)
     public var onRecordingStart: (() -> Void)?
 

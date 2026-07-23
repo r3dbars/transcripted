@@ -784,6 +784,8 @@ public class TranscriptionTaskManager: ObservableObject {
         )
         guard didPersist else { return false }
 
+        MeetingRecordingJournalStore.removeJournal(forMicAudioURL: micAudioURL)
+
         scheduleFailedRecordingAudioArchive(
             micURL: micAudioURL,
             systemURL: promotedSystemAudioURL,
@@ -800,6 +802,22 @@ public class TranscriptionTaskManager: ObservableObject {
         return true
     }
 
+    /// A terminal user action or completed retry owns a late finalization only
+    /// to clean it up. Reuse Core's canonical scratch containment checks and
+    /// clear the matching crash-recovery journal before removing the files.
+    public func discardFinalizedFailedTranscriptionAudio(
+        micAudioURL: URL?,
+        systemAudioURL: URL?
+    ) {
+        if let micAudioURL {
+            MeetingRecordingJournalStore.removeJournal(forMicAudioURL: micAudioURL)
+        }
+        removeManagedCleanupFile(micAudioURL, label: "terminal finalized failed mic scratch")
+        if systemAudioURL != micAudioURL {
+            removeManagedCleanupFile(systemAudioURL, label: "terminal finalized failed system scratch")
+        }
+    }
+
     @discardableResult
     public func addFailedTranscriptionRetainingAvailableAudio(
         micAudioURL: URL?,
@@ -808,7 +826,8 @@ public class TranscriptionTaskManager: ObservableObject {
         taskId: UUID = UUID(),
         meetingTitle: String? = nil,
         recordingDate: Date? = nil,
-        archiveAudio: Bool = true
+        archiveAudio: Bool = true,
+        clearRecordingJournalAfterPersistence: Bool = true
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -825,7 +844,8 @@ public class TranscriptionTaskManager: ObservableObject {
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
-            removeOriginalsAfterArchive: false
+            removeOriginalsAfterArchive: false,
+            clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence
         )
         if didPersist, archiveAudio {
             scheduleFailedRecordingAudioArchive(
@@ -849,7 +869,8 @@ public class TranscriptionTaskManager: ObservableObject {
         errorMessage: String,
         meetingTitle: String?,
         recordingDate: Date?,
-        removeOriginalsAfterArchive: Bool
+        removeOriginalsAfterArchive: Bool,
+        clearRecordingJournalAfterPersistence: Bool = true
     ) -> Bool {
         let failedSystemURL = retainedAudio?.systemURL ?? originalSystemURL
         let placeholderMicURL = makeSilentMicPlaceholderIfNeeded(
@@ -877,9 +898,10 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        // The failed-queue entry is durable — the crash-recovery journal next
-        // to the original scratch audio is no longer needed.
-        if let originalMicURL {
+        // A normal failed row owns all of its audio after persistence. A timed-
+        // out multi-segment stop keeps the journal until late finalization so a
+        // crash cannot lose segment filenames that are not represented by the row.
+        if clearRecordingJournalAfterPersistence, let originalMicURL {
             MeetingRecordingJournalStore.removeJournal(forMicAudioURL: originalMicURL)
         }
 
@@ -903,7 +925,12 @@ public class TranscriptionTaskManager: ObservableObject {
         enum Disposition: Sendable {
             case stale(reason: String)
             case skip(reason: String)
-            case recover(micURL: URL?, systemURL: URL?, startedAt: Date)
+            case recover(
+                micURL: URL?,
+                systemURL: URL?,
+                originalMicURL: URL?,
+                startedAt: Date
+            )
         }
         let journalURL: URL
         let disposition: Disposition
@@ -938,14 +965,30 @@ public class TranscriptionTaskManager: ObservableObject {
                     "file": candidate.journalURL.lastPathComponent,
                     "reason": reason
                 ])
-            case .recover(let micURL, let systemURL, let startedAt):
-                let didPersist = await addFailedTranscriptionRetainingAvailableAudioAfterArchive(
-                    micAudioURL: micURL,
-                    systemAudioURL: systemURL,
-                    errorMessage: "Recording was interrupted before it could be saved. The recovered audio is ready to transcribe.",
-                    recordingDate: startedAt,
-                    archiveAudio: true
-                )
+            case .recover(let micURL, let systemURL, let originalMicURL, let startedAt):
+                let existingFailure = failedTranscriptionManager.failedTranscriptions.first { failure in
+                    failure.micAudioURL.standardizedFileURL == originalMicURL?.standardizedFileURL
+                        || failure.micAudioURL.standardizedFileURL == micURL?.standardizedFileURL
+                        || (originalMicURL == nil
+                            && failure.systemAudioURL?.standardizedFileURL == systemURL?.standardizedFileURL)
+                }
+                let didPersist: Bool
+                if let existingFailure {
+                    let recoveredMicURL = micURL ?? existingFailure.micAudioURL
+                    didPersist = promoteFinalizedFailedTranscriptionAudio(
+                        id: existingFailure.id,
+                        micAudioURL: recoveredMicURL,
+                        systemAudioURL: systemURL ?? existingFailure.systemAudioURL
+                    )
+                } else {
+                    didPersist = await addFailedTranscriptionRetainingAvailableAudioAfterArchive(
+                        micAudioURL: micURL,
+                        systemAudioURL: systemURL,
+                        errorMessage: "Recording was interrupted before it could be saved. The recovered audio is ready to transcribe.",
+                        recordingDate: startedAt,
+                        archiveAudio: true
+                    )
+                }
                 if didPersist {
                     try? FileManager.default.removeItem(at: candidate.journalURL)
                     recovered += 1
@@ -990,6 +1033,13 @@ public class TranscriptionTaskManager: ObservableObject {
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
 
+        func identityURL(_ filename: String?) -> URL? {
+            guard let filename, !filename.isEmpty,
+                  !filename.contains("/"), !filename.contains("..") else { return nil }
+            return directory.appendingPathComponent(filename)
+        }
+
+        let originalMicURL = identityURL(journal.primaryMicFilename)
         let primaryURL = resolve(journal.primaryMicFilename)
         let segmentRecords = journal.micSegments.compactMap { record -> MicRecordingSegment? in
             guard let url = resolve(record.filename) else { return nil }
@@ -1040,7 +1090,12 @@ public class TranscriptionTaskManager: ObservableObject {
         }
         return OrphanedRecordingCandidate(
             journalURL: journalURL,
-            disposition: .recover(micURL: micURL, systemURL: systemURL, startedAt: journal.startedAt)
+            disposition: .recover(
+                micURL: micURL,
+                systemURL: systemURL,
+                originalMicURL: originalMicURL,
+                startedAt: journal.startedAt
+            )
         )
     }
 
@@ -1134,9 +1189,18 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
-        if !failed.audioFilesExist(),
-           let reconciled = failedTranscriptionManager.healMissingAudioReferencesForRetry(id: failedId) {
-            failed = reconciled
+        if !failed.audioFilesExist() {
+            do {
+                if let reconciled = try failedTranscriptionManager.healMissingAudioReferencesForRetry(id: failedId) {
+                    failed = reconciled
+                }
+            } catch {
+                AppLogger.pipeline.error("Failed to persist healed audio references before retry", [
+                    "failedId": "\(failedId)",
+                    "errorType": "\(type(of: error))"
+                ])
+                return false
+            }
         }
 
         guard failed.audioFilesExist() else {

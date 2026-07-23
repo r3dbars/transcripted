@@ -4,6 +4,11 @@ import Combine
 /// Manages the queue of failed transcriptions with persistent storage
 @MainActor
 public class FailedTranscriptionManager: ObservableObject {
+    public enum AudioReferenceHealingError: Error {
+        case audioRootUnavailable
+        case persistenceFailed
+    }
+
     @Published public var failedTranscriptions: [FailedTranscription] = []
 
     private let storageURL: URL
@@ -429,15 +434,17 @@ public class FailedTranscriptionManager: ObservableObject {
     /// This closes the short window after a full-fidelity merge deletes its
     /// source segments but before the app-level late-completion handoff updates
     /// the failed row.
-    public func healMissingAudioReferencesForRetry(id: UUID) -> FailedTranscription? {
+    public func healMissingAudioReferencesForRetry(id: UUID) throws -> FailedTranscription? {
         guard let index = failedTranscriptions.firstIndex(where: { $0.id == id }) else {
             return nil
         }
 
         let existing = failedTranscriptions[index]
         let reconciliation = reconcileAudioReferences(of: existing)
+        if reconciliation.hasUnavailableAudio {
+            throw AudioReferenceHealingError.audioRootUnavailable
+        }
         guard reconciliation.didHeal,
-              !reconciliation.hasUnavailableAudio,
               let healed = reconciliation.entry else {
             return existing
         }
@@ -446,12 +453,13 @@ public class FailedTranscriptionManager: ObservableObject {
         let didPersist = saveFailedTranscriptions()
         if !didPersist {
             failedTranscriptions[index] = existing
+            throw AudioReferenceHealingError.persistenceFailed
         }
         AppLogger.pipeline.info("Reconciled failed transcription audio before retry", [
             "id": id.uuidString,
             "persisted": "\(didPersist)"
         ])
-        return didPersist ? healed : existing
+        return healed
     }
 
     /// Removes a failed transcription from the queue.
@@ -514,6 +522,8 @@ public class FailedTranscriptionManager: ObservableObject {
         guard removeFailedTranscription(id: id) else {
             return false
         }
+
+        MeetingRecordingJournalStore.removeJournal(forMicAudioURL: failed.micAudioURL)
 
         // Delete audio files independently so one failure does not hide the other.
         removeAudioFile(failed.micAudioURL, label: "mic audio")

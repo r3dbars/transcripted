@@ -12,10 +12,11 @@ func testTimedOutFailedMeetingFinalization() {
             didTimeOut: false
         )
 
-        assertNil(
-            handoff.receive(result, for: failedID, failedMeetingIsPersisted: false),
-            "a completion cannot promote audio before its durable failed row exists"
-        )
+        if case .buffered = handoff.receive(result, for: failedID, failedMeetingIsPersisted: false) {
+            // Expected.
+        } else {
+            assertionFailure("a completion cannot promote audio before its durable failed row exists")
+        }
         assertEqual(
             handoff.failedMeetingDidPersist(id: failedID)?.micURL,
             finalizedMicURL,
@@ -58,13 +59,17 @@ func testTimedOutFailedMeetingFinalization() {
             handoff.failedMeetingDidPersist(id: failedID),
             "row-first persistence should not invent a completion"
         )
-        let deliverable = handoff.receive(
+        let action = handoff.receive(
             result,
             for: failedID,
             failedMeetingIsPersisted: true
         )
-        assertEqual(deliverable?.micURL, finalizedMicURL)
-        assertEqual(deliverable?.systemURL, finalizedSystemURL)
+        if case .promote(let deliverable) = action {
+            assertEqual(deliverable.micURL, finalizedMicURL)
+            assertEqual(deliverable.systemURL, finalizedSystemURL)
+        } else {
+            assertionFailure("row-first completion should promote immediately")
+        }
 
         handoff.markDeliverySucceeded(id: failedID)
         assertNil(handoff.failedMeetingDidPersist(id: failedID))
@@ -79,11 +84,90 @@ func testTimedOutFailedMeetingFinalization() {
             didTimeOut: false
         )
 
-        assertNotNil(handoff.receive(result, for: failedID, failedMeetingIsPersisted: true))
+        if case .promote = handoff.receive(result, for: failedID, failedMeetingIsPersisted: true) {
+            // Expected.
+        } else {
+            assertionFailure("persisted row should own immediate promotion")
+        }
         assertEqual(
             handoff.failedMeetingDidPersist(id: failedID)?.systemURL,
             result.systemURL,
             "a failed promotion must retain the completion for the store's existing mic placeholder"
+        )
+        handoff.markPersistenceFailed(id: failedID)
+        assertNil(
+            handoff.failedMeetingDidPersist(id: failedID),
+            "failed row persistence must release the buffer because the journal owns durable recovery"
+        )
+    }
+
+    runSuite("Timed-out terminal ownership discards late audio after row removal") {
+        var handoff = TimedOutFailedMeetingFinalizationHandoff()
+        let failedID = UUID()
+        let lateResult = CaptureStopResult(
+            micURL: URL(fileURLWithPath: "/tmp/terminal-mic_merged.wav"),
+            systemURL: nil,
+            didTimeOut: false
+        )
+
+        assertNil(handoff.failedMeetingDidPersist(id: failedID))
+        assertNil(handoff.markTerminalDiscard(id: failedID))
+        if case .discard(let discarded) = handoff.receive(
+            lateResult,
+            for: failedID,
+            failedMeetingIsPersisted: false
+        ) {
+            assertEqual(discarded.micURL, lateResult.micURL)
+        } else {
+            assertionFailure("a terminal delete or retry must own its late callback as cleanup-only")
+        }
+        assertEqual(handoff.terminalOwnershipCount, 0)
+    }
+
+    runSuite("Timed-out persistence failure leaves late audio to journal recovery") {
+        var handoff = TimedOutFailedMeetingFinalizationHandoff()
+        let failedID = UUID()
+        assertNil(handoff.failedMeetingDidPersist(id: failedID))
+        handoff.markPersistenceFailed(id: failedID)
+
+        let action = handoff.receive(
+            CaptureStopResult(micURL: nil, systemURL: nil, didTimeOut: false),
+            for: failedID,
+            failedMeetingIsPersisted: false
+        )
+        if case .journalOwned = action {
+            // Expected: keep disk recovery artifacts, but retain no callback result.
+        } else {
+            assertionFailure("failed row persistence should leave the durable journal in charge")
+        }
+        assertEqual(handoff.terminalOwnershipCount, 0)
+    }
+
+    runSuite("Timed-out terminal and failed-promotion ownership stays bounded") {
+        var handoff = TimedOutFailedMeetingFinalizationHandoff()
+        let ids = (0..<6).map { _ in UUID() }
+        for id in ids {
+            assertNil(handoff.failedMeetingDidPersist(id: id))
+            assertNil(handoff.markTerminalDiscard(id: id))
+        }
+        assertEqual(handoff.terminalOwnershipCount, 4)
+
+        var failedPromotionHandoff = TimedOutFailedMeetingFinalizationHandoff()
+        for id in ids {
+            _ = failedPromotionHandoff.receive(
+                CaptureStopResult(
+                    micURL: URL(fileURLWithPath: "/tmp/bounded-\(id.uuidString).wav"),
+                    systemURL: nil,
+                    didTimeOut: false
+                ),
+                for: id,
+                failedMeetingIsPersisted: true
+            )
+        }
+        assertEqual(failedPromotionHandoff.bufferedResultCount, 4)
+        assertNil(
+            failedPromotionHandoff.failedMeetingDidPersist(id: ids[0]),
+            "an older failed promotion should fall back to its journal instead of growing the in-memory buffer"
         )
     }
 

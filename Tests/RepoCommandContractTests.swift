@@ -2516,8 +2516,9 @@ func testRepoCommandContract() {
         )
         assertTrue(
             timeoutPreserveBlock.contains("archiveAudio: false")
+                && timeoutPreserveBlock.contains("clearRecordingJournalAfterPersistence: false")
                 && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.audioForPersistence("),
-            "stop timeouts should keep scratch audio in place and let callback-first finalized URLs create the durable row"
+            "stop timeouts should keep scratch audio and its recovery journal while callback-first URLs create the durable row"
         )
         assertTrue(
             controllerContents.contains("refreshTimedOutFailedMeetingAudio(")
@@ -2536,6 +2537,11 @@ func testRepoCommandContract() {
                 && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
                 && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL"),
             "late finalization should buffer both callback orders and reuse the failed queue mic placeholder"
+        )
+        assertTrue(
+            storeContents.contains("finishTimedOutFinalizationWithDiscard(id: id)")
+                && storeContents.contains("discardFinalizedFailedTranscriptionAudio("),
+            "delete and completed retry should turn any late finalization into bounded cleanup-only ownership"
         )
         assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),
@@ -2845,6 +2851,18 @@ func testRepoCommandContract() {
             cancelBlock.contains("capture.stopAndDiscardFiles()")
                 && cancelBlock.contains("restoreStateAfterRecordingEndedWithoutNewWork()"),
             "explicit discard should use the discard path and restore idle/ready state without queueing transcription"
+        )
+        let bridgeContents = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
+        let discardBlock = sourceSlice(
+            bridgeContents,
+            from: "func stopAndDiscardFiles() async -> CaptureStopResult {",
+            to: "func armVoiceProcessingForActiveRecording()"
+        )
+        assertTrue(
+            discardBlock.contains("stopAndAwaitFiles { [weak self] lateResult in")
+                && discardBlock.contains("discardFinalizedStopResult(lateResult)")
+                && bridgeContents.contains("audio.clearRecordingJournal(forMicAudioURL: micURL)"),
+            "an explicit discard timeout should also remove late finalized audio and its recovery journal"
         )
     }
 
