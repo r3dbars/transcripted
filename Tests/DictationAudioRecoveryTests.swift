@@ -146,6 +146,14 @@ func testDictationAudioRecovery() {
             "abandoned capture-not-started sessions should cancel the speech engine and clear preserved recovery audio"
         )
         assertTrue(
+            sessionSource.contains("await appState.sttRouter.stopRecording()\n            stopTiming.micStoppedAt"),
+            "an admitted stop must always reach the engine so a temporary recovery-idle state cannot revive the microphone"
+        )
+        assertFalse(
+            sessionSource.contains("if appState.sttRouter.isRecording || appState.sttRouter.hasRecoverableRecording {\n                await appState.sttRouter.stopRecording()"),
+            "the stop task must not re-check transient recording state before cancelling recovery"
+        )
+        assertTrue(
             engineSource.contains("drainRecordedSamplesForInference()"),
             "transcription should drain preserved segments instead of resampling all audio as one rate"
         )

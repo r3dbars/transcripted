@@ -804,6 +804,29 @@ func testParakeetRecoveryState() async {
         assertFalse(state.advance(to: .restart, generation: generation), "late callbacks cannot revive a cancelled recovery")
     }
 
+    await runSuite("Parakeet user stop invalidates recovery before a delayed restart") {
+        let harness = ParakeetZombieStopInterleavingHarness()
+        let resetPublished = ParakeetAsyncInterleavingGate()
+        let allowDelayedRestart = ParakeetAsyncInterleavingGate()
+
+        let delayedRecovery = Task {
+            let generation = await harness.beginReset()
+            await resetPublished.open()
+            await allowDelayedRestart.wait()
+            return await harness.tryRestart(generation: generation)
+        }
+
+        await resetPublished.wait()
+        let terminal = await harness.stop()
+        await allowDelayedRestart.open()
+
+        assertEqual(terminal?.result, .cancelled, "stop should consume the active recovery attempt")
+        assertFalse(
+            await delayedRecovery.value,
+            "a recovery continuation delayed behind stop must not restart the microphone"
+        )
+    }
+
     runSuite("ParakeetZombieRecoveryState keeps one active generation") {
         var state = ParakeetZombieRecoveryState()
         let first = state.begin(failureKind: "no_sample_callbacks")
@@ -865,6 +888,24 @@ private actor ParakeetPendingRestoreInterleavingHarness {
 
     func hasPendingValue() -> Bool {
         state.hasPendingValue
+    }
+}
+
+private actor ParakeetZombieStopInterleavingHarness {
+    private var state = ParakeetZombieRecoveryState()
+
+    func beginReset() -> UInt64 {
+        let generation = state.begin(failureKind: "no_sample_callbacks")
+        _ = state.advance(to: .reset, generation: generation)
+        return generation
+    }
+
+    func stop() -> ParakeetZombieRecoveryTerminal? {
+        state.cancelActiveAttempt()
+    }
+
+    func tryRestart(generation: UInt64) -> Bool {
+        state.advance(to: .restart, generation: generation)
     }
 }
 
