@@ -45,6 +45,21 @@ func testParakeetAudioOwnershipSourceContract() {
             mutation: "inputTapInstalled = false",
             helper: "resetAudioGraphAfterStartFailure"
         )
+        guard let resetLease = startFailure.range(
+                  of: "audioEngineWorkOwnership.begin(owner: resetWorkOwner, phase: .audioStart)"
+              ),
+              let rebuildCall = startFailure.range(
+                  of: "return await rebuildAudioEngine(reason: reason)",
+                  range: resetLease.upperBound..<startFailure.endIndex
+              ) else {
+            assertTrue(false, "failed-start reset should lease its engine and queue before rebuilding")
+            return
+        }
+        assertTrue(
+            resetLease.lowerBound < rebuildCall.lowerBound
+                && startFailure.contains("audioEngineWorkOwnership.finish(owner: resetWorkOwner, phase: .audioStart)"),
+            "failed-start reset must remain claimable by stop across blocked CoreAudio cleanup"
+        )
         assertPostAwaitOwnershipGuard(
             in: rebuild,
             ownerCapture: "let rebuildOwner = currentAudioGraphOwnerToken()",

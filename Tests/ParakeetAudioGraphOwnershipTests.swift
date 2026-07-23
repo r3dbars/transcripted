@@ -425,6 +425,70 @@ func testParakeetAudioGraphOwnership() async {
         assertEqual(startAdmission.owner, successorOwner, "the successor should remain admitted")
     }
 
+    runSuite("Parakeet stop replaces a blocked failed-start reset") {
+        let oldEngine = NSObject()
+        let oldQueue = DispatchQueue(label: "test.parakeet.blocked-failed-start-reset")
+        let oldOwner = ParakeetAudioEngineQueueOwnerToken(
+            generation: 43,
+            engine: oldEngine,
+            queue: oldQueue
+        )
+        let ownership = ParakeetTimedAudioEngineWorkOwnership()
+        let cancellationState = ParakeetAudioStartCancellationState()
+        var startAdmission = ParakeetAudioStartAdmissionState()
+        let resources = ParakeetEngineQueueTestResources(engine: oldEngine, queue: oldQueue)
+        assertTrue(startAdmission.begin(owner: oldOwner), "failed-start reset should retain start admission")
+        ownership.begin(owner: oldOwner, phase: .audioStart)
+
+        let resetEntered = DispatchSemaphore(value: 0)
+        let releaseReset = DispatchSemaphore(value: 0)
+        let resetFinished = DispatchSemaphore(value: 0)
+        let staleMutation = DispatchSemaphore(value: 0)
+        oldQueue.async {
+            resetEntered.signal()
+            _ = releaseReset.wait(timeout: .now() + 2)
+            if cancellationState.canRunWork,
+               ownership.isActive(owner: oldOwner, phase: .audioStart) {
+                resources.restoreOriginalResources()
+                staleMutation.signal()
+            }
+            ownership.finish(owner: oldOwner, phase: .audioStart)
+            resetFinished.signal()
+        }
+        assertTrue(resetEntered.wait(timeout: .now() + 1) == .success, "failed-start reset should block first")
+
+        cancellationState.cancel()
+        let claimed = ownership.claimPendingWorkForSuccessor(
+            currentEngine: oldEngine,
+            currentQueue: oldQueue
+        )
+        assertEqual(
+            claimed,
+            ParakeetTimedAudioEngineWorkLease(owner: oldOwner, phase: .audioStart),
+            "stop should claim reset work after logical generation changes"
+        )
+        assertTrue(startAdmission.finish(owner: oldOwner), "stop should release the failed start's admission")
+
+        let nextEngine = NSObject()
+        let nextQueue = DispatchQueue(label: "test.parakeet.failed-start-reset-successor")
+        let nextOwner = ParakeetAudioEngineQueueOwnerToken(
+            generation: 45,
+            engine: nextEngine,
+            queue: nextQueue
+        )
+        resources.replace(engine: nextEngine, queue: nextQueue)
+        assertTrue(startAdmission.begin(owner: nextOwner), "successor should start before old reset returns")
+        let successorFinished = DispatchSemaphore(value: 0)
+        nextQueue.async { successorFinished.signal() }
+        assertTrue(successorFinished.wait(timeout: .now() + 1) == .success, "successor queue should not be denied")
+
+        releaseReset.signal()
+        assertTrue(resetFinished.wait(timeout: .now() + 1) == .success, "retired reset should finish")
+        assertTrue(staleMutation.wait(timeout: .now()) == .timedOut, "late reset must not mutate successor resources")
+        assertFalse(startAdmission.finish(owner: oldOwner), "stale reset must not clear successor admission")
+        assertEqual(startAdmission.owner, nextOwner, "successor should remain admitted")
+    }
+
     await runSuite("ParakeetOwnerBoundPendingState rejects a truly delayed stale restore") {
         let engine = NSObject()
         let staleOwner = ParakeetAudioGraphOwnerToken(generation: 40, engine: engine)

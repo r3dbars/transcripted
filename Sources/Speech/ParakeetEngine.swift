@@ -1565,6 +1565,22 @@ class ParakeetEngine: ObservableObject {
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
 
+        // Reset/rebuild can block in CoreAudio too. Keep the admitted start's
+        // exact resources claimable so a user stop can replace this queue
+        // immediately instead of making the successor wait on stale cleanup.
+        let resetWorkOwner = currentAudioEngineQueueOwnerToken()
+        let resetCancellationState = ParakeetAudioStartCancellationState()
+        audioStartCancellationState?.cancel()
+        audioStartCancellationState = resetCancellationState
+        audioEngineWorkOwnership.begin(owner: resetWorkOwner, phase: .audioStart)
+        defer {
+            resetCancellationState.cancel()
+            audioEngineWorkOwnership.finish(owner: resetWorkOwner, phase: .audioStart)
+            if audioStartCancellationState === resetCancellationState {
+                audioStartCancellationState = nil
+            }
+        }
+
         if rebuildEngine {
             return await rebuildAudioEngine(reason: reason)
         }
