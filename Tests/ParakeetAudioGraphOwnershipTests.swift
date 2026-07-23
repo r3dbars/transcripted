@@ -101,6 +101,21 @@ func testParakeetAudioGraphOwnership() async {
         )
     }
 
+    runSuite("Parakeet stale rebuild recognizes a generation-only cancellation") {
+        let engine = NSObject()
+        let replacementEngine = NSObject()
+        let rebuildOwner = ParakeetAudioGraphOwnerToken(generation: 27, engine: engine)
+
+        assertTrue(
+            rebuildOwner.matchesEngine(engine),
+            "generation-only cancellation should retain the same engine identity for observer restoration"
+        )
+        assertFalse(
+            rebuildOwner.matchesEngine(replacementEngine),
+            "a replacement engine must own its own configuration observer"
+        )
+    }
+
     runSuite("ParakeetTimedAudioEngineWorkOwnership moves successor work off a blocked queue") {
         let retiredEngine = NSObject()
         let blockedQueue = DispatchQueue(label: "test.parakeet.blocked-engine-queue")

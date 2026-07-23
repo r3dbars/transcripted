@@ -12,6 +12,10 @@ struct ParakeetAudioGraphOwnerToken: Equatable, Sendable {
     func matches(generation: Int, engine: AnyObject) -> Bool {
         self.generation == generation && engineIdentity == ObjectIdentifier(engine)
     }
+
+    func matchesEngine(_ engine: AnyObject) -> Bool {
+        engineIdentity == ObjectIdentifier(engine)
+    }
 }
 
 struct ParakeetAudioEngineQueueOwnerToken: Equatable, Sendable {

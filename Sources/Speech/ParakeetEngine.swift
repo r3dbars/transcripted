@@ -1628,7 +1628,16 @@ class ParakeetEngine: ObservableObject {
             Self.safelyRemoveInputTap(on: audioEngine)
             audioEngine.reset()
         }
-        guard ownsAudioGraph(rebuildOwner) else { return nil }
+        guard ownsAudioGraph(rebuildOwner) else {
+            // A stop may invalidate only the logical generation while leaving
+            // this engine current. Restore the observer removed above so later
+            // route changes are still detected. A replacement engine owns its
+            // own observer installation.
+            if rebuildOwner.matchesEngine(audioEngine), !isShuttingDown {
+                installAudioEngineConfigObserverIfNeeded()
+            }
+            return nil
+        }
         audioEngine = AVAudioEngine()
         ParakeetRetiredAudioEngineStore.shared.retire(retiredEngine, reason: reason)
         inputTapInstalled = false

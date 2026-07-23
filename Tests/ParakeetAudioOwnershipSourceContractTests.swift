@@ -68,9 +68,20 @@ func testParakeetAudioOwnershipSourceContract() {
             in: rebuild,
             ownerCapture: "let rebuildOwner = currentAudioGraphOwnerToken()",
             suspension: "await runAudioEngineWork",
-            guardStatement: "guard ownsAudioGraph(rebuildOwner) else { return nil }",
+            guardStatement: "guard ownsAudioGraph(rebuildOwner) else {",
             mutation: "audioEngine = AVAudioEngine()",
             helper: "rebuildAudioEngine"
+        )
+        assertTrue(
+            rebuild.contains(
+                """
+                if rebuildOwner.matchesEngine(audioEngine), !isShuttingDown {
+                                installAudioEngineConfigObserverIfNeeded()
+                            }
+                            return nil
+                """
+            ),
+            "a generation-only rebuild cancellation should restore the current engine's configuration observer"
         )
         assertTrue(
             failedStartCleanup.contains("let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()")
