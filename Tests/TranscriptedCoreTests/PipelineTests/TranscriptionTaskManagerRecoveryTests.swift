@@ -256,6 +256,70 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
     }
 
+    func testFutureDatedAudioCannotPinRecoveryOwnerBeforeLaterJournalScan() async throws {
+        let (manager, paths) = makeManager()
+        let livenessWindow: TimeInterval = 0.02
+        let futureMicURL = paths.audioCaptures.appendingPathComponent("meeting_future_mic.wav")
+        try writeMonoWAV(to: futureMicURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(1)],
+            ofItemAtPath: futureMicURL.path
+        )
+        _ = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: futureMicURL.lastPathComponent,
+            segments: [.init(filename: futureMicURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(),
+            state: .stopping
+        )
+
+        var passCount = 0
+        var laterJournalURL: URL?
+        manager.orphanedRecordingRecoveryPassObserver = { [self] in
+            passCount += 1
+            guard passCount == 1 else { return }
+            do {
+                let laterMicURL = paths.audioCaptures.appendingPathComponent("meeting_later_mic.wav")
+                try writeMonoWAV(
+                    to: laterMicURL,
+                    sampleRate: 48_000,
+                    samples: Array(repeating: 0.5, count: 4_800)
+                )
+                try backdate(laterMicURL)
+                laterJournalURL = try writeJournal(
+                    in: paths.audioCaptures,
+                    primaryMicFilename: laterMicURL.lastPathComponent,
+                    segments: [.init(filename: laterMicURL.lastPathComponent, gapBefore: 0)],
+                    startedAt: Date(timeIntervalSince1970: 1_000),
+                    state: .stopping
+                )
+            } catch {
+                XCTFail("Could not create later recovery fixture: \(type(of: error))")
+            }
+        }
+
+        let recoveryTask = Task {
+            await manager.recoverOrphanedRecordings(
+                in: paths.audioCaptures,
+                livenessWindow: livenessWindow,
+                waitForRecentJournals: true
+            )
+        }
+        try await Task.sleep(for: .seconds(0.15))
+
+        XCTAssertGreaterThanOrEqual(passCount, 2)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(laterJournalURL).path))
+
+        // Let the original candidate become eligible so the owner can finish.
+        try backdate(futureMicURL)
+        let recovered = await recoveryTask.value
+        manager.orphanedRecordingRecoveryPassObserver = nil
+
+        XCTAssertEqual(recovered, 2)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 2)
+    }
+
     func testConcurrentRecoveryCallsShareOneJournalOwner() async throws {
         let (manager, paths) = makeManager()
         let micURL = paths.audioCaptures.appendingPathComponent("meeting_single_flight_mic.wav")

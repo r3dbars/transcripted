@@ -1097,7 +1097,16 @@ public class TranscriptionTaskManager: ObservableObject {
                 return totalRecovered
             }
             do {
-                try await Task.sleep(for: .seconds(max(0.01, retryAfter + 0.01)))
+                // A restored or tampered file can carry an mtime far in the
+                // future. Keep that candidate deferred, but never let it pin
+                // the single recovery owner (and every joined request) for an
+                // unbounded interval before the next scan.
+                let maximumRetryInterval = max(0.01, livenessWindow + 0.01)
+                let boundedRetryInterval = min(
+                    max(0.01, retryAfter + 0.01),
+                    maximumRetryInterval
+                )
+                try await Task.sleep(for: .seconds(boundedRetryInterval))
             } catch {
                 return totalRecovered
             }
