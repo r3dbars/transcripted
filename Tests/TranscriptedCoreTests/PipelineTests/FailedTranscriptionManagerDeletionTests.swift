@@ -205,6 +205,75 @@ extension FailedTranscriptionManagerTests {
         XCTAssertTrue(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
     }
 
+    func testMicOnlyDeleteFailsClosedWhenJournalSymlinkTargetsOutsideRoot() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let micURL = paths.audioCaptures.appendingPathComponent("outside-link-mic.wav")
+        let hiddenMicURL = paths.audioCaptures.appendingPathComponent("outside-link-hidden.wav")
+        let journalURL = paths.audioCaptures.appendingPathComponent("outside-link-mic.recording.json")
+        let outsideJournalURL = testRoot.appendingPathComponent("outside-link-target.recording.json")
+        for url in [micURL, hiddenMicURL] {
+            FileManager.default.createFile(atPath: url.path, contents: Data("owned".utf8))
+        }
+        try Data("not-json".utf8).write(to: outsideJournalURL, options: .atomic)
+        try FileManager.default.createSymbolicLink(
+            at: journalURL,
+            withDestinationURL: outsideJournalURL
+        )
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedID,
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+
+        XCTAssertFalse(manager.deleteFailedTranscription(id: failedID))
+        XCTAssertEqual(manager.failedTranscriptions.map(\.id), [failedID])
+        for url in [micURL, hiddenMicURL, journalURL, outsideJournalURL] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        }
+        let pendingDeletionURL = paths.failedQueue.deletingLastPathComponent()
+            .appendingPathComponent(FailedTranscriptionManager.pendingDeletionFilename)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
+    }
+
+    func testMicOnlyDeleteFailsClosedWhenJournalSymlinkIsBroken() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let micURL = paths.audioCaptures.appendingPathComponent("broken-link-mic.wav")
+        let hiddenMicURL = paths.audioCaptures.appendingPathComponent("broken-link-hidden.wav")
+        let journalURL = paths.audioCaptures.appendingPathComponent("broken-link-mic.recording.json")
+        let missingTargetURL = testRoot.appendingPathComponent("missing-journal-target.json")
+        for url in [micURL, hiddenMicURL] {
+            FileManager.default.createFile(atPath: url.path, contents: Data("owned".utf8))
+        }
+        try FileManager.default.createSymbolicLink(
+            at: journalURL,
+            withDestinationURL: missingTargetURL
+        )
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedID,
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+
+        XCTAssertFalse(manager.deleteFailedTranscription(id: failedID))
+        XCTAssertEqual(manager.failedTranscriptions.map(\.id), [failedID])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: hiddenMicURL.path))
+        XCTAssertNoThrow(try FileManager.default.destinationOfSymbolicLink(atPath: journalURL.path))
+        let pendingDeletionURL = paths.failedQueue.deletingLastPathComponent()
+            .appendingPathComponent(FailedTranscriptionManager.pendingDeletionFilename)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
+    }
+
     func testOldFailureCleanupConsumesRetainedJournalInventory() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

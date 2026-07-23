@@ -351,6 +351,12 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             isContained(url, in: canonicalRoots) ? url : nil
         }
         let journalCandidates = safeMicURL.map { journalURLs(forMicAudioURL: $0) } ?? []
+        // Check the raw expected paths before canonical containment. A broken
+        // or out-of-root symlink is otherwise filtered out and mistaken for
+        // no journal, even though it may stand in for hidden mic inventory.
+        guard !journalCandidates.contains(where: { isSymbolicLink(at: $0) }) else {
+            return false
+        }
         let existingJournalCandidates = journalCandidates.filter { candidate in
             isContained(candidate, in: canonicalRoots)
                 && FileManager.default.fileExists(atPath: candidate.path)
