@@ -50,8 +50,7 @@ final class MeetingCaptureBridge: ObservableObject {
     private let completionAttempt = MeetingCaptureAttempt<CaptureStopResult>()
     private let startAttempt = MeetingCaptureAttempt<Bool>()
     let micPCMRelay = MeetingMicPCMRelay()
-    private var timedOutStopCompletionHandlers: [UInt64: (CaptureStopResult) -> Void] = [:]
-    private var timedOutStopGenerations: Set<UInt64> = []
+    private var timedOutStopCompletions = TimedOutStopCompletionRegistry()
     private var expectedStopGeneration: UInt64?
 
     init(audio: Audio? = nil) {
@@ -88,6 +87,14 @@ final class MeetingCaptureBridge: ObservableObject {
         expectedStopGeneration = nil
         completionAttempt.reset()?.resume(returning: currentStopResult())
         if audio.isRecording { return true }
+
+        // Keep the immediately preceding timed-out stop across this start so
+        // its generation-tagged callback can still reach its failed row. Once
+        // another stop has advanced Core's generation, older journals/rows own
+        // recovery and their retained closures can be released.
+        timedOutStopCompletions.prune(
+            olderThan: audio.currentRecordingSessionGeneration
+        )
 
         errorMessage = nil
         micAttenuationCueObserved = false
@@ -162,10 +169,11 @@ final class MeetingCaptureBridge: ObservableObject {
                         uniquingKeysWith: { _, new in new }
                     )
                 )
-                self.timedOutStopGenerations.insert(stopGeneration)
-                if let onTimedOutCompletion {
-                    self.timedOutStopCompletionHandlers[stopGeneration] = onTimedOutCompletion
-                }
+                self.expectedStopGeneration = nil
+                self.timedOutStopCompletions.register(
+                    generation: stopGeneration,
+                    handler: onTimedOutCompletion
+                )
                 continuation.resume(returning: self.currentStopResult(didTimeOut: true))
             })
         }
@@ -239,7 +247,7 @@ final class MeetingCaptureBridge: ObservableObject {
                 switch MeetingCaptureCompletionPolicy.disposition(
                     completionGeneration: generation,
                     expectedStopGeneration: self.expectedStopGeneration,
-                    timedOutStopGenerations: self.timedOutStopGenerations,
+                    timedOutStopGenerations: self.timedOutStopCompletions.generations,
                     currentAudioGeneration: self.audio.currentRecordingSessionGeneration
                 ) {
                 case .expectedStop:
@@ -247,8 +255,7 @@ final class MeetingCaptureBridge: ObservableObject {
                     self.expectedStopGeneration = nil
                     continuation.resume(returning: result)
                 case .lateTimedOutStop:
-                    guard self.timedOutStopGenerations.remove(generation) != nil else { return }
-                    let handler = self.timedOutStopCompletionHandlers.removeValue(forKey: generation)
+                    let handler = self.timedOutStopCompletions.takeHandler(for: generation)
                     handler?(result)
                 case .unexpectedCurrentStop:
                     self.onUnexpectedRecordingComplete?(result)

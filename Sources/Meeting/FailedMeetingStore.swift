@@ -168,10 +168,18 @@ final class FailedMeetingStore {
         meetingTitle: String?,
         recordingDate: Date? = nil
     ) -> Bool {
+        // A completion can win the main-actor race and be buffered before the
+        // timeout continuation resumes. Use those finalized URLs as fallbacks
+        // so an empty timeout snapshot cannot suppress the durable failed row.
+        let persistenceAudio = timedOutFinalizationHandoff.audioForPersistence(
+            id: taskId,
+            provisionalMicURL: micAudioURL,
+            provisionalSystemURL: systemAudioURL
+        )
         let preserved = persistFailedMeetingForRetry(
             taskId: taskId,
-            micAudioURL: micAudioURL,
-            systemAudioURL: systemAudioURL,
+            micAudioURL: persistenceAudio.micURL,
+            systemAudioURL: persistenceAudio.systemURL,
             errorMessage: errorMessage,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,

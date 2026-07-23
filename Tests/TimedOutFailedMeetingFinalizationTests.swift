@@ -25,6 +25,16 @@ func testTimedOutFailedMeetingFinalization() {
             handoff.failedMeetingDidPersist(id: failedID)?.micURL == deletedSegmentURL,
             "the provisional segment path must never replace a buffered finalized result"
         )
+        let persistenceAudio = handoff.audioForPersistence(
+            id: failedID,
+            provisionalMicURL: nil,
+            provisionalSystemURL: nil
+        )
+        assertEqual(
+            persistenceAudio.micURL,
+            finalizedMicURL,
+            "callback-first finalization must supply the durable row when the timeout snapshot is empty"
+        )
 
         handoff.markDeliverySucceeded(id: failedID)
         assertNil(
@@ -75,5 +85,26 @@ func testTimedOutFailedMeetingFinalization() {
             result.systemURL,
             "a failed promotion must retain the completion for the store's existing mic placeholder"
         )
+    }
+
+    runSuite("Timed-out completion ownership prunes never-completing older stops") {
+        var registry = TimedOutStopCompletionRegistry()
+        var deliveredGeneration: UInt64?
+
+        registry.register(generation: 12) { _ in deliveredGeneration = 12 }
+        registry.prune(olderThan: 12)
+        assertTrue(registry.generations.contains(12), "the immediately preceding stop stays owned across the next start")
+        assertEqual(registry.handlerCount, 1)
+
+        registry.register(generation: 14) { _ in deliveredGeneration = 14 }
+        registry.prune(olderThan: 14)
+        assertFalse(registry.generations.contains(12), "an older never-completing stop must not retain its generation")
+        assertEqual(registry.handlerCount, 1, "pruning must release the older stop's closure")
+
+        let handler = registry.takeHandler(for: 14)
+        handler?(CaptureStopResult(micURL: nil, systemURL: nil, didTimeOut: false))
+        assertEqual(deliveredGeneration, 14)
+        assertTrue(registry.generations.isEmpty)
+        assertEqual(registry.handlerCount, 0)
     }
 }

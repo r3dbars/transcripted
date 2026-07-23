@@ -2433,8 +2433,13 @@ func testRepoCommandContract() {
         )
         assertTrue(
             stopBlock.contains("onTimedOutCompletion")
-                && stopBlock.contains("timedOutStopCompletionHandler"),
+                && stopBlock.contains("timedOutStopCompletions.register("),
             "late audio finalization after a stop timeout should be surfaced to repair retry paths"
+        )
+        assertTrue(
+            bridgeContents.contains("timedOutStopCompletions.prune(")
+                && bridgeContents.contains("olderThan: audio.currentRecordingSessionGeneration"),
+            "a never-completing timed-out stop should release older generations and closures on a later recording start"
         )
     }
 
@@ -2510,8 +2515,9 @@ func testRepoCommandContract() {
             "every stop timeout should keep its callback task ID before the generic missing-mic path"
         )
         assertTrue(
-            timeoutPreserveBlock.contains("archiveAudio: false"),
-            "stop timeouts should keep scratch audio in place because WAV finalization may still be running"
+            timeoutPreserveBlock.contains("archiveAudio: false")
+                && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.audioForPersistence("),
+            "stop timeouts should keep scratch audio in place and let callback-first finalized URLs create the durable row"
         )
         assertTrue(
             controllerContents.contains("refreshTimedOutFailedMeetingAudio(")
@@ -2750,8 +2756,9 @@ func testRepoCommandContract() {
         )
         assertTrue(
             terminationBlock.contains("taskId: shutdownFailedTaskId")
+                && terminationBlock.contains("if files.didTimeOut {")
                 && terminationBlock.contains("preserveTimedOutFailedMeetingForRetry("),
-            "shutdown stop timeouts should keep unfinished scratch audio in place until late finalization can promote it"
+            "shutdown stop timeouts should preserve callback-first audio even when the timeout snapshot has no URLs"
         )
     }
 

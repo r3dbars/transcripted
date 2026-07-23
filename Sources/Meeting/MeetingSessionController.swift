@@ -1625,26 +1625,27 @@ final class MeetingSessionController: ObservableObject {
             activeRecordingSuggestedTitle = nil
             activeRecordingStartedAt = nil
 
-            if files.micURL != nil || files.systemURL != nil {
-                if files.didTimeOut {
-                    didPreserveRecording = failedMeetingStore.preserveTimedOutFailedMeetingForRetry(
-                        taskId: shutdownFailedTaskId,
-                        micAudioURL: files.micURL,
-                        systemAudioURL: files.systemURL,
-                        errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
-                        meetingTitle: meetingTitle,
-                        recordingDate: recordingDate
-                    )
-                } else {
-                    didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
-                        taskId: shutdownFailedTaskId,
-                        micAudioURL: files.micURL,
-                        systemAudioURL: files.systemURL,
-                        errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
-                        meetingTitle: meetingTitle,
-                        recordingDate: recordingDate
-                    )
-                }
+            if files.didTimeOut {
+                // The late completion may already be buffered even when the
+                // timeout snapshot has no URLs, so always give the stable task
+                // ID a chance to create its durable failed row.
+                didPreserveRecording = failedMeetingStore.preserveTimedOutFailedMeetingForRetry(
+                    taskId: shutdownFailedTaskId,
+                    micAudioURL: files.micURL,
+                    systemAudioURL: files.systemURL,
+                    errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate
+                )
+            } else if files.micURL != nil || files.systemURL != nil {
+                didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
+                    taskId: shutdownFailedTaskId,
+                    micAudioURL: files.micURL,
+                    systemAudioURL: files.systemURL,
+                    errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
+                    meetingTitle: meetingTitle,
+                    recordingDate: recordingDate
+                )
             }
         } else {
             recordingTrigger = .unknown

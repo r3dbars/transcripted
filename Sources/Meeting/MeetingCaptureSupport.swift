@@ -29,8 +29,52 @@ struct TimedOutFailedMeetingFinalizationHandoff {
         bufferedResults[id]
     }
 
+    func audioForPersistence(
+        id: UUID,
+        provisionalMicURL: URL?,
+        provisionalSystemURL: URL?
+    ) -> (micURL: URL?, systemURL: URL?) {
+        let finalizedResult = bufferedResults[id]
+        return (
+            micURL: provisionalMicURL ?? finalizedResult?.micURL,
+            systemURL: provisionalSystemURL ?? finalizedResult?.systemURL
+        )
+    }
+
     mutating func markDeliverySucceeded(id: UUID) {
         bufferedResults.removeValue(forKey: id)
+    }
+}
+
+/// Owns callbacks for stops that timed out but may still finalize. A new
+/// recording retains the immediately preceding stop so its late completion can
+/// still be delivered, then prunes older stops whose journal/failed row owns
+/// recovery. This prevents never-completing stops from accumulating closures.
+struct TimedOutStopCompletionRegistry {
+    private(set) var generations: Set<UInt64> = []
+    private var handlers: [UInt64: (CaptureStopResult) -> Void] = [:]
+
+    var handlerCount: Int { handlers.count }
+
+    mutating func register(
+        generation: UInt64,
+        handler: ((CaptureStopResult) -> Void)?
+    ) {
+        generations.insert(generation)
+        handlers[generation] = handler
+    }
+
+    mutating func takeHandler(for generation: UInt64) -> ((CaptureStopResult) -> Void)? {
+        guard generations.remove(generation) != nil else { return nil }
+        return handlers.removeValue(forKey: generation)
+    }
+
+    mutating func prune(olderThan latestCompletedStopGeneration: UInt64) {
+        let staleGenerations = generations.filter { $0 < latestCompletedStopGeneration }
+        generations.subtract(staleGenerations)
+        for generation in staleGenerations {
+            handlers.removeValue(forKey: generation)
+        }
     }
 }
 
