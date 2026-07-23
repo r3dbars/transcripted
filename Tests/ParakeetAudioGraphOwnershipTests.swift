@@ -204,11 +204,11 @@ func testParakeetAudioGraphOwnership() async {
         let releaseBlockedStart = DispatchSemaphore(value: 0)
         let blockedStartFinished = DispatchSemaphore(value: 0)
         let lateCompletionMutatedResources = DispatchSemaphore(value: 0)
-        ownership.begin(owner: blockedOwner, phase: .zombieRecoveryStart)
+        ownership.begin(owner: blockedOwner, phase: .audioStart)
         blockedQueue.async {
             blockedStartEntered.signal()
             _ = releaseBlockedStart.wait(timeout: .now() + 2)
-            if ownership.finish(owner: blockedOwner, phase: .zombieRecoveryStart) {
+            if ownership.finish(owner: blockedOwner, phase: .audioStart) {
                 resources.restoreOriginalResources()
                 lateCompletionMutatedResources.signal()
             }
@@ -228,7 +228,7 @@ func testParakeetAudioGraphOwnership() async {
             claimedLease,
             ParakeetTimedAudioEngineWorkLease(
                 owner: blockedOwner,
-                phase: .zombieRecoveryStart
+                phase: .audioStart
             ),
             "cancellation should claim the exact in-flight recovery-start lease"
         )
@@ -332,6 +332,97 @@ func testParakeetAudioGraphOwnership() async {
             successorOwner,
             "successor admission should survive stale pre-lease completion"
         )
+    }
+
+    runSuite("Parakeet ordinary-start cancellation replaces blocked work before a successor") {
+        let blockedEngine = NSObject()
+        let blockedQueue = DispatchQueue(label: "test.parakeet.blocked-ordinary-start")
+        let blockedOwner = ParakeetAudioEngineQueueOwnerToken(
+            generation: 39,
+            engine: blockedEngine,
+            queue: blockedQueue
+        )
+        let ownership = ParakeetTimedAudioEngineWorkOwnership()
+        let cancellationState = ParakeetAudioStartCancellationState()
+        var startAdmission = ParakeetAudioStartAdmissionState()
+        let resources = ParakeetEngineQueueTestResources(
+            engine: blockedEngine,
+            queue: blockedQueue
+        )
+        assertTrue(startAdmission.begin(owner: blockedOwner), "the normal start should own admission")
+        ownership.begin(owner: blockedOwner, phase: .audioStart)
+
+        let blockedStartEntered = DispatchSemaphore(value: 0)
+        let releaseBlockedStart = DispatchSemaphore(value: 0)
+        let blockedStartFinished = DispatchSemaphore(value: 0)
+        let staleStartMutatedResources = DispatchSemaphore(value: 0)
+        blockedQueue.async {
+            blockedStartEntered.signal()
+            _ = releaseBlockedStart.wait(timeout: .now() + 2)
+            if cancellationState.canRunWork,
+               ownership.isActive(owner: blockedOwner, phase: .audioStart) {
+                resources.restoreOriginalResources()
+                staleStartMutatedResources.signal()
+            }
+            ownership.finish(owner: blockedOwner, phase: .audioStart)
+            blockedStartFinished.signal()
+        }
+        assertTrue(
+            blockedStartEntered.wait(timeout: .now() + 1) == .success,
+            "ordinary install/start work should be in flight before stop"
+        )
+
+        // Production stop advances logical generation before the timed-out
+        // continuation resumes. Claiming by engine+queue resource identity must
+        // still retire that exact blocked worker.
+        cancellationState.cancel()
+        let claimedLease = ownership.claimPendingWorkForSuccessor(
+            currentEngine: blockedEngine,
+            currentQueue: blockedQueue
+        )
+        assertEqual(
+            claimedLease,
+            ParakeetTimedAudioEngineWorkLease(owner: blockedOwner, phase: .audioStart),
+            "stop should claim a blocked ordinary start despite generation invalidation"
+        )
+        assertTrue(
+            startAdmission.finish(owner: blockedOwner),
+            "stop should release only the blocked ordinary start admission"
+        )
+
+        let successorEngine = NSObject()
+        let successorQueue = DispatchQueue(label: "test.parakeet.ordinary-start-successor")
+        let successorOwner = ParakeetAudioEngineQueueOwnerToken(
+            generation: 41,
+            engine: successorEngine,
+            queue: successorQueue
+        )
+        resources.replace(engine: successorEngine, queue: successorQueue)
+        assertTrue(
+            startAdmission.begin(owner: successorOwner),
+            "the replacement queue should admit a successor without another timeout"
+        )
+        let successorFinished = DispatchSemaphore(value: 0)
+        successorQueue.async { successorFinished.signal() }
+        assertTrue(
+            successorFinished.wait(timeout: .now() + 1) == .success,
+            "successor work should run while the retired queue remains blocked"
+        )
+
+        releaseBlockedStart.signal()
+        assertTrue(
+            blockedStartFinished.wait(timeout: .now() + 1) == .success,
+            "the test should release the retired worker"
+        )
+        assertTrue(
+            staleStartMutatedResources.wait(timeout: .now()) == .timedOut,
+            "a cancelled late start must not reclaim successor resources"
+        )
+        assertFalse(
+            startAdmission.finish(owner: blockedOwner),
+            "the stale ordinary-start defer must not clear successor admission"
+        )
+        assertEqual(startAdmission.owner, successorOwner, "the successor should remain admitted")
     }
 
     await runSuite("ParakeetOwnerBoundPendingState rejects a truly delayed stale restore") {
@@ -565,7 +656,7 @@ func testParakeetAudioGraphOwnership() async {
             queue: queue
         )
         let ownership = ParakeetTimedAudioEngineWorkOwnership()
-        ownership.begin(owner: owner, phase: .zombieRecoveryStart)
+        ownership.begin(owner: owner, phase: .audioStart)
 
         assertEqual(
             ownership.claimPendingWorkForSuccessor(currentEngine: engine, currentQueue: queue)?.owner,
@@ -576,7 +667,7 @@ func testParakeetAudioGraphOwnership() async {
         let retiredWorkRan = DispatchSemaphore(value: 0)
         let queuedWorkFinished = DispatchSemaphore(value: 0)
         queue.async {
-            if ownership.isActive(owner: owner, phase: .zombieRecoveryStart) {
+            if ownership.isActive(owner: owner, phase: .audioStart) {
                 retiredWorkRan.signal()
             }
             queuedWorkFinished.signal()
@@ -601,20 +692,20 @@ func testParakeetAudioGraphOwnership() async {
             queue: queue
         )
         let ownership = ParakeetTimedAudioEngineWorkOwnership()
-        ownership.begin(owner: owner, phase: .zombieRecoveryStart)
+        ownership.begin(owner: owner, phase: .audioStart)
 
         let workEntered = DispatchSemaphore(value: 0)
         let releaseWork = DispatchSemaphore(value: 0)
         let cleanupRan = DispatchSemaphore(value: 0)
         let workFinished = DispatchSemaphore(value: 0)
         queue.async {
-            guard ownership.isActive(owner: owner, phase: .zombieRecoveryStart) else {
+            guard ownership.isActive(owner: owner, phase: .audioStart) else {
                 workFinished.signal()
                 return
             }
             workEntered.signal()
             _ = releaseWork.wait(timeout: .now() + 2)
-            if !ownership.isActive(owner: owner, phase: .zombieRecoveryStart) {
+            if !ownership.isActive(owner: owner, phase: .audioStart) {
                 cleanupRan.signal()
             }
             workFinished.signal()
@@ -641,7 +732,7 @@ func testParakeetAudioGraphOwnership() async {
     }
 
     runSuite("Parakeet recovery start cancellation preserves only committed callbacks") {
-        let cancelledBeforeCommit = ParakeetRecoveryStartCancellationState()
+        let cancelledBeforeCommit = ParakeetAudioStartCancellationState()
         assertTrue(cancelledBeforeCommit.canRunWork, "a fresh recovery start should enter worker work")
         assertTrue(cancelledBeforeCommit.canDeliverSamples, "a fresh tap may deliver during start")
 
@@ -650,7 +741,7 @@ func testParakeetAudioGraphOwnership() async {
         assertFalse(cancelledBeforeCommit.canDeliverSamples, "stop should gate stale tap callbacks")
         assertFalse(cancelledBeforeCommit.commit(), "a cancelled start cannot become a recording")
 
-        let committedRecording = ParakeetRecoveryStartCancellationState()
+        let committedRecording = ParakeetAudioStartCancellationState()
         assertTrue(committedRecording.commit(), "the exact successful owner should commit its tap")
         assertFalse(committedRecording.canRunWork, "committed state is no longer start work")
         assertTrue(committedRecording.canDeliverSamples, "committing must not silence the recovered recording")

@@ -82,7 +82,7 @@ func testParakeetAudioOwnershipSourceContract() {
         )
     }
 
-    runSuite("ParakeetEngine cancelled recovery starts are gated and cleaned on the retired worker") {
+    runSuite("ParakeetEngine cancelled starts are gated and cleaned on the retired worker") {
         let source = readParakeetEngineSource()
         guard let timedWorkStart = source.range(of: "private func runTimedAudioEngineWork<T>("),
               let timedWorkEnd = source.range(of: "private static func elapsedMilliseconds", range: timedWorkStart.upperBound..<source.endIndex),
@@ -104,17 +104,40 @@ func testParakeetAudioOwnershipSourceContract() {
             "timed work should skip a claimed queued lease and clean in-flight cancellation on its own worker"
         )
         assertTrue(
-            install.contains("isWorkCurrent: recoveryWorkIsCurrent")
-                && install.contains("phase: .zombieRecoveryStart")
-                && install.contains("guard recoveryWorkIsCurrent() else { throw CancellationError() }")
-                && install.contains("recoveryCancellationState.canDeliverSamples")
+            install.contains("isWorkCurrent: startWorkIsCurrent")
+                && install.contains("phase: .audioStart")
+                && install.contains("guard startWorkIsCurrent() else { throw CancellationError() }")
+                && install.contains("startCancellationState.canDeliverSamples")
                 && install.contains("try audioEngine.start()"),
-            "recovery start should validate its lease at entry, tap delivery, and around engine start"
+            "every start should validate its lease at entry, tap delivery, and around engine start"
         )
         assertTrue(
-            source.contains("!zombieStartCancellationState.commit()")
-                && source.contains("zombieRecoveryStartCancellationState?.cancel()"),
-            "a successful recovery should commit callback delivery while stop cancels it immediately"
+            source.contains("!startCancellationState.commit()")
+                && source.contains("audioStartCancellationState?.cancel()"),
+            "a successful start should commit callback delivery while stop cancels it immediately"
+        )
+        assertTrue(
+            source.contains("let startCancellationState = ParakeetAudioStartCancellationState()")
+                && source.contains("audioEngineWorkOwnership.begin(owner: attemptOwner, phase: .audioStart)"),
+            "normal and recovery starts should share the same replaceable timed-work lease"
+        )
+        guard let idleStopStart = source.range(of: "if audioStartInProgress {"),
+              let idleStopEnd = source.range(
+                of: "await restorePendingSystemInputAfterRecording(",
+                range: idleStopStart.upperBound..<source.endIndex
+              ) else {
+            assertTrue(false, "test should find idle stop cancellation")
+            return
+        }
+        let idleStop = String(source[idleStopStart.lowerBound..<idleStopEnd.lowerBound])
+        guard let cancelTimedStart = idleStop.range(of: "cancelAudioWatchdog()"),
+              let cancelAdmission = idleStop.range(of: "audioStartAdmission.cancel()") else {
+            assertTrue(false, "idle stop should cancel timed start work and admission")
+            return
+        }
+        assertTrue(
+            cancelTimedStart.lowerBound < cancelAdmission.lowerBound,
+            "idle stop must retire blocked engine work before releasing start admission"
         )
         assertTrue(
             abandon.contains("let retiredQueue = audioEngineQueue")

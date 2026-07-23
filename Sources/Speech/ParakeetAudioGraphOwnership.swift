@@ -74,7 +74,7 @@ struct ParakeetAudioStartAdmissionState: Equatable {
 
 enum ParakeetTimedAudioEngineWorkPhase: String, Equatable, Sendable {
     case zombieReset
-    case zombieRecoveryStart
+    case audioStart
 }
 
 struct ParakeetTimedAudioEngineWorkLease: Equatable, Sendable {
@@ -82,7 +82,7 @@ struct ParakeetTimedAudioEngineWorkLease: Equatable, Sendable {
     let phase: ParakeetTimedAudioEngineWorkPhase
 }
 
-/// Thread-safe ownership for one bounded zombie-recovery engine operation.
+/// Thread-safe ownership for one bounded audio-engine operation.
 /// Completion clears only its exact lease; a newer MainActor owner can claim
 /// still-pending work by engine+queue identity after advancing the generation.
 final class ParakeetTimedAudioEngineWorkOwnership: @unchecked Sendable {
@@ -135,10 +135,10 @@ final class ParakeetTimedAudioEngineWorkOwnership: @unchecked Sendable {
     }
 }
 
-/// Bridges a recovery start from cancellable worker work into a committed
+/// Bridges an audio start from cancellable worker work into a committed
 /// recording. The tap may deliver only while the start is active or committed;
 /// stop turns both queued work and any late callbacks into no-ops.
-final class ParakeetRecoveryStartCancellationState: @unchecked Sendable {
+final class ParakeetAudioStartCancellationState: @unchecked Sendable {
     private enum State {
         case active
         case committed

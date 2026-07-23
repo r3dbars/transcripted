@@ -757,18 +757,18 @@ func testParakeetStartRecordingFailurePolicy() {
         let recreationBody = String(watchdog[recreationStart.lowerBound..<recreationEnd.lowerBound])
         guard let entryOwnershipGate = recreationBody.range(of: "expectedOwner: expectedOwner"),
               let trackRebuild = recreationBody.range(of: "trackAudioEngineRebuildChurn(reason: \"zombie_engine_recovery\")"),
-              let beginTimedOwnership = recreationBody.range(of: "zombieEngineWorkOwnership.begin(owner: resetQueueOwner, phase: .zombieReset)"),
+              let beginTimedOwnership = recreationBody.range(of: "audioEngineWorkOwnership.begin(owner: resetQueueOwner, phase: .zombieReset)"),
               let timedReset = recreationBody.range(of: "runTimedAudioEngineWork(operation: \"zombie_engine_reset\")"),
-              let finishTimedOwnership = recreationBody.range(of: "zombieEngineWorkOwnership.finish(", range: timedReset.upperBound..<recreationBody.endIndex),
+              let finishTimedOwnership = recreationBody.range(of: "audioEngineWorkOwnership.finish(", range: timedReset.upperBound..<recreationBody.endIndex),
               let timeoutOwnershipGate = recreationBody.range(of: "expectedOwner: resetOwner", range: timedReset.upperBound..<recreationBody.endIndex),
               let abandonBlocked = recreationBody.range(of: "reason: \"zombie_engine_reset_timeout\"", range: timeoutOwnershipGate.upperBound..<recreationBody.endIndex),
               let abandonQueueOwner = recreationBody.range(of: "expectedOwner: resetQueueOwner", range: abandonBlocked.upperBound..<recreationBody.endIndex),
               let successOwnershipGate = recreationBody.range(of: "expectedOwner: resetOwner", range: abandonBlocked.upperBound..<recreationBody.endIndex),
               let firstSharedFlagMutation = recreationBody.range(of: "inputTapInstalled = false", range: successOwnershipGate.upperBound..<recreationBody.endIndex),
               let freshEngine = recreationBody.range(of: "audioEngine = AVAudioEngine()", range: firstSharedFlagMutation.upperBound..<recreationBody.endIndex),
-              let beginRestartOwnership = recordingBody.range(of: "phase: .zombieRecoveryStart"),
+              let beginRestartOwnership = recordingBody.range(of: "phase: .audioStart"),
               let timedRestart = recordingBody.range(of: "try await installTapAndStartEngine", range: beginRestartOwnership.upperBound..<recordingBody.endIndex),
-              let finishRestartOwnership = recordingBody.range(of: "phase: .zombieRecoveryStart", range: timedRestart.upperBound..<recordingBody.endIndex) else {
+              let finishRestartOwnership = recordingBody.range(of: "phase: .audioStart", range: timedRestart.upperBound..<recordingBody.endIndex) else {
             assertTrue(false, "zombie graph recreation should guard entry, timeout, and successful completion")
             return
         }
@@ -892,9 +892,9 @@ func testParakeetStartRecordingFailurePolicy() {
               let clearTimeline = stopBody.range(of: "clearRecoveredRecordingTimeline(keepingCapacity: true)", range: pendingBranch.upperBound..<stopBody.endIndex),
               let releaseHardware = stopBody.range(of: "await releaseIdleAudioHardware(", range: pendingBranch.upperBound..<stopBody.endIndex),
               let returnFromBranch = stopBody.range(of: "return", range: pendingBranch.upperBound..<stopBody.endIndex),
-              let claimBlockedQueue = cancelBody.range(of: "zombieEngineWorkOwnership.claimPendingWorkForSuccessor("),
+              let claimBlockedQueue = cancelBody.range(of: "audioEngineWorkOwnership.claimPendingWorkForSuccessor("),
               let classifyBlockedQueue = cancelBody.range(of: "let reason = blockedLease.phase", range: claimBlockedQueue.upperBound..<cancelBody.endIndex),
-              let recoveryStartReason = cancelBody.range(of: "\"zombie_engine_recovery_start_cancelled\"", range: classifyBlockedQueue.upperBound..<cancelBody.endIndex),
+              let recoveryStartReason = cancelBody.range(of: "\"audio_engine_start_cancelled\"", range: classifyBlockedQueue.upperBound..<cancelBody.endIndex),
               let replaceBlockedQueue = cancelBody.range(of: "abandonBlockedAudioEngine(reason: reason)", range: recoveryStartReason.upperBound..<cancelBody.endIndex),
               let cancelTerminal = cancelBody.range(of: "zombieRecoveryState.cancelActiveAttempt()", range: replaceBlockedQueue.upperBound..<cancelBody.endIndex) else {
             assertTrue(false, "inactive stopRecording should cancel pending zombie recovery restart")
