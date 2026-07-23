@@ -235,6 +235,7 @@ public struct SpeakerNamingRequest {
     public let micAudioURL: URL?
     public let shouldRemoveTemporaryAudioOnCleanup: Bool
     public let sourceFailedTranscriptionId: UUID?
+    public let importedRecoverySession: (any ImportedTranscriptionRecoverySession)?
     public let onComplete: ([SpeakerNameUpdate]) -> Void
 
     public init(
@@ -247,6 +248,7 @@ public struct SpeakerNamingRequest {
         micAudioURL: URL?,
         shouldRemoveTemporaryAudioOnCleanup: Bool = true,
         sourceFailedTranscriptionId: UUID? = nil,
+        importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
         onComplete: @escaping ([SpeakerNameUpdate]) -> Void
     ) {
         self.speakers = speakers
@@ -258,6 +260,7 @@ public struct SpeakerNamingRequest {
         self.micAudioURL = micAudioURL
         self.shouldRemoveTemporaryAudioOnCleanup = shouldRemoveTemporaryAudioOnCleanup
         self.sourceFailedTranscriptionId = sourceFailedTranscriptionId
+        self.importedRecoverySession = importedRecoverySession
         self.onComplete = onComplete
     }
 

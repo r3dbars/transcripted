@@ -510,7 +510,6 @@ func testMeetingImportedAudioPreparer() async {
         try! ImportedTranscriptionQueueJournal.persist(
             id: id,
             audioURL: audioURL,
-            suggestedTitle: "Customer Call",
             recordingDate: recordingDate,
             enqueuedAt: recordingDate.addingTimeInterval(10),
             sttModelRawValue: "parakeet",
@@ -524,6 +523,15 @@ func testMeetingImportedAudioPreparer() async {
         assertEqual(recovered.first?.phase, .queued, "a newly accepted import should begin in the queued phase")
         assertNil(recovered.first?.owner, "a queued journal should not claim a live process owner")
         assertEqual(recovered.first?.audioFilename, audioURL.lastPathComponent, "journals should store only the app-owned scratch filename")
+        let journalFile = try! FileManager.default.contentsOfDirectory(
+            at: journalURL,
+            includingPropertiesForKeys: nil
+        ).first { $0.pathExtension == "json" }!
+        let journalData = try! Data(contentsOf: journalFile)
+        assertFalse(
+            journalData.range(of: Data("suggestedTitle".utf8)) != nil,
+            "recovery journals must not persist an imported title"
+        )
         assertEqual(
             recovered.first.flatMap {
                 ImportedTranscriptionQueueJournal.audioURL(for: $0, scratchDirectory: scratchURL)
@@ -552,7 +560,6 @@ func testMeetingImportedAudioPreparer() async {
         let unsafeRecord = ImportedTranscriptionQueueJournalRecord(
             id: UUID(),
             audioFilename: "../outside.wav",
-            suggestedTitle: "Unsafe",
             recordingDate: recordingDate,
             enqueuedAt: recordingDate,
             sttModelRawValue: "parakeet"
@@ -571,7 +578,6 @@ func testMeetingImportedAudioPreparer() async {
         try! ImportedTranscriptionQueueJournal.persist(
             id: olderSourceNewerQueueID,
             audioURL: olderSourceNewerQueueAudioURL,
-            suggestedTitle: "Older Source Imported Second",
             recordingDate: recordingDate.addingTimeInterval(-86_400),
             enqueuedAt: recordingDate.addingTimeInterval(20),
             sttModelRawValue: "parakeet",
@@ -592,7 +598,7 @@ func testMeetingImportedAudioPreparer() async {
         )
     }
 
-    runSuite("Imported transcription journal lease excludes a second process and survives owner death") {
+    runSuite("Imported transcription journal lease excludes a second live process and survives owner death") {
         let root = temporaryImportAudioPreparerRoot()
         let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
         let journalURL = root.appendingPathComponent("state/queue", isDirectory: true)
@@ -603,7 +609,6 @@ func testMeetingImportedAudioPreparer() async {
         try! ImportedTranscriptionQueueJournal.persist(
             id: id,
             audioURL: audioURL,
-            suggestedTitle: "Lease",
             recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
             sttModelRawValue: "parakeet",
             journalDirectory: journalURL,
@@ -617,14 +622,22 @@ func testMeetingImportedAudioPreparer() async {
         )
         assertNotNil(firstOwner, "the first process should claim the queued import")
         assertEqual(firstOwner?.phase, .active, "claiming should durably mark the import active")
-        let blockedOwner = try! ImportedTranscriptionQueueJournal.claim(
-            id: id,
-            journalDirectory: journalURL,
-            processIdentifier: 202
+        let lockURL = journalURL.appendingPathComponent(
+            "import-job-\(id.uuidString).lock",
+            isDirectory: false
         )
-        assertNil(blockedOwner, "a second live process must not claim active work")
+        assertEqual(
+            importedJournalLeaseProbe(lockURL: lockURL, expectLocked: true),
+            0,
+            "a separate process must be unable to take a live owner's lease"
+        )
 
         firstOwner = nil
+        assertEqual(
+            importedJournalLeaseProbe(lockURL: lockURL, expectLocked: false),
+            0,
+            "a separate process should take the lease after the prior owner exits"
+        )
         let recoveredOwner = try! ImportedTranscriptionQueueJournal.claim(
             id: id,
             journalDirectory: journalURL,
@@ -649,7 +662,6 @@ func testMeetingImportedAudioPreparer() async {
         try! ImportedTranscriptionQueueJournal.persist(
             id: id,
             audioURL: audioURL,
-            suggestedTitle: "Committed",
             recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
             sttModelRawValue: "parakeet",
             journalDirectory: journalURL,
@@ -675,9 +687,34 @@ func testMeetingImportedAudioPreparer() async {
         )
     }
 
+    runSuite("Imported transcription recovery recognizes both transcript crash boundaries") {
+        assertTrue(
+            ImportedTranscriptionQueueJournal.hasCommittedTranscript(
+                phase: .active,
+                stableTranscriptExists: true
+            ),
+            "a stable transcript identity must make recovery idempotent after the Markdown write but before the phase marker"
+        )
+        assertTrue(
+            ImportedTranscriptionQueueJournal.hasCommittedTranscript(
+                phase: .transcriptCommitted,
+                stableTranscriptExists: false
+            ),
+            "the durable phase must resume cleanup after the marker but before scratch removal"
+        )
+        assertFalse(
+            ImportedTranscriptionQueueJournal.hasCommittedTranscript(
+                phase: .active,
+                stableTranscriptExists: false
+            ),
+            "recovery should only replay when neither commit proof exists"
+        )
+    }
+
     runSuite("Imported transcription recovery rejects symlinks and non-regular scratch entries") {
         let root = temporaryImportAudioPreparerRoot()
         let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let journalURL = root.appendingPathComponent("state/queue", isDirectory: true)
         let outsideURL = root.appendingPathComponent("outside.wav")
         let symlinkURL = scratchURL.appendingPathComponent("linked.wav")
         let directoryURL = scratchURL.appendingPathComponent("folder.wav", isDirectory: true)
@@ -710,6 +747,34 @@ func testMeetingImportedAudioPreparer() async {
             .unsafeEntry,
             "recovery input must remain directly inside app-owned scratch"
         )
+
+        let jobId = UUID()
+        let regularURL = scratchURL.appendingPathComponent("regular.wav")
+        try! Data([4, 5, 6, 7]).write(to: regularURL)
+        try! ImportedTranscriptionQueueJournal.persist(
+            id: jobId,
+            audioURL: regularURL,
+            recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
+            sttModelRawValue: "parakeet",
+            journalDirectory: journalURL,
+            scratchDirectory: scratchURL
+        )
+        let outsideLockURL = root.appendingPathComponent("outside.lock")
+        try! Data().write(to: outsideLockURL)
+        try! FileManager.default.createSymbolicLink(
+            at: journalURL.appendingPathComponent("import-job-\(jobId.uuidString).lock"),
+            withDestinationURL: outsideLockURL
+        )
+        var rejectedSymlinkLock = false
+        do {
+            _ = try ImportedTranscriptionQueueJournal.claim(
+                id: jobId,
+                journalDirectory: journalURL
+            )
+        } catch {
+            rejectedSymlinkLock = true
+        }
+        assertTrue(rejectedSymlinkLock, "recovery must not follow a symlinked lease file")
     }
 
     runSuite("Imported queue persistence failure copy only claims durable retry ownership when persisted") {
@@ -729,6 +794,33 @@ func testMeetingImportedAudioPreparer() async {
             notPreserved.contains("Import the original file again"),
             "an unrecoverable copied import should give an honest recovery action"
         )
+    }
+}
+
+private func importedJournalLeaseProbe(lockURL: URL, expectLocked: Bool) -> Int32 {
+    let script = """
+    import fcntl, os, sys
+    descriptor = os.open(sys.argv[1], os.O_RDWR)
+    observed_locked = False
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        observed_locked = True
+    expected_locked = sys.argv[2] == "locked"
+    os.close(descriptor)
+    sys.exit(0 if observed_locked == expected_locked else 92)
+    """
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+    process.arguments = ["-c", script, lockURL.path, expectLocked ? "locked" : "available"]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    } catch {
+        return 90
     }
 }
 

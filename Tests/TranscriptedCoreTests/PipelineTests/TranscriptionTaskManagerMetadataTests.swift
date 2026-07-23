@@ -483,13 +483,14 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         diarization: (any DiarizationEngine)? = nil,
         retainedAudioDirectory: URL? = nil,
         retainedAudioDirectoryProvider: (() -> URL?)? = nil,
-        statsStore: (any StatsStore)? = nil
+        statsStore: (any StatsStore)? = nil,
+        failedQueueURL: URL? = nil
     ) -> TranscriptionTaskManager {
         let paths = CoreStoragePaths(
             transcripts: tempDirectory.appendingPathComponent("transcripts"),
             speakerDB: tempDirectory.appendingPathComponent("speakers.sqlite"),
             statsDB: tempDirectory.appendingPathComponent("stats.sqlite"),
-            failedQueue: tempDirectory.appendingPathComponent("failed_transcriptions.json"),
+            failedQueue: failedQueueURL ?? tempDirectory.appendingPathComponent("failed_transcriptions.json"),
             speakerClips: tempDirectory.appendingPathComponent("speaker_clips"),
             audioCaptures: tempDirectory.appendingPathComponent("audio"),
             logs: tempDirectory.appendingPathComponent("logs")

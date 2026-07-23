@@ -26,7 +26,6 @@ struct ImportedTranscriptionQueueJournalOwner: Codable, Equatable, Sendable {
 struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
     let id: UUID
     let audioFilename: String
-    let suggestedTitle: String
     let recordingDate: Date
     let enqueuedAt: Date
     let sttModelRawValue: String
@@ -36,7 +35,6 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
     init(
         id: UUID,
         audioFilename: String,
-        suggestedTitle: String,
         recordingDate: Date,
         enqueuedAt: Date,
         sttModelRawValue: String,
@@ -45,7 +43,6 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
     ) {
         self.id = id
         self.audioFilename = audioFilename
-        self.suggestedTitle = suggestedTitle
         self.recordingDate = recordingDate
         self.enqueuedAt = enqueuedAt
         self.sttModelRawValue = sttModelRawValue
@@ -56,7 +53,6 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id
         case audioFilename
-        case suggestedTitle
         case recordingDate
         case enqueuedAt
         case sttModelRawValue
@@ -68,7 +64,6 @@ struct ImportedTranscriptionQueueJournalRecord: Codable, Equatable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(UUID.self, forKey: .id)
         audioFilename = try values.decode(String.self, forKey: .audioFilename)
-        suggestedTitle = try values.decode(String.self, forKey: .suggestedTitle)
         recordingDate = try values.decode(Date.self, forKey: .recordingDate)
         enqueuedAt = try values.decode(Date.self, forKey: .enqueuedAt)
         sttModelRawValue = try values.decode(String.self, forKey: .sttModelRawValue)
@@ -105,6 +100,7 @@ enum ImportedTranscriptionQueueJournal {
     private static let filenamePrefix = "import-job-"
     private static let filenameExtension = "json"
     private static let lockFilenameExtension = "lock"
+    private static let maximumRecordBytes = 64 * 1024
 
     enum RecoveryAudioStatus: Equatable {
         case regularFile
@@ -115,7 +111,6 @@ enum ImportedTranscriptionQueueJournal {
     static func persist(
         id: UUID,
         audioURL: URL,
-        suggestedTitle: String,
         recordingDate: Date,
         enqueuedAt: Date = Date(),
         sttModelRawValue: String,
@@ -136,7 +131,6 @@ enum ImportedTranscriptionQueueJournal {
         let record = ImportedTranscriptionQueueJournalRecord(
             id: id,
             audioFilename: normalizedAudioURL.lastPathComponent,
-            suggestedTitle: suggestedTitle,
             recordingDate: recordingDate,
             enqueuedAt: enqueuedAt,
             sttModelRawValue: sttModelRawValue
@@ -150,7 +144,7 @@ enum ImportedTranscriptionQueueJournal {
     ) -> [ImportedTranscriptionQueueJournalRecord] {
         guard let urls = try? fileManager.contentsOfDirectory(
             at: journalDirectory,
-            includingPropertiesForKeys: nil,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
 
@@ -160,11 +154,7 @@ enum ImportedTranscriptionQueueJournal {
                     && $0.deletingPathExtension().lastPathComponent.hasPrefix(filenamePrefix)
             }
             .compactMap { url in
-                guard let data = try? Data(contentsOf: url),
-                      let record = try? JSONDecoder().decode(
-                          ImportedTranscriptionQueueJournalRecord.self,
-                          from: data
-                      ),
+                guard let record = readRecord(from: url),
                       !record.audioFilename.isEmpty,
                       URL(fileURLWithPath: record.audioFilename).lastPathComponent == record.audioFilename
                 else { return nil }
@@ -178,12 +168,22 @@ enum ImportedTranscriptionQueueJournal {
             }
     }
 
+    @discardableResult
     static func remove(
         id: UUID,
         journalDirectory: URL,
         fileManager: FileManager = .default
-    ) {
-        try? fileManager.removeItem(at: journalURL(for: id, in: journalDirectory))
+    ) -> Bool {
+        do {
+            try fileManager.removeItem(at: journalURL(for: id, in: journalDirectory))
+            synchronizeDirectory(journalDirectory)
+            return true
+        } catch {
+            if (error as NSError).code == NSFileNoSuchFileError {
+                return true
+            }
+            return false
+        }
     }
 
     /// Claims one journal with an advisory lock held for the lifetime of the
@@ -203,10 +203,17 @@ enum ImportedTranscriptionQueueJournal {
         let lockURL = lockURL(for: id, in: journalDirectory)
         let descriptor = Darwin.open(
             lockURL.path,
-            O_CREAT | O_RDWR | O_CLOEXEC,
+            O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW,
             S_IRUSR | S_IWUSR
         )
         guard descriptor >= 0 else {
+            throw ImportedTranscriptionQueueJournalError.claimFailed
+        }
+
+        var lockStatus = stat()
+        guard fstat(descriptor, &lockStatus) == 0,
+              (lockStatus.st_mode & S_IFMT) == S_IFREG else {
+            Darwin.close(descriptor)
             throw ImportedTranscriptionQueueJournalError.claimFailed
         }
 
@@ -280,6 +287,13 @@ enum ImportedTranscriptionQueueJournal {
             || existingAudioURLs.contains(audioURL.standardizedFileURL)
     }
 
+    static func hasCommittedTranscript(
+        phase: ImportedTranscriptionQueueJournalPhase,
+        stableTranscriptExists: Bool
+    ) -> Bool {
+        phase == .transcriptCommitted || stableTranscriptExists
+    }
+
     private static func journalURL(for id: UUID, in directory: URL) -> URL {
         directory.appendingPathComponent(
             "\(filenamePrefix)\(id.uuidString).\(filenameExtension)",
@@ -300,11 +314,7 @@ enum ImportedTranscriptionQueueJournal {
         fileManager: FileManager
     ) -> ImportedTranscriptionQueueJournalRecord? {
         let url = journalURL(for: id, in: journalDirectory)
-        guard let data = try? Data(contentsOf: url),
-              let record = try? JSONDecoder().decode(
-                  ImportedTranscriptionQueueJournalRecord.self,
-                  from: data
-              ),
+        guard let record = readRecord(from: url),
               record.id == id,
               !record.audioFilename.isEmpty,
               URL(fileURLWithPath: record.audioFilename).lastPathComponent == record.audioFilename
@@ -319,8 +329,76 @@ enum ImportedTranscriptionQueueJournal {
     ) throws {
         let data = try JSONEncoder().encode(record)
         let destination = journalURL(for: record.id, in: journalDirectory)
-        try data.write(to: destination, options: [.atomic])
+        let temporary = journalDirectory.appendingPathComponent(
+            ".\(filenamePrefix)\(record.id.uuidString)-\(UUID().uuidString).tmp",
+            isDirectory: false
+        )
+        let descriptor = Darwin.open(
+            temporary.path,
+            O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW,
+            S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else { throw posixError() }
+
+        do {
+            try data.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return }
+                var offset = 0
+                while offset < bytes.count {
+                    let written = Darwin.write(
+                        descriptor,
+                        base.advanced(by: offset),
+                        bytes.count - offset
+                    )
+                    guard written > 0 else { throw posixError() }
+                    offset += written
+                }
+            }
+            guard fsync(descriptor) == 0 else { throw posixError() }
+            guard rename(temporary.path, destination.path) == 0 else { throw posixError() }
+            synchronizeDirectory(journalDirectory)
+            Darwin.close(descriptor)
+        } catch {
+            Darwin.close(descriptor)
+            unlink(temporary.path)
+            throw error
+        }
         fileManager.restrictFileToOwnerOnly(at: destination)
+    }
+
+    private static func readRecord(from url: URL) -> ImportedTranscriptionQueueJournalRecord? {
+        let descriptor = Darwin.open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard descriptor >= 0 else { return nil }
+        defer { Darwin.close(descriptor) }
+
+        var status = stat()
+        guard fstat(descriptor, &status) == 0,
+              (status.st_mode & S_IFMT) == S_IFREG,
+              status.st_size >= 0,
+              status.st_size <= maximumRecordBytes else {
+            return nil
+        }
+
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
+        guard let data = try? handle.read(upToCount: maximumRecordBytes + 1),
+              data.count <= maximumRecordBytes else {
+            return nil
+        }
+        return try? JSONDecoder().decode(
+            ImportedTranscriptionQueueJournalRecord.self,
+            from: data
+        )
+    }
+
+    private static func synchronizeDirectory(_ directory: URL) {
+        let descriptor = Darwin.open(directory.path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { return }
+        _ = fsync(descriptor)
+        Darwin.close(descriptor)
+    }
+
+    private static func posixError() -> POSIXError {
+        POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
     }
 }
 
@@ -367,6 +445,10 @@ final class ImportedTranscriptionQueueJournalSession: ImportedTranscriptionRecov
     }
 
     func failedQueueHandoffConfirmed() {
+        finish()
+    }
+
+    func supersededRecoveryConfirmed() {
         finish()
     }
 

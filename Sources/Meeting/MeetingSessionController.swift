@@ -1560,8 +1560,17 @@ final class MeetingSessionController: ObservableObject {
                 )
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
-                    try? FileManager.default.removeItem(at: audioURL)
-                    transcriptionQueue.removeImportedJournal(for: job)
+                    do {
+                        try FileManager.default.removeItem(at: audioURL)
+                        transcriptionQueue.confirmImportedScratchCleanup(for: job)
+                    } catch where (error as NSError).code == NSFileNoSuchFileError {
+                        transcriptionQueue.confirmImportedScratchCleanup(for: job)
+                    } catch {
+                        AppLogger.pipeline.warning("Failed to discard queued imported scratch audio", [
+                            "file": audioURL.lastPathComponent,
+                            "errorType": String(describing: type(of: error))
+                        ])
+                    }
                 } else {
                     if failedMeetingStore.preserveFailedMeetingForRetry(
                         micAudioURL: nil,
@@ -1570,7 +1579,7 @@ final class MeetingSessionController: ObservableObject {
                         meetingTitle: suggestedTitle,
                         recordingDate: recordingDate
                     ) {
-                        transcriptionQueue.removeImportedJournal(for: job)
+                        transcriptionQueue.confirmImportedFailedQueueHandoff(for: job)
                     }
                 }
             }

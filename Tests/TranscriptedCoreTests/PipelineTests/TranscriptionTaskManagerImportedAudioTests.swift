@@ -4,6 +4,35 @@ import AVFoundation
 import FluidAudio
 @testable import TranscriptedCore
 
+private final class ImportedRecoverySessionSpy: ImportedTranscriptionRecoverySession, @unchecked Sendable {
+    let jobID: UUID
+
+    private let lock = NSLock()
+    private var transcriptCommits = 0
+    private var scratchCleanups = 0
+    private var failedQueueHandoffs = 0
+
+    init(jobID: UUID) {
+        self.jobID = jobID
+    }
+
+    var transcriptCommitCount: Int { lock.withLock { transcriptCommits } }
+    var scratchCleanupCount: Int { lock.withLock { scratchCleanups } }
+    var failedQueueHandoffCount: Int { lock.withLock { failedQueueHandoffs } }
+
+    func transcriptCommitConfirmed() {
+        lock.withLock { transcriptCommits += 1 }
+    }
+
+    func scratchCleanupConfirmed() {
+        lock.withLock { scratchCleanups += 1 }
+    }
+
+    func failedQueueHandoffConfirmed() {
+        lock.withLock { failedQueueHandoffs += 1 }
+    }
+}
+
 @available(macOS 14.0, *)
 @MainActor
 extension TranscriptionTaskManagerMetadataTests {
@@ -35,11 +64,15 @@ extension TranscriptionTaskManagerMetadataTests {
             .appendingPathComponent("audio", isDirectory: true)
             .appendingPathComponent("imported-meeting.wav")
         try writeMonoWAV(to: copiedImportURL, duration: 2.5)
+        let taskId = UUID()
+        let recoverySession = ImportedRecoverySessionSpy(jobID: taskId)
 
         manager.startImportedTranscription(
+            taskId: taskId,
             audioURL: copiedImportURL,
             outputFolder: tempDirectory.appendingPathComponent("transcripts"),
-            meetingTitle: "Imported customer call"
+            meetingTitle: "Imported customer call",
+            recoverySession: recoverySession
         )
 
         try await waitUntil {
@@ -59,11 +92,13 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: copiedImportURL.path))
+        XCTAssertEqual(recoverySession.failedQueueHandoffCount, 1)
+        XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
 
         speech.release()
     }
 
-    func testImportedTranscriptionTerminalHandlerWaitsForTranscriptCommit() async throws {
+    func testImportedRecoverySessionUsesStableIdentityAndWaitsForScratchCleanup() async throws {
         let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Imported terminal handoff.")
         let manager = makeManager(
             speechToText: speech,
@@ -74,21 +109,71 @@ extension TranscriptionTaskManagerMetadataTests {
             .appendingPathComponent("imported-terminal-handoff.wav")
         try writeMonoWAV(to: copiedImportURL, duration: 2.5)
 
-        var didReachTerminal = false
+        let taskId = UUID()
+        let recoverySession = ImportedRecoverySessionSpy(jobID: taskId)
         manager.startImportedTranscription(
+            taskId: taskId,
             audioURL: copiedImportURL,
             outputFolder: tempDirectory.appendingPathComponent("transcripts"),
-            onTerminal: { didReachTerminal = true }
+            recoverySession: recoverySession
         )
 
         try await waitUntil { speech.didStart }
-        XCTAssertFalse(didReachTerminal, "the import must remain recoverable while inference is running")
+        XCTAssertEqual(recoverySession.transcriptCommitCount, 0)
+        XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: copiedImportURL.path))
 
         speech.release()
         try await waitUntil {
-            didReachTerminal && manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
+            recoverySession.transcriptCommitCount == 1
+                && manager.lastSavedTranscriptURL != nil
+                && manager.activeTasks.isEmpty
         }
+
+        let transcriptURL = try XCTUnwrap(manager.lastSavedTranscriptURL)
+        let frontmatter = try XCTUnwrap(try TranscriptFrontmatter.readValues(from: transcriptURL))
+        XCTAssertEqual(TranscriptFrontmatter.captureID(in: frontmatter), taskId)
+        XCTAssertEqual(recoverySession.scratchCleanupCount, 0, "speaker review still owns scratch audio")
+
+        XCTAssertTrue(manager.deferPendingSpeakerNamingReview(reason: "test cleanup"))
+        try await waitUntil {
+            recoverySession.scratchCleanupCount == 1
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: copiedImportURL.path))
+    }
+
+    func testFailedShutdownHandoffKeepsImportedRecoverySession() async throws {
+        let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Imported failed handoff.")
+        let blockedParent = tempDirectory.appendingPathComponent("blocked-failed-queue")
+        try Data([0]).write(to: blockedParent)
+        let manager = makeManager(
+            speechToText: speech,
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments()),
+            failedQueueURL: blockedParent.appendingPathComponent("failed.json")
+        )
+        let copiedImportURL = tempDirectory
+            .appendingPathComponent("audio", isDirectory: true)
+            .appendingPathComponent("failed-handoff.wav")
+        try writeMonoWAV(to: copiedImportURL, duration: 2.5)
+        let taskId = UUID()
+        let recoverySession = ImportedRecoverySessionSpy(jobID: taskId)
+
+        manager.startImportedTranscription(
+            taskId: taskId,
+            audioURL: copiedImportURL,
+            outputFolder: tempDirectory.appendingPathComponent("transcripts"),
+            recoverySession: recoverySession
+        )
+        try await waitUntil { speech.didStart }
+
+        XCTAssertEqual(
+            manager.preserveActiveTranscriptionsForShutdown(errorMessage: "test failed handoff"),
+            0
+        )
+        XCTAssertEqual(recoverySession.failedQueueHandoffCount, 0)
+        XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: copiedImportURL.path))
+        speech.release()
     }
 
     func testStartSavedAudioRetranscriptionDoesNotDeleteSourceWhenRejectedForActiveTask() throws {

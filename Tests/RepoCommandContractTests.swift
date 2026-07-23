@@ -2285,8 +2285,10 @@ func testRepoCommandContract() {
         )
         assertTrue(
             importedEnqueueBlock.contains("try persistImportedJournal(for: job)")
+                && importedEnqueueBlock.contains("ImportedTranscriptionQueueJournal.claim(")
+                && importedEnqueueBlock.contains("job.importedRecoverySession = session")
                 && importedEnqueueBlock.contains("queuedTranscriptionJobs.append(job)"),
-            "an accepted imported job should be journaled before it becomes crash-volatile queue state"
+            "an accepted imported job should be journaled and leased before it becomes crash-volatile queue state"
         )
         let journalPersistIndex = importedEnqueueBlock.range(
             of: "try persistImportedJournal(for: job)"
@@ -2305,19 +2307,27 @@ func testRepoCommandContract() {
         let importedRecoveryBlock = sourceSlice(
             coordinatorContents,
             from: "func recoverImportedAudioJobs() -> Int {",
-            to: "func removeImportedJournal(for job: QueuedTranscriptionJob)"
+            to: "func confirmImportedScratchCleanup(for job: QueuedTranscriptionJob)"
         )
         assertTrue(
             importedRecoveryBlock.contains("controller.failedMeetingStore.failedAudioURLs")
-                && importedRecoveryBlock.contains("failedQueueAudioURLs.contains(audioURL.standardizedFileURL)"),
+                && importedRecoveryBlock.contains("failedQueueAudioURLs.contains(audioURL.standardizedFileURL)")
+                && importedRecoveryBlock.contains("recoverySession.failedQueueHandoffConfirmed()"),
             "relaunch recovery should use the failed-meeting store boundary and retire a journal whose audio already has durable failed-queue ownership"
         )
         assertTrue(
             importedRecoveryBlock.contains("ImportedTranscriptionQueueJournal.isDuplicate")
                 && importedRecoveryBlock.contains("recoveredJobIDs")
                 && importedRecoveryBlock.contains("recoveredAudioURLs")
-                && importedRecoveryBlock.contains("ImportedTranscriptionQueueJournal.remove"),
+                && importedRecoveryBlock.contains("recoverySession.supersededRecoveryConfirmed()"),
             "relaunch recovery should retire duplicate journals instead of enqueueing the same import twice"
+        )
+        assertTrue(
+            importedRecoveryBlock.contains("recoveryAudioStatus(")
+                && importedRecoveryBlock.contains("guard audioStatus == .regularFile")
+                && coordinatorContents.contains("TranscriptSaver.existingTranscriptURLs(")
+                && importedRecoveryBlock.contains("hasCommittedTranscript("),
+            "relaunch recovery should reject unsafe scratch inputs and finish either transcript crash boundary idempotently"
         )
         let importJournalFailureBlock = sourceSlice(
             controllerContents,
@@ -2341,15 +2351,12 @@ func testRepoCommandContract() {
             from: "func preserveQueuedTranscriptionJobsForShutdown(errorMessage: String) -> Int {",
             to: "return preservedCount"
         )
-        let shutdownImportedBlock = sourceSlice(
-            shutdownQueuePreservationBlock,
-            from: "case .imported(let audioURL, let suggestedTitle, let recordingDate):",
-            to: "removeImportedJournal(for: job)"
-        )
         assertTrue(
-            shutdownImportedBlock.contains("micAudioURL: nil")
-                && shutdownImportedBlock.contains("systemAudioURL: audioURL"),
-            "shutdown should preserve an imported single track with the same channel semantics as normal imported retry"
+            shutdownQueuePreservationBlock.contains("case .imported(let audioURL, let suggestedTitle, let recordingDate):")
+                && shutdownQueuePreservationBlock.contains("micAudioURL: nil")
+                && shutdownQueuePreservationBlock.contains("systemAudioURL: audioURL")
+                && shutdownQueuePreservationBlock.contains("job.importedRecoverySession?.failedQueueHandoffConfirmed()"),
+            "shutdown should retire an imported journal only after durable failed-queue ownership succeeds"
         )
         let startQueuedBlock = sourceSlice(
             coordinatorContents,
@@ -2852,7 +2859,8 @@ func testRepoCommandContract() {
         )
         assertTrue(
             cancelBlock.contains("if reason == .userRequested")
-                && cancelBlock.contains("try? FileManager.default.removeItem(at: audioURL)")
+                && cancelBlock.contains("try FileManager.default.removeItem(at: audioURL)")
+                && cancelBlock.contains("confirmImportedScratchCleanup(for: job)")
                 && cancelBlock.contains("Imported audio saved before cancellation"),
             "explicit user cancellation should delete cancelled imports while non-user cancellation keeps recovery audio"
         )
@@ -3183,7 +3191,9 @@ func testRepoCommandContract() {
         )
         assertTrue(
             runnerContents.contains("let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: targetTranscriptURL)")
-                && runnerContents.contains("let transcriptId = replacementTranscriptRollback?.transcriptId ?? UUID()"),
+                && runnerContents.contains("let transcriptId = replacementTranscriptRollback?.transcriptId")
+                && runnerContents.contains("?? stableTranscriptId")
+                && runnerContents.contains("?? UUID()"),
             "replacement retranscription should snapshot the selected transcript and reuse its existing ID"
         )
         assertTrue(
