@@ -302,7 +302,6 @@ final class SemanticSearchTests: XCTestCase {
 
         MCPStartupIndexing.completeAfterAttach(index: index)
         XCTAssertGreaterThan(provider.requests, 0, "semantic vectors should still be populated after attach")
-        XCTAssertTrue(index.embeddingStore?.isAvailable == true)
     }
 
     func testStartupEmbeddingComputationDoesNotHoldLexicalWriteLock() throws {

@@ -35,12 +35,6 @@ final class EmbeddingStore: @unchecked Sendable {
     /// very large libraries. Personal-scale libraries stay well under this.
     private let maxCandidateRows = 50_000
 
-    var isAvailable: Bool {
-        admissionCondition.lock()
-        defer { admissionCondition.unlock() }
-        return provider.isAvailable && !deferredStartupReconciliation && !reconciliationActive
-    }
-
     init(dbPath: URL, provider: EmbeddingProvider) throws {
         self.dbPath = dbPath
         self.provider = provider
