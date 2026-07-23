@@ -222,6 +222,10 @@ func testTimedOutFailedMeetingFinalization() {
         registry.prune(olderThan: 14)
         assertFalse(registry.generations.contains(12), "an older never-completing stop must not retain its generation")
         assertEqual(registry.handlerCount, 1, "pruning must release the older stop's closure")
+        assertTrue(
+            registry.isExpired(12),
+            "a callback after pruning must still route through closure-free journal recovery"
+        )
 
         let handler = registry.takeHandler(for: 14)
         handler?(CaptureStopResult(micURL: nil, systemURL: nil, didTimeOut: false))

@@ -129,6 +129,48 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.first?.id, failedID)
     }
 
+    func testRecoveryPromotesExistingSystemOnlyTimeoutRowWithoutDuplicatingIt() async throws {
+        let (manager, paths) = makeManager()
+        let missingMicURL = paths.audioCaptures.appendingPathComponent("meeting_system_only_mic.wav")
+        let systemURL = paths.audioCaptures.appendingPathComponent("meeting_system_only_system.wav")
+        try writeMonoWAV(to: systemURL, sampleRate: 48_000, samples: Array(repeating: 0.5, count: 4_800))
+        try backdate(systemURL)
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: missingMicURL.lastPathComponent,
+            segments: [.init(filename: missingMicURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            state: .stopping,
+            systemAudioFilename: systemURL.lastPathComponent
+        )
+
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: nil,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before microphone audio was finalized.",
+            taskId: failedID,
+            archiveAudio: false,
+            clearRecordingJournalAfterPersistence: false
+        ))
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+
+        XCTAssertEqual(recovered, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.first?.id, failedID)
+        XCTAssertEqual(
+            manager.failedTranscriptionManager.failedTranscriptions.first?.systemAudioURL,
+            systemURL
+        )
+    }
+
     func testRemovesStaleJournalWithNoAudio() async throws {
         let (manager, paths) = makeManager()
 

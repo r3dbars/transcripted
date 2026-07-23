@@ -235,6 +235,12 @@ struct TimedOutStopCompletionRegistry {
         for generation in staleGenerations {
             handlers.removeValue(forKey: generation)
         }
+        if let latestPrunedGeneration = staleGenerations.max() {
+            latestExpiredGeneration = max(
+                latestExpiredGeneration ?? 0,
+                latestPrunedGeneration
+            )
+        }
         return Set(staleGenerations)
     }
 }

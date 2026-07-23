@@ -1065,8 +1065,9 @@ public class TranscriptionTaskManager: ObservableObject {
                     let existingFailure = failedTranscriptionManager.failedTranscriptions.first { failure in
                         failure.micAudioURL.standardizedFileURL == originalMicURL?.standardizedFileURL
                             || failure.micAudioURL.standardizedFileURL == micURL?.standardizedFileURL
-                            || (originalMicURL == nil
-                                && failure.systemAudioURL?.standardizedFileURL == systemURL?.standardizedFileURL)
+                            || (systemURL.map {
+                                failure.systemAudioURL?.standardizedFileURL == $0.standardizedFileURL
+                            } == true)
                     }
                     let didPersist: Bool
                     if let existingFailure {
