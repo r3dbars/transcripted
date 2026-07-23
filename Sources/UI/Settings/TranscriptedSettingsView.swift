@@ -1926,7 +1926,7 @@ struct TranscriptedSettingsView: View {
     }
 
     private func requestClearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
-        if !item.audioURLs.isEmpty {
+        if item.deletionRemovesAudio {
             trackSettingsAction("home_delete_failed_meeting_request", page: .home)
             let presentation = HomeDeleteConfirmationPolicy.failedMeeting
             homeDeleteConfirmation = HomeDeleteConfirmation(
@@ -1952,7 +1952,7 @@ struct TranscriptedSettingsView: View {
 
         let didClear: Bool
         let failureTitle: String
-        if !item.audioURLs.isEmpty {
+        if item.deletionRemovesAudio {
             didClear = meetingSession.deleteFailedMeeting(id: item.id)
             failureTitle = "Could not delete failed meeting"
         } else {
@@ -1972,7 +1972,7 @@ struct TranscriptedSettingsView: View {
             ActivationTelemetry.trackWorkflowAbandoned(
                 workflowKind: .failedMeetingRetry,
                 stage: "retry_available",
-                reasonKind: item.audioURLs.isEmpty ? .dismissed : .deleted,
+                reasonKind: item.deletionRemovesAudio ? .deleted : .dismissed,
                 surface: .home,
                 priorReadyState: canRetryFailedMeetings ? "retry_ready" : "retry_blocked"
             )

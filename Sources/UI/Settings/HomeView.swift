@@ -1586,9 +1586,9 @@ struct HomeFailedMeetingInlineRow: View {
 
             HomeRowMoreMenuButton(items: [
                 HomeRowMenuItem(
-                    title: hasRetainedAudioFiles ? "Delete failed meeting" : "Dismiss",
-                    symbolName: hasRetainedAudioFiles ? "trash" : "xmark",
-                    isDestructive: hasRetainedAudioFiles,
+                    title: item.deletionRemovesAudio ? "Delete failed meeting" : "Dismiss",
+                    symbolName: item.deletionRemovesAudio ? "trash" : "xmark",
+                    isDestructive: item.deletionRemovesAudio,
                     action: onClear
                 )
             ], automationIdentifier: "transcripted.home.failed-meeting.more")
@@ -2409,7 +2409,7 @@ private struct HomeFailedMeetingRow: View {
             isRetryable: item.isRetryable,
             isRetrying: item.isRetrying,
             hasAudioFiles: item.hasAudioFiles,
-            hasRetainedAudioFiles: !item.audioURLs.isEmpty
+            hasRetainedAudioFiles: item.deletionRemovesAudio
         )
     }
 

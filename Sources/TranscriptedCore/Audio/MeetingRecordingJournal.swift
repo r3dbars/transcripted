@@ -315,8 +315,10 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     ) -> Bool {
         let canonicalRoots = allowedRoots.map { canonicalURL($0) }
         let hasMicJournal = micAudioURL.map { micURL in
-            isContained(micURL, in: canonicalRoots)
-                && journalURLs(forMicAudioURL: micURL).contains { candidate in
+            guard isContained(micURL, in: canonicalRoots) else { return false }
+            let candidates = journalURLs(forMicAudioURL: micURL)
+            return candidates.contains(where: { isSymbolicLink(at: $0) })
+                || candidates.contains { candidate in
                     isContained(candidate, in: canonicalRoots)
                         && !isSymbolicLink(at: candidate)
                         && FileManager.default.fileExists(atPath: candidate.path)

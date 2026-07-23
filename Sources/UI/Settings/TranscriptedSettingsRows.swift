@@ -390,7 +390,7 @@ struct SettingsFailedMeetingRow: View {
             isRetryable: item.isRetryable,
             isRetrying: item.isRetrying,
             hasAudioFiles: item.hasAudioFiles,
-            hasRetainedAudioFiles: !item.audioURLs.isEmpty
+            hasRetainedAudioFiles: item.deletionRemovesAudio
         )
     }
 

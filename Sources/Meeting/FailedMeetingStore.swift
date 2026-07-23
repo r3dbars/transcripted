@@ -25,6 +25,7 @@ final class FailedMeetingStore {
         let isRetryable: Bool
         let isRetrying: Bool
         let hasAudioFiles: Bool
+        let deletionRemovesAudio: Bool
         let audioURLs: [URL]
     }
 
@@ -445,7 +446,11 @@ final class FailedMeetingStore {
             .map { failed in
                 FailedMeetingPresentation.item(
                     from: failed,
-                    isRetrying: retryingFailedMeetingIDs.contains(failed.id)
+                    isRetrying: retryingFailedMeetingIDs.contains(failed.id),
+                    hasRecordingJournal: taskManager.hasRecordingJournal(
+                        micAudioURL: failed.micAudioURL,
+                        systemAudioURL: failed.systemAudioURL
+                    )
                 )
             }
         scheduleFailedAudioCompression(for: failedTranscriptions)

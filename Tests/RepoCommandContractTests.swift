@@ -2594,8 +2594,9 @@ func testRepoCommandContract() {
         )
         assertTrue(
             refreshFailedMeetingBlock.contains("timedOutFinalizationHandoff.persistedOwnershipIDs")
-                && refreshFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
-            "Core-side retry and speaker-finalization row removals should reach the canonical timeout cleanup seam"
+                && refreshFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)")
+                && refreshFailedMeetingBlock.contains("hasRecordingJournal: taskManager.hasRecordingJournal("),
+            "Core-side row removals should reach canonical cleanup, while journal ownership keeps the UI destructive"
         )
         assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),

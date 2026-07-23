@@ -223,6 +223,10 @@ func testFailedMeetingPresentation() {
             source.contains("hasAudioFiles: hasRetryableAudioFiles"),
             "partial retained audio should not enable the retry action"
         )
+        assertTrue(
+            source.contains("deletionRemovesAudio: !availableAudioURLs.isEmpty || hasRecordingJournal"),
+            "journal-owned audio should keep clear actions destructive even before a row URL is usable"
+        )
     }
 
     runSuite("Home failed meeting row reveals partial audio separately from retry readiness") {
@@ -252,6 +256,30 @@ func testFailedMeetingPresentation() {
         assertTrue(
             homeSource.contains("private var hasRetainedAudioFiles: Bool {\n        !item.audioURLs.isEmpty"),
             "failed rows should use available retained audio URLs for the reveal affordance"
+        )
+        assertTrue(
+            homeSource.contains("title: item.deletionRemovesAudio ? \"Delete failed meeting\" : \"Dismiss\"")
+                && homeSource.contains("hasRetainedAudioFiles: item.deletionRemovesAudio"),
+            "failed rows should label journal-owned cleanup as destructive without exposing an unusable reveal action"
+        )
+
+        let settingsSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
+            encoding: .utf8
+        )) ?? ""
+        assertTrue(
+            settingsSource.contains("if item.deletionRemovesAudio")
+                && settingsSource.contains("reasonKind: item.deletionRemovesAudio ? .deleted : .dismissed"),
+            "Home should confirm and report journal-owned cleanup as deletion, not dismissal"
+        )
+
+        let storeSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/Meeting/FailedMeetingStore.swift"),
+            encoding: .utf8
+        )) ?? ""
+        assertTrue(
+            storeSource.contains("hasRecordingJournal: taskManager.hasRecordingJournal("),
+            "the failed-meeting presentation should derive destructive ownership from the canonical journal seam"
         )
     }
 
