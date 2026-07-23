@@ -39,6 +39,9 @@ final class MeetingCaptureBridge: ObservableObject {
     @Published private(set) var routeStabilityWarningOutcome: CaptureRouteStabilizationOutcome?
 
     var onUnexpectedRecordingComplete: ((CaptureStopResult) -> Void)?
+    /// One stable recovery seam for completions that arrive after their
+    /// per-stop closure's bounded retention window.
+    var onExpiredTimedOutRecordingComplete: ((CaptureStopResult) -> Void)?
 
     // MARK: - Underlying capture
 
@@ -51,6 +54,7 @@ final class MeetingCaptureBridge: ObservableObject {
     private let startAttempt = MeetingCaptureAttempt<Bool>()
     let micPCMRelay = MeetingMicPCMRelay()
     private var timedOutStopCompletions = TimedOutStopCompletionRegistry()
+    private var timedOutStopCompletionExpiryTasks: [UInt64: Task<Void, Never>] = [:]
     private var expectedStopGeneration: UInt64?
 
     init(audio: Audio? = nil) {
@@ -70,6 +74,7 @@ final class MeetingCaptureBridge: ObservableObject {
     }
 
     deinit {
+        timedOutStopCompletionExpiryTasks.values.forEach { $0.cancel() }
         startAttempt.reset()?.resume(returning: false)
         completionAttempt.reset()?.resume(returning: CaptureStopResult(
             micURL: audio.micAudioFileURL,
@@ -92,9 +97,12 @@ final class MeetingCaptureBridge: ObservableObject {
         // its generation-tagged callback can still reach its failed row. Once
         // another stop has advanced Core's generation, older journals/rows own
         // recovery and their retained closures can be released.
-        timedOutStopCompletions.prune(
+        let prunedGenerations = timedOutStopCompletions.prune(
             olderThan: audio.currentRecordingSessionGeneration
         )
+        for generation in prunedGenerations {
+            timedOutStopCompletionExpiryTasks.removeValue(forKey: generation)?.cancel()
+        }
 
         errorMessage = nil
         micAttenuationCueObserved = false
@@ -174,6 +182,7 @@ final class MeetingCaptureBridge: ObservableObject {
                     generation: stopGeneration,
                     handler: onTimedOutCompletion
                 )
+                self.scheduleTimedOutStopCompletionExpiry(generation: stopGeneration)
                 continuation.resume(returning: self.currentStopResult(didTimeOut: true))
             })
         }
@@ -252,6 +261,11 @@ final class MeetingCaptureBridge: ObservableObject {
                     didTimeOut: false
                 )
 
+                if self.timedOutStopCompletions.isExpired(generation) {
+                    self.onExpiredTimedOutRecordingComplete?(result)
+                    return
+                }
+
                 switch MeetingCaptureCompletionPolicy.disposition(
                     completionGeneration: generation,
                     expectedStopGeneration: self.expectedStopGeneration,
@@ -263,6 +277,9 @@ final class MeetingCaptureBridge: ObservableObject {
                     self.expectedStopGeneration = nil
                     continuation.resume(returning: result)
                 case .lateTimedOutStop:
+                    self.timedOutStopCompletionExpiryTasks
+                        .removeValue(forKey: generation)?
+                        .cancel()
                     let handler = self.timedOutStopCompletions.takeHandler(for: generation)
                     handler?(result)
                 case .unexpectedCurrentStop:
@@ -351,6 +368,22 @@ final class MeetingCaptureBridge: ObservableObject {
             systemURL: audio.systemAudioFileURL,
             didTimeOut: didTimeOut
         )
+    }
+
+    private func scheduleTimedOutStopCompletionExpiry(generation: UInt64) {
+        timedOutStopCompletionExpiryTasks.removeValue(forKey: generation)?.cancel()
+        timedOutStopCompletionExpiryTasks[generation] = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(
+                    nanoseconds: TranscriptedConstants.meetingMaximumStopTimeout
+                )
+            } catch {
+                return
+            }
+            guard let self else { return }
+            _ = self.timedOutStopCompletions.expire(generation: generation)
+            self.timedOutStopCompletionExpiryTasks.removeValue(forKey: generation)
+        }
     }
 
     private func sinkStartAttemptTriggers<Output>(

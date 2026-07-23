@@ -79,6 +79,56 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
     }
 
+    func testRecoveryWaitsForLiveStopFinalizerOwnership() async throws {
+        let (manager, paths) = makeManager()
+        let micURL = paths.audioCaptures.appendingPathComponent("meeting_live_finalizer_mic.wav")
+        try writeMonoWAV(to: micURL, sampleRate: 48_000, samples: Array(repeating: 0.5, count: 4_800))
+        try backdate(micURL)
+
+        let store = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        let session = store.begin(
+            primaryMicURL: micURL,
+            startedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        store.markStopping(session: session)
+        store.flush()
+        let journalURL = try XCTUnwrap(
+            MeetingRecordingJournalStore.journalURLs(in: paths.audioCaptures).first
+        )
+        try backdate(journalURL)
+
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Recording stop timed out before audio files were finalized.",
+            taskId: failedID,
+            archiveAudio: false,
+            clearRecordingJournalAfterPersistence: false
+        ))
+
+        let whileFinalizing = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+        XCTAssertEqual(whileFinalizing, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.first?.id, failedID)
+
+        store.markFinalized(finalMicURL: micURL, session: session)
+        store.flush()
+        let afterFinalizing = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+        XCTAssertEqual(afterFinalizing, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
+        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.first?.id, failedID)
+    }
+
     func testRemovesStaleJournalWithNoAudio() async throws {
         let (manager, paths) = makeManager()
 
@@ -534,7 +584,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertTrue(MeetingRecordingJournalStore.journalURLs(in: paths.audioCaptures).isEmpty)
     }
 
-    func testLateJournalWriteAfterRecoveryHandoffDoesNotDuplicateFailedEntry() async throws {
+    func testFinalizerOwnershipPreventsRecoveryHandoffAndDuplicateEntry() async throws {
         let (manager, paths) = makeManager()
 
         let micURL = paths.audioCaptures.appendingPathComponent("meeting_dup_mic.wav")
@@ -552,19 +602,34 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
 
-        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+        let recoveredWhileFinalizing = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+        XCTAssertEqual(recoveredWhileFinalizing, 0)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+
+        // The stop path writes the final state before releasing ownership.
+        store.markFinalized(finalMicURL: micURL, session: session)
+        store.flush()
+
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
         XCTAssertEqual(recovered, 1)
         XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
 
-        // A late stop-path write from the stale session (a timed-out bridge
-        // stop finishing its merge) must not resurrect the journal...
+        // A duplicate stale mutation from the ended token cannot resurrect
+        // the handed-off journal or create a second failed row.
         store.markFinalized(finalMicURL: micURL, session: session)
         store.flush()
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
 
-        // ...so the next scan finds nothing and the failed queue keeps a
-        // single entry for this recording.
         let recoveredAgain = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
         XCTAssertEqual(recoveredAgain, 0)
         XCTAssertEqual(

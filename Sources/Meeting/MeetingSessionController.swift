@@ -352,6 +352,9 @@ final class MeetingSessionController: ObservableObject {
         capture.onUnexpectedRecordingComplete = { [weak self] result in
             self?.handleUnexpectedCaptureStop(result)
         }
+        capture.onExpiredTimedOutRecordingComplete = { [weak self] result in
+            self?.failedMeetingStore.recoverExpiredTimedOutMeetingAudio(result)
+        }
 
         wireSubscriptions()
         transcriptionQueue.recoverImportedAudioJobs()

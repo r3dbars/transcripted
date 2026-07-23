@@ -277,6 +277,14 @@ final class FailedMeetingStore {
         }
     }
 
+    /// The bridge intentionally releases each per-meeting late callback after
+    /// a bounded grace. A completion after that boundary can still recover its
+    /// finalized journal through this value-only, ID-independent seam.
+    func recoverExpiredTimedOutMeetingAudio(_ result: CaptureStopResult) {
+        guard let ownedAudioURL = result.micURL ?? result.systemURL else { return }
+        scheduleTimedOutJournalRecovery(in: ownedAudioURL.deletingLastPathComponent())
+    }
+
     private func persistFailedMeetingForRetry(
         taskId: UUID,
         micAudioURL: URL?,

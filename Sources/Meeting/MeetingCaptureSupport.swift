@@ -197,6 +197,7 @@ struct TimedOutFailedMeetingFinalizationHandoff {
 struct TimedOutStopCompletionRegistry {
     private(set) var generations: Set<UInt64> = []
     private var handlers: [UInt64: (CaptureStopResult) -> Void] = [:]
+    private(set) var latestExpiredGeneration: UInt64?
 
     var handlerCount: Int { handlers.count }
 
@@ -213,12 +214,28 @@ struct TimedOutStopCompletionRegistry {
         return handlers.removeValue(forKey: generation)
     }
 
-    mutating func prune(olderThan latestCompletedStopGeneration: UInt64) {
+    @discardableResult
+    mutating func expire(generation: UInt64) -> Bool {
+        guard generations.remove(generation) != nil else { return false }
+        handlers.removeValue(forKey: generation)
+        latestExpiredGeneration = max(latestExpiredGeneration ?? 0, generation)
+        return true
+    }
+
+    func isExpired(_ generation: UInt64) -> Bool {
+        guard let latestExpiredGeneration else { return false }
+        return !generations.contains(generation)
+            && generation <= latestExpiredGeneration
+    }
+
+    @discardableResult
+    mutating func prune(olderThan latestCompletedStopGeneration: UInt64) -> Set<UInt64> {
         let staleGenerations = generations.filter { $0 < latestCompletedStopGeneration }
         generations.subtract(staleGenerations)
         for generation in staleGenerations {
             handlers.removeValue(forKey: generation)
         }
+        return Set(staleGenerations)
     }
 }
 

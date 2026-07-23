@@ -2441,6 +2441,12 @@ func testRepoCommandContract() {
                 && bridgeContents.contains("olderThan: audio.currentRecordingSessionGeneration"),
             "a never-completing timed-out stop should release older generations and closures on a later recording start"
         )
+        assertTrue(
+            bridgeContents.contains("TranscriptedConstants.meetingMaximumStopTimeout")
+                && bridgeContents.contains("timedOutStopCompletions.expire(generation: generation)")
+                && bridgeContents.contains("onExpiredTimedOutRecordingComplete?(result)"),
+            "a never-completing timed-out stop should release its closure on a fixed deadline and keep very late audio recoverable"
+        )
     }
 
     runSuite("Repo command contract - old failed meeting audio is pruned by age") {
@@ -2525,6 +2531,10 @@ func testRepoCommandContract() {
         assertTrue(
             taskManagerContents.contains("MeetingRecordingJournalStore.hasJournal(forMicAudioURL: failed.micAudioURL)"),
             "retry must wait until the retained journal's full segment inventory has been reconciled"
+        )
+        assertTrue(
+            taskManagerContents.contains("MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: journalURL)"),
+            "orphan recovery must not touch a timed-out journal while the Audio stop path still owns finalization"
         )
         assertTrue(
             controllerContents.contains("refreshTimedOutFailedMeetingAudio(")

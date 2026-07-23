@@ -41,16 +41,62 @@ struct MeetingRecordingJournal: Codable, Equatable {
 /// dropped. Stop-path finalization can land seconds after `stop()` returns
 /// (multi-segment merges), so without the token a previous session's late
 /// writes would corrupt the journal of the recording that is now active.
-struct MeetingRecordingJournalSession: Equatable, Sendable {
+struct MeetingRecordingJournalSession: Equatable, Hashable, Sendable {
     private let id: UUID
+    private let liveOwnership: MeetingRecordingJournalLiveOwnership
 
-    init() {
+    init(journalURL: URL) {
         self.id = UUID()
+        self.liveOwnership = MeetingRecordingJournalLiveOwnership(
+            id: id,
+            journalURL: journalURL
+        )
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    func releaseLiveOwnership() {
+        liveOwnership.release()
+    }
+}
+
+private final class MeetingRecordingJournalLiveOwnership: @unchecked Sendable {
+    private let id: UUID
+    private let lock = NSLock()
+    private var isReleased = false
+
+    init(id: UUID, journalURL: URL) {
+        self.id = id
+        MeetingRecordingJournalStore.claimLiveOwnership(of: journalURL, id: id)
+    }
+
+    deinit {
+        release()
+    }
+
+    func release() {
+        lock.lock()
+        guard !isReleased else {
+            lock.unlock()
+            return
+        }
+        isReleased = true
+        lock.unlock()
+        MeetingRecordingJournalStore.releaseLiveOwnership(id: id)
     }
 }
 
 final class MeetingRecordingJournalStore: @unchecked Sendable {
     static let filenameSuffix = ".recording.json"
+
+    private static let liveOwnershipLock = NSLock()
+    private static var liveOwnership: [UUID: URL] = [:]
 
     private let directory: URL
     private let queue = DispatchQueue(label: "com.transcripted.recording-journal", qos: .utility)
@@ -64,11 +110,13 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
 
     @discardableResult
     func begin(primaryMicURL: URL, startedAt: Date = Date()) -> MeetingRecordingJournalSession {
-        let session = MeetingRecordingJournalSession()
+        let journalURL = directory.appendingPathComponent(
+            primaryMicURL.deletingPathExtension().lastPathComponent + Self.filenameSuffix
+        )
+        let session = MeetingRecordingJournalSession(journalURL: journalURL)
         queue.async {
-            let name = primaryMicURL.deletingPathExtension().lastPathComponent + Self.filenameSuffix
             self.activeSession = session
-            self.journalURL = self.directory.appendingPathComponent(name)
+            self.journalURL = journalURL
             self.journal = MeetingRecordingJournal(
                 version: 1,
                 state: .recording,
@@ -106,7 +154,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     }
 
     func markFinalized(finalMicURL: URL?, session: MeetingRecordingJournalSession?) {
-        mutate(session: session) {
+        mutate(session: session, endingSession: true) {
             $0.state = .finalized
             $0.finalMicFilename = finalMicURL?.lastPathComponent
         }
@@ -115,6 +163,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     /// The meeting reached a durable state elsewhere; the journal's job is done.
     func clear() {
         queue.async {
+            self.activeSession?.releaseLiveOwnership()
             if let url = self.journalURL {
                 try? Self.unlinkFileOnly(at: url)
             }
@@ -134,9 +183,13 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         allowedRoot: URL
     ) -> Bool {
         let snapshot = queue.sync {
-            let snapshot = (journalURL: self.journalURL, journal: self.journal)
+            let snapshot = (
+                journalURL: self.journalURL,
+                journal: self.journal
+            )
             self.journal = nil
             self.journalURL = nil
+            self.activeSession?.releaseLiveOwnership()
             self.activeSession = nil
             return snapshot
         }
@@ -155,9 +208,15 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
 
     private func mutate(
         session: MeetingRecordingJournalSession?,
+        endingSession: Bool = false,
         _ change: @escaping (inout MeetingRecordingJournal) -> Void
     ) {
         queue.async {
+            defer {
+                if endingSession {
+                    session?.releaseLiveOwnership()
+                }
+            }
             // Only the session that began this journal may write to it. A nil
             // session (a stop with no active recording) owns nothing.
             guard let session, session == self.activeSession else { return }
@@ -177,6 +236,9 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             journal.updatedAt = Date()
             self.journal = journal
             self.persistLocked()
+            if endingSession, self.activeSession == session {
+                self.activeSession = nil
+            }
         }
     }
 
@@ -197,6 +259,32 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     }
 
     // MARK: - Recovery + handoff helpers
+
+    /// In-process recovery must never inspect or mutate a journal while the
+    /// Audio stop path still owns its file handles and final merge. The token
+    /// stays live until `markFinalized` has persisted the last journal state;
+    /// a crashed process naturally loses the in-memory claim on next launch.
+    static func isOwnedByLiveFinalizer(at journalURL: URL) -> Bool {
+        let canonicalJournalURL = canonicalURL(journalURL)
+        liveOwnershipLock.lock()
+        defer { liveOwnershipLock.unlock() }
+        return liveOwnership.values.contains(canonicalJournalURL)
+    }
+
+    fileprivate static func claimLiveOwnership(
+        of journalURL: URL,
+        id: UUID
+    ) {
+        liveOwnershipLock.lock()
+        liveOwnership[id] = canonicalURL(journalURL)
+        liveOwnershipLock.unlock()
+    }
+
+    fileprivate static func releaseLiveOwnership(id: UUID) {
+        liveOwnershipLock.lock()
+        liveOwnership.removeValue(forKey: id)
+        liveOwnershipLock.unlock()
+    }
 
     static func journalURLs(in directory: URL) -> [URL] {
         let urls = (try? FileManager.default.contentsOfDirectory(

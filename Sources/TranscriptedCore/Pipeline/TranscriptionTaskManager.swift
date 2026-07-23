@@ -1162,6 +1162,15 @@ public class TranscriptionTaskManager: ObservableObject {
         now: Date,
         livenessWindow: TimeInterval
     ) -> OrphanedRecordingCandidate? {
+        guard !MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: journalURL) else {
+            return OrphanedRecordingCandidate(
+                journalURL: journalURL,
+                disposition: .skip(
+                    reason: "owned by live finalizer",
+                    retryAfter: max(0.01, min(1, livenessWindow))
+                )
+            )
+        }
         guard let journal = MeetingRecordingJournalStore.load(at: journalURL) else {
             return OrphanedRecordingCandidate(journalURL: journalURL, disposition: .stale(reason: "unreadable journal"))
         }

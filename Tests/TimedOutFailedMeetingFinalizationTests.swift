@@ -229,4 +229,17 @@ func testTimedOutFailedMeetingFinalization() {
         assertTrue(registry.generations.isEmpty)
         assertEqual(registry.handlerCount, 0)
     }
+
+    runSuite("Timed-out completion ownership expires without a later recording") {
+        var registry = TimedOutStopCompletionRegistry()
+        registry.register(generation: 22) { _ in
+            assertionFailure("an expired per-stop closure must never be delivered")
+        }
+
+        assertTrue(registry.expire(generation: 22))
+        assertTrue(registry.generations.isEmpty)
+        assertEqual(registry.handlerCount, 0, "expiry must release the retained closure")
+        assertTrue(registry.isExpired(22), "a closure-free tombstone must route a very late completion to journal recovery")
+        assertFalse(registry.expire(generation: 22), "expiry must be idempotent")
+    }
 }
