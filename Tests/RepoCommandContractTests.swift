@@ -2762,6 +2762,16 @@ func testRepoCommandContract() {
             terminationBlock.contains("taskManager.cleanupPendingNaming()"),
             "shutdown should finalize pending speaker-review scratch ownership before in-memory requests disappear"
         )
+        let activePreservationIndex = terminationBlock.range(
+            of: "let activePreserved = taskManager.preserveActiveTranscriptionsForShutdown("
+        )?.lowerBound ?? terminationBlock.endIndex
+        let pendingNamingCleanupIndex = terminationBlock.range(
+            of: "taskManager.cleanupPendingNaming()"
+        )?.lowerBound ?? terminationBlock.startIndex
+        assertTrue(
+            activePreservationIndex < pendingNamingCleanupIndex,
+            "shutdown must preserve active imported audio before pending review cleanup can retire its journal"
+        )
         assertTrue(
             terminationBlock.contains("let shutdownFailedTaskId = UUID()")
                 && terminationBlock.contains("capture.stopAndAwaitFiles {")

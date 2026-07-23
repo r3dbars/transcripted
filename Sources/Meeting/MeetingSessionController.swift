@@ -1655,16 +1655,17 @@ final class MeetingSessionController: ObservableObject {
             recordingTrigger = .unknown
         }
 
-        // Completed imported pipelines can leave their recovery lease inside a
-        // deferred speaker-review request. Finalize that typed owner before the
-        // app tears down in-memory review state.
-        taskManager.cleanupPendingNaming()
         let queuedPreserved = transcriptionQueue.preserveQueuedTranscriptionJobsForShutdown(
             errorMessage: "Meeting saved before quit. Audio is safe; finish the queued transcript from Home after reopening."
         )
         let activePreserved = taskManager.preserveActiveTranscriptionsForShutdown(
             errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
         )
+        // An active imported pipeline can enqueue speaker review just before
+        // committing its transcript. Preserve that task first so review cleanup
+        // cannot retire the journal and delete its only scratch copy. Completed
+        // pipelines still finalize their typed recovery owner here.
+        taskManager.cleanupPendingNaming()
         let shouldFailPendingLiveHandoff = queuedPreserved > 0
             || activePreserved > 0
             || liveCodexSessionAwaitingFinalTranscript
