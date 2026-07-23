@@ -324,6 +324,13 @@ public class FailedTranscriptionManager: ObservableObject {
             && isDirectory.boolValue
     }
 
+    private func areReferencedManagedAudioRootsReachable(for failed: FailedTranscription) -> Bool {
+        [failed.micAudioURL, failed.systemAudioURL]
+            .compactMap { $0 }
+            .filter(isSafeAudioURL)
+            .allSatisfy(isContainingAudioRootReachable)
+    }
+
     private func repairWAVHeaderIfNeeded(at url: URL, entryId: UUID) {
         guard url.pathExtension.lowercased() == "wav",
               FileManager.default.fileExists(atPath: url.path) else { return }
@@ -425,9 +432,8 @@ public class FailedTranscriptionManager: ObservableObject {
                 continue
             }
             let referencedAudioURLs = [failed.micAudioURL, failed.systemAudioURL].compactMap { $0 }
-            guard referencedAudioURLs.allSatisfy({
-                isSafeAudioURL($0) && isContainingAudioRootReachable(for: $0)
-            }) else {
+            guard referencedAudioURLs.allSatisfy(isSafeAudioURL),
+                  areReferencedManagedAudioRootsReachable(for: failed) else {
                 // A missing path under an offline capture/archive root is not a
                 // completed deletion. Keep the row and marker until the volume
                 // returns, then retry from the canonical row.
@@ -653,6 +659,7 @@ public class FailedTranscriptionManager: ObservableObject {
         // the visible row stays put; if queue persistence later fails after
         // cleanup, the marker finishes metadata removal on the next launch.
         guard registerPendingDeletion(for: failed) else { return false }
+        guard areReferencedManagedAudioRootsReachable(for: failed) else { return false }
 
         let didDiscard = MeetingRecordingJournalStore.discardRecordingArtifacts(
             micAudioURL: failed.micAudioURL,

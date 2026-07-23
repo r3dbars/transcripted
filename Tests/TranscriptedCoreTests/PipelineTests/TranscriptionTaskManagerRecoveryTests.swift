@@ -313,6 +313,109 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: futureJournalURL.path))
     }
 
+    func testRecoveryUsesEarliestCandidateRetry() async throws {
+        let (manager, paths) = makeManager()
+        let livenessWindow: TimeInterval = 0.5
+        let olderMicURL = paths.audioCaptures.appendingPathComponent("meeting_older_recent_mic.wav")
+        let newerMicURL = paths.audioCaptures.appendingPathComponent("meeting_newer_recent_mic.wav")
+        try writeMonoWAV(to: olderMicURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
+        try writeMonoWAV(to: newerMicURL, sampleRate: 48_000, samples: Array(repeating: 0.5, count: 4_800))
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-0.45)],
+            ofItemAtPath: olderMicURL.path
+        )
+        _ = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: olderMicURL.lastPathComponent,
+            segments: [.init(filename: olderMicURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            state: .stopping
+        )
+        _ = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: newerMicURL.lastPathComponent,
+            segments: [.init(filename: newerMicURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(timeIntervalSince1970: 2_000),
+            state: .stopping
+        )
+
+        let startedAt = Date()
+        var passCount = 0
+        var secondPassElapsed: TimeInterval?
+        manager.orphanedRecordingRecoveryPassObserver = { [self] in
+            passCount += 1
+            if passCount == 1 {
+                do {
+                    try backdate(newerMicURL)
+                } catch {
+                    XCTFail("Could not age newer recovery fixture: \(type(of: error))")
+                }
+            } else if passCount == 2 {
+                secondPassElapsed = Date().timeIntervalSince(startedAt)
+            }
+        }
+
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: livenessWindow,
+            waitForRecentJournals: true
+        )
+        manager.orphanedRecordingRecoveryPassObserver = nil
+
+        XCTAssertEqual(recovered, 2)
+        XCTAssertGreaterThanOrEqual(passCount, 2)
+        XCTAssertLessThan(try XCTUnwrap(secondPassElapsed), 0.3)
+    }
+
+    func testJoinedRequestsCannotExtendRecoveryOwnerDeadline() async throws {
+        let (manager, paths) = makeManager()
+        let livenessWindow: TimeInterval = 0.05
+        let futureMicURL = paths.audioCaptures.appendingPathComponent("meeting_joined_future_mic.wav")
+        try writeMonoWAV(to: futureMicURL, sampleRate: 48_000, samples: Array(repeating: 0.4, count: 4_800))
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(5)],
+            ofItemAtPath: futureMicURL.path
+        )
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: futureMicURL.lastPathComponent,
+            segments: [.init(filename: futureMicURL.lastPathComponent, gapBefore: 0)],
+            startedAt: Date(),
+            state: .stopping
+        )
+
+        let joinedRequestInjector = Task { @MainActor in
+            for _ in 0..<8 {
+                do {
+                    try await Task.sleep(for: .seconds(0.025))
+                } catch {
+                    return
+                }
+                Task { @MainActor in
+                    _ = await manager.recoverOrphanedRecordings(
+                        in: paths.audioCaptures,
+                        livenessWindow: livenessWindow,
+                        waitForRecentJournals: true
+                    )
+                }
+            }
+        }
+        let startedAt = ContinuousClock.now
+        let recovered = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: livenessWindow,
+            waitForRecentJournals: true
+        )
+        let elapsed = startedAt.duration(to: ContinuousClock.now)
+        joinedRequestInjector.cancel()
+        await joinedRequestInjector.value
+
+        XCTAssertEqual(recovered, 0)
+        XCTAssertLessThan(elapsed, .seconds(0.2))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: futureMicURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+    }
+
     func testConcurrentRecoveryCallsShareOneJournalOwner() async throws {
         let (manager, paths) = makeManager()
         let micURL = paths.audioCaptures.appendingPathComponent("meeting_single_flight_mic.wav")

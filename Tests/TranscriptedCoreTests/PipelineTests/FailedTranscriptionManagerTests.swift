@@ -515,6 +515,39 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
     }
 
+    func testDeleteDefersWhenAudioRootIsAlreadyUnavailable() throws {
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let micURL = paths.audioCaptures.appendingPathComponent("offline-before-delete-mic.wav")
+        let micData = Data("mic".utf8)
+        FileManager.default.createFile(atPath: micURL.path, contents: micData)
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        let failedID = UUID()
+        XCTAssertTrue(manager.addFailedTranscription(
+            id: failedID,
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        ))
+        try FileManager.default.removeItem(at: paths.audioCaptures)
+
+        XCTAssertFalse(manager.deleteFailedTranscription(id: failedID))
+        XCTAssertEqual(manager.failedTranscriptions.map(\.id), [failedID])
+        let pendingDeletionURL = paths.failedQueue.deletingLastPathComponent()
+            .appendingPathComponent(FailedTranscriptionManager.pendingDeletionFilename)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
+
+        // Simulate the managed volume returning at the same canonical root.
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: micURL.path, contents: micData)
+        let relaunched = FailedTranscriptionManager(paths: paths)
+
+        XCTAssertTrue(relaunched.failedTranscriptions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
+    }
+
     func testPendingDeletionIgnoresInjectedAudioPaths() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

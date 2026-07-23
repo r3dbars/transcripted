@@ -973,22 +973,29 @@ public class TranscriptionTaskManager: ObservableObject {
             return await activeRecovery.value
         }
 
+        // One monotonic deadline belongs to the single-flight owner. Joined
+        // requests can ask it to rescan, but cannot extend its lifetime.
+        let maximumWaitInterval = max(0.02, (livenessWindow * 2) + 0.02)
+        let waitDeadline = ContinuousClock.now.advanced(
+            by: .seconds(maximumWaitInterval)
+        )
         let recoveryTask = Task { [weak self] in
             guard let self else { return 0 }
             var totalRecovered = 0
-            while true {
+            while ContinuousClock.now < waitDeadline {
                 let ownerRequestGeneration = self.orphanedRecordingRecoveryRequestGeneration
                 totalRecovered += await self.performOrphanedRecordingRecovery(
                     in: scratchDirectory,
                     livenessWindow: livenessWindow,
-                    waitForRecentJournals: waitForRecentJournals
+                    waitForRecentJournals: waitForRecentJournals,
+                    waitDeadline: waitDeadline
                 )
-                guard self.orphanedRecordingRecoveryRequestGeneration == ownerRequestGeneration else {
-                    continue
+                if self.orphanedRecordingRecoveryRequestGeneration == ownerRequestGeneration {
+                    break
                 }
-                self.orphanedRecordingRecoveryTask = nil
-                return totalRecovered
             }
+            self.orphanedRecordingRecoveryTask = nil
+            return totalRecovered
         }
         orphanedRecordingRecoveryTask = recoveryTask
         return await recoveryTask.value
@@ -997,7 +1004,8 @@ public class TranscriptionTaskManager: ObservableObject {
     private func performOrphanedRecordingRecovery(
         in scratchDirectory: URL,
         livenessWindow: TimeInterval,
-        waitForRecentJournals: Bool
+        waitForRecentJournals: Bool,
+        waitDeadline: ContinuousClock.Instant
     ) async -> Int {
         let canonicalScratchDirectory = Self.canonicalDirectoryURL(scratchDirectory)
         guard cleanupDirectories.contains(where: { root in
@@ -1007,14 +1015,6 @@ public class TranscriptionTaskManager: ObservableObject {
             AppLogger.pipeline.warning("Refused recording journal recovery outside managed storage")
             return 0
         }
-        // A live writer can keep refreshing a file forever, and a restored or
-        // tampered file can have an mtime far in the future. Give this owner a
-        // finite wait budget; a later explicit recovery request can rescan any
-        // journal that is still live when the budget expires.
-        let maximumWaitInterval = max(0.02, (livenessWindow * 2) + 0.02)
-        let waitDeadline = ContinuousClock.now.advanced(
-            by: .seconds(maximumWaitInterval)
-        )
         var totalRecovered = 0
         while !Task.isCancelled {
             let passRequestGeneration = orphanedRecordingRecoveryRequestGeneration
@@ -1034,7 +1034,7 @@ public class TranscriptionTaskManager: ObservableObject {
                 switch candidate.disposition {
                 case .skip(let reason, let candidateRetryAfter):
                     if let candidateRetryAfter {
-                        retryAfter = max(retryAfter ?? 0, candidateRetryAfter)
+                        retryAfter = min(retryAfter ?? candidateRetryAfter, candidateRetryAfter)
                     }
                     AppLogger.pipeline.info("Left recording journal in place", [
                         "file": candidate.journalURL.lastPathComponent,
@@ -1098,6 +1098,7 @@ public class TranscriptionTaskManager: ObservableObject {
             }
 
             if orphanedRecordingRecoveryRequestGeneration != passRequestGeneration {
+                guard ContinuousClock.now < waitDeadline else { return totalRecovered }
                 continue
             }
 
