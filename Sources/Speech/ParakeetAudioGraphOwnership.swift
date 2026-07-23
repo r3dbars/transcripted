@@ -111,6 +111,15 @@ final class ParakeetTimedAudioEngineWorkOwnership: @unchecked Sendable {
         return true
     }
 
+    func isActive(
+        owner: ParakeetAudioEngineQueueOwnerToken,
+        phase: ParakeetTimedAudioEngineWorkPhase
+    ) -> Bool {
+        lock.withLock {
+            pendingLease == ParakeetTimedAudioEngineWorkLease(owner: owner, phase: phase)
+        }
+    }
+
     func claimPendingWorkForSuccessor(
         currentEngine: AnyObject,
         currentQueue: AnyObject
