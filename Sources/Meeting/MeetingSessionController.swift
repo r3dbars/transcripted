@@ -874,6 +874,50 @@ final class MeetingSessionController: ObservableObject {
             stopTimedOut: stopResult.didTimeOut
         )
 
+        // Every timed-out stop keeps the preallocated task ID used by its late
+        // completion callback. Handle this before the generic missing-mic path
+        // so an initially absent mic URL cannot create an unrelated failed row.
+        if stopResult.didTimeOut {
+            Self.runtimeDiagnosticsRecorder?.recordStall(
+                kind: "meeting",
+                stage: "recording_stop_timeout",
+                durationSeconds: recordingSnapshot.durationSeconds,
+                extra: [
+                    "trigger": recordingSnapshot.trigger.rawValue,
+                    "reason": reason.rawValue
+                ]
+            )
+            let preserved = failedMeetingStore.preserveTimedOutFailedMeetingForRetry(
+                taskId: stopTimeoutFailedTaskId,
+                micAudioURL: files.micURL,
+                systemAudioURL: files.systemURL,
+                errorMessage: "Recording stop timed out before audio files were finalized.",
+                meetingTitle: recordingSnapshot.suggestedTitle,
+                recordingDate: recordingSnapshot.recordingStartedAt
+            )
+            DiagnosticsTrail.record(
+                level: .warning,
+                engine: "meeting",
+                event: "meeting_recording_stop_timeout_failed",
+                message: "Meeting routed to failed queue due to stop timeout",
+                context: baseDiagnosticsContext(
+                    extra: [
+                        "reason": reason.rawValue,
+                        "preserved_for_retry": boolString(preserved)
+                    ]
+                )
+            )
+            state = .error("Recording didn't close cleanly. Open Transcripted Home to retry.")
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "stop_timeout")
+            trackDetectedPromptOutcome(
+                .transcriptFailed,
+                elapsedSeconds: activeDetectedPromptRecordingStartedAt.map { Date().timeIntervalSince($0) },
+                promptProperties: activeDetectedPromptRecordingTelemetryProperties
+            )
+            clearDetectedPromptRecordingTelemetry()
+            return
+        }
+
         guard let micURL = files.micURL else {
             let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
                 micAudioURL: nil,
@@ -902,53 +946,6 @@ final class MeetingSessionController: ObservableObject {
             state = files.systemURL == nil
                 ? .error("No meeting audio was captured.")
                 : .error("Microphone audio was missing. Open Transcripted Home to retry the system audio.")
-            return
-        }
-
-        // Stop timeout means Audio.onRecordingComplete never fired. The WAV
-        // header may not be fully patched, so route the audio to the failed
-        // queue rather than enqueuing for transcription. The user can retry
-        // from Transcripted Home, where the pipeline will either succeed
-        // on a now-finalized file or fail cleanly.
-        if stopResult.didTimeOut {
-            Self.runtimeDiagnosticsRecorder?.recordStall(
-                kind: "meeting",
-                stage: "recording_stop_timeout",
-                durationSeconds: recordingSnapshot.durationSeconds,
-                extra: [
-                    "trigger": recordingSnapshot.trigger.rawValue,
-                    "reason": reason.rawValue
-                ]
-            )
-            let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
-                taskId: stopTimeoutFailedTaskId,
-                micAudioURL: micURL,
-                systemAudioURL: files.systemURL,
-                errorMessage: "Recording stop timed out before audio files were finalized.",
-                meetingTitle: recordingSnapshot.suggestedTitle,
-                recordingDate: recordingSnapshot.recordingStartedAt,
-                archiveAudio: false
-            )
-            DiagnosticsTrail.record(
-                level: .warning,
-                engine: "meeting",
-                event: "meeting_recording_stop_timeout_failed",
-                message: "Meeting routed to failed queue due to stop timeout",
-                context: baseDiagnosticsContext(
-                    extra: [
-                        "reason": reason.rawValue,
-                        "preserved_for_retry": boolString(preserved)
-                    ]
-                )
-            )
-            state = .error("Recording didn't close cleanly. Open Transcripted Home to retry.")
-            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "stop_timeout")
-            trackDetectedPromptOutcome(
-                .transcriptFailed,
-                elapsedSeconds: activeDetectedPromptRecordingStartedAt.map { Date().timeIntervalSince($0) },
-                promptProperties: activeDetectedPromptRecordingTelemetryProperties
-            )
-            clearDetectedPromptRecordingTelemetry()
             return
         }
 
@@ -1629,15 +1626,25 @@ final class MeetingSessionController: ObservableObject {
             activeRecordingStartedAt = nil
 
             if files.micURL != nil || files.systemURL != nil {
-                didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
-                    taskId: shutdownFailedTaskId,
-                    micAudioURL: files.micURL,
-                    systemAudioURL: files.systemURL,
-                    errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
-                    meetingTitle: meetingTitle,
-                    recordingDate: recordingDate,
-                    archiveAudio: !files.didTimeOut
-                )
+                if files.didTimeOut {
+                    didPreserveRecording = failedMeetingStore.preserveTimedOutFailedMeetingForRetry(
+                        taskId: shutdownFailedTaskId,
+                        micAudioURL: files.micURL,
+                        systemAudioURL: files.systemURL,
+                        errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
+                        meetingTitle: meetingTitle,
+                        recordingDate: recordingDate
+                    )
+                } else {
+                    didPreserveRecording = failedMeetingStore.preserveFailedMeetingForRetry(
+                        taskId: shutdownFailedTaskId,
+                        micAudioURL: files.micURL,
+                        systemAudioURL: files.systemURL,
+                        errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening.",
+                        meetingTitle: meetingTitle,
+                        recordingDate: recordingDate
+                    )
+                }
             }
         } else {
             recordingTrigger = .unknown

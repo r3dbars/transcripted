@@ -2483,7 +2483,7 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - stop-timeout failed meetings refresh Home immediately") {
-        // preserveFailedMeetingForRetry / refreshTimedOutFailedMeetingAudio
+        // preserveTimedOutFailedMeetingForRetry / refreshTimedOutFailedMeetingAudio
         // moved to FailedMeetingStore.swift (audit 2026-07-08 wave 2, W2-B).
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let storeContents = readRepoTextFile("Sources/Meeting/FailedMeetingStore.swift")
@@ -2497,13 +2497,20 @@ func testRepoCommandContract() {
             from: "func preserveFailedMeetingForRetry(",
             to: "func refreshTimedOutFailedMeetingAudio("
         )
+        let timeoutPreserveBlock = sourceSlice(
+            storeContents,
+            from: "func preserveTimedOutFailedMeetingForRetry(",
+            to: "func preserveFailedMeetingForRetry("
+        )
 
         assertTrue(
-            timeoutBlock.contains("let preserved = failedMeetingStore.preserveFailedMeetingForRetry("),
-            "stop timeouts should route retained audio through the refresh helper before returning"
+            timeoutBlock.contains("let preserved = failedMeetingStore.preserveTimedOutFailedMeetingForRetry(")
+                && timeoutBlock.contains("micAudioURL: files.micURL")
+                && timeoutBlock.contains("guard let micURL = files.micURL"),
+            "every stop timeout should keep its callback task ID before the generic missing-mic path"
         )
         assertTrue(
-            timeoutBlock.contains("archiveAudio: false"),
+            timeoutPreserveBlock.contains("archiveAudio: false"),
             "stop timeouts should keep scratch audio in place because WAV finalization may still be running"
         )
         assertTrue(
@@ -2517,17 +2524,19 @@ func testRepoCommandContract() {
             to: "func refreshFailedMeetings("
         )
         assertTrue(
-            refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
+            refreshTimedOutAudioBlock.contains("timedOutFinalizationHandoff.receive(")
+                && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.failedMeetingDidPersist(")
+                && refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
                 && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
                 && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL"),
-            "late finalization should still promote system-only failed audio by reusing the failed queue mic placeholder"
+            "late finalization should buffer both callback orders and reuse the failed queue mic placeholder"
         )
         assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),
             "stop-timeout diagnostics should state whether the retained audio reached the retry queue"
         )
         assertTrue(
-            helperBlock.contains("taskManager.addFailedTranscriptionRetainingAvailableAudio(")
+            helperBlock.contains("let preserved = persistFailedMeetingForRetry(")
                 && helperBlock.contains("if preserved {\n            publishRefresh()"),
             "retained failed-meeting audio should refresh MeetingSessionController.failedMeetings immediately"
         )
@@ -2741,7 +2750,7 @@ func testRepoCommandContract() {
         )
         assertTrue(
             terminationBlock.contains("taskId: shutdownFailedTaskId")
-                && terminationBlock.contains("archiveAudio: !files.didTimeOut"),
+                && terminationBlock.contains("preserveTimedOutFailedMeetingForRetry("),
             "shutdown stop timeouts should keep unfinished scratch audio in place until late finalization can promote it"
         )
     }

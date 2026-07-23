@@ -10,6 +10,31 @@ struct CaptureStopResult {
     let didTimeOut: Bool
 }
 
+/// Orders late stop finalization against failed-row persistence. Audio writes
+/// its recording journal before emitting the completion callback, so buffering
+/// here is crash-safe until the failed row exists; after that, Core's persisted
+/// failed row and merged-sibling reconciliation own crash recovery.
+struct TimedOutFailedMeetingFinalizationHandoff {
+    private var bufferedResults: [UUID: CaptureStopResult] = [:]
+
+    mutating func receive(
+        _ result: CaptureStopResult,
+        for id: UUID,
+        failedMeetingIsPersisted: Bool
+    ) -> CaptureStopResult? {
+        bufferedResults[id] = result
+        return failedMeetingIsPersisted ? result : nil
+    }
+
+    func failedMeetingDidPersist(id: UUID) -> CaptureStopResult? {
+        bufferedResults[id]
+    }
+
+    mutating func markDeliverySucceeded(id: UUID) {
+        bufferedResults.removeValue(forKey: id)
+    }
+}
+
 final class MeetingCaptureAttempt<Output> {
     private var continuation: CheckedContinuation<Output, Never>?
     private var attemptID: UUID?

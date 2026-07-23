@@ -39,6 +39,7 @@ final class FailedMeetingStore {
     private let diagnosticsContext: ([String: String]) -> [String: String]
 
     private var retryingFailedMeetingIDs: Set<UUID> = []
+    private var timedOutFinalizationHandoff = TimedOutFailedMeetingFinalizationHandoff()
     private var failedAudioCompressionTask: Task<Void, Never>?
     private var failedAudioCompressionNeedsReschedule = false
 
@@ -159,6 +160,34 @@ final class FailedMeetingStore {
     }
 
     @discardableResult
+    func preserveTimedOutFailedMeetingForRetry(
+        taskId: UUID,
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        errorMessage: String,
+        meetingTitle: String?,
+        recordingDate: Date? = nil
+    ) -> Bool {
+        let preserved = persistFailedMeetingForRetry(
+            taskId: taskId,
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: errorMessage,
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate,
+            archiveAudio: false
+        )
+        guard preserved else { return false }
+
+        if let finalizedResult = timedOutFinalizationHandoff.failedMeetingDidPersist(id: taskId) {
+            promoteTimedOutFailedMeetingAudio(id: taskId, result: finalizedResult)
+        } else {
+            publishRefresh()
+        }
+        return true
+    }
+
+    @discardableResult
     func preserveFailedMeetingForRetry(
         taskId: UUID = UUID(),
         micAudioURL: URL?,
@@ -168,11 +197,11 @@ final class FailedMeetingStore {
         recordingDate: Date? = nil,
         archiveAudio: Bool = true
     ) -> Bool {
-        let preserved = taskManager.addFailedTranscriptionRetainingAvailableAudio(
+        let preserved = persistFailedMeetingForRetry(
+            taskId: taskId,
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,
-            taskId: taskId,
             meetingTitle: meetingTitle,
             recordingDate: recordingDate,
             archiveAudio: archiveAudio
@@ -184,6 +213,51 @@ final class FailedMeetingStore {
     }
 
     func refreshTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
+        let failedMeetingIsPersisted = failedManager.failedTranscriptions
+            .contains(where: { $0.id == id })
+        guard let deliverableResult = timedOutFinalizationHandoff.receive(
+            result,
+            for: id,
+            failedMeetingIsPersisted: failedMeetingIsPersisted
+        ) else {
+            DiagnosticsTrail.record(
+                level: .info,
+                engine: "meeting",
+                event: "meeting_recording_stop_timeout_audio_buffered",
+                message: "Timed-out meeting audio finalized before its failed queue entry was persisted",
+                context: diagnosticsContext([
+                    "failed_id": id.uuidString,
+                    "mic_file_present": boolString(result.micURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false),
+                    "system_file_present": boolString(result.systemURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+                ])
+            )
+            return
+        }
+
+        promoteTimedOutFailedMeetingAudio(id: id, result: deliverableResult)
+    }
+
+    private func persistFailedMeetingForRetry(
+        taskId: UUID,
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        errorMessage: String,
+        meetingTitle: String?,
+        recordingDate: Date?,
+        archiveAudio: Bool
+    ) -> Bool {
+        taskManager.addFailedTranscriptionRetainingAvailableAudio(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: errorMessage,
+            taskId: taskId,
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate,
+            archiveAudio: archiveAudio
+        )
+    }
+
+    private func promoteTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
         let existingFailure = failedManager.failedTranscriptions
             .first(where: { $0.id == id })
         let existingMicURL = existingFailure?.micAudioURL
@@ -210,6 +284,7 @@ final class FailedMeetingStore {
             ])
         )
         if updated {
+            timedOutFinalizationHandoff.markDeliverySucceeded(id: id)
             publishRefresh()
         }
     }
