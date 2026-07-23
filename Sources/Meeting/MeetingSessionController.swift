@@ -1655,6 +1655,10 @@ final class MeetingSessionController: ObservableObject {
             recordingTrigger = .unknown
         }
 
+        // Completed imported pipelines can leave their recovery lease inside a
+        // deferred speaker-review request. Finalize that typed owner before the
+        // app tears down in-memory review state.
+        taskManager.cleanupPendingNaming()
         let queuedPreserved = transcriptionQueue.preserveQueuedTranscriptionJobsForShutdown(
             errorMessage: "Meeting saved before quit. Audio is safe; finish the queued transcript from Home after reopening."
         )

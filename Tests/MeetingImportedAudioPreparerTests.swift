@@ -644,10 +644,15 @@ func testMeetingImportedAudioPreparer() async {
             processIdentifier: 202
         )
         assertNotNil(recoveredOwner, "the kernel lease should release automatically when the prior owner dies")
+        try! FileManager.default.removeItem(at: audioURL)
         recoveredOwner?.scratchCleanupConfirmed()
         assertTrue(
             ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).isEmpty,
             "confirmed scratch cleanup should retire the journal"
+        )
+        assertFalse(
+            FileManager.default.fileExists(atPath: lockURL.path),
+            "terminal journal cleanup should remove its no-longer-needed lease file"
         )
     }
 

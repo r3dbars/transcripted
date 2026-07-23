@@ -2308,6 +2308,16 @@ func testRepoCommandContract() {
             from: "func recoverImportedAudioJobs() -> Int {",
             to: "func confirmImportedScratchCleanup(for job: QueuedTranscriptionJob)"
         )
+        let recoveryClaimIndex = importedRecoveryBlock.range(
+            of: "let claimedRecords = records.compactMap"
+        )?.lowerBound ?? importedRecoveryBlock.endIndex
+        let transcriptScanIndex = importedRecoveryBlock.range(
+            of: "let existingTranscriptsByID = TranscriptSaver.existingTranscriptURLs("
+        )?.lowerBound ?? importedRecoveryBlock.startIndex
+        assertTrue(
+            recoveryClaimIndex < transcriptScanIndex,
+            "recovery must hold every available job lease before its one batch transcript scan so commit evidence cannot race stale"
+        )
         assertTrue(
             importedRecoveryBlock.contains("controller.failedMeetingStore.failedAudioURLs")
                 && importedRecoveryBlock.contains("failedQueueAudioURLs.contains(audioURL.standardizedFileURL)")
@@ -2739,6 +2749,10 @@ func testRepoCommandContract() {
         assertTrue(
             terminationBlock.contains("activeQueuedTranscriptionJobID = nil"),
             "shutdown preservation should clear the active queued job owner used for live sidecar final attachment"
+        )
+        assertTrue(
+            terminationBlock.contains("taskManager.cleanupPendingNaming()"),
+            "shutdown should finalize pending speaker-review scratch ownership before in-memory requests disappear"
         )
         assertTrue(
             terminationBlock.contains("let shutdownFailedTaskId = UUID()")

@@ -469,9 +469,24 @@ final class TranscriptionQueueCoordinator {
             journalDirectory: importedQueueJournalDirectory
         )
         let failedQueueAudioURLs = controller.failedMeetingStore.failedAudioURLs
+        let claimedRecords = records.compactMap { record -> (
+            ImportedTranscriptionQueueJournalRecord,
+            ImportedTranscriptionQueueJournalSession
+        )? in
+            guard let recoverySession = try? ImportedTranscriptionQueueJournal.claim(
+                id: record.id,
+                journalDirectory: importedQueueJournalDirectory
+            ) else {
+                return nil
+            }
+            return (record, recoverySession)
+        }
+        // Scan only after every available lease is held. A prior owner can no
+        // longer publish a stable transcript after this snapshot and leave us
+        // with stale evidence that would replay the same job.
         let existingTranscriptsByID = TranscriptSaver.existingTranscriptURLs(
             in: MeetingStoragePaths.transcriptsFolder,
-            transcriptIds: Set(records.map(\.id))
+            transcriptIds: Set(claimedRecords.map { $0.0.id })
         )
         var recoveredJobIDs = Set(queuedTranscriptionJobs.map(\.id))
         var recoveredAudioURLs = Set(
@@ -487,13 +502,7 @@ final class TranscriptionQueueCoordinator {
             }
         }
         var recovered = 0
-        for record in records {
-            guard let recoverySession = try? ImportedTranscriptionQueueJournal.claim(
-                id: record.id,
-                journalDirectory: importedQueueJournalDirectory
-            ) else {
-                continue
-            }
+        for (record, recoverySession) in claimedRecords {
             guard let audioURL = ImportedTranscriptionQueueJournal.audioURL(
                 for: record,
                 scratchDirectory: importedAudioScratchDirectory

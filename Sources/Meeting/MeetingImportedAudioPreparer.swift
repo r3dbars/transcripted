@@ -279,7 +279,7 @@ enum ImportedTranscriptionQueueJournal {
         )
     }
 
-    private static func lockURL(for id: UUID, in directory: URL) -> URL {
+    fileprivate static func lockURL(for id: UUID, in directory: URL) -> URL {
         directory.appendingPathComponent(
             "\(filenamePrefix)\(id.uuidString).\(lockFilenameExtension)",
             isDirectory: false
@@ -464,11 +464,14 @@ final class ImportedTranscriptionQueueJournalSession: ImportedTranscriptionRecov
     private func finish() {
         stateLock.withLock {
             guard lockDescriptor >= 0 else { return }
-            ImportedTranscriptionQueueJournal.remove(
+            let didRemoveJournal = ImportedTranscriptionQueueJournal.remove(
                 id: jobID,
                 journalDirectory: journalDirectory,
                 fileManager: fileManager
             )
+            if didRemoveJournal {
+                unlink(ImportedTranscriptionQueueJournal.lockURL(for: jobID, in: journalDirectory).path)
+            }
             releaseLockWhileStateLocked()
         }
     }
