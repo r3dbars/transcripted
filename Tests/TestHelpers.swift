@@ -83,6 +83,32 @@ func runSuite(_ name: String, _ block: () async -> Void) async {
     await block()
 }
 
+actor ParakeetAsyncInterleavingGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func opened() -> Bool {
+        isOpen
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        for waiter in pendingWaiters {
+            waiter.resume()
+        }
+    }
+}
+
 func repoFixtureURL(_ relativePath: String) -> URL {
     URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
         .appendingPathComponent(relativePath)
