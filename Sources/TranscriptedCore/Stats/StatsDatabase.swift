@@ -155,10 +155,36 @@ public final class StatsDatabase {
                 throw DatabaseWriteError.sqlite(operation: "COMMIT", message: message)
             }
         } catch {
-            if sqlite3_exec(db, "ROLLBACK", nil, nil, nil) != SQLITE_OK {
-                AppLogger.stats.error("Transaction ROLLBACK failed", ["sqlite_error": dbErrorMessage()])
-            }
+            rollbackAfterFailure()
             throw error
+        }
+    }
+
+    private func rollbackAfterFailure() {
+        guard let activeDB = db, sqlite3_get_autocommit(activeDB) == 0 else {
+            return
+        }
+        guard sqlite3_exec(activeDB, "ROLLBACK", nil, nil, nil) != SQLITE_OK else {
+            return
+        }
+
+        let rollbackError = dbErrorMessage()
+        AppLogger.stats.error("Transaction ROLLBACK failed", ["sqlite_error": rollbackError])
+
+        // Some SQLite failures roll back automatically. Quarantine only when SQLite confirms
+        // this handle still owns an open transaction; reusing it could expose partial state or
+        // make every later BEGIN fail. Closing the handle discards the uncommitted transaction.
+        guard sqlite3_get_autocommit(activeDB) == 0 else {
+            return
+        }
+        db = nil
+        isDatabaseOpen = false
+        let closeResult = sqlite3_close_v2(activeDB)
+        if closeResult != SQLITE_OK {
+            AppLogger.stats.error(
+                "Failed to close quarantined stats database connection",
+                ["sqlite_result": "\(closeResult)"]
+            )
         }
     }
 
