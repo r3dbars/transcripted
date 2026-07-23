@@ -6,24 +6,10 @@ func testMeetingCaptureCompletionPolicy() {
             MeetingCaptureCompletionPolicy.disposition(
                 completionGeneration: 12,
                 expectedStopGeneration: 12,
-                timedOutStopGenerations: [],
                 currentAudioGeneration: 12
             ),
             .expectedStop,
             "the completion for the current stop should resume its own continuation"
-        )
-    }
-
-    runSuite("MeetingCaptureCompletionPolicy routes a timed-out stop completion") {
-        assertEqual(
-            MeetingCaptureCompletionPolicy.disposition(
-                completionGeneration: 12,
-                expectedStopGeneration: 12,
-                timedOutStopGenerations: [12],
-                currentAudioGeneration: 12
-            ),
-            .lateTimedOutStop,
-            "a completion after the stop timeout should use the late-completion handler"
         )
     }
 
@@ -32,7 +18,6 @@ func testMeetingCaptureCompletionPolicy() {
             MeetingCaptureCompletionPolicy.disposition(
                 completionGeneration: 12,
                 expectedStopGeneration: nil,
-                timedOutStopGenerations: [],
                 currentAudioGeneration: 12
             ),
             .unexpectedCurrentStop,
@@ -45,7 +30,6 @@ func testMeetingCaptureCompletionPolicy() {
             MeetingCaptureCompletionPolicy.disposition(
                 completionGeneration: 12,
                 expectedStopGeneration: 14,
-                timedOutStopGenerations: [],
                 currentAudioGeneration: 14
             ),
             .stale,
@@ -53,26 +37,4 @@ func testMeetingCaptureCompletionPolicy() {
         )
     }
 
-    runSuite("MeetingCaptureCompletionPolicy keeps timed-out A separate from B") {
-        assertEqual(
-            MeetingCaptureCompletionPolicy.disposition(
-                completionGeneration: 12,
-                expectedStopGeneration: 14,
-                timedOutStopGenerations: [12],
-                currentAudioGeneration: 14
-            ),
-            .lateTimedOutStop,
-            "A's late completion should stay owned by A while B is stopping"
-        )
-        assertEqual(
-            MeetingCaptureCompletionPolicy.disposition(
-                completionGeneration: 14,
-                expectedStopGeneration: 14,
-                timedOutStopGenerations: [12],
-                currentAudioGeneration: 14
-            ),
-            .expectedStop,
-            "B's completion should still resolve B's stop"
-        )
-    }
 }

@@ -832,6 +832,19 @@ public class TranscriptionTaskManager: ObservableObject {
         )
     }
 
+    /// Checks whether the crash-recovery journal still durably owns a late
+    /// callback whose bounded app-side identity has already been evicted.
+    public func hasRecordingJournal(
+        micAudioURL: URL?,
+        systemAudioURL: URL?
+    ) -> Bool {
+        MeetingRecordingJournalStore.hasRecordingJournal(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            allowedRoots: cleanupDirectories
+        )
+    }
+
     @discardableResult
     public func addFailedTranscriptionRetainingAvailableAudio(
         micAudioURL: URL?,

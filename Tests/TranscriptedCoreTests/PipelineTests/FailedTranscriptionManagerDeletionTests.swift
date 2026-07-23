@@ -101,6 +101,11 @@ extension FailedTranscriptionManagerTests {
             systemAudioURL: systemURL,
             errorMessage: "Recording stop timed out before audio files were finalized."
         ))
+        XCTAssertTrue(MeetingRecordingJournalStore.hasRecordingJournal(
+            micAudioURL: placeholderURL,
+            systemAudioURL: systemURL,
+            allowedRoots: [paths.audioCaptures]
+        ))
 
         XCTAssertFalse(manager.deleteFailedTranscription(id: failedID))
         XCTAssertEqual(manager.failedTranscriptions.map(\.id), [failedID])

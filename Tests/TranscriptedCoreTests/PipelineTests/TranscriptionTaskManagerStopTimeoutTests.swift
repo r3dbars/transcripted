@@ -271,6 +271,10 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(first.micAudioURL.lastPathComponent, "microphone_placeholder_\(firstID.uuidString).wav")
         XCTAssertEqual(second.micAudioURL.lastPathComponent, "microphone_placeholder_\(secondID.uuidString).wav")
         XCTAssertNotEqual(first.micAudioURL, second.micAudioURL)
+        XCTAssertTrue(manager.hasRecordingJournal(
+            micAudioURL: first.micAudioURL,
+            systemAudioURL: firstSystemURL
+        ))
         XCTAssertEqual(
             MeetingRecordingJournalStore.load(at: firstJournalURL)?.systemAudioFilename,
             firstSystemURL.lastPathComponent
@@ -284,6 +288,10 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.micAudioURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: firstSystemURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: firstJournalURL.path))
+        XCTAssertFalse(manager.hasRecordingJournal(
+            micAudioURL: first.micAudioURL,
+            systemAudioURL: firstSystemURL
+        ))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.micAudioURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: secondSystemURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: secondJournalURL.path))
@@ -621,6 +629,10 @@ extension TranscriptionTaskManagerMetadataTests {
         // Model a merger that was already in flight when deletion removed the
         // failed row and its journal-owned segment inventory.
         try writeMonoWAV(to: mergedURL, duration: 2.5)
+        XCTAssertFalse(manager.hasRecordingJournal(
+            micAudioURL: mergedURL,
+            systemAudioURL: systemURL
+        ))
         manager.discardFinalizedFailedTranscriptionAudio(
             micAudioURL: mergedURL,
             systemAudioURL: systemURL

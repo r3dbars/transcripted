@@ -263,8 +263,9 @@ final class MeetingCaptureBridge: ObservableObject {
                     didTimeOut: false
                 )
 
-                if self.timedOutStopCompletions.isExpired(generation) {
-                    switch self.timedOutStopCompletions.takeExpiredOwner(for: generation) {
+                switch self.timedOutStopCompletions.resolve(generation: generation) {
+                case .expired(let owner):
+                    switch owner {
                     case .failedMeeting(let id):
                         self.onExpiredTimedOutRecordingComplete?(id, result)
                     case .discard:
@@ -276,24 +277,25 @@ final class MeetingCaptureBridge: ObservableObject {
                         self.onExpiredTimedOutRecordingComplete?(nil, result)
                     }
                     return
+                case .pending(let handler):
+                    self.timedOutStopCompletionExpiryTasks
+                        .removeValue(forKey: generation)?
+                        .cancel()
+                    handler?(result)
+                    return
+                case .unowned:
+                    break
                 }
 
                 switch MeetingCaptureCompletionPolicy.disposition(
                     completionGeneration: generation,
                     expectedStopGeneration: self.expectedStopGeneration,
-                    timedOutStopGenerations: self.timedOutStopCompletions.generations,
                     currentAudioGeneration: self.audio.currentRecordingSessionGeneration
                 ) {
                 case .expectedStop:
                     guard let continuation = self.completionAttempt.reset() else { return }
                     self.expectedStopGeneration = nil
                     continuation.resume(returning: result)
-                case .lateTimedOutStop:
-                    self.timedOutStopCompletionExpiryTasks
-                        .removeValue(forKey: generation)?
-                        .cancel()
-                    let handler = self.timedOutStopCompletions.takeHandler(for: generation)
-                    handler?(result)
                 case .unexpectedCurrentStop:
                     self.onUnexpectedRecordingComplete?(result)
                 case .stale:

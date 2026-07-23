@@ -308,6 +308,28 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         }
     }
 
+    static func hasRecordingJournal(
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        allowedRoots: [URL]
+    ) -> Bool {
+        let canonicalRoots = allowedRoots.map { canonicalURL($0) }
+        let hasMicJournal = micAudioURL.map { micURL in
+            isContained(micURL, in: canonicalRoots)
+                && journalURLs(forMicAudioURL: micURL).contains { candidate in
+                    isContained(candidate, in: canonicalRoots)
+                        && !isSymbolicLink(at: candidate)
+                        && FileManager.default.fileExists(atPath: candidate.path)
+                }
+        } ?? false
+        if hasMicJournal { return true }
+        guard let systemAudioURL else { return false }
+        return !journalURLs(
+            forSystemAudioURL: systemAudioURL,
+            canonicalRoots: canonicalRoots
+        ).isEmpty
+    }
+
     /// Deletes a terminal recording's complete journal-owned inventory. The
     /// supplied URLs are useful after a merge, while the journal contributes
     /// every pre-merge recovery segment when completion never arrives.
@@ -335,16 +357,11 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             return false
         }
         let systemJournalCandidates: [URL]
-        if existingJournalCandidates.isEmpty,
-           let safeSystemURL,
-           isSafeFilename(safeSystemURL.lastPathComponent) {
+        if existingJournalCandidates.isEmpty, let safeSystemURL {
             systemJournalCandidates = journalURLs(
-                in: safeSystemURL.deletingLastPathComponent()
-            ).filter { candidate in
-                isContained(candidate, in: canonicalRoots)
-                    && !isSymbolicLink(at: candidate)
-                    && load(at: candidate)?.systemAudioFilename == safeSystemURL.lastPathComponent
-            }
+                forSystemAudioURL: safeSystemURL,
+                canonicalRoots: canonicalRoots
+            )
             // A system filename must identify exactly one recording. Never
             // guess across ambiguous journals during terminal deletion.
             guard systemJournalCandidates.count <= 1 else { return false }
@@ -471,6 +488,21 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             stems.append(String(stem.dropLast("_merged".count)))
         }
         return stems.map { directory.appendingPathComponent($0 + filenameSuffix) }
+    }
+
+    private static func journalURLs(
+        forSystemAudioURL systemAudioURL: URL,
+        canonicalRoots: [URL]
+    ) -> [URL] {
+        guard isContained(systemAudioURL, in: canonicalRoots),
+              isSafeFilename(systemAudioURL.lastPathComponent) else {
+            return []
+        }
+        return journalURLs(in: systemAudioURL.deletingLastPathComponent()).filter { candidate in
+            isContained(candidate, in: canonicalRoots)
+                && !isSymbolicLink(at: candidate)
+                && load(at: candidate)?.systemAudioFilename == systemAudioURL.lastPathComponent
+        }
     }
 
     private static func isSafeFilename(_ filename: String) -> Bool {

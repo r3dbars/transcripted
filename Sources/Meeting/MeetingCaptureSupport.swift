@@ -18,6 +18,15 @@ enum TimedOutStopCompletionOwner: Equatable {
     case discard
 }
 
+enum ExpiredTimedOutCompletionFallback: Equatable {
+    case recoverJournal
+    case discardFinalizedAudio
+
+    static func action(hasMatchingJournal: Bool) -> Self {
+        hasMatchingJournal ? .recoverJournal : .discardFinalizedAudio
+    }
+}
+
 /// Orders late stop finalization against failed-row persistence. Audio's
 /// recording journal keeps owning unfinished segments until finalization; the
 /// failed row and merged-sibling reconciliation own the retryable result.
@@ -63,6 +72,7 @@ struct TimedOutFailedMeetingFinalizationHandoff {
             if case .journalOwned = state { count += 1 }
         }
     }
+    func hasOwnership(of id: UUID) -> Bool { states[id] != nil }
 
     mutating func receive(
         _ result: CaptureStopResult,
@@ -202,66 +212,70 @@ struct TimedOutFailedMeetingFinalizationHandoff {
 /// recording retains the immediately preceding stop so its late completion can
 /// still be delivered, then prunes older stops whose journal/failed row owns
 /// recovery. This prevents never-completing stops from accumulating closures.
-struct TimedOutStopCompletionRegistry {
-    private static let expiredOwnerCapacity = 4
-    private(set) var generations: Set<UInt64> = []
-    private var handlers: [UInt64: (CaptureStopResult) -> Void] = [:]
-    private var owners: [UInt64: TimedOutStopCompletionOwner] = [:]
-    private var expiredOwners: [UInt64: TimedOutStopCompletionOwner] = [:]
-    private var expiredOwnerOrder: [UInt64] = []
-    private(set) var latestExpiredGeneration: UInt64?
+enum TimedOutStopCompletionResolution {
+    case pending(((CaptureStopResult) -> Void)?)
+    case expired(TimedOutStopCompletionOwner?)
+    case unowned
+}
 
-    var handlerCount: Int { handlers.count }
-    var expiredOwnerCount: Int { expiredOwners.count }
+struct TimedOutStopCompletionRegistry {
+    private struct PendingCompletion {
+        let owner: TimedOutStopCompletionOwner?
+        let handler: ((CaptureStopResult) -> Void)?
+    }
+
+    private struct Tombstone {
+        let generation: UInt64
+        let owner: TimedOutStopCompletionOwner
+    }
+
+    private static let tombstoneCapacity = 4
+    private var pending: [UInt64: PendingCompletion] = [:]
+    private var tombstones: [Tombstone] = []
+    private var latestExpiredGeneration: UInt64?
+
+    var generations: Set<UInt64> { Set(pending.keys) }
+    var handlerCount: Int { pending.values.filter { $0.handler != nil }.count }
+    var expiredOwnerCount: Int { tombstones.count }
 
     mutating func register(
         generation: UInt64,
         owner: TimedOutStopCompletionOwner? = nil,
         handler: ((CaptureStopResult) -> Void)?
     ) {
-        generations.insert(generation)
-        handlers[generation] = handler
-        owners[generation] = owner
-        expiredOwners.removeValue(forKey: generation)
-        expiredOwnerOrder.removeAll { $0 == generation }
+        pending[generation] = PendingCompletion(owner: owner, handler: handler)
+        tombstones.removeAll { $0.generation == generation }
     }
 
-    mutating func takeHandler(for generation: UInt64) -> ((CaptureStopResult) -> Void)? {
-        guard generations.remove(generation) != nil else { return nil }
-        owners.removeValue(forKey: generation)
-        return handlers.removeValue(forKey: generation)
-    }
-
-    mutating func takeExpiredOwner(for generation: UInt64) -> TimedOutStopCompletionOwner? {
-        expiredOwnerOrder.removeAll { $0 == generation }
-        return expiredOwners.removeValue(forKey: generation)
+    mutating func resolve(generation: UInt64) -> TimedOutStopCompletionResolution {
+        if let completion = pending.removeValue(forKey: generation) {
+            return .pending(completion.handler)
+        }
+        if let index = tombstones.firstIndex(where: { $0.generation == generation }) {
+            return .expired(tombstones.remove(at: index).owner)
+        }
+        if let latestExpiredGeneration, generation <= latestExpiredGeneration {
+            return .expired(nil)
+        }
+        return .unowned
     }
 
     @discardableResult
     mutating func expire(generation: UInt64) -> Bool {
-        guard generations.remove(generation) != nil else { return false }
-        handlers.removeValue(forKey: generation)
-        if let owner = owners.removeValue(forKey: generation) {
-            storeExpiredOwner(owner, for: generation)
+        guard let completion = pending.removeValue(forKey: generation) else { return false }
+        if let owner = completion.owner {
+            storeTombstone(owner, for: generation)
         }
         latestExpiredGeneration = max(latestExpiredGeneration ?? 0, generation)
         return true
     }
 
-    func isExpired(_ generation: UInt64) -> Bool {
-        guard let latestExpiredGeneration else { return false }
-        return !generations.contains(generation)
-            && generation <= latestExpiredGeneration
-    }
-
     @discardableResult
     mutating func prune(olderThan latestCompletedStopGeneration: UInt64) -> Set<UInt64> {
-        let staleGenerations = generations.filter { $0 < latestCompletedStopGeneration }
-        generations.subtract(staleGenerations)
+        let staleGenerations = pending.keys.filter { $0 < latestCompletedStopGeneration }
         for generation in staleGenerations {
-            handlers.removeValue(forKey: generation)
-            if let owner = owners.removeValue(forKey: generation) {
-                storeExpiredOwner(owner, for: generation)
+            if let owner = pending.removeValue(forKey: generation)?.owner {
+                storeTombstone(owner, for: generation)
             }
         }
         if let latestPrunedGeneration = staleGenerations.max() {
@@ -273,15 +287,14 @@ struct TimedOutStopCompletionRegistry {
         return Set(staleGenerations)
     }
 
-    private mutating func storeExpiredOwner(
+    private mutating func storeTombstone(
         _ owner: TimedOutStopCompletionOwner,
         for generation: UInt64
     ) {
-        if expiredOwners.updateValue(owner, forKey: generation) == nil {
-            expiredOwnerOrder.append(generation)
-        }
-        while expiredOwnerOrder.count > Self.expiredOwnerCapacity {
-            expiredOwners.removeValue(forKey: expiredOwnerOrder.removeFirst())
+        tombstones.removeAll { $0.generation == generation }
+        tombstones.append(Tombstone(generation: generation, owner: owner))
+        while tombstones.count > Self.tombstoneCapacity {
+            tombstones.removeFirst()
         }
     }
 }
@@ -324,7 +337,6 @@ final class MeetingCaptureAttempt<Output> {
 
 enum MeetingCaptureCompletionDisposition: Equatable {
     case expectedStop
-    case lateTimedOutStop
     case unexpectedCurrentStop
     case stale
 }
@@ -333,13 +345,8 @@ enum MeetingCaptureCompletionPolicy {
     static func disposition(
         completionGeneration: UInt64,
         expectedStopGeneration: UInt64?,
-        timedOutStopGenerations: Set<UInt64>,
         currentAudioGeneration: UInt64
     ) -> MeetingCaptureCompletionDisposition {
-        if timedOutStopGenerations.contains(completionGeneration) {
-            return .lateTimedOutStop
-        }
-
         if let expectedStopGeneration,
            expectedStopGeneration == completionGeneration {
             return .expectedStop

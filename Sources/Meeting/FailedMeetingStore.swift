@@ -244,6 +244,20 @@ final class FailedMeetingStore {
     func refreshTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
         let failedMeetingIsPersisted = failedManager.failedTranscriptions
             .contains(where: { $0.id == id })
+        if !failedMeetingIsPersisted,
+           !timedOutFinalizationHandoff.hasOwnership(of: id),
+           result.micURL != nil || result.systemURL != nil,
+           !taskManager.hasRecordingJournal(
+               micAudioURL: result.micURL,
+               systemAudioURL: result.systemURL
+           ) {
+            // Both bounded owner tables may have evicted this ID. With no
+            // durable row or journal, a terminal delete/discard owns the late
+            // callback only for cleanup; treating it as callback-first would
+            // orphan merger output that appeared after deletion.
+            discardFinalizedTimedOutAudio(result)
+            return
+        }
         let action = timedOutFinalizationHandoff.receive(
             result,
             for: id,
@@ -279,8 +293,62 @@ final class FailedMeetingStore {
     /// a bounded grace. A completion after that boundary can still recover its
     /// finalized journal through this value-only, ID-independent seam.
     func recoverExpiredTimedOutMeetingAudio(_ result: CaptureStopResult) {
+        let matchingFailures = failedManager.failedTranscriptions.filter {
+            failedMeeting($0, owns: result)
+        }
+        if matchingFailures.count == 1, let failedMeetingID = matchingFailures.first?.id {
+            refreshTimedOutFailedMeetingAudio(id: failedMeetingID, result: result)
+            return
+        }
         guard let ownedAudioURL = result.micURL ?? result.systemURL else { return }
-        scheduleTimedOutJournalRecovery(in: ownedAudioURL.deletingLastPathComponent())
+        let scratchDirectory = ownedAudioURL.deletingLastPathComponent()
+        let hasMatchingJournal = taskManager.hasRecordingJournal(
+            micAudioURL: result.micURL,
+            systemAudioURL: result.systemURL
+        )
+        if matchingFailures.count > 1 {
+            // Ambiguous live ownership fails closed: keep the finalized file
+            // and let canonical journal recovery reconcile what it can.
+            scheduleTimedOutJournalRecovery(in: scratchDirectory)
+            return
+        }
+        switch ExpiredTimedOutCompletionFallback.action(
+            hasMatchingJournal: hasMatchingJournal
+        ) {
+        case .recoverJournal:
+            scheduleTimedOutJournalRecovery(in: scratchDirectory)
+        case .discardFinalizedAudio:
+            discardFinalizedTimedOutAudio(result)
+        }
+    }
+
+    private func failedMeeting(
+        _ failure: FailedTranscription,
+        owns result: CaptureStopResult
+    ) -> Bool {
+        if let failedSystemURL = failure.systemAudioURL,
+           let systemURL = result.systemURL,
+           canonicalURL(failedSystemURL) == canonicalURL(systemURL) {
+            return true
+        }
+        guard let micURL = result.micURL else { return false }
+        let failedMicURL = canonicalURL(failure.micAudioURL)
+        let finalizedMicURL = canonicalURL(micURL)
+        guard failedMicURL.deletingLastPathComponent() == finalizedMicURL.deletingLastPathComponent() else {
+            return false
+        }
+        return recordingStem(failedMicURL) == recordingStem(finalizedMicURL)
+    }
+
+    private func recordingStem(_ url: URL) -> String {
+        let stem = url.deletingPathExtension().lastPathComponent
+        return stem.hasSuffix("_merged")
+            ? String(stem.dropLast("_merged".count))
+            : stem
+    }
+
+    private func canonicalURL(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
     }
 
     private func persistFailedMeetingForRetry(

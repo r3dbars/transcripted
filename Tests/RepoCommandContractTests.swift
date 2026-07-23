@@ -2444,7 +2444,7 @@ func testRepoCommandContract() {
         assertTrue(
             bridgeContents.contains("TranscriptedConstants.meetingMaximumStopTimeout")
                 && bridgeContents.contains("timedOutStopCompletions.expire(generation: generation)")
-                && bridgeContents.contains("takeExpiredOwner(for: generation)")
+                && bridgeContents.contains("timedOutStopCompletions.resolve(generation: generation)")
                 && bridgeContents.contains("onExpiredTimedOutRecordingComplete?(id, result)"),
             "a never-completing timed-out stop should release its closure on a fixed deadline while retaining bounded value-only ownership"
         )
@@ -2550,12 +2550,15 @@ func testRepoCommandContract() {
         assertTrue(
             refreshTimedOutAudioBlock.contains("timedOutFinalizationHandoff.receive(")
                 && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.failedMeetingDidPersist(")
+                && refreshTimedOutAudioBlock.contains("!timedOutFinalizationHandoff.hasOwnership(of: id)")
+                && refreshTimedOutAudioBlock.contains("taskManager.hasRecordingJournal(")
                 && refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
                 && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
                 && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL")
                 && refreshTimedOutAudioBlock.contains("case .journalOwned:")
+                && refreshTimedOutAudioBlock.contains("case .discardFinalizedAudio:")
                 && refreshTimedOutAudioBlock.contains("scheduleTimedOutJournalRecovery(in: ownedAudioURL.deletingLastPathComponent())"),
-            "late finalization should buffer both callback orders, reuse the failed queue mic placeholder, and recover an empty-snapshot journal in-process"
+            "late finalization should buffer both callback orders, preserve durable journal recovery, and discard terminal callbacks after bounded-owner eviction"
         )
         let journalRecoveryScheduleBlock = sourceSlice(
             storeContents,
