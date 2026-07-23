@@ -2515,6 +2515,11 @@ func testRepoCommandContract() {
             from: "func preserveTimedOutFailedMeetingForRetry(",
             to: "func preserveFailedMeetingForRetry("
         )
+        let retryFailedTranscriptionBlock = sourceSlice(
+            taskManagerContents,
+            from: "public func retryFailedTranscription(",
+            to: "private func performRetry("
+        )
 
         assertTrue(
             timeoutBlock.contains("let preserved = failedMeetingStore.preserveTimedOutFailedMeetingForRetry(")
@@ -2530,8 +2535,10 @@ func testRepoCommandContract() {
             "stop timeouts should schedule journal recovery after either durable persistence or persistence failure"
         )
         assertTrue(
-            taskManagerContents.contains("MeetingRecordingJournalStore.hasJournal(forMicAudioURL: failed.micAudioURL)"),
-            "retry must wait until the retained journal's full segment inventory has been reconciled"
+            retryFailedTranscriptionBlock.contains("if hasRecordingJournal(")
+                && retryFailedTranscriptionBlock.contains("micAudioURL: failed.micAudioURL")
+                && retryFailedTranscriptionBlock.contains("systemAudioURL: failed.systemAudioURL"),
+            "retry must wait until the retained mic- or system-keyed journal inventory has been reconciled"
         )
         assertTrue(
             taskManagerContents.contains("MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: journalURL)"),
