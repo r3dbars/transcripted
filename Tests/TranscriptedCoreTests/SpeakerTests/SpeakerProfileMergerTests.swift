@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
@@ -134,7 +135,7 @@ final class SpeakerProfileMergerTests: XCTestCase {
         let sourceBefore = try XCTUnwrap(database.getSpeaker(id: source.id))
         database.recordNegativeExemplar(profileId: source.id, embedding: [Float](repeating: 0.12, count: 256))
 
-        database.mergeProfiles(sourceId: source.id, into: target.id)
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
 
         XCTAssertNil(database.getSpeaker(id: source.id), "source profile is deleted after merge")
         XCTAssertTrue(
@@ -146,6 +147,138 @@ final class SpeakerProfileMergerTests: XCTestCase {
         XCTAssertEqual(merged.callCount, targetBefore.callCount + sourceBefore.callCount, "call counts sum")
         XCTAssertEqual(merged.displayName, "Jenny Wen", "name transfers when the target is unnamed")
         XCTAssertEqual(merged.confidence, min(1.0, targetBefore.confidence + 0.15), accuracy: 0.0001, "confidence bumps")
+    }
+
+    func testMergeProfilesThrowsWhenEitherProfileIsMissing() throws {
+        let target = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.30, count: 256),
+            existingId: nil
+        )
+        let missingSourceId = UUID()
+
+        XCTAssertThrowsError(try database.mergeProfiles(sourceId: missingSourceId, into: target.id)) { error in
+            guard case SpeakerDatabase.ProfileMergeError.profileNotFound(
+                sourceId: missingSourceId,
+                targetId: target.id
+            ) = error else {
+                XCTFail("Expected profileNotFound, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testAtomicMergeBatchRollsBackEarlierMergeWhenLaterMergeFails() throws {
+        let firstSource = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.20, count: 256),
+            existingId: nil
+        )
+        let firstTarget = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.30, count: 256),
+            existingId: nil
+        )
+        let firstSourceBefore = try XCTUnwrap(database.getSpeaker(id: firstSource.id))
+        let firstTargetBefore = try XCTUnwrap(database.getSpeaker(id: firstTarget.id))
+
+        XCTAssertThrowsError(try database.performMutationBatch {
+            try database.mergeProfiles(sourceId: firstSource.id, into: firstTarget.id)
+            try database.mergeProfiles(sourceId: UUID(), into: firstTarget.id)
+        })
+
+        assertProfile(database.getSpeaker(id: firstSource.id), equals: firstSourceBefore)
+        assertProfile(database.getSpeaker(id: firstTarget.id), equals: firstTargetBefore)
+        XCTAssertTrue(database.recentUndoableMerges().isEmpty)
+    }
+
+    private func assertProfile(
+        _ actual: SpeakerProfile?,
+        equals expected: SpeakerProfile,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let actual else {
+            XCTFail("Expected speaker profile \(expected.id)", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(actual.id, expected.id, file: file, line: line)
+        XCTAssertEqual(actual.displayName, expected.displayName, file: file, line: line)
+        XCTAssertEqual(actual.nameSource, expected.nameSource, file: file, line: line)
+        XCTAssertEqual(actual.embedding, expected.embedding, file: file, line: line)
+        XCTAssertEqual(actual.exemplars, expected.exemplars, file: file, line: line)
+        XCTAssertEqual(actual.firstSeen, expected.firstSeen, file: file, line: line)
+        XCTAssertEqual(actual.lastSeen, expected.lastSeen, file: file, line: line)
+        XCTAssertEqual(actual.callCount, expected.callCount, file: file, line: line)
+        XCTAssertEqual(actual.confidence, expected.confidence, file: file, line: line)
+        XCTAssertEqual(actual.disputeCount, expected.disputeCount, file: file, line: line)
+    }
+
+    func testMergeProfilesRollsBackAndThrowsWhenTargetUpdateCannotBePrepared() throws {
+        let (source, target) = makeNamedSourceAndUnnamedTarget()
+        let result = database.queue.sync {
+            sqlite3_set_authorizer(database.db, { _, action, tableName, _, _, _ in
+                guard action == SQLITE_UPDATE,
+                      let tableName,
+                      String(cString: tableName) == "speakers" else {
+                    return SQLITE_OK
+                }
+                return SQLITE_DENY
+            }, nil)
+        }
+        XCTAssertEqual(result, SQLITE_OK)
+        defer {
+            _ = database.queue.sync { sqlite3_set_authorizer(database.db, nil, nil) }
+        }
+
+        assertMergeThrows(sourceId: source.id, targetId: target.id, operation: "prepare merge target update")
+        try assertMergeDidNotMutate(source: source, target: target)
+    }
+
+    func testMergeProfilesRollsBackAndThrowsWhenTargetUpdateStepFails() throws {
+        let (source, target) = makeNamedSourceAndUnnamedTarget()
+        try executeSQL("""
+        CREATE TRIGGER fail_merge_target_update
+        BEFORE UPDATE ON speakers
+        WHEN OLD.id = '\(target.id.uuidString)' AND NEW.call_count > OLD.call_count
+        BEGIN
+            SELECT RAISE(ABORT, 'forced merge update failure');
+        END;
+        """)
+
+        assertMergeThrows(sourceId: source.id, targetId: target.id, operation: "step merge target update")
+        try assertMergeDidNotMutate(source: source, target: target)
+    }
+
+    func testMergeProfilesThrowsWhenTransactionCannotBegin() throws {
+        let (source, target) = makeNamedSourceAndUnnamedTarget()
+
+        let thrown = database.queue.sync { () -> Error? in
+            guard sqlite3_exec(database.db, "BEGIN EXCLUSIVE", nil, nil, nil) == SQLITE_OK else {
+                return TestFailure.couldNotStartTransaction
+            }
+            defer { sqlite3_exec(database.db, "ROLLBACK", nil, nil, nil) }
+            do {
+                try database.mergeProfilesImpl(sourceId: source.id, into: target.id)
+                return nil
+            } catch {
+                return error
+            }
+        }
+
+        assertSQLiteOperation(thrown, equals: "begin speaker transaction")
+        try assertMergeDidNotMutate(source: source, target: target)
+    }
+
+    func testMergeProfilesRollsBackAndThrowsWhenCommitFails() throws {
+        let (source, target) = makeNamedSourceAndUnnamedTarget()
+        try executeSQL("PRAGMA foreign_keys = ON;")
+        try executeSQL("""
+        CREATE TABLE merge_commit_guard (
+            source_id TEXT NOT NULL REFERENCES speakers(id) DEFERRABLE INITIALLY DEFERRED
+        );
+        INSERT INTO merge_commit_guard (source_id) VALUES ('\(source.id.uuidString)');
+        """)
+
+        assertMergeThrows(sourceId: source.id, targetId: target.id, operation: "commit speaker transaction")
+        try assertMergeDidNotMutate(source: source, target: target)
     }
 
     func testMergeProfilesByNameCollapsesSameNameProfiles() throws {
@@ -175,6 +308,44 @@ final class SpeakerProfileMergerTests: XCTestCase {
         XCTAssertEqual(survivors.count, 1, "identical unnamed embeddings above threshold merge into one")
     }
 
+    func testMergeDuplicatesContinuesAfterOuterProfileIsAbsorbed() {
+        let now = Date()
+        let lowCallOuter = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        let highCallKeeper = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        let remaining = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.25, count: 256),
+            existingId: nil
+        )
+        database.restoreProfile(SpeakerProfile(
+            id: lowCallOuter.id, displayName: nil, nameSource: nil,
+            embedding: lowCallOuter.embedding, firstSeen: now, lastSeen: now,
+            callCount: 1, confidence: 0.5, disputeCount: 0
+        ))
+        database.restoreProfile(SpeakerProfile(
+            id: highCallKeeper.id, displayName: nil, nameSource: nil,
+            embedding: highCallKeeper.embedding, firstSeen: now, lastSeen: now.addingTimeInterval(-60),
+            callCount: 3, confidence: 0.7, disputeCount: 0
+        ))
+        database.restoreProfile(SpeakerProfile(
+            id: remaining.id, displayName: nil, nameSource: nil,
+            embedding: remaining.embedding, firstSeen: now, lastSeen: now.addingTimeInterval(-120),
+            callCount: 1, confidence: 0.5, disputeCount: 0
+        ))
+
+        database.mergeDuplicates(threshold: 0.6)
+
+        let survivors = [lowCallOuter.id, highCallKeeper.id, remaining.id].compactMap {
+            database.getSpeaker(id: $0)
+        }
+        XCTAssertEqual(survivors.map(\.id), [highCallKeeper.id])
+    }
+
     func testPruneWeakProfilesRemovesNegativeExemplarsWithProfile() {
         let profileId = UUID()
         _ = database.addOrUpdateSpeaker(
@@ -198,6 +369,77 @@ final class SpeakerProfileMergerTests: XCTestCase {
 
         XCTAssertNil(database.getSpeaker(id: profileId))
         XCTAssertTrue(database.negativeExemplars(profileId: profileId).isEmpty)
+    }
+
+    private func makeNamedSourceAndUnnamedTarget() -> (source: SpeakerProfile, target: SpeakerProfile) {
+        let target = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.30, count: 256),
+            existingId: nil
+        )
+        let source = database.addOrUpdateSpeaker(
+            embedding: [Float](repeating: 0.31, count: 256),
+            existingId: nil
+        )
+        database.setDisplayName(id: source.id, name: "Jenny Wen", source: NameSource.userManual)
+        database.recordNegativeExemplar(
+            profileId: source.id,
+            embedding: [Float](repeating: 0.12, count: 256)
+        )
+        return (source, target)
+    }
+
+    private func assertMergeThrows(sourceId: UUID, targetId: UUID, operation: String) {
+        XCTAssertThrowsError(try database.mergeProfiles(sourceId: sourceId, into: targetId)) {
+            self.assertSQLiteOperation($0, equals: operation)
+        }
+    }
+
+    private func assertSQLiteOperation(
+        _ error: Error?,
+        equals operation: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let sqliteError = error as? SpeakerDatabase.SQLiteOperationError else {
+            XCTFail("Expected SQLiteOperationError, got \(String(describing: error))", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(sqliteError.operation, operation, file: file, line: line)
+    }
+
+    private func assertMergeDidNotMutate(
+        source: SpeakerProfile,
+        target: SpeakerProfile,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let sourceAfter = try XCTUnwrap(database.getSpeaker(id: source.id), file: file, line: line)
+        let targetAfter = try XCTUnwrap(database.getSpeaker(id: target.id), file: file, line: line)
+        XCTAssertEqual(sourceAfter.displayName, "Jenny Wen", file: file, line: line)
+        XCTAssertEqual(sourceAfter.callCount, source.callCount, file: file, line: line)
+        XCTAssertNil(targetAfter.displayName, file: file, line: line)
+        XCTAssertEqual(targetAfter.callCount, target.callCount, file: file, line: line)
+        XCTAssertFalse(database.negativeExemplars(profileId: source.id).isEmpty, file: file, line: line)
+        XCTAssertTrue(database.recentUndoableMerges().isEmpty, file: file, line: line)
+    }
+
+    private func executeSQL(_ sql: String) throws {
+        try database.queue.sync {
+            var message: UnsafeMutablePointer<CChar>?
+            let result = sqlite3_exec(database.db, sql, nil, nil, &message)
+            defer { sqlite3_free(message) }
+            guard result == SQLITE_OK else {
+                throw NSError(
+                    domain: "SpeakerProfileMergerTests.SQLite",
+                    code: Int(result),
+                    userInfo: [NSLocalizedDescriptionKey: message.map { String(cString: $0) } ?? "unknown SQLite error"]
+                )
+            }
+        }
+    }
+
+    private enum TestFailure: Error {
+        case couldNotStartTransaction
     }
 }
 
@@ -226,7 +468,7 @@ private final class DefaultMergeFallbackSpeakerStore: SpeakerStore, @unchecked S
     func setDisplayName(id _: UUID, name _: String, source _: String) {}
     func restoreProfile(_: SpeakerProfile) {}
     func deleteSpeaker(id _: UUID) {}
-    func mergeProfiles(sourceId _: UUID, into _: UUID) {}
+    func mergeProfiles(sourceId _: UUID, into _: UUID) throws {}
     func mergeProfilesByName() {}
 
     func mergeDuplicates() {

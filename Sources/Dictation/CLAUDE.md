@@ -7,6 +7,7 @@
 ## Files
 
 - `DictationSessionTimeout.swift` — uptime-based timeout helper so sleep does not consume a session's remaining record window
+- `DictationStoppedAudioRecovery.swift` — writes a private recovery WAV plus restart-discovery metadata immediately after recording stops and retains both until transcript persistence succeeds or the user explicitly discards the session
 - `DictationStoragePaths.swift` — capture-library-backed storage root for dictation artifacts
 - `DictationTranscriptWriter.swift` — groups completed dictations into one markdown file per day; serializes day-file writes through `DictationTranscriptMutationLock`
 - `DictationTranscriptStore.swift` — shared seam for saving dictation markdown and reading the newest saved dictation back out
@@ -27,6 +28,13 @@
 - root: `<capture-library>/dictations/`
 - transcript folder: same as the dictation root
 - file shape: one `Dictations_YYYY-MM-DD.md` file per day, with multiple timestamped sections
+- stopped-audio recovery: `~/Library/Application Support/Transcripted/state/dictation-audio-recovery/`
+
+Stopped-audio recovery is intentionally bounded and local. Launch scans at most
+one pending metadata record for presentation, then `Show Audio` reveals the WAV
+in Finder. The operational recovery path is Home -> Import Audio -> select that
+WAV; this uses the normal local imported-audio transcription pipeline. Reveal or
+restart never deletes the checkpoint.
 
 Each section captures:
 
@@ -40,6 +48,7 @@ Each section captures:
 ## Test coverage
 
 - `Tests/DictationSessionTimeoutTests.swift`
+- `Tests/DictationStoppedAudioRecoveryTests.swift`
 - `Tests/DictationTranscriptStoreTests.swift`
 - `Tests/DictationTranscriptWriterTests.swift`
 

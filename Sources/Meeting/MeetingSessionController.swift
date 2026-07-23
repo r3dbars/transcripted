@@ -204,6 +204,8 @@ final class MeetingSessionController: ObservableObject {
     var liveCodexFinalTranscriptNeedsQueuedJobID = false
     var liveCodexAwaitedTranscriptionJobID: UUID?
     var activeQueuedTranscriptionJobID: UUID?
+    var activeStoppedAudioRecovery: DictationStoppedAudioRecovery?
+    private var stoppedAudioRecoveryRetryRegistry = DictationStoppedAudioRecoveryRetryRegistry()
 
     var shouldConfirmQuitForActiveCapture: Bool {
         isCaptureSessionActive || isFinishingRecording
@@ -1461,13 +1463,17 @@ final class MeetingSessionController: ObservableObject {
             return false
         }
 
+        let stoppedAudioRecovery = DictationStoppedAudioRecoveryStore
+            .pendingRecoveries(limit: Int.max)
+            .first { $0.url.standardizedFileURL == sourceURL.standardizedFileURL }
         let outcome: TranscriptionQueueCoordinator.QueueInsertionOutcome
         do {
             outcome = try transcriptionQueue.enqueueImportedAudioJob(
                 audioURL: preparedAudio.copiedAudioURL,
                 suggestedTitle: preparedAudio.suggestedTitle,
                 recordingDate: preparedAudio.recordingDate,
-                startTrigger: .fileImport
+                startTrigger: .fileImport,
+                stoppedAudioRecovery: stoppedAudioRecovery
             )
         } catch {
             let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(
@@ -1573,8 +1579,9 @@ final class MeetingSessionController: ObservableObject {
         taskManager.cancelAll()
         if liveCodexSessionAwaitingFinalTranscript {
             finishLiveCodexSession(status: .failed, shouldAwaitFinalTranscript: false)
-            activeQueuedTranscriptionJobID = nil
         }
+        activeQueuedTranscriptionJobID = nil
+        activeStoppedAudioRecovery = nil
         state = .ready
         DiagnosticsTrail.record(
             level: .warning,
@@ -1884,6 +1891,23 @@ final class MeetingSessionController: ObservableObject {
     @discardableResult
     func deleteFailedMeeting(id: UUID) -> Bool {
         failedMeetingStore.deleteFailedMeeting(id: id)
+    }
+
+    private func prepareStoppedAudioRecoveryForRetry(failedMeetingID: UUID) {
+        activeStoppedAudioRecovery = stoppedAudioRecoveryRetryRegistry.recovery(
+            for: failedMeetingID
+        )
+    }
+
+    private func discardStoppedAudioRecoveryForRetry(failedMeetingID: UUID) {
+        let recovery = stoppedAudioRecoveryRetryRegistry.remove(for: failedMeetingID)
+        if activeQueuedTranscriptionJobID == failedMeetingID {
+            activeStoppedAudioRecovery = nil
+        }
+        guard recovery != nil else { return }
+        Task.detached(priority: .utility) {
+            DictationStoppedAudioRecoveryStore.cleanup(recovery, explicitDiscard: true)
+        }
     }
 
     // MARK: - Subscriptions
@@ -2627,6 +2651,19 @@ final class MeetingSessionController: ObservableObject {
         switch status {
         case .transcriptSaved:
             lastTerminalTranscriptionOutcome = .transcriptSaved
+            let completedJobID = activeQueuedTranscriptionJobID
+            if let stoppedAudioRecovery = activeStoppedAudioRecovery {
+                activeStoppedAudioRecovery = nil
+                Task.detached(priority: .utility) {
+                    DictationStoppedAudioRecoveryStore.cleanup(
+                        stoppedAudioRecovery,
+                        transcriptPersisted: true
+                    )
+                }
+            }
+            if let completedJobID {
+                stoppedAudioRecoveryRetryRegistry.remove(for: completedJobID)
+            }
             let transcriptionTrigger = activeTranscriptionTrigger
             let promptTelemetryProperties = activeDetectedPromptTranscriptionTelemetryProperties
             let promptRecordingStartedAt = activeDetectedPromptTranscriptionRecordingStartedAt
@@ -2656,6 +2693,15 @@ final class MeetingSessionController: ObservableObject {
             activeTranscriptionCaptureDiagnostics = nil
         case .failed(let message):
             lastTerminalTranscriptionOutcome = .failed(message)
+            // A failed import must retain its original stopped-audio checkpoint.
+            if let failedJobID = activeQueuedTranscriptionJobID,
+               let stoppedAudioRecovery = activeStoppedAudioRecovery {
+                stoppedAudioRecoveryRetryRegistry.retain(
+                    stoppedAudioRecovery,
+                    for: failedJobID
+                )
+            }
+            activeStoppedAudioRecovery = nil
             let transcriptionTrigger = activeTranscriptionTrigger
             let diagnosticMessage = taskManager.lastFailureDiagnosticMessage ?? message
             let failureKind = MeetingFailureKind.classify(message: diagnosticMessage)
@@ -3180,6 +3226,12 @@ final class MeetingSessionController: ObservableObject {
             },
             markRetryStarted: { [weak self] in
                 self?.activeTranscriptionTrigger = .unknown
+            },
+            prepareStoppedAudioRecoveryForRetry: { [weak self] failedMeetingID in
+                self?.prepareStoppedAudioRecoveryForRetry(failedMeetingID: failedMeetingID)
+            },
+            discardStoppedAudioRecoveryForRetry: { [weak self] failedMeetingID in
+                self?.discardStoppedAudioRecoveryForRetry(failedMeetingID: failedMeetingID)
             },
             publishRefresh: { [weak self] in
                 self?.refreshFailedMeetings()
