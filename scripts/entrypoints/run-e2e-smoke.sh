@@ -48,6 +48,8 @@ SWIFT_SOURCES=(
     "Sources/TranscriptedCore/Speaker/SpeakerProfile.swift"
     "Sources/TranscriptedCore/Services/CoreStoragePaths.swift"
     "Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift"
+    "Sources/TranscriptedCore/Audio/MicRecordingSegment.swift"
+    "Sources/TranscriptedCore/Audio/MeetingRecordingJournal.swift"
     "Sources/TranscriptedCore/Audio/WAVHeaderRepair.swift"
     "Sources/TranscriptedCore/Logging/AppLogger.swift"
     "Sources/TranscriptedCore/Logging/FileLogger.swift"

@@ -223,6 +223,10 @@ func testFailedMeetingPresentation() {
             source.contains("hasAudioFiles: hasRetryableAudioFiles"),
             "partial retained audio should not enable the retry action"
         )
+        assertFalse(
+            source.contains("deletionRemovesAudio"),
+            "failed rows should not carry an impossible non-destructive cleanup state"
+        )
     }
 
     runSuite("Home failed meeting row reveals partial audio separately from retry readiness") {
@@ -252,6 +256,26 @@ func testFailedMeetingPresentation() {
         assertTrue(
             homeSource.contains("private var hasRetainedAudioFiles: Bool {\n        !item.audioURLs.isEmpty"),
             "failed rows should use available retained audio URLs for the reveal affordance"
+        )
+        assertTrue(
+            homeSource.contains("title: \"Delete failed meeting\"")
+                && homeSource.contains("isDestructive: true"),
+            "failed rows should label cleanup as destructive without exposing an unusable reveal action"
+        )
+
+        let settingsSource = (try? String(
+            contentsOf: repoFixtureURL("Sources/UI/Settings/TranscriptedSettingsView.swift"),
+            encoding: .utf8
+        )) ?? ""
+        assertTrue(
+            settingsSource.contains("requestClearFailedMeeting")
+                && settingsSource.contains("HomeDeleteConfirmationPolicy.failedMeeting")
+                && settingsSource.contains("reasonKind: .deleted"),
+            "Home should confirm and report every failed-row cleanup as deletion, not dismissal"
+        )
+        assertFalse(
+            settingsSource.contains("dismissFailedMeeting"),
+            "failed-row cleanup should have one canonical destructive seam"
         )
     }
 

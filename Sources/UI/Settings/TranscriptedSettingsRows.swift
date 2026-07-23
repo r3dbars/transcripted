@@ -365,19 +365,19 @@ struct SettingsFailedMeetingRow: View {
                 .help(presentation.retryHelp)
             }
 
-            Button(role: presentation.clearIsDestructive ? .destructive : nil) {
+            Button(role: .destructive) {
                 secondaryAction()
             } label: {
-                Label(presentation.clearTitle, systemImage: presentation.clearSymbolName)
+                Label("Delete", systemImage: "trash")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
             }
             .buttonStyle(SettingsHoverButtonStyle(
-                tone: presentation.clearIsDestructive ? .destructive : .neutral,
+                tone: .destructive,
                 cornerRadius: 8,
-                normalFill: presentation.clearIsDestructive ? Color.red.opacity(0.06) : Color.primary.opacity(0.025),
-                normalStroke: presentation.clearIsDestructive ? Color.red.opacity(0.14) : Color.primary.opacity(0.06)
+                normalFill: Color.red.opacity(0.06),
+                normalStroke: Color.red.opacity(0.14)
             ))
         }
     }
@@ -389,8 +389,7 @@ struct SettingsFailedMeetingRow: View {
             retryUnavailableReason: retryUnavailableReason,
             isRetryable: item.isRetryable,
             isRetrying: item.isRetrying,
-            hasAudioFiles: item.hasAudioFiles,
-            hasRetainedAudioFiles: !item.audioURLs.isEmpty
+            hasAudioFiles: item.hasAudioFiles
         )
     }
 

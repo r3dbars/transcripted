@@ -1586,9 +1586,9 @@ struct HomeFailedMeetingInlineRow: View {
 
             HomeRowMoreMenuButton(items: [
                 HomeRowMenuItem(
-                    title: hasRetainedAudioFiles ? "Delete failed meeting" : "Dismiss",
-                    symbolName: hasRetainedAudioFiles ? "trash" : "xmark",
-                    isDestructive: hasRetainedAudioFiles,
+                    title: "Delete failed meeting",
+                    symbolName: "trash",
+                    isDestructive: true,
                     action: onClear
                 )
             ], automationIdentifier: "transcripted.home.failed-meeting.more")
@@ -2384,16 +2384,14 @@ private struct HomeFailedMeetingRow: View {
                     }
 
                     SettingsInlineActionButton(
-                        title: presentation.clearTitle,
-                        symbolName: presentation.clearSymbolName,
-                        tone: presentation.clearIsDestructive ? .destructive : .neutral,
-                        automationIdentifier: presentation.clearIsDestructive
-                            ? "transcripted.home.failed-meetings.delete"
-                            : "transcripted.home.failed-meetings.dismiss"
+                        title: "Delete",
+                        symbolName: "trash",
+                        tone: .destructive,
+                        automationIdentifier: "transcripted.home.failed-meetings.delete"
                     ) {
                         onClear()
                     }
-                    .frame(width: presentation.clearIsDestructive ? 78 : 82, height: 30)
+                    .frame(width: 78, height: 30)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2408,8 +2406,7 @@ private struct HomeFailedMeetingRow: View {
             retryUnavailableReason: retryUnavailableReason,
             isRetryable: item.isRetryable,
             isRetrying: item.isRetrying,
-            hasAudioFiles: item.hasAudioFiles,
-            hasRetainedAudioFiles: !item.audioURLs.isEmpty
+            hasAudioFiles: item.hasAudioFiles
         )
     }
 
