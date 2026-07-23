@@ -4,10 +4,28 @@ import Foundation
 /// `Audio.onRecordingComplete` within `meetingStopTimeout`, so the WAV files
 /// at the returned URLs may not be fully finalized — the controller should
 /// route the audio to the failed queue rather than enqueuing for transcription.
+enum CaptureStopFinalizationOwner: Equatable {
+    case audioFinalizer
+    case recordingJournalRecovery
+}
+
 struct CaptureStopResult {
     let micURL: URL?
     let systemURL: URL?
     let didTimeOut: Bool
+    let finalizationOwner: CaptureStopFinalizationOwner
+
+    init(
+        micURL: URL?,
+        systemURL: URL?,
+        didTimeOut: Bool,
+        finalizationOwner: CaptureStopFinalizationOwner = .audioFinalizer
+    ) {
+        self.micURL = micURL
+        self.systemURL = systemURL
+        self.didTimeOut = didTimeOut
+        self.finalizationOwner = finalizationOwner
+    }
 }
 
 /// Closure-free identity retained after a timed-out stop callback expires.
@@ -95,6 +113,15 @@ struct TimedOutFailedMeetingFinalizationHandoff {
             }
         }
 
+        if result.finalizationOwner == .recordingJournalRecovery {
+            if failedMeetingIsPersisted {
+                remove(id)
+            } else {
+                store(.journalOwned, for: id)
+            }
+            return .journalOwned
+        }
+
         store(
             failedMeetingIsPersisted
                 ? .bufferedForPromotion(result)
@@ -105,6 +132,10 @@ struct TimedOutFailedMeetingFinalizationHandoff {
     }
 
     mutating func failedMeetingDidPersist(id: UUID) -> CaptureStopResult? {
+        if case .journalOwned = states[id] {
+            remove(id)
+            return nil
+        }
         if case .bufferedBeforePersistence(let result) = states[id] {
             store(.bufferedForPromotion(result), for: id)
             return result
@@ -172,7 +203,9 @@ struct TimedOutFailedMeetingFinalizationHandoff {
             remove(id)
         case .awaitingCallback, nil:
             store(.journalOwned, for: id)
-        case .discardOnCallback, .journalOwned:
+        case .journalOwned:
+            remove(id)
+        case .discardOnCallback:
             break
         }
     }

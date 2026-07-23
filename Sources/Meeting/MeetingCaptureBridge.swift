@@ -262,7 +262,7 @@ final class MeetingCaptureBridge: ObservableObject {
     }
 
     private func wireCallbacks() {
-        audio.onRecordingCompleteWithGeneration = { [weak self] generation, micURL, systemURL in
+        audio.onRecordingCompleteWithGeneration = { [weak self] generation, micURL, systemURL, disposition in
             // This closure fires on whichever queue Core's Audio dispatches from.
             // Hop to main and resume the continuation exactly once.
             Task { @MainActor [weak self] in
@@ -270,7 +270,10 @@ final class MeetingCaptureBridge: ObservableObject {
                 let result = CaptureStopResult(
                     micURL: micURL,
                     systemURL: systemURL,
-                    didTimeOut: false
+                    didTimeOut: false,
+                    finalizationOwner: disposition == .journalRecoveryOwned
+                        ? .recordingJournalRecovery
+                        : .audioFinalizer
                 )
 
                 switch self.timedOutStopCompletions.resolve(generation: generation) {

@@ -193,6 +193,57 @@ func testTimedOutFailedMeetingFinalization() {
         assertEqual(handoff.terminalOwnershipCount, 0)
     }
 
+    runSuite("Timed-out row-first abandonment leaves its journal to recovery") {
+        var handoff = TimedOutFailedMeetingFinalizationHandoff()
+        let failedID = UUID()
+        assertNil(handoff.failedMeetingDidPersist(id: failedID))
+
+        let action = handoff.receive(
+            CaptureStopResult(
+                micURL: nil,
+                systemURL: nil,
+                didTimeOut: false,
+                finalizationOwner: .recordingJournalRecovery
+            ),
+            for: failedID,
+            failedMeetingIsPersisted: true
+        )
+        if case .journalOwned = action {
+            // Expected: promotion must not clear the multi-segment journal.
+        } else {
+            assertionFailure("an abandoned finalizer must never promote the provisional failed-row audio")
+        }
+        assertNil(
+            handoff.failedMeetingDidPersist(id: failedID),
+            "the recovery-owned callback must be consumed without inventing another completion"
+        )
+    }
+
+    runSuite("Timed-out callback-first abandonment stays journal-owned through persistence") {
+        var handoff = TimedOutFailedMeetingFinalizationHandoff()
+        let failedID = UUID()
+        let action = handoff.receive(
+            CaptureStopResult(
+                micURL: nil,
+                systemURL: nil,
+                didTimeOut: false,
+                finalizationOwner: .recordingJournalRecovery
+            ),
+            for: failedID,
+            failedMeetingIsPersisted: false
+        )
+        if case .journalOwned = action {
+            // Expected: the durable journal owns the callback-first result.
+        } else {
+            assertionFailure("callback-first abandonment must stay on the journal recovery path")
+        }
+        assertNil(
+            handoff.failedMeetingDidPersist(id: failedID),
+            "later row persistence must not reclassify an abandoned completion for promotion"
+        )
+        assertFalse(handoff.hasOwnership(of: failedID))
+    }
+
     runSuite("Timed-out terminal and failed-promotion ownership stays bounded") {
         var handoff = TimedOutFailedMeetingFinalizationHandoff()
         let ids = (0..<6).map { _ in UUID() }

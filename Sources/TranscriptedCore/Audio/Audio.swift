@@ -4,6 +4,11 @@ import QuartzCore
 import CoreAudio
 import Combine
 
+public enum RecordingStopFinalizationDisposition: Sendable, Equatable {
+    case finalized
+    case journalRecoveryOwned
+}
+
 /// Lifecycle cues emitted by `Audio` so embedders can react without `Audio`
 /// itself depending on AppKit / NSSound.
 ///
@@ -248,24 +253,33 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _journalSession = nil
         return session
     }
-    private var stoppingJournalSessions: [UInt64: MeetingRecordingJournalSession] = [:]
+    private struct StoppingRecordingFinalization {
+        let journalSession: MeetingRecordingJournalSession?
+    }
+    struct StoppedMicRecordingFinalization {
+        let micURL: URL?
+        let disposition: RecordingStopFinalizationDisposition
+    }
+    private var stoppingRecordingFinalizations: [UInt64: StoppingRecordingFinalization] = [:]
     private let stoppingJournalSessionsLock = NSLock()
 
     func retainStoppingJournalSession(
-        _ session: MeetingRecordingJournalSession,
+        _ session: MeetingRecordingJournalSession?,
         generation: UInt64
     ) {
         stoppingJournalSessionsLock.lock()
-        stoppingJournalSessions[generation] = session
+        stoppingRecordingFinalizations[generation] = StoppingRecordingFinalization(
+            journalSession: session
+        )
         stoppingJournalSessionsLock.unlock()
     }
 
-    private func takeStoppingJournalSession(
+    private func takeStoppingRecordingFinalization(
         generation: UInt64
-    ) -> MeetingRecordingJournalSession? {
+    ) -> StoppingRecordingFinalization? {
         stoppingJournalSessionsLock.lock()
         defer { stoppingJournalSessionsLock.unlock() }
-        return stoppingJournalSessions.removeValue(forKey: generation)
+        return stoppingRecordingFinalizations.removeValue(forKey: generation)
     }
 
     /// Claims this generation's finalizer before it mutates any recording
@@ -276,15 +290,36 @@ public class Audio: ObservableObject, @unchecked Sendable {
         segments: [MicRecordingSegment],
         generation: UInt64
     ) -> URL? {
-        guard let session = takeStoppingJournalSession(generation: generation) else {
+        finalizeStoppedMicRecordingResult(
+            primaryURL: primaryURL,
+            segments: segments,
+            generation: generation
+        ).micURL
+    }
+
+    func finalizeStoppedMicRecordingResult(
+        primaryURL: URL?,
+        segments: [MicRecordingSegment],
+        generation: UInt64
+    ) -> StoppedMicRecordingFinalization {
+        guard let finalization = takeStoppingRecordingFinalization(generation: generation) else {
             AppLogger.audioMic.info("Skipped abandoned mic finalization owned by recovery", [
                 "stopGeneration": "\(generation)"
             ])
-            return nil
+            return StoppedMicRecordingFinalization(
+                micURL: nil,
+                disposition: .journalRecoveryOwned
+            )
         }
         let finalMicURL = finalizeMicRecording(primaryURL: primaryURL, segments: segments)
-        recordingJournal.markFinalized(finalMicURL: finalMicURL, session: session)
-        return finalMicURL
+        recordingJournal.markFinalized(
+            finalMicURL: finalMicURL,
+            session: finalization.journalSession
+        )
+        return StoppedMicRecordingFinalization(
+            micURL: finalMicURL,
+            disposition: .finalized
+        )
     }
 
     /// The host no longer retains a completion callback for this stopped
@@ -295,11 +330,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
         forStopGeneration generation: UInt64
     ) -> Bool {
         stoppingJournalSessionsLock.lock()
-        guard let session = stoppingJournalSessions.removeValue(forKey: generation) else {
+        guard let finalization = stoppingRecordingFinalizations.removeValue(forKey: generation) else {
             stoppingJournalSessionsLock.unlock()
             return false
         }
-        recordingJournal.abandonFinalization(session: session)
+        if let session = finalization.journalSession {
+            recordingJournal.abandonFinalization(session: session)
+        }
         stoppingJournalSessionsLock.unlock()
         return true
     }
@@ -877,7 +914,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Generation-tagged completion callback used by hosts that can overlap a
     /// timed-out stop with a newer recording. The legacy callback remains for
     /// embedders that do not need stale-session filtering.
-    public var onRecordingCompleteWithGeneration: ((UInt64, URL?, URL?) -> Void)?
+    public var onRecordingCompleteWithGeneration: ((UInt64, URL?, URL?, RecordingStopFinalizationDisposition) -> Void)?
 
     /// Monotonic capture-session generation visible to host lifecycle bridges.
     /// It changes synchronously at each start/stop boundary.
@@ -1666,9 +1703,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // drops both writes, so a previous meeting's already-handed-off
         // journal cannot be resurrected into the next launch's recovery scan.
         let journalSession = takeJournalSession()
-        if let journalSession {
-            retainStoppingJournalSession(journalSession, generation: stopGeneration)
-        }
+        retainStoppingJournalSession(journalSession, generation: stopGeneration)
         recordingJournal.markStopping(session: journalSession)
 
         // Update UI state immediately so the meeting widget unfreezes
@@ -1771,7 +1806,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
             cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
                 guard let self else { return }
-                let finalMicURL = self.finalizeStoppedMicRecording(
+                let micFinalization = self.finalizeStoppedMicRecordingResult(
                     primaryURL: primaryMicURL,
                     segments: micSegmentsSnapshot,
                     generation: stopGeneration
@@ -1780,15 +1815,20 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     if self.recordingSessionGeneration == stopGeneration {
                         self.originalMicAudioFileURL = nil
                         self.micSegments = []
-                        self.micAudioFileURL = finalMicURL
+                        self.micAudioFileURL = micFinalization.micURL
                     } else {
                         AppLogger.audio.info("Recording completion belongs to stale stop; preserving current capture state", [
                             "stopGeneration": "\(stopGeneration)",
                             "currentGeneration": "\(self.recordingSessionGeneration)"
                         ])
                     }
-                    self.onRecordingCompleteWithGeneration?(stopGeneration, finalMicURL, finalSystemURL)
-                    self.onRecordingComplete?(finalMicURL, finalSystemURL)
+                    self.onRecordingCompleteWithGeneration?(
+                        stopGeneration,
+                        micFinalization.micURL,
+                        finalSystemURL,
+                        micFinalization.disposition
+                    )
+                    self.onRecordingComplete?(micFinalization.micURL, finalSystemURL)
                 }
             }
         }

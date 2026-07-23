@@ -101,7 +101,7 @@ final class MeetingRecordingJournalTests: XCTestCase {
         audio.retainStoppingJournalSession(session, generation: generation)
         XCTAssertTrue(audio.abandonRecordingJournalFinalization(forStopGeneration: generation))
 
-        let lateResult = audio.finalizeStoppedMicRecording(
+        let lateResult = audio.finalizeStoppedMicRecordingResult(
             primaryURL: primaryURL,
             segments: [
                 MicRecordingSegment(url: primaryURL, gapBeforeDuration: 0),
@@ -110,7 +110,8 @@ final class MeetingRecordingJournalTests: XCTestCase {
             generation: generation
         )
 
-        XCTAssertNil(lateResult)
+        XCTAssertNil(lateResult.micURL)
+        XCTAssertEqual(lateResult.disposition, .journalRecoveryOwned)
         XCTAssertEqual(try Data(contentsOf: recoveredMergedURL), recoveredAudio)
         XCTAssertTrue(FileManager.default.fileExists(atPath: primaryURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: segmentURL.path))

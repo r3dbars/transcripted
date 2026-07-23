@@ -2452,6 +2452,13 @@ func testRepoCommandContract() {
             "a never-completing stop should bound callbacks and transfer its journal to canonical recovery"
         )
         assertTrue(
+            bridgeContents.contains("disposition == .journalRecoveryOwned")
+                && bridgeContents.contains("? .recordingJournalRecovery")
+                && readRepoTextFile("Sources/Meeting/FailedMeetingStore.swift")
+                    .contains("result.finalizationOwner != .recordingJournalRecovery"),
+            "an abandoned late callback must stay on journal recovery instead of promoting provisional audio"
+        )
+        assertTrue(
             controllerContents.contains("capture.onRecordingJournalFinalizationAbandoned =")
                 && controllerContents.contains("await taskManager.recoverOrphanedRecordings(in: scratchDirectory)"),
             "abandoning a never-completing finalizer should immediately rescan its durable journal"

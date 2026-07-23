@@ -234,6 +234,7 @@ final class FailedMeetingStore {
             .contains(where: { $0.id == id })
         if !failedMeetingIsPersisted,
            !timedOutFinalizationHandoff.hasOwnership(of: id),
+           result.finalizationOwner != .recordingJournalRecovery,
            result.micURL != nil || result.systemURL != nil,
            !taskManager.hasRecordingJournal(
                micAudioURL: result.micURL,
@@ -270,7 +271,12 @@ final class FailedMeetingStore {
         case .discard(let terminalResult):
             discardFinalizedTimedOutAudio(terminalResult)
         case .journalOwned:
-            if let ownedAudioURL = result.micURL ?? result.systemURL {
+            let persistedFailure = failedManager.failedTranscriptions
+                .first(where: { $0.id == id })
+            if let ownedAudioURL = result.micURL
+                ?? result.systemURL
+                ?? persistedFailure?.micAudioURL
+                ?? persistedFailure?.systemAudioURL {
                 scheduleTimedOutJournalRecovery(in: ownedAudioURL.deletingLastPathComponent())
             }
             return
