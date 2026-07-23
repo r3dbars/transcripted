@@ -105,11 +105,23 @@ final class TranscriptIndex: @unchecked Sendable {
 
     // MARK: - Reconciliation
 
-    func reconcile(meetingsDir: URL, dictationsDir: URL) throws {
-        try reconcile(meetingDirs: [meetingsDir], dictationDirs: [dictationsDir])
+    func reconcile(
+        meetingsDir: URL,
+        dictationsDir: URL,
+        updateEmbeddings: Bool = true
+    ) throws {
+        try reconcile(
+            meetingDirs: [meetingsDir],
+            dictationDirs: [dictationsDir],
+            updateEmbeddings: updateEmbeddings
+        )
     }
 
-    func reconcile(meetingDirs: [URL], dictationDirs: [URL]) throws {
+    func reconcile(
+        meetingDirs: [URL],
+        dictationDirs: [URL],
+        updateEmbeddings: Bool = true
+    ) throws {
         try queue.sync {
             var seenPaths: Set<String> = []
             var diskMap: [String: ContextArtifactFile] = [:]
@@ -148,6 +160,12 @@ final class TranscriptIndex: @unchecked Sendable {
 
         // Best-effort: embed any newly indexed rows. Never fails the reconcile —
         // lexical search must keep working even if embedding hits a snag.
+        if updateEmbeddings {
+            reconcileEmbeddings()
+        }
+    }
+
+    func reconcileEmbeddings() {
         embeddingStore?.reconcileEmbeddings()
     }
 
@@ -160,7 +178,7 @@ final class TranscriptIndex: @unchecked Sendable {
                 return resolvedURL.path == basePath
                     || resolvedURL.path.hasPrefix(basePath + "/")
             }) else {
-                log("Skipping index update outside watched roots: \(url.path)")
+                log("Skipping index update outside watched roots")
                 return
             }
 
@@ -176,7 +194,7 @@ final class TranscriptIndex: @unchecked Sendable {
                 case .missing:
                     continue
                 case .invalid:
-                    log("Skipping invalid or unsafe file change: \(root.appendingPathComponent(requestedName).path)")
+                    log("Skipping invalid or unsafe file change")
                     continue
                 }
             }
@@ -265,7 +283,7 @@ final class TranscriptIndex: @unchecked Sendable {
 
         try execOrThrow("COMMIT")
         committed = true
-        log("Indexed: \(filename) (\(transcript.utterances.count) utterances)")
+        log("Indexed meeting (utterance_count_bucket=\(MCPLogPrivacy.countBucket(transcript.utterances.count)))")
     }
 
     /// Parse the meeting's structured summary (inline transcript summary, then a
@@ -358,7 +376,7 @@ final class TranscriptIndex: @unchecked Sendable {
 
         try execOrThrow("COMMIT")
         committed = true
-        log("Indexed dictation day: \(filename) (\(day.entries.count) entries)")
+        log("Indexed dictation day (entry_count_bucket=\(MCPLogPrivacy.countBucket(day.entries.count)))")
     }
 
     private func reindex(file url: URL, filename: String, kind: ContextArtifactKind) throws {
@@ -520,11 +538,12 @@ final class TranscriptIndex: @unchecked Sendable {
         // Semantic / hybrid routing. Falls through to lexical when no vector store
         // is available, so these modes degrade gracefully rather than returning
         // nothing. The lexical branch below is unchanged.
-        if mode != .lexical, let store = embeddingStore, store.isAvailable {
-            let semantic = store.semanticSearchUtterances(
+        if mode != .lexical,
+           let store = embeddingStore,
+           let semantic = store.semanticSearchUtterancesIfAvailable(
                 query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo,
                 maxMeetings: maxMeetings, snippetsPerMeeting: snippetsPerMeeting
-            )
+           ) {
             if mode == .semantic { return semantic }
             let lexical = try searchUtterances(
                 query: query, speaker: speaker, dateFrom: dateFrom, dateTo: dateTo,
@@ -881,10 +900,11 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     func searchDictationEntries(query: String, dateFrom: String?, dateTo: String?, maxItems: Int = 10, mode: SearchMode = .lexical) throws -> [ContextSearchGroup] {
-        if mode != .lexical, let store = embeddingStore, store.isAvailable {
-            let semantic = store.semanticSearchDictationEntries(
+        if mode != .lexical,
+           let store = embeddingStore,
+           let semantic = store.semanticSearchDictationEntriesIfAvailable(
                 query: query, dateFrom: dateFrom, dateTo: dateTo, maxItems: maxItems
-            )
+           ) {
             if mode == .semantic { return semantic }
             let lexical = try searchDictationEntries(
                 query: query, dateFrom: dateFrom, dateTo: dateTo, maxItems: maxItems, mode: .lexical
@@ -1695,5 +1715,28 @@ final class TranscriptIndex: @unchecked Sendable {
 
     private func dbError() -> String {
         sqlDBError(db)
+    }
+}
+
+/// Keeps the stdio attach path bounded by making the lexical index available
+/// first. Semantic vectors are additive and can finish after the client has
+/// connected without changing any read-only tool contract.
+enum MCPStartupIndexing {
+    static func prepareForAttach(
+        index: TranscriptIndex,
+        meetingDirs: [URL],
+        dictationDirs: [URL]
+    ) throws {
+        index.embeddingStore?.deferSemanticSearchUntilReconciled()
+        try index.reconcile(
+            meetingDirs: meetingDirs,
+            dictationDirs: dictationDirs,
+            updateEmbeddings: false
+        )
+    }
+
+    static func completeAfterAttach(index: TranscriptIndex) {
+        defer { index.embeddingStore?.finishDeferredStartupReconciliation() }
+        index.reconcileEmbeddings()
     }
 }
