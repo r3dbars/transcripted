@@ -434,7 +434,6 @@ func testParakeetAudioGraphOwnership() async {
             queue: oldQueue
         )
         let ownership = ParakeetTimedAudioEngineWorkOwnership()
-        let cancellationState = ParakeetAudioStartCancellationState()
         var startAdmission = ParakeetAudioStartAdmissionState()
         let resources = ParakeetEngineQueueTestResources(engine: oldEngine, queue: oldQueue)
         assertTrue(startAdmission.begin(owner: oldOwner), "failed-start reset should retain start admission")
@@ -447,8 +446,8 @@ func testParakeetAudioGraphOwnership() async {
         oldQueue.async {
             resetEntered.signal()
             _ = releaseReset.wait(timeout: .now() + 2)
-            if cancellationState.canRunWork,
-               ownership.isActive(owner: oldOwner, phase: .audioStart) {
+            if ownership.isActive(owner: oldOwner, phase: .audioStart),
+               resources.matches(owner: oldOwner) {
                 resources.restoreOriginalResources()
                 staleMutation.signal()
             }
@@ -457,7 +456,6 @@ func testParakeetAudioGraphOwnership() async {
         }
         assertTrue(resetEntered.wait(timeout: .now() + 1) == .success, "failed-start reset should block first")
 
-        cancellationState.cancel()
         let claimed = ownership.claimPendingWorkForSuccessor(
             currentEngine: oldEngine,
             currentQueue: oldQueue
@@ -467,16 +465,29 @@ func testParakeetAudioGraphOwnership() async {
             ParakeetTimedAudioEngineWorkLease(owner: oldOwner, phase: .audioStart),
             "stop should claim reset work after logical generation changes"
         )
-        assertTrue(startAdmission.finish(owner: oldOwner), "stop should release the failed start's admission")
-
         let nextEngine = NSObject()
         let nextQueue = DispatchQueue(label: "test.parakeet.failed-start-reset-successor")
+        var replacementCount = 0
+        let cancellationReplacedGraph: Bool
+        if claimed != nil {
+            resources.replace(engine: nextEngine, queue: nextQueue)
+            replacementCount += 1
+            cancellationReplacedGraph = true
+        } else {
+            cancellationReplacedGraph = false
+        }
+        if !cancellationReplacedGraph {
+            resources.replace(engine: nextEngine, queue: nextQueue)
+            replacementCount += 1
+        }
+        assertEqual(replacementCount, 1, "timeout cleanup should replace the blocked graph exactly once")
+        assertTrue(startAdmission.finish(owner: oldOwner), "stop should release the failed start's admission")
+
         let nextOwner = ParakeetAudioEngineQueueOwnerToken(
             generation: 45,
             engine: nextEngine,
             queue: nextQueue
         )
-        resources.replace(engine: nextEngine, queue: nextQueue)
         assertTrue(startAdmission.begin(owner: nextOwner), "successor should start before old reset returns")
         let successorFinished = DispatchSemaphore(value: 0)
         nextQueue.async { successorFinished.signal() }
@@ -892,6 +903,13 @@ private final class ParakeetEngineQueueTestResources: @unchecked Sendable {
         defer { lock.unlock() }
         return ObjectIdentifier(self.engine) == ObjectIdentifier(engine)
             && ObjectIdentifier(self.queue) == ObjectIdentifier(queue)
+    }
+
+    func matches(owner: ParakeetAudioEngineQueueOwnerToken) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return ObjectIdentifier(engine) == owner.graphOwner.engineIdentity
+            && ObjectIdentifier(queue) == owner.queueIdentity
     }
 }
 

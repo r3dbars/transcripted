@@ -60,6 +60,10 @@ func testParakeetAudioOwnershipSourceContract() {
                 && startFailure.contains("audioEngineWorkOwnership.finish(owner: resetWorkOwner, phase: .audioStart)"),
             "failed-start reset must remain claimable by stop across blocked CoreAudio cleanup"
         )
+        assertFalse(
+            startFailure.contains("ParakeetAudioStartCancellationState()"),
+            "failed-start reset should use its exact ownership lease instead of an unread cancellation signal"
+        )
         assertPostAwaitOwnershipGuard(
             in: rebuild,
             ownerCapture: "let rebuildOwner = currentAudioGraphOwnerToken()",
@@ -133,6 +137,21 @@ func testParakeetAudioOwnershipSourceContract() {
             stopEngine.lowerBound < restoreInput.lowerBound
                 && restoreInput.lowerBound < finalOwnershipGuard.lowerBound,
             "graph loss during stop must not bypass matching system-input restoration"
+        )
+    }
+
+    runSuite("ParakeetEngine blocked-start timeout replaces the graph once") {
+        let source = readParakeetEngineSource()
+        guard let abandonStart = source.range(of: "func abandonBlockedRecordingStart(reason: String)"),
+              let abandonEnd = source.range(of: "func cancel()", range: abandonStart.upperBound..<source.endIndex) else {
+            assertTrue(false, "test should find blocked-start abandonment")
+            return
+        }
+        let abandon = String(source[abandonStart.lowerBound..<abandonEnd.lowerBound])
+        assertTrue(
+            abandon.contains("let didReplaceBlockedGraph = cancelAudioWatchdog()")
+                && abandon.contains("if !didReplaceBlockedGraph {\n            abandonBlockedAudioEngine(reason: reason)\n        }"),
+            "blocked-start timeout should skip its fallback when watchdog cancellation already replaced the graph"
         )
     }
 

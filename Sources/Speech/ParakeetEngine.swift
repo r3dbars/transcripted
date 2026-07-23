@@ -1569,16 +1569,9 @@ class ParakeetEngine: ObservableObject {
         // exact resources claimable so a user stop can replace this queue
         // immediately instead of making the successor wait on stale cleanup.
         let resetWorkOwner = currentAudioEngineQueueOwnerToken()
-        let resetCancellationState = ParakeetAudioStartCancellationState()
-        audioStartCancellationState?.cancel()
-        audioStartCancellationState = resetCancellationState
         audioEngineWorkOwnership.begin(owner: resetWorkOwner, phase: .audioStart)
         defer {
-            resetCancellationState.cancel()
             audioEngineWorkOwnership.finish(owner: resetWorkOwner, phase: .audioStart)
-            if audioStartCancellationState === resetCancellationState {
-                audioStartCancellationState = nil
-            }
         }
 
         if rebuildEngine {
@@ -3493,7 +3486,7 @@ class ParakeetEngine: ObservableObject {
         sharedMeetingMicTransition.invalidate()
         sharedMeetingMicRecorder.cancel()
         sharedMeetingMicRecording = false
-        cancelAudioWatchdog()
+        let didReplaceBlockedGraph = cancelAudioWatchdog()
         audioStartAdmission.cancel()
         prewarmRetryTask?.cancel()
         prewarmRetryTask = nil
@@ -3521,7 +3514,9 @@ class ParakeetEngine: ObservableObject {
             ownedBy: pendingRestoreOwner,
             operation: "abandon_blocked_recording_start"
         )
-        abandonBlockedAudioEngine(reason: reason)
+        if !didReplaceBlockedGraph {
+            abandonBlockedAudioEngine(reason: reason)
+        }
     }
 
     func cancel() {
@@ -3589,10 +3584,12 @@ class ParakeetEngine: ObservableObject {
         }
     }
 
-    private func cancelZombieEngineRecovery() {
+    @discardableResult
+    private func cancelZombieEngineRecovery() -> Bool {
         zombieRecoveryTask?.cancel()
         audioStartCancellationState?.cancel()
         audioStartCancellationState = nil
+        var didReplaceBlockedGraph = false
         if let blockedLease = audioEngineWorkOwnership.claimPendingWorkForSuccessor(
             currentEngine: audioEngine,
             currentQueue: audioEngineQueue
@@ -3606,18 +3603,21 @@ class ParakeetEngine: ObservableObject {
             if blockedLease.phase == .audioStart {
                 audioStartAdmission.finish(owner: blockedLease.owner)
             }
-            abandonBlockedAudioEngine(reason: reason)
+            didReplaceBlockedGraph = abandonBlockedAudioEngine(reason: reason)
         }
         zombieRecoveryTask = nil
         zombieRecoveryStartGeneration = nil
-        guard let terminal = zombieRecoveryState.cancelActiveAttempt() else { return }
-        reportZombieEngineRecoveryTerminal(terminal)
+        if let terminal = zombieRecoveryState.cancelActiveAttempt() {
+            reportZombieEngineRecoveryTerminal(terminal)
+        }
+        return didReplaceBlockedGraph
     }
 
-    func cancelAudioWatchdog() {
+    @discardableResult
+    func cancelAudioWatchdog() -> Bool {
         audioWatchdogTask?.cancel()
         audioWatchdogTask = nil
-        cancelZombieEngineRecovery()
+        return cancelZombieEngineRecovery()
     }
 
     func cleanup() {
