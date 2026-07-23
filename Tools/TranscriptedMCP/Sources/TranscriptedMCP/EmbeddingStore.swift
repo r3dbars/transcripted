@@ -16,6 +16,10 @@ import SQLite3
 final class EmbeddingStore: @unchecked Sendable {
     private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "com.transcripted.mcp.vectors", qos: .utility)
+    private let admissionCondition = NSCondition()
+    private var deferredStartupReconciliation = false
+    private var reconciliationActive = false
+    private var activeSemanticSearches = 0
     private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private let provider: EmbeddingProvider
     private let dbPath: URL
@@ -30,8 +34,6 @@ final class EmbeddingStore: @unchecked Sendable {
     /// Cap on candidate rows scanned per query, newest first, to bound work on
     /// very large libraries. Personal-scale libraries stay well under this.
     private let maxCandidateRows = 50_000
-
-    var isAvailable: Bool { provider.isAvailable }
 
     init(dbPath: URL, provider: EmbeddingProvider) throws {
         self.dbPath = dbPath
@@ -80,11 +82,40 @@ final class EmbeddingStore: @unchecked Sendable {
 
     // MARK: - Embedding reconciliation
 
+    func deferSemanticSearchUntilReconciled() {
+        admissionCondition.lock()
+        deferredStartupReconciliation = true
+        admissionCondition.unlock()
+    }
+
+    func finishDeferredStartupReconciliation() {
+        admissionCondition.lock()
+        deferredStartupReconciliation = false
+        admissionCondition.unlock()
+    }
+
     /// Embed any indexed rows that don't yet have a vector, drop orphaned
     /// vectors, and re-embed everything if the model identity changed. Safe to
     /// call after every lexical reconcile; it only does work for new/changed rows.
     func reconcileEmbeddings() {
         guard provider.isAvailable else { return }
+
+        admissionCondition.lock()
+        while reconciliationActive {
+            admissionCondition.wait()
+        }
+        reconciliationActive = true
+        while activeSemanticSearches > 0 {
+            admissionCondition.wait()
+        }
+        admissionCondition.unlock()
+
+        defer {
+            admissionCondition.lock()
+            reconciliationActive = false
+            admissionCondition.broadcast()
+            admissionCondition.unlock()
+        }
         queue.sync {
             invalidateOnModelChangeLocked()
             // Drop vectors whose backing rows are gone (reindex churns rowids).
@@ -152,35 +183,89 @@ final class EmbeddingStore: @unchecked Sendable {
         sqlite3_finalize(selectStmt)
         guard !pending.isEmpty else { return }
 
-        sqlite3_exec(db, "BEGIN", nil, nil, nil)
         var inserted = 0
-        for item in pending {
-            guard let vec = provider.embed(item.text) else { continue }
-            var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, insertSQL, -1, &stmt, nil) == SQLITE_OK else { continue }
-            sqlite3_bind_int64(stmt, 1, item.rowid)
-            let blob = VectorMath.blob(from: vec)
-            _ = blob.withUnsafeBytes { raw in
-                sqlite3_bind_blob(stmt, 2, raw.baseAddress, Int32(blob.count), SQLITE_TRANSIENT)
+        for batchStart in stride(from: 0, to: pending.count, by: 100) {
+            let batchEnd = min(batchStart + 100, pending.count)
+            let vectors = pending[batchStart..<batchEnd].compactMap { item -> (Int64, [Float])? in
+                provider.embed(item.text).map { (item.rowid, $0) }
             }
-            if sqlite3_step(stmt) == SQLITE_DONE { inserted += 1 }
-            sqlite3_finalize(stmt)
+            guard !vectors.isEmpty else { continue }
+
+            // Keep the database write lock short. Vector computation is the slow
+            // part and happens before the transaction so lexical watcher updates
+            // can continue while a large semantic backlog is processed.
+            sqlite3_exec(db, "BEGIN", nil, nil, nil)
+            for (rowid, vector) in vectors {
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, insertSQL, -1, &stmt, nil) == SQLITE_OK else { continue }
+                sqlite3_bind_int64(stmt, 1, rowid)
+                let blob = VectorMath.blob(from: vector)
+                _ = blob.withUnsafeBytes { raw in
+                    sqlite3_bind_blob(stmt, 2, raw.baseAddress, Int32(blob.count), SQLITE_TRANSIENT)
+                }
+                if sqlite3_step(stmt) == SQLITE_DONE { inserted += 1 }
+                sqlite3_finalize(stmt)
+            }
+            sqlite3_exec(db, "COMMIT", nil, nil, nil)
         }
-        sqlite3_exec(db, "COMMIT", nil, nil, nil)
-        if inserted > 0 { log("Embedded \(inserted) rows") }
+        if inserted > 0 {
+            log("Embedded semantic rows (count_bucket=\(MCPLogPrivacy.countBucket(inserted)))")
+        }
     }
 
     // MARK: - Semantic search
 
-    /// Cosine-ranked meeting utterance search, grouped per meeting (same shape as
-    /// the lexical path). Returns empty when the query can't be embedded.
-    func semanticSearchUtterances(
+    private func withSemanticSearchAdmission<T>(_ body: () -> T) -> T? {
+        admissionCondition.lock()
+        guard provider.isAvailable,
+              !deferredStartupReconciliation,
+              !reconciliationActive else {
+            admissionCondition.unlock()
+            return nil
+        }
+        activeSemanticSearches += 1
+        admissionCondition.unlock()
+
+        defer {
+            admissionCondition.lock()
+            activeSemanticSearches -= 1
+            if activeSemanticSearches == 0 {
+                admissionCondition.broadcast()
+            }
+            admissionCondition.unlock()
+        }
+        return body()
+    }
+
+    func semanticSearchUtterancesIfAvailable(
         query: String,
         speaker: String?,
         dateFrom: String?,
         dateTo: String?,
         maxMeetings: Int = 10,
         snippetsPerMeeting: Int = 3
+    ) -> GroupedSearchResult? {
+        withSemanticSearchAdmission {
+            semanticSearchUtterances(
+                query: query,
+                speaker: speaker,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                maxMeetings: maxMeetings,
+                snippetsPerMeeting: snippetsPerMeeting
+            )
+        }
+    }
+
+    /// Cosine-ranked meeting utterance search, grouped per meeting (same shape as
+    /// the lexical path). Returns empty when the query can't be embedded.
+    private func semanticSearchUtterances(
+        query: String,
+        speaker: String?,
+        dateFrom: String?,
+        dateTo: String?,
+        maxMeetings: Int,
+        snippetsPerMeeting: Int
     ) -> GroupedSearchResult {
         guard let qvec = provider.embed(query) else {
             return GroupedSearchResult(results: [], totalMeetingsMatched: 0, truncated: false)
@@ -297,13 +382,29 @@ final class EmbeddingStore: @unchecked Sendable {
         }
     }
 
-    /// Cosine-ranked dictation entry search, one snippet per entry (same shape as
-    /// the lexical path). Returns empty when the query can't be embedded.
-    func semanticSearchDictationEntries(
+    func semanticSearchDictationEntriesIfAvailable(
         query: String,
         dateFrom: String?,
         dateTo: String?,
         maxItems: Int = 10
+    ) -> [ContextSearchGroup]? {
+        withSemanticSearchAdmission {
+            semanticSearchDictationEntries(
+                query: query,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                maxItems: maxItems
+            )
+        }
+    }
+
+    /// Cosine-ranked dictation entry search, one snippet per entry (same shape as
+    /// the lexical path). Returns empty when the query can't be embedded.
+    private func semanticSearchDictationEntries(
+        query: String,
+        dateFrom: String?,
+        dateTo: String?,
+        maxItems: Int
     ) -> [ContextSearchGroup] {
         guard let qvec = provider.embed(query) else { return [] }
 
@@ -384,7 +485,7 @@ final class EmbeddingStore: @unchecked Sendable {
 
     private func execLocked(_ sql: String) {
         if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
-            log("Vector store SQL failed: \(dbErrorLocked()) for: \(sql)")
+            log("Vector store SQL operation failed")
         }
     }
 

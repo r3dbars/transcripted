@@ -23,7 +23,7 @@ enum TranscriptLoader {
     static func loadMeeting(_ url: URL) -> AgentTranscript? {
         guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseMeeting(from: content) else {
-            log("Cannot read markdown meeting: \(url.lastPathComponent)")
+            log("Cannot read meeting markdown")
             return nil
         }
 
@@ -97,7 +97,7 @@ enum TranscriptLoader {
     static func loadDictationDay(_ url: URL) -> AgentDictationDay? {
         guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseDictationDay(from: content, markdownURL: url) else {
-            log("Cannot read markdown dictation day: \(url.lastPathComponent)")
+            log("Cannot read dictation markdown")
             return nil
         }
 
@@ -191,4 +191,42 @@ func withLogsSuppressed<T>(_ body: () throws -> T) rethrows -> T {
     }
 
     return try body()
+}
+
+enum MCPLogPrivacy {
+    static func countBucket(_ count: Int) -> String {
+        switch max(0, count) {
+        case 0: return "0"
+        case 1: return "1"
+        case 2...10: return "2_to_10"
+        case 11...100: return "11_to_100"
+        case 101...1_000: return "101_to_1000"
+        default: return "over_1000"
+        }
+    }
+}
+
+enum MCPStartupDiagnostics {
+    enum Phase: String {
+        case lexicalIndexReady = "lexical_index_ready"
+        case transportReady = "transport_ready"
+        case semanticIndexStarted = "semantic_index_started"
+        case semanticIndexReady = "semantic_index_ready"
+    }
+
+    static func message(phase: Phase, elapsedSeconds: TimeInterval) -> String {
+        "Startup phase=\(phase.rawValue) elapsed_bucket=\(elapsedBucket(elapsedSeconds))"
+    }
+
+    static func elapsedBucket(_ seconds: TimeInterval) -> String {
+        switch max(0, seconds) {
+        case ..<0.25: return "under_250ms"
+        case ..<1: return "250ms_to_1s"
+        case ..<5: return "1s_to_5s"
+        case ..<15: return "5s_to_15s"
+        case ..<30: return "15s_to_30s"
+        case ..<60: return "30s_to_60s"
+        default: return "over_60s"
+        }
+    }
 }
