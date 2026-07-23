@@ -453,6 +453,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - script edits map to syntax and owned checks") {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let homeBenchmark = readRepoTextFile("scripts/dev/benchmark-home-recent-captures.sh")
         let expectedChecks = [
             "bash -n scripts/entrypoints/build-deps.sh",
             "bash build-deps.sh --force",
@@ -484,6 +485,11 @@ func testRepoCommandContract() {
         for check in expectedChecks {
             assertTrue(matrix.contains(check), "test matrix should include \(check)")
         }
+        assertTrue(
+            homeBenchmark.contains("Sources/TranscriptedCore/Protocols/ImportedTranscriptionRecoverySession.swift")
+                && homeBenchmark.contains("Sources/TranscriptedCore/Models/TranscriptionTypes.swift"),
+            "the raw-swiftc Home benchmark should include the recovery protocol used by transcription types"
+        )
     }
 
     runSuite("Repo command contract - agent preflight executes the canonical matrix") {
