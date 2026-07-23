@@ -166,15 +166,16 @@ final class TranscriptionQueueCoordinator {
             importedRecoverySession: nil
         )
 
-        // Persist ownership before any asynchronous model preparation starts.
-        // Otherwise a force quit can lose an accepted immediate-start import.
-        try persistImportedJournal(for: job)
-        guard let session = try ImportedTranscriptionQueueJournal.claim(
+        // Take the lease before publishing recoverable work, then keep it
+        // through every asynchronous queue and pipeline transition.
+        let session = try ImportedTranscriptionQueueJournal.createClaimed(
             id: job.id,
-            journalDirectory: importedQueueJournalDirectory
-        ) else {
-            throw ImportedTranscriptionQueueJournalError.claimFailed
-        }
+            audioURL: audioURL,
+            recordingDate: recordingDate,
+            sttModelRawValue: job.sttModel.rawValue,
+            journalDirectory: importedQueueJournalDirectory,
+            scratchDirectory: importedAudioScratchDirectory
+        )
         job.importedRecoverySession = session
 
         if canStartQueuedTranscriptionImmediately {
@@ -576,20 +577,6 @@ final class TranscriptionQueueCoordinator {
 
     func confirmImportedFailedQueueHandoff(for job: QueuedTranscriptionJob) {
         job.importedRecoverySession?.failedQueueHandoffConfirmed()
-    }
-
-    private func persistImportedJournal(for job: QueuedTranscriptionJob) throws {
-        guard case .imported(let audioURL, _, let recordingDate) = job.kind else {
-            return
-        }
-        try ImportedTranscriptionQueueJournal.persist(
-            id: job.id,
-            audioURL: audioURL,
-            recordingDate: recordingDate,
-            sttModelRawValue: job.sttModel.rawValue,
-            journalDirectory: importedQueueJournalDirectory,
-            scratchDirectory: importedAudioScratchDirectory
-        )
     }
 
     private func removeRecoveredImportedScratchFile(_ audioURL: URL) -> Bool {

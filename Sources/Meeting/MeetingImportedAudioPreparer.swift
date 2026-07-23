@@ -138,6 +138,44 @@ enum ImportedTranscriptionQueueJournal {
         try write(record, journalDirectory: journalDirectory, fileManager: fileManager)
     }
 
+    /// Creates the initial record only after taking its process lease, so no
+    /// other process can observe recoverable work before its owner is live.
+    static func createClaimed(
+        id: UUID,
+        audioURL: URL,
+        recordingDate: Date,
+        enqueuedAt: Date = Date(),
+        sttModelRawValue: String,
+        journalDirectory: URL,
+        scratchDirectory: URL,
+        processIdentifier: Int32 = getpid(),
+        claimedAt: Date = Date(),
+        fileManager: FileManager = .default
+    ) throws -> ImportedTranscriptionQueueJournalSession {
+        let normalizedAudioURL = audioURL.standardizedFileURL
+        guard normalizedAudioURL.deletingLastPathComponent() == scratchDirectory.standardizedFileURL else {
+            throw ImportedTranscriptionQueueJournalError.audioOutsideScratchDirectory
+        }
+        let record = ImportedTranscriptionQueueJournalRecord(
+            id: id,
+            audioFilename: normalizedAudioURL.lastPathComponent,
+            recordingDate: recordingDate,
+            enqueuedAt: enqueuedAt,
+            sttModelRawValue: sttModelRawValue
+        )
+        guard let session = try claim(
+            id: id,
+            journalDirectory: journalDirectory,
+            processIdentifier: processIdentifier,
+            claimedAt: claimedAt,
+            fileManager: fileManager,
+            recordToPublish: record
+        ) else {
+            throw ImportedTranscriptionQueueJournalError.claimFailed
+        }
+        return session
+    }
+
     static func load(
         journalDirectory: URL,
         fileManager: FileManager = .default
@@ -194,7 +232,8 @@ enum ImportedTranscriptionQueueJournal {
         journalDirectory: URL,
         processIdentifier: Int32 = getpid(),
         claimedAt: Date = Date(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        recordToPublish: ImportedTranscriptionQueueJournalRecord? = nil
     ) throws -> ImportedTranscriptionQueueJournalSession? {
         fileManager.ensurePrivateDirectory(
             at: journalDirectory,
@@ -226,8 +265,23 @@ enum ImportedTranscriptionQueueJournal {
         }
 
         do {
-            guard var record = load(id: id, journalDirectory: journalDirectory, fileManager: fileManager) else {
-                throw ImportedTranscriptionQueueJournalError.journalMissing
+            var record: ImportedTranscriptionQueueJournalRecord
+            if let recordToPublish {
+                var journalStatus = stat()
+                guard lstat(journalURL(for: id, in: journalDirectory).path, &journalStatus) != 0,
+                      errno == ENOENT else {
+                    throw ImportedTranscriptionQueueJournalError.claimFailed
+                }
+                record = recordToPublish
+            } else {
+                guard let loaded = load(
+                    id: id,
+                    journalDirectory: journalDirectory,
+                    fileManager: fileManager
+                ) else {
+                    throw ImportedTranscriptionQueueJournalError.journalMissing
+                }
+                record = loaded
             }
             if record.phase != .transcriptCommitted {
                 record.phase = .active

@@ -606,22 +606,22 @@ func testMeetingImportedAudioPreparer() async {
         let id = UUID()
         try! FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
         try! Data([0, 1, 2, 3]).write(to: audioURL)
-        try! ImportedTranscriptionQueueJournal.persist(
+        var firstOwner: ImportedTranscriptionQueueJournalSession? = try! ImportedTranscriptionQueueJournal.createClaimed(
             id: id,
             audioURL: audioURL,
             recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
             sttModelRawValue: "parakeet",
             journalDirectory: journalURL,
-            scratchDirectory: scratchURL
-        )
-
-        var firstOwner = try! ImportedTranscriptionQueueJournal.claim(
-            id: id,
-            journalDirectory: journalURL,
+            scratchDirectory: scratchURL,
             processIdentifier: 101
         )
         assertNotNil(firstOwner, "the first process should claim the queued import")
         assertEqual(firstOwner?.phase, .active, "claiming should durably mark the import active")
+        assertEqual(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).first?.owner?.processIdentifier,
+            101,
+            "initial journal publication should already contain the live lease owner"
+        )
         let lockURL = journalURL.appendingPathComponent(
             "import-job-\(id.uuidString).lock",
             isDirectory: false

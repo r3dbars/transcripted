@@ -2284,14 +2284,13 @@ func testRepoCommandContract() {
             to: "private func enqueue(_ job: QueuedTranscriptionJob)"
         )
         assertTrue(
-            importedEnqueueBlock.contains("try persistImportedJournal(for: job)")
-                && importedEnqueueBlock.contains("ImportedTranscriptionQueueJournal.claim(")
+            importedEnqueueBlock.contains("ImportedTranscriptionQueueJournal.createClaimed(")
                 && importedEnqueueBlock.contains("job.importedRecoverySession = session")
                 && importedEnqueueBlock.contains("queuedTranscriptionJobs.append(job)"),
-            "an accepted imported job should be journaled and leased before it becomes crash-volatile queue state"
+            "an accepted imported job should publish its journal while already leased before it becomes crash-volatile queue state"
         )
         let journalPersistIndex = importedEnqueueBlock.range(
-            of: "try persistImportedJournal(for: job)"
+            of: "ImportedTranscriptionQueueJournal.createClaimed("
         )?.lowerBound ?? importedEnqueueBlock.endIndex
         let immediateStartCheckIndex = importedEnqueueBlock.range(
             of: "if canStartQueuedTranscriptionImmediately"
