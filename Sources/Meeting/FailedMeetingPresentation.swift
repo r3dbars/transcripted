@@ -25,7 +25,6 @@ enum FailedMeetingPresentation {
             isRetryable: failed.isRetryable,
             isRetrying: isRetrying,
             hasAudioFiles: hasRetryableAudioFiles,
-            deletionRemovesAudio: true,
             audioURLs: availableAudioURLs
         )
     }

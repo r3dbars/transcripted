@@ -1399,6 +1399,13 @@ public class TranscriptionTaskManager: ObservableObject {
             return false
         }
 
+        guard !failedTranscriptionManager.hasPendingDeletion(id: failedId) else {
+            AppLogger.pipeline.info("Skipping retry — deletion is pending", [
+                "failedId": failedId.uuidString
+            ])
+            return false
+        }
+
         guard failed.isRetryable else {
             AppLogger.pipeline.info("Skipping retry — failure is permanent", ["failedId": "\(failedId)", "error": failed.errorMessage])
             return false

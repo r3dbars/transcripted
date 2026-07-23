@@ -25,7 +25,6 @@ final class FailedMeetingStore {
         let isRetryable: Bool
         let isRetrying: Bool
         let hasAudioFiles: Bool
-        let deletionRemovesAudio: Bool
         let audioURLs: [URL]
     }
 
@@ -142,18 +141,6 @@ final class FailedMeetingStore {
             )
         }
         return true
-    }
-
-    @discardableResult
-    func dismissFailedMeeting(id: UUID) -> Bool {
-        retryingFailedMeetingIDs.remove(id)
-        let didDismiss = failedManager.deleteFailedTranscription(id: id)
-        let isAbsent = !failedManager.failedTranscriptions.contains(where: { $0.id == id })
-        if didDismiss || isAbsent {
-            finishTimedOutFinalizationWithDiscard(id: id)
-        }
-        publishRefresh()
-        return didDismiss || isAbsent
     }
 
     @discardableResult

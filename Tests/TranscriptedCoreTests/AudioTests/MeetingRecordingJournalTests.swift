@@ -77,6 +77,45 @@ final class MeetingRecordingJournalTests: XCTestCase {
         XCTAssertNil(MeetingRecordingJournalStore.load(at: journalURL)?.finalMicFilename)
     }
 
+    func testAbandonedProductionFinalizerCannotMutateRecoveredMergedAudio() throws {
+        let paths = CoreStoragePaths(
+            transcripts: temporaryDirectory.appendingPathComponent("transcripts", isDirectory: true),
+            speakerDB: temporaryDirectory.appendingPathComponent("speakers.sqlite"),
+            statsDB: temporaryDirectory.appendingPathComponent("stats.sqlite"),
+            failedQueue: temporaryDirectory.appendingPathComponent("failed_transcriptions.json"),
+            speakerClips: temporaryDirectory.appendingPathComponent("speaker_clips", isDirectory: true),
+            audioCaptures: temporaryDirectory,
+            logs: temporaryDirectory.appendingPathComponent("logs", isDirectory: true)
+        )
+        let audio = Audio(paths: paths)
+        let primaryURL = temporaryDirectory.appendingPathComponent("meeting_race_mic.wav")
+        let segmentURL = temporaryDirectory.appendingPathComponent("meeting_race_mic_segment2.wav")
+        let recoveredMergedURL = temporaryDirectory.appendingPathComponent("meeting_race_mic_merged.wav")
+        let recoveredAudio = Data("recovered-audio-sentinel".utf8)
+        FileManager.default.createFile(atPath: primaryURL.path, contents: Data("primary".utf8))
+        FileManager.default.createFile(atPath: segmentURL.path, contents: Data("segment".utf8))
+        FileManager.default.createFile(atPath: recoveredMergedURL.path, contents: recoveredAudio)
+
+        let generation: UInt64 = 42
+        let session = audio.recordingJournal.begin(primaryMicURL: primaryURL)
+        audio.retainStoppingJournalSession(session, generation: generation)
+        XCTAssertTrue(audio.abandonRecordingJournalFinalization(forStopGeneration: generation))
+
+        let lateResult = audio.finalizeStoppedMicRecording(
+            primaryURL: primaryURL,
+            segments: [
+                MicRecordingSegment(url: primaryURL, gapBeforeDuration: 0),
+                MicRecordingSegment(url: segmentURL, gapBeforeDuration: 0)
+            ],
+            generation: generation
+        )
+
+        XCTAssertNil(lateResult)
+        XCTAssertEqual(try Data(contentsOf: recoveredMergedURL), recoveredAudio)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: primaryURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: segmentURL.path))
+    }
+
     func testCurrentTerminalDiscardRemovesEveryJournalOwnedSegmentWithoutCallbackURLs() throws {
         let audioDirectory = temporaryDirectory.appendingPathComponent("audio", isDirectory: true)
         try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)

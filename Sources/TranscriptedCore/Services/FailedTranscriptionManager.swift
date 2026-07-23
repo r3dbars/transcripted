@@ -409,6 +409,10 @@ public class FailedTranscriptionManager: ObservableObject {
         return true
     }
 
+    func hasPendingDeletion(id: UUID) -> Bool {
+        pendingDeletions.contains(where: { $0.id == id })
+    }
+
     private func completePendingDeletion(id: UUID) {
         let previous = pendingDeletions
         pendingDeletions.removeAll { $0.id == id }

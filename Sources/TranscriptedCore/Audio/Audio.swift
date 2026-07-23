@@ -251,7 +251,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     private var stoppingJournalSessions: [UInt64: MeetingRecordingJournalSession] = [:]
     private let stoppingJournalSessionsLock = NSLock()
 
-    private func retainStoppingJournalSession(
+    func retainStoppingJournalSession(
         _ session: MeetingRecordingJournalSession,
         generation: UInt64
     ) {
@@ -266,6 +266,25 @@ public class Audio: ObservableObject, @unchecked Sendable {
         stoppingJournalSessionsLock.lock()
         defer { stoppingJournalSessionsLock.unlock() }
         return stoppingJournalSessions.removeValue(forKey: generation)
+    }
+
+    /// Claims this generation's finalizer before it mutates any recording
+    /// files. If recovery already took ownership, leave every segment and
+    /// merged artifact untouched for that canonical recovery path.
+    func finalizeStoppedMicRecording(
+        primaryURL: URL?,
+        segments: [MicRecordingSegment],
+        generation: UInt64
+    ) -> URL? {
+        guard let session = takeStoppingJournalSession(generation: generation) else {
+            AppLogger.audioMic.info("Skipped abandoned mic finalization owned by recovery", [
+                "stopGeneration": "\(generation)"
+            ])
+            return nil
+        }
+        let finalMicURL = finalizeMicRecording(primaryURL: primaryURL, segments: segments)
+        recordingJournal.markFinalized(finalMicURL: finalMicURL, session: session)
+        return finalMicURL
     }
 
     /// The host no longer retains a completion callback for this stopped
@@ -1752,13 +1771,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
             cleanupGroup.notify(queue: .global(qos: .utility)) { [weak self] in
                 guard let self else { return }
-                let finalMicURL = self.finalizeMicRecording(primaryURL: primaryMicURL, segments: micSegmentsSnapshot)
-                let finalizationSession = self.takeStoppingJournalSession(
+                let finalMicURL = self.finalizeStoppedMicRecording(
+                    primaryURL: primaryMicURL,
+                    segments: micSegmentsSnapshot,
                     generation: stopGeneration
-                )
-                self.recordingJournal.markFinalized(
-                    finalMicURL: finalMicURL,
-                    session: finalizationSession
                 )
                 DispatchQueue.main.async {
                     if self.recordingSessionGeneration == stopGeneration {

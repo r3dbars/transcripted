@@ -308,9 +308,8 @@ final class MeetingSessionController: ObservableObject {
         // under app-owned state, not the capture library. The queue is drained
         // by `refreshFailedMeetings()` (subscribed to
         // `failedManager.$failedTranscriptions`) and surfaced in Settings →
-        // Meetings → "Needs Attention", with retry / dismiss / delete actions
-        // wired through `retryFailedMeeting`, `dismissFailedMeeting`, and
-        // `deleteFailedMeeting`.
+        // Meetings → "Needs Attention", with retry / delete actions wired
+        // through `retryFailedMeeting` and `deleteFailedMeeting`.
         self.failedManager = FailedTranscriptionManager(paths: storagePaths)
         self.failedManager.cleanupOldFailedTranscriptions(
             olderThanDays: TranscriptedConstants.failedMeetingAudioRetentionDays
@@ -1913,11 +1912,6 @@ final class MeetingSessionController: ObservableObject {
     // Full implementations moved to FailedMeetingStore.swift (audit
     // 2026-07-08 wave 2, W2-B). These forwarders keep the public signatures
     // controller callers (Settings/Home UI) already depend on.
-    @discardableResult
-    func dismissFailedMeeting(id: UUID) -> Bool {
-        failedMeetingStore.dismissFailedMeeting(id: id)
-    }
-
     @discardableResult
     func deleteFailedMeeting(id: UUID) -> Bool {
         failedMeetingStore.deleteFailedMeeting(id: id)

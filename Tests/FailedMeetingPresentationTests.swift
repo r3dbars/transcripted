@@ -223,9 +223,9 @@ func testFailedMeetingPresentation() {
             source.contains("hasAudioFiles: hasRetryableAudioFiles"),
             "partial retained audio should not enable the retry action"
         )
-        assertTrue(
-            source.contains("deletionRemovesAudio: true"),
-            "every failed row should keep clear actions destructive while referenced audio may return"
+        assertFalse(
+            source.contains("deletionRemovesAudio"),
+            "failed rows should not carry an impossible non-destructive cleanup state"
         )
     }
 
@@ -258,8 +258,8 @@ func testFailedMeetingPresentation() {
             "failed rows should use available retained audio URLs for the reveal affordance"
         )
         assertTrue(
-            homeSource.contains("title: item.deletionRemovesAudio ? \"Delete failed meeting\" : \"Dismiss\"")
-                && homeSource.contains("hasRetainedAudioFiles: item.deletionRemovesAudio"),
+            homeSource.contains("title: \"Delete failed meeting\"")
+                && homeSource.contains("isDestructive: true"),
             "failed rows should label cleanup as destructive without exposing an unusable reveal action"
         )
 
@@ -268,9 +268,14 @@ func testFailedMeetingPresentation() {
             encoding: .utf8
         )) ?? ""
         assertTrue(
-            settingsSource.contains("if item.deletionRemovesAudio")
-                && settingsSource.contains("reasonKind: item.deletionRemovesAudio ? .deleted : .dismissed"),
+            settingsSource.contains("requestClearFailedMeeting")
+                && settingsSource.contains("HomeDeleteConfirmationPolicy.failedMeeting")
+                && settingsSource.contains("reasonKind: .deleted"),
             "Home should confirm and report every failed-row cleanup as deletion, not dismissal"
+        )
+        assertFalse(
+            settingsSource.contains("dismissFailedMeeting"),
+            "failed-row cleanup should have one canonical destructive seam"
         )
     }
 

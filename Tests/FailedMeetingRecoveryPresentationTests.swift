@@ -8,17 +8,13 @@ func testFailedMeetingRecoveryPresentation() {
             retryUnavailableReason: nil,
             isRetryable: true,
             isRetrying: false,
-            hasAudioFiles: true,
-            hasRetainedAudioFiles: true
+            hasAudioFiles: true
         )
 
         assertEqual(presentation.iconSystemName, "exclamationmark.triangle.fill")
         assertEqual(presentation.iconTone, .warning)
         assertFalse(presentation.retryDisabled)
         assertEqual(presentation.retryHelp, "Transcribe this saved audio again.")
-        assertEqual(presentation.clearTitle, "Delete")
-        assertEqual(presentation.clearSymbolName, "trash")
-        assertTrue(presentation.clearIsDestructive)
     }
 
     runSuite("FailedMeetingRecoveryPresentation - retry blocked by active work") {
@@ -28,17 +24,13 @@ func testFailedMeetingRecoveryPresentation() {
             retryUnavailableReason: "Wait for model prep to finish.",
             isRetryable: true,
             isRetrying: false,
-            hasAudioFiles: true,
-            hasRetainedAudioFiles: false
+            hasAudioFiles: true
         )
 
         assertEqual(presentation.iconSystemName, "timer")
         assertEqual(presentation.iconTone, .neutral)
         assertTrue(presentation.retryDisabled)
         assertEqual(presentation.retryHelp, "Wait for model prep to finish.")
-        assertEqual(presentation.clearTitle, "Dismiss")
-        assertEqual(presentation.clearSymbolName, "xmark")
-        assertFalse(presentation.clearIsDestructive)
     }
 
     runSuite("FailedMeetingRecoveryPresentation - missing audio wins over unavailable reason") {
@@ -48,8 +40,7 @@ func testFailedMeetingRecoveryPresentation() {
             retryUnavailableReason: "Wait for another job.",
             isRetryable: true,
             isRetrying: false,
-            hasAudioFiles: false,
-            hasRetainedAudioFiles: false
+            hasAudioFiles: false
         )
 
         assertTrue(presentation.retryDisabled)
@@ -63,8 +54,7 @@ func testFailedMeetingRecoveryPresentation() {
             retryUnavailableReason: nil,
             isRetryable: true,
             isRetrying: true,
-            hasAudioFiles: true,
-            hasRetainedAudioFiles: true
+            hasAudioFiles: true
         )
 
         assertTrue(presentation.retryDisabled)
@@ -78,8 +68,7 @@ func testFailedMeetingRecoveryPresentation() {
             retryUnavailableReason: nil,
             isRetryable: true,
             isRetrying: false,
-            hasAudioFiles: true,
-            hasRetainedAudioFiles: true
+            hasAudioFiles: true
         )
 
         assertTrue(presentation.retryDisabled)

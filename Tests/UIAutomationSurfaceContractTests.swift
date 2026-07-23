@@ -275,9 +275,10 @@ func testUIAutomationSurfaceContract() {
         )
 
         for requiredHomeRendererHook in [
-            "title: presentation.clearTitle",
+            "title: \"Delete\"",
+            "symbolName: \"trash\"",
             "SettingsInlineActionButton(",
-            "tone: presentation.clearIsDestructive ? .destructive : .neutral",
+            "tone: .destructive",
             "HomeRowMoreMenuButton(items:",
             "retainedActionTarget = context.coordinator",
             "final class ClosureMenuItem: NSMenuItem",
@@ -293,13 +294,14 @@ func testUIAutomationSurfaceContract() {
             "Home icon buttons and compact row actions should keep a shared 40pt hit-target floor"
         )
         for requiredFailedMeetingPolicyHook in [
-            "clearTitle: hasRetainedAudioFiles ? \"Delete\" : \"Dismiss\"",
-            "clearSymbolName: hasRetainedAudioFiles ? \"trash\" : \"xmark\"",
-            "clearIsDestructive: hasRetainedAudioFiles",
             "return \"This meeting does not have enough saved audio to retry.\"",
         ] {
             assertTrue(contractSource("Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift").contains(requiredFailedMeetingPolicyHook), "\(requiredFailedMeetingPolicyHook) should keep failed-meeting action policy visible")
         }
+        assertFalse(
+            contractSource("Sources/UI/Settings/FailedMeetingRecoveryPresentation.swift").contains("hasRetainedAudioFiles"),
+            "failed-meeting policy should not retain an unreachable dismiss state"
+        )
         assertTrue(
             contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".frame(minHeight: 40)")
                 && contractSource("Sources/UI/Settings/TranscriptedSettingsComponents.swift").contains(".contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))"),
@@ -689,12 +691,15 @@ func testUIAutomationSurfaceContract() {
             "transcripted.home.failed-meetings.retry",
             "transcripted.home.failed-meetings.show-audio",
             "transcripted.home.failed-meetings.delete",
-            "transcripted.home.failed-meetings.dismiss",
             "transcripted.home.load-more",
             "transcripted.home.needs-attention.review.",
         ] {
             assertTrue(homeSurfaceContractContains(identifier), "\(identifier) should stay attached to Home click-flow controls")
         }
+        assertFalse(
+            homeSurfaceContractContains("transcripted.home.failed-meetings.dismiss"),
+            "failed meetings should not expose an unreachable non-destructive click flow"
+        )
 
         for identifier in [
             "transcripted.settings.footer.check-updates",

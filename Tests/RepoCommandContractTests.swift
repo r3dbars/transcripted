@@ -2590,17 +2590,21 @@ func testRepoCommandContract() {
         assertTrue(
             storeContents.contains("finishTimedOutFinalizationWithDiscard(id: id)")
                 && storeContents.contains("discardFinalizedFailedTranscriptionAudio("),
-            "dismiss, delete, and completed retry should turn any late finalization into bounded cleanup-only ownership"
+            "delete and completed retry should turn any late finalization into bounded cleanup-only ownership"
         )
-        let dismissFailedMeetingBlock = sourceSlice(
+        let deleteFailedMeetingBlock = sourceSlice(
             storeContents,
-            from: "func dismissFailedMeeting(id: UUID) -> Bool {",
-            to: "func deleteFailedMeeting(id: UUID) -> Bool {"
+            from: "func deleteFailedMeeting(id: UUID) -> Bool {",
+            to: "func preserveTimedOutFailedMeetingForRetry("
         )
         assertTrue(
-            dismissFailedMeetingBlock.contains("failedManager.deleteFailedTranscription(id: id)")
-                && dismissFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
-            "dismiss should use the manager's scratch-and-archive cleanup roots before owning a late callback"
+            deleteFailedMeetingBlock.contains("failedManager.deleteFailedTranscription(id: id)")
+                && deleteFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
+            "delete should use the manager's scratch-and-archive cleanup roots before owning a late callback"
+        )
+        assertFalse(
+            storeContents.contains("func dismissFailedMeeting(id: UUID)"),
+            "failed rows should not retain a duplicate non-destructive cleanup seam"
         )
         let refreshFailedMeetingBlock = sourceSlice(
             storeContents,
@@ -3258,7 +3262,7 @@ func testRepoCommandContract() {
         )
         guard
             let functionStart = controllerContents.range(of: "func retranscribeSavedMeeting("),
-            let functionEnd = controllerContents.range(of: "func dismissFailedMeeting", range: functionStart.upperBound..<controllerContents.endIndex)
+            let functionEnd = controllerContents.range(of: "func deleteFailedMeeting", range: functionStart.upperBound..<controllerContents.endIndex)
         else {
             assertionFailure("MeetingSessionController should keep a saved-meeting re-transcription entry point")
             return
@@ -3365,9 +3369,9 @@ func testRepoCommandContract() {
             "failed-meeting retry should report whether the retry started"
         )
         assertTrue(
-            controllerContents.contains("func dismissFailedMeeting(id: UUID) -> Bool")
-                && controllerContents.contains("func deleteFailedMeeting(id: UUID) -> Bool"),
-            "failed-meeting clear actions should report whether the queue changed"
+            controllerContents.contains("func deleteFailedMeeting(id: UUID) -> Bool")
+                && !controllerContents.contains("func dismissFailedMeeting(id: UUID) -> Bool"),
+            "failed-meeting deletion should report whether the queue changed through one seam"
         )
         assertTrue(
             managerContents.contains("public func removeFailedTranscription(id: UUID) -> Bool")
@@ -3381,11 +3385,9 @@ func testRepoCommandContract() {
             "Home retry clicks should surface immediate retry blockers"
         )
         assertTrue(
-            settingsContents.contains("let didClear: Bool")
-                && settingsContents.contains("didClear = meetingSession.deleteFailedMeeting(id: item.id)")
-                && settingsContents.contains("didClear = meetingSession.dismissFailedMeeting(id: item.id)")
+            settingsContents.contains("let didClear = meetingSession.deleteFailedMeeting(id: item.id)")
                 && settingsContents.contains("if !didClear"),
-            "Home delete/dismiss clicks should surface failed queue updates"
+            "Home delete clicks should surface failed queue updates"
         )
     }
 

@@ -1926,22 +1926,16 @@ struct TranscriptedSettingsView: View {
     }
 
     private func requestClearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
-        if item.deletionRemovesAudio {
-            trackSettingsAction("home_delete_failed_meeting_request", page: .home)
-            let presentation = HomeDeleteConfirmationPolicy.failedMeeting
-            homeDeleteConfirmation = HomeDeleteConfirmation(
-                title: presentation.title,
-                message: presentation.message,
-                confirmTitle: presentation.confirmTitle
-            ) {
-                trackSettingsAction("home_delete_failed_meeting_confirm", page: .home)
-                clearFailedMeeting(item)
-            }
-            return
+        trackSettingsAction("home_delete_failed_meeting_request", page: .home)
+        let presentation = HomeDeleteConfirmationPolicy.failedMeeting
+        homeDeleteConfirmation = HomeDeleteConfirmation(
+            title: presentation.title,
+            message: presentation.message,
+            confirmTitle: presentation.confirmTitle
+        ) {
+            trackSettingsAction("home_delete_failed_meeting_confirm", page: .home)
+            clearFailedMeeting(item)
         }
-
-        trackSettingsAction("home_dismiss_failed_meeting", page: .home)
-        clearFailedMeeting(item)
     }
 
     private func clearFailedMeeting(_ item: MeetingSessionController.FailedMeetingItem) {
@@ -1950,19 +1944,11 @@ struct TranscriptedSettingsView: View {
             MeetingAudioPlayback.shared.stop()
         }
 
-        let didClear: Bool
-        let failureTitle: String
-        if item.deletionRemovesAudio {
-            didClear = meetingSession.deleteFailedMeeting(id: item.id)
-            failureTitle = "Could not delete failed meeting"
-        } else {
-            didClear = meetingSession.dismissFailedMeeting(id: item.id)
-            failureTitle = "Could not dismiss failed meeting"
-        }
+        let didClear = meetingSession.deleteFailedMeeting(id: item.id)
 
         if !didClear {
             presentHomeActionFailure(
-                title: failureTitle,
+                title: "Could not delete failed meeting",
                 message: "Transcripted couldn't remove this meeting. Check that your capture folder is available, then try again.",
                 retry: {
                     clearFailedMeeting(item)
@@ -1972,7 +1958,7 @@ struct TranscriptedSettingsView: View {
             ActivationTelemetry.trackWorkflowAbandoned(
                 workflowKind: .failedMeetingRetry,
                 stage: "retry_available",
-                reasonKind: item.deletionRemovesAudio ? .deleted : .dismissed,
+                reasonKind: .deleted,
                 surface: .home,
                 priorReadyState: canRetryFailedMeetings ? "retry_ready" : "retry_blocked"
             )
