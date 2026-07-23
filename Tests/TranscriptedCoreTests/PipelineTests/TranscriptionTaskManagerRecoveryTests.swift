@@ -206,6 +206,43 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
     }
 
+    func testCorruptSystemOnlyJournalSurvivesRecoveryAndPendingDeletionRelaunch() async throws {
+        let (manager, paths) = makeManager()
+        let placeholderURL = paths.audioCaptures.appendingPathComponent("corrupt-system-placeholder.wav")
+        let hiddenMicURL = paths.audioCaptures.appendingPathComponent("corrupt-hidden-mic.wav")
+        let systemURL = paths.audioCaptures.appendingPathComponent("corrupt-system.wav")
+        let journalURL = paths.audioCaptures.appendingPathComponent("corrupt-hidden-mic.recording.json")
+        for url in [placeholderURL, hiddenMicURL, systemURL] {
+            FileManager.default.createFile(atPath: url.path, contents: Data("owned".utf8))
+        }
+        try Data("not-json".utf8).write(to: journalURL, options: .atomic)
+
+        let failedID = UUID()
+        XCTAssertTrue(manager.failedTranscriptionManager.addFailedTranscription(
+            id: failedID,
+            micAudioURL: placeholderURL,
+            systemAudioURL: systemURL,
+            errorMessage: "Recording stop timed out before audio files were finalized."
+        ))
+        XCTAssertFalse(manager.failedTranscriptionManager.deleteFailedTranscription(id: failedID))
+
+        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+
+        XCTAssertEqual(recovered, 0)
+        for url in [placeholderURL, hiddenMicURL, systemURL, journalURL] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        }
+
+        let reloaded = FailedTranscriptionManager(paths: paths)
+        XCTAssertEqual(reloaded.failedTranscriptions.map(\.id), [failedID])
+        let pendingDeletionURL = paths.failedQueue.deletingLastPathComponent()
+            .appendingPathComponent(FailedTranscriptionManager.pendingDeletionFilename)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
+        for url in [placeholderURL, hiddenMicURL, systemURL, journalURL] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
     func testRecoversMultiSegmentRecordingByMerging() async throws {
         let (manager, paths) = makeManager()
 

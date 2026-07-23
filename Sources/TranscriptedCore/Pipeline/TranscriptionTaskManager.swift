@@ -1186,7 +1186,14 @@ public class TranscriptionTaskManager: ObservableObject {
             )
         }
         guard let journal = MeetingRecordingJournalStore.load(at: journalURL) else {
-            return OrphanedRecordingCandidate(journalURL: journalURL, disposition: .stale(reason: "unreadable journal"))
+            // An unreadable journal may still be the only inventory of mic
+            // segments absent from a system-only failed row. Preserve it as
+            // durable ownership evidence; deleting it could let a later
+            // pending-deletion replay report success while private audio stays.
+            return OrphanedRecordingCandidate(
+                journalURL: journalURL,
+                disposition: .skip(reason: "unreadable journal", retryAfter: nil)
+            )
         }
 
         // Journals store bare filenames; resolve them inside the scratch
