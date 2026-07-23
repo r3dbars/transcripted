@@ -135,6 +135,43 @@ final class ParakeetTimedAudioEngineWorkOwnership: @unchecked Sendable {
     }
 }
 
+/// Bridges a recovery start from cancellable worker work into a committed
+/// recording. The tap may deliver only while the start is active or committed;
+/// stop turns both queued work and any late callbacks into no-ops.
+final class ParakeetRecoveryStartCancellationState: @unchecked Sendable {
+    private enum State {
+        case active
+        case committed
+        case cancelled
+    }
+
+    private let lock = NSLock()
+    private var state: State = .active
+
+    var canRunWork: Bool {
+        lock.withLock { state == .active }
+    }
+
+    var canDeliverSamples: Bool {
+        lock.withLock { state != .cancelled }
+    }
+
+    @discardableResult
+    func commit() -> Bool {
+        lock.withLock {
+            guard state != .cancelled else { return false }
+            state = .committed
+            return true
+        }
+    }
+
+    func cancel() {
+        lock.withLock {
+            state = .cancelled
+        }
+    }
+}
+
 enum ParakeetSystemInputWorkError: LocalizedError, Equatable {
     case timedOut(operation: String, timeoutMs: Int)
 

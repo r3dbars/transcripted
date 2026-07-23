@@ -92,6 +92,7 @@ class ParakeetEngine: ObservableObject {
     private var zombieRecoveryTask: Task<Void, Never>?
     private var zombieRecoveryState = ParakeetZombieRecoveryState()
     private let zombieEngineWorkOwnership = ParakeetTimedAudioEngineWorkOwnership()
+    private var zombieRecoveryStartCancellationState: ParakeetRecoveryStartCancellationState?
     private var zombieRecoveryStartGeneration: UInt64?
     private var zombieRecoveryRestartPending: Bool { zombieRecoveryState.isActive }
     private var asrInferenceActivity = ParakeetASRInferenceActivityState()
@@ -1360,13 +1361,15 @@ class ParakeetEngine: ObservableObject {
 
     private func installTapAndStartEngine(
         isRecoveryAttempt: Bool,
-        recoveryLeaseOwner: ParakeetAudioEngineQueueOwnerToken?
+        recoveryLeaseOwner: ParakeetAudioEngineQueueOwnerToken?,
+        recoveryCancellationState: ParakeetRecoveryStartCancellationState?
     ) async throws -> ParakeetAudioStartSnapshot {
         let wasPrewarmed = isEnginePrewarmed
         let recoveryOwnership = zombieEngineWorkOwnership
         let recoveryWorkIsCurrent: () -> Bool = { [recoveryOwnership] in
-            guard let recoveryLeaseOwner else { return true }
-            return recoveryOwnership.isActive(
+            guard let recoveryLeaseOwner, let recoveryCancellationState else { return true }
+            return recoveryCancellationState.canRunWork
+                && recoveryOwnership.isActive(
                 owner: recoveryLeaseOwner,
                 phase: .zombieRecoveryStart
             )
@@ -1389,12 +1392,9 @@ class ParakeetEngine: ObservableObject {
             Self.applyDictationVoiceProcessingPreference(voiceProcessingRequested, to: inputNode)
             stageTimings["audio_voice_processing_apply_ms"] = Self.elapsedMilliseconds(since: voiceProcessingStartedAt)
             let tapInstallStartedAt = CFAbsoluteTimeGetCurrent()
-            inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self, recoveryOwnership] buffer, _ in
-                if let recoveryLeaseOwner {
-                    guard recoveryOwnership.isActive(
-                        owner: recoveryLeaseOwner,
-                        phase: .zombieRecoveryStart
-                    ) else { return }
+            inputNode.installTap(onBus: 0, bufferSize: TranscriptedConstants.audioTapBufferSize, format: nil) { [weak self] buffer, _ in
+                if let recoveryCancellationState {
+                    guard recoveryCancellationState.canDeliverSamples else { return }
                 }
                 guard let self = self,
                       let monoSamples = self.extractMonoSamples(from: buffer) else { return }
@@ -2102,30 +2102,42 @@ class ParakeetEngine: ObservableObject {
             reserveNativeSampleBufferCapacity()
 
             let zombieStartLeaseOwner: ParakeetAudioEngineQueueOwnerToken?
+            let zombieStartCancellationState: ParakeetRecoveryStartCancellationState?
             if isRecoveryAttempt,
                let generation = zombieRecoveryStartGeneration,
                zombieRecoveryState.canContinue(generation: generation) {
                 zombieStartLeaseOwner = attemptOwner
+                let cancellationState = ParakeetRecoveryStartCancellationState()
+                zombieRecoveryStartCancellationState?.cancel()
+                zombieRecoveryStartCancellationState = cancellationState
+                zombieStartCancellationState = cancellationState
                 zombieEngineWorkOwnership.begin(
                     owner: attemptOwner,
                     phase: .zombieRecoveryStart
                 )
             } else {
                 zombieStartLeaseOwner = nil
+                zombieStartCancellationState = nil
             }
 
             do {
                 let startSnapshot = try await installTapAndStartEngine(
                     isRecoveryAttempt: isRecoveryAttempt,
-                    recoveryLeaseOwner: zombieStartLeaseOwner
+                    recoveryLeaseOwner: zombieStartLeaseOwner,
+                    recoveryCancellationState: zombieStartCancellationState
                 )
-                if let zombieStartLeaseOwner {
-                    zombieEngineWorkOwnership.finish(
-                        owner: zombieStartLeaseOwner,
-                        phase: .zombieRecoveryStart
-                    )
-                }
                 guard ownsAudioEngineQueue(attemptOwner) else {
+                    zombieStartCancellationState?.cancel()
+                    if let zombieStartLeaseOwner {
+                        zombieEngineWorkOwnership.finish(
+                            owner: zombieStartLeaseOwner,
+                            phase: .zombieRecoveryStart
+                        )
+                    }
+                    if let zombieStartCancellationState,
+                       zombieRecoveryStartCancellationState === zombieStartCancellationState {
+                        zombieRecoveryStartCancellationState = nil
+                    }
                     attemptQueue.async {
                         Self.cleanUpLateAudioStart(on: attemptEngine)
                     }
@@ -2137,6 +2149,28 @@ class ParakeetEngine: ObservableObject {
                         context: ["audio_graph_generation": "\(audioGraphGeneration)"]
                     )
                     return await failAudioStart()
+                }
+                if let zombieStartCancellationState,
+                   !zombieStartCancellationState.commit() {
+                    if let zombieStartLeaseOwner {
+                        zombieEngineWorkOwnership.finish(
+                            owner: zombieStartLeaseOwner,
+                            phase: .zombieRecoveryStart
+                        )
+                    }
+                    if zombieRecoveryStartCancellationState === zombieStartCancellationState {
+                        zombieRecoveryStartCancellationState = nil
+                    }
+                    attemptQueue.async {
+                        Self.cleanUpLateAudioStart(on: attemptEngine)
+                    }
+                    return await failAudioStart()
+                }
+                if let zombieStartLeaseOwner {
+                    zombieEngineWorkOwnership.finish(
+                        owner: zombieStartLeaseOwner,
+                        phase: .zombieRecoveryStart
+                    )
                 }
                 inputTapInstalled = true
                 isEnginePrewarmed = true
@@ -2171,6 +2205,11 @@ class ParakeetEngine: ObservableObject {
                         ])
                 }
             } catch {
+                zombieStartCancellationState?.cancel()
+                if let zombieStartCancellationState,
+                   zombieRecoveryStartCancellationState === zombieStartCancellationState {
+                    zombieRecoveryStartCancellationState = nil
+                }
                 if let zombieStartLeaseOwner {
                     zombieEngineWorkOwnership.finish(
                         owner: zombieStartLeaseOwner,
@@ -3537,6 +3576,8 @@ class ParakeetEngine: ObservableObject {
 
     private func cancelZombieEngineRecovery() {
         zombieRecoveryTask?.cancel()
+        zombieRecoveryStartCancellationState?.cancel()
+        zombieRecoveryStartCancellationState = nil
         if let blockedLease = zombieEngineWorkOwnership.claimPendingWorkForSuccessor(
             currentEngine: audioEngine,
             currentQueue: audioEngineQueue

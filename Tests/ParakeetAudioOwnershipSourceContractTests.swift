@@ -107,8 +107,14 @@ func testParakeetAudioOwnershipSourceContract() {
             install.contains("isWorkCurrent: recoveryWorkIsCurrent")
                 && install.contains("phase: .zombieRecoveryStart")
                 && install.contains("guard recoveryWorkIsCurrent() else { throw CancellationError() }")
+                && install.contains("recoveryCancellationState.canDeliverSamples")
                 && install.contains("try audioEngine.start()"),
             "recovery start should validate its lease at entry, tap delivery, and around engine start"
+        )
+        assertTrue(
+            source.contains("!zombieStartCancellationState.commit()")
+                && source.contains("zombieRecoveryStartCancellationState?.cancel()"),
+            "a successful recovery should commit callback delivery while stop cancels it immediately"
         )
         assertTrue(
             abandon.contains("let retiredQueue = audioEngineQueue")

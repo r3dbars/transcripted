@@ -640,6 +640,25 @@ func testParakeetAudioGraphOwnership() async {
         )
     }
 
+    runSuite("Parakeet recovery start cancellation preserves only committed callbacks") {
+        let cancelledBeforeCommit = ParakeetRecoveryStartCancellationState()
+        assertTrue(cancelledBeforeCommit.canRunWork, "a fresh recovery start should enter worker work")
+        assertTrue(cancelledBeforeCommit.canDeliverSamples, "a fresh tap may deliver during start")
+
+        cancelledBeforeCommit.cancel()
+        assertFalse(cancelledBeforeCommit.canRunWork, "stop should gate queued or in-flight work")
+        assertFalse(cancelledBeforeCommit.canDeliverSamples, "stop should gate stale tap callbacks")
+        assertFalse(cancelledBeforeCommit.commit(), "a cancelled start cannot become a recording")
+
+        let committedRecording = ParakeetRecoveryStartCancellationState()
+        assertTrue(committedRecording.commit(), "the exact successful owner should commit its tap")
+        assertFalse(committedRecording.canRunWork, "committed state is no longer start work")
+        assertTrue(committedRecording.canDeliverSamples, "committing must not silence the recovered recording")
+
+        committedRecording.cancel()
+        assertFalse(committedRecording.canDeliverSamples, "a later user stop should silence committed callbacks immediately")
+    }
+
 }
 private actor ParakeetPendingRestoreInterleavingHarness {
     private var state = ParakeetOwnerBoundPendingState<String>()
@@ -739,4 +758,3 @@ private final class ParakeetSystemInputRouteTestState: @unchecked Sendable {
         return markerIsSet
     }
 }
-
