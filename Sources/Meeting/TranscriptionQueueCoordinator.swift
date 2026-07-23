@@ -43,6 +43,7 @@ final class TranscriptionQueueCoordinator {
         let stoppedAudioRecovery: DictationStoppedAudioRecovery?
         let promptTelemetryProperties: [String: String]?
         let promptRecordingStartedAt: Date?
+        var importedRecoverySession: ImportedTranscriptionQueueJournalSession?
 
         var captureDiagnostics: [String: String]? {
             switch kind {
@@ -132,7 +133,8 @@ final class TranscriptionQueueCoordinator {
             sttModel: controller.sttRouter.selectedModel,
             stoppedAudioRecovery: nil,
             promptTelemetryProperties: promptTelemetryProperties,
-            promptRecordingStartedAt: promptRecordingStartedAt
+            promptRecordingStartedAt: promptRecordingStartedAt,
+            importedRecoverySession: nil
         )
 
         if controller.liveCodexFinalTranscriptNeedsQueuedJobID && controller.liveCodexSessionAwaitingFinalTranscript {
@@ -149,7 +151,7 @@ final class TranscriptionQueueCoordinator {
         startTrigger: MeetingSessionController.StartTrigger,
         stoppedAudioRecovery: DictationStoppedAudioRecovery? = nil
     ) throws -> QueueInsertionOutcome {
-        let job = QueuedTranscriptionJob(
+        var job = QueuedTranscriptionJob(
             id: UUID(),
             kind: .imported(
                 audioURL: audioURL,
@@ -160,12 +162,21 @@ final class TranscriptionQueueCoordinator {
             sttModel: controller.sttRouter.selectedModel,
             stoppedAudioRecovery: stoppedAudioRecovery,
             promptTelemetryProperties: nil,
-            promptRecordingStartedAt: nil
+            promptRecordingStartedAt: nil,
+            importedRecoverySession: nil
         )
 
-        // Persist ownership before any asynchronous model preparation starts.
-        // Otherwise a force quit can lose an accepted immediate-start import.
-        try persistImportedJournal(for: job)
+        // Take the lease before publishing recoverable work, then keep it
+        // through every asynchronous queue and pipeline transition.
+        let session = try ImportedTranscriptionQueueJournal.createClaimed(
+            id: job.id,
+            audioURL: audioURL,
+            recordingDate: recordingDate,
+            sttModelRawValue: job.sttModel.rawValue,
+            journalDirectory: importedQueueJournalDirectory,
+            scratchDirectory: importedAudioScratchDirectory
+        )
+        job.importedRecoverySession = session
 
         if canStartQueuedTranscriptionImmediately {
             startQueuedTranscription(job)
@@ -338,12 +349,13 @@ final class TranscriptionQueueCoordinator {
             )
         case .imported(let audioURL, let suggestedTitle, let recordingDate):
             controller.taskManager.startImportedTranscription(
+                taskId: job.id,
                 audioURL: audioURL,
                 outputFolder: MeetingStoragePaths.transcriptsFolder,
                 meetingTitle: suggestedTitle,
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                recoverySession: job.importedRecoverySession
             )
-            removeImportedJournal(for: job)
         }
     }
 
@@ -379,7 +391,7 @@ final class TranscriptionQueueCoordinator {
             )
         }
         if preserved {
-            removeImportedJournal(for: job)
+            job.importedRecoverySession?.failedQueueHandoffConfirmed()
         }
         clearQueuedTranscriptionRuntimeDiagnosticsIfOwned(for: job, outcome: "model_recovery_failed")
     }
@@ -457,6 +469,25 @@ final class TranscriptionQueueCoordinator {
             journalDirectory: importedQueueJournalDirectory
         )
         let failedQueueAudioURLs = controller.failedMeetingStore.failedAudioURLs
+        let claimedRecords = records.compactMap { record -> (
+            ImportedTranscriptionQueueJournalRecord,
+            ImportedTranscriptionQueueJournalSession
+        )? in
+            guard let recoverySession = try? ImportedTranscriptionQueueJournal.claim(
+                id: record.id,
+                journalDirectory: importedQueueJournalDirectory
+            ) else {
+                return nil
+            }
+            return (record, recoverySession)
+        }
+        // Scan only after every available lease is held. A prior owner can no
+        // longer publish a stable transcript after this snapshot and leave us
+        // with stale evidence that would replay the same job.
+        let existingTranscriptsByID = TranscriptSaver.existingTranscriptURLs(
+            in: MeetingStoragePaths.transcriptsFolder,
+            transcriptIds: Set(claimedRecords.map { $0.0.id })
+        )
         var recoveredJobIDs = Set(queuedTranscriptionJobs.map(\.id))
         var recoveredAudioURLs = Set(
             queuedTranscriptionJobs.compactMap { job -> URL? in
@@ -471,22 +502,15 @@ final class TranscriptionQueueCoordinator {
             }
         }
         var recovered = 0
-        for record in records {
+        for (record, recoverySession) in claimedRecords {
             guard let audioURL = ImportedTranscriptionQueueJournal.audioURL(
                 for: record,
                 scratchDirectory: importedAudioScratchDirectory
             ) else {
-                ImportedTranscriptionQueueJournal.remove(
-                    id: record.id,
-                    journalDirectory: importedQueueJournalDirectory
-                )
                 continue
             }
             if failedQueueAudioURLs.contains(audioURL.standardizedFileURL) {
-                ImportedTranscriptionQueueJournal.remove(
-                    id: record.id,
-                    journalDirectory: importedQueueJournalDirectory
-                )
+                recoverySession.failedQueueHandoffConfirmed()
                 continue
             }
             if ImportedTranscriptionQueueJournal.isDuplicate(
@@ -495,19 +519,53 @@ final class TranscriptionQueueCoordinator {
                 existingJobIDs: recoveredJobIDs,
                 existingAudioURLs: recoveredAudioURLs
             ) {
-                ImportedTranscriptionQueueJournal.remove(
-                    id: record.id,
-                    journalDirectory: importedQueueJournalDirectory
-                )
+                recoverySession.supersededRecoveryConfirmed()
                 continue
             }
-            guard FileManager.default.fileExists(atPath: audioURL.path) else {
-                ImportedTranscriptionQueueJournal.remove(
-                    id: record.id,
-                    journalDirectory: importedQueueJournalDirectory
-                )
+
+            let audioStatus = ImportedTranscriptionQueueJournal.recoveryAudioStatus(
+                at: audioURL,
+                scratchDirectory: importedAudioScratchDirectory
+            )
+            if audioStatus == .missing {
+                recoverySession.scratchCleanupConfirmed()
                 continue
             }
+            guard audioStatus == .regularFile else {
+                AppLogger.pipeline.warning("Rejected unsafe imported recovery scratch entry", [
+                    "jobId": record.id.uuidString
+                ])
+                continue
+            }
+
+            let stableTranscriptExists = existingTranscriptsByID[record.id] != nil
+            switch ImportedTranscriptionQueueJournal.recoveryAction(
+                phase: recoverySession.phase,
+                stableTranscriptExists: stableTranscriptExists
+            ) {
+            case .replayTranscription:
+                break
+            case .cleanScratch:
+                if removeRecoveredImportedScratchFile(audioURL) {
+                    recoverySession.scratchCleanupConfirmed()
+                }
+                continue
+            case .handOffScratch:
+                if stableTranscriptExists {
+                    recoverySession.transcriptCommitConfirmed()
+                }
+                if controller.failedMeetingStore.preserveFailedMeetingForRetry(
+                    micAudioURL: nil,
+                    systemAudioURL: audioURL,
+                    errorMessage: "The transcript was saved. Imported audio was preserved because recovery could not confirm scratch cleanup.",
+                    meetingTitle: "Imported audio",
+                    recordingDate: record.recordingDate
+                ) {
+                    recoverySession.failedQueueHandoffConfirmed()
+                }
+                continue
+            }
+
             let model = TranscriptionModelChoice(rawValue: record.sttModelRawValue)
                 ?? controller.sttRouter.selectedModel
             queuedTranscriptionJobs.append(
@@ -515,14 +573,15 @@ final class TranscriptionQueueCoordinator {
                     id: record.id,
                     kind: .imported(
                         audioURL: audioURL,
-                        suggestedTitle: record.suggestedTitle,
+                        suggestedTitle: "Imported audio",
                         recordingDate: record.recordingDate
                     ),
                     startTrigger: .fileImport,
                     sttModel: model,
                     stoppedAudioRecovery: nil,
                     promptTelemetryProperties: nil,
-                    promptRecordingStartedAt: nil
+                    promptRecordingStartedAt: nil,
+                    importedRecoverySession: recoverySession
                 )
             )
             recoveredJobIDs.insert(record.id)
@@ -535,27 +594,32 @@ final class TranscriptionQueueCoordinator {
         return recovered
     }
 
-    func removeImportedJournal(for job: QueuedTranscriptionJob) {
-        guard case .imported = job.kind else { return }
-        ImportedTranscriptionQueueJournal.remove(
-            id: job.id,
-            journalDirectory: importedQueueJournalDirectory
-        )
+    func prepareImportedScratchCleanup(for job: QueuedTranscriptionJob) -> Bool {
+        job.importedRecoverySession?.prepareForScratchCleanup() ?? true
     }
 
-    private func persistImportedJournal(for job: QueuedTranscriptionJob) throws {
-        guard case .imported(let audioURL, let suggestedTitle, let recordingDate) = job.kind else {
-            return
+    func confirmImportedScratchCleanup(for job: QueuedTranscriptionJob) {
+        job.importedRecoverySession?.scratchCleanupConfirmed()
+    }
+
+    func confirmImportedFailedQueueHandoff(for job: QueuedTranscriptionJob) {
+        job.importedRecoverySession?.failedQueueHandoffConfirmed()
+    }
+
+    private func removeRecoveredImportedScratchFile(_ audioURL: URL) -> Bool {
+        do {
+            try FileManager.default.removeItem(at: audioURL)
+            return true
+        } catch {
+            if (error as NSError).code == NSFileNoSuchFileError {
+                return true
+            }
+            AppLogger.pipeline.warning("Failed to clean committed imported scratch audio", [
+                "file": audioURL.lastPathComponent,
+                "errorType": String(describing: type(of: error))
+            ])
+            return false
         }
-        try ImportedTranscriptionQueueJournal.persist(
-            id: job.id,
-            audioURL: audioURL,
-            suggestedTitle: suggestedTitle,
-            recordingDate: recordingDate,
-            sttModelRawValue: job.sttModel.rawValue,
-            journalDirectory: importedQueueJournalDirectory,
-            scratchDirectory: importedAudioScratchDirectory
-        )
     }
 
     private func finalizeBackgroundTranscriptionStateIfNeeded() {
@@ -621,7 +685,7 @@ final class TranscriptionQueueCoordinator {
                     recordingDate: recordingDate
                 ) {
                     preservedCount += 1
-                    removeImportedJournal(for: job)
+                    job.importedRecoverySession?.failedQueueHandoffConfirmed()
                 }
             }
         }

@@ -8,6 +8,14 @@ import AVFoundation
 @available(macOS 14.0, *)
 @MainActor
 public class TranscriptionTaskManager: ObservableObject {
+    private struct ActiveTaskAudio {
+        let micURL: URL?
+        let systemURL: URL?
+        let meetingTitle: String?
+        let recordingDate: Date?
+        let importedRecoverySession: (any ImportedTranscriptionRecoverySession)?
+    }
+
     @Published public var activeCount: Int = 0
     @Published public var justCompleted: Bool = false
     @Published public var displayStatus: DisplayStatus = .idle
@@ -24,7 +32,7 @@ public class TranscriptionTaskManager: ObservableObject {
     private var savedTranscriptTaskIdsByTranscriptId: [UUID: UUID] = [:]
     private var savedTranscriptTaskIdsByURL: [URL: UUID] = [:]
     var activeTasks: [UUID: Task<Void, Never>] = [:]
-    private var activeTaskAudio: [UUID: (micURL: URL?, systemURL: URL?, meetingTitle: String?, recordingDate: Date?)] = [:]
+    private var activeTaskAudio: [UUID: ActiveTaskAudio] = [:]
     private var preservedTaskIdsForShutdown: Set<UUID> = []
     private var intentionallyCancelledTaskIds: Set<UUID> = []
     private var committedTranscriptTaskIds: Set<UUID> = []
@@ -185,11 +193,12 @@ public class TranscriptionTaskManager: ObservableObject {
 
         activeCount += 1
         backgroundTaskCount += 1
-        activeTaskAudio[task.id] = (
+        activeTaskAudio[task.id] = ActiveTaskAudio(
             micURL: micURL,
             systemURL: systemURL,
             meetingTitle: meetingTitle,
-            recordingDate: recordingDate
+            recordingDate: recordingDate,
+            importedRecoverySession: nil
         )
         publishNonFailureStatus(.gettingReady)
 
@@ -327,14 +336,26 @@ public class TranscriptionTaskManager: ObservableObject {
     /// Imported files reuse the system-audio speaker path and are not added to the
     /// failed-transcription queue because the user can simply re-import the source file.
     public func startImportedTranscription(
+        taskId: UUID = UUID(),
         audioURL: URL,
         outputFolder: URL,
         meetingTitle: String? = nil,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        recoverySession: (any ImportedTranscriptionRecoverySession)? = nil
     ) {
+        precondition(
+            recoverySession == nil || recoverySession?.jobID == taskId,
+            "Imported recovery session must use the queued job identity"
+        )
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting imported transcription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
-            removeRecordingFile(audioURL, label: "rejected imported recording")
+            if removeImportedRecordingFile(
+                audioURL,
+                recoverySession: recoverySession,
+                label: "rejected imported recording"
+            ) {
+                recoverySession?.scratchCleanupConfirmed()
+            }
             publishFailure(
                 displayMessage: "Another transcript is already running. Wait for it to finish, then import the file again.",
                 diagnosticMessage: "Transcription already in progress"
@@ -346,7 +367,13 @@ public class TranscriptionTaskManager: ObservableObject {
         let minDuration: TimeInterval = 2.0
         if let audioDuration = audioDuration(url: audioURL), audioDuration < minDuration {
             AppLogger.pipeline.info("Imported recording too short, skipping transcription", ["duration": String(format: "%.1fs", audioDuration)])
-            removeRecordingFile(audioURL, label: "short imported recording")
+            if removeImportedRecordingFile(
+                audioURL,
+                recoverySession: recoverySession,
+                label: "short imported recording"
+            ) {
+                recoverySession?.scratchCleanupConfirmed()
+            }
             publishFailure(
                 displayMessage: "That audio file is too short to transcribe. Choose audio that is at least two seconds long.",
                 diagnosticMessage: "Recording too short"
@@ -355,14 +382,14 @@ public class TranscriptionTaskManager: ObservableObject {
             return
         }
 
-        let taskId = UUID()
         activeCount += 1
         backgroundTaskCount += 1
-        activeTaskAudio[taskId] = (
+        activeTaskAudio[taskId] = ActiveTaskAudio(
             micURL: audioURL,
             systemURL: nil,
             meetingTitle: meetingTitle,
-            recordingDate: recordingDate
+            recordingDate: recordingDate,
+            importedRecoverySession: recoverySession
         )
         publishNonFailureStatus(.gettingReady)
 
@@ -402,10 +429,22 @@ public class TranscriptionTaskManager: ObservableObject {
                         return
                     }
                     if self.finishCancelledTaskIfNeeded(taskId: taskId, error: error) {
-                        self.removeRecordingFile(audioURL, label: "cancelled imported recording")
+                        if self.removeImportedRecordingFile(
+                            audioURL,
+                            recoverySession: recoverySession,
+                            label: "cancelled imported recording"
+                        ) {
+                            recoverySession?.scratchCleanupConfirmed()
+                        }
                         return
                     }
-                    self.removeRecordingFile(audioURL, label: "failed imported recording")
+                    if self.removeImportedRecordingFile(
+                        audioURL,
+                        recoverySession: recoverySession,
+                        label: "failed imported recording"
+                    ) {
+                        recoverySession?.scratchCleanupConfirmed()
+                    }
                     let diagnosticMessage = Self.safeFailureDiagnosticMessage(for: error)
                     self.publishFailure(
                         displayMessage: Self.importedAudioFailureDisplayMessage(forDiagnosticMessage: diagnosticMessage),
@@ -1604,8 +1643,9 @@ public class TranscriptionTaskManager: ObservableObject {
 
     func markTaskTranscriptCommitted(taskId: UUID) {
         committedTranscriptTaskIds.insert(taskId)
-        // Transcript is durably on disk — the crash-recovery journal for this
-        // recording's scratch audio is no longer needed.
+        activeTaskAudio[taskId]?.importedRecoverySession?.transcriptCommitConfirmed()
+        // The imported journal remains through scratch cleanup. The separate
+        // live-recording journal can retire once the transcript is durable.
         if let micURL = activeTaskAudio[taskId]?.micURL {
             MeetingRecordingJournalStore.removeJournal(
                 forMicAudioURL: micURL,
@@ -1652,8 +1692,13 @@ public class TranscriptionTaskManager: ObservableObject {
             intentionallyCancelledTaskIds.insert(taskId)
             task.cancel()
             if let audio = activeTaskAudio[taskId] {
-                removeManagedCleanupFile(audio.micURL, label: "cancelled live mic scratch")
-                removeManagedCleanupFile(audio.systemURL, label: "cancelled live system scratch")
+                if audio.importedRecoverySession?.prepareForScratchCleanup() != false {
+                    let removedMic = removeManagedCleanupFile(audio.micURL, label: "cancelled live mic scratch")
+                    let removedSystem = removeManagedCleanupFile(audio.systemURL, label: "cancelled live system scratch")
+                    if removedMic && removedSystem {
+                        audio.importedRecoverySession?.scratchCleanupConfirmed()
+                    }
+                }
             }
             activeTaskAudio.removeValue(forKey: taskId)
             AppLogger.pipeline.info("Cancelled task", ["taskId": "\(taskId)"])
@@ -1691,15 +1736,17 @@ public class TranscriptionTaskManager: ObservableObject {
 
         var preservedCount = 0
         for (taskId, audio) in activeAudio {
-            if addFailedTranscriptionRetainingAvailableAudio(
+            let didPersist = addFailedTranscriptionRetainingAvailableAudio(
                 micAudioURL: audio.micURL,
                 systemAudioURL: audio.systemURL,
                 errorMessage: errorMessage,
                 taskId: taskId,
                 meetingTitle: audio.meetingTitle,
                 recordingDate: audio.recordingDate
-            ) {
+            )
+            if didPersist {
                 preservedCount += 1
+                audio.importedRecoverySession?.failedQueueHandoffConfirmed()
             }
         }
         return preservedCount
@@ -1806,27 +1853,43 @@ public class TranscriptionTaskManager: ObservableObject {
         notifier.notifyTranscriptionFailed(errorMessage: errorMessage)
     }
 
-    nonisolated private func removeRecordingFile(_ url: URL, label: String) {
+    @discardableResult
+    nonisolated private func removeRecordingFile(_ url: URL, label: String) -> Bool {
         // Security: only delete scratch files inside Transcripted-managed cleanup roots.
         // `startImportedTranscription` accepts a URL from the caller, so without a containment
         // check a misuse or tampered in-memory request could unlink arbitrary user files.
         guard isSafeCleanupURL(url) else {
             AppLogger.pipeline.error("Refused to delete out-of-sandbox recording file", [
                 "label": label,
-                "path": url.path
+                "file": url.lastPathComponent
             ])
-            return
+            return false
         }
 
         do {
             try FileManager.default.removeItem(at: url)
+            return true
         } catch {
+            if (error as NSError).code == NSFileNoSuchFileError {
+                return true
+            }
             AppLogger.pipeline.warning("Failed to remove recording file", [
                 "label": label,
                 "file": url.lastPathComponent,
                 "error": error.localizedDescription
             ])
+            return false
         }
+    }
+
+    @discardableResult
+    nonisolated private func removeImportedRecordingFile(
+        _ url: URL,
+        recoverySession: (any ImportedTranscriptionRecoverySession)?,
+        label: String
+    ) -> Bool {
+        guard recoverySession?.prepareForScratchCleanup() != false else { return false }
+        return removeRecordingFile(url, label: label)
     }
 
     func resolvedRetainedAudioDirectory() -> URL? {
@@ -1845,9 +1908,22 @@ public class TranscriptionTaskManager: ObservableObject {
             .withAudioSources(audioSources)
     }
 
-    nonisolated func removeManagedCleanupFile(_ url: URL?, label: String) {
-        guard let url else { return }
-        removeRecordingFile(url, label: label)
+    @discardableResult
+    nonisolated func removeManagedCleanupFile(_ url: URL?, label: String) -> Bool {
+        guard let url else { return true }
+        return removeRecordingFile(url, label: label)
+    }
+
+    func confirmImportedTranscriptionScratchCleanup(taskId: UUID) {
+        activeTaskAudio[taskId]?.importedRecoverySession?.scratchCleanupConfirmed()
+    }
+
+    func prepareImportedTranscriptionScratchCleanup(taskId: UUID) -> Bool {
+        activeTaskAudio[taskId]?.importedRecoverySession?.prepareForScratchCleanup() ?? true
+    }
+
+    func importedRecoverySession(taskId: UUID) -> (any ImportedTranscriptionRecoverySession)? {
+        activeTaskAudio[taskId]?.importedRecoverySession
     }
 
     nonisolated private func isSafeCleanupURL(_ url: URL) -> Bool {

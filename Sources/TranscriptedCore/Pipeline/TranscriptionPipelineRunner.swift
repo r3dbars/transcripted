@@ -254,7 +254,8 @@ extension TranscriptionTaskManager {
             healthInfo: nil,
             splitLocalSpeakers: false,
             meetingTitle: meetingTitle,
-            recordingDate: recordingDate
+            recordingDate: recordingDate,
+            stableTranscriptId: taskId
         )
     }
 
@@ -274,7 +275,8 @@ extension TranscriptionTaskManager {
         sourceFailedTranscriptionId: UUID? = nil,
         removeSourceAudioAfterArchive: Bool = true,
         targetTranscriptURL: URL? = nil,
-        archiveRecordingAudio: Bool = true
+        archiveRecordingAudio: Bool = true,
+        stableTranscriptId: UUID? = nil
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
@@ -513,7 +515,9 @@ extension TranscriptionTaskManager {
         }
 
         let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: targetTranscriptURL)
-        let transcriptId = replacementTranscriptRollback?.transcriptId ?? UUID()
+        let transcriptId = replacementTranscriptRollback?.transcriptId
+            ?? stableTranscriptId
+            ?? UUID()
         try Task.checkCancellation()
         // Phase 2: Save transcript with speaker names
         let notifier: TranscriptNotifier? = await MainActor.run {
@@ -725,6 +729,9 @@ extension TranscriptionTaskManager {
                 replacementTranscriptRollback: replacementTranscriptRollback
             )
             await MainActor.run {
+                let importedRecoverySession = self.importedRecoverySession(
+                    taskId: taskId
+                )
                 self.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
                     speakers: capturedEntries,
                     knownPeople: knownPeople,
@@ -735,6 +742,7 @@ extension TranscriptionTaskManager {
                     micAudioURL: micURL,
                     shouldRemoveTemporaryAudioOnCleanup: shouldRemoveScratchAudio && sourceFailedTranscriptionId == nil,
                     sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                    importedRecoverySession: importedRecoverySession,
                     onComplete: { [weak self] updates in
                         self?.handleNamingComplete(
                             updates: updates,
@@ -745,7 +753,8 @@ extension TranscriptionTaskManager {
                             systemURL: systemURL,
                             shouldRemoveTemporaryAudio: shouldRemoveScratchAudio,
                             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
-                            clips: capturedEntries
+                            clips: capturedEntries,
+                            importedRecoverySession: importedRecoverySession
                         )
                     }
                 ))
@@ -803,8 +812,18 @@ extension TranscriptionTaskManager {
         // committed, so a late cancellation cannot delete transcript + retained
         // audio after scratch files are gone.
         if shouldRemoveScratchAudio, sourceFailedTranscriptionId == nil {
-            removeManagedCleanupFile(micURL, label: "completed mic scratch")
-            removeManagedCleanupFile(systemURL, label: "completed system scratch")
+            let cleanupPrepared = await MainActor.run {
+                self.prepareImportedTranscriptionScratchCleanup(taskId: taskId)
+            }
+            if cleanupPrepared {
+                let removedMic = removeManagedCleanupFile(micURL, label: "completed mic scratch")
+                let removedSystem = removeManagedCleanupFile(systemURL, label: "completed system scratch")
+                if removedMic && removedSystem {
+                    await MainActor.run {
+                        self.confirmImportedTranscriptionScratchCleanup(taskId: taskId)
+                    }
+                }
+            }
         }
 
         return savedURL

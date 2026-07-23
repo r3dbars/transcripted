@@ -249,6 +249,7 @@ $test_entries
 EOF
 
 APP_SOURCES=(
+    "Sources/TranscriptedCore/Protocols/ImportedTranscriptionRecoverySession.swift"
     "Sources/Support/ActivationPolicyController.swift"
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
@@ -321,6 +322,7 @@ APP_SOURCES=(
     "Sources/Meeting/SustainedActivityConfirmer.swift"
     "Sources/Meeting/MeetingAudioInactivityDetector.swift"
     "Sources/Meeting/MeetingAudioStorageManager.swift"
+    "Sources/Meeting/ImportedTranscriptionQueueJournalState.swift"
     "Sources/Meeting/MeetingImportedAudioPreparer.swift"
     "Sources/Meeting/MeetingImportPreparationFailureCopy.swift"
     "Sources/Meeting/MeetingSessionUIPolicy.swift"

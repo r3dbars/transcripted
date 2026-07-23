@@ -1576,8 +1576,20 @@ final class MeetingSessionController: ObservableObject {
                 )
             case .imported(let audioURL, let suggestedTitle, let recordingDate):
                 if reason == .userRequested {
-                    try? FileManager.default.removeItem(at: audioURL)
-                    transcriptionQueue.removeImportedJournal(for: job)
+                    guard transcriptionQueue.prepareImportedScratchCleanup(for: job) else {
+                        continue
+                    }
+                    do {
+                        try FileManager.default.removeItem(at: audioURL)
+                        transcriptionQueue.confirmImportedScratchCleanup(for: job)
+                    } catch where (error as NSError).code == NSFileNoSuchFileError {
+                        transcriptionQueue.confirmImportedScratchCleanup(for: job)
+                    } catch {
+                        AppLogger.pipeline.warning("Failed to discard queued imported scratch audio", [
+                            "file": audioURL.lastPathComponent,
+                            "errorType": String(describing: type(of: error))
+                        ])
+                    }
                 } else {
                     if failedMeetingStore.preserveFailedMeetingForRetry(
                         micAudioURL: nil,
@@ -1586,7 +1598,7 @@ final class MeetingSessionController: ObservableObject {
                         meetingTitle: suggestedTitle,
                         recordingDate: recordingDate
                     ) {
-                        transcriptionQueue.removeImportedJournal(for: job)
+                        transcriptionQueue.confirmImportedFailedQueueHandoff(for: job)
                     }
                 }
             }
@@ -1678,6 +1690,11 @@ final class MeetingSessionController: ObservableObject {
         let activePreserved = taskManager.preserveActiveTranscriptionsForShutdown(
             errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
         )
+        // An active imported pipeline can enqueue speaker review just before
+        // committing its transcript. Preserve that task first so review cleanup
+        // cannot retire the journal and delete its only scratch copy. Completed
+        // pipelines still finalize their typed recovery owner here.
+        taskManager.cleanupPendingNaming()
         let shouldFailPendingLiveHandoff = queuedPreserved > 0
             || activePreserved > 0
             || liveCodexSessionAwaitingFinalTranscript
