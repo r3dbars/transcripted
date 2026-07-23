@@ -453,6 +453,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - script edits map to syntax and owned checks") {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
+        let homeBenchmark = readRepoTextFile("scripts/dev/benchmark-home-recent-captures.sh")
         let expectedChecks = [
             "bash -n scripts/entrypoints/build-deps.sh",
             "bash build-deps.sh --force",
@@ -484,6 +485,11 @@ func testRepoCommandContract() {
         for check in expectedChecks {
             assertTrue(matrix.contains(check), "test matrix should include \(check)")
         }
+        assertTrue(
+            homeBenchmark.contains("Sources/TranscriptedCore/Protocols/ImportedTranscriptionRecoverySession.swift")
+                && homeBenchmark.contains("Sources/TranscriptedCore/Models/TranscriptionTypes.swift"),
+            "the raw-swiftc Home benchmark should include the recovery protocol used by transcription types"
+        )
     }
 
     runSuite("Repo command contract - agent preflight executes the canonical matrix") {
@@ -2284,12 +2290,13 @@ func testRepoCommandContract() {
             to: "private func enqueue(_ job: QueuedTranscriptionJob)"
         )
         assertTrue(
-            importedEnqueueBlock.contains("try persistImportedJournal(for: job)")
+            importedEnqueueBlock.contains("ImportedTranscriptionQueueJournal.createClaimed(")
+                && importedEnqueueBlock.contains("job.importedRecoverySession = session")
                 && importedEnqueueBlock.contains("queuedTranscriptionJobs.append(job)"),
-            "an accepted imported job should be journaled before it becomes crash-volatile queue state"
+            "an accepted imported job should publish its journal while already leased before it becomes crash-volatile queue state"
         )
         let journalPersistIndex = importedEnqueueBlock.range(
-            of: "try persistImportedJournal(for: job)"
+            of: "ImportedTranscriptionQueueJournal.createClaimed("
         )?.lowerBound ?? importedEnqueueBlock.endIndex
         let immediateStartCheckIndex = importedEnqueueBlock.range(
             of: "if canStartQueuedTranscriptionImmediately"
@@ -2305,19 +2312,40 @@ func testRepoCommandContract() {
         let importedRecoveryBlock = sourceSlice(
             coordinatorContents,
             from: "func recoverImportedAudioJobs() -> Int {",
-            to: "func removeImportedJournal(for job: QueuedTranscriptionJob)"
+            to: "func confirmImportedScratchCleanup(for job: QueuedTranscriptionJob)"
+        )
+        let recoveryClaimIndex = importedRecoveryBlock.range(
+            of: "let claimedRecords = records.compactMap"
+        )?.lowerBound ?? importedRecoveryBlock.endIndex
+        let transcriptScanIndex = importedRecoveryBlock.range(
+            of: "let existingTranscriptsByID = TranscriptSaver.existingTranscriptURLs("
+        )?.lowerBound ?? importedRecoveryBlock.startIndex
+        assertTrue(
+            recoveryClaimIndex < transcriptScanIndex,
+            "recovery must hold every available job lease before its one batch transcript scan so commit evidence cannot race stale"
         )
         assertTrue(
             importedRecoveryBlock.contains("controller.failedMeetingStore.failedAudioURLs")
-                && importedRecoveryBlock.contains("failedQueueAudioURLs.contains(audioURL.standardizedFileURL)"),
+                && importedRecoveryBlock.contains("failedQueueAudioURLs.contains(audioURL.standardizedFileURL)")
+                && importedRecoveryBlock.contains("recoverySession.failedQueueHandoffConfirmed()"),
             "relaunch recovery should use the failed-meeting store boundary and retire a journal whose audio already has durable failed-queue ownership"
         )
         assertTrue(
             importedRecoveryBlock.contains("ImportedTranscriptionQueueJournal.isDuplicate")
                 && importedRecoveryBlock.contains("recoveredJobIDs")
                 && importedRecoveryBlock.contains("recoveredAudioURLs")
-                && importedRecoveryBlock.contains("ImportedTranscriptionQueueJournal.remove"),
+                && importedRecoveryBlock.contains("recoverySession.supersededRecoveryConfirmed()"),
             "relaunch recovery should retire duplicate journals instead of enqueueing the same import twice"
+        )
+        assertTrue(
+            importedRecoveryBlock.contains("recoveryAudioStatus(")
+                && importedRecoveryBlock.contains("guard audioStatus == .regularFile")
+                && coordinatorContents.contains("TranscriptSaver.existingTranscriptURLs(")
+                && importedRecoveryBlock.contains("recoveryAction(")
+                && importedRecoveryBlock.contains("case .cleanScratch:")
+                && importedRecoveryBlock.contains("case .handOffScratch:")
+                && importedRecoveryBlock.contains("preserveFailedMeetingForRetry("),
+            "relaunch recovery should reject unsafe inputs and resolve every state through replay, authorized cleanup, or durable visible handoff"
         )
         let importJournalFailureBlock = sourceSlice(
             controllerContents,
@@ -2341,15 +2369,12 @@ func testRepoCommandContract() {
             from: "func preserveQueuedTranscriptionJobsForShutdown(errorMessage: String) -> Int {",
             to: "return preservedCount"
         )
-        let shutdownImportedBlock = sourceSlice(
-            shutdownQueuePreservationBlock,
-            from: "case .imported(let audioURL, let suggestedTitle, let recordingDate):",
-            to: "removeImportedJournal(for: job)"
-        )
         assertTrue(
-            shutdownImportedBlock.contains("micAudioURL: nil")
-                && shutdownImportedBlock.contains("systemAudioURL: audioURL"),
-            "shutdown should preserve an imported single track with the same channel semantics as normal imported retry"
+            shutdownQueuePreservationBlock.contains("case .imported(let audioURL, let suggestedTitle, let recordingDate):")
+                && shutdownQueuePreservationBlock.contains("micAudioURL: nil")
+                && shutdownQueuePreservationBlock.contains("systemAudioURL: audioURL")
+                && shutdownQueuePreservationBlock.contains("job.importedRecoverySession?.failedQueueHandoffConfirmed()"),
+            "shutdown should retire an imported journal only after durable failed-queue ownership succeeds"
         )
         let startQueuedBlock = sourceSlice(
             coordinatorContents,
@@ -2416,6 +2441,7 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - bridge uses scaled meeting stop timeout") {
         let bridgeContents = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
+        let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let stopBlock = sourceSlice(
             bridgeContents,
             from: "func stopAndAwaitFiles(",
@@ -2433,8 +2459,34 @@ func testRepoCommandContract() {
         )
         assertTrue(
             stopBlock.contains("onTimedOutCompletion")
-                && stopBlock.contains("timedOutStopCompletionHandler"),
+                && stopBlock.contains("timedOutStopCompletions.register("),
             "late audio finalization after a stop timeout should be surfaced to repair retry paths"
+        )
+        assertTrue(
+            bridgeContents.contains("timedOutStopCompletions.prune(")
+                && bridgeContents.contains("olderThan: audio.currentRecordingSessionGeneration")
+                && bridgeContents.contains("audio.abandonRecordingJournalFinalization("),
+            "a never-completing timed-out stop should release older callbacks and transfer journal ownership on a later recording start"
+        )
+        assertTrue(
+            bridgeContents.contains("TranscriptedConstants.meetingMaximumStopTimeout")
+                && bridgeContents.contains("timedOutStopCompletions.expire(generation: generation)")
+                && bridgeContents.contains("timedOutStopCompletions.resolve(generation: generation)")
+                && bridgeContents.contains("onExpiredTimedOutRecordingComplete?(id, result)")
+                && bridgeContents.contains("onRecordingJournalFinalizationAbandoned?()"),
+            "a never-completing stop should bound callbacks and transfer its journal to canonical recovery"
+        )
+        assertTrue(
+            bridgeContents.contains("disposition == .journalRecoveryOwned")
+                && bridgeContents.contains("? .recordingJournalRecovery")
+                && readRepoTextFile("Sources/Meeting/FailedMeetingStore.swift")
+                    .contains("result.finalizationOwner != .recordingJournalRecovery"),
+            "an abandoned late callback must stay on journal recovery instead of promoting provisional audio"
+        )
+        assertTrue(
+            controllerContents.contains("capture.onRecordingJournalFinalizationAbandoned =")
+                && controllerContents.contains("await taskManager.recoverOrphanedRecordings(in: scratchDirectory)"),
+            "abandoning a never-completing finalizer should immediately rescan its durable journal"
         )
     }
 
@@ -2483,10 +2535,11 @@ func testRepoCommandContract() {
     }
 
     runSuite("Repo command contract - stop-timeout failed meetings refresh Home immediately") {
-        // preserveFailedMeetingForRetry / refreshTimedOutFailedMeetingAudio
+        // preserveTimedOutFailedMeetingForRetry / refreshTimedOutFailedMeetingAudio
         // moved to FailedMeetingStore.swift (audit 2026-07-08 wave 2, W2-B).
         let controllerContents = readRepoTextFile("Sources/Meeting/MeetingSessionController.swift")
         let storeContents = readRepoTextFile("Sources/Meeting/FailedMeetingStore.swift")
+        let taskManagerContents = readRepoTextFile("Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager.swift")
         let timeoutBlock = sourceSlice(
             controllerContents,
             from: "if stopResult.didTimeOut {",
@@ -2497,14 +2550,39 @@ func testRepoCommandContract() {
             from: "func preserveFailedMeetingForRetry(",
             to: "func refreshTimedOutFailedMeetingAudio("
         )
+        let timeoutPreserveBlock = sourceSlice(
+            storeContents,
+            from: "func preserveTimedOutFailedMeetingForRetry(",
+            to: "func preserveFailedMeetingForRetry("
+        )
+        let retryFailedTranscriptionBlock = sourceSlice(
+            taskManagerContents,
+            from: "public func retryFailedTranscription(",
+            to: "private func performRetry("
+        )
 
         assertTrue(
-            timeoutBlock.contains("let preserved = failedMeetingStore.preserveFailedMeetingForRetry("),
-            "stop timeouts should route retained audio through the refresh helper before returning"
+            timeoutBlock.contains("let preserved = failedMeetingStore.preserveTimedOutFailedMeetingForRetry(")
+                && timeoutBlock.contains("micAudioURL: files.micURL")
+                && timeoutBlock.contains("guard let micURL = files.micURL"),
+            "every stop timeout should keep its callback task ID before the generic missing-mic path"
         )
         assertTrue(
-            timeoutBlock.contains("archiveAudio: false"),
-            "stop timeouts should keep scratch audio in place because WAV finalization may still be running"
+            timeoutPreserveBlock.contains("archiveAudio: false")
+                && timeoutPreserveBlock.contains("clearRecordingJournalAfterPersistence: false")
+                && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.audioForPersistence(")
+                && timeoutPreserveBlock.components(separatedBy: "scheduleTimedOutJournalRecovery(in:").count >= 3,
+            "stop timeouts should schedule journal recovery after either durable persistence or persistence failure"
+        )
+        assertTrue(
+            retryFailedTranscriptionBlock.contains("if hasRecordingJournal(")
+                && retryFailedTranscriptionBlock.contains("micAudioURL: failed.micAudioURL")
+                && retryFailedTranscriptionBlock.contains("systemAudioURL: failed.systemAudioURL"),
+            "retry must wait until the retained mic- or system-keyed journal inventory has been reconciled"
+        )
+        assertTrue(
+            taskManagerContents.contains("MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: journalURL)"),
+            "orphan recovery must not touch a timed-out journal while the Audio stop path still owns finalization"
         )
         assertTrue(
             controllerContents.contains("refreshTimedOutFailedMeetingAudio(")
@@ -2517,17 +2595,65 @@ func testRepoCommandContract() {
             to: "func refreshFailedMeetings("
         )
         assertTrue(
-            refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
+            refreshTimedOutAudioBlock.contains("timedOutFinalizationHandoff.receive(")
+                && timeoutPreserveBlock.contains("timedOutFinalizationHandoff.failedMeetingDidPersist(")
+                && refreshTimedOutAudioBlock.contains("!timedOutFinalizationHandoff.hasOwnership(of: id)")
+                && refreshTimedOutAudioBlock.contains("taskManager.hasRecordingJournal(")
+                && refreshTimedOutAudioBlock.contains("let existingFailure = failedManager.failedTranscriptions")
                 && refreshTimedOutAudioBlock.contains("let existingMicURL = existingFailure?.micAudioURL")
-                && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL"),
-            "late finalization should still promote system-only failed audio by reusing the failed queue mic placeholder"
+                && refreshTimedOutAudioBlock.contains("guard let micURL = result.micURL ?? existingMicURL")
+                && refreshTimedOutAudioBlock.contains("case .journalOwned:")
+                && refreshTimedOutAudioBlock.contains("case .discardFinalizedAudio:")
+                && refreshTimedOutAudioBlock.contains("scheduleTimedOutJournalRecovery(in: ownedAudioURL.deletingLastPathComponent())"),
+            "late finalization should buffer both callback orders, preserve durable journal recovery, and discard terminal callbacks after bounded-owner eviction"
+        )
+        let journalRecoveryScheduleBlock = sourceSlice(
+            storeContents,
+            from: "private func scheduleTimedOutJournalRecovery(",
+            to: "func refreshFailedMeetings("
+        )
+        assertTrue(
+            journalRecoveryScheduleBlock.contains("Task {")
+                && journalRecoveryScheduleBlock.contains("taskManager.recoverOrphanedRecordings(in: scratchDirectory)")
+                && !storeContents.contains("timedOutJournalRecoveryTask")
+                && !storeContents.contains("pendingTimedOutJournalRecoveryDirectory"),
+            "timeout journal recovery should delegate single-flight ownership to the canonical Core seam"
+        )
+        assertTrue(
+            storeContents.contains("finishTimedOutFinalizationWithDiscard(id: id)")
+                && storeContents.contains("discardFinalizedFailedTranscriptionAudio("),
+            "delete and completed retry should turn any late finalization into bounded cleanup-only ownership"
+        )
+        let deleteFailedMeetingBlock = sourceSlice(
+            storeContents,
+            from: "func deleteFailedMeeting(id: UUID) -> Bool {",
+            to: "func preserveTimedOutFailedMeetingForRetry("
+        )
+        assertTrue(
+            deleteFailedMeetingBlock.contains("failedManager.deleteFailedTranscription(id: id)")
+                && deleteFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
+            "delete should use the manager's scratch-and-archive cleanup roots before owning a late callback"
+        )
+        assertFalse(
+            storeContents.contains("func dismissFailedMeeting(id: UUID)"),
+            "failed rows should not retain a duplicate non-destructive cleanup seam"
+        )
+        let refreshFailedMeetingBlock = sourceSlice(
+            storeContents,
+            from: "func refreshFailedMeetings(",
+            to: "private func scheduleFailedAudioCompression("
+        )
+        assertTrue(
+            refreshFailedMeetingBlock.contains("timedOutFinalizationHandoff.persistedOwnershipIDs")
+                && refreshFailedMeetingBlock.contains("finishTimedOutFinalizationWithDiscard(id: id)"),
+            "Core-side row removals should reach the canonical timeout cleanup seam"
         )
         assertTrue(
             timeoutBlock.contains("\"preserved_for_retry\": boolString(preserved)"),
             "stop-timeout diagnostics should state whether the retained audio reached the retry queue"
         )
         assertTrue(
-            helperBlock.contains("taskManager.addFailedTranscriptionRetainingAvailableAudio(")
+            helperBlock.contains("let preserved = persistFailedMeetingForRetry(")
                 && helperBlock.contains("if preserved {\n            publishRefresh()"),
             "retained failed-meeting audio should refresh MeetingSessionController.failedMeetings immediately"
         )
@@ -2734,15 +2860,30 @@ func testRepoCommandContract() {
             "shutdown preservation should clear the active queued job owner used for live sidecar final attachment"
         )
         assertTrue(
+            terminationBlock.contains("taskManager.cleanupPendingNaming()"),
+            "shutdown should finalize pending speaker-review scratch ownership before in-memory requests disappear"
+        )
+        let activePreservationIndex = terminationBlock.range(
+            of: "let activePreserved = taskManager.preserveActiveTranscriptionsForShutdown("
+        )?.lowerBound ?? terminationBlock.endIndex
+        let pendingNamingCleanupIndex = terminationBlock.range(
+            of: "taskManager.cleanupPendingNaming()"
+        )?.lowerBound ?? terminationBlock.startIndex
+        assertTrue(
+            activePreservationIndex < pendingNamingCleanupIndex,
+            "shutdown must preserve active imported audio before pending review cleanup can retire its journal"
+        )
+        assertTrue(
             terminationBlock.contains("let shutdownFailedTaskId = UUID()")
-                && terminationBlock.contains("capture.stopAndAwaitFiles {")
+                && terminationBlock.contains("timedOutOwner: .failedMeeting(shutdownFailedTaskId)")
                 && terminationBlock.contains("refreshTimedOutFailedMeetingAudio("),
             "shutdown stop timeouts should keep the same late-finalization repair path as normal meeting stops"
         )
         assertTrue(
             terminationBlock.contains("taskId: shutdownFailedTaskId")
-                && terminationBlock.contains("archiveAudio: !files.didTimeOut"),
-            "shutdown stop timeouts should keep unfinished scratch audio in place until late finalization can promote it"
+                && terminationBlock.contains("if files.didTimeOut {")
+                && terminationBlock.contains("preserveTimedOutFailedMeetingForRetry("),
+            "shutdown stop timeouts should preserve callback-first audio even when the timeout snapshot has no URLs"
         )
     }
 
@@ -2830,6 +2971,18 @@ func testRepoCommandContract() {
                 && cancelBlock.contains("restoreStateAfterRecordingEndedWithoutNewWork()"),
             "explicit discard should use the discard path and restore idle/ready state without queueing transcription"
         )
+        let bridgeContents = readRepoTextFile("Sources/Meeting/MeetingCaptureBridge.swift")
+        let discardBlock = sourceSlice(
+            bridgeContents,
+            from: "func stopAndDiscardFiles() async -> CaptureStopResult {",
+            to: "func armVoiceProcessingForActiveRecording()"
+        )
+        assertTrue(
+            discardBlock.contains("stopAndAwaitFiles(timedOutOwner: .discard) { [weak self] lateResult in")
+                && discardBlock.contains("audio.discardFinalizedRecordingArtifacts(")
+                && discardBlock.contains("audio.discardCurrentRecordingArtifacts("),
+            "explicit discard should consume the current journal inventory and safely clean any later finalized callback"
+        )
     }
 
     runSuite("Repo command contract - transcription cancellation clears live sidecar waits") {
@@ -2852,7 +3005,9 @@ func testRepoCommandContract() {
         )
         assertTrue(
             cancelBlock.contains("if reason == .userRequested")
-                && cancelBlock.contains("try? FileManager.default.removeItem(at: audioURL)")
+                && cancelBlock.contains("prepareImportedScratchCleanup(for: job)")
+                && cancelBlock.contains("try FileManager.default.removeItem(at: audioURL)")
+                && cancelBlock.contains("confirmImportedScratchCleanup(for: job)")
                 && cancelBlock.contains("Imported audio saved before cancellation"),
             "explicit user cancellation should delete cancelled imports while non-user cancellation keeps recovery audio"
         )
@@ -3155,7 +3310,7 @@ func testRepoCommandContract() {
         )
         guard
             let functionStart = controllerContents.range(of: "func retranscribeSavedMeeting("),
-            let functionEnd = controllerContents.range(of: "func dismissFailedMeeting", range: functionStart.upperBound..<controllerContents.endIndex)
+            let functionEnd = controllerContents.range(of: "func deleteFailedMeeting", range: functionStart.upperBound..<controllerContents.endIndex)
         else {
             assertionFailure("MeetingSessionController should keep a saved-meeting re-transcription entry point")
             return
@@ -3183,7 +3338,9 @@ func testRepoCommandContract() {
         )
         assertTrue(
             runnerContents.contains("let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: targetTranscriptURL)")
-                && runnerContents.contains("let transcriptId = replacementTranscriptRollback?.transcriptId ?? UUID()"),
+                && runnerContents.contains("let transcriptId = replacementTranscriptRollback?.transcriptId")
+                && runnerContents.contains("?? stableTranscriptId")
+                && runnerContents.contains("?? UUID()"),
             "replacement retranscription should snapshot the selected transcript and reuse its existing ID"
         )
         assertTrue(
@@ -3263,9 +3420,9 @@ func testRepoCommandContract() {
             "failed-meeting retry should report whether the retry started"
         )
         assertTrue(
-            controllerContents.contains("func dismissFailedMeeting(id: UUID) -> Bool")
-                && controllerContents.contains("func deleteFailedMeeting(id: UUID) -> Bool"),
-            "failed-meeting clear actions should report whether the queue changed"
+            controllerContents.contains("func deleteFailedMeeting(id: UUID) -> Bool")
+                && !controllerContents.contains("func dismissFailedMeeting(id: UUID) -> Bool"),
+            "failed-meeting deletion should report whether the queue changed through one seam"
         )
         assertTrue(
             managerContents.contains("public func removeFailedTranscription(id: UUID) -> Bool")
@@ -3279,11 +3436,9 @@ func testRepoCommandContract() {
             "Home retry clicks should surface immediate retry blockers"
         )
         assertTrue(
-            settingsContents.contains("let didClear: Bool")
-                && settingsContents.contains("didClear = meetingSession.deleteFailedMeeting(id: item.id)")
-                && settingsContents.contains("didClear = meetingSession.dismissFailedMeeting(id: item.id)")
+            settingsContents.contains("let didClear = meetingSession.deleteFailedMeeting(id: item.id)")
                 && settingsContents.contains("if !didClear"),
-            "Home delete/dismiss clicks should surface failed queue updates"
+            "Home delete clicks should surface failed queue updates"
         )
     }
 

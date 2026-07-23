@@ -510,7 +510,6 @@ func testMeetingImportedAudioPreparer() async {
         try! ImportedTranscriptionQueueJournal.persist(
             id: id,
             audioURL: audioURL,
-            suggestedTitle: "Customer Call",
             recordingDate: recordingDate,
             enqueuedAt: recordingDate.addingTimeInterval(10),
             sttModelRawValue: "parakeet",
@@ -521,7 +520,18 @@ func testMeetingImportedAudioPreparer() async {
         let recovered = ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL)
         assertEqual(recovered.count, 1, "a fresh journal reader should recover the accepted import")
         assertEqual(recovered.first?.id, id, "recovery should preserve the queued job identity")
+        assertEqual(recovered.first?.phase, .queued, "a newly accepted import should begin in the queued phase")
+        assertNil(recovered.first?.owner, "a queued journal should not claim a live process owner")
         assertEqual(recovered.first?.audioFilename, audioURL.lastPathComponent, "journals should store only the app-owned scratch filename")
+        let journalFile = try! FileManager.default.contentsOfDirectory(
+            at: journalURL,
+            includingPropertiesForKeys: nil
+        ).first { $0.pathExtension == "json" }!
+        let journalData = try! Data(contentsOf: journalFile)
+        assertFalse(
+            journalData.range(of: Data("suggestedTitle".utf8)) != nil,
+            "recovery journals must not persist an imported title"
+        )
         assertEqual(
             recovered.first.flatMap {
                 ImportedTranscriptionQueueJournal.audioURL(for: $0, scratchDirectory: scratchURL)
@@ -550,7 +560,6 @@ func testMeetingImportedAudioPreparer() async {
         let unsafeRecord = ImportedTranscriptionQueueJournalRecord(
             id: UUID(),
             audioFilename: "../outside.wav",
-            suggestedTitle: "Unsafe",
             recordingDate: recordingDate,
             enqueuedAt: recordingDate,
             sttModelRawValue: "parakeet"
@@ -569,7 +578,6 @@ func testMeetingImportedAudioPreparer() async {
         try! ImportedTranscriptionQueueJournal.persist(
             id: olderSourceNewerQueueID,
             audioURL: olderSourceNewerQueueAudioURL,
-            suggestedTitle: "Older Source Imported Second",
             recordingDate: recordingDate.addingTimeInterval(-86_400),
             enqueuedAt: recordingDate.addingTimeInterval(20),
             sttModelRawValue: "parakeet",
@@ -590,6 +598,228 @@ func testMeetingImportedAudioPreparer() async {
         )
     }
 
+    runSuite("Imported transcription journal lease excludes a second live process and survives owner death") {
+        let root = temporaryImportAudioPreparerRoot()
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let journalURL = root.appendingPathComponent("state/queue", isDirectory: true)
+        let audioURL = scratchURL.appendingPathComponent("lease.wav")
+        let id = UUID()
+        try! FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
+        try! Data([0, 1, 2, 3]).write(to: audioURL)
+        var firstOwner: ImportedTranscriptionQueueJournalSession? = try! ImportedTranscriptionQueueJournal.createClaimed(
+            id: id,
+            audioURL: audioURL,
+            recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
+            sttModelRawValue: "parakeet",
+            journalDirectory: journalURL,
+            scratchDirectory: scratchURL,
+            processIdentifier: 101
+        )
+        assertNotNil(firstOwner, "the first process should claim the queued import")
+        assertEqual(firstOwner?.phase, .active, "claiming should durably mark the import active")
+        assertEqual(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).first?.owner?.processIdentifier,
+            101,
+            "initial journal publication should already contain the live lease owner"
+        )
+        let lockURL = journalURL.appendingPathComponent(
+            "import-job-\(id.uuidString).lock",
+            isDirectory: false
+        )
+        assertEqual(
+            importedJournalLeaseProbe(lockURL: lockURL, expectLocked: true),
+            0,
+            "a separate process must be unable to take a live owner's lease"
+        )
+
+        firstOwner = nil
+        assertEqual(
+            importedJournalLeaseProbe(lockURL: lockURL, expectLocked: false),
+            0,
+            "a separate process should take the lease after the prior owner exits"
+        )
+        let recoveredOwner = try! ImportedTranscriptionQueueJournal.claim(
+            id: id,
+            journalDirectory: journalURL,
+            processIdentifier: 202
+        )
+        assertNotNil(recoveredOwner, "the kernel lease should release automatically when the prior owner dies")
+        try! FileManager.default.removeItem(at: audioURL)
+        recoveredOwner?.scratchCleanupConfirmed()
+        assertTrue(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).isEmpty,
+            "confirmed scratch cleanup should retire the journal"
+        )
+        assertFalse(
+            FileManager.default.fileExists(atPath: lockURL.path),
+            "terminal journal cleanup should remove its no-longer-needed lease file"
+        )
+    }
+
+    runSuite("Imported transcription committed phase survives a crash until scratch cleanup") {
+        let root = temporaryImportAudioPreparerRoot()
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let journalURL = root.appendingPathComponent("state/queue", isDirectory: true)
+        let audioURL = scratchURL.appendingPathComponent("committed.wav")
+        let id = UUID()
+        try! FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
+        try! Data([0, 1, 2, 3]).write(to: audioURL)
+        try! ImportedTranscriptionQueueJournal.persist(
+            id: id,
+            audioURL: audioURL,
+            recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
+            sttModelRawValue: "parakeet",
+            journalDirectory: journalURL,
+            scratchDirectory: scratchURL
+        )
+
+        var owner = try! ImportedTranscriptionQueueJournal.claim(id: id, journalDirectory: journalURL)
+        owner?.transcriptCommitConfirmed()
+        assertEqual(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).first?.phase,
+            .transcriptCommitted,
+            "transcript commit should advance the journal without retiring scratch ownership"
+        )
+        owner = nil
+
+        var cleanupOwner = try! ImportedTranscriptionQueueJournal.claim(id: id, journalDirectory: journalURL)
+        assertEqual(cleanupOwner?.phase, .transcriptCommitted, "relaunch should preserve the committed cleanup phase")
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
+                phase: cleanupOwner?.phase ?? .active,
+                stableTranscriptExists: false
+            ),
+            .handOffScratch,
+            "transcript commit alone must hand off audio intentionally retained after an archive failure"
+        )
+        assertTrue(
+            cleanupOwner?.prepareForScratchCleanup() == true,
+            "cleanup intent should become durable before scratch deletion"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).first?.phase,
+            .scratchCleanupPending,
+            "cleanup authorization should survive a crash before file removal"
+        )
+        cleanupOwner = nil
+        let resumedCleanupOwner = try! ImportedTranscriptionQueueJournal.claim(
+            id: id,
+            journalDirectory: journalURL
+        )
+        assertEqual(
+            resumedCleanupOwner?.phase,
+            .scratchCleanupPending,
+            "a new process should resume the authorized cleanup phase without replaying transcription"
+        )
+        try! FileManager.default.removeItem(at: audioURL)
+        resumedCleanupOwner?.scratchCleanupConfirmed()
+        assertTrue(
+            ImportedTranscriptionQueueJournal.load(journalDirectory: journalURL).isEmpty,
+            "the committed journal should retire only after scratch is gone"
+        )
+    }
+
+    runSuite("Imported transcription recovery resolves both transcript crash boundaries") {
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
+                phase: .active,
+                stableTranscriptExists: true
+            ),
+            .handOffScratch,
+            "a stable transcript identity must hand off uncertain scratch after the Markdown write but before the phase marker"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
+                phase: .transcriptCommitted,
+                stableTranscriptExists: false
+            ),
+            .handOffScratch,
+            "a committed record without cleanup authorization must receive durable visible ownership"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
+                phase: .active,
+                stableTranscriptExists: false
+            ),
+            .replayTranscription,
+            "recovery should replay only when neither commit proof exists"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAction(
+                phase: .scratchCleanupPending,
+                stableTranscriptExists: false
+            ),
+            .cleanScratch,
+            "recovery should finish an authorized cleanup idempotently"
+        )
+    }
+
+    runSuite("Imported transcription recovery rejects symlinks and non-regular scratch entries") {
+        let root = temporaryImportAudioPreparerRoot()
+        let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
+        let journalURL = root.appendingPathComponent("state/queue", isDirectory: true)
+        let outsideURL = root.appendingPathComponent("outside.wav")
+        let symlinkURL = scratchURL.appendingPathComponent("linked.wav")
+        let directoryURL = scratchURL.appendingPathComponent("folder.wav", isDirectory: true)
+        try! FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
+        try! Data([0, 1, 2, 3]).write(to: outsideURL)
+        try! FileManager.default.createSymbolicLink(at: symlinkURL, withDestinationURL: outsideURL)
+        try! FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAudioStatus(
+                at: symlinkURL,
+                scratchDirectory: scratchURL
+            ),
+            .unsafeEntry,
+            "recovery must not follow a scratch symlink"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAudioStatus(
+                at: directoryURL,
+                scratchDirectory: scratchURL
+            ),
+            .unsafeEntry,
+            "recovery must not transcribe a non-regular scratch entry"
+        )
+        assertEqual(
+            ImportedTranscriptionQueueJournal.recoveryAudioStatus(
+                at: outsideURL,
+                scratchDirectory: scratchURL
+            ),
+            .unsafeEntry,
+            "recovery input must remain directly inside app-owned scratch"
+        )
+
+        let jobId = UUID()
+        let regularURL = scratchURL.appendingPathComponent("regular.wav")
+        try! Data([4, 5, 6, 7]).write(to: regularURL)
+        try! ImportedTranscriptionQueueJournal.persist(
+            id: jobId,
+            audioURL: regularURL,
+            recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
+            sttModelRawValue: "parakeet",
+            journalDirectory: journalURL,
+            scratchDirectory: scratchURL
+        )
+        let outsideLockURL = root.appendingPathComponent("outside.lock")
+        try! Data().write(to: outsideLockURL)
+        try! FileManager.default.createSymbolicLink(
+            at: journalURL.appendingPathComponent("import-job-\(jobId.uuidString).lock"),
+            withDestinationURL: outsideLockURL
+        )
+        var rejectedSymlinkLock = false
+        do {
+            _ = try ImportedTranscriptionQueueJournal.claim(
+                id: jobId,
+                journalDirectory: journalURL
+            )
+        } catch {
+            rejectedSymlinkLock = true
+        }
+        assertTrue(rejectedSymlinkLock, "recovery must not follow a symlinked lease file")
+    }
+
     runSuite("Imported queue persistence failure copy only claims durable retry ownership when persisted") {
         assertTrue(
             ImportedAudioQueuePersistenceFailureCopy.displayMessage(preservedForRelaunch: true)
@@ -607,6 +837,33 @@ func testMeetingImportedAudioPreparer() async {
             notPreserved.contains("Import the original file again"),
             "an unrecoverable copied import should give an honest recovery action"
         )
+    }
+}
+
+private func importedJournalLeaseProbe(lockURL: URL, expectLocked: Bool) -> Int32 {
+    let script = """
+    import fcntl, os, sys
+    descriptor = os.open(sys.argv[1], os.O_RDWR)
+    observed_locked = False
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        observed_locked = True
+    expected_locked = sys.argv[2] == "locked"
+    os.close(descriptor)
+    sys.exit(0 if observed_locked == expected_locked else 92)
+    """
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+    process.arguments = ["-c", script, lockURL.path, expectLocked ? "locked" : "available"]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    } catch {
+        return 90
     }
 }
 

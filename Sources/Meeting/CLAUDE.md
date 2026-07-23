@@ -21,7 +21,8 @@
 - `MeetingFailureCopy.swift` — normalizes `MeetingFailureKind` values into user-facing titles and recovery copy
 - `MeetingFailureExplanation.swift` — maps meeting outcomes into retryability, artifact-retention, user-visible state, and privacy-safe telemetry fields
 - `MeetingFailureKind.swift` — canonical failure taxonomy that classifies raw meeting errors into stable machine-readable kinds
-- `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths, derives titles, and prepares single-file meeting transcription jobs
+- `ImportedTranscriptionQueueJournalState.swift` — privacy-minimal durable schema for imported-job identity, process ownership, and transcript/cleanup phase
+- `MeetingImportedAudioPreparer.swift` — copies imported recordings into app-managed scratch paths and implements the imported-job journal. Journal sessions hold a per-job process lease and retain the record through transcript commit until authorized scratch cleanup or durable failed-queue handoff
 - `MeetingImportPreparationFailureCopy.swift` — maps an imported-audio preparation failure into the shared `MeetingFailureKind` taxonomy and user-facing retry copy, extracted out of `MeetingSessionController` so it stays unit-testable
 - `LiveMeetingCodexSession.swift` — app-owned sidecar writer for the opt-in live-meeting workspace used by Codex and Claude Cowork; it must not replace or mutate the normal saved meeting transcript pipeline
 - `LiveMeetingPreviewServer.swift` — loopback HTTP server that serves the live sidecar preview on a tokenized URL so the page updates in place without full-page refreshes while Transcripted is running
@@ -36,7 +37,6 @@
 - `MicActivityMonitor.swift` — Core Audio process-object watcher for ad-hoc call detection. Emits the set of non-self bundle IDs currently holding the mic input so the detector can prompt when a call *starts* (including a spontaneous Google Meet with no calendar invite), plus a second set of native conferencing bundle IDs confirmed to be playing audio *output* (`kAudioProcessPropertyIsRunningOutput`) — the listen-only / hard-muted call signal, scoped to conferencing families only so browser/media playback never counts and gated by a longer output sustain so notification dings stay quiet. Metadata-only, no TCC permission; CoreAudio confined to one serial queue. Listens on the default input device's running-somewhere edge but, because that edge silently misses calls on a non-default device or when the device is already running, leans on a short process-object backstop poll (seconds, not the original 60s) so a missed edge still surfaces fast. See `docs/auto-call-detection-spec.md`
 - `CameraActivityMonitor.swift` — CoreMediaIO watcher for the complementary camera signal. Emits a single boolean (any camera confirmed in use) via `kCMIODevicePropertyDeviceIsRunningSomewhere` per CMIO device. Metadata-only, **no camera TCC permission and no extra entitlement** (CoreMediaIO has no public per-process camera API, so attribution is deferred to the detector). Mirrors `MicActivityMonitor`'s queue/threading/debounce/poll/sustain shape. See `docs/auto-call-detection-spec.md`
 - `SustainedActivityConfirmer.swift` — pure "is this sustained, or a blip?" gate shared by both monitors. A raw active key (mic-holding bundle, or the camera sentinel) is only *confirmed* once it has been continuously present for a sustain interval, with a `nextDeadline` so the monitor re-scans the instant a real call is confirmed. This is the on-device min-duration sanity check that lets the monitors poll aggressively without prompting on momentary mic/camera access
-- `MeetingRecordingCleanup.swift` — removes scratch audio when a live meeting recording is explicitly discarded instead of saved
 - `MeetingRecordingStartGate.swift` — permission preflight for meeting recording, including missing-permission reasons and user-facing error messages
 - `MeetingSTTAdapter.swift` — adapts the app's shared `STTRouter` to `TranscriptedCore.SpeechToTextEngine`
 - `MeetingSessionController.swift` — top-level meeting state machine, permission gating, model warmup, capture start/stop, imported-audio handoff, queued transcription handoff, local-speaker-split handoff, failed-meeting actions, and transcript restyling
@@ -61,11 +61,12 @@
 8. `MeetingSessionController.stopRecording(...)` awaits mic/system audio files from the bridge, then either starts transcription immediately or queues it behind the active job.
 9. `MeetingSessionController.cancelRecording(...)` is only for explicit confirmed discard flows; it stops capture, removes scratch audio, and does not enqueue transcription.
 10. `MeetingSessionController.importAudioFile(...)` routes standalone recordings through `MeetingImportedAudioPreparer` and into the same save / naming / restyling pipeline used by live captures.
+11. Imported jobs use their journal UUID as the transcript UUID. Recovery skips a live lease owner and rejects non-regular scratch entries. Cleanup-pending records delete scratch; committed or stable-transcript records with uncertain cleanup move audio to the durable visible failed queue; only records with no commit proof replay transcription.
 11. `TranscriptionTaskManager` runs one diarize → transcribe → save pipeline at a time. When `LocalSpeakerPreferences` is enabled, queued meeting work also asks the core pipeline to diarize the local mic channel instead of treating it as a single "You" speaker.
 12. A subscription on `taskManager.$lastSavedTranscriptURL` runs `MeetingTranscriptStyler.restyleTranscript(...)` on a serialized background task (the restyle reads/rewrites the whole transcript and can rename artifacts, so it must stay off the main actor) and hops back to the main actor to update the recent-meetings UI state. The restyle fails closed when a transcript body has text the entry parser cannot understand instead of replacing it with the empty placeholder.
 13. After a transcript is saved, `MeetingAudioStorageManager` compresses retained WAV audio to M4A and applies the user's retention setting. Launch and Settings changes also run a backfill pass over existing Transcripted meeting transcripts, and queue-tracked failed-meeting audio can be compressed only after the failed queue is updated to point at the converted files.
 14. If the speaker review sheet shows multiple local speakers, the user can either name them individually or collapse them back to a single "You" track via the UI's "Keep as You" path.
-15. Failed meetings can be played, revealed, retried, deleted, or dismissed from Home, with `MeetingFailureKind` providing stable failure categories, `MeetingFailureExplanation` preserving retry/artifact state, and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
+15. Failed meetings can be played, revealed, retried, or deleted from Home, with `MeetingFailureKind` providing stable failure categories, `MeetingFailureExplanation` preserving retry/artifact state, and `MeetingFailureCopy` keeping error copy consistent across retryable and non-retryable states.
 
 ## Key invariants
 
@@ -154,7 +155,6 @@ Relevant direct coverage:
 - `Tests/MeetingRecordingStartGateTests.swift`
 - `Tests/MeetingStartFailureClassifierTests.swift`
 - `Tests/MeetingMicBoostPromptPolicyTests.swift`
-- `Tests/MeetingRecordingCleanupTests.swift`
 - `Tests/MeetingWarmupStatusPolicyTests.swift`
 - `Tests/MeetingAudioInactivityDetectorTests.swift`
 - `Tests/MeetingPromptDetectorTests.swift`

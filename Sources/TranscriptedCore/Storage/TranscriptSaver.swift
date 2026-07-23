@@ -58,6 +58,53 @@ public class TranscriptSaver {
         return try fileUpdateQueue.sync(execute: update)
     }
 
+    /// Finds an already-written transcript by its stable frontmatter identity.
+    /// Recovery uses this to make a crash immediately after the atomic Markdown
+    /// write idempotent instead of producing a second timestamp-suffixed file.
+    public static func existingTranscriptURL(
+        in directory: URL,
+        transcriptId: UUID,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        existingTranscriptURLs(
+            in: directory,
+            transcriptIds: [transcriptId],
+            fileManager: fileManager
+        )[transcriptId]
+    }
+
+    /// Resolves a recovery batch in one bounded directory scan so many stale
+    /// journals cannot multiply transcript-directory I/O.
+    public static func existingTranscriptURLs(
+        in directory: URL,
+        transcriptIds: Set<UUID>,
+        fileManager: FileManager = .default
+    ) -> [UUID: URL] {
+        guard !transcriptIds.isEmpty else { return [:] }
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [:] }
+
+        var matches: [UUID: URL] = [:]
+        let markdownFiles = files
+            .filter { $0.pathExtension.lowercased() == "md" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        for url in markdownFiles {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+                  values.isRegularFile == true,
+                  values.isSymbolicLink != true,
+                  let frontmatter = try? TranscriptFrontmatter.readValues(from: url),
+                  let transcriptId = TranscriptFrontmatter.captureID(in: frontmatter),
+                  transcriptIds.contains(transcriptId),
+                  matches[transcriptId] == nil
+            else { continue }
+            matches[transcriptId] = url
+        }
+        return matches
+    }
+
     /// Save transcript to file with automatic timestamped naming
     /// - Parameters:
     ///   - text: The transcript text to save

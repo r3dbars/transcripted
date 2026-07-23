@@ -10,9 +10,6 @@ struct FailedMeetingRecoveryPresentation: Equatable {
     let iconTone: FailedMeetingRecoveryIconTone
     let retryDisabled: Bool
     let retryHelp: String
-    let clearTitle: String
-    let clearSymbolName: String
-    let clearIsDestructive: Bool
 
     static func make(
         failureKind: MeetingFailureKind,
@@ -20,8 +17,7 @@ struct FailedMeetingRecoveryPresentation: Equatable {
         retryUnavailableReason: String?,
         isRetryable: Bool,
         isRetrying: Bool,
-        hasAudioFiles: Bool,
-        hasRetainedAudioFiles: Bool
+        hasAudioFiles: Bool
     ) -> FailedMeetingRecoveryPresentation {
         FailedMeetingRecoveryPresentation(
             iconSystemName: failureKind == .recordingTooShort ? "timer" : "exclamationmark.triangle.fill",
@@ -38,10 +34,7 @@ struct FailedMeetingRecoveryPresentation: Equatable {
                 isRetryable: isRetryable,
                 isRetrying: isRetrying,
                 hasAudioFiles: hasAudioFiles
-            ),
-            clearTitle: hasRetainedAudioFiles ? "Delete" : "Dismiss",
-            clearSymbolName: hasRetainedAudioFiles ? "trash" : "xmark",
-            clearIsDestructive: hasRetainedAudioFiles
+            )
         )
     }
 

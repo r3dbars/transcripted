@@ -20,6 +20,7 @@ swiftc \
   "$ROOT_DIR/Sources/Meeting/LocalMeetingSummarizer.swift" \
   "$ROOT_DIR/Sources/Support/LocalMeetingSummaryPreferences.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Speaker/SpeakerProfile.swift" \
+  "$ROOT_DIR/Sources/TranscriptedCore/Protocols/ImportedTranscriptionRecoverySession.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Models/TranscriptionTypes.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Storage/TranscriptFrontmatter.swift" \
   "$ROOT_DIR/Sources/UI/Shared/MeetingAudioArchiveResolver.swift" \

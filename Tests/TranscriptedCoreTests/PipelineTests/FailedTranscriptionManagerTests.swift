@@ -1,11 +1,12 @@
 import AVFoundation
+import Combine
 import XCTest
 @testable import TranscriptedCore
 
 @available(macOS 14.0, *)
 @MainActor
 final class FailedTranscriptionManagerTests: XCTestCase {
-    private var testRoot: URL!
+    var testRoot: URL!
 
     override func setUpWithError() throws {
         let homeRoot = FileManager.default.homeDirectoryForCurrentUser
@@ -161,63 +162,6 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(manager.failedTranscriptions.count, 1)
     }
 
-    func testDeleteFailedTranscriptionRemovesTinyRetainedAudioAndQueueEntry() throws {
-        let paths = makePaths(root: testRoot)
-        let archiveRoot = paths.transcripts.appendingPathComponent("audio", isDirectory: true)
-        let archivedDirectory = archiveRoot.appendingPathComponent("Tiny_Recoverable_Call_audio", isDirectory: true)
-        try FileManager.default.createDirectory(at: archivedDirectory, withIntermediateDirectories: true)
-
-        let archivedMicURL = archivedDirectory.appendingPathComponent("microphone.wav")
-        let archivedSystemURL = archivedDirectory.appendingPathComponent("system_audio.wav")
-        FileManager.default.createFile(atPath: archivedMicURL.path, contents: Data([0x01]))
-        FileManager.default.createFile(atPath: archivedSystemURL.path, contents: Data([0x02]))
-
-        let manager = FailedTranscriptionManager(paths: paths)
-        let failedId = UUID()
-        XCTAssertTrue(manager.addFailedTranscription(
-            id: failedId,
-            micAudioURL: archivedMicURL,
-            systemAudioURL: archivedSystemURL,
-            errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
-        ))
-
-        XCTAssertTrue(manager.deleteFailedTranscription(id: failedId))
-        XCTAssertTrue(manager.failedTranscriptions.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: archivedMicURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: archivedSystemURL.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: archivedDirectory.path))
-
-        let persisted = try JSONDecoder.iso8601.decode(
-            [FailedTranscription].self,
-            from: Data(contentsOf: paths.failedQueue)
-        )
-        XCTAssertTrue(persisted.isEmpty)
-    }
-
-    func testDeleteFailedTranscriptionRollsBackWhenPersistenceFails() throws {
-        let paths = makePaths(root: testRoot)
-        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
-
-        let micURL = paths.audioCaptures.appendingPathComponent("safe-mic.wav")
-        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
-
-        let manager = FailedTranscriptionManager(paths: paths)
-        let failedId = UUID()
-        XCTAssertTrue(manager.addFailedTranscription(
-            id: failedId,
-            micAudioURL: micURL,
-            systemAudioURL: nil,
-            errorMessage: "Temporary transcription failure"
-        ))
-        let failure = try XCTUnwrap(manager.failedTranscriptions.first)
-
-        try FileManager.default.removeItem(at: paths.failedQueue)
-        try FileManager.default.createDirectory(at: paths.failedQueue, withIntermediateDirectories: true)
-
-        XCTAssertFalse(manager.deleteFailedTranscription(id: failedId))
-        XCTAssertEqual(manager.failedTranscriptions, [failure])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
-    }
 
     func testAddFailedTranscriptionPersistsMeetingTitle() throws {
         let paths = makePaths(root: testRoot)
@@ -700,7 +644,7 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         try handle.write(contentsOf: Data([0, 0, 0, 0]))
     }
 
-    private func makePaths(root: URL) -> CoreStoragePaths {
+    func makePaths(root: URL) -> CoreStoragePaths {
         CoreStoragePaths(
             transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
             speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
@@ -713,7 +657,7 @@ final class FailedTranscriptionManagerTests: XCTestCase {
     }
 }
 
-private extension JSONEncoder {
+extension JSONEncoder {
     static var iso8601: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -721,7 +665,7 @@ private extension JSONEncoder {
     }
 }
 
-private extension JSONDecoder {
+extension JSONDecoder {
     static var iso8601: JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601

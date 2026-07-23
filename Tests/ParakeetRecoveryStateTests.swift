@@ -1,10 +1,10 @@
 // ParakeetRecoveryStateTests.swift
-// Tests for the device-change recovery state machine — generation guard,
-// readiness flags, transitions across config-change → recovery → success.
+// Device-change recovery, route debounce, zombie lifecycle, and retry policy.
+// Audio graph ownership and system-input interleavings live in their own suite.
 
 import Foundation
 
-func testParakeetRecoveryState() {
+func testParakeetRecoveryState() async {
     runSuite("ParakeetRecoveryState — initial state is ready and not recovering") {
         let state = ParakeetRecoveryState()
         assertFalse(state.isRecovering, "fresh state should not be recovering")
@@ -206,6 +206,149 @@ func testParakeetRecoveryState() {
         assertTrue(state.isStale(generation: staleGeneration), "reset should supersede in-flight recovery tasks")
     }
 
+    runSuite("ParakeetRecoveryState.cancelRecovery — stop cancels only its matching recovery") {
+        var state = ParakeetRecoveryState()
+        let recoveryGeneration = state.beginConfigChange()
+
+        assertTrue(
+            state.cancelRecovery(generation: recoveryGeneration),
+            "the stop that observed the current recovery should consume it"
+        )
+        assertTrue(state.canStartRecording, "cancelling recovery should unblock the next recording start")
+        assertTrue(
+            state.isStale(generation: recoveryGeneration),
+            "the suspended cleanup must become stale before it can resume"
+        )
+    }
+
+    runSuite("ParakeetRecoveryState.cancelRecovery — stale cleanup preserves a successor owner") {
+        var state = ParakeetRecoveryState()
+        let staleGeneration = state.beginConfigChange()
+        let successorGeneration = state.beginConfigChange()
+
+        assertFalse(
+            state.cancelRecovery(generation: staleGeneration),
+            "a cleanup from the retired generation must not cancel its successor"
+        )
+        assertTrue(state.isRecovering, "the successor recovery should remain active")
+        assertFalse(state.canStartRecording, "the successor must still gate recording starts")
+        assertTrue(
+            state.finishRecovery(success: true, generation: successorGeneration),
+            "the successor should retain the right to finish"
+        )
+    }
+
+    runSuite("ParakeetRecoveryState.cancelRecovery — late timeout cannot poison a cancelled stop") {
+        var state = ParakeetRecoveryState()
+        let recoveryGeneration = state.beginConfigChange()
+
+        assertTrue(state.cancelRecovery(generation: recoveryGeneration), "matching stop should cancel recovery")
+        assertFalse(
+            state.timeoutRecovery(generation: recoveryGeneration),
+            "the old timeout must not make the next start unready"
+        )
+        assertTrue(state.canStartRecording, "a cancelled timeout should leave the next start available")
+    }
+
+    runSuite("ParakeetRouteTransitionDebounceState emits one stable categorical transition") {
+        let builtIn = categoricalRoute(input: "built_in", output: "built_in", shape: "built_in_to_built_in")
+        let bluetooth = categoricalRoute(input: "bluetooth", output: "bluetooth", shape: "bluetooth_to_bluetooth")
+        var state = ParakeetRouteTransitionDebounceState()
+        state.seedStableRouteIfNeeded(builtIn)
+
+        state.observe(bluetooth)
+        state.observe(bluetooth)
+        let transition = state.commitPendingRoute()
+
+        assertEqual(transition, bluetooth, "repeated notifications should coalesce into one stable route transition")
+        assertEqual(state.commitPendingRoute(), nil, "a committed burst should not emit a second transition")
+
+        state.observe(bluetooth)
+        assertEqual(state.commitPendingRoute(), nil, "the already-stable route should stay quiet")
+    }
+
+    runSuite("ParakeetRouteTransitionDebounceState suppresses oscillation back to the original route") {
+        let builtIn = categoricalRoute(input: "built_in", output: "built_in", shape: "built_in_to_built_in")
+        let bluetooth = categoricalRoute(input: "bluetooth", output: "bluetooth", shape: "bluetooth_to_bluetooth")
+        var state = ParakeetRouteTransitionDebounceState()
+        state.seedStableRouteIfNeeded(builtIn)
+
+        state.observe(bluetooth)
+        state.observe(builtIn)
+
+        assertEqual(state.commitPendingRoute(), nil, "A -> B -> A notification churn is not a stable route change")
+        assertEqual(state.stableRoute, builtIn, "oscillation should preserve the original stable route")
+    }
+
+    runSuite("ParakeetRouteTransitionDebounceState treats the first known route as a baseline") {
+        let builtIn = categoricalRoute(input: "built_in", output: "built_in", shape: "built_in_to_built_in")
+        var state = ParakeetRouteTransitionDebounceState()
+
+        state.observe(builtIn)
+
+        assertEqual(state.commitPendingRoute(), nil, "initial discovery should seed a baseline instead of claiming a transition")
+        assertEqual(state.stableRoute, builtIn, "initial discovery should become the stable baseline")
+    }
+
+    runSuite("ParakeetZombieRecoveryState emits exactly one terminal result per attempt") {
+        var state = ParakeetZombieRecoveryState()
+        let generation = state.begin(failureKind: "no_sample_callbacks")
+
+        assertTrue(state.advance(to: .reset, generation: generation), "active recovery should advance into reset")
+        assertTrue(state.advance(to: .restart, generation: generation), "active recovery should advance into restart")
+        let terminal = state.finish(result: .failed, generation: generation)
+
+        assertEqual(terminal?.stage, .restart, "terminal telemetry should preserve the last actionable stage")
+        assertEqual(terminal?.result, .failed, "terminal telemetry should preserve the outcome")
+        assertEqual(terminal?.failureKind, "no_sample_callbacks", "terminal telemetry should preserve the categorical trigger")
+        assertEqual(state.finish(result: .failed, generation: generation), nil, "the same attempt cannot finish twice")
+    }
+
+    runSuite("ParakeetZombieRecoveryState cancellation is terminal and rejects stale callbacks") {
+        var state = ParakeetZombieRecoveryState()
+        let generation = state.begin(failureKind: "silent_hfp_callbacks")
+        assertTrue(state.advance(to: .settle, generation: generation), "active recovery should advance into settle")
+
+        let terminal = state.cancelActiveAttempt()
+
+        assertEqual(terminal?.stage, .settle, "cancellation should name the stage it interrupted")
+        assertEqual(terminal?.result, .cancelled, "cancellation should have a categorical terminal result")
+        assertFalse(state.canContinue(generation: generation), "cancelled work should become stale")
+        assertFalse(state.advance(to: .restart, generation: generation), "late callbacks cannot revive a cancelled recovery")
+    }
+
+    await runSuite("Parakeet user stop invalidates recovery before a delayed restart") {
+        let harness = ParakeetZombieStopInterleavingHarness()
+        let resetPublished = ParakeetAsyncInterleavingGate()
+        let allowDelayedRestart = ParakeetAsyncInterleavingGate()
+
+        let delayedRecovery = Task {
+            let generation = await harness.beginReset()
+            await resetPublished.open()
+            await allowDelayedRestart.wait()
+            return await harness.tryRestart(generation: generation)
+        }
+
+        await resetPublished.wait()
+        let terminal = await harness.stop()
+        await allowDelayedRestart.open()
+
+        assertEqual(terminal?.result, .cancelled, "stop should consume the active recovery attempt")
+        assertFalse(
+            await delayedRecovery.value,
+            "a recovery continuation delayed behind stop must not restart the microphone"
+        )
+    }
+
+    runSuite("ParakeetZombieRecoveryState keeps one active generation") {
+        var state = ParakeetZombieRecoveryState()
+        let first = state.begin(failureKind: "no_sample_callbacks")
+        let duplicate = state.begin(failureKind: "silent_hfp_callbacks")
+
+        assertEqual(duplicate, first, "a second detector callback must not replace an unfinished recovery attempt")
+        assertTrue(state.canContinue(generation: first), "the original attempt should remain active")
+    }
+
     runSuite("ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure — retries only normal first failures") {
         assertTrue(
             ParakeetAudioStartRecoveryPolicy.shouldRetryStartFailure(isRecoveryAttempt: false, failedAttempts: 1, retryBudget: 1),
@@ -235,4 +378,34 @@ func testParakeetRecoveryState() {
             "failures after the throttle window should report again"
         )
     }
+}
+
+private actor ParakeetZombieStopInterleavingHarness {
+    private var state = ParakeetZombieRecoveryState()
+
+    func beginReset() -> UInt64 {
+        let generation = state.begin(failureKind: "no_sample_callbacks")
+        _ = state.advance(to: .reset, generation: generation)
+        return generation
+    }
+
+    func stop() -> ParakeetZombieRecoveryTerminal? {
+        state.cancelActiveAttempt()
+    }
+
+    func tryRestart(generation: UInt64) -> Bool {
+        state.advance(to: .restart, generation: generation)
+    }
+}
+
+private func categoricalRoute(
+    input: String,
+    output: String,
+    shape: String
+) -> ParakeetCategoricalAudioRoute {
+    ParakeetCategoricalAudioRoute(
+        inputDeviceClass: input,
+        outputDeviceClass: output,
+        routeShape: shape
+    )
 }

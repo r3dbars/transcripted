@@ -146,6 +146,35 @@ func testDictationAudioRecovery() {
             "abandoned capture-not-started sessions should cancel the speech engine and clear preserved recovery audio"
         )
         assertTrue(
+            sessionSource.contains("await appState.sttRouter.stopRecording()\n            stopTiming.micStoppedAt"),
+            "an admitted stop must always reach the engine so a temporary recovery-idle state cannot revive the microphone"
+        )
+        guard let stopTaskOwner = sessionSource.range(of: "let taskSessionID = currentDictationSessionID"),
+              let preStopGuard = sessionSource.range(
+                of: "guard !Task.isCancelled,",
+                range: stopTaskOwner.upperBound..<sessionSource.endIndex
+              ),
+              let stopDiagnostic = sessionSource.range(
+                of: "appState.runtimeDiagnostics.recordSession(kind: \"dictation\", stage: \"stop_requested\")",
+                range: preStopGuard.upperBound..<sessionSource.endIndex
+              ),
+              let stopCall = sessionSource.range(
+                of: "await appState.sttRouter.stopRecording()",
+                range: stopDiagnostic.upperBound..<sessionSource.endIndex
+              ) else {
+            assertTrue(false, "stop task should gate diagnostics and engine mutation on exact session ownership")
+            return
+        }
+        assertTrue(
+            preStopGuard.lowerBound < stopDiagnostic.lowerBound
+                && stopDiagnostic.lowerBound < stopCall.lowerBound,
+            "a cancelled stale stop task must not stop or relabel a successor dictation session"
+        )
+        assertFalse(
+            sessionSource.contains("if appState.sttRouter.isRecording || appState.sttRouter.hasRecoverableRecording {\n                await appState.sttRouter.stopRecording()"),
+            "the stop task must not re-check transient recording state before cancelling recovery"
+        )
+        assertTrue(
             engineSource.contains("drainRecordedSamplesForInference()"),
             "transcription should drain preserved segments instead of resampling all audio as one rate"
         )
