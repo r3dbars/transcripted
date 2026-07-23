@@ -42,8 +42,6 @@ final class FailedMeetingStore {
     private var timedOutFinalizationHandoff = TimedOutFailedMeetingFinalizationHandoff()
     private var failedAudioCompressionTask: Task<Void, Never>?
     private var failedAudioCompressionNeedsReschedule = false
-    private var timedOutJournalRecoveryTask: Task<Void, Never>?
-    private var pendingTimedOutJournalRecoveryDirectory: URL?
 
     init(
         taskManager: TranscriptionTaskManager,
@@ -354,17 +352,9 @@ final class FailedMeetingStore {
     }
 
     private func scheduleTimedOutJournalRecovery(in scratchDirectory: URL) {
-        pendingTimedOutJournalRecoveryDirectory = scratchDirectory
-        guard timedOutJournalRecoveryTask == nil else { return }
-        pendingTimedOutJournalRecoveryDirectory = nil
         let taskManager = self.taskManager
-        timedOutJournalRecoveryTask = Task { [weak self] in
+        Task {
             _ = await taskManager.recoverOrphanedRecordings(in: scratchDirectory)
-            guard let self else { return }
-            self.timedOutJournalRecoveryTask = nil
-            if let pendingDirectory = self.pendingTimedOutJournalRecoveryDirectory {
-                self.scheduleTimedOutJournalRecovery(in: pendingDirectory)
-            }
         }
     }
 

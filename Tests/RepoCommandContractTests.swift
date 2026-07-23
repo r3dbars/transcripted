@@ -2562,10 +2562,11 @@ func testRepoCommandContract() {
             to: "func refreshFailedMeetings("
         )
         assertTrue(
-            journalRecoveryScheduleBlock.contains("pendingTimedOutJournalRecoveryDirectory = scratchDirectory")
-                && journalRecoveryScheduleBlock.contains("guard timedOutJournalRecoveryTask == nil else { return }")
-                && !journalRecoveryScheduleBlock.contains("timedOutJournalRecoveryTask?.cancel()"),
-            "timeout journal recovery should retain one bounded waiter and coalesce later requests"
+            journalRecoveryScheduleBlock.contains("Task {")
+                && journalRecoveryScheduleBlock.contains("taskManager.recoverOrphanedRecordings(in: scratchDirectory)")
+                && !storeContents.contains("timedOutJournalRecoveryTask")
+                && !storeContents.contains("pendingTimedOutJournalRecoveryDirectory"),
+            "timeout journal recovery should delegate single-flight ownership to the canonical Core seam"
         )
         assertTrue(
             storeContents.contains("finishTimedOutFinalizationWithDiscard(id: id)")
