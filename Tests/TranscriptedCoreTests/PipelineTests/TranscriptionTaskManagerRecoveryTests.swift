@@ -568,7 +568,10 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         )
 
         let joinedRequestInjector = Task { @MainActor in
-            for _ in 0..<8 {
+            // Keep joins arriving for a full second. A broken owner that lets
+            // each join extend its deadline will remain alive past the bound
+            // below, while the fixed 120 ms owner has ample CI scheduler slack.
+            for _ in 0..<40 {
                 do {
                     try await Task.sleep(for: .seconds(0.025))
                 } catch {
@@ -594,7 +597,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         await joinedRequestInjector.value
 
         XCTAssertEqual(recovered, 0)
-        XCTAssertLessThan(elapsed, .seconds(0.2))
+        XCTAssertLessThan(elapsed, .seconds(0.5))
         XCTAssertTrue(FileManager.default.fileExists(atPath: futureMicURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
     }
