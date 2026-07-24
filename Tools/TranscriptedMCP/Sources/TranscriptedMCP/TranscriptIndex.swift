@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import SQLite3
 import TranscriptedCaptureKit
 
@@ -16,7 +17,12 @@ final class TranscriptIndex: @unchecked Sendable {
 
     init(indexDir: URL, embeddingProvider: EmbeddingProvider? = nil) throws {
         self.indexPath = indexDir.appendingPathComponent("mcp_index.sqlite")
-        try queue.sync { try self.openAndSetup() }
+        let setupLockPath = indexDir.appendingPathComponent("mcp_index.setup.lock", isDirectory: false)
+        try queue.sync {
+            try Self.withExclusiveSetupLock(at: setupLockPath) {
+                try self.openAndSetup()
+            }
+        }
         if let provider = embeddingProvider, provider.isAvailable {
             self.embeddingStore = try EmbeddingStore(dbPath: indexPath, provider: provider)
         }
@@ -29,6 +35,31 @@ final class TranscriptIndex: @unchecked Sendable {
     }
 
     // MARK: - Setup
+
+    /// Schema gates can delete and recreate the derived index. Serialize only
+    /// that setup window across MCP client processes so two cold starts cannot
+    /// remove the database underneath each other.
+    private static func withExclusiveSetupLock(
+        at lockPath: URL,
+        operation: () throws -> Void
+    ) throws {
+        let descriptor = open(lockPath.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            throw MCPIndexError.databaseOpenFailed("Could not open the index setup lock")
+        }
+        defer {
+            _ = flock(descriptor, LOCK_UN)
+            close(descriptor)
+        }
+
+        while flock(descriptor, LOCK_EX) != 0 {
+            guard errno == EINTR else {
+                throw MCPIndexError.databaseOpenFailed("Could not acquire the index setup lock")
+            }
+        }
+        _ = chmod(lockPath.path, 0o600)
+        try operation()
+    }
 
     private func openAndSetup() throws {
         if sqlite3_open(indexPath.path, &db) != SQLITE_OK {
