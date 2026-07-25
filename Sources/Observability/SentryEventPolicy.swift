@@ -122,6 +122,11 @@ struct SentryEventPolicy: Equatable {
             event: "model_init_failed",
             summary: "Speech model initialization failed."
         ),
+        "parakeet.model_download_stalled": .init(
+            engine: "parakeet",
+            event: "model_download_stalled",
+            summary: "Speech model download stopped making progress."
+        ),
         "parakeet.prewarm_failed": .init(
             engine: "parakeet",
             event: "prewarm_failed",

@@ -11,8 +11,132 @@ import FluidAudio
 import Foundation
 import TranscriptedCore
 
+private final class ParakeetModelDownloadProgressTarget: @unchecked Sendable {
+    weak var engine: ParakeetEngine?
+
+    @MainActor
+    init(engine: ParakeetEngine) {
+        self.engine = engine
+    }
+}
+
 extension ParakeetEngine {
     // MARK: - Model Initialization
+
+    private static let stalledDownloadMessage =
+        "The model download stopped making progress. Check your connection and retry the download."
+    /// Slow downloads remain valid while bytes are moving. A silent task
+    /// fails into the existing Retry Download path instead of waiting forever.
+    private static let modelDownloadNoProgressTimeout: TimeInterval = 300
+
+    private func startModelDownloadTask() -> Task<URL, Error> {
+        let progressTracker = ParakeetModelDownloadProgressTracker()
+        let generation = beginModelDownloadAttempt(progressTracker: progressTracker)
+        let progressTarget = ParakeetModelDownloadProgressTarget(engine: self)
+        let task = Task.detached(priority: .utility) {
+            try await AsrModels.download(version: .v3) { progress in
+                let beginsNewStage: Bool
+                switch progress.phase {
+                case .listing:
+                    beginsNewStage = true
+                case .downloading, .compiling:
+                    beginsNewStage = false
+                }
+                guard let overallProgress = progressTracker.progressToPublish(
+                    rawProgress: progress.fractionCompleted,
+                    beginsNewStage: beginsNewStage
+                ) else { return }
+                Task { @MainActor in
+                    progressTarget.engine?.recordModelDownloadProgress(
+                        overallProgress,
+                        generation: generation
+                    )
+                }
+            }
+        }
+        modelFilePrefetchTask = task
+        return task
+    }
+
+    private func beginModelDownloadAttempt(
+        progressTracker: ParakeetModelDownloadProgressTracker
+    ) -> UInt64 {
+        modelDownloadAttemptGeneration &+= 1
+        modelDownloadState = .downloading(progress: 0)
+        scheduleModelDownloadWatchdog(
+            generation: modelDownloadAttemptGeneration,
+            progressTracker: progressTracker
+        )
+        return modelDownloadAttemptGeneration
+    }
+
+    private func recordModelDownloadProgress(_ progress: Double, generation: UInt64) {
+        guard ParakeetModelDownloadAttemptPolicy.isCurrent(
+            expectedGeneration: generation,
+            currentGeneration: modelDownloadAttemptGeneration
+        ), modelFilePrefetchTask != nil else { return }
+        modelDownloadState = .downloading(progress: max(0, min(1, progress)))
+    }
+
+    private func scheduleModelDownloadWatchdog(
+        generation: UInt64,
+        progressTracker: ParakeetModelDownloadProgressTracker
+    ) {
+        modelDownloadWatchdogTask?.cancel()
+        modelDownloadWatchdogTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                let remaining = progressTracker.remainingNoProgressInterval(
+                    timeout: Self.modelDownloadNoProgressTimeout
+                )
+                guard remaining > 0 else { break }
+                do {
+                    try await Task.sleep(
+                        nanoseconds: UInt64(remaining * 1_000_000_000)
+                    )
+                } catch {
+                    return
+                }
+            }
+            guard let self else { return }
+            guard ParakeetModelDownloadAttemptPolicy.shouldTimeOut(
+                expectedGeneration: generation,
+                currentGeneration: self.modelDownloadAttemptGeneration,
+                hasActiveTask: self.modelFilePrefetchTask != nil,
+                taskCancelled: Task.isCancelled
+            ) else {
+                return
+            }
+
+            self.modelDownloadAttemptGeneration &+= 1
+            self.modelFilePrefetchTask?.cancel()
+            self.modelFilePrefetchTask = nil
+            self.modelInitializationGeneration &+= 1
+            self.modelInitializationTask?.cancel()
+            self.modelInitializationTask = nil
+            self.modelDownloadState = .failed(Self.stalledDownloadMessage)
+            EventReporter.shared.capture(
+                level: .error,
+                engine: "parakeet",
+                event: "model_download_stalled",
+                message: "Local speech model download stopped making progress",
+                context: [
+                    "failure_kind": "no_progress_timeout",
+                    "stall_stage": "model_download",
+                ]
+            )
+        }
+    }
+
+    @discardableResult
+    private func finishModelDownloadAttempt(generation: UInt64) -> Bool {
+        guard ParakeetModelDownloadAttemptPolicy.isCurrent(
+            expectedGeneration: generation,
+            currentGeneration: modelDownloadAttemptGeneration
+        ) else { return false }
+        modelDownloadWatchdogTask?.cancel()
+        modelDownloadWatchdogTask = nil
+        return true
+    }
 
     /// Load Parakeet models from the app bundle (preferred) or download from HuggingFace (fallback).
     /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
@@ -24,9 +148,11 @@ extension ParakeetEngine {
             return
         }
 
+        modelInitializationGeneration &+= 1
+        let generation = modelInitializationGeneration
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.performInitialize()
+            await self.performInitialize(generation: generation)
         }
         modelInitializationTask = task
         await task.value
@@ -41,8 +167,12 @@ extension ParakeetEngine {
         return true
     }
 
-    private func performInitialize() async {
-        defer { modelInitializationTask = nil }
+    private func performInitialize(generation: UInt64) async {
+        defer {
+            if generation == modelInitializationGeneration {
+                modelInitializationTask = nil
+            }
+        }
         guard !isShuttingDown, !Task.isCancelled else { return }
         scheduleInputDeviceNameRefresh()
         markCachedRuntimeModelIfAvailable()
@@ -112,8 +242,9 @@ extension ParakeetEngine {
                 let downloadedPath: URL
                 if let modelFilePrefetchTask {
                     AppLogger.transcription.info("PARAKEET | waiting for background Parakeet model cache...")
-                    modelDownloadState = .downloading(progress: 0.0)
+                    let generation = modelDownloadAttemptGeneration
                     downloadedPath = try await modelFilePrefetchTask.value
+                    guard finishModelDownloadAttempt(generation: generation) else { return }
                     prefetchedModelPath = downloadedPath
                     self.modelFilePrefetchTask = nil
                 } else if let prefetchedModelPath {
@@ -123,8 +254,11 @@ extension ParakeetEngine {
                     downloadedPath = cachedModelPath
                 } else {
                     AppLogger.transcription.info("PARAKEET | models not bundled, downloading (~600MB)...")
-                    modelDownloadState = .downloading(progress: 0.0)
-                    downloadedPath = try await AsrModels.download(version: .v3)
+                    let task = startModelDownloadTask()
+                    let generation = modelDownloadAttemptGeneration
+                    downloadedPath = try await task.value
+                    guard finishModelDownloadAttempt(generation: generation) else { return }
+                    modelFilePrefetchTask = nil
                     prefetchedModelPath = downloadedPath
                 }
                 guard !Task.isCancelled, !isShuttingDown else { return }
@@ -153,6 +287,7 @@ extension ParakeetEngine {
 
         } catch {
             guard !Task.isCancelled, !isShuttingDown else { return }
+            finishModelDownloadAttempt(generation: modelDownloadAttemptGeneration)
             modelFilePrefetchTask = nil
             prefetchedModelPath = nil
             let friendlyMessage = ModelDownloadService.classifyError(error).detail
@@ -195,15 +330,13 @@ extension ParakeetEngine {
         if let modelFilePrefetchTask {
             task = modelFilePrefetchTask
         } else {
-            modelDownloadState = .downloading(progress: 0.0)
-            task = Task.detached(priority: .utility) {
-                try await AsrModels.download(version: .v3)
-            }
-            modelFilePrefetchTask = task
+            task = startModelDownloadTask()
         }
+        let generation = modelDownloadAttemptGeneration
 
         do {
             let downloadedPath = try await task.value
+            guard finishModelDownloadAttempt(generation: generation) else { return }
             guard !Task.isCancelled, !isShuttingDown else { return }
             guard modelInitializationTask == nil, asrManager == nil, !asrManagerReady else {
                 if modelFilePrefetchTask != nil {
@@ -225,8 +358,13 @@ extension ParakeetEngine {
             )
         } catch {
             guard !Task.isCancelled, !isShuttingDown else { return }
+            guard finishModelDownloadAttempt(generation: generation) else { return }
             if modelFilePrefetchTask != nil {
                 modelFilePrefetchTask = nil
+            }
+            if case .failed(let message) = modelDownloadState,
+               message == Self.stalledDownloadMessage {
+                return
             }
             let friendlyMessage = ModelDownloadService.classifyError(error).detail
             modelDownloadState = .failed(friendlyMessage)
@@ -292,6 +430,10 @@ extension ParakeetEngine {
 
     /// Cancel in-flight model init/prefetch work. Called from `cleanup()`.
     func cancelModelWork() {
+        modelDownloadAttemptGeneration &+= 1
+        modelDownloadWatchdogTask?.cancel()
+        modelDownloadWatchdogTask = nil
+        modelInitializationGeneration &+= 1
         modelInitializationTask?.cancel()
         modelInitializationTask = nil
         modelFilePrefetchTask?.cancel()

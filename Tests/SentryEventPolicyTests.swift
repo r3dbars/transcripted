@@ -74,6 +74,10 @@ func testSentryEventPolicy() {
             forEngine: "parakeet",
             event: "model_init_failed"
         )
+        let modelDownloadStalled = SentryEventPolicy.policy(
+            forEngine: "parakeet",
+            event: "model_download_stalled"
+        )
         let onboardingStartFailure = SentryEventPolicy.policy(
             forEngine: "onboarding",
             event: "first_dictation_start_failed"
@@ -109,6 +113,7 @@ func testSentryEventPolicy() {
         assertNil(meetingTranscriptSkipped, "expected empty/no-speech meeting outcomes should stay out of Sentry")
         assertEqual(speakerFinalizationFailed?.summary, "Meeting speaker naming finalization failed.", "speaker finalization failures should not masquerade as full transcript failures")
         assertEqual(modelInitFailure?.summary, "Speech model initialization failed.", "model-init failures should stay allowlisted with a privacy-safe summary")
+        assertEqual(modelDownloadStalled?.summary, "Speech model download stopped making progress.", "stalled downloads should be visible without user content")
         assertEqual(onboardingStartFailure?.summary, "Onboarding could not start first dictation.", "onboarding start wiring failures should be visible without clickstream data")
         assertEqual(onboardingStopFailure?.summary, "Onboarding could not stop first dictation.", "onboarding stop wiring failures should be visible without clickstream data")
         assertNil(unknown, "unknown events should stay local-only by default")

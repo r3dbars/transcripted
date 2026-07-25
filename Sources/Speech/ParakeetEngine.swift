@@ -88,8 +88,11 @@ class ParakeetEngine: ObservableObject {
     // FluidAudio ASR
     var asrManager: AsrManager?
     var modelInitializationTask: Task<Void, Never>?
+    var modelInitializationGeneration: UInt64 = 0
     var modelFilePrefetchTask: Task<URL, Error>?
     var prefetchedModelPath: URL?
+    var modelDownloadWatchdogTask: Task<Void, Never>?
+    var modelDownloadAttemptGeneration: UInt64 = 0
     private var audioWatchdogTask: Task<Void, Never>?
     private var zombieRecoveryTask: Task<Void, Never>?
     private var zombieRecoveryState = ParakeetZombieRecoveryState()
