@@ -124,12 +124,9 @@ enum ParakeetBundledModelLayoutPolicy {
         subdirectory: "parakeet-tdt-0.6b-v3",
         checkFile: "JointDecisionv3.mlmodelc"
     )
-    static let legacy = ParakeetBundledModelLayout(
-        subdirectory: "parakeet-tdt-0.6b-v3-coreml",
-        checkFile: "Encoder.mlmodelc"
-    )
-    static let candidates = [runtime, legacy]
 
+    // FluidAudio reloads v3 from its canonical folder name, so a legacy-only
+    // bundled directory is not actually loadable and must fail closed here.
     static func resolveBundledModelPath(
         resourcePath: String?,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
@@ -138,15 +135,11 @@ enum ParakeetBundledModelLayoutPolicy {
 
         let root = URL(fileURLWithPath: resourcePath)
             .appendingPathComponent("parakeet-models")
-        for candidate in candidates {
-            let path = root.appendingPathComponent(candidate.subdirectory)
-            guard fileExists(path.appendingPathComponent(candidate.checkFile).path) else {
-                continue
-            }
-            return path
+        let path = root.appendingPathComponent(runtime.subdirectory)
+        guard fileExists(path.appendingPathComponent(runtime.checkFile).path) else {
+            return nil
         }
-
-        return nil
+        return path
     }
 }
 

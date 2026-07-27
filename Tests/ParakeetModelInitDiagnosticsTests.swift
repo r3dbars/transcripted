@@ -160,7 +160,7 @@ func testParakeetModelInitDiagnostics() {
         )
     }
 
-    runSuite("ParakeetBundledModelLayoutPolicy prefers the current runtime bundle layout") {
+    runSuite("ParakeetBundledModelLayoutPolicy resolves the current runtime bundle layout") {
         let root = makeBundledModelFixtureRoot()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -168,11 +168,6 @@ func testParakeetModelInitDiagnostics() {
             root: root,
             subdirectory: ParakeetBundledModelLayoutPolicy.runtime.subdirectory,
             checkFile: ParakeetBundledModelLayoutPolicy.runtime.checkFile
-        )
-        writeBundledModelFixture(
-            root: root,
-            subdirectory: ParakeetBundledModelLayoutPolicy.legacy.subdirectory,
-            checkFile: ParakeetBundledModelLayoutPolicy.legacy.checkFile
         )
 
         let resolved = ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
@@ -182,28 +177,27 @@ func testParakeetModelInitDiagnostics() {
         assertEqual(
             resolved?.lastPathComponent,
             ParakeetBundledModelLayoutPolicy.runtime.subdirectory,
-            "the runtime bundle directory should win when both layouts exist"
+            "the packaged runtime bundle directory should resolve as bundled"
         )
     }
 
-    runSuite("ParakeetBundledModelLayoutPolicy falls back to the legacy bundle layout") {
+    runSuite("ParakeetBundledModelLayoutPolicy ignores legacy-only bundled layouts") {
         let root = makeBundledModelFixtureRoot()
         defer { try? FileManager.default.removeItem(at: root) }
 
         writeBundledModelFixture(
             root: root,
-            subdirectory: ParakeetBundledModelLayoutPolicy.legacy.subdirectory,
-            checkFile: ParakeetBundledModelLayoutPolicy.legacy.checkFile
+            subdirectory: "parakeet-tdt-0.6b-v3-coreml",
+            checkFile: "Encoder.mlmodelc"
         )
 
         let resolved = ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
             resourcePath: root.path
         )
 
-        assertEqual(
-            resolved?.lastPathComponent,
-            ParakeetBundledModelLayoutPolicy.legacy.subdirectory,
-            "older bundled builds should still resolve their legacy Parakeet directory"
+        assertNil(
+            resolved,
+            "legacy-only bundle directories are not loadable through the current FluidAudio runtime layout"
         )
     }
 
