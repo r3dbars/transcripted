@@ -146,14 +146,7 @@ class ParakeetEngine: ObservableObject {
     }
 
     private lazy var hasBundledParakeetModel: Bool =
-        bundledModelPath(
-            subdirectory: "parakeet-tdt-0.6b-v3",
-            checkFile: "JointDecisionv3.mlmodelc"
-        ) != nil ||
-        bundledModelPath(
-            subdirectory: "parakeet-tdt-0.6b-v3-coreml",
-            checkFile: "Encoder.mlmodelc"
-        ) != nil
+        bundledParakeetModelPath() != nil
 
     init() {
         markCachedRuntimeModelIfAvailable()

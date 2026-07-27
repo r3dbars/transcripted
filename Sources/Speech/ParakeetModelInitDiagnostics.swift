@@ -114,6 +114,42 @@ enum ParakeetModelLoadSource: String, Equatable {
     case download
 }
 
+struct ParakeetBundledModelLayout: Equatable {
+    let subdirectory: String
+    let checkFile: String
+}
+
+enum ParakeetBundledModelLayoutPolicy {
+    static let runtime = ParakeetBundledModelLayout(
+        subdirectory: "parakeet-tdt-0.6b-v3",
+        checkFile: "JointDecisionv3.mlmodelc"
+    )
+    static let legacy = ParakeetBundledModelLayout(
+        subdirectory: "parakeet-tdt-0.6b-v3-coreml",
+        checkFile: "Encoder.mlmodelc"
+    )
+    static let candidates = [runtime, legacy]
+
+    static func resolveBundledModelPath(
+        resourcePath: String?,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> URL? {
+        guard let resourcePath else { return nil }
+
+        let root = URL(fileURLWithPath: resourcePath)
+            .appendingPathComponent("parakeet-models")
+        for candidate in candidates {
+            let path = root.appendingPathComponent(candidate.subdirectory)
+            guard fileExists(path.appendingPathComponent(candidate.checkFile).path) else {
+                continue
+            }
+            return path
+        }
+
+        return nil
+    }
+}
+
 enum ParakeetModelInitDiagnostics {
     static func failureContext(
         stage: ParakeetModelInitStage,
