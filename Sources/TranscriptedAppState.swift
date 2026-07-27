@@ -64,22 +64,24 @@ class TranscriptedAppState: ObservableObject {
         guard !isInitialized else { return }
         isInitialized = true
 
-        do {
-            try LaunchAtLoginController.applySavedOptOutAtStartup()
-        } catch {
-            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
-                message: error.localizedDescription)
-        }
+        if !Self.isLaunchSmokeMode {
+            do {
+                try LaunchAtLoginController.applySavedOptOutAtStartup()
+            } catch {
+                EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
+                    message: error.localizedDescription)
+            }
 
-        // Covers existing installs that finished onboarding before the default
-        // existed; fresh installs get it from the onboarding-completion hook.
-        do {
-            try LaunchAtLoginController.applyDefaultEnableIfNeeded(
-                onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
-            )
-        } catch {
-            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
-                message: error.localizedDescription)
+            // Covers existing installs that finished onboarding before the default
+            // existed; fresh installs get it from the onboarding-completion hook.
+            do {
+                try LaunchAtLoginController.applyDefaultEnableIfNeeded(
+                    onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
+                )
+            } catch {
+                EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
+                    message: error.localizedDescription)
+            }
         }
 
         if !Self.isLaunchSmokeMode {

@@ -912,7 +912,7 @@ final class FirstRunReliabilitySmokeRunner {
         return buildScenario(
             id: "zero-state-and-restart",
             launches: [first, second],
-            successDetail: "Two launches from the same empty isolated profile kept onboarding incomplete, model state idle, and the observed host-owned system-audio state stable across restart."
+            successDetail: "Two launches from the same empty isolated profile kept onboarding incomplete, model state idle, and the same cached system-audio permission flags across restart."
         ) { reports in
             guard reports.count == 2 else {
                 return ["expected two successful launch reports"]
@@ -937,7 +937,7 @@ final class FirstRunReliabilitySmokeRunner {
             failures.append(contentsOf: expectedBooleanFailures(
                 reports[0].runtime.systemAudioPermissionKnown == reports[1].runtime.systemAudioPermissionKnown
                     && reports[0].runtime.systemAudioPermissionGranted == reports[1].runtime.systemAudioPermissionGranted,
-                message: "zero-state restart should preserve the same observed host-owned system-audio permission state"
+                message: "zero-state restart should preserve the same cached system-audio permission flags"
             ))
             failures.append(contentsOf: expectedBooleanFailures(
                 reports[0].runtime.captureLibraryPath == reports[1].runtime.captureLibraryPath,
@@ -980,7 +980,7 @@ final class FirstRunReliabilitySmokeRunner {
         return buildScenario(
             id: "permissions-state-matrix",
             launches: [denied, granted],
-            successDetail: "The packaged app preserved incomplete and completed onboarding prefs while observing the same host-owned system-audio state across isolated launches, without claiming live TCC mutation."
+            successDetail: "The packaged app preserved incomplete and completed onboarding prefs while exercising cached denied and granted system-audio permission flags from isolated preferences."
         ) { reports in
             guard reports.count == 2 else {
                 return ["expected denied and granted permission launch reports"]
@@ -990,13 +990,16 @@ final class FirstRunReliabilitySmokeRunner {
             var failures = isolationFailures(in: denied, workspace: workspace)
             failures.append(contentsOf: isolationFailures(in: granted, workspace: workspace))
             failures.append(contentsOf: expectedBooleanFailures(
-                denied.runtime.systemAudioPermissionKnown == granted.runtime.systemAudioPermissionKnown
-                    && denied.runtime.systemAudioPermissionGranted == granted.runtime.systemAudioPermissionGranted,
-                message: "isolated launches should observe the same host-owned system-audio permission state without pretending HOME isolation can mutate TCC"
+                denied.runtime.systemAudioPermissionKnown && !denied.runtime.systemAudioPermissionGranted,
+                message: "denied launch should report the cached known=true granted=false system-audio flags"
+            ))
+            failures.append(contentsOf: expectedBooleanFailures(
+                granted.runtime.systemAudioPermissionKnown && granted.runtime.systemAudioPermissionGranted,
+                message: "granted launch should report the cached known=true granted=true system-audio flags"
             ))
             failures.append(contentsOf: expectedBooleanFailures(
                 denied.permissionsOnboardingCompleted == false && granted.permissionsOnboardingCompleted,
-                message: "permission matrix should preserve incomplete and completed onboarding states"
+                message: "permission matrix should preserve incomplete and completed onboarding states while covering cached permission-state restoration"
             ))
             return failures
         }
