@@ -8,6 +8,11 @@ import TranscriptedCore
 class TranscriptedAppState: ObservableObject {
     private static let wakeHotkeyRetryAttempts = 3
     private static let wakeHotkeyRetryDelay: UInt64 = 500_000_000
+    private static var isLaunchSmokeMode: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
+            || environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] != nil
+    }
     let logger = AppLogSink()
     let sparkleUpdater = SparkleUpdaterController()
     let contextCapture = ContextCaptureEngine()
@@ -77,7 +82,7 @@ class TranscriptedAppState: ObservableObject {
                 message: error.localizedDescription)
         }
 
-        if ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] == nil {
+        if !Self.isLaunchSmokeMode {
             sparkleUpdater.performStartupUpdateCheckIfNeeded()
         }
         AppSoundPlayer.shared.setWarningReporter { cue in
@@ -99,7 +104,7 @@ class TranscriptedAppState: ObservableObject {
             startExistingInstallModelPrefetchIfNeeded()
         }
         startAudioStorageMaintenanceIfNeeded()
-        if ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] == nil {
+        if !Self.isLaunchSmokeMode {
             startAgentHelperRefreshIfNeeded()
         }
         if #available(macOS 14.0, *) {

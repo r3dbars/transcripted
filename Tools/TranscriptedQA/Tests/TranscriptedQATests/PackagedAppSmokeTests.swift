@@ -30,6 +30,16 @@ final class PackagedAppSmokeTests: XCTestCase {
         XCTAssertEqual(report.exitCode, 3)
     }
 
+    func testPackagedAppSmokeWarnsWhenFirstRunReliabilityHarnessIsSkipped() throws {
+        let fixture = try makeFixture()
+
+        let report = makeRunner(fixture: fixture).run()
+
+        XCTAssertTrue(report.checks.contains {
+            $0.id == "first-run-reliability" && $0.status == .warn
+        })
+    }
+
     func testMissingDSYMFailsByDefault() throws {
         let fixture = try makeFixture()
         try FileManager.default.removeItem(at: fixture.dSYM)
@@ -99,6 +109,18 @@ final class PackagedAppSmokeTests: XCTestCase {
         XCTAssertTrue(findings.contains { $0.contains("token/secret") })
     }
 
+    func testPrivacyLogScannerAllowsHarnessOwnedAbsolutePathsWhenAllowlisted() {
+        let findings = PrivacyLogScanner.findings(
+            in: """
+            {"path":"/Users/redbars/harness/run/report.json"}
+            failed to create folder at /Users/redbars/harness/run/container/cache
+            """,
+            allowedPathPrefixes: ["/Users/redbars/harness"]
+        )
+
+        XCTAssertTrue(findings.isEmpty)
+    }
+
     func testMissingExecutableFails() throws {
         let fixture = try makeFixture()
         try FileManager.default.removeItem(at: fixture.app.appendingPathComponent("Contents/MacOS/Transcripted"))
@@ -125,10 +147,13 @@ final class PackagedAppSmokeTests: XCTestCase {
             logPaths: [fixture.log.path],
             reportPath: nil,
             uiReportPath: nil,
+            firstRunReportPath: nil,
             uiTimeout: 1,
+            firstRunTimeout: 1,
             requireDSYM: requireDSYM,
             requireDMG: requireDMG,
             runUISmoke: false,
+            runFirstRunReliability: false,
             allowExistingInstance: false,
             promptForAccessibility: false,
             verifyCodeSignature: true,
