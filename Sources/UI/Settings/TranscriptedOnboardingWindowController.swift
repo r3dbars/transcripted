@@ -35,7 +35,8 @@ final class TranscriptedOnboardingWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         window.minSize = PermissionsOnboardingView.preferredSize
         window.contentViewController = hostingController
-        window.sharingType = .none
+        // First-run setup should be capturable for support and QA walkthroughs.
+        window.sharingType = .readOnly
         window.center()
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
 
