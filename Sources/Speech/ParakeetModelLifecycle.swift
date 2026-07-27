@@ -139,7 +139,7 @@ extension ParakeetEngine {
     }
 
     /// Load Parakeet models from the app bundle (preferred) or download from HuggingFace (fallback).
-    /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3-coreml/
+    /// Bundle path: Contents/Resources/parakeet-models/parakeet-tdt-0.6b-v3/
     func initialize() async {
         guard !isShuttingDown, !Task.isCancelled else { return }
 
@@ -206,7 +206,7 @@ extension ParakeetEngine {
         // FluidAudio 0.15.x resolves bundled models as <parent>/<repo folderName>, and the
         // folder name lost its -coreml suffix. Gate on JointDecisionv3.mlmodelc (new required
         // file) so an incomplete bundle can't trigger a download into the signed app bundle.
-        let bundledModelPath = bundledModelPath(subdirectory: "parakeet-tdt-0.6b-v3", checkFile: "JointDecisionv3.mlmodelc")
+        let bundledModelPath = bundledParakeetModelPath()
         let bundledModelPresent = bundledModelPath != nil
 
         do {
@@ -308,10 +308,7 @@ extension ParakeetEngine {
         guard !isShuttingDown, !Task.isCancelled else { return }
         guard asrManager == nil else { return }
 
-        guard bundledModelPath(
-            subdirectory: "parakeet-tdt-0.6b-v3-coreml",
-            checkFile: "Encoder.mlmodelc"
-        ) == nil else {
+        guard bundledParakeetModelPath() == nil else {
             return
         }
 
@@ -424,6 +421,12 @@ extension ParakeetEngine {
             .appendingPathComponent(subdirectory)
         guard FileManager.default.fileExists(atPath: path.appendingPathComponent(checkFile).path) else { return nil }
         return path
+    }
+
+    func bundledParakeetModelPath() -> URL? {
+        ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
+            resourcePath: Bundle.main.resourcePath
+        )
     }
 
     // MARK: - Model teardown

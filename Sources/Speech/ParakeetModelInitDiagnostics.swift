@@ -114,6 +114,35 @@ enum ParakeetModelLoadSource: String, Equatable {
     case download
 }
 
+struct ParakeetBundledModelLayout: Equatable {
+    let subdirectory: String
+    let checkFile: String
+}
+
+enum ParakeetBundledModelLayoutPolicy {
+    static let runtime = ParakeetBundledModelLayout(
+        subdirectory: "parakeet-tdt-0.6b-v3",
+        checkFile: "JointDecisionv3.mlmodelc"
+    )
+
+    // FluidAudio reloads v3 from its canonical folder name, so a legacy-only
+    // bundled directory is not actually loadable and must fail closed here.
+    static func resolveBundledModelPath(
+        resourcePath: String?,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> URL? {
+        guard let resourcePath else { return nil }
+
+        let root = URL(fileURLWithPath: resourcePath)
+            .appendingPathComponent("parakeet-models")
+        let path = root.appendingPathComponent(runtime.subdirectory)
+        guard fileExists(path.appendingPathComponent(runtime.checkFile).path) else {
+            return nil
+        }
+        return path
+    }
+}
+
 enum ParakeetModelInitDiagnostics {
     static func failureContext(
         stage: ParakeetModelInitStage,
