@@ -202,9 +202,21 @@ enum ClaudeDesktopIntegrationInstaller {
             throw ClaudeDesktopIntegrationError.bundledBinaryMissing(bundledBinaryURL)
         }
 
-        try installBundledBinary(
+        let stagedBinaryURL = try stageBundledBinary(
             from: bundledBinaryURL,
-            to: installedBinaryURL,
+            in: installedBinaryURL.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
+        defer {
+            if fileManager.fileExists(atPath: stagedBinaryURL.path) {
+                try? fileManager.removeItem(at: stagedBinaryURL)
+            }
+        }
+
+        let selfTest = try runSelfTest(binaryURL: stagedBinaryURL, fileManager: fileManager)
+        try replaceInstalledBinary(
+            withStagedBinaryAt: stagedBinaryURL,
+            at: installedBinaryURL,
             fileManager: fileManager
         )
         try writeMCPObservabilityConfigIfAvailable(fileManager: fileManager)
@@ -215,7 +227,6 @@ enum ClaudeDesktopIntegrationInstaller {
             fileManager: fileManager
         )
 
-        let selfTest = try runSelfTest(binaryURL: installedBinaryURL, fileManager: fileManager)
         return ClaudeDesktopIntegrationInstallResult(
             configURL: configURL,
             installedBinaryURL: installedBinaryURL,
@@ -224,26 +235,31 @@ enum ClaudeDesktopIntegrationInstaller {
         )
     }
 
-    /// Silently re-copies the bundled helper over a previously installed one
-    /// when their contents differ, e.g. after an app update. Helper analytics
-    /// config is refreshed only when an installed helper already exists. Never
-    /// installs fresh: a missing installed helper means the user has not
-    /// opted into agent setup yet.
+    /// Silently restores or refreshes the bundled helper after app updates.
+    /// An existing helper or an exact Claude Desktop config entry proves the
+    /// user already opted into agent setup. Without either signal this never
+    /// installs fresh.
     @discardableResult
     static func refreshInstalledHelperIfNeeded(
         bundledBinaryURL: URL? = bundledMCPBinaryURL(),
         installedBinaryURL: URL = installedMCPBinaryURL,
+        configURL: URL = claudeDesktopConfigURL,
         observabilityConfigURL: URL = mcpObservabilityConfigURL,
         infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
         fileManager: FileManager = .default
     ) throws -> Bool {
-        guard fileManager.fileExists(atPath: installedBinaryURL.path) else {
+        let installedBinaryExists = fileManager.fileExists(atPath: installedBinaryURL.path)
+        let configuredCommandPath = readClaudeDesktopConfig(at: configURL, fileManager: fileManager)
+            .config
+            .flatMap(transcriptedCommandPath(in:))
+        let hasCanonicalClaudeConfig = configuredCommandPath == installedBinaryURL.path
+        guard installedBinaryExists || hasCanonicalClaudeConfig else {
             return false
         }
+
         guard let bundledBinaryURL,
               fileManager.isExecutableFile(atPath: bundledBinaryURL.path),
-              bundledBinaryURL.standardizedFileURL.path != installedBinaryURL.standardizedFileURL.path,
-              !fileManager.contentsEqual(atPath: installedBinaryURL.path, andPath: bundledBinaryURL.path) else {
+              bundledBinaryURL.standardizedFileURL.path != installedBinaryURL.standardizedFileURL.path else {
             try writeMCPObservabilityConfigIfAvailable(
                 configURL: observabilityConfigURL,
                 infoDictionary: infoDictionary,
@@ -252,9 +268,35 @@ enum ClaudeDesktopIntegrationInstaller {
             return false
         }
 
-        try installBundledBinary(
+        let installedBinaryIsCurrent = fileManager.isExecutableFile(atPath: installedBinaryURL.path)
+            && fileManager.contentsEqual(atPath: installedBinaryURL.path, andPath: bundledBinaryURL.path)
+        guard !installedBinaryIsCurrent else {
+            try writeMCPObservabilityConfigIfAvailable(
+                configURL: observabilityConfigURL,
+                infoDictionary: infoDictionary,
+                fileManager: fileManager
+            )
+            return false
+        }
+
+        let stagedBinaryURL = try stageBundledBinary(
             from: bundledBinaryURL,
-            to: installedBinaryURL,
+            in: installedBinaryURL.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
+        defer {
+            if fileManager.fileExists(atPath: stagedBinaryURL.path) {
+                try? fileManager.removeItem(at: stagedBinaryURL)
+            }
+        }
+
+        // Validate the exact bytes we plan to install before replacing an
+        // existing helper, so failed refreshes cannot strand Claude on a bad
+        // update.
+        _ = try runSelfTest(binaryURL: stagedBinaryURL, fileManager: fileManager)
+        try replaceInstalledBinary(
+            withStagedBinaryAt: stagedBinaryURL,
+            at: installedBinaryURL,
             fileManager: fileManager
         )
         try writeMCPObservabilityConfigIfAvailable(
@@ -290,14 +332,55 @@ enum ClaudeDesktopIntegrationInstaller {
         to installedBinaryURL: URL,
         fileManager: FileManager = .default
     ) throws {
-        let installDirectory = installedBinaryURL.deletingLastPathComponent()
-        try fileManager.createDirectory(at: installDirectory, withIntermediateDirectories: true)
-
-        if fileManager.fileExists(atPath: installedBinaryURL.path) {
-            try fileManager.removeItem(at: installedBinaryURL)
+        let stagedBinaryURL = try stageBundledBinary(
+            from: bundledBinaryURL,
+            in: installedBinaryURL.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
+        defer {
+            if fileManager.fileExists(atPath: stagedBinaryURL.path) {
+                try? fileManager.removeItem(at: stagedBinaryURL)
+            }
         }
 
-        try fileManager.copyItem(at: bundledBinaryURL, to: installedBinaryURL)
+        try replaceInstalledBinary(
+            withStagedBinaryAt: stagedBinaryURL,
+            at: installedBinaryURL,
+            fileManager: fileManager
+        )
+    }
+
+    static func stageBundledBinary(
+        from bundledBinaryURL: URL,
+        in installDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        try fileManager.createDirectory(at: installDirectory, withIntermediateDirectories: true)
+        let stagedBinaryURL = installDirectory
+            .appendingPathComponent(".\(helperBinaryName).install-\(UUID().uuidString)", isDirectory: false)
+        try fileManager.copyItem(at: bundledBinaryURL, to: stagedBinaryURL)
+        try fileManager.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o755)],
+            ofItemAtPath: stagedBinaryURL.path
+        )
+        return stagedBinaryURL
+    }
+
+    static func replaceInstalledBinary(
+        withStagedBinaryAt stagedBinaryURL: URL,
+        at installedBinaryURL: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        if fileManager.fileExists(atPath: installedBinaryURL.path) {
+            _ = try fileManager.replaceItemAt(
+                installedBinaryURL,
+                withItemAt: stagedBinaryURL,
+                backupItemName: nil,
+                options: [.usingNewMetadataOnly]
+            )
+        } else {
+            try fileManager.moveItem(at: stagedBinaryURL, to: installedBinaryURL)
+        }
         try fileManager.setAttributes(
             [.posixPermissions: NSNumber(value: 0o755)],
             ofItemAtPath: installedBinaryURL.path
