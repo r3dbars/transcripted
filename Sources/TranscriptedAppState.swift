@@ -8,6 +8,11 @@ import TranscriptedCore
 class TranscriptedAppState: ObservableObject {
     private static let wakeHotkeyRetryAttempts = 3
     private static let wakeHotkeyRetryDelay: UInt64 = 500_000_000
+    private static var isLaunchSmokeMode: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
+            || environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] != nil
+    }
     let logger = AppLogSink()
     let sparkleUpdater = SparkleUpdaterController()
     let contextCapture = ContextCaptureEngine()
@@ -59,25 +64,27 @@ class TranscriptedAppState: ObservableObject {
         guard !isInitialized else { return }
         isInitialized = true
 
-        do {
-            try LaunchAtLoginController.applySavedOptOutAtStartup()
-        } catch {
-            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
-                message: error.localizedDescription)
+        if !Self.isLaunchSmokeMode {
+            do {
+                try LaunchAtLoginController.applySavedOptOutAtStartup()
+            } catch {
+                EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_opt_out_sync_failed",
+                    message: error.localizedDescription)
+            }
+
+            // Covers existing installs that finished onboarding before the default
+            // existed; fresh installs get it from the onboarding-completion hook.
+            do {
+                try LaunchAtLoginController.applyDefaultEnableIfNeeded(
+                    onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
+                )
+            } catch {
+                EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
+                    message: error.localizedDescription)
+            }
         }
 
-        // Covers existing installs that finished onboarding before the default
-        // existed; fresh installs get it from the onboarding-completion hook.
-        do {
-            try LaunchAtLoginController.applyDefaultEnableIfNeeded(
-                onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted()
-            )
-        } catch {
-            EventReporter.shared.capture(level: .warning, engine: "app", event: "login_item_default_enable_failed",
-                message: error.localizedDescription)
-        }
-
-        if ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] == nil {
+        if !Self.isLaunchSmokeMode {
             sparkleUpdater.performStartupUpdateCheckIfNeeded()
         }
         AppSoundPlayer.shared.setWarningReporter { cue in
@@ -99,7 +106,7 @@ class TranscriptedAppState: ObservableObject {
             startExistingInstallModelPrefetchIfNeeded()
         }
         startAudioStorageMaintenanceIfNeeded()
-        if ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] == nil {
+        if !Self.isLaunchSmokeMode {
             startAgentHelperRefreshIfNeeded()
         }
         if #available(macOS 14.0, *) {

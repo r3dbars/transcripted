@@ -77,7 +77,9 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private static let pendingInstalledUpdateVersionKey = "Transcripted.PendingInstalledUpdateVersion"
     private static let pendingInstalledUpdatePreviousVersionKey = "Transcripted.PendingInstalledUpdatePreviousVersion"
     private static var isLaunchUISmoke: Bool {
-        ProcessInfo.processInfo.environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
+        let environment = ProcessInfo.processInfo.environment
+        return environment["TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT"] != nil
+            || environment["TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT"] != nil
     }
 
     override init() {

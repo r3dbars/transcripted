@@ -854,7 +854,7 @@ run_packaged_tail() {
   fi
 
   run_step "70-packaged-app-smoke" "Packaged app smoke" "yes" \
-    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke --report $(shell_quote "${RAW_DIR}/packaged-app-smoke.json") --ui-report $(shell_quote "${RAW_DIR}/packaged-app-ui-smoke.json")"
+    "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke --run-first-run-reliability --report $(shell_quote "${RAW_DIR}/packaged-app-smoke.json") --ui-report $(shell_quote "${RAW_DIR}/packaged-app-ui-smoke.json") --first-run-report $(shell_quote "${RAW_DIR}/packaged-app-first-run-reliability.json")"
 }
 
 run_corpus_tail() {
