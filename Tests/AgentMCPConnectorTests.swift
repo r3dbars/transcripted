@@ -697,6 +697,7 @@ func testAgentMCPConnector() {
         )
 
         assertEqual(installed?.path, installedBinaryURL.path, "ensure should return the stable installed path")
+        assertEqual(installed?.action, .freshInstall, "missing helpers should report a fresh install action")
         assertEqual(
             (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? "",
             "#!/bin/sh\necho v2\n",
@@ -715,7 +716,7 @@ func testAgentMCPConnector() {
         assertEqual(filePermissions(at: observabilityConfigURL), NSNumber(value: 0o600), "helper observability config should be owner-only")
 
         try? "#!/bin/sh\necho v1\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
-        _ = try? AgentMCPConnector.ensureHelperInstalled(
+        let refreshed = try? AgentMCPConnector.ensureHelperInstalled(
             bundledBinaryURL: bundledBinaryURL,
             installedBinaryURL: installedBinaryURL,
             observabilityConfigURL: observabilityConfigURL,
@@ -724,6 +725,7 @@ func testAgentMCPConnector() {
                 AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
             ]
         )
+        assertEqual(refreshed?.action, .repair, "stale helpers should report a repair action")
         assertEqual(
             (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? "",
             "#!/bin/sh\necho v2\n",

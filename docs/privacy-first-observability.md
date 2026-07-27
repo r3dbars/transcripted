@@ -104,6 +104,7 @@ allowlist.
 - `activation_habit_loop_actioned`
 - `activation_agent_prompt_action_clicked`
 - `activation_agent_setup_cta_clicked`
+- `agent_setup_lifecycle_observed`
 - `agent_capture_query_observed`
 - `activation_return_proxy_observed`
 - `workflow_abandoned`

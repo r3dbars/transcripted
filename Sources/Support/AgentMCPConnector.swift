@@ -130,6 +130,21 @@ struct AgentMCPConnectResult: Equatable {
     let replacedConfigBackupURL: URL?
 }
 
+struct AgentMCPHelperInstallResult: Equatable {
+    enum Action: String, Equatable {
+        case unchanged
+        case freshInstall = "fresh_install"
+        case repair
+    }
+
+    let helperURL: URL
+    let action: Action
+
+    var path: String {
+        helperURL.path
+    }
+}
+
 enum AgentMCPConnector {
     static let serverName = ClaudeDesktopIntegrationInstaller.serverName
 
@@ -164,20 +179,28 @@ enum AgentMCPConnector {
         paths: AgentMCPConnectorPaths = AgentMCPConnectorPaths(),
         fileManager: FileManager = .default
     ) -> Bool {
+        configuredCommandPath(for: agent, paths: paths, fileManager: fileManager) == helperCommandPath
+    }
+
+    static func configuredCommandPath(
+        for agent: AgentMCPAgent,
+        paths: AgentMCPConnectorPaths = AgentMCPConnectorPaths(),
+        fileManager: FileManager = .default
+    ) -> String? {
         switch agent {
         case .claudeDesktop:
             return ClaudeDesktopIntegrationInstaller.currentStatus(fileManager: fileManager).isInstalled
+                ? ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL.path
+                : nil
         case .claudeCode:
             return configuredCommandPath(inJSONConfigAt: paths.claudeCodeUserConfigURL, fileManager: fileManager)
-                == helperCommandPath
         case .codex:
             guard let text = try? String(contentsOf: paths.codexConfigURL, encoding: .utf8) else {
-                return false
+                return nil
             }
-            return codexConfiguredCommandPath(inConfigText: text) == helperCommandPath
+            return codexConfiguredCommandPath(inConfigText: text)
         case .cursor:
             return configuredCommandPath(inJSONConfigAt: paths.cursorConfigURL, fileManager: fileManager)
-                == helperCommandPath
         }
     }
 
@@ -192,27 +215,32 @@ enum AgentMCPConnector {
         observabilityConfigURL: URL = ClaudeDesktopIntegrationInstaller.mcpObservabilityConfigURL,
         infoDictionary: [String: Any]? = Bundle.main.infoDictionary,
         fileManager: FileManager = .default
-    ) throws -> URL {
+    ) throws -> AgentMCPHelperInstallResult {
         guard let bundledBinaryURL,
               fileManager.isExecutableFile(atPath: bundledBinaryURL.path) else {
             throw ClaudeDesktopIntegrationError.bundledBinaryMissing(bundledBinaryURL)
         }
 
-        let installedIsCurrent = fileManager.fileExists(atPath: installedBinaryURL.path)
+        let installedExists = fileManager.fileExists(atPath: installedBinaryURL.path)
+        let installedIsCurrent = installedExists
             && fileManager.contentsEqual(atPath: installedBinaryURL.path, andPath: bundledBinaryURL.path)
+        let action: AgentMCPHelperInstallResult.Action
         if !installedIsCurrent {
             try ClaudeDesktopIntegrationInstaller.installBundledBinary(
                 from: bundledBinaryURL,
                 to: installedBinaryURL,
                 fileManager: fileManager
             )
+            action = installedExists ? .repair : .freshInstall
+        } else {
+            action = .unchanged
         }
         try ClaudeDesktopIntegrationInstaller.writeMCPObservabilityConfigIfAvailable(
             configURL: observabilityConfigURL,
             infoDictionary: infoDictionary,
             fileManager: fileManager
         )
-        return installedBinaryURL
+        return AgentMCPHelperInstallResult(helperURL: installedBinaryURL, action: action)
     }
 
     /// Points the agent's config at the installed helper. Claude Desktop runs
