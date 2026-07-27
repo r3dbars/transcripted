@@ -364,6 +364,38 @@ func testTranscriptedPermissionAccess() async {
         )
     }
 
+    await runSuite("TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus — smoke mode preserves cached granted state without a live probe") {
+        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
+        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
+        defer {
+            restore(originalKnown, forKey: knownKey)
+            restore(originalGranted, forKey: grantedKey)
+        }
+
+        UserDefaults.standard.set(true, forKey: knownKey)
+        UserDefaults.standard.set(true, forKey: grantedKey)
+
+        let requestBox = PermissionRequestBox()
+        let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus(
+            requester: {
+                requestBox.callCount += 1
+                return false
+            },
+            skipSmokeRevalidation: true
+        )
+
+        assertTrue(granted, "smoke-mode revalidation should keep the cached granted state")
+        assertEqual(requestBox.callCount, 0, "smoke mode should not perform a live system-audio probe")
+        assertTrue(
+            UserDefaults.standard.bool(forKey: knownKey),
+            "smoke mode should keep the cached system-audio state marked as known"
+        )
+        assertTrue(
+            UserDefaults.standard.bool(forKey: grantedKey),
+            "smoke mode should preserve the cached granted state"
+        )
+    }
+
     await runSuite("TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded — skips requester when microphone is already authorized") {
         let requestBox = PermissionRequestBox()
         let granted = await TranscriptedPermissionAccess.requestMicrophoneAccessIfNeeded(

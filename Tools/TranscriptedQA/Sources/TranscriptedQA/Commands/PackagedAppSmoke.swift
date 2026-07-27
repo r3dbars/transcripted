@@ -847,8 +847,7 @@ final class FirstRunReliabilitySmokeRunner {
         let onboardingWorkspace = makeWorkspace(id: "zero-state", evidenceRoot: evidenceRoot)
         scenarios.append(runZeroStateAndRestartScenario(executableURL: executableURL, workspace: onboardingWorkspace))
 
-        let permissionsWorkspace = makeWorkspace(id: "permissions-matrix", evidenceRoot: evidenceRoot)
-        scenarios.append(runPermissionsMatrixScenario(executableURL: executableURL, workspace: permissionsWorkspace))
+        scenarios.append(runPermissionsMatrixScenario(executableURL: executableURL, evidenceRoot: evidenceRoot))
 
         let staleCacheWorkspace = makeWorkspace(id: "stale-model-cache", evidenceRoot: evidenceRoot)
         scenarios.append(runStaleModelCacheScenario(executableURL: executableURL, workspace: staleCacheWorkspace))
@@ -949,16 +948,18 @@ final class FirstRunReliabilitySmokeRunner {
 
     private func runPermissionsMatrixScenario(
         executableURL: URL,
-        workspace: FirstRunScenarioWorkspace
+        evidenceRoot: URL
     ) -> FirstRunReliabilityScenario {
+        let deniedWorkspace = makeWorkspace(id: "permissions-matrix-denied", evidenceRoot: evidenceRoot)
+        let grantedWorkspace = makeWorkspace(id: "permissions-matrix-granted", evidenceRoot: evidenceRoot)
         let denied = launch(
             executableURL: executableURL,
-            workspace: workspace,
+            workspace: deniedWorkspace,
             tag: "permissions-denied",
             options: FirstRunLaunchOptions(
                 onboardingCompleted: false,
                 forceOnboarding: true,
-                preferenceOverrides: [
+                launchDefaultsOverrides: [
                     "systemAudioRecordingPermissionKnown": true,
                     "systemAudioRecordingPermissionGranted": false,
                 ]
@@ -966,12 +967,12 @@ final class FirstRunReliabilitySmokeRunner {
         )
         let granted = launch(
             executableURL: executableURL,
-            workspace: workspace,
+            workspace: grantedWorkspace,
             tag: "permissions-granted",
             options: FirstRunLaunchOptions(
                 onboardingCompleted: true,
                 forceOnboarding: false,
-                preferenceOverrides: [
+                launchDefaultsOverrides: [
                     "systemAudioRecordingPermissionKnown": true,
                     "systemAudioRecordingPermissionGranted": true,
                 ]
@@ -980,15 +981,15 @@ final class FirstRunReliabilitySmokeRunner {
         return buildScenario(
             id: "permissions-state-matrix",
             launches: [denied, granted],
-            successDetail: "The packaged app preserved incomplete and completed onboarding prefs while exercising cached denied and granted system-audio permission flags from isolated preferences."
+            successDetail: "The packaged app preserved incomplete and completed onboarding prefs while exercising cached denied and granted system-audio permission flags from separate isolated launch defaults."
         ) { reports in
             guard reports.count == 2 else {
                 return ["expected denied and granted permission launch reports"]
             }
             let denied = reports[0]
             let granted = reports[1]
-            var failures = isolationFailures(in: denied, workspace: workspace)
-            failures.append(contentsOf: isolationFailures(in: granted, workspace: workspace))
+            var failures = isolationFailures(in: denied, workspace: deniedWorkspace)
+            failures.append(contentsOf: isolationFailures(in: granted, workspace: grantedWorkspace))
             failures.append(contentsOf: expectedBooleanFailures(
                 denied.runtime.systemAudioPermissionKnown && !denied.runtime.systemAudioPermissionGranted,
                 message: "denied launch should report the cached known=true granted=false system-audio flags"
@@ -996,6 +997,11 @@ final class FirstRunReliabilitySmokeRunner {
             failures.append(contentsOf: expectedBooleanFailures(
                 granted.runtime.systemAudioPermissionKnown && granted.runtime.systemAudioPermissionGranted,
                 message: "granted launch should report the cached known=true granted=true system-audio flags"
+            ))
+            failures.append(contentsOf: expectedBooleanFailures(
+                denied.runtime.homePath != granted.runtime.homePath
+                    && denied.runtime.containerPath != granted.runtime.containerPath,
+                message: "cached permission-state coverage should launch denied and granted cases from separate isolated homes and containers"
             ))
             failures.append(contentsOf: expectedBooleanFailures(
                 denied.permissionsOnboardingCompleted == false && granted.permissionsOnboardingCompleted,
@@ -1384,6 +1390,10 @@ final class FirstRunReliabilitySmokeRunner {
             "-observability-anonymous-analytics-enabled", "NO",
             "-observability-crash-reporting-enabled", "NO",
         ]
+        for key in options.launchDefaultsOverrides.keys.sorted() {
+            guard let value = userDefaultsArgumentValue(options.launchDefaultsOverrides[key]) else { continue }
+            process.arguments?.append(contentsOf: ["-\(key)", value])
+        }
 
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = workspace.homeURL.path
@@ -1691,6 +1701,21 @@ final class FirstRunReliabilitySmokeRunner {
             waitForProcessExit(process)
         }
     }
+
+    private func userDefaultsArgumentValue(_ value: Any?) -> String? {
+        switch value {
+        case let value as Bool:
+            return value ? "YES" : "NO"
+        case let value as Int:
+            return String(value)
+        case let value as Double:
+            return String(value)
+        case let value as String:
+            return value
+        default:
+            return nil
+        }
+    }
 }
 
 private struct FirstRunScenarioWorkspace {
@@ -1705,6 +1730,7 @@ private struct FirstRunLaunchOptions {
     let onboardingCompleted: Bool
     let forceOnboarding: Bool
     var preferenceOverrides: [String: Any] = [:]
+    var launchDefaultsOverrides: [String: Any] = [:]
     var environmentOverrides: [String: String] = [:]
     var containerURL: URL? = nil
 }
