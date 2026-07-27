@@ -202,9 +202,21 @@ enum ClaudeDesktopIntegrationInstaller {
             throw ClaudeDesktopIntegrationError.bundledBinaryMissing(bundledBinaryURL)
         }
 
-        try installBundledBinary(
+        let stagedBinaryURL = try stageBundledBinary(
             from: bundledBinaryURL,
-            to: installedBinaryURL,
+            in: installedBinaryURL.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
+        defer {
+            if fileManager.fileExists(atPath: stagedBinaryURL.path) {
+                try? fileManager.removeItem(at: stagedBinaryURL)
+            }
+        }
+
+        let selfTest = try runSelfTest(binaryURL: stagedBinaryURL, fileManager: fileManager)
+        try replaceInstalledBinary(
+            withStagedBinaryAt: stagedBinaryURL,
+            at: installedBinaryURL,
             fileManager: fileManager
         )
         try writeMCPObservabilityConfigIfAvailable(fileManager: fileManager)
@@ -215,7 +227,6 @@ enum ClaudeDesktopIntegrationInstaller {
             fileManager: fileManager
         )
 
-        let selfTest = try runSelfTest(binaryURL: installedBinaryURL, fileManager: fileManager)
         return ClaudeDesktopIntegrationInstallResult(
             configURL: configURL,
             installedBinaryURL: installedBinaryURL,
@@ -268,9 +279,24 @@ enum ClaudeDesktopIntegrationInstaller {
             return false
         }
 
-        try installBundledBinary(
+        let stagedBinaryURL = try stageBundledBinary(
             from: bundledBinaryURL,
-            to: installedBinaryURL,
+            in: installedBinaryURL.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
+        defer {
+            if fileManager.fileExists(atPath: stagedBinaryURL.path) {
+                try? fileManager.removeItem(at: stagedBinaryURL)
+            }
+        }
+
+        // Validate the exact bytes we plan to install before replacing an
+        // existing helper, so failed refreshes cannot strand Claude on a bad
+        // update.
+        _ = try runSelfTest(binaryURL: stagedBinaryURL, fileManager: fileManager)
+        try replaceInstalledBinary(
+            withStagedBinaryAt: stagedBinaryURL,
+            at: installedBinaryURL,
             fileManager: fileManager
         )
         try writeMCPObservabilityConfigIfAvailable(
@@ -306,22 +332,45 @@ enum ClaudeDesktopIntegrationInstaller {
         to installedBinaryURL: URL,
         fileManager: FileManager = .default
     ) throws {
-        let installDirectory = installedBinaryURL.deletingLastPathComponent()
-        try fileManager.createDirectory(at: installDirectory, withIntermediateDirectories: true)
-        let stagedBinaryURL = installDirectory
-            .appendingPathComponent(".\(helperBinaryName).install-\(UUID().uuidString)", isDirectory: false)
+        let stagedBinaryURL = try stageBundledBinary(
+            from: bundledBinaryURL,
+            in: installedBinaryURL.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
         defer {
             if fileManager.fileExists(atPath: stagedBinaryURL.path) {
                 try? fileManager.removeItem(at: stagedBinaryURL)
             }
         }
 
+        try replaceInstalledBinary(
+            withStagedBinaryAt: stagedBinaryURL,
+            at: installedBinaryURL,
+            fileManager: fileManager
+        )
+    }
+
+    static func stageBundledBinary(
+        from bundledBinaryURL: URL,
+        in installDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        try fileManager.createDirectory(at: installDirectory, withIntermediateDirectories: true)
+        let stagedBinaryURL = installDirectory
+            .appendingPathComponent(".\(helperBinaryName).install-\(UUID().uuidString)", isDirectory: false)
         try fileManager.copyItem(at: bundledBinaryURL, to: stagedBinaryURL)
         try fileManager.setAttributes(
             [.posixPermissions: NSNumber(value: 0o755)],
             ofItemAtPath: stagedBinaryURL.path
         )
+        return stagedBinaryURL
+    }
 
+    static func replaceInstalledBinary(
+        withStagedBinaryAt stagedBinaryURL: URL,
+        at installedBinaryURL: URL,
+        fileManager: FileManager = .default
+    ) throws {
         if fileManager.fileExists(atPath: installedBinaryURL.path) {
             _ = try fileManager.replaceItemAt(
                 installedBinaryURL,

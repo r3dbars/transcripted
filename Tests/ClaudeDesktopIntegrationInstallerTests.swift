@@ -667,9 +667,10 @@ func testClaudeDesktopIntegrationInstaller() {
         try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
-        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":1,"dictation_file_count":0}
+        """)
         try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
-        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
         _ = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(commandPath: installedBinaryURL.path, configURL: configURL)
 
         let status = ClaudeDesktopIntegrationInstaller.currentStatus(
@@ -702,41 +703,45 @@ func testClaudeDesktopIntegrationInstaller() {
         try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? "#!/bin/sh\nexit 0\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
-        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":1,"dictation_file_count":0}
+        """)
         try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: installedBinaryURL.path)
-        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
 
-        let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
-            bundledBinaryURL: bundledBinaryURL,
-            installedBinaryURL: installedBinaryURL,
-            observabilityConfigURL: helperConfigURL,
-            infoDictionary: [
-                AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
-                AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
-                ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "1.2.3",
-                AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
-                AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc123def456",
-            ]
-        )
+        do {
+            let refreshed = try ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
+                bundledBinaryURL: bundledBinaryURL,
+                installedBinaryURL: installedBinaryURL,
+                observabilityConfigURL: helperConfigURL,
+                infoDictionary: [
+                    AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
+                    AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                    ClaudeDesktopIntegrationInstaller.appVersionInfoKey: "1.2.3",
+                    AnalyticsRuntimeConfiguration.buildChannelInfoKey: "release",
+                    AnalyticsRuntimeConfiguration.buildRevisionInfoKey: "abc123def456",
+                ]
+            )
 
-        assertEqual(refreshed, true, "stale installed helper should be refreshed at launch")
-        assertEqual(
-            (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? "",
-            "#!/bin/sh\necho current\n",
-            "refresh should copy the bundled helper bytes over the stale install"
-        )
-        assertTrue(
-            FileManager.default.isExecutableFile(atPath: installedBinaryURL.path),
-            "refreshed helper should stay executable"
-        )
-        assertTrue(
-            FileManager.default.fileExists(atPath: helperConfigURL.path),
-            "refresh should keep installed-helper analytics config in sync"
-        )
-        let helperConfig = helperObservabilityConfig(at: helperConfigURL)
-        assertEqual(helperConfig?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "1.2.3", "refresh should write the current app version")
-        assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildChannelInfoKey], "release", "refresh should write the current build channel")
-        assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "abc123def456", "refresh should write the current build revision")
+            assertEqual(refreshed, true, "stale installed helper should be refreshed at launch")
+            assertTrue(
+                FileManager.default.contentsEqual(atPath: bundledBinaryURL.path, andPath: installedBinaryURL.path),
+                "refresh should copy the bundled helper bytes over the stale install"
+            )
+            assertTrue(
+                FileManager.default.isExecutableFile(atPath: installedBinaryURL.path),
+                "refreshed helper should stay executable"
+            )
+            assertTrue(
+                FileManager.default.fileExists(atPath: helperConfigURL.path),
+                "refresh should keep installed-helper analytics config in sync"
+            )
+            let helperConfig = helperObservabilityConfig(at: helperConfigURL)
+            assertEqual(helperConfig?[ClaudeDesktopIntegrationInstaller.appVersionInfoKey], "1.2.3", "refresh should write the current app version")
+            assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildChannelInfoKey], "release", "refresh should write the current build channel")
+            assertEqual(helperConfig?[AnalyticsRuntimeConfiguration.buildRevisionInfoKey], "abc123def456", "refresh should write the current build revision")
+        } catch {
+            assertTrue(false, "stale installed helper refresh should succeed: \(error)")
+        }
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — leaves a current helper untouched") {
@@ -797,8 +802,9 @@ func testClaudeDesktopIntegrationInstaller() {
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
         try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":1,"dictation_file_count":0}
+        """)
         _ = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(
             commandPath: installedBinaryURL.path,
             configURL: configURL
@@ -840,10 +846,13 @@ func testClaudeDesktopIntegrationInstaller() {
 
         try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? "#!/bin/sh\necho current\n".write(to: installedBinaryURL, atomically: true, encoding: .utf8)
-        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
+        try? writeSelfTestHelper(to: installedBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":2,"dictation_file_count":0}
+        """)
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":2,"dictation_file_count":0}
+        """)
         try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o644)], ofItemAtPath: installedBinaryURL.path)
-        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
         _ = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(
             commandPath: installedBinaryURL.path,
             configURL: configURL
@@ -862,6 +871,56 @@ func testClaudeDesktopIntegrationInstaller() {
             FileManager.default.isExecutableFile(atPath: installedBinaryURL.path),
             "permission repair should restore an executable helper"
         )
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded — preserves a working helper when the bundled refresh fails self-test") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeHelperRefreshFailureTests-\(UUID().uuidString)", isDirectory: true)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let helperConfigURL = tempRoot.appendingPathComponent("mcp-observability.plist", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: installedBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? writeSelfTestHelper(to: installedBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":3,"dictation_file_count":1}
+        """)
+        let installedBeforeFailure = (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? ""
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: "helper failed", exitCode: 9)
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
+                bundledBinaryURL: bundledBinaryURL,
+                installedBinaryURL: installedBinaryURL,
+                observabilityConfigURL: helperConfigURL,
+                infoDictionary: [
+                    AnalyticsRuntimeConfiguration.apiKeyInfoKey: "phc_current",
+                    AnalyticsRuntimeConfiguration.hostInfoKey: "https://us.i.posthog.com",
+                ]
+            )
+            assertTrue(false, "refresh should surface a bundled helper that fails self-test")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(
+                error,
+                .selfTestFailed(status: 9, output: "helper failed\n"),
+                "refresh should preserve the bundled helper diagnostics when self-test fails"
+            )
+            assertEqual(
+                (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? "",
+                installedBeforeFailure,
+                "a failed refresh must keep the previously working helper installed"
+            )
+            assertFalse(
+                FileManager.default.fileExists(atPath: helperConfigURL.path),
+                "failed refresh should not rewrite helper observability config"
+            )
+        } catch {
+            assertTrue(false, "failed refresh should throw ClaudeDesktopIntegrationError: \(error)")
+        }
     }
 
     runSuite("ClaudeDesktopIntegrationInstaller.installBundledBinary — preserves installed helper when staging fails") {
@@ -1017,8 +1076,9 @@ func testClaudeDesktopIntegrationInstaller() {
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
         try? FileManager.default.createDirectory(at: bundledBinaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? "#!/bin/sh\necho current\n".write(to: bundledBinaryURL, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: bundledBinaryURL.path)
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":0,"dictation_file_count":0}
+        """)
 
         let refreshed = try? ClaudeDesktopIntegrationInstaller.refreshInstalledHelperIfNeeded(
             bundledBinaryURL: bundledBinaryURL,
@@ -1484,10 +1544,68 @@ func testClaudeDesktopIntegrationInstaller() {
                 .selfTestFailed(status: 7, output: "helper failed\n"),
                 "self-test failure should include exit status and helper output"
             )
-            assertTrue(FileManager.default.isExecutableFile(atPath: installedBinaryURL.path), "failed self-test should still leave the copied helper for inspection")
-            assertEqual(transcriptedCommandPath(inConfigAt: configURL), installedBinaryURL.path, "config should show which helper failed self-test")
+            assertFalse(
+                FileManager.default.fileExists(atPath: installedBinaryURL.path),
+                "failed self-test should not replace a helper on disk"
+            )
+            assertFalse(
+                FileManager.default.fileExists(atPath: configURL.path),
+                "failed self-test should not rewrite Claude config"
+            )
         } catch {
             assertTrue(false, "self-test failure should throw ClaudeDesktopIntegrationError: \(error)")
+        }
+    }
+
+    runSuite("ClaudeDesktopIntegrationInstaller.installForClaudeDesktop — preserves an existing helper when replacement self-test fails") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeInstallReplaceFailureTests-\(UUID().uuidString)", isDirectory: true)
+        let configURL = tempRoot
+            .appendingPathComponent("Claude", isDirectory: true)
+            .appendingPathComponent("claude_desktop_config.json", isDirectory: false)
+        let bundledBinaryURL = tempRoot
+            .appendingPathComponent("bundle", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        let installedBinaryURL = tempRoot
+            .appendingPathComponent("mcp", isDirectory: true)
+            .appendingPathComponent("transcripted-mcp", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? writeSelfTestHelper(to: installedBinaryURL, stdout: """
+        {"ok":true,"meetings_directory":"meetings","dictations_directory":"dictations","index_directory":"index","meeting_file_count":4,"dictation_file_count":1}
+        """)
+        let installedBeforeFailure = (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? ""
+        _ = try? ClaudeDesktopIntegrationInstaller.writeClaudeDesktopConfig(
+            commandPath: installedBinaryURL.path,
+            configURL: configURL
+        )
+        try? writeSelfTestHelper(to: bundledBinaryURL, stdout: "helper failed", exitCode: 7)
+
+        do {
+            _ = try ClaudeDesktopIntegrationInstaller.installForClaudeDesktop(
+                bundledBinaryURL: bundledBinaryURL,
+                installedBinaryURL: installedBinaryURL,
+                configURL: configURL
+            )
+            assertTrue(false, "install should surface helper self-test failures before replacing a working helper")
+        } catch let error as ClaudeDesktopIntegrationError {
+            assertEqual(
+                error,
+                .selfTestFailed(status: 7, output: "helper failed\n"),
+                "replacement failure should keep helper self-test diagnostics"
+            )
+            assertEqual(
+                (try? String(contentsOf: installedBinaryURL, encoding: .utf8)) ?? "",
+                installedBeforeFailure,
+                "replacement failure must leave the previous helper installed"
+            )
+            assertEqual(
+                transcriptedCommandPath(inConfigAt: configURL),
+                installedBinaryURL.path,
+                "replacement failure must leave Claude config pointing at the last known-good helper"
+            )
+        } catch {
+            assertTrue(false, "replacement self-test failure should throw ClaudeDesktopIntegrationError: \(error)")
         }
     }
 
@@ -1525,8 +1643,14 @@ func testClaudeDesktopIntegrationInstaller() {
                 "Transcripted direct tools ran, but the health check output could not be read.",
                 "install should keep unreadable self-test output generic for users"
             )
-            assertTrue(FileManager.default.isExecutableFile(atPath: installedBinaryURL.path), "failed self-test decode should leave the copied helper for inspection")
-            assertEqual(transcriptedCommandPath(inConfigAt: configURL), installedBinaryURL.path, "config should show which helper produced unreadable self-test output")
+            assertFalse(
+                FileManager.default.fileExists(atPath: installedBinaryURL.path),
+                "failed self-test decode should not replace a helper on disk"
+            )
+            assertFalse(
+                FileManager.default.fileExists(atPath: configURL.path),
+                "failed self-test decode should not rewrite Claude config"
+            )
         } catch {
             assertTrue(false, "unreadable self-test output should throw ClaudeDesktopIntegrationError: \(error)")
         }
@@ -1691,8 +1815,14 @@ func testClaudeDesktopIntegrationInstaller() {
                 .selfTestReportedUnhealthy(output: "\(output)\n"),
                 "install should report unhealthy self-test output from the copied helper"
             )
-            assertTrue(FileManager.default.isExecutableFile(atPath: installedBinaryURL.path), "unhealthy self-test should leave the copied helper for inspection")
-            assertEqual(transcriptedCommandPath(inConfigAt: configURL), installedBinaryURL.path, "config should show which helper reported an unhealthy self-test")
+            assertFalse(
+                FileManager.default.fileExists(atPath: installedBinaryURL.path),
+                "unhealthy self-test should not replace a helper on disk"
+            )
+            assertFalse(
+                FileManager.default.fileExists(atPath: configURL.path),
+                "unhealthy self-test should not rewrite Claude config"
+            )
         } catch {
             assertTrue(false, "unhealthy install self-test output should throw ClaudeDesktopIntegrationError: \(error)")
         }
