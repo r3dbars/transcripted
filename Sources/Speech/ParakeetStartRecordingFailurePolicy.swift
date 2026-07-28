@@ -232,15 +232,6 @@ enum ParakeetAudioFormatReadinessPolicy {
     }
 }
 
-enum ParakeetInputOverrideSettlePolicy {
-    static func delayNanoseconds(afterImmediateReadiness readiness: ParakeetAudioFormatReadiness) -> UInt64 {
-        switch readiness {
-        case .ready, .invalid, .routeNotSettled:
-            return TranscriptedConstants.audioRecoveryDelay
-        }
-    }
-}
-
 enum ParakeetTapSampleRatePolicy {
     static func effectiveSampleRate(
         bufferSampleRate: Double,
