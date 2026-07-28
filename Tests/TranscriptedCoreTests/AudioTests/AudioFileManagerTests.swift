@@ -4,6 +4,7 @@ import XCTest
 
 @available(macOS 14.0, *)
 final class AudioFileManagerTests: XCTestCase {
+    private final class StubSystemCapture {}
     private final class StubSystemWriter {}
 
     // MARK: - Test scaffolding
@@ -26,34 +27,88 @@ final class AudioFileManagerTests: XCTestCase {
             .appendingPathComponent("\(name)-\(UUID().uuidString)", isDirectory: true)
     }
 
-    func testSystemAudioWriterOwnershipRejectsStaleCleanup() {
-        var ownership = SystemAudioWriterOwnership<StubSystemWriter>()
+    func testSystemAudioCaptureAttemptOwnershipRejectsStaleWriterMutation() {
+        var ownership =
+            SystemAudioCaptureAttemptOwnership<StubSystemCapture, StubSystemWriter>()
+        let oldCapture = StubSystemCapture()
+        let newCapture = StubSystemCapture()
         let oldWriter = StubSystemWriter()
         let newWriter = StubSystemWriter()
 
-        XCTAssertNil(ownership.begin(generation: 1))
-        XCTAssertTrue(ownership.install(oldWriter, generation: 1))
+        XCTAssertNil(ownership.begin(generation: 1, capture: oldCapture))
+        XCTAssertTrue(
+            ownership.install(oldWriter, generation: 1, capture: oldCapture)
+        )
 
-        XCTAssertTrue(ownership.begin(generation: 2) === oldWriter)
-        XCTAssertTrue(ownership.install(newWriter, generation: 2))
+        let displaced = ownership.begin(generation: 2, capture: newCapture)
+        XCTAssertTrue(displaced?.capture === oldCapture)
+        XCTAssertTrue(displaced?.writer === oldWriter)
+        XCTAssertTrue(
+            ownership.install(newWriter, generation: 2, capture: newCapture)
+        )
 
-        XCTAssertNil(ownership.takeWriterOwned(by: 1))
-        XCTAssertTrue(ownership.writerOwned(by: 2) === newWriter)
+        XCTAssertNil(ownership.takeWriterOwned(by: 1, capture: oldCapture))
+        XCTAssertTrue(
+            ownership.writerOwned(by: 2, capture: newCapture) === newWriter
+        )
     }
 
-    func testSystemAudioWriterOwnershipRejectsLateFailureInstall() {
-        var ownership = SystemAudioWriterOwnership<StubSystemWriter>()
+    func testSystemAudioCaptureAttemptOwnershipKeepsOldStopAwayFromNewCapture() {
+        var ownership =
+            SystemAudioCaptureAttemptOwnership<StubSystemCapture, StubSystemWriter>()
+        let oldCapture = StubSystemCapture()
+        let newCapture = StubSystemCapture()
+
+        XCTAssertNil(ownership.begin(generation: 10, capture: oldCapture))
+        XCTAssertNil(ownership.begin(generation: 11, capture: newCapture)?.writer)
+
+        XCTAssertNil(ownership.takeAttemptOwned(by: 10))
+        XCTAssertTrue(ownership.captureOwned(by: 11) === newCapture)
+    }
+
+    func testSystemAudioCaptureAttemptOwnershipRejectsLateCallbackInstall() {
+        var ownership =
+            SystemAudioCaptureAttemptOwnership<StubSystemCapture, StubSystemWriter>()
+        let lateCapture = StubSystemCapture()
+        let currentCapture = StubSystemCapture()
         let lateWriter = StubSystemWriter()
         let currentWriter = StubSystemWriter()
 
-        XCTAssertNil(ownership.begin(generation: 10))
-        XCTAssertNil(ownership.begin(generation: 11))
-        XCTAssertNil(ownership.begin(generation: 10))
+        XCTAssertNil(ownership.begin(generation: 10, capture: lateCapture))
+        XCTAssertNil(ownership.begin(generation: 11, capture: currentCapture)?.writer)
+        XCTAssertNil(ownership.begin(generation: 10, capture: lateCapture))
 
-        XCTAssertFalse(ownership.install(lateWriter, generation: 10))
-        XCTAssertFalse(ownership.owns(generation: 10))
-        XCTAssertTrue(ownership.install(currentWriter, generation: 11))
-        XCTAssertTrue(ownership.writerOwned(by: 11) === currentWriter)
+        XCTAssertFalse(
+            ownership.install(lateWriter, generation: 10, capture: lateCapture)
+        )
+        XCTAssertFalse(ownership.owns(generation: 10, capture: lateCapture))
+        XCTAssertTrue(
+            ownership.install(currentWriter, generation: 11, capture: currentCapture)
+        )
+        XCTAssertTrue(
+            ownership.writerOwned(by: 11, capture: currentCapture) === currentWriter
+        )
+    }
+
+    func testStalledSystemAudioSetupDoesNotBlockNextAttempt() {
+        let root = makeRoot(name: "ConcurrentSystemAudioSetup")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = makeAudio(root: root)
+        let releaseFirst = DispatchSemaphore(value: 0)
+        let firstStarted = expectation(description: "first setup started")
+        let secondStarted = expectation(description: "second setup started")
+
+        audio.systemAudioSetupQueue.async {
+            firstStarted.fulfill()
+            _ = releaseFirst.wait(timeout: .now() + 2)
+        }
+        wait(for: [firstStarted], timeout: 1)
+
+        audio.systemAudioSetupQueue.async {
+            secondStarted.fulfill()
+        }
+        wait(for: [secondStarted], timeout: 0.5)
+        releaseFirst.signal()
     }
 
     private func makeNonInterleavedBuffer(

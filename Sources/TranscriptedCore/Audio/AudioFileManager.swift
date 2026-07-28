@@ -2,52 +2,77 @@ import Foundation
 @preconcurrency import AVFoundation
 import QuartzCore
 
-/// Queue-confined ownership for the system-audio writer. A newer recording
-/// claims the slot before its asynchronous setup begins, so late setup,
-/// cleanup, or failure work from an older generation cannot mutate its writer.
-struct SystemAudioWriterOwnership<Writer: AnyObject> {
-    private(set) var writer: Writer?
-    private(set) var generation: UInt64?
-
-    @discardableResult
-    mutating func begin(generation: UInt64) -> Writer? {
-        if let currentGeneration = self.generation,
-           currentGeneration > generation {
-            return nil
-        }
-        let displacedWriter = writer
-        writer = nil
-        self.generation = generation
-        return displacedWriter
+/// Queue-confined ownership for one system-audio capture attempt. Capture
+/// lifecycle and writer lifecycle move together so stale setup, cleanup, and
+/// stop work cannot act on a newer recording.
+struct SystemAudioCaptureAttemptOwnership<Capture, Writer: AnyObject> {
+    struct Attempt {
+        let generation: UInt64
+        let capture: Capture
+        let captureID: ObjectIdentifier
+        var writer: Writer?
     }
 
-    mutating func install(_ writer: Writer, generation: UInt64) -> Bool {
-        guard self.generation == generation, self.writer == nil else { return false }
-        self.writer = writer
+    private(set) var current: Attempt?
+
+    @discardableResult
+    mutating func begin(generation: UInt64, capture: Capture) -> Attempt? {
+        if let current, current.generation > generation {
+            return nil
+        }
+        let displacedAttempt = current
+        current = Attempt(
+            generation: generation,
+            capture: capture,
+            captureID: ObjectIdentifier(capture as AnyObject),
+            writer: nil
+        )
+        return displacedAttempt
+    }
+
+    mutating func install(
+        _ writer: Writer,
+        generation: UInt64,
+        capture: Capture
+    ) -> Bool {
+        guard var current,
+              current.generation == generation,
+              current.captureID == ObjectIdentifier(capture as AnyObject),
+              current.writer == nil else {
+            return false
+        }
+        current.writer = writer
+        self.current = current
         return true
     }
 
-    func owns(generation: UInt64) -> Bool {
-        self.generation == generation
+    func owns(generation: UInt64, capture: Capture) -> Bool {
+        current?.generation == generation
+            && current?.captureID == ObjectIdentifier(capture as AnyObject)
     }
 
-    func writerOwned(by generation: UInt64) -> Writer? {
-        guard self.generation == generation else { return nil }
-        return writer
+    func captureOwned(by generation: UInt64) -> Capture? {
+        guard current?.generation == generation else { return nil }
+        return current?.capture
     }
 
-    mutating func takeWriterOwned(by generation: UInt64) -> Writer? {
-        guard self.generation == generation else { return nil }
-        let ownedWriter = writer
-        writer = nil
+    func writerOwned(by generation: UInt64, capture: Capture) -> Writer? {
+        guard owns(generation: generation, capture: capture) else { return nil }
+        return current?.writer
+    }
+
+    mutating func takeWriterOwned(by generation: UInt64, capture: Capture) -> Writer? {
+        guard owns(generation: generation, capture: capture) else { return nil }
+        let ownedWriter = current?.writer
+        current?.writer = nil
         return ownedWriter
     }
 
-    mutating func takeWriterAndInvalidate(for generation: UInt64) -> Writer? {
-        let ownedWriter = writer
-        writer = nil
-        self.generation = generation
-        return ownedWriter
+    mutating func takeAttemptOwned(by generation: UInt64) -> Attempt? {
+        guard current?.generation == generation else { return nil }
+        let ownedAttempt = current
+        current = nil
+        return ownedAttempt
     }
 }
 
@@ -98,7 +123,7 @@ extension Audio {
         // Start system audio capture
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
-        if let capture = systemAudioCapture {
+        if let capture = makeSystemAudioCaptureForRecordingAttempt() {
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let captureDir = self.paths.audioCaptures
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
@@ -106,17 +131,33 @@ extension Audio {
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_system.wav")
             AppLogger.audioSystem.info("System audio file URL", ["file": fileURL.lastPathComponent])
 
+            var displacedAttempt:
+                SystemAudioCaptureAttemptOwnership<
+                    any SystemAudioCaptureEngine & Sendable,
+                    AVAudioFile
+                >.Attempt?
             let claimedSetup = systemAudioFileQueue.sync {
-                systemAudioFileOwnership.begin(generation: sessionGeneration)?.close()
-                return systemAudioFileOwnership.owns(generation: sessionGeneration)
+                displacedAttempt = systemAudioCaptureAttemptOwnership.begin(
+                    generation: sessionGeneration,
+                    capture: capture
+                )
+                return systemAudioCaptureAttemptOwnership.owns(
+                    generation: sessionGeneration,
+                    capture: capture
+                )
             }
             guard claimedSetup else {
                 throw AudioCaptureStaleSessionError()
             }
+            if let displacedAttempt {
+                displacedAttempt.writer?.close()
+                systemAudioSetupQueue.async {
+                    displacedAttempt.capture.stopSync()
+                }
+            }
 
-            // Setup and teardown share one serial lane. A stale attempt therefore
-            // finishes stopping its capture before a newer attempt can prepare or
-            // start the shared ScreenCaptureKit object.
+            // Each attempt owns a fresh capture engine, so a blocked prepare from
+            // an older generation cannot hold up or stop this setup.
             systemAudioSetupQueue.async { [weak self] in
                 guard let strongSelf = self else {
                     AppLogger.audioSystem.error("System audio setup: self is nil")
@@ -125,12 +166,23 @@ extension Audio {
 
                 func cleanupAbandonedSetup() {
                     let abandonedWriter = strongSelf.systemAudioFileQueue.sync {
-                        strongSelf.systemAudioFileOwnership.takeWriterOwned(
-                            by: sessionGeneration
+                        strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
+                            by: sessionGeneration,
+                            capture: capture
                         )
                     }
                     abandonedWriter?.close()
-                    capture.stopSync()
+                    let captureIsOwnedByAnotherAttempt = strongSelf.systemAudioFileQueue.sync {
+                        guard let current =
+                            strongSelf.systemAudioCaptureAttemptOwnership.current else {
+                            return false
+                        }
+                        return current.generation != sessionGeneration
+                            && current.captureID == ObjectIdentifier(capture as AnyObject)
+                    }
+                    if !captureIsOwnedByAnotherAttempt {
+                        capture.stopSync()
+                    }
                     try? FileManager.default.removeItem(at: fileURL)
                 }
 
@@ -185,9 +237,10 @@ extension Audio {
                     )
                     FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
                     let installed = strongSelf.systemAudioFileQueue.sync {
-                        strongSelf.systemAudioFileOwnership.install(
+                        strongSelf.systemAudioCaptureAttemptOwnership.install(
                             file,
-                            generation: sessionGeneration
+                            generation: sessionGeneration,
+                            capture: capture
                         )
                     }
                     guard installed else {
@@ -249,8 +302,10 @@ extension Audio {
                         self.systemAudioFileQueue.async { [weak self] in
                             guard let self = self,
                                   self.consecutiveSystemWriteErrors < self.maxConsecutiveWriteErrors,
-                                  let audioFile = self.systemAudioFileOwnership.writerOwned(
-                                    by: sessionGeneration
+                                  let audioFile =
+                                    self.systemAudioCaptureAttemptOwnership.writerOwned(
+                                        by: sessionGeneration,
+                                        capture: capture
                                   ) else { return }
                             do {
                                 try audioFile.write(from: bufferForAsyncUse)
@@ -279,8 +334,9 @@ extension Audio {
                     }
                     AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
                     let failedWriter = strongSelf.systemAudioFileQueue.sync {
-                        strongSelf.systemAudioFileOwnership.takeWriterOwned(
-                            by: sessionGeneration
+                        strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
+                            by: sessionGeneration,
+                            capture: capture
                         )
                     }
                     failedWriter?.close()

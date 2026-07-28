@@ -377,7 +377,12 @@ final class AudioInitializationTests: XCTestCase {
         )
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
 
-        let audio = Audio(paths: paths)
+        let oldSystemCapture = StubSystemAudioCapture()
+        let newSystemCapture = StubSystemAudioCapture()
+        let audio = Audio(
+            paths: paths,
+            systemAudioCaptureForTesting: oldSystemCapture
+        )
         let format = try XCTUnwrap(AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 48_000,
@@ -405,13 +410,15 @@ final class AudioInitializationTests: XCTestCase {
             )
         }
         audio.systemAudioFileQueue.sync {
-            _ = audio.systemAudioFileOwnership.begin(
-                generation: audio.recordingSessionGeneration
+            _ = audio.systemAudioCaptureAttemptOwnership.begin(
+                generation: audio.recordingSessionGeneration,
+                capture: oldSystemCapture
             )
             XCTAssertTrue(
-                audio.systemAudioFileOwnership.install(
+                audio.systemAudioCaptureAttemptOwnership.install(
                     oldSystemFile,
-                    generation: audio.recordingSessionGeneration
+                    generation: audio.recordingSessionGeneration,
+                    capture: oldSystemCapture
                 )
             )
         }
@@ -442,6 +449,7 @@ final class AudioInitializationTests: XCTestCase {
         audio.micSegments = [MicRecordingSegment(url: newMicURL)]
         audio.micAudioFileURL = newMicURL
         audio.systemAudioFileURL = newSystemURL
+        audio.systemAudioCapture = newSystemCapture
         _ = audio.micAudioFileQueue.sync {
             audio.micAudioFileOwnership.installSessionWriter(
                 newMicFile,
@@ -449,13 +457,15 @@ final class AudioInitializationTests: XCTestCase {
             )
         }
         audio.systemAudioFileQueue.sync {
-            _ = audio.systemAudioFileOwnership.begin(
-                generation: audio.recordingSessionGeneration
+            _ = audio.systemAudioCaptureAttemptOwnership.begin(
+                generation: audio.recordingSessionGeneration,
+                capture: newSystemCapture
             )
             XCTAssertTrue(
-                audio.systemAudioFileOwnership.install(
+                audio.systemAudioCaptureAttemptOwnership.install(
                     newSystemFile,
-                    generation: audio.recordingSessionGeneration
+                    generation: audio.recordingSessionGeneration,
+                    capture: newSystemCapture
                 )
             )
         }
@@ -474,12 +484,17 @@ final class AudioInitializationTests: XCTestCase {
             audio.micAudioFileOwnership.writer
         }
         let activeSystemFile = audio.systemAudioFileQueue.sync {
-            audio.systemAudioFileOwnership.writerOwned(by: newGeneration)
+            audio.systemAudioCaptureAttemptOwnership.writerOwned(
+                by: newGeneration,
+                capture: newSystemCapture
+            )
         }
         XCTAssertNotNil(activeMicFile)
         XCTAssertNotNil(activeSystemFile)
         XCTAssertTrue(activeMicFile === newMicFile)
         XCTAssertTrue(activeSystemFile === newSystemFile)
+        XCTAssertEqual(oldSystemCapture.stopSyncCallCount, 1)
+        XCTAssertEqual(newSystemCapture.stopSyncCallCount, 0)
     }
 
     func testPrepareForNewRecordingStartClearsStaleCaptureArtifacts() {

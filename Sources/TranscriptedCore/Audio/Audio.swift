@@ -654,10 +654,17 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // System audio capture
     var systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?
+    private let systemAudioCaptureFactory:
+        () -> (any SystemAudioCaptureEngine & Sendable)?
 
     // Audio file recording
-    var systemAudioFileOwnership = SystemAudioWriterOwnership<AVAudioFile>()
-    let systemAudioSetupQueue = DispatchQueue(label: "SystemAudioSetup", qos: .userInitiated)
+    var systemAudioCaptureAttemptOwnership =
+        SystemAudioCaptureAttemptOwnership<any SystemAudioCaptureEngine & Sendable, AVAudioFile>()
+    let systemAudioSetupQueue = DispatchQueue(
+        label: "SystemAudioSetup",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
     var micAudioFileOwnership = MicWriterOwnership<AVAudioFile>()
     let systemAudioFileQueue = DispatchQueue(label: "SystemAudioFileWrite", qos: .utility)
     let micAudioFileQueue = DispatchQueue(label: "MicAudioFileWrite", qos: .utility)
@@ -982,6 +989,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         self.paths = paths
         self.sleepWakeNotifications = sleepWakeNotifications
         self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        self.systemAudioCaptureFactory = { SCKAudioCapture() }
     }
 
     init(
@@ -993,6 +1001,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         self.sleepWakeNotifications = sleepWakeNotifications
         self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
         self.systemAudioCapture = systemAudioCapture
+        self.systemAudioCaptureFactory = { systemAudioCapture }
         if let systemAudioCapture {
             wireSystemAudioStatusPublisher(from: systemAudioCapture)
         }
@@ -1005,10 +1014,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // ScreenCaptureKit path. This keeps meeting audio on the narrower
         // "System Audio Recording" permission tier and avoids restart-required
         // Screen Recording flows.
-        let capture = SCKAudioCapture()
+        guard let capture = systemAudioCaptureFactory() else { return }
         systemAudioCapture = capture
         wireSystemAudioStatusPublisher(from: capture)
         installWorkspaceSleepWakeObservers()
+    }
+
+    func makeSystemAudioCaptureForRecordingAttempt()
+        -> (any SystemAudioCaptureEngine & Sendable)? {
+        guard let capture = systemAudioCaptureFactory() else { return nil }
+        systemAudioCapture = capture
+        wireSystemAudioStatusPublisher(from: capture)
+        return capture
     }
 
     private func wireSystemAudioStatusPublisher(from capture: any SystemAudioCaptureEngine) {
@@ -1663,6 +1680,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // Bump generation synchronously on the calling thread so any
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
+        let captureGeneration = recordingSessionGeneration
+        let fallbackSystemCaptureRef = systemAudioCapture
         pendingStartIntentId = nil
         recordingSessionGeneration &+= 1
         let stopGeneration = recordingSessionGeneration
@@ -1672,13 +1691,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // while UI updates happen in parallel.
         let engineRef = self.engine
         let inputNodeRef = self.inputNode
-        let systemCaptureRef = self.systemAudioCapture
         let micAudioFileRef = micAudioFileQueue.sync {
             self.micAudioFileOwnership.takeWriterAndInvalidate(for: stopGeneration)
         }
-        let systemAudioFileRef = systemAudioFileQueue.sync {
-            self.systemAudioFileOwnership.takeWriterAndInvalidate(for: stopGeneration)
+        let systemAudioAttempt = systemAudioFileQueue.sync {
+            self.systemAudioCaptureAttemptOwnership.takeAttemptOwned(
+                by: captureGeneration
+            )
         }
+        let systemCaptureRef = systemAudioAttempt?.capture ?? fallbackSystemCaptureRef
+        let systemAudioFileRef = systemAudioAttempt?.writer
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
         // contains the bulk of the recording.
@@ -1729,7 +1751,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
 
-            var didTeardownCurrentSession = false
             self.withAudioGraphLock {
                 guard self.recordingSessionGeneration == stopGeneration else {
                     AppLogger.audio.info("Skipping stale audio graph teardown because a newer session exists", [
@@ -1738,7 +1759,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
                     ])
                     return
                 }
-                didTeardownCurrentSession = true
 
                 if let engineRef, let inputNodeRef {
                     AppLogger.audio.info("Stopping audio capture")
@@ -1756,12 +1776,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 self.realtimeAGC = nil
             }
 
-            // This closure already runs off-main, so use the synchronous system
-            // capture stop. It keeps onRecordingComplete behind backend teardown
-            // and avoids stale ScreenCaptureKit cleanup racing the next start.
-            if didTeardownCurrentSession {
-                systemCaptureRef?.stopSync()
-            }
+            // The capture reference belongs to this exact attempt. Stop it even
+            // when mic-graph teardown is stale; a newer attempt owns a different
+            // capture engine and cannot be affected.
+            systemCaptureRef?.stopSync()
 
             // Coordinate file close. With the engine fully stopped above,
             // no new buffers will arrive on these queues — closing here is
