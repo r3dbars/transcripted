@@ -1046,7 +1046,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return capture
     }
 
-    private func replaceSystemAudioMonitoringAttempt(
+    func replaceSystemAudioMonitoringAttempt(
         with attempt: SystemAudioCaptureStartAttempt?
     ) -> SystemAudioCaptureStartAttempt? {
         systemAudioMonitoringAttemptLock.lock()
@@ -1947,7 +1947,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // Start system audio capture for level metering only (no file writing)
         if let capture = systemAudioCapture {
             let monitoringAttempt = SystemAudioCaptureStartAttempt(capture: capture)
-            replaceSystemAudioMonitoringAttempt(with: monitoringAttempt)?.cancel()
+            if let displacedAttempt = replaceSystemAudioMonitoringAttempt(with: monitoringAttempt) {
+                systemAudioSetupQueue.async {
+                    displacedAttempt.cancel()
+                }
+            }
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 do {
                     try monitoringAttempt.prepare()
@@ -1991,7 +1995,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
             realtimeAGC = nil
         }
 
-        monitoringAttempt?.cancel()
+        if let monitoringAttempt {
+            // ScreenCaptureKit start/stop can each wait for a bounded callback.
+            // Keep that serialization on the attempt, but never make the UI
+            // thread wait while monitoring hands off to full recording.
+            systemAudioSetupQueue.async {
+                monitoringAttempt.cancel()
+            }
+        }
 
         DispatchQueue.main.async {
             self.isMonitoring = false
