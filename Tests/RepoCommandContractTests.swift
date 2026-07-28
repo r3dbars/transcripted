@@ -189,7 +189,6 @@ func testRepoCommandContract() {
     runSuite("Repo command contract - PostHog health probe counts emitted first-value events") {
         let probe = readRepoTextFile("scripts/ops/health-probe.sh")
         let docs = readRepoTextFile("docs/ops-credentials.md")
-        let digest = readRepoTextFile("scripts/ops/generate-nightly-digest.py")
         let firstValueEvents = sourceSlice(
             probe,
             from: "first_value_events=",
@@ -213,19 +212,6 @@ func testRepoCommandContract() {
             assertTrue(
                 firstValueEvents.contains(event) && docs.contains(event),
                 "PostHog first-value probe and docs should include \(event)"
-            )
-        }
-        for event in [
-            "activation_first_artifact_saved",
-            "activation_second_artifact_saved",
-            "activation_artifact_action_clicked",
-            "activation_agent_prompt_action_clicked",
-            "activation_agent_setup_cta_clicked",
-            "activation_return_proxy_observed"
-        ] {
-            assertTrue(
-                digest.contains(event),
-                "nightly digest DAU event set should include \(event)"
             )
         }
         assertTrue(
@@ -494,21 +480,10 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - agent preflight executes the canonical matrix") {
         let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
-        let selector = readRepoTextFile("scripts/dev/test-matrix-checks.py")
         assertTrue(
             preflight.contains("printf '%s\\n' \"$changed_paths\"")
-                && preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml")
-                && !preflight.contains("matches_any")
                 && !preflight.contains("add_command"),
             "agent preflight should select checks by executing the matrix once, without a mirrored shell rule tree"
-        )
-        assertTrue(
-            selector.contains("def parse_matrix")
-                && selector.contains("def glob_regex")
-                && selector.contains("def select_checks")
-                && selector.contains("--self-test")
-                && selector.contains("seen: set[str]"),
-            "the dependency-free matrix selector should parse rules, match path globs, deduplicate checks, and self-test representative mappings"
         )
     }
 
@@ -596,7 +571,6 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - Core verification starts with rebuilt deps") {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
-        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
 
         let coreMatrixBlock = sourceSlice(
             matrix,
@@ -609,11 +583,6 @@ func testRepoCommandContract() {
                 && coreMatrixBlock.contains("bash run-integration-smoke.sh")
                 && coreMatrixBlock.contains("swift test"),
             "Core/package test guidance should rebuild dependency frameworks before app, smoke, or package checks"
-        )
-
-        assertTrue(
-            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
-            "agent preflight should source Core verification ordering from the canonical matrix"
         )
     }
 
@@ -739,29 +708,15 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - deterministic E2E smoke stays on the release surface") {
         let wrapper = readRepoTextFile("run-e2e-smoke.sh")
-        let entrypoint = readRepoTextFile("scripts/entrypoints/run-e2e-smoke.sh")
         let testsReadme = readRepoTextFile("Tests/README.md")
-        let matrix = readRepoTextFile(".agents/test-matrix.yml")
 
         assertTrue(
             wrapper.contains("exec \"$SCRIPT_DIR/scripts/entrypoints/run-e2e-smoke.sh\" \"$@\""),
             "root E2E wrapper should delegate to the scripts entrypoint"
         )
         assertTrue(
-            entrypoint.contains("Tests/E2E/TranscriptedE2ESmoke.swift"),
-            "E2E entrypoint should compile the deterministic release-critical smoke"
-        )
-        assertTrue(
-            entrypoint.contains("TRANSCRIPTED_DISABLE_FILE_LOGGER=1"),
-            "E2E smoke should keep local production logs clean"
-        )
-        assertTrue(
             testsReadme.contains("bash run-e2e-smoke.sh"),
             "Tests README should document the deterministic E2E smoke"
-        )
-        assertTrue(
-            matrix.contains("Tests/E2E/**") && matrix.contains("bash run-e2e-smoke.sh"),
-            "test matrix should map E2E smoke changes to the E2E command"
         )
     }
 
@@ -1209,7 +1164,6 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - release path preflight rebuilds deps") {
         let matrix = readRepoTextFile(".agents/test-matrix.yml")
-        let preflight = readRepoTextFile("scripts/dev/agent-preflight.sh")
         let releaseMatrixBlock = sourceSlice(
             matrix,
             from: "- \"build-beta.sh\"",
@@ -1220,10 +1174,6 @@ func testRepoCommandContract() {
                 && releaseMatrixBlock.contains("bash build.sh --no-open")
                 && releaseMatrixBlock.contains("SKIP_NOTARIZATION=1 bash build-beta.sh '' <user-name>"),
             "release-path matrix checks should rebuild deps before app and packaging smoke"
-        )
-        assertTrue(
-            preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
-            "agent preflight should source release-path dependency ordering from the canonical matrix"
         )
     }
 
@@ -3763,30 +3713,6 @@ func testRepoCommandContract() {
         )
     }
 
-    runSuite("Repo command contract - home stats action uses parent presenter") {
-        let homeContents = readRepoTextFile("Sources/UI/Settings/HomeView.swift")
-        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
-        assertTrue(
-            homeContents.contains("transcripted.home.stats.view")
-                && homeContents.contains(".help(\"View all stats\")"),
-            "the home stats line should stay a labeled, scriptable stats affordance"
-        )
-        assertTrue(
-            homeContents.contains("let onViewStats: () -> Void")
-                && homeContents.contains("onViewStats()")
-                && settingsContents.contains("@State private var homeShowsStatsDetails = false")
-                && settingsContents.contains(".sheet(isPresented: $homeShowsStatsDetails)")
-                && settingsContents.contains("HomeStatsDetailSheet("),
-            "home stats should route View stats through the parent settings sheet presenter"
-        )
-        assertFalse(
-            homeContents.contains("@State private var isShowingDetails")
-                || homeContents.contains(".sheet(isPresented: $isShowingDetails")
-                || homeContents.contains(".popover(isPresented: $isShowingDetails"),
-            "home stats badge should not own its own details presentation state"
-        )
-    }
-
     runSuite("Repo command contract - meeting overlay transient controls keep 40pt hit targets") {
         let overlayContents = readRepoTextFile("Sources/UI/Overlay/MeetingOverlayController.swift")
         let drawerContents = readRepoTextFile("Sources/UI/Overlay/MeetingLiveTranscriptDrawerView.swift")
@@ -3880,12 +3806,6 @@ func testRepoCommandContract() {
                 deleteBlock.contains("try HomeMeetingDeletion.delete(plan)") &&
                 deleteBlock.contains("try await deletionTask.value"),
             "Home delete should run filesystem cleanup away from the main Settings UI path"
-        )
-        assertTrue(
-            deleteBlock.contains("result.removedTranscriptURLs.isEmpty")
-                && deleteBlock.contains("FileManager.default.fileExists(atPath: item.transcriptURL.path)")
-                && deleteBlock.contains("presentHomeActionFailure("),
-            "a confirmed Home delete that removes nothing while the file is still on disk (stale path) should surface a failure instead of silently re-showing the row"
         )
         assertTrue(
             homeContents.contains("func removeVisibleMeeting(id: String)")

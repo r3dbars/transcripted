@@ -11,9 +11,6 @@ OUT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "out", "eres2net_swift_golden.json")
 MLPACKAGE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                         "..", "objective-noyce-06bac2", "scripts", "out",
-                         "eres2net_fused.mlpackage")
-MLPACKAGE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "scripts", "out", "eres2net_fused.mlpackage")
 
 
