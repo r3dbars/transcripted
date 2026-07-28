@@ -28,7 +28,7 @@ Before making assumptions about the codebase:
 6. `Sources/CLAUDE.md` — app target orientation
 7. the nearest local `CLAUDE.md` for the area you are changing (see "Subsystem docs" below)
 
-When docs disagree, split the decision: `AGENTS.md` and `.agents/test-matrix.yml` win for workflow contracts; current source wins for runtime behavior and file existence; local `CLAUDE.md` files explain subsystem intent when their file lists still match the tree; `docs/archive/` is context only.
+When docs disagree, split the decision: `AGENTS.md` and `.agents/test-matrix.yml` win for workflow contracts; current source wins for runtime behavior and file existence; local `CLAUDE.md` files explain subsystem intent when their file lists still match the tree.
 
 ## Build and test
 
@@ -160,7 +160,6 @@ A release is not complete just because a DMG exists. For in-app Sparkle updates 
 Treat as reference, not current runtime truth:
 
 - `archive/` (including `archive/backend-beta-worker/`, `archive/evals/`)
-- `docs/archive/`
 - `.claude/` (older planning)
 - references to `Sources/Text/` or `Sources/Style/` in older docs
 

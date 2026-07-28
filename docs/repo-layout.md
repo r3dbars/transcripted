@@ -12,7 +12,7 @@ The repo root should only expose:
 - clearly marked historical/archive zones
 
 If a file or folder does not fit one of those jobs, it should usually live
-under `scripts/`, `Tools/`, `docs/archive/`, or `archive/`.
+under `scripts/`, `Tools/`, `docs/`, or `archive/`.
 
 When a root shell command is part of the public repo surface, prefer a thin
 wrapper at the root and keep the implementation under `scripts/`.
@@ -84,7 +84,6 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
 - `docs/` — live project docs
 - `docs/strategy/` — dated strategy syntheses and deep dives for product, market, and architecture planning
-- `docs/archive/` — archived planning, reviews, and historical notes
 - `archive/` — historical code and legacy tooling kept out of the live product surface
 - `config/` — app config artifacts including entitlements and nightly security manifests
 - `Casks/` — committed Homebrew cask release surface
@@ -136,6 +135,4 @@ Treat these as reference, not current product surface:
 
 - `archive/backend-beta-worker/`
 - `archive/evals/`
-- `docs/archive/`
-- `docs/archive/screenshots/`
 - `.claude/`
