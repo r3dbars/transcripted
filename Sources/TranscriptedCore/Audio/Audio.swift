@@ -653,13 +653,28 @@ public class Audio: ObservableObject, @unchecked Sendable {
     @Published var systemAudioFailed: Bool = false
 
     // System audio capture
-    var systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?
+    private let systemAudioCaptureStateLock = NSLock()
+    private var _systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?
+    var systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)? {
+        get {
+            systemAudioCaptureStateLock.lock()
+            defer { systemAudioCaptureStateLock.unlock() }
+            return _systemAudioCapture
+        }
+        set {
+            systemAudioCaptureStateLock.lock()
+            _systemAudioCapture = newValue
+            systemAudioCaptureStateLock.unlock()
+        }
+    }
     private let systemAudioCaptureFactory:
         () -> (any SystemAudioCaptureEngine & Sendable)?
+    private let systemAudioMonitoringAttemptLock = NSLock()
+    private var systemAudioMonitoringAttempt: SystemAudioCaptureStartAttempt?
 
     // Audio file recording
     var systemAudioCaptureAttemptOwnership =
-        SystemAudioCaptureAttemptOwnership<any SystemAudioCaptureEngine & Sendable, AVAudioFile>()
+        SystemAudioCaptureAttemptOwnership<SystemAudioCaptureStartAttempt, AVAudioFile>()
     let systemAudioSetupQueue = DispatchQueue(
         label: "SystemAudioSetup",
         qos: .userInitiated,
@@ -995,13 +1010,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
     init(
         paths: CoreStoragePaths = .default,
         systemAudioCaptureForTesting systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?,
+        systemAudioCaptureFactoryForTesting systemAudioCaptureFactory:
+            (() -> (any SystemAudioCaptureEngine & Sendable)?)? = nil,
         sleepWakeNotifications: AudioSleepWakeNotifications = .macOSWorkspace
     ) {
         self.paths = paths
         self.sleepWakeNotifications = sleepWakeNotifications
         self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
-        self.systemAudioCapture = systemAudioCapture
-        self.systemAudioCaptureFactory = { systemAudioCapture }
+        self._systemAudioCapture = systemAudioCapture
+        self.systemAudioCaptureFactory =
+            systemAudioCaptureFactory ?? { systemAudioCapture }
         if let systemAudioCapture {
             wireSystemAudioStatusPublisher(from: systemAudioCapture)
         }
@@ -1026,6 +1044,24 @@ public class Audio: ObservableObject, @unchecked Sendable {
         systemAudioCapture = capture
         wireSystemAudioStatusPublisher(from: capture)
         return capture
+    }
+
+    private func replaceSystemAudioMonitoringAttempt(
+        with attempt: SystemAudioCaptureStartAttempt?
+    ) -> SystemAudioCaptureStartAttempt? {
+        systemAudioMonitoringAttemptLock.lock()
+        let previous = systemAudioMonitoringAttempt
+        systemAudioMonitoringAttempt = attempt
+        systemAudioMonitoringAttemptLock.unlock()
+        return previous
+    }
+
+    private func currentSystemAudioMonitoringAttemptIs(
+        _ attempt: SystemAudioCaptureStartAttempt
+    ) -> Bool {
+        systemAudioMonitoringAttemptLock.lock()
+        defer { systemAudioMonitoringAttemptLock.unlock() }
+        return systemAudioMonitoringAttempt === attempt
     }
 
     private func wireSystemAudioStatusPublisher(from capture: any SystemAudioCaptureEngine) {
@@ -1681,7 +1717,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
         let captureGeneration = recordingSessionGeneration
-        let fallbackSystemCaptureRef = systemAudioCapture
         pendingStartIntentId = nil
         recordingSessionGeneration &+= 1
         let stopGeneration = recordingSessionGeneration
@@ -1699,7 +1734,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
                 by: captureGeneration
             )
         }
-        let systemCaptureRef = systemAudioAttempt?.capture ?? fallbackSystemCaptureRef
+        let systemCaptureAttempt = systemAudioAttempt?.capture
         let systemAudioFileRef = systemAudioAttempt?.writer
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
@@ -1779,7 +1814,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             // The capture reference belongs to this exact attempt. Stop it even
             // when mic-graph teardown is stale; a newer attempt owns a different
             // capture engine and cannot be affected.
-            systemCaptureRef?.stopSync()
+            systemCaptureAttempt?.cancel()
 
             // Coordinate file close. With the engine fully stopped above,
             // no new buffers will arrive on these queues — closing here is
@@ -1911,13 +1946,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
         // Start system audio capture for level metering only (no file writing)
         if let capture = systemAudioCapture {
+            let monitoringAttempt = SystemAudioCaptureStartAttempt(capture: capture)
+            replaceSystemAudioMonitoringAttempt(with: monitoringAttempt)?.cancel()
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 do {
-                    try capture.prepare()
-                    try capture.start { [weak self] systemBuffer in
+                    try monitoringAttempt.prepare()
+                    let started = try monitoringAttempt.startIfNotCancelled { [weak self] systemBuffer in
                         self?.calculateSystemLevel(buffer: systemBuffer)
                     }
-                    AppLogger.audioSystem.info("System audio monitoring started")
+                    if started,
+                       self?.currentSystemAudioMonitoringAttemptIs(monitoringAttempt) == true {
+                        AppLogger.audioSystem.info("System audio monitoring started")
+                    }
                 } catch {
                     AppLogger.audioSystem.warning("System audio monitoring unavailable", ["error": error.localizedDescription])
                     // Mic monitoring still works — system audio is optional
@@ -1925,14 +1965,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
             }
         }
 
-        DispatchQueue.main.async {
-            self.isMonitoring = true
-        }
+        isMonitoring = true
     }
 
     /// Stop level metering. Called automatically before `start()` begins full recording.
     public func stopMonitoring() {
-        guard isMonitoring else { return }
+        let monitoringAttempt = replaceSystemAudioMonitoringAttempt(with: nil)
+        guard isMonitoring || monitoringAttempt != nil else { return }
 
         AppLogger.audio.info("Stopping audio level monitoring")
 
@@ -1952,7 +1991,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             realtimeAGC = nil
         }
 
-        systemAudioCapture?.stopSync()  // Synchronous — avoids race where delayed cleanup destroys the next recording's tap
+        monitoringAttempt?.cancel()
 
         DispatchQueue.main.async {
             self.isMonitoring = false
@@ -1973,6 +2012,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         timer?.invalidate()
         watchdogTimer?.invalidate()
         systemAudioCancellable?.cancel()
+        replaceSystemAudioMonitoringAttempt(with: nil)?.cancel()
         systemAudioCapture?.stopSync()
 
         withAudioGraphLock {

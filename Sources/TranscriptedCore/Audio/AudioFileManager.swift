@@ -2,6 +2,41 @@ import Foundation
 @preconcurrency import AVFoundation
 import QuartzCore
 
+/// Serializes start and stop for one system-audio capture attempt. A stop that
+/// arrives during `prepare()` marks the attempt cancelled; a stop that races
+/// `start()` waits and then tears it down.
+final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
+    let capture: any SystemAudioCaptureEngine & Sendable
+    private let lifecycleLock = NSLock()
+    private var cancelled = false
+
+    init(capture: any SystemAudioCaptureEngine & Sendable) {
+        self.capture = capture
+    }
+
+    func prepare() throws {
+        try capture.prepare()
+    }
+
+    @discardableResult
+    func startIfNotCancelled(
+        bufferCallback: @escaping (AVAudioPCMBuffer) -> Void
+    ) throws -> Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard !cancelled else { return false }
+        try capture.start(bufferCallback: bufferCallback)
+        return true
+    }
+
+    func cancel() {
+        lifecycleLock.lock()
+        cancelled = true
+        capture.stopSync()
+        lifecycleLock.unlock()
+    }
+}
+
 /// Queue-confined ownership for one system-audio capture attempt. Capture
 /// lifecycle and writer lifecycle move together so stale setup, cleanup, and
 /// stop work cannot act on a newer recording.
@@ -124,6 +159,7 @@ extension Audio {
         // CRITICAL: Create audio file BEFORE starting I/O proc to avoid CPU overload
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
         if let capture = makeSystemAudioCaptureForRecordingAttempt() {
+            let captureAttempt = SystemAudioCaptureStartAttempt(capture: capture)
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let captureDir = self.paths.audioCaptures
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
@@ -133,17 +169,17 @@ extension Audio {
 
             var displacedAttempt:
                 SystemAudioCaptureAttemptOwnership<
-                    any SystemAudioCaptureEngine & Sendable,
+                    SystemAudioCaptureStartAttempt,
                     AVAudioFile
                 >.Attempt?
             let claimedSetup = systemAudioFileQueue.sync {
                 displacedAttempt = systemAudioCaptureAttemptOwnership.begin(
                     generation: sessionGeneration,
-                    capture: capture
+                    capture: captureAttempt
                 )
                 return systemAudioCaptureAttemptOwnership.owns(
                     generation: sessionGeneration,
-                    capture: capture
+                    capture: captureAttempt
                 )
             }
             guard claimedSetup else {
@@ -152,7 +188,7 @@ extension Audio {
             if let displacedAttempt {
                 displacedAttempt.writer?.close()
                 systemAudioSetupQueue.async {
-                    displacedAttempt.capture.stopSync()
+                    displacedAttempt.capture.cancel()
                 }
             }
 
@@ -168,7 +204,7 @@ extension Audio {
                     let abandonedWriter = strongSelf.systemAudioFileQueue.sync {
                         strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
                             by: sessionGeneration,
-                            capture: capture
+                            capture: captureAttempt
                         )
                     }
                     abandonedWriter?.close()
@@ -178,10 +214,10 @@ extension Audio {
                             return false
                         }
                         return current.generation != sessionGeneration
-                            && current.captureID == ObjectIdentifier(capture as AnyObject)
+                            && current.captureID == ObjectIdentifier(captureAttempt)
                     }
                     if !captureIsOwnedByAnotherAttempt {
-                        capture.stopSync()
+                        captureAttempt.cancel()
                     }
                     try? FileManager.default.removeItem(at: fileURL)
                 }
@@ -200,7 +236,7 @@ extension Audio {
 
                     // Step 1: Prepare the tap (creates aggregate device, gets format)
                     // This does NOT start the I/O proc yet
-                    try capture.prepare()
+                    try captureAttempt.prepare()
 
                     guard sessionIsCurrent() else {
                         cleanupAbandonedSetup()
@@ -240,7 +276,7 @@ extension Audio {
                         strongSelf.systemAudioCaptureAttemptOwnership.install(
                             file,
                             generation: sessionGeneration,
-                            capture: capture
+                            capture: captureAttempt
                         )
                     }
                     guard installed else {
@@ -257,7 +293,7 @@ extension Audio {
 
                     // Step 4: Now start the I/O proc with a lightweight callback
                     // The file already exists, so callback only needs to copy+write
-                    try capture.start { [weak self] systemBuffer in
+                    let started = try captureAttempt.startIfNotCancelled { [weak self] systemBuffer in
                         guard let self = self else { return }
                         guard sessionGeneration == self.recordingSessionGeneration else { return }
 
@@ -305,7 +341,7 @@ extension Audio {
                                   let audioFile =
                                     self.systemAudioCaptureAttemptOwnership.writerOwned(
                                         by: sessionGeneration,
-                                        capture: capture
+                                        capture: captureAttempt
                                   ) else { return }
                             do {
                                 try audioFile.write(from: bufferForAsyncUse)
@@ -314,6 +350,10 @@ extension Audio {
                                 self.recordSystemWriteFailure(error, bufferNumber: currentBufferCount)
                             }
                         }
+                    }
+                    guard started else {
+                        cleanupAbandonedSetup()
+                        return
                     }
 
                     guard sessionIsCurrent() else {
@@ -336,7 +376,7 @@ extension Audio {
                     let failedWriter = strongSelf.systemAudioFileQueue.sync {
                         strongSelf.systemAudioCaptureAttemptOwnership.takeWriterOwned(
                             by: sessionGeneration,
-                            capture: capture
+                            capture: captureAttempt
                         )
                     }
                     failedWriter?.close()
