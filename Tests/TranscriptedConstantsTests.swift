@@ -55,6 +55,19 @@ func testTranscriptedConstants() async {
         )
     }
 
+    runSuite("TranscriptedConstants lets ScreenCaptureKit finish before the meeting start deadline") {
+        let screenCaptureKitStartTimeout: UInt64 = 8_000_000_000
+        assertEqual(
+            TranscriptedConstants.meetingStartTimeout,
+            12_000_000_000,
+            "meeting start should use the same 12-second budget as the live capture smoke"
+        )
+        assertTrue(
+            TranscriptedConstants.meetingStartTimeout > screenCaptureKitStartTimeout,
+            "the outer meeting deadline must outlast ScreenCaptureKit's 8-second callback timeout"
+        )
+    }
+
     runSuite("TranscriptedConstants scales meeting stop timeout for long recordings") {
         assertEqual(
             TranscriptedConstants.meetingStopTimeout(forRecordingDuration: 10 * 60),
