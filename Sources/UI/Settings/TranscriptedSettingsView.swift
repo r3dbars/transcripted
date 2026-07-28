@@ -172,7 +172,7 @@ struct TranscriptedSettingsView: View {
                             pageBody
                         }
                         .padding(.horizontal, 28)
-                        .padding(.top, settingsContentTopPadding)
+                        .padding(.top, 14)
                         .padding(.bottom, 28)
                         .frame(maxWidth: 860, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -809,17 +809,6 @@ struct TranscriptedSettingsView: View {
             hour: Calendar.current.component(.hour, from: Date()),
             firstName: homeViewModel.welcomeName
         )
-    }
-
-    private var settingsContentTopPadding: CGFloat {
-        SettingsContentLayoutPolicy.topPadding(
-            for: navigation.selectedPage,
-            sidebarPresentation: settingsSidebarPresentation
-        )
-    }
-
-    private var settingsSidebarPresentation: SettingsSidebarPresentation {
-        settingsColumnVisibility == .detailOnly ? .hidden : .visible
     }
 
     private func reviewHomeAttentionIssue(_ issue: HomeAttentionIssue) {
