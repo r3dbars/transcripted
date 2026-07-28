@@ -2040,6 +2040,5 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
 // MARK: - AudioCaptureEngine conformance
 // Empty extension — protocol signatures match Audio's existing public API exactly.
-// Added as part of Step 8 protocol wiring (merge-plan §5.1).
 
 extension Audio: AudioCaptureEngine {}
