@@ -2,6 +2,55 @@ import Foundation
 @preconcurrency import AVFoundation
 import QuartzCore
 
+/// Queue-confined ownership for the system-audio writer. A newer recording
+/// claims the slot before its asynchronous setup begins, so late setup,
+/// cleanup, or failure work from an older generation cannot mutate its writer.
+struct SystemAudioWriterOwnership<Writer: AnyObject> {
+    private(set) var writer: Writer?
+    private(set) var generation: UInt64?
+
+    @discardableResult
+    mutating func begin(generation: UInt64) -> Writer? {
+        if let currentGeneration = self.generation,
+           currentGeneration > generation {
+            return nil
+        }
+        let displacedWriter = writer
+        writer = nil
+        self.generation = generation
+        return displacedWriter
+    }
+
+    mutating func install(_ writer: Writer, generation: UInt64) -> Bool {
+        guard self.generation == generation, self.writer == nil else { return false }
+        self.writer = writer
+        return true
+    }
+
+    func owns(generation: UInt64) -> Bool {
+        self.generation == generation
+    }
+
+    func writerOwned(by generation: UInt64) -> Writer? {
+        guard self.generation == generation else { return nil }
+        return writer
+    }
+
+    mutating func takeWriterOwned(by generation: UInt64) -> Writer? {
+        guard self.generation == generation else { return nil }
+        let ownedWriter = writer
+        writer = nil
+        return ownedWriter
+    }
+
+    mutating func takeWriterAndInvalidate(for generation: UInt64) -> Writer? {
+        let ownedWriter = writer
+        writer = nil
+        self.generation = generation
+        return ownedWriter
+    }
+}
+
 // MARK: - Audio File Creation & Buffer Management
 
 /// Extension handling audio file creation, WAV writing, buffer copying, and format conversion.
@@ -57,16 +106,30 @@ extension Audio {
             let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_system.wav")
             AppLogger.audioSystem.info("System audio file URL", ["file": fileURL.lastPathComponent])
 
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let claimedSetup = systemAudioFileQueue.sync {
+                systemAudioFileOwnership.begin(generation: sessionGeneration)?.close()
+                return systemAudioFileOwnership.owns(generation: sessionGeneration)
+            }
+            guard claimedSetup else {
+                throw AudioCaptureStaleSessionError()
+            }
+
+            // Setup and teardown share one serial lane. A stale attempt therefore
+            // finishes stopping its capture before a newer attempt can prepare or
+            // start the shared ScreenCaptureKit object.
+            systemAudioSetupQueue.async { [weak self] in
                 guard let strongSelf = self else {
                     AppLogger.audioSystem.error("System audio setup: self is nil")
                     return
                 }
 
                 func cleanupAbandonedSetup() {
-                    strongSelf.systemAudioFileQueue.sync {
-                        strongSelf.systemAudioFile = nil
+                    let abandonedWriter = strongSelf.systemAudioFileQueue.sync {
+                        strongSelf.systemAudioFileOwnership.takeWriterOwned(
+                            by: sessionGeneration
+                        )
                     }
+                    abandonedWriter?.close()
                     capture.stopSync()
                     try? FileManager.default.removeItem(at: fileURL)
                 }
@@ -121,7 +184,17 @@ extension Audio {
                         interleaved: tapFormat.isInterleaved
                     )
                     FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-                    strongSelf.systemAudioFileQueue.sync { strongSelf.systemAudioFile = file }
+                    let installed = strongSelf.systemAudioFileQueue.sync {
+                        strongSelf.systemAudioFileOwnership.install(
+                            file,
+                            generation: sessionGeneration
+                        )
+                    }
+                    guard installed else {
+                        file.close()
+                        cleanupAbandonedSetup()
+                        return
+                    }
                     AppLogger.audioSystem.info("System audio file created before I/O proc", ["sampleRate": AudioRecordingFormatPolicy.displaySampleRate(sampleRate), "channels": "\(tapFormat.channelCount)"])
 
                     guard sessionIsCurrent() else {
@@ -176,7 +249,9 @@ extension Audio {
                         self.systemAudioFileQueue.async { [weak self] in
                             guard let self = self,
                                   self.consecutiveSystemWriteErrors < self.maxConsecutiveWriteErrors,
-                                  let audioFile = self.systemAudioFile else { return }
+                                  let audioFile = self.systemAudioFileOwnership.writerOwned(
+                                    by: sessionGeneration
+                                  ) else { return }
                             do {
                                 try audioFile.write(from: bufferForAsyncUse)
                                 self.consecutiveSystemWriteErrors = 0
@@ -203,11 +278,17 @@ extension Audio {
                         return
                     }
                     AppLogger.audioSystem.warning("System audio failed", ["error": error.localizedDescription])
-                    strongSelf.systemAudioFileQueue.sync {
-                        strongSelf.systemAudioFile = nil
+                    let failedWriter = strongSelf.systemAudioFileQueue.sync {
+                        strongSelf.systemAudioFileOwnership.takeWriterOwned(
+                            by: sessionGeneration
+                        )
                     }
+                    failedWriter?.close()
                     try? FileManager.default.removeItem(at: fileURL)
                     DispatchQueue.main.async {
+                        guard strongSelf.recordingSessionGeneration == sessionGeneration else {
+                            return
+                        }
                         strongSelf.error = "System audio unavailable \u{2014} can only record your microphone. To capture Zoom/Teams audio, go to System Settings \u{2192} Privacy & Security \u{2192} System Audio Recording and enable Transcripted."
                         strongSelf.systemAudioFileURL = nil
                         strongSelf.systemAudioFailed = true

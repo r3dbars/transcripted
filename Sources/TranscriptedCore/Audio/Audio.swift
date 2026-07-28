@@ -656,7 +656,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
     var systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?
 
     // Audio file recording
-    var systemAudioFile: AVAudioFile?
+    var systemAudioFileOwnership = SystemAudioWriterOwnership<AVAudioFile>()
+    let systemAudioSetupQueue = DispatchQueue(label: "SystemAudioSetup", qos: .userInitiated)
     var micAudioFileOwnership = MicWriterOwnership<AVAudioFile>()
     let systemAudioFileQueue = DispatchQueue(label: "SystemAudioFileWrite", qos: .utility)
     let micAudioFileQueue = DispatchQueue(label: "MicAudioFileWrite", qos: .utility)
@@ -1675,7 +1676,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
         let micAudioFileRef = micAudioFileQueue.sync {
             self.micAudioFileOwnership.takeWriterAndInvalidate(for: stopGeneration)
         }
-        let systemAudioFileRef = systemAudioFileQueue.sync { self.systemAudioFile }
+        let systemAudioFileRef = systemAudioFileQueue.sync {
+            self.systemAudioFileOwnership.takeWriterAndInvalidate(for: stopGeneration)
+        }
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
         // contains the bulk of the recording.
@@ -1781,11 +1784,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
             }
 
             cleanupGroup.enter()
-            self.systemAudioFileQueue.async { [weak self] in
-                if let self, let systemAudioFileRef {
-                    if let currentSystemFile = self.systemAudioFile, currentSystemFile === systemAudioFileRef {
-                        self.systemAudioFile = nil
-                    }
+            self.systemAudioFileQueue.async {
+                if let systemAudioFileRef {
                     systemAudioFileRef.close()
                     AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
                 }

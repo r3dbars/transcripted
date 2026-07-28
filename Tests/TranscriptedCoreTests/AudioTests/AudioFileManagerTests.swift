@@ -4,6 +4,7 @@ import XCTest
 
 @available(macOS 14.0, *)
 final class AudioFileManagerTests: XCTestCase {
+    private final class StubSystemWriter {}
 
     // MARK: - Test scaffolding
 
@@ -23,6 +24,36 @@ final class AudioFileManagerTests: XCTestCase {
     private func makeRoot(name: String = "AudioFileManagerTests") -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("\(name)-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    func testSystemAudioWriterOwnershipRejectsStaleCleanup() {
+        var ownership = SystemAudioWriterOwnership<StubSystemWriter>()
+        let oldWriter = StubSystemWriter()
+        let newWriter = StubSystemWriter()
+
+        XCTAssertNil(ownership.begin(generation: 1))
+        XCTAssertTrue(ownership.install(oldWriter, generation: 1))
+
+        XCTAssertTrue(ownership.begin(generation: 2) === oldWriter)
+        XCTAssertTrue(ownership.install(newWriter, generation: 2))
+
+        XCTAssertNil(ownership.takeWriterOwned(by: 1))
+        XCTAssertTrue(ownership.writerOwned(by: 2) === newWriter)
+    }
+
+    func testSystemAudioWriterOwnershipRejectsLateFailureInstall() {
+        var ownership = SystemAudioWriterOwnership<StubSystemWriter>()
+        let lateWriter = StubSystemWriter()
+        let currentWriter = StubSystemWriter()
+
+        XCTAssertNil(ownership.begin(generation: 10))
+        XCTAssertNil(ownership.begin(generation: 11))
+        XCTAssertNil(ownership.begin(generation: 10))
+
+        XCTAssertFalse(ownership.install(lateWriter, generation: 10))
+        XCTAssertFalse(ownership.owns(generation: 10))
+        XCTAssertTrue(ownership.install(currentWriter, generation: 11))
+        XCTAssertTrue(ownership.writerOwned(by: 11) === currentWriter)
     }
 
     private func makeNonInterleavedBuffer(

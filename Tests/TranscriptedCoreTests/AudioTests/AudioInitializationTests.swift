@@ -404,7 +404,17 @@ final class AudioInitializationTests: XCTestCase {
                 generation: audio.recordingSessionGeneration
             )
         }
-        audio.systemAudioFileQueue.sync { audio.systemAudioFile = oldSystemFile }
+        audio.systemAudioFileQueue.sync {
+            _ = audio.systemAudioFileOwnership.begin(
+                generation: audio.recordingSessionGeneration
+            )
+            XCTAssertTrue(
+                audio.systemAudioFileOwnership.install(
+                    oldSystemFile,
+                    generation: audio.recordingSessionGeneration
+                )
+            )
+        }
 
         let lockHeld = expectation(description: "audio graph lock held")
         let releaseLock = DispatchSemaphore(value: 0)
@@ -438,7 +448,17 @@ final class AudioInitializationTests: XCTestCase {
                 generation: audio.recordingSessionGeneration
             )
         }
-        audio.systemAudioFileQueue.sync { audio.systemAudioFile = newSystemFile }
+        audio.systemAudioFileQueue.sync {
+            _ = audio.systemAudioFileOwnership.begin(
+                generation: audio.recordingSessionGeneration
+            )
+            XCTAssertTrue(
+                audio.systemAudioFileOwnership.install(
+                    newSystemFile,
+                    generation: audio.recordingSessionGeneration
+                )
+            )
+        }
 
         releaseLock.signal()
         wait(for: [stopFinished], timeout: 1.0)
@@ -453,7 +473,9 @@ final class AudioInitializationTests: XCTestCase {
         let activeMicFile = audio.micAudioFileQueue.sync {
             audio.micAudioFileOwnership.writer
         }
-        let activeSystemFile = audio.systemAudioFileQueue.sync { audio.systemAudioFile }
+        let activeSystemFile = audio.systemAudioFileQueue.sync {
+            audio.systemAudioFileOwnership.writerOwned(by: newGeneration)
+        }
         XCTAssertNotNil(activeMicFile)
         XCTAssertNotNil(activeSystemFile)
         XCTAssertTrue(activeMicFile === newMicFile)
