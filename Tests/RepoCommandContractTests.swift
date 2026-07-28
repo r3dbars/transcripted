@@ -708,11 +708,16 @@ func testRepoCommandContract() {
 
     runSuite("Repo command contract - deterministic E2E smoke stays on the release surface") {
         let wrapper = readRepoTextFile("run-e2e-smoke.sh")
+        let entrypoint = readRepoTextFile("scripts/entrypoints/run-e2e-smoke.sh")
         let testsReadme = readRepoTextFile("Tests/README.md")
 
         assertTrue(
             wrapper.contains("exec \"$SCRIPT_DIR/scripts/entrypoints/run-e2e-smoke.sh\" \"$@\""),
             "root E2E wrapper should delegate to the scripts entrypoint"
+        )
+        assertTrue(
+            entrypoint.contains("TRANSCRIPTED_DISABLE_FILE_LOGGER=1"),
+            "deterministic E2E smoke should keep production file logging disabled"
         )
         assertTrue(
             testsReadme.contains("bash run-e2e-smoke.sh"),
