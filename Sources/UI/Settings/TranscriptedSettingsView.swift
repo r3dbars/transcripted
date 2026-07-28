@@ -674,7 +674,6 @@ struct TranscriptedSettingsView: View {
     private var dictationsPage: some View {
         DictationsSettingsPage(
             homeViewModel: homeViewModel,
-            actions: actions,
             homeCopiedRowID: homeCopiedRowID,
             onStartDictation: {
                 trackSettingsAction("empty_start_dictation", page: .dictations)
@@ -3695,7 +3694,6 @@ struct TranscriptedSettingsView: View {
 
     private var supportPage: some View {
         SupportSettingsPage(
-            actions: actions,
             diagnosticsActionStatus: diagnosticsActionStatus,
             crashReportingEnabled: crashReportingEnabled,
             onSubmitFeedback: {

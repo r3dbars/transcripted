@@ -2,12 +2,10 @@ import SwiftUI
 
 /// The Settings > Dictations page. Extracted from `TranscriptedSettingsView`
 /// (see `docs/` audit 2026-07-08 wave 2, spec W2-A). All the actual
-/// open/copy/flag/delete/track logic stays owned by the parent — this struct
-/// is a pure presentation wrapper that receives pre-built closures so
-/// behavior is unchanged.
+/// open/copy/flag/delete/track logic stays owned by the parent and arrives as
+/// focused closures.
 struct DictationsSettingsPage: View {
     @ObservedObject var homeViewModel: HomeViewModel
-    let actions: TranscriptedSettingsActions
     let homeCopiedRowID: String?
     let onStartDictation: () -> Void
     let onLoadMoreDictations: () -> Void
