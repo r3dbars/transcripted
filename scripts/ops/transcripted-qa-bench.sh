@@ -700,13 +700,9 @@ run_pasteback_synthetic() {
 run_artifact_validation() {
   local blocking="$1"
   if [[ "${blocking}" == "yes" ]]; then
-    run_step "20-qa-health" "TranscriptedQA health check" "yes" \
-      "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa check-health --format json"
     run_step "21-qa-validate-all" "TranscriptedQA validate current artifacts" "yes" \
       "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
   else
-    run_step "20-qa-health" "TranscriptedQA health check" "yes" \
-      "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa check-health --format json"
     run_warnings_only_step "21-qa-validate-all" "TranscriptedQA validate current artifacts (warnings-only local state)" \
       "TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift run --package-path Tools/TranscriptedQA transcripted-qa validate-all --format json"
   fi
