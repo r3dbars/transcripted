@@ -96,7 +96,7 @@ onboarding connect stage. Both keep one mental model:
 - `Settings/TranscriptedSettingsComponents.swift` — shared SwiftUI building blocks (`SettingsPageIntro`, `SettingsSection`) used across settings pages
 - `Settings/TranscriptedSettingsNavigationModel.swift` — observable navigation state for the current `TranscriptedSettingsPage` selection
 - `Settings/TranscriptedSettingsPage.swift` — enum of window pages (home, dictations, people, connectAgent, plus the gear-gated settings pages) with titles, summaries, and SF Symbol names; legacy model, shortcut, and privacy cases remain deep-link aliases into General
-- `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, Auto Enter apps, retained-audio playback, and failed meetings
+- `Settings/TranscriptedSettingsRows.swift` — reusable Settings rows for correction editing, model choices, and Auto Enter apps
 - `Settings/TranscriptedSettingsSidebar.swift` — sidebar section model: content-first primary rows (Home/Dictations/Speakers/Agent); settings pages render as a tab strip in the content pane, reached from the sidebar gear
 - `Settings/TranscriptedSettingsView.swift` — main settings view
 - `Settings/TranscriptedSettingsWindowController.swift` — NSWindowController for settings
@@ -188,7 +188,7 @@ Manual checks:
 - speaker settings can preview clips, surface duplicates, toggle local-speaker splitting, and rename / merge people cleanly
 - completed meeting review cleanly separates "People in the room" from remote participants, can resolve retained meeting audio playback, and "Keep as You" restores the single-speaker local path when needed
 - recent meetings on Home and in Settings can play retained audio attachments without losing sync between transcript rows and playback state
-- failed meetings surface retained audio on Home and Settings so users can play it, reveal it in Finder, or retry transcription from the preserved files
+- failed meetings surface retained audio on Home so users can play it, reveal it in Finder, or retry transcription from the preserved files
 - the Settings home dashboard opens quickly, shows grouped recent dictations and meetings, and its load-more actions keep working on large libraries
 - permissions onboarding and first-run onboarding window still open correctly
 - first-run CTA copy updates correctly as permissions and local-model state change
