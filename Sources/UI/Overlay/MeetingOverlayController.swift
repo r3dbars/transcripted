@@ -2,7 +2,6 @@
 // Second non-activating NSPanel for meeting-mode recording/transcription status.
 // Separate from FloatingOverlayController (draft/dictation) by design — the
 // meeting panel has its own lifecycle, state machine, and visual language.
-// See merge-plan.md §5.3.
 //
 // Pure AppKit: NSPanel + NSView subclasses + Combine subscriptions on the
 // controller only. Views are dumb renderers with `update()` methods — no
