@@ -237,10 +237,14 @@ final class AudioInitializationTests: XCTestCase {
         let newAttempt = SystemAudioCaptureStartAttempt(capture: newCapture)
         let oldStartEntered = expectation(description: "old monitoring start entered")
         let oldAttemptFinished = expectation(description: "old monitoring attempt stopped")
+        let oldStopFinished = expectation(description: "old monitoring backend stopped")
         let releaseOldStart = DispatchSemaphore(value: 0)
         oldCapture.onStart = {
             oldStartEntered.fulfill()
             _ = releaseOldStart.wait(timeout: .now() + 2)
+        }
+        oldCapture.onStopSync = {
+            oldStopFinished.fulfill()
         }
 
         let audio = Audio(
@@ -268,7 +272,8 @@ final class AudioInitializationTests: XCTestCase {
         )
 
         releaseOldStart.signal()
-        wait(for: [oldAttemptFinished], timeout: 1)
+        wait(for: [oldAttemptFinished, oldStopFinished], timeout: 1)
+        oldCapture.onStopSync = nil
         XCTAssertEqual(oldCapture.stopSyncCallCount, 1)
         XCTAssertEqual(newCapture.startCallCount, 1)
         XCTAssertEqual(newCapture.stopSyncCallCount, 0)
