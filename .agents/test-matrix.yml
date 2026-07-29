@@ -126,6 +126,14 @@ rules:
       - "python3 scripts/dev/agent-context.py --self-test"
 
   - paths:
+      - "scripts/dev/agent-check.py"
+      - "scripts/dev/agent-preflight.sh"
+    checks:
+      - "scripts/dev/agent-preflight.sh"
+      - "python3 -m py_compile scripts/dev/agent-check.py"
+      - "python3 scripts/dev/agent-check.py --self-test"
+
+  - paths:
       - ".agents/test-matrix.yml"
       - "scripts/dev/agent-preflight.sh"
       - "scripts/dev/test-matrix-checks.py"
@@ -409,6 +417,7 @@ rules:
       - "Tools/**/CLAUDE.md"
       - ".agents/**"
       - ".github/**"
+      - "scripts/dev/agent-check.py"
       - "scripts/dev/agent-preflight.sh"
       - "scripts/dev/agent-context.py"
       - "scripts/dev/test-matrix-checks.py"
