@@ -15,17 +15,6 @@ enum TranscriptedSupportActions {
         NSWorkspace.shared.open(url)
     }
 
-    static func copyDiagnostics(appState: TranscriptedAppState) -> Bool {
-        let text = diagnosticsText(appState: appState)
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        let copied = pasteboard.setString(text, forType: .string)
-        if copied {
-            AnalyticsReporter.track("support_diagnostics_copied")
-        }
-        return copied
-    }
-
     static func sendDiagnosticEvent(appState: TranscriptedAppState) -> String? {
         let snapshot = diagnosticsSnapshot(appState: appState)
         let context = SupportDiagnosticsBundle.sentryContext(snapshot: snapshot)

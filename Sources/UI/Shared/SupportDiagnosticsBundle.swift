@@ -113,7 +113,7 @@ enum SupportDiagnosticsBundle {
         // emitted here: it can carry paths / free text, and
         // `reliability_packet_count` already gives the coarse signal that reaches
         // Sentry. (The human-readable diagnostics text, built separately, still
-        // summarizes recent reliability packets for copied support bundles.)
+        // summarizes recent reliability packets for support diagnostic payloads.)
 
         for (key, value) in snapshot.audioRoute {
             context["route_\(key)"] = value
