@@ -4,7 +4,6 @@ import SwiftUI
 /// (codebase audit 2026-07-08 wave 2, spec W2-A). Tracking and diagnostic
 /// dispatch stay owned by the parent and are passed in as closures.
 struct SupportSettingsPage: View {
-    let actions: TranscriptedSettingsActions
     let diagnosticsActionStatus: String?
     let crashReportingEnabled: Bool
     let onSubmitFeedback: () -> Void
