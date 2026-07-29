@@ -48,6 +48,20 @@ def validate_contract(contract: dict[str, Any], repo_root: Path) -> None:
     missing_root = required_root.difference(contract)
     if missing_root:
         raise ContractError(f"missing root keys: {sorted(missing_root)}")
+    for path_key in ("start_doc", "test_matrix"):
+        if not isinstance(contract[path_key], str) or not contract[path_key]:
+            raise ContractError(f"{path_key} must be a non-empty string")
+    proof_classes = contract["proof_classes"]
+    required_proof_classes = {"deterministic", "hosted", "manual", "unknown"}
+    if not isinstance(proof_classes, dict) or required_proof_classes.difference(proof_classes):
+        raise ContractError("proof_classes must define deterministic, hosted, manual, and unknown")
+    if any(not isinstance(value, str) or not value for value in proof_classes.values()):
+        raise ContractError("proof_classes values must be non-empty strings")
+    global_invariants = contract["global_invariants"]
+    if not isinstance(global_invariants, list) or any(
+        not isinstance(item, str) or not item for item in global_invariants
+    ):
+        raise ContractError("global_invariants must be a non-empty string list")
 
     referenced_files = [contract["start_doc"], contract["test_matrix"]]
     area_ids: set[str] = set()
@@ -73,12 +87,27 @@ def validate_contract(contract: dict[str, Any], repo_root: Path) -> None:
         if area_id in area_ids:
             raise ContractError(f"duplicate area id: {area_id}")
         area_ids.add(area_id)
+        owns = area["owns"]
+        if not isinstance(owns, str) or not owns:
+            raise ContractError(f"{area_id}.owns must be a non-empty string")
+        fallback = area.get("fallback", False)
+        if not isinstance(fallback, bool):
+            raise ContractError(f"{area_id}.fallback must be a boolean")
         for list_key in ("path_prefixes", "docs", "keywords", "invariants", "manual_proof"):
             value = area[list_key]
-            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            if not isinstance(value, list) or any(
+                not isinstance(item, str) or (not item and list_key != "path_prefixes")
+                for item in value
+            ):
                 raise ContractError(f"{area_id}.{list_key} must be a string list")
+        if not area["path_prefixes"] and not area.get("exact_paths"):
+            raise ContractError(f"{area_id} must claim at least one path")
+        if "" in area["path_prefixes"] and not fallback:
+            raise ContractError(f"{area_id} may use an empty prefix only as a fallback")
         exact_paths = area.get("exact_paths", [])
-        if not isinstance(exact_paths, list) or any(not isinstance(item, str) for item in exact_paths):
+        if not isinstance(exact_paths, list) or any(
+            not isinstance(item, str) or not item for item in exact_paths
+        ):
             raise ContractError(f"{area_id}.exact_paths must be a string list")
         path_claims += len(area["path_prefixes"]) + len(exact_paths)
         referenced_files.extend(area["docs"])
@@ -138,8 +167,10 @@ def changed_paths(base_ref: str) -> list[str]:
 
 
 def area_matches_path(area: dict[str, Any], path: str) -> bool:
-    return any(path.startswith(prefix) for prefix in area["path_prefixes"]) or path in area.get(
-        "exact_paths", []
+    return (
+        any(path.startswith(prefix) for prefix in area["path_prefixes"])
+        or path in area.get("exact_paths", [])
+        or path in area["docs"]
     )
 
 
@@ -175,13 +206,21 @@ def nearest_local_doc(path: str) -> str | None:
 def select_areas(
     contract: dict[str, Any], paths: list[str], symptom: str | None
 ) -> list[dict[str, Any]]:
-    selected = []
+    selected_ids: set[str] = set()
+    specific_areas = [area for area in contract["areas"] if not area.get("fallback", False)]
+    fallback_areas = [area for area in contract["areas"] if area.get("fallback", False)]
+
+    for path in paths:
+        path_matches = [area for area in specific_areas if area_matches_path(area, path)]
+        if not path_matches:
+            path_matches = [area for area in fallback_areas if area_matches_path(area, path)]
+        selected_ids.update(area["id"] for area in path_matches)
+
     for area in contract["areas"]:
-        if any(area_matches_path(area, path) for path in paths) or (
-            symptom and area_matches_symptom(area, symptom)
-        ):
-            selected.append(area)
-    return selected
+        if symptom and area_matches_symptom(area, symptom):
+            selected_ids.add(area["id"])
+
+    return [area for area in contract["areas"] if area["id"] in selected_ids]
 
 
 def select_checks(contract: dict[str, Any], paths: list[str]) -> list[str]:
@@ -272,8 +311,15 @@ def self_test(contract_path: Path) -> None:
         "Sources/Speech/ParakeetEngine.swift": {"speech"},
         "Sources/Meeting/MeetingSessionController.swift": {"meeting-app"},
         "Sources/TranscriptedCore/Audio/Audio.swift": {"meeting-core"},
+        "Sources/TranscriptedApp.swift": {"app-shell"},
         "Package.swift": {"meeting-core"},
-        "scripts/entrypoints/build-beta.sh": {"beta-release"},
+        "build.sh": {"build-system"},
+        "scripts/entrypoints/build-beta.sh": {"beta-release", "build-system"},
+        "scripts/download_ami.sh": {"scripts"},
+        "docs/agent-onboarding.md": {"documentation"},
+        "docs/release-packaging.md": {"beta-release", "documentation"},
+        "Resources/Transcripted.icns": {"resources-config"},
+        "archive/README.md": {"repository-fallback"},
         "Tools/TranscriptedMCP/Package.swift": {"tools"},
         "AGENTS.md": {"agent-workflow"},
     }
@@ -302,6 +348,12 @@ def self_test(contract_path: Path) -> None:
     )
     if "Tools/TranscriptedMCP/CLAUDE.md" not in nested_context["docs"]:
         raise ContractError("nested paths must include their nearest local guide")
+    tracked_paths = _git_lines("ls-files")
+    unmapped_paths = [
+        path for path in tracked_paths if not select_areas(contract, [path], None)
+    ]
+    if unmapped_paths:
+        raise ContractError(f"tracked paths without an owner: {unmapped_paths[:5]}")
     try:
         changed_paths("refs/heads/__agent_context_missing_base__")
     except ContractError:

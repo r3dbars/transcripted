@@ -141,7 +141,13 @@
     {
       "id": "beta-release",
       "path_prefixes": ["scripts/release/", "Casks/"],
-      "exact_paths": ["build-beta.sh", "scripts/entrypoints/build-beta.sh", "docs/appcast.xml"],
+      "exact_paths": [
+        "build-beta.sh",
+        "scripts/entrypoints/build-beta.sh",
+        "docs/appcast.xml",
+        "docs/release-packaging.md",
+        "docs/sparkle-updates.md"
+      ],
       "docs": ["docs/release-packaging.md", "docs/sparkle-updates.md"],
       "keywords": ["release", "beta", "signing", "notarization", "sparkle", "homebrew", "appcast"],
       "owns": "Distribution configuration, packaging, signing, notarization, Sparkle, and Homebrew.",
@@ -199,6 +205,99 @@
       "invariants": [
         "Reports must stay bounded and privacy-safe.",
         "Fixture proof and live-service proof must be labeled separately."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "app-shell",
+      "path_prefixes": ["Sources/"],
+      "fallback": true,
+      "docs": ["Sources/CLAUDE.md"],
+      "keywords": ["app shell", "app delegate", "bootstrap", "application state"],
+      "owns": "Top-level application bootstrap, shared app state, and subsystem wiring.",
+      "invariants": [
+        "Keep product decisions in the owning subsystem instead of the app shell.",
+        "Preserve the TranscriptedCore library boundary."
+      ],
+      "manual_proof": ["Real app launch and menu-bar behavior when bootstrap wiring changes."]
+    },
+    {
+      "id": "build-system",
+      "path_prefixes": ["scripts/entrypoints/"],
+      "exact_paths": [
+        "build-deps.sh",
+        "build.sh",
+        "build-beta.sh",
+        "run-tests.sh",
+        "run-integration-smoke.sh",
+        "run-e2e-smoke.sh",
+        "run-slow-pasteback-smoke.sh",
+        "run-live-capture-smoke.sh",
+        "run-daily-audio-reliability.sh"
+      ],
+      "docs": ["scripts/README.md"],
+      "keywords": ["build", "dependency", "entrypoint", "test runner"],
+      "owns": "Root build and test wrappers plus their canonical entrypoints.",
+      "invariants": [
+        "Keep root wrappers thin and preserve non-interactive agent entrypoints.",
+        "Run build and test commands sequentially because they share build output."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "scripts",
+      "path_prefixes": ["scripts/"],
+      "fallback": true,
+      "docs": ["scripts/README.md"],
+      "keywords": ["script", "automation"],
+      "owns": "Repository automation not owned by a narrower build, development, operations, or release area.",
+      "invariants": [
+        "Do not add an unconsumed script.",
+        "Keep automation non-interactive when it is part of an agent proof path."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "documentation",
+      "path_prefixes": ["docs/"],
+      "exact_paths": [
+        "README.md",
+        "CHANGELOG.md",
+        "CODE_OF_CONDUCT.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md"
+      ],
+      "docs": ["docs/docs.md"],
+      "keywords": ["documentation", "readme", "guide"],
+      "owns": "Product, engineering, support, and release documentation.",
+      "invariants": [
+        "Current source and machine-readable contracts outrank dated planning documents.",
+        "Do not duplicate executable check rules in prose."
+      ],
+      "manual_proof": []
+    },
+    {
+      "id": "resources-config",
+      "path_prefixes": ["Resources/", "config/"],
+      "docs": ["docs/repo-layout.md"],
+      "keywords": ["resource", "entitlement", "configuration", "asset"],
+      "owns": "Bundled resources, app assets, entitlements, and security configuration.",
+      "invariants": [
+        "Never commit secrets or private customer data.",
+        "Keep bundled runtime resources aligned with packaging proof."
+      ],
+      "manual_proof": ["Installed-app resource loading when packaged assets change."]
+    },
+    {
+      "id": "repository-fallback",
+      "path_prefixes": [""],
+      "fallback": true,
+      "docs": ["docs/repo-layout.md"],
+      "keywords": ["repository", "metadata", "license"],
+      "owns": "Repository metadata and uncommon paths without a narrower subsystem owner.",
+      "invariants": [
+        "Find the nearest concrete consumer before changing an uncommon path.",
+        "Do not infer product behavior from archived or generated material."
       ],
       "manual_proof": []
     }
