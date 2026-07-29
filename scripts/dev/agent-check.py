@@ -20,6 +20,8 @@ from typing import Any, Callable
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTEXT_COMMAND = REPO_ROOT / "scripts/dev/agent-context.py"
 DEFAULT_REPORT = REPO_ROOT / "build/agent-proof.json"
+TRUSTED_MATRIX_PATH = ".agents/test-matrix.yml"
+TRUSTED_SELECTOR_PATH = "scripts/dev/test-matrix-checks.py"
 PLACEHOLDER_PATTERN = re.compile(r"<[^>\n]+>")
 PREFLIGHT_COMMAND_PATTERN = re.compile(
     r"^(?:bash[ \t]+)?scripts/dev/agent-preflight\.sh(?:[ \t]|$)"
@@ -64,20 +66,23 @@ def git_bytes(*arguments: str) -> bytes:
     return result.stdout
 
 
-def trusted_matrix_commands(base_sha: str) -> set[str]:
+def git_file(base_sha: str, relative_path: str) -> bytes:
     result = subprocess.run(
-        ["git", "show", f"{base_sha}:.agents/test-matrix.yml"],
+        ["git", "show", f"{base_sha}:{relative_path}"],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
-        text=True,
     )
     if result.returncode != 0:
-        raise ProofError("trusted base does not contain the test matrix")
+        raise ProofError("trusted base is missing a proof dependency")
+    return result.stdout
 
+
+def trusted_matrix_commands(base_sha: str) -> set[str]:
     commands: set[str] = set()
     in_checks = False
-    for raw_line in result.stdout.splitlines():
+    matrix = git_file(base_sha, TRUSTED_MATRIX_PATH).decode("utf-8")
+    for raw_line in matrix.splitlines():
         stripped = raw_line.strip()
         if stripped == "checks:":
             in_checks = True
@@ -97,6 +102,66 @@ def trusted_matrix_commands(base_sha: str) -> set[str]:
     if not commands:
         raise ProofError("trusted test matrix contains no commands")
     return commands
+
+
+def trusted_checks_for_paths(base_sha: str, paths: list[str]) -> list[str]:
+    if not paths:
+        return []
+    with tempfile.TemporaryDirectory(prefix="transcripted-agent-proof-") as directory:
+        temporary_root = Path(directory)
+        matrix_path = temporary_root / "test-matrix.yml"
+        selector_path = temporary_root / "test-matrix-checks.py"
+        matrix_path.write_bytes(git_file(base_sha, TRUSTED_MATRIX_PATH))
+        selector_path.write_bytes(git_file(base_sha, TRUSTED_SELECTOR_PATH))
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(selector_path),
+                "--matrix",
+                str(matrix_path),
+                *paths,
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    if result.returncode != 0:
+        raise ProofError("trusted base check selection failed")
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def normalize_repo_path(raw_path: str) -> str:
+    candidate = Path(raw_path)
+    resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (
+        REPO_ROOT / candidate
+    ).resolve(strict=False)
+    try:
+        return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError as error:
+        raise ProofError("proof path must stay inside the repo") from error
+
+
+def git_path_list(*arguments: str) -> list[str]:
+    output = git_bytes(*arguments)
+    return [
+        normalize_repo_path(raw_path.decode("utf-8"))
+        for raw_path in output.split(b"\0")
+        if raw_path
+    ]
+
+
+def changed_repo_paths(base_ref: str) -> list[str]:
+    merge_base_sha = git_value("merge-base", "HEAD", base_ref)
+    paths = set(git_path_list("diff", "--name-only", "-z", f"{merge_base_sha}...HEAD"))
+    paths.update(git_path_list("diff", "--cached", "--name-only", "-z"))
+    paths.update(git_path_list("diff", "--name-only", "-z"))
+    paths.update(git_path_list("ls-files", "--others", "--exclude-standard", "-z"))
+    return sorted(paths)
+
+
+def proof_commands(selected: list[str], required: list[str]) -> list[str]:
+    return list(dict.fromkeys([*required, *selected]))
 
 
 def path_state_fingerprint(paths: list[str]) -> str:
@@ -321,10 +386,12 @@ def normalize_report_path(raw_path: Path) -> Path:
     resolved = raw_path.resolve(strict=False) if raw_path.is_absolute() else (
         REPO_ROOT / raw_path
     ).resolve(strict=False)
+    report_root = (REPO_ROOT / "build").resolve(strict=False)
     try:
         resolved.relative_to(REPO_ROOT.resolve())
+        resolved.relative_to(report_root)
     except ValueError as error:
-        raise ProofError("report path must stay inside the repo") from error
+        raise ProofError("report path must stay inside the build directory") from error
     return resolved
 
 
@@ -399,6 +466,20 @@ def self_test() -> None:
     trusted_commands = trusted_matrix_commands(git_value("rev-parse", "HEAD"))
     if "bash build.sh --no-open" not in trusted_commands:
         raise ProofError("trusted matrix commands were not loaded from git")
+    required_checks = trusted_checks_for_paths(
+        git_value("rev-parse", "HEAD"),
+        ["Tests/RepoCommandContractTests.swift"],
+    )
+    if not {"bash build.sh --no-open", "bash run-tests.sh"}.issubset(
+        required_checks
+    ):
+        raise ProofError("trusted path-specific checks were not selected")
+    merged_checks = proof_commands(
+        ["python3 scripts/dev/agent-check.py --self-test"],
+        required_checks,
+    )
+    if merged_checks[:2] != ["bash build.sh --no-open", "bash run-tests.sh"]:
+        raise ProofError("trusted path-specific checks must run before branch additions")
 
     source_snapshot = capture_source_snapshot(
         "HEAD",
@@ -438,6 +519,12 @@ def self_test() -> None:
             raise ProofError("outside-repo report errors must not echo absolute paths") from error
     else:
         raise ProofError("outside-repo report paths must fail closed")
+    try:
+        normalize_report_path(REPO_ROOT / "AGENT_START.md")
+    except ProofError:
+        pass
+    else:
+        raise ProofError("report paths must not overwrite repository source")
     print("Agent proof runner self-test passed.")
 
 
@@ -453,7 +540,14 @@ def main() -> int:
         if args.self_test:
             self_test()
             return 0
-        context = load_context(args.base, args.paths)
+        initial_head_sha = git_value("rev-parse", "HEAD")
+        initial_base_sha = git_value("rev-parse", args.base)
+        requested_paths = (
+            sorted({normalize_repo_path(path) for path in args.paths})
+            if args.paths
+            else changed_repo_paths(args.base)
+        )
+        context = load_context(args.base, requested_paths)
         checks = context.get("checks")
         if not isinstance(checks, list) or any(not isinstance(check, str) for check in checks):
             raise ProofError("agent context returned invalid checks")
@@ -462,11 +556,23 @@ def main() -> int:
             not isinstance(path, str) or not path for path in context_paths
         ):
             raise ProofError("agent context returned invalid paths")
+        if context_paths != requested_paths:
+            raise ProofError("agent context changed the requested proof paths")
 
         report_path = normalize_report_path(args.report)
         source_snapshot = capture_source_snapshot(args.base, context_paths)
+        if (
+            source_snapshot["head_sha"] != initial_head_sha
+            or source_snapshot["base_sha"] != initial_base_sha
+        ):
+            raise ProofError("source identity changed during proof setup")
         trusted_commands = trusted_matrix_commands(source_snapshot["base_sha"])
-        results = run_commands(checks, trusted_commands=trusted_commands)
+        required_checks = trusted_checks_for_paths(
+            source_snapshot["base_sha"],
+            context_paths,
+        )
+        commands = proof_commands(checks, required_checks)
+        results = run_commands(commands, trusted_commands=trusted_commands)
         source_stable = source_snapshot_is_stable(source_snapshot, context_paths)
         if not source_stable:
             results.append(
