@@ -22,21 +22,36 @@ class STTRouter: ObservableObject {
     private(set) var lastEmptyTranscriptionReason: DictationEmptyTranscriptionReason?
 
     private var cancellables: Set<AnyCancellable> = []
-    private var activeRecordingModel: TranscriptionModelChoice?
+    private var recordingModelOwnership = TranscriptionRecordingModelOwnership()
     private var warmupOwnership = TranscriptionModelWarmupOwnership()
     private var backgroundWarmupTask: Task<Void, Never>?
     private var backgroundWarmupGeneration: UInt64 = 0
     private var isShuttingDown = false
+
+    private var activeRecordingModel: TranscriptionModelChoice? {
+        recordingModelOwnership.activeLease?.model
+    }
+
+    var recordingModelLease: TranscriptionRecordingModelLease? {
+        recordingModelOwnership.activeLease
+    }
+
+    private var recordingModel: TranscriptionModelChoice {
+        activeRecordingModel
+            ?? warmupOwnership.foregroundModel(on: selectedModel.runtime)
+            ?? selectedModel
+    }
 
     var isModelLoaded: Bool {
         isModelLoaded(for: selectedModel)
     }
 
     var isRecordingModelLoaded: Bool {
-        let model = activeRecordingModel
-            ?? warmupOwnership.foregroundModel(on: selectedModel.runtime)
-            ?? selectedModel
-        return isModelLoaded(for: model)
+        isModelLoaded(for: recordingModel)
+    }
+
+    var recordingModelDownloadState: ParakeetModelState {
+        modelDownloadState(for: recordingModel)
     }
 
     /// True when the selected model's files are already on disk, so dictation
@@ -147,11 +162,8 @@ class STTRouter: ObservableObject {
         }
     }
 
-    func initializeSelectedModel() async {
-        let model = activeRecordingModel
-            ?? warmupOwnership.foregroundModel(on: selectedModel.runtime)
-            ?? selectedModel
-        await initialize(model: model)
+    func initializeRecordingModel() async {
+        await initialize(model: recordingModel)
     }
 
     func initializeSelectedModelInBackground() async {
@@ -227,14 +239,23 @@ class STTRouter: ObservableObject {
     }
 
     private func setActiveRecordingModel(_ model: TranscriptionModelChoice) {
-        guard activeRecordingModel != model else { return }
-        clearActiveRecordingModel()
-        activeRecordingModel = beginForegroundUse(of: model)
+        let resolvedModel = beginForegroundUse(of: model)
+        let replacement = recordingModelOwnership.replace(with: resolvedModel)
+        if let replacedModel = replacement.replacedModel {
+            endForegroundUse(of: replacedModel)
+        }
     }
 
-    private func clearActiveRecordingModel() {
-        guard let model = activeRecordingModel else { return }
-        activeRecordingModel = nil
+    private func clearActiveRecordingModel(
+        ifMatching lease: TranscriptionRecordingModelLease? = nil
+    ) {
+        let model: TranscriptionModelChoice?
+        if let lease {
+            model = recordingModelOwnership.release(ifMatching: lease)
+        } else {
+            model = recordingModelOwnership.takeActiveModel()
+        }
+        guard let model else { return }
         endForegroundUse(of: model)
     }
 
@@ -274,11 +295,12 @@ class STTRouter: ObservableObject {
     /// poll sleep while a download is publishing progress or no
     /// initialization handle exists (Whisper). Callers own the overall
     /// timeout and must re-check `isModelLoaded` after each wait.
-    func waitForModelLoadProgress() async {
+    func waitForRecordingModelLoadProgress() async {
+        let model = recordingModel
         defer { refreshModelDownloadState() }
-        if selectedModel == .parakeetTDTv3 {
+        if model == .parakeetTDTv3 {
             var isDownloading = false
-            if case .downloading = modelDownloadState { isDownloading = true }
+            if case .downloading = recordingModelDownloadState { isDownloading = true }
             if !isDownloading, await parakeetEngine.joinModelInitialization() {
                 return
             }
@@ -336,10 +358,13 @@ class STTRouter: ObservableObject {
     }
 
     func transcribe(preparedRecording: RecordedSpeechSamples? = nil) async -> String? {
-        let model = activeRecordingModel ?? selectedModel
+        let recordingLease = recordingModelOwnership.activeLease
+        let model = recordingLease?.model ?? selectedModel
         lastEmptyTranscriptionReason = nil
         defer {
-            clearActiveRecordingModel()
+            if let recordingLease {
+                clearActiveRecordingModel(ifMatching: recordingLease)
+            }
         }
 
         switch model {
@@ -460,8 +485,9 @@ class STTRouter: ObservableObject {
         parakeetEngine.cancel()
     }
 
-    func finishRecordingModelUse() {
-        clearActiveRecordingModel()
+    func finishRecordingModelUse(_ lease: TranscriptionRecordingModelLease?) {
+        guard let lease else { return }
+        clearActiveRecordingModel(ifMatching: lease)
     }
 
     func cleanup() {
@@ -470,22 +496,14 @@ class STTRouter: ObservableObject {
         backgroundWarmupTask?.cancel()
         backgroundWarmupTask = nil
         warmupOwnership.reset()
-        activeRecordingModel = nil
+        recordingModelOwnership.reset()
         parakeetEngine.cleanup()
         whisperEngine.cleanup()
         nemotronEngine.cleanup()
     }
 
     private func refreshModelDownloadState() {
-        let refreshed: ParakeetModelState
-        switch selectedModel {
-        case .parakeetTDTv3:
-            refreshed = parakeetEngine.modelDownloadState
-        case .whisperLargeV3Turbo, .whisperLargeV3:
-            refreshed = whisperEngine.modelDownloadState
-        case .nemotronStreaming:
-            refreshed = nemotronEngine.modelDownloadState
-        }
+        let refreshed = modelDownloadState(for: selectedModel)
         // Skip the redundant @Published reassignment when nothing changed.
         // Background meeting transcription refreshes this state repeatedly
         // (per segment / per wait tick), and every reassignment fires
@@ -494,6 +512,19 @@ class STTRouter: ObservableObject {
         // pointless main-actor invalidations across a long meeting.
         guard !Self.modelStatesEqual(refreshed, modelDownloadState) else { return }
         modelDownloadState = refreshed
+    }
+
+    private func modelDownloadState(
+        for model: TranscriptionModelChoice
+    ) -> ParakeetModelState {
+        switch model {
+        case .parakeetTDTv3:
+            return parakeetEngine.modelDownloadState
+        case .whisperLargeV3Turbo, .whisperLargeV3:
+            return whisperEngine.modelDownloadState
+        case .nemotronStreaming:
+            return nemotronEngine.modelDownloadState
+        }
     }
 
     /// `ParakeetModelState` is not `Equatable` (it lives with the engine

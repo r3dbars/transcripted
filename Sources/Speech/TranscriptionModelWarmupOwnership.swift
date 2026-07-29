@@ -29,6 +29,66 @@ struct TranscriptionModelForegroundClaim: Equatable {
     let obsoleteBackgroundModel: TranscriptionModelChoice?
 }
 
+struct TranscriptionRecordingModelLease: Equatable {
+    let model: TranscriptionModelChoice
+    let generation: UInt64
+}
+
+/// Gives each recording attempt a distinct identity even when consecutive
+/// sessions use the same model. An older async stop/transcribe task can only
+/// release the exact lease it captured.
+struct TranscriptionRecordingModelOwnership {
+    private(set) var activeLease: TranscriptionRecordingModelLease?
+    private var nextGeneration: UInt64 = 0
+
+    mutating func replace(
+        with model: TranscriptionModelChoice
+    ) -> (lease: TranscriptionRecordingModelLease, replacedModel: TranscriptionModelChoice?) {
+        nextGeneration &+= 1
+        let lease = TranscriptionRecordingModelLease(
+            model: model,
+            generation: nextGeneration
+        )
+        let replacedModel = activeLease?.model
+        activeLease = lease
+        return (lease, replacedModel)
+    }
+
+    mutating func release(
+        ifMatching lease: TranscriptionRecordingModelLease
+    ) -> TranscriptionModelChoice? {
+        guard activeLease == lease else { return nil }
+        activeLease = nil
+        return lease.model
+    }
+
+    mutating func takeActiveModel() -> TranscriptionModelChoice? {
+        defer { activeLease = nil }
+        return activeLease?.model
+    }
+
+    mutating func reset() {
+        activeLease = nil
+    }
+}
+
+struct TranscriptionModelPreparationGeneration {
+    private(set) var current: UInt64 = 0
+
+    mutating func begin() -> UInt64 {
+        current &+= 1
+        return current
+    }
+
+    mutating func invalidate() {
+        current &+= 1
+    }
+
+    func isCurrent(_ generation: UInt64) -> Bool {
+        generation == current
+    }
+}
+
 /// Tracks whether model work is disposable background warmup or protected by
 /// active dictation/meeting/import use. The generation prevents an older
 /// canceled warmup from clearing a newer warmup for the same model.

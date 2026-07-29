@@ -301,7 +301,7 @@ class DictationSessionController: ObservableObject {
             // abandon a model load the next session will need, and the
             // engine dedupes concurrent initialization internally.
             Task { @MainActor in
-                await appState.sttRouter.initializeSelectedModel()
+                await appState.sttRouter.initializeRecordingModel()
             }
             beginDictationRecording(sourceApp: sourceApp)
             return
@@ -951,11 +951,12 @@ class DictationSessionController: ObservableObject {
 
         streamingTask?.cancel()
         let taskSessionID = currentDictationSessionID
+        let taskRecordingModelLease = appState.sttRouter.recordingModelLease
         let checkpointSignal = DictationStoppedAudioCheckpointSignal()
         stoppedAudioCheckpointSignal = checkpointSignal
         streamingTask = Task {
             defer {
-                appState.sttRouter.finishRecordingModelUse()
+                appState.sttRouter.finishRecordingModelUse(taskRecordingModelLease)
                 Task { await checkpointSignal.complete() }
             }
             var stopTiming = DictationStopTiming(requestedAt: stopRequestedAt)
@@ -1052,7 +1053,7 @@ class DictationSessionController: ObservableObject {
                           self.isDictating,
                           self.currentDictationSessionID == taskSessionID else { return }
                     self.updateLoadingOverlay(sourceApp: self.sessionSourceApp, phase: .afterRecording)
-                    switch appState.sttRouter.modelDownloadState {
+                    switch appState.sttRouter.recordingModelDownloadState {
                     case .failed:
                         // The concurrent load already failed — surface the
                         // error now instead of waiting out the full budget.
@@ -1061,15 +1062,15 @@ class DictationSessionController: ObservableObject {
                         // Nothing is loading the model; kick (or join) the
                         // deduped initialization instead of waiting for
                         // another caller to do it.
-                        let stateBefore = appState.sttRouter.modelDownloadState.diagnosticName
-                        await appState.sttRouter.initializeSelectedModel()
+                        let stateBefore = appState.sttRouter.recordingModelDownloadState.diagnosticName
+                        await appState.sttRouter.initializeRecordingModel()
                         // If initialization bailed without progressing (e.g.
                         // mid-shutdown), sleep so this loop can't spin hot.
-                        if appState.sttRouter.modelDownloadState.diagnosticName == stateBefore {
+                        if appState.sttRouter.recordingModelDownloadState.diagnosticName == stateBefore {
                             try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
                         }
                     case .downloading, .loading, .ready:
-                        await appState.sttRouter.waitForModelLoadProgress()
+                        await appState.sttRouter.waitForRecordingModelLoadProgress()
                     }
                 }
                 guard self.isDictating,
@@ -1536,10 +1537,10 @@ class DictationSessionController: ObservableObject {
         startupTask = Task { @MainActor [weak self] in
             guard let self else { return }
 
-            if case .failed = appState.sttRouter.modelDownloadState {
+            if case .failed = appState.sttRouter.recordingModelDownloadState {
                 // A previous attempt failed; retry once before the wait loop
                 // treats .failed as terminal.
-                await appState.sttRouter.initializeSelectedModel()
+                await appState.sttRouter.initializeRecordingModel()
             }
 
             let deadline = ProcessInfo.processInfo.systemUptime
@@ -1547,7 +1548,7 @@ class DictationSessionController: ObservableObject {
             while ProcessInfo.processInfo.systemUptime < deadline {
                 guard !Task.isCancelled, self.isDictating else { return }
 
-                let modelState = appState.sttRouter.modelDownloadState
+                let modelState = appState.sttRouter.recordingModelDownloadState
                 self.updateLoadingOverlay(sourceApp: sourceApp, modelState: modelState)
 
                 switch modelState {
@@ -1573,18 +1574,18 @@ class DictationSessionController: ObservableObject {
                     )
                     return
                 case .notLoaded, .cached:
-                    let stateBefore = appState.sttRouter.modelDownloadState.diagnosticName
-                    await appState.sttRouter.initializeSelectedModel()
+                    let stateBefore = appState.sttRouter.recordingModelDownloadState.diagnosticName
+                    await appState.sttRouter.initializeRecordingModel()
                     // If initialization bailed without progressing (e.g.
                     // mid-shutdown), sleep so this loop can't spin hot.
-                    if appState.sttRouter.modelDownloadState.diagnosticName == stateBefore {
+                    if appState.sttRouter.recordingModelDownloadState.diagnosticName == stateBefore {
                         try? await Task.sleep(nanoseconds: TranscriptedConstants.modelLoadPollInterval)
                     }
                 case .downloading, .loading:
                     // Downloads publish progress the overlay refreshes on a
                     // short poll; an in-flight load is joined directly so
                     // recording starts the moment it settles.
-                    await appState.sttRouter.waitForModelLoadProgress()
+                    await appState.sttRouter.waitForRecordingModelLoadProgress()
                 }
             }
 
@@ -1618,7 +1619,7 @@ class DictationSessionController: ObservableObject {
     ) {
         guard let appState = appState else { return }
         let presentation = loadingPresentation(
-            for: modelState ?? appState.sttRouter.modelDownloadState,
+            for: modelState ?? appState.sttRouter.recordingModelDownloadState,
             phase: phase
         )
         overlayController?.showLoadingState(

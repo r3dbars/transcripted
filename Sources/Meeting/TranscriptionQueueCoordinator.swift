@@ -225,13 +225,19 @@ final class TranscriptionQueueCoordinator {
         // A cancelled task must not touch shared state: a newer
         // startQueuedTranscription has already taken ownership of
         // queuedTranscriptionStartTask / preparingQueuedTranscriptionJob.
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+            if preparingQueuedTranscriptionJob?.id == job.id {
+                controller.sttAdapter.discardPreparedModel()
+            }
+            return
+        }
         guard preparingQueuedTranscriptionJob?.id == job.id else { return }
 
         queuedTranscriptionStartTask = nil
         preparingQueuedTranscriptionJob = nil
 
         guard modelsReady else {
+            controller.sttAdapter.discardPreparedModel()
             failQueuedTranscriptionJobAfterModelRecovery(job)
             handleBackgroundTranscriptionWorkChanged()
             return
@@ -244,7 +250,18 @@ final class TranscriptionQueueCoordinator {
         controller.sttAdapter.selectPreparedModel(job.sttModel)
 
         if controller.sttAdapter.isReady && controller.diarization.isReady {
-            return true
+            do {
+                try await controller.downloader.ensureModelsReady(
+                    sttModel: job.sttModel,
+                    retainForNextJob: true
+                )
+                if controller.sttAdapter.hasPreparedLease(for: job.sttModel) {
+                    return true
+                }
+            } catch {
+                // Fall through to the bounded recovery path so the failure is
+                // recorded consistently and gets one clean retry.
+            }
         }
 
         DiagnosticsTrail.record(
@@ -271,9 +288,11 @@ final class TranscriptionQueueCoordinator {
             try await TranscriptedConstants.withDetachedTimeout(
                 seconds: TranscriptedConstants.modelLoadWaitBudget
             ) {
-                try await self.controller.downloader.ensureModelsReady(sttModel: job.sttModel)
+                try await self.controller.downloader.ensureModelsReady(
+                    sttModel: job.sttModel,
+                    retainForNextJob: true
+                )
             }
-            controller.sttAdapter.selectPreparedModel(job.sttModel)
         } catch {
             DiagnosticsTrail.record(
                 level: .error,
@@ -330,7 +349,6 @@ final class TranscriptionQueueCoordinator {
     }
 
     private func runPreparedQueuedTranscription(_ job: QueuedTranscriptionJob) {
-        controller.sttAdapter.selectPreparedModel(job.sttModel)
         queuedRuntimeDiagnosticsJobIDs.remove(job.id)
         controller.activeQueuedTranscriptionJobID = job.id
         controller.activeStoppedAudioRecovery = job.stoppedAudioRecovery
@@ -356,6 +374,13 @@ final class TranscriptionQueueCoordinator {
                 recordingDate: recordingDate,
                 recoverySession: job.importedRecoverySession
             )
+        }
+
+        // Task-manager gates reject synchronously before incrementing
+        // activeCount. Do not retain a prepared non-selected model when no
+        // transcription job took ownership of it.
+        if controller.taskManager.activeCount == 0 {
+            controller.sttAdapter.discardPreparedModel()
         }
     }
 
@@ -662,6 +687,7 @@ final class TranscriptionQueueCoordinator {
         queuedTranscriptionStartTask = nil
         preparingQueuedTranscriptionJob = nil
         queuedTranscriptionJobs.removeAll()
+        controller.sttAdapter.discardPreparedModel()
 
         var preservedCount = 0
         for job in jobs {

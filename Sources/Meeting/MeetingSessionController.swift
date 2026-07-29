@@ -1560,6 +1560,7 @@ final class MeetingSessionController: ObservableObject {
         transcriptionQueue.queuedTranscriptionStartTask?.cancel()
         transcriptionQueue.queuedTranscriptionStartTask = nil
         transcriptionQueue.preparingQueuedTranscriptionJob = nil
+        sttAdapter.discardPreparedModel()
         lastTerminalTranscriptionOutcome = nil
         activeTranscriptionTrigger = .unknown
         activeTranscriptionCaptureDiagnostics = nil

@@ -134,4 +134,42 @@ func testTranscriptionModelWarmupOwnership() {
             "an already released claim must remain a no-op"
         )
     }
+
+    runSuite("Recording model ownership - stale sessions cannot release a successor") {
+        var ownership = TranscriptionRecordingModelOwnership()
+        let first = ownership.replace(with: .parakeetTDTv3)
+        let second = ownership.replace(with: .parakeetTDTv3)
+
+        assertEqual(first.replacedModel, nil)
+        assertEqual(second.replacedModel, .parakeetTDTv3)
+        assertNil(
+            ownership.release(ifMatching: first.lease),
+            "an older async stop task must not release the newer recording's model"
+        )
+        assertEqual(ownership.activeLease, second.lease)
+        assertEqual(ownership.release(ifMatching: second.lease), .parakeetTDTv3)
+        assertNil(ownership.activeLease)
+    }
+
+    runSuite("Recording model ownership - unconditional teardown takes only the active lease") {
+        var ownership = TranscriptionRecordingModelOwnership()
+        _ = ownership.replace(with: .whisperLargeV3Turbo)
+
+        assertEqual(ownership.takeActiveModel(), .whisperLargeV3Turbo)
+        assertNil(ownership.takeActiveModel())
+    }
+
+    runSuite("Model preparation generation - stale completion cannot publish") {
+        var generation = TranscriptionModelPreparationGeneration()
+        let first = generation.begin()
+        let second = generation.begin()
+
+        assertFalse(generation.isCurrent(first))
+        assertTrue(generation.isCurrent(second))
+        generation.invalidate()
+        assertFalse(
+            generation.isCurrent(second),
+            "cleanup or job start must invalidate an in-flight model preparation"
+        )
+    }
 }
