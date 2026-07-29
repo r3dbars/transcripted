@@ -325,7 +325,7 @@ enum DictationStopBenchmarkRunner {
         decodeSeconds: Double,
         stopToText: Double
     ) -> [String: Any] {
-        [
+        var payload: [String: Any] = [
             "record_type": "case_result",
             "timestamp": iso8601.string(from: Date()),
             "case_id": benchmarkCase.id,
@@ -340,11 +340,14 @@ enum DictationStopBenchmarkRunner {
             "bench_samples": preprocessed.samples.count,
             "resampled_samples": preprocessed.resampledSampleCount,
             "preprocess_s": rounded(preprocessed.preprocessSeconds),
-            "snapshot_resample_s": rounded(preprocessed.preprocessSeconds),
-            "recovery_checkpoint_s": rounded(preprocessed.recoveryCheckpointSeconds),
-            "decode_s": rounded(decodeSeconds),
             "stop_to_text_s": rounded(stopToText)
         ]
+        if case .production = config.variant {
+            payload["snapshot_resample_s"] = rounded(preprocessed.preprocessSeconds)
+            payload["recovery_checkpoint_s"] = rounded(preprocessed.recoveryCheckpointSeconds)
+            payload["decode_s"] = rounded(decodeSeconds)
+        }
+        return payload
     }
 
     private static func estimatedResampledSampleCount(inputCount: Int, inputRate: Double) -> Int {
