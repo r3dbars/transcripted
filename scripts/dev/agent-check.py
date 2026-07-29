@@ -516,7 +516,12 @@ def build_report(
     results: list[dict[str, Any]],
     source_stable: bool,
 ) -> dict[str, Any]:
-    manual_requirements = context.get("manual_proof", [])
+    manual_requirements = list(context.get("manual_proof", []))
+    if any(result.get("reason") == "manual-proof-required" for result in results):
+        manual_requirements.append(
+            "Run the blocked manual check with its required local permissions and hardware."
+        )
+    manual_requirements = list(dict.fromkeys(manual_requirements))
     return {
         "schema_version": 1,
         "head_sha": source_snapshot["head_sha"],
@@ -787,6 +792,22 @@ def self_test() -> None:
         raise ProofError("proof reports must retain the pre-run source identity")
     if report["source"]["stable"] is not True:
         raise ProofError("proof reports must record source stability")
+    manual_report = build_report(
+        source_snapshot,
+        {"paths": ["run-live-capture-smoke.sh"], "areas": [], "manual_proof": []},
+        [
+            {
+                "command": "bash run-live-capture-smoke.sh --skip-build",
+                "status": "BLOCKED",
+                "exit_code": None,
+                "duration_ms": 0,
+                "reason": "manual-proof-required",
+            }
+        ],
+        source_stable=True,
+    )
+    if manual_report["proof"]["manual"]["status"] != "UNKNOWN":
+        raise ProofError("blocked live checks must leave manual proof unknown")
     serialized_report = json.dumps(report)
     if any(key in serialized_report for key in forbidden_keys):
         raise ProofError("proof reports must not retain output or environment")
