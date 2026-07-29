@@ -23,6 +23,7 @@ class STTRouter: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
     private var activeRecordingModel: TranscriptionModelChoice?
+    private var backgroundWarmupModel: TranscriptionModelChoice?
 
     var isModelLoaded: Bool {
         isModelLoaded(for: selectedModel)
@@ -111,7 +112,10 @@ class STTRouter: ObservableObject {
         let nextModel = TranscriptionModelPreferences.effectiveModel()
         guard nextModel != selectedModel else { return }
 
-        cancelObsoleteModelWork(for: selectedModel)
+        if backgroundWarmupModel == selectedModel {
+            cancelBackgroundWarmup(for: selectedModel)
+            backgroundWarmupModel = nil
+        }
         selectedModel = nextModel
         refreshModelDownloadState()
         Task { @MainActor [weak self] in
@@ -119,11 +123,7 @@ class STTRouter: ObservableObject {
         }
     }
 
-    private func cancelObsoleteModelWork(for model: TranscriptionModelChoice) {
-        // A model assigned to the active recording must stay alive until that
-        // recording has been transcribed.
-        guard activeRecordingModel != model else { return }
-
+    private func cancelBackgroundWarmup(for model: TranscriptionModelChoice) {
         switch model {
         case .parakeetTDTv3:
             parakeetEngine.cancelModelWork()
@@ -139,6 +139,17 @@ class STTRouter: ObservableObject {
         await initialize(model: selectedModel)
     }
 
+    func initializeSelectedModelInBackground() async {
+        let model = selectedModel
+        backgroundWarmupModel = model
+        defer {
+            if backgroundWarmupModel == model {
+                backgroundWarmupModel = nil
+            }
+        }
+        await initializeModel(model)
+    }
+
     func prefetchSelectedModelFilesForExistingInstall() async {
         guard selectedModel == .parakeetTDTv3 else { return }
         await parakeetEngine.prefetchModelFilesIfNeeded()
@@ -146,6 +157,15 @@ class STTRouter: ObservableObject {
     }
 
     func initialize(model: TranscriptionModelChoice) async {
+        // Any real dictation, meeting, or import that joins launch warmup owns
+        // that work now. A later preference change must not cancel it.
+        if backgroundWarmupModel == model {
+            backgroundWarmupModel = nil
+        }
+        await initializeModel(model)
+    }
+
+    private func initializeModel(_ model: TranscriptionModelChoice) async {
         guard !isModelLoaded(for: model) else {
             refreshModelDownloadState()
             return

@@ -2187,16 +2187,18 @@ func testRepoCommandContract() {
             "background voice-model warmup should not compete with interactive UI work"
         )
         assertTrue(
-            warmupBlock.contains("await self.sttRouter.initializeSelectedModel()"),
+            warmupBlock.contains("await self.sttRouter.initializeSelectedModelInBackground()"),
             "background readiness should load the selected dictation model"
         )
         let routerContents = readRepoTextFile("Sources/Speech/STTRouter.swift")
         assertTrue(
-            routerContents.contains("cancelObsoleteModelWork(for: selectedModel)")
+            routerContents.contains("if backgroundWarmupModel == selectedModel")
+                && routerContents.contains("cancelBackgroundWarmup(for: selectedModel)")
                 && routerContents.contains("parakeetEngine.cancelModelWork()")
                 && routerContents.contains("parakeetEngine.teardownModel()")
-                && routerContents.contains("guard activeRecordingModel != model else { return }"),
-            "changing the selected model should cancel obsolete launch warmup without tearing down an active recording"
+                && routerContents.contains("func initializeSelectedModelInBackground() async")
+                && routerContents.contains("if backgroundWarmupModel == model"),
+            "model changes should cancel only unclaimed launch warmup and preserve work joined by dictation or meetings"
         )
         assertFalse(
             warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),

@@ -262,7 +262,7 @@ class TranscriptedAppState: ObservableObject {
             // UI setup is complete before this task starts. Load the selected
             // model quietly so first dictation can begin without a cold start.
             guard !Task.isCancelled else { return }
-            await self.sttRouter.initializeSelectedModel()
+            await self.sttRouter.initializeSelectedModelInBackground()
             // Keep heavier meeting diarization lazy. Meeting start/import paths
             // call prepareModels() with visible loading state when needed.
         }
