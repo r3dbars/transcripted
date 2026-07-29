@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -26,6 +28,11 @@ MAX_COMMAND_LENGTH = 512
 MANUAL_COMMAND_FRAGMENTS = (
     "run-live-capture-smoke.sh",
 )
+ALLOWED_EXECUTABLES = {"bash", "python3", "ruby", "swift"}
+BOOTSTRAP_COMMANDS = {
+    "python3 -m py_compile scripts/dev/agent-check.py",
+    "python3 scripts/dev/agent-check.py --self-test",
+}
 
 
 class ProofError(ValueError):
@@ -43,6 +50,103 @@ def git_value(*arguments: str) -> str:
     if result.returncode != 0:
         raise ProofError("could not resolve git proof identity")
     return result.stdout.strip()
+
+
+def git_bytes(*arguments: str) -> bytes:
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise ProofError("could not capture git proof state")
+    return result.stdout
+
+
+def trusted_matrix_commands(base_sha: str) -> set[str]:
+    result = subprocess.run(
+        ["git", "show", f"{base_sha}:.agents/test-matrix.yml"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise ProofError("trusted base does not contain the test matrix")
+
+    commands: set[str] = set()
+    in_checks = False
+    for raw_line in result.stdout.splitlines():
+        stripped = raw_line.strip()
+        if stripped == "checks:":
+            in_checks = True
+            continue
+        if stripped in {"- paths:", "notes:"}:
+            in_checks = False
+            continue
+        if not in_checks or not stripped.startswith("- "):
+            continue
+        try:
+            value = json.loads(stripped[2:].strip())
+        except json.JSONDecodeError as error:
+            raise ProofError("trusted test matrix is invalid") from error
+        if not isinstance(value, str) or not value:
+            raise ProofError("trusted test matrix contains an invalid command")
+        commands.add(value)
+    if not commands:
+        raise ProofError("trusted test matrix contains no commands")
+    return commands
+
+
+def path_state_fingerprint(paths: list[str]) -> str:
+    digest = hashlib.sha256()
+    repo_root = REPO_ROOT.resolve()
+    for relative_path in sorted(paths):
+        resolved = (REPO_ROOT / relative_path).resolve(strict=False)
+        try:
+            resolved.relative_to(repo_root)
+        except ValueError as error:
+            raise ProofError("proof path must stay inside the repo") from error
+        digest.update(relative_path.encode("utf-8"))
+        digest.update(b"\0")
+        if not resolved.exists():
+            digest.update(b"missing\0")
+            continue
+        stat_result = resolved.stat()
+        digest.update(f"{stat_result.st_mode:o}".encode("ascii"))
+        digest.update(b"\0")
+        if resolved.is_file():
+            with resolved.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        else:
+            digest.update(b"non-file")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def capture_source_snapshot(base_ref: str, paths: list[str]) -> dict[str, Any]:
+    head_sha = git_value("rev-parse", "HEAD")
+    base_sha = git_value("rev-parse", base_ref)
+    merge_base_sha = git_value("merge-base", "HEAD", base_ref)
+    worktree_state = git_bytes("status", "--porcelain=v1", "-z", "--untracked-files=all")
+    return {
+        "head_sha": head_sha,
+        "base_ref": base_ref,
+        "base_sha": base_sha,
+        "merge_base_sha": merge_base_sha,
+        "worktree_clean": not worktree_state,
+        "worktree_state_sha256": hashlib.sha256(worktree_state).hexdigest(),
+        "path_state_sha256": path_state_fingerprint(paths),
+    }
+
+
+def source_snapshot_is_stable(snapshot: dict[str, Any], paths: list[str]) -> bool:
+    try:
+        return capture_source_snapshot(snapshot["base_ref"], paths) == snapshot
+    except (OSError, ProofError):
+        return False
 
 
 def load_context(base_ref: str, paths: list[str]) -> dict[str, Any]:
@@ -69,7 +173,29 @@ def load_context(base_ref: str, paths: list[str]) -> dict[str, Any]:
     return context
 
 
-def classify_command(command: str) -> tuple[str, str | None]:
+def command_argv(command: str) -> list[str]:
+    try:
+        arguments = shlex.split(command)
+    except ValueError as error:
+        raise ProofError("invalid command syntax") from error
+    if not arguments:
+        raise ProofError("empty command")
+    executable = arguments[0]
+    if executable not in ALLOWED_EXECUTABLES and not executable.startswith("scripts/"):
+        raise ProofError("command executable is not allowed")
+    if executable.startswith("scripts/"):
+        resolved = (REPO_ROOT / executable).resolve(strict=False)
+        try:
+            resolved.relative_to(REPO_ROOT.resolve())
+        except ValueError as error:
+            raise ProofError("command executable must stay inside the repo") from error
+    return arguments
+
+
+def classify_command(
+    command: str,
+    trusted_commands: set[str] | None = None,
+) -> tuple[str, str | None]:
     if not command or len(command) > MAX_COMMAND_LENGTH or "\n" in command:
         return "BLOCKED", "invalid-command"
     if PREFLIGHT_COMMAND_PATTERN.search(command):
@@ -78,12 +204,20 @@ def classify_command(command: str) -> tuple[str, str | None]:
         return "BLOCKED", "operator-input-required"
     if any(fragment in command for fragment in MANUAL_COMMAND_FRAGMENTS):
         return "BLOCKED", "manual-proof-required"
+    if trusted_commands is not None and (
+        command not in trusted_commands and command not in BOOTSTRAP_COMMANDS
+    ):
+        return "BLOCKED", "untrusted-matrix-command"
+    try:
+        command_argv(command)
+    except ProofError:
+        return "BLOCKED", "invalid-command"
     return "RUN", None
 
 
-def shell_runner(command: str) -> int:
+def command_runner(command: str) -> int:
     return subprocess.run(
-        ["/bin/bash", "-lc", command],
+        command_argv(command),
         cwd=REPO_ROOT,
         check=False,
     ).returncode
@@ -91,14 +225,17 @@ def shell_runner(command: str) -> int:
 
 def run_commands(
     commands: list[str],
-    runner: Callable[[str], int] = shell_runner,
+    trusted_commands: set[str] | None = None,
+    runner: Callable[[str], int] = command_runner,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
-    runnable_total = sum(classify_command(command)[0] == "RUN" for command in commands)
+    runnable_total = sum(
+        classify_command(command, trusted_commands)[0] == "RUN" for command in commands
+    )
     runnable_index = 0
 
     for command in commands:
-        disposition, reason = classify_command(command)
+        disposition, reason = classify_command(command, trusted_commands)
         if disposition != "RUN":
             results.append(
                 {
@@ -141,18 +278,25 @@ def deterministic_status(results: list[dict[str, Any]]) -> str:
 
 
 def build_report(
-    base_ref: str,
+    source_snapshot: dict[str, Any],
     context: dict[str, Any],
     results: list[dict[str, Any]],
+    source_stable: bool,
 ) -> dict[str, Any]:
     manual_requirements = context.get("manual_proof", [])
     return {
         "schema_version": 1,
-        "head_sha": git_value("rev-parse", "HEAD"),
+        "head_sha": source_snapshot["head_sha"],
         "base": {
-            "ref": base_ref,
-            "sha": git_value("rev-parse", base_ref),
-            "merge_base_sha": git_value("merge-base", "HEAD", base_ref),
+            "ref": source_snapshot["base_ref"],
+            "sha": source_snapshot["base_sha"],
+            "merge_base_sha": source_snapshot["merge_base_sha"],
+        },
+        "source": {
+            "worktree_clean": source_snapshot["worktree_clean"],
+            "worktree_state_sha256": source_snapshot["worktree_state_sha256"],
+            "path_state_sha256": source_snapshot["path_state_sha256"],
+            "stable": source_stable,
         },
         "paths": context.get("paths", []),
         "areas": [area.get("id") for area in context.get("areas", [])],
@@ -213,20 +357,30 @@ def self_test() -> None:
             "manual-proof-required",
         ),
         "echo first\necho second": ("BLOCKED", "invalid-command"),
+        "python3 scripts/dev/untrusted-proof.py": ("RUN", None),
     }
     for command, expected in classifications.items():
         actual = classify_command(command)
         if actual != expected:
             raise ProofError(f"unexpected command classification: {actual}")
 
-    exit_codes = {"pass": 0, "fail": 7}
+    untrusted_command = "python3 scripts/dev/test-matrix-checks.py --self-test"
+    if classify_command(
+        "python3 scripts/dev/untrusted-proof.py",
+        trusted_commands=set(),
+    ) != ("BLOCKED", "untrusted-matrix-command"):
+        raise ProofError("commands absent from the trusted base must fail closed")
+
+    pass_command = "python3 scripts/dev/agent-check.py --self-test"
+    exit_codes = {pass_command: 0, untrusted_command: 7}
     results = run_commands(
         [
             "bash scripts/dev/agent-preflight.sh",
-            "pass",
-            "fail",
+            pass_command,
+            untrusted_command,
             "release <operator>",
         ],
+        trusted_commands={untrusted_command},
         runner=lambda command: exit_codes[command],
     )
     if [result["status"] for result in results] != [
@@ -241,6 +395,42 @@ def self_test() -> None:
     forbidden_keys = {"stdout", "stderr", "environment", "cwd"}
     if any(forbidden_keys.intersection(result) for result in results):
         raise ProofError("proof results must not retain command output or environment")
+
+    trusted_commands = trusted_matrix_commands(git_value("rev-parse", "HEAD"))
+    if "bash build.sh --no-open" not in trusted_commands:
+        raise ProofError("trusted matrix commands were not loaded from git")
+
+    source_snapshot = capture_source_snapshot(
+        "HEAD",
+        ["scripts/dev/agent-check.py"],
+    )
+    if not source_snapshot_is_stable(
+        source_snapshot,
+        ["scripts/dev/agent-check.py"],
+    ):
+        raise ProofError("an unchanged source snapshot must remain stable")
+    changed_snapshot = dict(source_snapshot)
+    changed_snapshot["head_sha"] = "0" * 40
+    if source_snapshot_is_stable(
+        changed_snapshot,
+        ["scripts/dev/agent-check.py"],
+    ):
+        raise ProofError("a changed source snapshot must fail closed")
+
+    report = build_report(
+        source_snapshot,
+        {"paths": ["scripts/dev/agent-check.py"], "areas": [], "manual_proof": []},
+        results,
+        source_stable=True,
+    )
+    if report["head_sha"] != source_snapshot["head_sha"]:
+        raise ProofError("proof reports must retain the pre-run source identity")
+    if report["source"]["stable"] is not True:
+        raise ProofError("proof reports must record source stability")
+    serialized_report = json.dumps(report)
+    if any(key in serialized_report for key in forbidden_keys):
+        raise ProofError("proof reports must not retain output or environment")
+
     try:
         normalize_report_path(REPO_ROOT.parent / "private-proof.json")
     except ProofError as error:
@@ -267,9 +457,33 @@ def main() -> int:
         checks = context.get("checks")
         if not isinstance(checks, list) or any(not isinstance(check, str) for check in checks):
             raise ProofError("agent context returned invalid checks")
-        results = run_commands(checks)
+        context_paths = context.get("paths")
+        if not isinstance(context_paths, list) or any(
+            not isinstance(path, str) or not path for path in context_paths
+        ):
+            raise ProofError("agent context returned invalid paths")
+
         report_path = normalize_report_path(args.report)
-        report = build_report(args.base, context, results)
+        source_snapshot = capture_source_snapshot(args.base, context_paths)
+        trusted_commands = trusted_matrix_commands(source_snapshot["base_sha"])
+        results = run_commands(checks, trusted_commands=trusted_commands)
+        source_stable = source_snapshot_is_stable(source_snapshot, context_paths)
+        if not source_stable:
+            results.append(
+                {
+                    "command": "source-stability",
+                    "status": "FAIL",
+                    "exit_code": None,
+                    "duration_ms": 0,
+                    "reason": "source-changed-during-proof",
+                }
+            )
+        report = build_report(
+            source_snapshot,
+            context,
+            results,
+            source_stable=source_stable,
+        )
         write_report(report_path, report)
         deterministic = report["proof"]["deterministic"]["status"]
         print(f"\nDeterministic proof: {deterministic}")
