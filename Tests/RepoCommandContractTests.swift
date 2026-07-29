@@ -2198,16 +2198,30 @@ func testRepoCommandContract() {
                 && routerContents.contains("parakeetEngine.cancelModelWork()")
                 && routerContents.contains("parakeetEngine.teardownModel()")
                 && routerContents.contains("func initializeSelectedModelInBackground() async")
-                && routerContents.contains(
-                    "guard !isModelLoaded(for: model), !foregroundOwnedModels.contains(model) else"
-                )
-                && routerContents.contains("if backgroundWarmupModel == model, !isModelLoaded(for: model)")
+                && routerContents.contains("await self?.initializeSelectedModelInBackground()")
+                && routerContents.contains("let ownsBackgroundWarmup = !foregroundOwnedModels.contains(model)")
+                && routerContents.contains("if ownsBackgroundWarmup")
+                && routerContents.contains("backgroundWarmupModel == model")
                 && routerContents.contains("func claimModelForForegroundUse(_ model: TranscriptionModelChoice)")
                 && routerContents.contains("foregroundOwnedModels.insert(model)")
                 && routerContents.contains("claimModelForForegroundUse(selectedModel)")
                 && routerContents.contains("claimModelForForegroundUse(resolvedModel)")
                 && meetingAdapterContents.contains("router.claimModelForForegroundUse(model)"),
-            "model changes should cancel only unclaimed launch warmup and preserve work joined by dictation or meetings"
+            "model changes should cancel only unclaimed background warmup and preserve work joined by dictation or meetings"
+        )
+        let settingsContents = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
+        assertTrue(
+            settingsContents.contains("await sttRouter.initializeSelectedModelInBackground()"),
+            "settings-driven model loads should stay background-owned until real work claims them"
+        )
+        let whisperContents = readRepoTextFile("Sources/Speech/WhisperEngine.swift")
+        let nemotronContents = readRepoTextFile("Sources/Speech/NemotronEngine.swift")
+        assertTrue(
+            whisperContents.contains("private var initializationGeneration: UInt64 = 0")
+                && whisperContents.contains("generation == initializationGeneration")
+                && nemotronContents.contains("private var initializationGeneration: UInt64 = 0")
+                && nemotronContents.contains("generation == initializationGeneration"),
+            "cancelled advanced-model warmups should not publish over newer initialization work"
         )
         assertFalse(
             warmupBlock.contains("meetingSession.prepareModels(showLoadingUI: false)"),

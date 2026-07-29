@@ -3811,7 +3811,7 @@ struct TranscriptedSettingsView: View {
         return {
             trackSettingsAction("download_model", page: page)
             Task { @MainActor in
-                await sttRouter.initializeSelectedModel()
+                await sttRouter.initializeSelectedModelInBackground()
             }
         }
     }
@@ -4323,7 +4323,7 @@ struct TranscriptedSettingsView: View {
         trackSettingsAction("switch_model", page: page)
         TranscriptionModelPreferences.setPreferredModel(model)
         Task { @MainActor in
-            await sttRouter.initializeSelectedModel()
+            await sttRouter.initializeSelectedModelInBackground()
         }
     }
 

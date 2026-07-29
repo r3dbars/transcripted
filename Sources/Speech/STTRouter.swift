@@ -120,7 +120,7 @@ class STTRouter: ObservableObject {
         selectedModel = nextModel
         refreshModelDownloadState()
         Task { @MainActor [weak self] in
-            await self?.initializeSelectedModel()
+            await self?.initializeSelectedModelInBackground()
         }
     }
 
@@ -143,15 +143,20 @@ class STTRouter: ObservableObject {
     func initializeSelectedModelInBackground() async {
         let model = selectedModel
         // A loaded model may already belong to active or prior foreground use.
-        // Do not reclassify it as disposable launch work during wake recovery.
-        guard !isModelLoaded(for: model), !foregroundOwnedModels.contains(model) else {
+        // Do not reclassify it as disposable background work during wake recovery.
+        guard !isModelLoaded(for: model) else {
             refreshModelDownloadState()
             return
         }
 
-        backgroundWarmupModel = model
+        let ownsBackgroundWarmup = !foregroundOwnedModels.contains(model)
+        if ownsBackgroundWarmup {
+            backgroundWarmupModel = model
+        }
         await initializeModel(model)
-        if backgroundWarmupModel == model, !isModelLoaded(for: model) {
+        if ownsBackgroundWarmup,
+           backgroundWarmupModel == model,
+           !isModelLoaded(for: model) {
             backgroundWarmupModel = nil
         }
     }
@@ -167,7 +172,7 @@ class STTRouter: ObservableObject {
         await initializeModel(model)
     }
 
-    /// Promote launch-preloaded work to foreground ownership. Once dictation,
+    /// Promote background-preloaded work to foreground ownership. Once dictation,
     /// meetings, or imports use a model, preference changes must not tear it
     /// down as obsolete background work.
     func claimModelForForegroundUse(_ model: TranscriptionModelChoice) {
