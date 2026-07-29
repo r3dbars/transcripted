@@ -100,6 +100,49 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("ClipboardRestoringTextPaster timing excludes non-confirmation work") {
+            let pasteboard = NSPasteboard(
+                name: NSPasteboard.Name("TranscriptedPasteTimingFailure-\(UUID().uuidString)")
+            )
+            let paster = ClipboardRestoringTextPaster()
+
+            pasteboard.clearContents()
+            pasteboard.setString("synthetic original clipboard", forType: .string)
+            let outcome = paster.paste(
+                "synthetic failed dispatch",
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: { false },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000
+            )
+
+            let measurements = paster.lastPasteTiming?.measurements() ?? [:]
+            assertEqual(
+                outcome.copyReason,
+                .pasteEventCreationFailed,
+                "the synthetic dispatcher failure should use the manual-copy fallback"
+            )
+            assertNil(
+                measurements["paste_confirmation_wait_ms"],
+                "fallback clipboard work must not be mislabeled as confirmation waiting"
+            )
+
+            let preDispatchRead = ClipboardPasteTiming(
+                startedAt: 10,
+                dispatchStartedAt: 11,
+                dispatchFinishedAt: 11.01,
+                clipboardReadAt: 10.5,
+                confirmationStartedAt: nil,
+                confirmationFinishedAt: nil
+            ).measurements()
+            assertNil(
+                preDispatchRead["paste_clipboard_read_ms"],
+                "a clipboard manager read before Cmd+V must not look like an immediate target read"
+            )
+        }
+
         runSuite("ClipboardRestoringTextPaster.capture — focused element cast is crash-proof") {
             // Regression: kAXFocusedUIElementAttribute's CFTypeRef was force-cast
             // straight to AXUIElement with no type check. AXUIElement is a toll-free

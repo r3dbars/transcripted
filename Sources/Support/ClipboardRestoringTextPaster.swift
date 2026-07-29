@@ -67,14 +67,25 @@ struct ClipboardPasteTiming: Equatable {
     let dispatchStartedAt: CFAbsoluteTime?
     let dispatchFinishedAt: CFAbsoluteTime?
     let clipboardReadAt: CFAbsoluteTime?
-    let finishedAt: CFAbsoluteTime
+    let confirmationStartedAt: CFAbsoluteTime?
+    let confirmationFinishedAt: CFAbsoluteTime?
 
     func measurements() -> [String: Int] {
         var values: [String: Int] = [:]
         values["paste_prepare_ms"] = milliseconds(from: startedAt, to: dispatchStartedAt)
         values["paste_dispatch_ms"] = milliseconds(from: dispatchStartedAt, to: dispatchFinishedAt)
-        values["paste_clipboard_read_ms"] = milliseconds(from: dispatchStartedAt, to: clipboardReadAt)
-        values["paste_confirmation_wait_ms"] = milliseconds(from: dispatchFinishedAt, to: finishedAt)
+        if let dispatchStartedAt,
+           let clipboardReadAt,
+           clipboardReadAt >= dispatchStartedAt {
+            values["paste_clipboard_read_ms"] = milliseconds(
+                from: dispatchStartedAt,
+                to: clipboardReadAt
+            )
+        }
+        values["paste_confirmation_wait_ms"] = milliseconds(
+            from: confirmationStartedAt,
+            to: confirmationFinishedAt
+        )
         return values
     }
 
@@ -723,6 +734,8 @@ final class ClipboardRestoringTextPaster {
         let timingStartedAt = CFAbsoluteTimeGetCurrent()
         var timingDispatchStartedAt: CFAbsoluteTime?
         var timingDispatchFinishedAt: CFAbsoluteTime?
+        var timingConfirmationStartedAt: CFAbsoluteTime?
+        var timingConfirmationFinishedAt: CFAbsoluteTime?
         var timingProvider: TemporaryPasteboardStringProvider?
         defer {
             lastPasteTiming = ClipboardPasteTiming(
@@ -730,7 +743,8 @@ final class ClipboardRestoringTextPaster {
                 dispatchStartedAt: timingDispatchStartedAt,
                 dispatchFinishedAt: timingDispatchFinishedAt,
                 clipboardReadAt: timingProvider?.firstReadAt,
-                finishedAt: CFAbsoluteTimeGetCurrent()
+                confirmationStartedAt: timingConfirmationStartedAt,
+                confirmationFinishedAt: timingConfirmationFinishedAt
             )
         }
         discardPasteRetry()
@@ -817,11 +831,13 @@ final class ClipboardRestoringTextPaster {
             return false
         }
 
+        timingConfirmationStartedAt = CFAbsoluteTimeGetCurrent()
         let pasteConfirmationResult = waitForPasteConfirmation(
             targetIsFrontmost: targetRemainsFrontmost,
             pasteConfirmed: confirmPasteReceived,
             timeout: pasteConfirmationWait
         )
+        timingConfirmationFinishedAt = CFAbsoluteTimeGetCurrent()
         guard pasteConfirmationResult == .confirmed else {
             var diagnostics = accessibilityConfirmation?.diagnosticsContext(
                 clipboardReadAt: temporaryProvider?.firstReadAt,
