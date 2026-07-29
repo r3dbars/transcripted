@@ -391,7 +391,8 @@ final class UIAutomationSmokeRunner {
         ]
 
         for check in primaryPageChecks {
-            guard appInspector.performPressOrClick(identifier: check.triggerID) else {
+            guard appInspector.selectRow(identifier: check.triggerID)
+                    || appInspector.performPressOrClick(identifier: check.triggerID) else {
                 builder.add(.fail(
                     check.id,
                     check.title,
@@ -1069,6 +1070,39 @@ private struct AXInspector {
         return false
     }
 
+    func selectRow(identifier: String, maxDepth: Int = 12, maxNodes: Int = 2_000) -> Bool {
+        var queue: [(element: AXUIElement, depth: Int, ancestors: [AXUIElement])] = [(root, 0, [])]
+        var visited = Set<CFHashCode>()
+        var visitedCount = 0
+
+        while !queue.isEmpty, visitedCount < maxNodes {
+            let (element, depth, ancestors) = queue.removeFirst()
+            let key = CFHash(element)
+            if visited.contains(key) { continue }
+            visited.insert(key)
+            visitedCount += 1
+
+            if observedElement(for: element).identifier == identifier {
+                for candidate in [element] + ancestors.reversed() {
+                    guard string(candidate, kAXRoleAttribute as String) == kAXRowRole as String else {
+                        continue
+                    }
+                    if Self.select(candidate) {
+                        return true
+                    }
+                }
+                return false
+            }
+
+            guard depth < maxDepth else { continue }
+            for child in children(of: element) {
+                queue.append((child, depth + 1, ancestors + [element]))
+            }
+        }
+
+        return false
+    }
+
     func performPressOrClick(identifier: String, maxDepth: Int = 12, maxNodes: Int = 2_000) -> Bool {
         if performPress(identifier: identifier, maxDepth: maxDepth, maxNodes: maxNodes) {
             return true
@@ -1113,6 +1147,22 @@ private struct AXInspector {
             return false
         }
         return AXUIElementPerformAction(element, kAXPressAction as CFString) == .success
+    }
+
+    static func select(_ element: AXUIElement) -> Bool {
+        var isSettable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(
+            element,
+            kAXSelectedAttribute as CFString,
+            &isSettable
+        ) == .success, isSettable.boolValue else {
+            return false
+        }
+        return AXUIElementSetAttributeValue(
+            element,
+            kAXSelectedAttribute as CFString,
+            kCFBooleanTrue
+        ) == .success
     }
 
     static func performClick(frame: AXFrame) -> Bool {

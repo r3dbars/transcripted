@@ -848,6 +848,8 @@ func testUIAutomationSurfaceContract() {
             "onboardingAppLogPath",
             "appInspector",
             "systemUIServerStatusItem",
+            "selectRow(identifier:",
+            "kAXSelectedAttribute",
             "performPress(identifier:",
             "performPressOrClick(identifier:",
             "CGEvent(mouseEventSource:",

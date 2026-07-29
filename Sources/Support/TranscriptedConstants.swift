@@ -78,7 +78,9 @@ enum TranscriptedConstants {
     /// Timeout for MeetingCaptureBridge.startRecording — resolves the start
     /// continuation with the current `isRecording` state after this window if
     /// neither the success nor error publisher has fired.
-    static let meetingStartTimeout: UInt64 = 5_000_000_000  // 5 seconds
+    // ScreenCaptureKit allows its start callback up to 8 seconds. Keep the
+    // host deadline above that backend contract and aligned with the live smoke.
+    static let meetingStartTimeout: UInt64 = 12_000_000_000  // 12 seconds
 
     /// Bounds the ScreenCaptureKit probe used to verify System Audio Recording
     /// access before meeting capture. A stalled TCC/ScreenCaptureKit callback
