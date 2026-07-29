@@ -385,7 +385,6 @@ APP_SOURCES=(
     "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
-    "Sources/UI/Settings/SettingsContentLayoutPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
     "Sources/UI/Settings/OnboardingAbandonmentReasonPolicy.swift"
     "Sources/UI/Settings/HomeRootAlertPolicy.swift"

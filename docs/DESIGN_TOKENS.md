@@ -49,7 +49,7 @@ so the grid is 4pt-based with 10 and 14 kept as first-class steps.
 | `lg` | 12 | 49 spacing / 17 padding |
 | `xl` | 16 | 8 spacing / 13 padding |
 | `xxl` | 24 | page-section separation |
-| `gutter` | 14 | kept as a step (21 spacing / 18 padding); matches `SettingsContentLayoutPolicy.topPadding` |
+| `gutter` | 14 | kept as a step (21 spacing / 18 padding); matches the Settings content top padding |
 
 ## Corner radii — 4 steps
 
@@ -83,5 +83,5 @@ Snap rule: 7 → `md`; 10 → `md` or `lg` by container size; 14/18 → `xl`.
 2. Replace numeric `spacing:` / `.padding(n)` with the nearest spacing step.
 3. Replace each `cornerRadius:` with the nearest of the four radii.
 4. Keep any deliberate exception, and add a one-line comment saying why.
-5. If a layout-policy test pins a constant (e.g.
-   `SettingsContentLayoutPolicy.topPadding == 14`), keep the number equal.
+5. If an existing layout contract pins a constant (for example, Settings content
+   uses 14 points of top padding), keep the number equal.
